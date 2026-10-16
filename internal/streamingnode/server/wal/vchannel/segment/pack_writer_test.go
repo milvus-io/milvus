@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -519,11 +520,15 @@ func TestFlushInsertBufferMaterializesMissingBM25Output(t *testing.T) {
 			require.Equal(t, 2, req.insertData[0].Data[102].RowNum())
 			return &growingBulkWriteResult{}, nil
 		}}
-		_, err := writer.FlushInsertBuffer(context.Background(), packFor())
+		pack := packFor()
+		cached := message.MustAsImmutableInsertMessageV1(pack.Inserts[0]).MustBody()
+		before := proto.Clone(cached)
+		_, err := writer.FlushInsertBuffer(context.Background(), pack)
 		require.NoError(t, err)
-		_, stats, err := buildGrowingInsertData(schema, packFor())
+		_, stats, err := buildGrowingInsertData(schema, pack)
 		require.NoError(t, err)
 		require.NotNil(t, stats[102])
+		require.True(t, proto.Equal(before, cached), "persistence retries cannot modify the cached raw Body")
 	})
 	t.Run("persist missing output with StorageV3", func(t *testing.T) {
 		storageConfig, cm := setupV3TestEnv(t)

@@ -426,3 +426,19 @@ func TestRowLockHookIsReadAtAppendTime(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, called)
 }
+
+// Structural exclusive messages keep the vchannel write lock, independent of
+// partial-update CAS.
+func TestManualFlushKeepsStructuralExclusiveLock(t *testing.T) {
+	patch := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
+	defer patch.UnPatch()
+	interceptor := newTestInterceptor()
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithVChannel(testVChannel).
+		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		MustBuildMutable()
+	guard := interceptor.acquireLockGuard(context.Background(), msg)
+	defer guard()
+	require.False(t, interceptor.vchannelLocker.TryRLock(testVChannel))
+}

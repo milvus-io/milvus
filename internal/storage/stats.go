@@ -371,9 +371,48 @@ func (m *BM25Stats) Merge(meta *BM25Stats) {
 func (m *BM25Stats) Minus(meta *BM25Stats) {
 	for key, value := range meta.rowsWithToken {
 		m.rowsWithToken[key] -= value
+		if m.rowsWithToken[key] == 0 {
+			delete(m.rowsWithToken, key)
+		}
 	}
 	m.numRow -= meta.numRow
 	m.numToken -= meta.numToken
+}
+
+// ValidateDelta checks a complete replacement before the caller publishes it.
+func (m *BM25Stats) ValidateDelta(add, remove *BM25Stats) error {
+	rows := m.numRow + add.numRow - remove.numRow
+	tokens := m.numToken + add.numToken - remove.numToken
+	if rows < 0 || tokens < 0 {
+		return merr.WrapErrDataIntegrityMsg("negative BM25 aggregate counts after replacement")
+	}
+	for _, delta := range []*BM25Stats{remove, add} {
+		for key := range delta.rowsWithToken {
+			count := int64(m.rowsWithToken[key]) + int64(add.rowsWithToken[key]) - int64(remove.rowsWithToken[key])
+			if count < 0 || count > rows || count > math.MaxInt32 {
+				return merr.WrapErrDataIntegrityMsg("invalid BM25 document frequency for token %d", key)
+			}
+		}
+	}
+	return nil
+}
+
+// ApplyDelta applies a previously validated delta under the owner's write lock.
+// Remove zero-frequency keys and compact maps after a large vocabulary reduction.
+func (m *BM25Stats) ApplyDelta(add, remove *BM25Stats) {
+	previousSize := len(m.rowsWithToken)
+	m.Minus(remove)
+	m.Merge(add)
+	for key := range remove.rowsWithToken {
+		if m.rowsWithToken[key] == 0 {
+			delete(m.rowsWithToken, key)
+		}
+	}
+	if previousSize > 1024 && len(m.rowsWithToken)*2 < previousSize {
+		compact := make(map[uint32]int32, len(m.rowsWithToken))
+		maps.Copy(compact, m.rowsWithToken)
+		m.rowsWithToken = compact
+	}
 }
 
 func (m *BM25Stats) Clone() *BM25Stats {
@@ -440,37 +479,27 @@ func (m *BM25Stats) SerializeToWriter(w io.Writer) error {
 }
 
 func (m *BM25Stats) Deserialize(bs []byte) error {
-	buffer := bytes.NewBuffer(bs)
+	if len(bs) < 20 {
+		// Match EOF at a header field boundary and truncation within a field.
+		if len(bs) == 0 || len(bs) == 4 || len(bs) == 12 {
+			return io.EOF
+		}
+		return io.ErrUnexpectedEOF
+	}
+
 	dim := (len(bs) - 20) / 8
-	var numRow, tokenNum int64
-	var version int32
-	if err := binary.Read(buffer, common.Endian, &version); err != nil {
-		return err
+	if dim > 0 && len(m.rowsWithToken) == 0 {
+		m.rowsWithToken = make(map[uint32]int32, dim)
 	}
-
-	if err := binary.Read(buffer, common.Endian, &numRow); err != nil {
-		return err
-	}
-
-	if err := binary.Read(buffer, common.Endian, &tokenNum); err != nil {
-		return err
-	}
-
-	var key uint32
-	var value int32
 	for i := 0; i < dim; i++ {
-		if err := binary.Read(buffer, common.Endian, &key); err != nil {
-			return err
-		}
-
-		if err := binary.Read(buffer, common.Endian, &value); err != nil {
-			return err
-		}
+		off := 20 + i*8
+		key := common.Endian.Uint32(bs[off : off+4])
+		value := int32(common.Endian.Uint32(bs[off+4 : off+8]))
 		m.rowsWithToken[key] += value
 	}
 
-	m.numRow += numRow
-	m.numToken += tokenNum
+	m.numRow += int64(common.Endian.Uint64(bs[4:12]))
+	m.numToken += int64(common.Endian.Uint64(bs[12:20]))
 	return nil
 }
 
@@ -517,38 +546,37 @@ func (m *BM25Stats) MemSize() int64 {
 // DeserializeFromReader reads BM25 stats from an io.Reader and accumulates into self.
 // Unlike Deserialize([]byte), this does not require knowing the total size upfront.
 func (m *BM25Stats) DeserializeFromReader(r io.Reader) error {
-	var version int32
-	if err := binary.Read(r, common.Endian, &version); err != nil {
+	var header [20]byte
+	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return err
 	}
 
-	var numRow, tokenNum int64
-	if err := binary.Read(r, common.Endian, &numRow); err != nil {
-		return err
-	}
-	if err := binary.Read(r, common.Endian, &tokenNum); err != nil {
-		return err
-	}
+	m.numRow += int64(common.Endian.Uint64(header[4:12]))
+	m.numToken += int64(common.Endian.Uint64(header[12:20]))
 
-	m.numRow += numRow
-	m.numToken += tokenNum
-
-	var key uint32
-	var value int32
+	buf := make([]byte, 4*1024)
+	remaining := 0
 	for {
-		if err := binary.Read(r, common.Endian, &key); err != nil {
+		n, err := r.Read(buf[remaining:])
+		n += remaining
+		end := n - n%8
+		for off := 0; off < end; off += 8 {
+			key := common.Endian.Uint32(buf[off : off+4])
+			value := int32(common.Endian.Uint32(buf[off+4 : off+8]))
+			m.rowsWithToken[key] += value
+		}
+		// Carry an incomplete record into the next read.
+		remaining = copy(buf, buf[end:n])
+		if err != nil {
 			if err == io.EOF {
-				break
+				if remaining != 0 {
+					return io.ErrUnexpectedEOF
+				}
+				return nil
 			}
 			return err
 		}
-		if err := binary.Read(r, common.Endian, &value); err != nil {
-			return err
-		}
-		m.rowsWithToken[key] += value
 	}
-
-	return nil
 }
 
 // DeserializeStats deserializes @blobs as []*PrimaryKeyStats

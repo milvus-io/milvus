@@ -17,6 +17,7 @@
 package cohere
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -69,7 +70,7 @@ func TestEmbeddingOK(t *testing.T) {
 
 	{
 		c, _ := NewCohereClient("mock_key")
-		ret, err := c.Embedding(url, "cohere-3", []string{"sentence"}, "search_document", "float", "END", 0, 0)
+		ret, err := c.Embedding(context.Background(), url, "cohere-3", []string{"sentence"}, "search_document", "float", "END", 0, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Embeddings.Float[0], []float32{0.0, 0.1})
 		assert.Equal(t, ret.Embeddings.Float[1], []float32{1.0, 1.1})
@@ -86,7 +87,7 @@ func TestEmbeddingFailed(t *testing.T) {
 
 	{
 		c, _ := NewCohereClient("mock_key")
-		_, err := c.Embedding(url, "cohere-3", []string{"sentence"}, "search_document", "float", "END", 0, 0)
+		_, err := c.Embedding(context.Background(), url, "cohere-3", []string{"sentence"}, "search_document", "float", "END", 0, 0)
 		assert.True(t, err != nil)
 	}
 }
@@ -132,7 +133,7 @@ func TestRerankOK(t *testing.T) {
 
 	{
 		c, _ := NewCohereClient("mock_key")
-		ret, err := c.Rerank(url, "rerank-lite-1", "query", []string{"text1", "text2", "text3"}, map[string]any{}, 0)
+		ret, err := c.Rerank(context.Background(), url, "rerank-lite-1", "query", []string{"text1", "text2", "text3"}, map[string]any{}, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Results[0].Index, 0)
 		assert.Equal(t, ret.Results[1].Index, 3)
@@ -155,7 +156,7 @@ func TestRerankFailed(t *testing.T) {
 
 	{
 		c, _ := NewCohereClient("mock_key")
-		_, err := c.Rerank(url, "rerank-lite-1", "query", []string{"text1", "text2", "text3"}, map[string]any{}, 0)
+		_, err := c.Rerank(context.Background(), url, "rerank-lite-1", "query", []string{"text1", "text2", "text3"}, map[string]any{}, 0)
 		assert.True(t, err != nil)
 	}
 }

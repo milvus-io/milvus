@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -87,6 +88,8 @@ func initResourceForTest(t *testing.T) {
 	rc.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	queryViewsPatch := mockey.Mock((*mock_metastore.MockStreamingNodeCataLog).ListQueryViews).Return(nil, nil).Build()
+	t.Cleanup(func() { queryViewsPatch.UnPatch() })
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)

@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import random
+import tempfile
 import time
 from pathlib import Path
 
@@ -171,6 +172,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=schema,
             remote_path=f"bulk_data/{c_name}/{file_type.name.lower()}",
             connect_param=RemoteBulkWriter.ConnectParam(

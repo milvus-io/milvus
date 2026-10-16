@@ -213,22 +213,6 @@ SetExprResCacheConfig(const char* mode,
 }
 
 void
-SetArrowIOThreadPoolCapacity(int threads) {
-    if (threads <= 0) {
-        return;
-    }
-    auto status = arrow::io::SetIOThreadPoolCapacity(threads);
-    if (!status.ok()) {
-        LOG_WARN("failed to set arrow io thread pool capacity to {}: {}",
-                 threads,
-                 status.ToString());
-        return;
-    }
-    LOG_INFO("arrow io thread pool capacity set to {}", threads);
-    UpdateArrowIOThreadPoolMetrics();
-}
-
-void
 UpdateArrowIOThreadPoolMetrics() {
     auto capacity = arrow::io::GetIOThreadPoolCapacity();
     milvus::monitor::internal_arrow_io_pool_capacity_all.Set(capacity);

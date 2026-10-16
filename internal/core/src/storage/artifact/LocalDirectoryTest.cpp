@@ -241,9 +241,8 @@ TEST(MappedRegionGuardTest, MoveAndReleaseTransferMappingOwnership) {
     EXPECT_EQ(moved.Data(), nullptr);
     EXPECT_EQ(destination.Data(), first_data);
 
-    unsigned char residency = 0;
     errno = 0;
-    EXPECT_EQ(::mincore(second_data, size, &residency), -1);
+    EXPECT_EQ(::mprotect(second_data, size, PROT_READ | PROT_WRITE), -1);
     EXPECT_EQ(errno, ENOMEM);
 
     auto* released = destination.Release();

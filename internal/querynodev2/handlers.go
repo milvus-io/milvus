@@ -264,6 +264,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.SuccessLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	resp.Status = merr.Success()
 	return resp, nil
 }
 

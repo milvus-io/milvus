@@ -520,7 +520,9 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 		// for results of each subSearchResultData, storing the start offset of each query of nq queries
 		subSearchNqOffset = make([][]int64, subSearchNum)
 	)
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, subSearchNum)
 	for i := 0; i < subSearchNum; i++ {
+		idxComputers[i] = typeutil.NewFieldDataIdxComputer(subSearchResultData[i].GetFieldsData())
 		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
 		for j := int64(1); j < nq; j++ {
 			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
@@ -547,6 +549,12 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 				acceptedRows = append(acceptedRows, reduce.RowRef{ResultIdx: subIdx, RowIdx: innerIdx})
 				typeutil.AppendPKs(ret.Results.Ids, pk)
 				ret.Results.Scores = append(ret.Results.Scores, score)
+				if len(ret.Results.FieldsData) > 0 {
+					// Keep output fields aligned with the concatenated IDs for
+					// reranking and assembly when hybrid search skips requery.
+					fieldIdxs := idxComputers[subIdx].Compute(innerIdx)
+					typeutil.AppendFieldData(ret.Results.FieldsData, subData.GetFieldsData(), innerIdx, fieldIdxs...)
+				}
 
 				// Handle ElementIndices if present
 				if subData.ElementIndices != nil {
