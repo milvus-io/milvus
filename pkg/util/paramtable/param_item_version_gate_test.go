@@ -105,7 +105,7 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 	})
 
 	t.Run("clearing temporary override restores gated default", func(t *testing.T) {
-		item := &params.ProxyCfg.RLSImportEnforcementEnabled
+		item := &params.FunctionCfg.EnableWriteBeforeMaterialization
 		old := item.SwapTempValue("true")
 		assert.True(t, item.GetAsBool())
 		item.SwapTempValue(old)

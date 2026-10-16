@@ -19,14 +19,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -84,8 +82,6 @@ type QueryTask struct {
 	actualChannelsMvcc *typeutil.ConcurrentMap[string, uint64]
 	preferredNodes     map[string]int64
 	fastSkip           bool
-	skipRuntimeRLS     bool
-	preserveRawFields  bool
 	node               taskmodel.TaskNode
 
 	reQuery              bool
@@ -151,20 +147,6 @@ func (t *QueryTask) HasRecordedChannelMvcc() bool {
 // Request returns the original query request.
 func (t *QueryTask) Request() *milvuspb.QueryRequest {
 	return t.request
-}
-
-// SetSkipRuntimeRLS prevents an internal query from resolving a second policy.
-//
-//go:noinline
-func (t *QueryTask) SetSkipRuntimeRLS(skip bool) {
-	t.skipRuntimeRLS = skip
-}
-
-// SetPreserveRawFields keeps internal query results suitable for local policy evaluation.
-//
-//go:noinline
-func (t *QueryTask) SetPreserveRawFields(preserve bool) {
-	t.preserveRawFields = preserve
 }
 
 // StorageCost returns the storage cost reported by the last execution.
@@ -785,30 +767,8 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
-	canonicalDBName := colInfo.DBName
-	if canonicalDBName == "" {
-		canonicalDBName = t.request.GetDbName()
-	}
 
 	var principalName string
-	var enforceRLS bool
-	if !t.skipRuntimeRLS {
-		rlsEnabled := colInfo.RlsEnabled
-		if rlsEnabled && t.request.GetSkipRls() {
-			if t.node == nil {
-				return merr.WrapErrServiceInternalMsg("query task has no host node for SkipRLS authorization")
-			}
-			rlsEnabled, err = t.node.ResolveRLSEnforcement(ctx, t.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
-				canonicalDBName, colInfo.Schema.GetName(), "query")
-			if err != nil {
-				return err
-			}
-		}
-		principalName, enforceRLS, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
-		if err != nil {
-			return err
-		}
-	}
 
 	schema := colInfo.Schema
 	t.schema = schema
@@ -898,15 +858,6 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 	userPlanAlwaysTrue := planparserv2.IsAlwaysTruePlan(t.plan)
 
-	if enforceRLS {
-		predicate, err := rls.ResolveUsingPredicate(ctx, t.CollectionID, principalName, rls.QueryAction(t.queryParams.isIterator), t.schema.SchemaHelper)
-		if err != nil {
-			return err
-		}
-		if err := rls.MergeNormalizedPredicateToPlan(t.plan, predicate); err != nil {
-			return err
-		}
-	}
 	t.plan.GetQuery().Limit = t.Limit
 	if t.queryParams.queryIteratorCursor != nil {
 		t.plan.GetQuery().QueryIteratorCursor = t.queryParams.queryIteratorCursor
@@ -1193,7 +1144,7 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 }
 
 func (t *QueryTask) formatTimeFields(ctx context.Context) error {
-	if t.reQuery || t.preserveRawFields {
+	if t.reQuery {
 		return nil
 	}
 	if len(t.queryParams.extractTimeFields) > 0 {

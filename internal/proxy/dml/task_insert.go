@@ -15,14 +15,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -47,8 +44,6 @@ type InsertTask struct {
 	partitionKeys   *schemapb.FieldData
 	schemaTimestamp uint64
 	collectionID    int64
-	rlsPrincipal    string
-	skipRLS         bool
 	schemaVersion   int32
 
 	idempotencyEnabled bool
@@ -89,8 +84,6 @@ func NewInsertTask(ctx context.Context, node taskmodel.TaskNode, request *milvus
 		chMgr:           node.ChMgr(),
 		schemaTimestamp: request.SchemaTimestamp,
 		idempotencyKey:  idempotencyKey,
-		rlsPrincipal:    request.GetRlsPrincipal(),
-		skipRLS:         request.GetSkipRls(),
 	}
 }
 
@@ -217,7 +210,6 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
-	rlsEnabled := colInfo.RlsEnabled
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = it.insertMsg.GetDbName()
@@ -226,17 +218,6 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	it.insertMsg.DbName = canonicalDBName
 	it.insertMsg.CollectionName = collectionName
 	it.insertMsg.CollectionID = collID
-	if rlsEnabled && it.skipRLS {
-		rlsEnabled, err = it.node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
-			canonicalDBName, collectionName, "insert")
-		if err != nil {
-			return err
-		}
-	}
-	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, it.rlsPrincipal, "insert")
-	if err != nil {
-		return err
-	}
 
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.UpdateTimestamp {
@@ -255,14 +236,6 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	it.schemaVersion = schema.Version
 	if err := dql.ValidateTextStorageV3Enabled(it.schema); err != nil {
 		return err
-	}
-	var rlsCheckPredicate *planpb.Expr
-	if enforceRLS {
-		rlsCheckPredicate, err = rls.ResolveCheckForWrite(ctx, it.collectionID, principalName,
-			rlsutil.PolicyActionInsert, schema.SchemaHelper, "insert")
-		if err != nil {
-			return err
-		}
 	}
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema)
@@ -406,14 +379,6 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 
 	if err := checkMaxInsertSize(ctx, "insert", it.insertMsg.Size()); err != nil {
 		return err
-	}
-
-	if enforceRLS {
-		if err := rlsutil.ValidateRowsByPredicate(ctx, it.insertMsg.GetFieldsData(), int(it.insertMsg.NRows()),
-			rlsCheckPredicate, "insert", "check"); err != nil {
-			log.Warn(ctx, "RLS check expression validation failed for insert", mlog.Err(err))
-			return err
-		}
 	}
 
 	log.Debug(ctx, "Proxy Insert PreExecute done")
