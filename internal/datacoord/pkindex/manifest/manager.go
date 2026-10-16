@@ -20,6 +20,7 @@
 package manifest
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"time"
@@ -80,10 +81,15 @@ var (
 	// ErrDuplicateSST reports an edit that adds an SST ID the manifest already
 	// has, or that lists the same SST ID twice.
 	ErrDuplicateSST = errors.New("sst ID is already in the manifest or repeated in the edit")
-	// ErrStaleEdit reports a compaction whose inputs are not a contiguous run
-	// of the manifest SST list, except an applied retry: no input is in the
-	// list and all outputs are in the list.
-	ErrStaleEdit = errors.New("compaction inputs are not in the manifest")
+	// ErrStaleEdit reports a compaction that does not fit the manifest, except
+	// an applied retry (no input is in the list and all outputs are in the
+	// list). It covers a concurrent edit and a malformed compaction alike:
+	// the inputs are not a contiguous range of the SST list in the same
+	// order; the inputs split a run; the outputs are not one new run (no run
+	// id, mixed run ids, a run id already in the list, a key range with its
+	// min key above its max key, or ranges that overlap or are not in
+	// ascending order); or an L0 table would end up behind a run.
+	ErrStaleEdit = errors.New("compaction edit does not fit the manifest")
 	// ErrSchemaMismatch reports a primary key data type that differs from the manifest.
 	ErrSchemaMismatch = errors.New("primary key data type does not match the manifest")
 )
@@ -370,10 +376,13 @@ func (m *Manager) forget(key string) {
 	m.mu.Unlock()
 }
 
-// Compaction is the edit that replaces a contiguous run of SSTs with merged SSTs.
+// Compaction is the edit that replaces a contiguous range of SSTs with the
+// merged SSTs of one new run. The inputs must not split a run, and the L0
+// tables must stay a prefix of the SST list (see ErrStaleEdit). The outputs
+// may be empty when all keys of the inputs are dropped.
 type Compaction struct {
 	Inputs  []int64
-	Outputs []*pkindexpb.SSTRef // newest first
+	Outputs []*pkindexpb.SSTRef // one run: ascending key order, all with the same run id
 }
 
 // applyFlush applies a flush to cur, which is nil when the vchannel has no
@@ -417,18 +426,24 @@ func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstB
 	next := nextVersion(base)
 	next.LastFlushTerm = req.GetPchannelTerm()
 	next.CheckpointTimeTick = req.GetCheckpointTimeTick()
-	next.Ssts = append(cloneSSTs(req.GetAddSsts()), next.GetSsts()...)
+	added := cloneSSTs(req.GetAddSsts())
+	for _, s := range added {
+		s.RunId = 0 // a flush always creates L0 tables
+	}
+	next.Ssts = append(added, next.GetSsts()...)
 	return next, nil
 }
 
 // applyCompaction applies a compaction to cur. When the inputs are a non-empty
-// contiguous run of the SST list of cur, in the same order, it returns a new
-// version, in which the outputs replace the inputs at the position of
-// the inputs; the checkpoint and the last flush term do not change. When the inputs are
+// contiguous range of the SST list of cur, in the same order, and they do not
+// split a run, and the outputs are empty or one new run, and the L0 tables stay
+// a prefix of the list, it returns a new version, in which the outputs replace
+// the inputs at the position of the inputs; the checkpoint and the last flush
+// term do not change. When the inputs are
 // not empty, no input is in the SST list of cur and all outputs are in it, the
 // compaction is an applied retry and applyCompaction returns nil. It returns
 // ErrNoManifest when cur is nil, ErrStaleEdit in all other cases where
-// the inputs are not such a run, and ErrDuplicateSST when an output ID is
+// the inputs or the outputs break one of these rules, and ErrDuplicateSST when an output ID is
 // already in the SST list of cur or is listed twice in the outputs. It does
 // not change cur.
 func applyCompaction(cur *pkindexpb.Manifest, c Compaction) (*pkindexpb.Manifest, error) {
@@ -457,12 +472,18 @@ func applyCompaction(cur *pkindexpb.Manifest, c Compaction) (*pkindexpb.Manifest
 	if err := checkNewSSTs(cur.GetVchannel(), idSet(list), c.Outputs); err != nil {
 		return nil, err
 	}
+	if err := checkRunEdit(cur.GetVchannel(), list, start, len(c.Inputs), c.Outputs); err != nil {
+		return nil, err
+	}
 	next := nextVersion(cur)
 	merged := make([]*pkindexpb.SSTRef, 0, len(list)-len(c.Inputs)+len(c.Outputs))
 	merged = append(merged, next.GetSsts()[:start]...)
 	merged = append(merged, cloneSSTs(c.Outputs)...)
 	merged = append(merged, next.GetSsts()[start+len(c.Inputs):]...)
 	next.Ssts = merged
+	if err := checkL0Prefix(cur.GetVchannel(), merged); err != nil {
+		return nil, err
+	}
 	return next, nil
 }
 
@@ -522,4 +543,61 @@ func idSet(list []*pkindexpb.SSTRef) map[int64]struct{} {
 		set[s.GetId()] = struct{}{}
 	}
 	return set
+}
+
+// checkRunEdit returns ErrStaleEdit when the inputs list[start:start+n] split
+// a run, or when the outputs do not form one new run: every output must carry
+// the same run id, which is not 0 and not in list, each output must have a min
+// key not above its max key, and the key ranges of the outputs must be in
+// ascending order without overlap. Empty outputs are valid (all keys of the
+// inputs are dropped): only the checks on the inputs apply.
+func checkRunEdit(vchannel string, list []*pkindexpb.SSTRef, start, n int, outputs []*pkindexpb.SSTRef) error {
+	stale := func(format string, args ...any) error {
+		return errors.Wrapf(ErrStaleEdit, "vchannel %s: "+format, append([]any{vchannel}, args...)...)
+	}
+	if first := list[start]; first.GetRunId() != 0 && start > 0 && list[start-1].GetRunId() == first.GetRunId() {
+		return stale("input %d splits run %d", first.GetId(), first.GetRunId())
+	}
+	end := start + n
+	if last := list[end-1]; last.GetRunId() != 0 && end < len(list) && list[end].GetRunId() == last.GetRunId() {
+		return stale("input %d splits run %d", last.GetId(), last.GetRunId())
+	}
+	if len(outputs) == 0 {
+		return nil
+	}
+	runID := outputs[0].GetRunId()
+	if runID == 0 {
+		return stale("outputs have no run id")
+	}
+	for _, s := range list {
+		if s.GetRunId() == runID {
+			return stale("run %d is already in the manifest", runID)
+		}
+	}
+	for i, o := range outputs {
+		if o.GetRunId() != runID {
+			return stale("output %d has run %d, the first output has run %d", o.GetId(), o.GetRunId(), runID)
+		}
+		if bytes.Compare(o.GetMinKey(), o.GetMaxKey()) > 0 {
+			return stale("output %d has min key above its max key", o.GetId())
+		}
+		if i > 0 && bytes.Compare(o.GetMinKey(), outputs[i-1].GetMaxKey()) <= 0 {
+			return stale("outputs %d and %d overlap or are out of order", outputs[i-1].GetId(), o.GetId())
+		}
+	}
+	return nil
+}
+
+// checkL0Prefix returns ErrStaleEdit when an L0 table (run id 0) follows a
+// run table in list: the L0 tables must be a prefix of the list.
+func checkL0Prefix(vchannel string, list []*pkindexpb.SSTRef) error {
+	seenRun := false
+	for _, s := range list {
+		if s.GetRunId() != 0 {
+			seenRun = true
+		} else if seenRun {
+			return errors.Wrapf(ErrStaleEdit, "vchannel %s: L0 table %d is behind a run", vchannel, s.GetId())
+		}
+	}
+	return nil
 }
