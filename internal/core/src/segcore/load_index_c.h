@@ -38,8 +38,11 @@ AppendIndexParam(CLoadIndexInfo c_load_index_info,
                  const char* index_key,
                  const char* index_value);
 
-LoadResourceRequest
-EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
+CStatus
+EstimateLoadIndexResourceFromSerializedInfo(
+    const uint8_t* serialized_load_index_info,
+    const uint64_t len,
+    LoadResourceRequest* load_resource_request);
 
 bool
 TryReserveLoadingResourceWithTimeout(CResourceUsage size,

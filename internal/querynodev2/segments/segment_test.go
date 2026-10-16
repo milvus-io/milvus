@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
@@ -17,6 +19,68 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func TestResourceUsageEstimateCachesStatsExpansion(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+
+	schema := &schemapb.CollectionSchema{
+		Name:   "stats_expansion",
+		Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64}},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:      11,
+		CollectionID:   33,
+		StorageVersion: storage.StorageV2,
+		BinlogPaths: []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: []int64{101, 999}, // A dropped field shares the packed column group.
+			Binlogs:     []*datapb.Binlog{{MemorySize: 4096}},
+		}},
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{101: {MemorySize: 100}},
+		TextStatsLogs:    map[int64]*datapb.TextIndexStats{101: {MemorySize: 200}},
+	}
+	for _, test := range []struct {
+		name   string
+		mmap   bool
+		tiered bool
+		ratio  float64
+		want   ResourceUsage
+	}{
+		{name: "memory", want: ResourceUsage{MemorySize: 4796}},
+		{name: "disk", mmap: true, want: ResourceUsage{MemorySize: 4496, DiskSize: 300}},
+		{name: "memory with zero tiered budget", tiered: true, want: ResourceUsage{MemorySize: 300}},
+		{name: "disk with zero tiered budget", mmap: true, tiered: true, want: ResourceUsage{DiskSize: 300}},
+		{name: "memory with partial tiered budget", tiered: true, ratio: 0.3, want: ResourceUsage{MemorySize: 1649}},
+		{name: "disk with partial tiered budget", mmap: true, tiered: true, ratio: 0.3, want: ResourceUsage{MemorySize: 1349, DiskSize: 300}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for key, value := range map[string]string{
+				params.QueryCoordCfg.AutoscalePrecheckEnabled.Key:       "false",
+				params.QueryNodeCfg.MmapScalarField.Key:                 "false",
+				params.QueryNodeCfg.MmapJSONStats.Key:                   fmt.Sprint(test.mmap),
+				params.QueryNodeCfg.TieredEvictionEnabled.Key:           fmt.Sprint(test.tiered),
+				params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key: fmt.Sprint(test.ratio),
+				params.QueryNodeCfg.TieredEvictableDiskCacheRatio.Key:   fmt.Sprint(test.ratio),
+				params.QueryNodeCfg.JSONKeyStatsExpansionFactor.Key:     "3.0",
+				params.QueryNodeCfg.TextIndexExpansionFactor.Key:        "2.0",
+			} {
+				require.NoError(t, params.Save(key, value))
+				t.Cleanup(func() { params.Reset(key) })
+			}
+			segment := &baseSegment{
+				collection:         NewCollectionWithoutSegcoreForTest(loadInfo.GetCollectionID(), schema),
+				segmentType:        SegmentTypeSealed,
+				loadInfo:           atomic.NewPointer(loadInfo),
+				resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+			}
+
+			require.Equal(t, test.want, segment.ResourceUsageEstimate())
+			require.Equal(t, &test.want, segment.resourceUsageCache.Load())
+			require.Equal(t, test.want, segment.ResourceUsageEstimate())
+		})
+	}
+}
 
 type SegmentSuite struct {
 	suite.Suite

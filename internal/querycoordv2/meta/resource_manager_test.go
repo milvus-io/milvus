@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -29,11 +30,13 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -77,6 +80,31 @@ func (suite *ResourceManagerSuite) TearDownSuite() {
 
 func TestResourceManager(t *testing.T) {
 	suite.Run(t, new(ResourceManagerSuite))
+}
+
+func TestLoadDemandMetricsFollowResourceGroupLifecycle(t *testing.T) {
+	const rgName = "load-demand-metrics-lifecycle"
+	metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName)
+	metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName)
+	t.Cleanup(func() {
+		metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName)
+		metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName)
+	})
+
+	catalog := metastoremocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().RemoveResourceGroup(mock.Anything, rgName).Return(nil).Once()
+	nodeMgr := session.NewNodeManager()
+	manager := NewResourceManager(catalog, nodeMgr)
+	manager.setupInMemResourceGroup(NewResourceGroup(rgName, newResourceGroupConfig(0, 0), nodeMgr))
+
+	require.True(t, metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName))
+	require.True(t, metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName))
+
+	metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgName).Add(0)
+	metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(rgName).Add(0)
+	require.NoError(t, manager.DropResourceGroup(context.Background(), rgName))
+	require.False(t, metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName))
+	require.False(t, metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName))
 }
 
 func (suite *ResourceManagerSuite) TestValidateConfiguration() {
