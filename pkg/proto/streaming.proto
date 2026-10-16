@@ -1035,12 +1035,12 @@ message StreamingNodeRunAnalyzerResponse {
 // the current write schema from an exact historical version, including zero.
 // Failures use native streaming gRPC errors, not an embedded response status.
 message StreamingNodeGetCollectionSchemaRequest {
-    int64 collection_id = 1;
-    string vchannel = 2;
-    PChannelInfo pchannel = 3;
+    // Collection identity is derived from the canonical vchannel name.
+    string vchannel = 1;
+    PChannelInfo pchannel = 2;
     oneof selector {
-        bool current_write = 4;
-        int32 schema_version = 5;
+        bool current_write = 3;
+        int32 schema_version = 4;
     }
 }
 

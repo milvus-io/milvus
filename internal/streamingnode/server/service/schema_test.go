@@ -53,7 +53,7 @@ func TestSchemaNativeTransport(t *testing.T) {
 		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{CollectionId: 1, Vchannel: "p_1v0", Pchannel: &streamingpb.PChannelInfo{Name: "p", Term: 2}, Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}}
+		req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{Vchannel: "p_1v0", Pchannel: &streamingpb.PChannelInfo{Name: "p", Term: 2}, Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}}
 		resp, err := client.GetCollectionSchema(ctx, req)
 		require.NoError(t, err)
 		require.Zero(t, resp.Schema.Version)
@@ -77,10 +77,13 @@ func TestSchemaNativeTransport(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 		for _, invalid := range []*streamingpb.StreamingNodeGetCollectionSchemaRequest{
 			{},
-			{CollectionId: 1, Vchannel: "p_1v0", Pchannel: &streamingpb.PChannelInfo{Name: "other"}},
-			{CollectionId: 1, Vchannel: "p_1v0", Pchannel: req.Pchannel},
-			{CollectionId: 1, Vchannel: "p_1v0", Pchannel: req.Pchannel, Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{}},
-			{CollectionId: 1, Vchannel: "p_1v0", Pchannel: req.Pchannel, Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: -1}},
+			{Vchannel: "p_invalid", Pchannel: req.Pchannel, Selector: req.Selector},
+			{Vchannel: "p_0v0", Pchannel: req.Pchannel, Selector: req.Selector},
+			{Vchannel: "p_1v0"},
+			{Vchannel: "p_1v0", Pchannel: &streamingpb.PChannelInfo{Name: "other"}},
+			{Vchannel: "p_1v0", Pchannel: req.Pchannel},
+			{Vchannel: "p_1v0", Pchannel: req.Pchannel, Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{}},
+			{Vchannel: "p_1v0", Pchannel: req.Pchannel, Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: -1}},
 		} {
 			resp, err = client.GetCollectionSchema(ctx, invalid)
 			require.Nil(t, resp)

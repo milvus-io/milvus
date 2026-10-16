@@ -209,5 +209,5 @@ func (w *walAccesserImpl) AnalyzerClient() AnalyzerClient {
 }
 
 func (w *walAccesserImpl) SchemaClient() SchemaClient {
-	return w.handlerClient
+	return schemaClient{handlerClient: w.handlerClient}
 }

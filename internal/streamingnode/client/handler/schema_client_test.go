@@ -64,7 +64,7 @@ func TestSchemaAssignmentRetry(t *testing.T) {
 				return &streamingpb.StreamingNodeGetCollectionSchemaResponse{Schema: &schemapb.CollectionSchema{}, EffectiveTimeTick: 10}, nil
 			}).Build()
 			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), watcher: &analyzerWatcher{}, service: &analyzerService{}, rebalanceTrigger: &analyzerTrigger{}}
-			req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{CollectionId: 1, Vchannel: "p_1v0", Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}}
+			req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{Vchannel: "p_1v0", Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			resp, err := client.GetCollectionSchema(ctx, req)
@@ -98,7 +98,15 @@ func TestSchemaClientAdmission(t *testing.T) {
 
 func TestSchemaClientRejectsInvalidSelectorsAndCancellation(t *testing.T) {
 	client := &handlerClientImpl{lifetime: typeutil.NewLifetime()}
-	req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{CollectionId: 1, Vchannel: "p_1v0"}
+	// Invalid identities must fail before discovery or its retry loop.
+	for _, vchannel := range []string{"", "p", "p_bad", "p_0v0", "p_-1v0", "p_01v0", "p_1v", "p_1v0_extra", "p_9223372036854775808v0"} {
+		_, err := client.GetCollectionSchema(context.Background(), &streamingpb.StreamingNodeGetCollectionSchemaRequest{
+			Vchannel: vchannel,
+			Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{CurrentWrite: true},
+		})
+		require.True(t, status.AsStreamingError(err).IsInvalidArgument(), "%s: %v", vchannel, err)
+	}
+	req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{Vchannel: "p_1v0"}
 	_, err := client.GetCollectionSchema(context.Background(), req)
 	require.True(t, status.AsStreamingError(err).IsInvalidArgument())
 	req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{}

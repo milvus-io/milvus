@@ -18,8 +18,9 @@ func (hs *handlerServiceImpl) GetCollectionSchema(ctx context.Context, req *stre
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if req.GetCollectionId() == 0 || req.GetVchannel() == "" || req.GetPchannel() == nil || req.GetPchannel().GetName() != funcutil.ToPhysicalChannel(req.GetVchannel()) {
-		return nil, status.NewInvalidArgument("schema lookup requires collection, vchannel and matching pchannel")
+	pchannel, collectionID, _, err := funcutil.ParseVChannel(req.GetVchannel())
+	if err != nil || collectionID == 0 || req.GetPchannel() == nil || req.GetPchannel().GetName() != pchannel {
+		return nil, status.NewInvalidArgument("schema lookup requires a canonical collection vchannel and matching pchannel")
 	}
 	switch selector := req.GetSelector().(type) {
 	case *streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite:

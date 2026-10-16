@@ -80,10 +80,9 @@ func TestCollectionSchemaRPCWithWAL(t *testing.T) {
 		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Name: "schema_rpc", Version: 0}}).MustBuildMutable())
 	require.NoError(t, err)
 	req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{
-		CollectionId: 1,
-		Vchannel:     vchannel,
-		Pchannel:     types.NewProtoFromPChannelInfo(channel),
-		Selector:     &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{CurrentWrite: true},
+		Vchannel: vchannel,
+		Pchannel: types.NewProtoFromPChannelInfo(channel),
+		Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{CurrentWrite: true},
 	}
 	current, err := client.GetCollectionSchema(ctx, req)
 	require.NoError(t, err)

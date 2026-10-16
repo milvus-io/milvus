@@ -27,7 +27,11 @@ func TestWALSchemaSelectors(t *testing.T) {
 	mockey.PatchConvey("write admission and historical read lookup have independent frontiers", t, func() {
 		channel := types.PChannelInfo{AccessMode: types.AccessModeRW}
 		mockey.Mock((*analyzerWALTest).Channel).To(func(*analyzerWALTest) types.PChannelInfo { return channel }).Build()
-		mockey.Mock((*schemaShardManager).GetWriteSchema).Return(&streamingpb.CollectionSchemaOfVChannel{Schema: &schemapb.CollectionSchema{Version: 2}, CheckpointTimeTick: 30}, nil).Build()
+		mockey.Mock((*schemaShardManager).GetWriteSchema).To(func(_ *schemaShardManager, collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+			require.EqualValues(t, 1, collectionID)
+			require.Equal(t, "p_1v0", vchannel)
+			return &streamingpb.CollectionSchemaOfVChannel{Schema: &schemapb.CollectionSchema{Version: 2}, CheckpointTimeTick: 30}, nil
+		}).Build()
 		manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{PChannel: "p", VChannelMetas: map[string]*streamingpb.VChannelMeta{"p_1v0": {
 			Vchannel: "p_1v0", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{CollectionId: 1, Schemas: []*streamingpb.CollectionSchemaOfVChannel{
@@ -38,7 +42,7 @@ func TestWALSchemaSelectors(t *testing.T) {
 		require.NoError(t, err)
 		defer manager.Close()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, rwWALImpls: &analyzerWALTest{}, viewResourceManager: manager, param: &interceptors.InterceptorBuildParam{ShardManager: &schemaShardManager{}}}
-		req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{CollectionId: 1, Vchannel: "p_1v0", Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{CurrentWrite: true}}
+		req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{Vchannel: "p_1v0", Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{CurrentWrite: true}}
 		resp, err := w.GetCollectionSchema(context.Background(), req)
 		require.NoError(t, err)
 		require.EqualValues(t, 2, resp.Schema.Version)
@@ -52,7 +56,7 @@ func TestWALSchemaSelectors(t *testing.T) {
 		_, err = w.GetCollectionSchema(context.Background(), req)
 		require.Error(t, err)
 		require.False(t, status.AsStreamingError(err).IsUnrecoverable(), "write schema visibility does not imply observer visibility")
-		req.Vchannel = "absent"
+		req.Vchannel = "p_2v0"
 		_, err = w.GetCollectionSchema(context.Background(), req)
 		require.Error(t, err)
 		require.False(t, status.AsStreamingError(err).IsUnrecoverable())

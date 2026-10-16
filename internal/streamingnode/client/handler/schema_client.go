@@ -21,8 +21,9 @@ func (hc *handlerClientImpl) GetCollectionSchema(ctx context.Context, req *strea
 		return nil, status.NewOnShutdownError("handler client is closing")
 	}
 	defer hc.lifetime.Done()
-	if req.GetCollectionId() == 0 || req.GetVchannel() == "" {
-		return nil, status.NewInvalidArgument("schema lookup requires collection and vchannel")
+	pchannel, collectionID, _, err := funcutil.ParseVChannel(req.GetVchannel())
+	if err != nil || collectionID == 0 {
+		return nil, status.NewInvalidArgument("schema lookup requires a canonical collection vchannel")
 	}
 	// Reject malformed selectors before entering the assignment retry loop.
 	switch selector := req.GetSelector().(type) {
@@ -37,7 +38,6 @@ func (hc *handlerClientImpl) GetCollectionSchema(ctx context.Context, req *strea
 	default:
 		return nil, status.NewInvalidArgument("schema selector is required")
 	}
-	pchannel := funcutil.ToPhysicalChannel(req.GetVchannel())
 	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "schema"))
 	response, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		client, err := hc.service.GetService(ctx)

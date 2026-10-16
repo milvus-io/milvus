@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -26,18 +27,20 @@ func (w *walAdaptorImpl) GetCollectionSchema(ctx context.Context, req *streaming
 	}
 	var snapshot *streamingpb.CollectionSchemaOfVChannel
 	var err error
+	// The handler validates the canonical vchannel before entering the WAL.
+	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
 	if req.GetCurrentWrite() {
 		provider, ok := w.param.ShardManager.(writeSchemaProvider)
 		if !ok {
 			return nil, status.NewUnrecoverableError("WAL does not provide its write schema")
 		}
-		snapshot, err = provider.GetWriteSchema(req.GetCollectionId(), req.GetVchannel())
+		snapshot, err = provider.GetWriteSchema(collectionID, req.GetVchannel())
 	} else {
 		module := w.viewResourceManager.Module(req.GetVchannel())
 		if module == nil {
 			return nil, status.NewInner("schema history for vchannel %s is not ready", req.GetVchannel())
 		}
-		snapshot, err = module.GetSchemaVersion(req.GetCollectionId(), req.GetSchemaVersion())
+		snapshot, err = module.GetSchemaVersion(collectionID, req.GetSchemaVersion())
 	}
 	if err != nil {
 		return nil, err

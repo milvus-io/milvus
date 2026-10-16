@@ -116,11 +116,6 @@ type AnalyzerClient interface {
 	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
 }
 
-// SchemaClient resolves write or exact historical schemas through WAL ownership.
-type SchemaClient interface {
-	GetCollectionSchema(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error)
-}
-
 // Scanner is the interface for reading records from the wal.
 type Scanner interface {
 	// Done returns a channel which will be closed when scanner is finished or closed.
