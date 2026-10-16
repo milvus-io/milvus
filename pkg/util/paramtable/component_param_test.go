@@ -37,6 +37,8 @@ func TestQueryNodeSparseInterimIndexAlgorithms(t *testing.T) {
 	t.Cleanup(base.mgr.Close)
 	params.Init(base)
 	cfg := &params.QueryNodeCfg
+	assert.False(t, cfg.InterimIndexSparseIPAlgo.Export)
+	assert.False(t, cfg.InterimIndexSparseBM25Algo.Export)
 	assert.Empty(t, cfg.InterimIndexSparseIPAlgo.GetValue())
 	assert.Empty(t, cfg.InterimIndexSparseBM25Algo.GetValue())
 	require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, " sindi "))

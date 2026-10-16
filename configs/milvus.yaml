@@ -697,12 +697,6 @@ queryNode:
       refineQuantType: NONE # Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'
       refineWithQuant: true # whether to use refineQuantType to refine for faster but loss a little precision
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
-      # Sparse interim algorithms for growing and unindexed sealed segments; restart required.
-      # Empty inherits collection index parameters. Options: TAAT_NAIVE, DAAT_WAND,
-      # DAAT_MAXSCORE, BLOCK_MAX_WAND, BLOCK_MAX_MAXSCORE, SINDI.
-      # SINDI requires queryNode.segcore.interimIndex.targetIndexVersion >= 10.
-      sparseIPIndexAlgo: ""
-      sparseBM25IndexAlgo: ""
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
       growingBuildThreadRate: 0 # The ratio of the interim index build thread pool that one growing segment index build may use, resolved as round(rate * pool size) and clamped to [1, pool size]. 0 means single threaded

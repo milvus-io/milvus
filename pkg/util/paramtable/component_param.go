@@ -5225,7 +5225,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		DefaultValue: "",
 		Formatter:    func(v string) string { return strings.ToUpper(strings.TrimSpace(v)) },
 		Doc:          "Sparse IP interim index algorithm for growing and unindexed sealed segments. Empty inherits the collection index parameters. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE, BLOCK_MAX_WAND, BLOCK_MAX_MAXSCORE, SINDI. SINDI requires interimIndex.targetIndexVersion >= 10. Takes effect after restart.",
-		Export:       true,
+		Export:       false,
 	}
 	p.InterimIndexSparseIPAlgo.Init(base.mgr)
 
@@ -5235,7 +5235,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		DefaultValue: "",
 		Formatter:    func(v string) string { return strings.ToUpper(strings.TrimSpace(v)) },
 		Doc:          "Sparse BM25 interim index algorithm for growing and unindexed sealed segments. Empty inherits the collection index parameters. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE, BLOCK_MAX_WAND, BLOCK_MAX_MAXSCORE, SINDI. SINDI requires interimIndex.targetIndexVersion >= 10. Takes effect after restart.",
-		Export:       true,
+		Export:       false,
 	}
 	p.InterimIndexSparseBM25Algo.Init(base.mgr)
 
