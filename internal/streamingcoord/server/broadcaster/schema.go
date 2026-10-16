@@ -31,12 +31,14 @@ type pendingSchemaTarget struct {
 
 // schemaTargetCollectionID is captured before publishing a task. MarkIgnore can
 // replace a task's message later, but only for AlterReplicateConfig messages.
+// Read only the header: completed tasks need not have their bodies decoded
+// during recovery.
 func schemaTargetCollectionID(msg message.BroadcastMutableMessage) int64 {
 	if msg.MessageTypeWithVersion() != message.MessageTypeAlterCollectionV2 {
 		return 0
 	}
 	alter, err := message.AsMutableAlterCollectionMessageV2(msg)
-	if err != nil || !messageutil.IsSchemaChange(alter.Header()) || alter.MustBody().GetUpdates().GetSchema() == nil {
+	if err != nil || !messageutil.IsSchemaChange(alter.Header()) {
 		return 0
 	}
 	return alter.Header().GetCollectionId()
@@ -134,6 +136,15 @@ func (bm *broadcastTaskManager) GetPendingSchemaTarget(collectionID int64) (*Sch
 	// Match ACK callback recovery order, never choose the largest pending DDL.
 	sort.Slice(pending, func(i, j int) bool {
 		if pending[i].controlTimeTick != pending[j].controlTimeTick {
+			// Replication may register a successor via a business-channel ACK
+			// before its control-channel ACK arrives. Its unknown order must
+			// not hide an already admitted predecessor.
+			if pending[i].controlTimeTick == 0 {
+				return false
+			}
+			if pending[j].controlTimeTick == 0 {
+				return true
+			}
 			return pending[i].controlTimeTick < pending[j].controlTimeTick
 		}
 		return pending[i].target.BroadcastID < pending[j].target.BroadcastID

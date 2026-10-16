@@ -28,8 +28,16 @@ func TestWALSchemaSelectors(t *testing.T) {
 		channel := types.PChannelInfo{AccessMode: types.AccessModeRW}
 		mockey.Mock((*analyzerWALTest).Channel).To(func(*analyzerWALTest) types.PChannelInfo { return channel }).Build()
 		mockey.Mock((*schemaShardManager).GetWriteSchema).To(func(_ *schemaShardManager, collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+			if collectionID == 2 {
+				require.Equal(t, "p_2v0", vchannel)
+				return nil, status.NewUnrecoverableError("collection does not exist")
+			}
+			if collectionID == 3 {
+				require.Equal(t, "p_3v0", vchannel)
+				return nil, status.NewInner("write schema is not ready")
+			}
 			require.EqualValues(t, 1, collectionID)
-			require.Equal(t, "p_1v0", vchannel)
+			require.Contains(t, []string{"p_1v0", "p_1v1"}, vchannel)
 			return &streamingpb.CollectionSchemaOfVChannel{Schema: &schemapb.CollectionSchema{Version: 2}, CheckpointTimeTick: 30}, nil
 		}).Build()
 		manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{PChannel: "p", VChannelMetas: map[string]*streamingpb.VChannelMeta{"p_1v0": {
@@ -56,10 +64,20 @@ func TestWALSchemaSelectors(t *testing.T) {
 		_, err = w.GetCollectionSchema(context.Background(), req)
 		require.Error(t, err)
 		require.False(t, status.AsStreamingError(err).IsUnrecoverable(), "write schema visibility does not imply observer visibility")
-		req.Vchannel = "p_2v0"
-		_, err = w.GetCollectionSchema(context.Background(), req)
-		require.Error(t, err)
-		require.False(t, status.AsStreamingError(err).IsUnrecoverable())
+		for _, tc := range []struct {
+			vchannel string
+			terminal bool
+		}{
+			{vchannel: "p_1v1"},                 // Write admission exists, observer has not caught up.
+			{vchannel: "p_2v0", terminal: true}, // Unknown or fully GC'd collection.
+			{vchannel: "p_3v0"},                 // Write schema is still recovering.
+		} {
+			req.Vchannel = tc.vchannel
+			resp, err = w.GetCollectionSchema(context.Background(), req)
+			require.Nil(t, resp, tc.vchannel)
+			require.Error(t, err, tc.vchannel)
+			require.Equal(t, tc.terminal, status.AsStreamingError(err).IsUnrecoverable(), tc.vchannel)
+		}
 		req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{CurrentWrite: true}
 		w.param.ShardManager = nil
 		_, err = w.GetCollectionSchema(context.Background(), req)

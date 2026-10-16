@@ -30,14 +30,16 @@ func (w *walAdaptorImpl) GetCollectionSchema(ctx context.Context, req *streaming
 	// The handler validates the canonical vchannel before entering the WAL.
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
 	if req.GetCurrentWrite() {
-		provider, ok := w.param.ShardManager.(writeSchemaProvider)
-		if !ok {
-			return nil, status.NewUnrecoverableError("WAL does not provide its write schema")
-		}
-		snapshot, err = provider.GetWriteSchema(collectionID, req.GetVchannel())
+		snapshot, err = w.getWriteSchema(collectionID, req.GetVchannel())
 	} else {
 		module := w.viewResourceManager.Module(req.GetVchannel())
 		if module == nil {
+			// The observer can lag write admission, but an absent collection
+			// cannot produce schema history. Preserve that terminal error;
+			// never substitute the current write schema for an exact version.
+			if _, err := w.getWriteSchema(collectionID, req.GetVchannel()); err != nil {
+				return nil, err
+			}
 			return nil, status.NewInner("schema history for vchannel %s is not ready", req.GetVchannel())
 		}
 		snapshot, err = module.GetSchemaVersion(collectionID, req.GetSchemaVersion())
@@ -48,4 +50,12 @@ func (w *walAdaptorImpl) GetCollectionSchema(ctx context.Context, req *streaming
 	return &streamingpb.StreamingNodeGetCollectionSchemaResponse{
 		Schema: snapshot.GetSchema(), EffectiveTimeTick: snapshot.GetCheckpointTimeTick(),
 	}, nil
+}
+
+func (w *walAdaptorImpl) getWriteSchema(collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+	provider, ok := w.param.ShardManager.(writeSchemaProvider)
+	if !ok {
+		return nil, status.NewUnrecoverableError("WAL does not provide its write schema")
+	}
+	return provider.GetWriteSchema(collectionID, vchannel)
 }

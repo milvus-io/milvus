@@ -231,7 +231,12 @@ func TestSchemaTargetIndexExcludesNonSchemaAlter(t *testing.T) {
 			task := newBroadcastTaskFromBroadcastMessage(msg, metrics, nil)
 			index := make(schemaTaskIndex)
 			index.add(1, task)
-			require.Empty(t, index)
+			if tc.schema == nil {
+				require.Len(t, index[100], 1, "index membership uses only the header")
+			} else {
+				require.Empty(t, index)
+			}
+			require.Nil(t, task.pendingSchemaTarget(100))
 		})
 	}
 }
@@ -334,4 +339,76 @@ func TestSchemaTargetRecoveredCallbackAdmission(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, target)
 	})
+}
+
+func TestSchemaTargetMissingSuccessorControlAck(t *testing.T) {
+	paramtable.Init()
+	metrics := newBroadcasterMetrics()
+	firstMsg, secondMsg := schemaTestMessage(100, 1), schemaTestMessage(100, 2)
+	firstPB := createNewWaitAckBroadcastTaskFromMessage(firstMsg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{1, 1})
+	secondPB := createNewWaitAckBroadcastTaskFromMessage(secondMsg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, []byte{1, 1})
+	controlIndex := -1
+	for i := range firstPB.AckedCheckpoints {
+		firstPB.AckedCheckpoints[i].TimeTick = 10
+	}
+	for i, ch := range secondMsg.BroadcastHeader().VChannels {
+		secondPB.AckedCheckpoints[i].TimeTick = 20
+		if funcutil.IsControlChannel(ch) {
+			controlIndex = i
+			secondPB.AckedCheckpoints[i] = nil
+			secondPB.AckedVchannelBitmap[i] = 0
+		}
+	}
+	require.NotEqual(t, -1, controlIndex)
+	first := newBroadcastTaskFromProto(firstPB, metrics, nil)
+	second := newBroadcastTaskFromProto(secondPB, metrics, nil)
+	first.schemaTargetEligible = true
+	bm := &broadcastTaskManager{mu: &sync.Mutex{}, schemaTasks: make(schemaTaskIndex)}
+	bm.schemaTasks.add(1, first)
+	bm.schemaTasks.add(2, second)
+	target, err := bm.GetPendingSchemaTarget(100)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, target.BroadcastID)
+	first.schemaTargetEligible = false
+	target, err = bm.GetPendingSchemaTarget(100)
+	require.Nil(t, target)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	first.schemaTargetEligible = true
+	second.task.AckedCheckpoints[controlIndex] = &streamingpb.AckedCheckpoint{TimeTick: 20}
+	target, err = bm.GetPendingSchemaTarget(100)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, target.BroadcastID)
+	bm.schemaTasks.remove(1, 100)
+	target, err = bm.GetPendingSchemaTarget(100)
+	require.Nil(t, target)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	second.schemaTargetEligible = true
+	target, err = bm.GetPendingSchemaTarget(100)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, target.BroadcastID)
+}
+
+func TestSchemaTargetRecoverySkipsCompletedBody(t *testing.T) {
+	paramtable.Init()
+	for _, state := range []streamingpb.BroadcastTaskState{
+		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE,
+		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE,
+	} {
+		t.Run(state.String(), func(t *testing.T) {
+			msg := schemaTestMessage(100, 1)
+			pb := createNewWaitAckBroadcastTaskFromMessage(msg, state, []byte{1, 1})
+			pb.Message.Payload = []byte{0xff}
+			require.NotPanics(t, func() {
+				task := newBroadcastTaskFromProto(pb, newBroadcasterMetrics(), nil)
+				index := make(schemaTaskIndex)
+				index.add(1, task)
+				require.Empty(t, index)
+				require.Nil(t, task.pendingSchemaTarget(100))
+				if state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+					bm := &broadcastTaskManager{mu: &sync.Mutex{}, tasks: map[uint64]*broadcastTask{1: task}}
+					require.Empty(t, bm.GetPendingSchemaFileResources())
+				}
+			})
+		})
+	}
 }
