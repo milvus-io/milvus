@@ -76,13 +76,6 @@ type Index struct {
 	installMu        sync.Mutex
 	installedVersion int64
 	installedPaths   map[sst.ID]string
-
-	// These fields are guarded by Channel.mu.
-	removed bool
-	// recovered is set for an Index that is open when the claim starts: the
-	// Index of a collection that existed at WAL open. Only such an Index
-	// looks up its manifest.
-	recovered bool
 }
 
 // openIndex opens the engine of a vchannel and builds the Index on top of it.

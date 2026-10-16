@@ -98,7 +98,7 @@ func (c *Channel) lastAckedLocked() uint64 {
 func (c *Channel) trackDirty(idx *Index) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if idx.removed || c.acked.contains(idx) || !idx.fresh() {
+	if !c.attachedLocked(idx) || c.acked.contains(idx) || !idx.fresh() {
 		return
 	}
 	c.acked.update(idx, idx.lastCommittedTimeTick())
@@ -109,7 +109,7 @@ func (c *Channel) trackDirty(idx *Index) {
 func (c *Channel) refreshAcked(idx *Index) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if idx.removed {
+	if !c.attachedLocked(idx) {
 		return
 	}
 	if !idx.dirty() || !idx.fresh() {

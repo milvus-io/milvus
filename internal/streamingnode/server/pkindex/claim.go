@@ -54,9 +54,10 @@ func (c *Channel) StartClaim() {
 		return
 	}
 	c.claimStarted = true
+	// The Indexes that are open now are those of the collections that existed
+	// at WAL open. Only they look up their manifests.
 	recovered := make([]*Index, 0, len(c.indexes))
 	for _, idx := range c.indexes {
-		idx.recovered = true
 		recovered = append(recovered, idx)
 	}
 	c.mu.Unlock()
@@ -82,11 +83,15 @@ func (c *Channel) claim(recovered []*Index) {
 		return
 	}
 
+	lookedUp := make(map[*Index]struct{}, len(recovered))
+	for _, idx := range recovered {
+		lookedUp[idx] = struct{}{}
+	}
 	c.mu.Lock()
 	c.claimed = true
 	var created []*Index
 	for _, idx := range c.indexes {
-		if !idx.recovered {
+		if _, ok := lookedUp[idx]; !ok {
 			created = append(created, idx)
 		}
 	}

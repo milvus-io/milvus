@@ -53,8 +53,7 @@ type Channel struct {
 	// happens outside mu.
 	opMu sync.Mutex
 
-	// mu guards indexes, the LastAcked heap, slots, ackedMax, claimed, and
-	// Index.removed and Index.recovered.
+	// mu guards indexes, the LastAcked heap, slots, ackedMax and claimed.
 	mu       sync.Mutex
 	indexes  map[string]*Index
 	acked    ackTracker
@@ -171,11 +170,16 @@ func (c *Channel) closeIndex(ctx context.Context, vchannel string) {
 	}
 }
 
-// detachLocked removes idx from the map and from the LastAcked heap. The
+// attachedLocked reports whether idx is the open Index of its vchannel. The
 // caller holds mu.
+func (c *Channel) attachedLocked(idx *Index) bool {
+	return c.indexes[idx.vchannel] == idx
+}
+
+// detachLocked removes idx from the map, from the LastAcked heap and from the
+// driver slots. The caller holds mu.
 func (c *Channel) detachLocked(idx *Index) {
 	delete(c.indexes, idx.vchannel)
-	idx.removed = true
 	c.acked.remove(idx)
 	delete(c.slots, idx)
 }
