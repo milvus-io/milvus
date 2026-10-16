@@ -1008,10 +1008,10 @@ ChunkedSegmentSealedImpl::BuildPkIndexSlot(
         pk_index_size,
         id_,
         stats_.mem_size.load());
-     auto slot = Manager::GetInstance()
+    auto slot = Manager::GetInstance()
                     .CreateCacheSlot<storagev2translator::PkIndexCell>(
                         std::move(translator));
-     if (eager) {
+    if (eager) {
         auto cell_holder =
             cachinglayer::SemiInlineGet(slot->PinCells(op_ctx, {0}));
         AssertInfo(cell_holder->get_cell_of(0) != nullptr,

@@ -502,8 +502,14 @@ OpenIndex(bool use_async,
     }
 
     ValidateLoadedShape(params, plan.state, engine, LoadBackend::Disk);
-    co_return std::make_unique<VectorIndexReader>(open_options.beamwidth,
-                                                  std::move(engine));
+    // Report the native engine footprint for segment RAM accounting. Capture
+    // before the engine is moved into the reader (knowhere Size() reflects the
+    // materialized index).
+    const auto mem_size = static_cast<size_t>(engine.native_index.Size());
+    auto reader = std::make_unique<VectorIndexReader>(open_options.beamwidth,
+                                                      std::move(engine));
+    reader->SetMemSize(mem_size);
+    co_return reader;
 }
 
 }  // namespace

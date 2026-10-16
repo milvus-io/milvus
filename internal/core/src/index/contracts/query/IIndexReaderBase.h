@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 
 #include "cachinglayer/Utils.h"
@@ -81,6 +82,25 @@ class IIndexReaderBase {
     // admission. All other non-sentinel values are actual owned resources.
     virtual cachinglayer::ResourceUsage
     CellByteSize() const = 0;
+
+    // Native heap footprint reported by the underlying engine at load time, in
+    // bytes. Unlike MemoryUsage()/CellByteSize(), which describe resources the
+    // caching layer admits and charges, this is the loader-populated size that
+    // segment RAM reporting sums into the segment's memory total. Readers that
+    // do not measure a native size (for example scalar indexes) leave the
+    // default zero. Set once by the loader after the index is materialized.
+    virtual size_t
+    MemByteSize() const {
+        return mem_size_;
+    }
+
+    virtual void
+    SetMemSize(size_t mem_size) {
+        mem_size_ = mem_size;
+    }
+
+ protected:
+    size_t mem_size_ = 0;
 };
 
 using IIndexReaderBasePtr = std::unique_ptr<IIndexReaderBase>;
