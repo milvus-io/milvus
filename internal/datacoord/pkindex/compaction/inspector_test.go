@@ -18,10 +18,10 @@ package compaction
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -32,8 +32,10 @@ import (
 )
 
 func fourL0() *pkindexpb.Manifest {
-	return &pkindexpb.Manifest{CollectionId: 1, Vchannel: "v", Version: 4, SstBasePath: "base",
-		Ssts: []*pkindexpb.SSTRef{ref(4, 0, 1), ref(3, 0, 1), ref(2, 0, 1), ref(1, 0, 1)}}
+	return &pkindexpb.Manifest{
+		CollectionId: 1, Vchannel: "v", Version: 4, SstBasePath: "base",
+		Ssts: []*pkindexpb.SSTRef{ref(4, 0, 1), ref(3, 0, 1), ref(2, 0, 1), ref(1, 0, 1)},
+	}
 }
 
 func newTestInspector(t *testing.T, cfg Config, committer *fakeCommitter, sched *task.MockGlobalScheduler) *Inspector {

@@ -95,7 +95,7 @@ func TestIterReportsCorruptBlock(t *testing.T) {
 	for i := off; i < off+64; i++ {
 		b[i] ^= 0xff
 	}
-	require.NoError(t, os.WriteFile(path, b, 0o600))
+	require.NoError(t, os.WriteFile(path, b, 0o600)) //nolint:gosec // test store under t.TempDir()
 
 	r, err := OpenReader(path, nil)
 	require.NoError(t, err)
@@ -192,6 +192,7 @@ func TestReaderCloseWaitsForIterators(t *testing.T) {
 
 	err = r.Close()
 	require.Error(t, err)
+	require.ErrorIs(t, err, errIteratorsOpen)
 	require.Contains(t, err.Error(), "1 iterators are still open")
 	// the reader is still usable
 	require.True(t, it.Next())

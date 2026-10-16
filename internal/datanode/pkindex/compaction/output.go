@@ -31,6 +31,12 @@ import (
 // errOutputIDsExhausted means the reserved ID range was too small for the
 // outputs. Nothing re-plans with a bigger range today: the task fails and the
 // vchannel waits for its cooldown.
+var (
+	errOutputDone       = errors.New("pkindex compaction output is finished or aborted")
+	errOutputAborted    = errors.New("pkindex compaction output was aborted")
+	errUploaderFinished = errors.New("pkindex compaction uploader is finished")
+)
+
 var errOutputIDsExhausted = errors.New("pkindex compaction ran out of output ids")
 
 // splitOutput writes the merged entries to tables of about maxBytes on disk
@@ -55,7 +61,7 @@ type splitOutput struct {
 
 func (o *splitOutput) Add(key, value []byte) error {
 	if o.finished || o.aborted {
-		return errors.New("output is finished or aborted")
+		return errOutputDone
 	}
 	if o.w == nil {
 		if o.nextID >= o.endID {
@@ -93,7 +99,7 @@ func (o *splitOutput) closeCurrent() error {
 // Finish closes the open table, if any, and returns every table written.
 func (o *splitOutput) Finish() ([]sst.Info, error) {
 	if o.aborted {
-		return nil, errors.New("output aborted")
+		return nil, errOutputAborted
 	}
 	o.finished = true
 	if o.w != nil {
@@ -161,7 +167,7 @@ func (u *uploader) enqueue(info sst.Info) error {
 	u.mu.Lock()
 	if u.finished {
 		u.mu.Unlock()
-		return errors.New("uploader finished")
+		return errUploaderFinished
 	}
 	err := u.err
 	u.mu.Unlock()

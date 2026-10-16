@@ -197,7 +197,7 @@ func TestMergeReportsCorruptTable(t *testing.T) {
 	for i := off; i < off+64; i++ {
 		b[i] ^= 0xff
 	}
-	require.NoError(t, os.WriteFile(path, b, 0o600))
+	require.NoError(t, os.WriteFile(path, b, 0o600)) //nolint:gosec // test store under t.TempDir()
 	r, err := sst.OpenReader(path, nil)
 	require.NoError(t, err)
 	defer r.Close()
@@ -231,7 +231,7 @@ func (s *fakeStore) DownloadFile(context.Context, string, string) error { return
 func touchTable(t *testing.T, dir string, id sst.ID) string {
 	t.Helper()
 	p := filepath.Join(dir, sst.FileName(id))
-	require.NoError(t, os.WriteFile(p, []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(p, []byte("x"), 0o600))
 	return p
 }
 

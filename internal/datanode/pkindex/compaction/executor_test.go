@@ -46,7 +46,7 @@ func (s dirStore) UploadFile(_ context.Context, key, path string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(dst, b, 0o600)
+	return os.WriteFile(dst, b, 0o600) //nolint:gosec // test store under t.TempDir()
 }
 
 func (s dirStore) DownloadFile(_ context.Context, key, path string) error {
@@ -58,7 +58,7 @@ func (s dirStore) DownloadFile(_ context.Context, key, path string) error {
 	if err != nil {
 		return pkindex.MarkIO(err, "read %s", key)
 	}
-	return os.WriteFile(path, b, 0o600)
+	return os.WriteFile(path, b, 0o600) //nolint:gosec // test store under t.TempDir()
 }
 
 func testExecutor(t *testing.T, ttl time.Duration) (*Executor, dirStore) {
@@ -106,8 +106,10 @@ func TestExecutorRunsACompaction(t *testing.T) {
 	base := "sst/1/v"
 	newer := uploadInput(t, store, base, 2, "a", "new", "b", "b")
 	older := uploadInput(t, store, base, 1, "a", "old", "c", "c")
-	req := &pkindexpb.CompactionRequest{TaskId: 7, CollectionId: 1, Vchannel: "v", SstBasePath: base,
-		Inputs: []*pkindexpb.SSTRef{newer, older}, RunId: 9, OutputIdBegin: 100, OutputIdEnd: 110, TargetFileSize: 1 << 20}
+	req := &pkindexpb.CompactionRequest{
+		TaskId: 7, CollectionId: 1, Vchannel: "v", SstBasePath: base,
+		Inputs: []*pkindexpb.SSTRef{newer, older}, RunId: 9, OutputIdBegin: 100, OutputIdEnd: 110, TargetFileSize: 1 << 20,
+	}
 	require.NoError(t, e.Create(context.Background(), req))
 	require.EqualValues(t, 4, e.Slots())
 
@@ -135,8 +137,10 @@ func TestExecutorRunsACompaction(t *testing.T) {
 
 func TestExecutorFailsOnMissingInput(t *testing.T) {
 	e, _ := testExecutor(t, time.Hour)
-	req := &pkindexpb.CompactionRequest{TaskId: 8, SstBasePath: "sst/1/v", RunId: 9, OutputIdBegin: 100, OutputIdEnd: 110, TargetFileSize: 1 << 20,
-		Inputs: []*pkindexpb.SSTRef{{Id: 55, Size: 10}}}
+	req := &pkindexpb.CompactionRequest{
+		TaskId: 8, SstBasePath: "sst/1/v", RunId: 9, OutputIdBegin: 100, OutputIdEnd: 110, TargetFileSize: 1 << 20,
+		Inputs: []*pkindexpb.SSTRef{{Id: 55, Size: 10}},
+	}
 	require.NoError(t, e.Create(context.Background(), req))
 	result := waitState(t, e, 8, taskcommon.Failed)
 	_, reason, _, _ := e.Query(8)
@@ -238,7 +242,7 @@ func TestExecutorCloseMarksARunningTaskRetriable(t *testing.T) {
 	tk := e.tasks[17]
 	e.mu.Unlock()
 	e.Close()
-	state, err, _ := tk.getState()
+	state, _, err := tk.getState()
 	require.Equal(t, taskcommon.Failed, state)
 	require.Error(t, err)
 	require.True(t, retriable(err)) // a cancellation is never the request's fault
@@ -283,10 +287,10 @@ func TestExecutorFailsOnWrongSize(t *testing.T) {
 
 func TestExecutorRejectsBadRequests(t *testing.T) {
 	e, _ := testExecutor(t, time.Hour)
-	require.Error(t, e.Create(context.Background(), &pkindexpb.CompactionRequest{TaskId: 1, SstBasePath: "b", OutputIdBegin: 1, OutputIdEnd: 2, TargetFileSize: 1}))                                       // no inputs
-	require.Error(t, e.Create(context.Background(), &pkindexpb.CompactionRequest{TaskId: 1, SstBasePath: "b", Inputs: []*pkindexpb.SSTRef{{Id: 1}}, OutputIdBegin: 2, OutputIdEnd: 2, TargetFileSize: 1})) // empty range
-	require.Error(t, e.Create(context.Background(), &pkindexpb.CompactionRequest{TaskId: 1, SstBasePath: "b", Inputs: []*pkindexpb.SSTRef{{Id: 1}}, OutputIdBegin: 1, OutputIdEnd: 2}))                    // no target size
-	require.Error(t, e.Create(context.Background(), &pkindexpb.CompactionRequest{TaskId: 1, Inputs: []*pkindexpb.SSTRef{{Id: 1}}, OutputIdBegin: 1, OutputIdEnd: 2, TargetFileSize: 1}))                   // no base path
+	require.ErrorIs(t, e.Create(context.Background(), &pkindexpb.CompactionRequest{TaskId: 1, SstBasePath: "b", OutputIdBegin: 1, OutputIdEnd: 2, TargetFileSize: 1}), errInvalidRequest)                                       // no inputs
+	require.ErrorIs(t, e.Create(context.Background(), &pkindexpb.CompactionRequest{TaskId: 1, SstBasePath: "b", Inputs: []*pkindexpb.SSTRef{{Id: 1}}, OutputIdBegin: 2, OutputIdEnd: 2, TargetFileSize: 1}), errInvalidRequest) // empty range
+	require.ErrorIs(t, e.Create(context.Background(), &pkindexpb.CompactionRequest{TaskId: 1, SstBasePath: "b", Inputs: []*pkindexpb.SSTRef{{Id: 1}}, OutputIdBegin: 1, OutputIdEnd: 2}), errInvalidRequest)                    // no target size
+	require.ErrorIs(t, e.Create(context.Background(), &pkindexpb.CompactionRequest{TaskId: 1, Inputs: []*pkindexpb.SSTRef{{Id: 1}}, OutputIdBegin: 1, OutputIdEnd: 2, TargetFileSize: 1}), errInvalidRequest)                   // no base path
 	_, _, _, ok := e.Query(1)
 	require.False(t, ok)
 }
