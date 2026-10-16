@@ -830,16 +830,12 @@ Reported in Section 3.1 and Section 4.
   | Delete 4.4 M keys, 44 requests (apply / tsafe stall) | 51.9 s / 43.6 s → 1.5 s / 0.25 s | 222.6 s / 209.8 s → 2.6 s / 0.08 s |
   | Load with 6.34 M deleted keys to replay | 92.9 s → 9.9 s | 380.9 s → 10.9 s |
 
-  Row counts after every delete matched the expected values and spot
-  queries of deleted and neighbouring keys returned the expected rows.
-  Two intermediate variants explain where the gain comes from: changing only
-  the sort key gave about 20 % (monotonic offsets), adding an in-chunk cursor
-  but keeping the chunk-major loop gave 3–4×, and the key-major merge gave
-  the rest, because the sorted primary-key column holds many chunks and the
-  chunk-major loop scanned every key once per chunk. With the merge, the per
-  key cost no longer depends on memory latency and `maxRows` can be raised
-  or removed; the prototype branch is `proto/delete-merge-cursor` in the
-  author's tree and will be submitted as its own PR.
+  Row counts after every delete matched the expected values, spot queries
+  of deleted and neighbouring keys returned the expected rows, and reloading
+  the segments with the unmodified binary reproduced the same counts. With
+  the merge, the per-key cost no longer depends on memory latency and
+  `maxRows` can be raised or removed; the prototype will be submitted as its
+  own PR.
 - Loader estimate: add a per-row constant for fixed-width columns (measured
   gap ~80 B per row on `int64 + int32`), not for variable-length columns
   (already covered by the 2× factor).
