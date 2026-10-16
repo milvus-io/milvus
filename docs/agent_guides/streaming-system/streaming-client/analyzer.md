@@ -113,14 +113,19 @@ publish a schema with missing resources. RootCoord does not wait for all QNs to
 synchronize their inventories. Existing StreamingCoord assignment admission and
 legacy file-resource push distribution remain unchanged.
 
-The validation response contains only resource IDs. Errors use streaming gRPC
-interceptors: invalid analyzer configuration is an unrecoverable invalid argument;
-transient native system failures remain retriable, while native errors marked
-non-retriable become terminal streaming system errors. Deterministically invalid
-analyzer options are classified as input errors at their Rust origin; internal
-failures are not relabeled as bad user parameters. HandlerClient
-uses its existing readiness/retry loop, returns Unimplemented immediately, and
-maps invalid arguments to the public DDL parameter-error contract. The same
+The validation response carries a business Status and, on success, resource IDs.
+Native validation failures return in Status, preserving their error code, input
+classification and retriability. HandlerClient checks this Status after the
+readiness loop and does not retry business failures, even when Status marks an
+I/O error retriable. A wrong file_name or missing local path therefore returns
+the native file error immediately instead of holding the collection DDL lock
+until the analyzer request timeout. Filesystem absence alone does not prove
+invalid input: concurrent resource removal or worker-local state can cause the
+same failure, so these errors retain their system classification.
+Deterministically invalid analyzer options remain input errors at their Rust
+origin; HandlerClient maps these to the public DDL parameter-error contract.
+Discovery and resource preparation still use the existing streaming readiness
+retry loop, and Unimplemented returns immediately. The same
 Analyzer request timeout bounds retries of persistent preparation failures, so
 DDL validation cannot retain its collection-name lock indefinitely when the
 caller supplied no deadline. Known permanent storage failures during preparation

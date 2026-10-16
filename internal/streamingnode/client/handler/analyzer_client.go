@@ -76,5 +76,15 @@ func (hc *handlerClientImpl) ValidateAnalyzer(ctx context.Context, req *streamin
 		}
 		return nil, err
 	}
-	return response.(*streamingpb.StreamingNodeValidateAnalyzerResponse), nil
+	resp := response.(*streamingpb.StreamingNodeValidateAnalyzerResponse)
+	// Interpret business failures only after the readiness loop has completed.
+	// Retriable native I/O errors must not keep a collection DDL lock held while
+	// we repeatedly validate the same configuration.
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		if merr.GetErrorType(err) == merr.InputError {
+			return nil, merr.WrapErrParameterInvalidErr(err, "analyzer validation failed")
+		}
+		return nil, err
+	}
+	return resp, nil
 }

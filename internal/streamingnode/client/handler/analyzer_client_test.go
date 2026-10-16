@@ -307,6 +307,36 @@ func TestValidateAnalyzerDiscovery(t *testing.T) {
 	}
 }
 
+func TestValidateAnalyzerBusinessFailuresDoNotRetry(t *testing.T) {
+	for _, failure := range []error{
+		merr.SegcoreError(int32(merr.CodeFileReadFailed), "dictionary file not found"),
+		merr.ErrServiceUnavailable,
+		merr.ErrServiceInternal,
+		merr.SegcoreError(int32(merr.CodeInvalidParameter), "invalid analyzer"),
+	} {
+		mockey.PatchConvey(failure.Error(), t, func() {
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			call := mockey.Mock((*analyzerRPC).ValidateAnalyzer).Return(&streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(failure)}, nil).Build()
+			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			require.Nil(t, resp)
+			require.Error(t, err)
+			require.Equal(t, 1, call.Times(), "even retriable business failures must not enter readiness backoff")
+			require.Equal(t, merr.GetErrorType(failure), merr.GetErrorType(err))
+			require.Equal(t, merr.IsRetryableErr(failure), merr.IsRetryableErr(err))
+			if merr.GetErrorType(failure) == merr.InputError {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			} else {
+				require.Equal(t, merr.Code(failure), merr.Code(err))
+			}
+			client.lifetime.SetState(typeutil.LifetimeStateStopped)
+			client.lifetime.Wait()
+		})
+	}
+}
+
 func TestAnalyzerRequestsBoundPersistentPreparationFailures(t *testing.T) {
 	for _, validate := range []bool{false, true} {
 		mockey.PatchConvey("persistent preparation failure has an operation deadline", t, func() {
