@@ -15,8 +15,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
-	golang.org/x/time v0.14.0
-	google.golang.org/grpc v1.83.2
+	golang.org/x/time v0.15.0
+	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -86,7 +86,7 @@ require (
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

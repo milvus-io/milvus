@@ -3805,7 +3805,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 	).Build()
 	defer patch.UnPatch()
 
-	cache := make(map[int64]string)
+	cache := make(map[int64]l0ManifestCommit)
 	err = meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
 		200,
 		deltalogs,
@@ -3816,7 +3816,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 
 	updated := meta.GetSegment(context.TODO(), 200)
 	require.Equal(t, newManifest, updated.GetManifestPath())
-	require.Equal(t, newManifest, cache[int64(200)])
+	require.Equal(t, newManifest, cache[int64(200)].manifestPath)
 	require.Len(t, updated.GetDeltalogs(), 1)
 	require.Len(t, updated.GetDeltalogs()[0].GetBinlogs(), 1)
 	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
@@ -3872,7 +3872,7 @@ func TestAddL0DeltalogsAccumulatesDeltaStatsAfterRestart(t *testing.T) {
 	).Build()
 	defer patch.UnPatch()
 
-	cache := make(map[int64]string)
+	cache := make(map[int64]l0ManifestCommit)
 	err = meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
 		200,
 		deltalogs,
@@ -3935,7 +3935,7 @@ func TestAddL0DeltalogsRetryDoesNotDoubleCountDeltaStats(t *testing.T) {
 	defer patch.UnPatch()
 
 	// First run: commits manifest, accumulates deltas.
-	cache := make(map[int64]string)
+	cache := make(map[int64]l0ManifestCommit)
 	require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
 		202, deltalogs, &indexpb.StorageConfig{}, cache)))
 
@@ -4029,68 +4029,62 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *
 	require.Empty(t, updated2.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 }
 
-func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *testing.T) {
-	basePath := "/tmp/milvus/insert_log/1/10/200"
-	oldManifest := packed.MarshalManifestPath(basePath, 7)
-	manifest8 := packed.MarshalManifestPath(basePath, 8)
-	manifest9 := packed.MarshalManifestPath(basePath, 9)
-
+func TestAddL0DeltalogsAndUpdateManifestOperatorRetriesConcurrentUpdates(t *testing.T) {
+	ctx := context.Background()
+	base := "/tmp/milvus/insert_log/1/10/200"
+	manifest := func(version int64) string { return packed.MarshalManifestPath(base, version) }
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
-	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:           200,
-		CollectionID: 1,
-		PartitionID:  10,
-		State:        commonpb.SegmentState_Flushed,
-		ManifestPath: oldManifest,
+	require.NoError(t, meta.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 200, State: commonpb.SegmentState_Flushed, ManifestPath: manifest(7),
 	})))
-
-	var mu sync.Mutex
-	calls := make([]string, 0, 2)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
 	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
-			mu.Lock()
-			defer mu.Unlock()
-			calls = append(calls, manifestPath)
-			if len(calls) == 1 {
-				return manifest8, nil
+		func(path string, _ *indexpb.StorageConfig, entries []packed.DeltaLogEntry) (string, error) {
+			if entries[0].Path == base+"/_delta/9001" && path == manifest(7) {
+				close(entered)
+				<-release
+				return manifest(9), nil
 			}
-			return manifest9, nil
-		},
-	).Build()
+			if path == manifest(7) {
+				return manifest(8), nil
+			}
+			return manifest(10), nil
+		}).Build()
 	defer patch.UnPatch()
-
-	makeDelta := func(logID int64) []*datapb.FieldBinlog {
-		return []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{
-			LogID:      logID,
-			LogPath:    fmt.Sprintf("%s/_delta/%d", basePath, logID),
-			EntriesNum: 1,
-		}}}}
+	defer unblock()
+	makeOp := func(logID int64, cache map[int64]l0ManifestCommit) UpdateOperator {
+		return AddL0DeltalogsAndUpdateManifestOperator(200, []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{
+			LogID: logID, LogPath: fmt.Sprintf("%s/_delta/%d", base, logID), EntriesNum: 1,
+		}}}}, &indexpb.StorageConfig{}, cache)
 	}
-
-	errs := make(chan error, 2)
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		errs <- meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(200, makeDelta(9001), &indexpb.StorageConfig{}, nil))
-	}()
-	go func() {
-		defer wg.Done()
-		errs <- meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(200, makeDelta(9002), &indexpb.StorageConfig{}, nil))
-	}()
-	wg.Wait()
-	close(errs)
-
-	for err := range errs {
+	cache := make(map[int64]l0ManifestCommit)
+	first := make(chan error, 1)
+	go func() { first <- meta.UpdateSegmentsInfo(ctx, makeOp(9001, cache)) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first manifest commit did not start")
+	}
+	second := make(chan error, 1)
+	go func() { second <- meta.UpdateSegmentsInfo(ctx, makeOp(9002, nil)) }()
+	select {
+	case err := <-second:
 		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("second update blocked on manifest I/O")
 	}
-	require.Equal(t, []string{oldManifest, manifest8}, calls)
-
-	updated := meta.GetSegment(context.TODO(), 200)
-	require.Equal(t, manifest9, updated.GetManifestPath())
-	require.Len(t, updated.GetDeltalogs(), 1)
+	unblock()
+	require.ErrorIs(t, <-first, merr.ErrServiceUnavailable)
+	require.Empty(t, cache, "stale prepared revision must not survive in retry cache")
+	require.Equal(t, manifest(8), meta.GetSegment(ctx, 200).GetManifestPath())
+	require.NoError(t, meta.UpdateSegmentsInfo(ctx, makeOp(9001, cache)))
+	updated := meta.GetSegment(ctx, 200)
+	require.Equal(t, manifest(10), updated.GetManifestPath())
 	require.Len(t, updated.GetDeltalogs()[0].GetBinlogs(), 2)
+	require.EqualValues(t, 2, updated.GetStats().GetDeleteNumRows())
 }
 
 func TestAddL0DeltalogsAndUpdateManifestOperatorRequiresLogPath(t *testing.T) {
@@ -4119,7 +4113,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorRequiresLogPath(t *testing.T) {
 	require.Empty(t, updated.GetDeltalogs())
 }
 
-func TestAddL0DeltalogsAndUpdateManifestOperatorCacheDoesNotRegressManifest(t *testing.T) {
+func TestAddL0DeltalogsAndUpdateManifestOperatorDiscardsStaleCache(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	manifest8 := packed.MarshalManifestPath(basePath, 8)
 	manifest9 := packed.MarshalManifestPath(basePath, 9)
@@ -4136,12 +4130,13 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCacheDoesNotRegressManifest(t *t
 	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
 		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			calls++
-			return "", errors.New("should not be called")
+			require.Equal(t, manifest9, manifestPath)
+			return packed.MarshalManifestPath(basePath, 10), nil
 		},
 	).Build()
 	defer patch.UnPatch()
 
-	cache := map[int64]string{200: manifest8}
+	cache := map[int64]l0ManifestCommit{200: {baseManifest: manifest8, manifestPath: manifest8}}
 	err = meta.UpdateSegmentsInfo(context.TODO(), AddL0DeltalogsAndUpdateManifestOperator(
 		200,
 		[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: basePath + "/_delta/9001", EntriesNum: 3}}}},
@@ -4150,9 +4145,9 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCacheDoesNotRegressManifest(t *t
 	))
 
 	require.NoError(t, err)
-	require.Zero(t, calls)
+	require.Equal(t, 1, calls)
 	updated := meta.GetSegment(context.TODO(), 200)
-	require.Equal(t, manifest9, updated.GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(basePath, 10), updated.GetManifestPath())
 	require.Len(t, updated.GetDeltalogs(), 1)
 }
 

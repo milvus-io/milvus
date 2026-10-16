@@ -245,6 +245,21 @@ func TestMembershipFilterSizeFallbackKeys(t *testing.T) {
 	})
 }
 
+func TestComponentParam_TieredLazyColumnGroupEnabled(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
+
+	item := &params.QueryNodeCfg.TieredLazyColumnGroupEnabled
+	assert.Equal(t, "queryNode.segcore.tieredStorage.lazyColumnGroupEnabled", item.Key)
+	assert.Equal(t, "3.0.3", item.Version)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, params.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, params.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()

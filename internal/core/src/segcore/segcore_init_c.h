@@ -109,6 +109,12 @@ void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
 
 void
+SegcoreSetLazyColumnGroupEnabled(const bool value);
+
+bool
+SegcoreGetLazyColumnGroupEnabled();
+
+void
 SegcoreCloseGlog();
 
 int32_t
