@@ -161,7 +161,7 @@ func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
 }
 
 func (m *SegmentResourceManager) newResourceLocked(id, collection int64) *segmentResource {
-	ctx, cancel := context.WithCancel(m.ctx)
+	ctx, cancel := context.WithCancel(m.ctx) // #nosec G118 -- Ownership transfers to the resource; Release or reconciliation cancels it.
 	r := &segmentResource{manager: m, id: id, collectionID: collection, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	m.resources[id] = r
 	return r

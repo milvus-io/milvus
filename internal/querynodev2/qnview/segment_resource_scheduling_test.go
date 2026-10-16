@@ -88,8 +88,11 @@ func (f *resourceSchedulingFixture) addBinding(schema int32) *segmentBinding {
 	req := (&resourceTestFixture{}).request(int64(schema), schema, 1)
 	req.OnReady = nil
 	ctx, cancel := context.WithCancel(f.r.ctx)
-	v := &viewResources{ctx: ctx, cancel: cancel, req: req, dependenciesDone: make(chan struct{}),
-		collection: &fakeCollectionRuntimeGuard{schemaVersion: int64(schema), schema: &schemapb.CollectionSchema{Version: schema}}, buffer: &fakeTransformLogGuard{}}
+	f.t.Cleanup(cancel)
+	v := &viewResources{
+		ctx: ctx, cancel: cancel, req: req, dependenciesDone: make(chan struct{}),
+		collection: &fakeCollectionRuntimeGuard{schemaVersion: int64(schema), schema: &schemapb.CollectionSchema{Version: schema}}, buffer: &fakeTransformLogGuard{},
+	}
 	close(v.dependenciesDone)
 	b := &segmentBinding{resource: f.r, view: v, partitionID: 10}
 	v.bindings = map[int64]*segmentBinding{f.r.id: b}
@@ -99,9 +102,11 @@ func (f *resourceSchedulingFixture) addBinding(schema int32) *segmentBinding {
 }
 
 func (f *resourceSchedulingFixture) snapshot(revision uint64) SegmentLoadInfoSnapshot {
-	return SegmentLoadInfoSnapshot{SegmentID: 1000, CollectionID: 1,
+	return SegmentLoadInfoSnapshot{
+		SegmentID: 1000, CollectionID: 1,
 		Revision: SegmentLoadInfoRevision{Revision: revision},
-		LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000, CollectionID: 1, PartitionID: 10}}
+		LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000, CollectionID: 1, PartitionID: 10},
+	}
 }
 
 func (f *resourceSchedulingFixture) wake() {
