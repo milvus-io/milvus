@@ -40,8 +40,10 @@ type Config struct {
 	// the oldest run reach this many times the oldest run.
 	SpaceAmpRatio float64
 	// MaxInputBytes bounds the input of a flushed-table or size-tiered merge.
+	// It does not apply to the space-amplification rule.
 	MaxInputBytes int64
-	// MaxInputTables bounds the number of flushed tables in one merge.
+	// MaxInputTables bounds the number of flushed tables in one flushed-table
+	// merge. It applies to the flushed-table rule only.
 	MaxInputTables int
 	// MaxConcurrent bounds the tasks in flight across all vchannels.
 	MaxConcurrent int
