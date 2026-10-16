@@ -217,8 +217,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		}),
 		storage.WithVersion(t.storageVersion),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		storage.WithUseLoonFFI(t.useLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
+		storage.WithMultiPartUploadSize(paramtable.Get().DataNodeCfg.MultiPartUploadSize.GetAsInt64()),
 	}
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
 		lobBasePath := storage.SegmentPartitionBasePath(
