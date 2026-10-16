@@ -26,9 +26,8 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -158,7 +157,7 @@ func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID in
 		cancel:       cancel,
 		lifetime:     typeutil.NewLifetime(),
 		ready:        make(chan struct{}),
-		sstBasePath:  objpath.SSTBasePath(cfg.StorageRootPath, collectionID, vchannel),
+		sstBasePath:  pkroot.SSTBasePath(cfg.StorageRootPath, collectionID, vchannel),
 		backoff:      c.newBackoff(),
 		heapPos:      -1,
 	}
@@ -181,7 +180,7 @@ func hasLeftover(dirs ...string) (bool, error) {
 			continue
 		}
 		if err != nil {
-			return false, pkerr.MarkIO(err, "list dir %s", d)
+			return false, pkroot.MarkIO(err, "list dir %s", d)
 		}
 		if len(ents) > 0 {
 			return true, nil
@@ -194,7 +193,7 @@ func hasLeftover(dirs ...string) (bool, error) {
 func wipeLocal(dirs ...string) error {
 	for _, d := range dirs {
 		if err := os.RemoveAll(d); err != nil {
-			return pkerr.MarkIO(err, "remove dir %s", d)
+			return pkroot.MarkIO(err, "remove dir %s", d)
 		}
 	}
 	return nil
@@ -355,12 +354,12 @@ func (idx *Index) resolveLocal(ctx context.Context, basePath string, id sst.ID, 
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	} else if !os.IsNotExist(err) {
-		return "", pkerr.MarkIO(err, "stat committed sst %s", path)
+		return "", pkroot.MarkIO(err, "stat committed sst %s", path)
 	}
 	if err := os.MkdirAll(idx.committedDir, 0o755); err != nil {
-		return "", pkerr.MarkIO(err, "create committed dir %s", idx.committedDir)
+		return "", pkroot.MarkIO(err, "create committed dir %s", idx.committedDir)
 	}
-	if err := idx.ch.m.cfg.Store.DownloadFile(ctx, objpath.SSTKey(basePath, int64(id)), path); err != nil {
+	if err := idx.ch.m.cfg.Store.DownloadFile(ctx, pkroot.SSTKey(basePath, int64(id)), path); err != nil {
 		return "", err
 	}
 	idx.logger.Info(ctx, "downloaded a committed primary key index table", mlog.Int64("sstID", int64(id)))
@@ -538,5 +537,5 @@ func (idx *Index) handover(ctx context.Context) (bool, error) {
 // newer owner, the manifest service rejected a request that a retry cannot
 // fix, or stored data is corrupted.
 func isFatal(err error) bool {
-	return errors.Is(err, ErrFenced) || errors.Is(err, ErrRejected) || errors.Is(err, pkerr.ErrCorrupted)
+	return errors.Is(err, ErrFenced) || errors.Is(err, ErrRejected) || errors.Is(err, pkroot.ErrCorrupted)
 }

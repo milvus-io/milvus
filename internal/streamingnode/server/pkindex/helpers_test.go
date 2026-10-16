@@ -28,10 +28,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -49,7 +48,7 @@ var farFuture = time.Now().Add(24 * time.Hour)
 const testStorageRoot = "root"
 
 func testBasePath(vchannel string) string {
-	return objpath.SSTBasePath(testStorageRoot, testCollectionID, vchannel)
+	return pkroot.SSTBasePath(testStorageRoot, testCollectionID, vchannel)
 }
 
 // fakeClient applies claims, lookups and flushes the way the manifest
@@ -213,7 +212,7 @@ func (c *fakeClient) CommitFlush(ctx context.Context, args FlushArgs) (ManifestV
 	c.applied = append(c.applied, changed)
 	if c.loseNext {
 		c.loseNext = false
-		return ManifestView{}, errors.Mark(errors.New("response lost"), pkerr.ErrUnavailable)
+		return ManifestView{}, errors.Mark(errors.New("response lost"), pkroot.ErrUnavailable)
 	}
 	if c.rewrite != nil {
 		return c.rewrite(next.View), nil
@@ -286,7 +285,7 @@ func (s *countingStore) UploadFile(ctx context.Context, key, path string) error 
 func (s *countingStore) DownloadFile(ctx context.Context, key, path string) error {
 	s.downloads.Add(1)
 	if s.missing.Load() {
-		return errors.Mark(errors.Newf("object %s is missing", key), pkerr.ErrCorrupted)
+		return errors.Mark(errors.Newf("object %s is missing", key), pkroot.ErrCorrupted)
 	}
 	return s.FakeStore.DownloadFile(ctx, key, path)
 }

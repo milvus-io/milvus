@@ -29,10 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -255,7 +254,7 @@ func TestNoManifestAndNoLeftoverIsFresh(t *testing.T) {
 	assert.Equal(t, idx.sstBasePath, m.SSTBasePath)
 	keys := env.store.Keys()
 	for _, ref := range m.Tables {
-		assert.Contains(t, keys, objpath.SSTKey(idx.sstBasePath, int64(ref.ID)))
+		assert.Contains(t, keys, pkroot.SSTKey(idx.sstBasePath, int64(ref.ID)))
 	}
 	assert.Empty(t, env.fatalList())
 }
@@ -269,10 +268,10 @@ func TestDecideCorruptionIsFatal(t *testing.T) {
 
 	_, err := idx.Decide(ctx, insertRequest(idx, 1))
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkroot.ErrCorrupted))
 	fatals := env.fatalList()
 	require.Len(t, fatals, 1)
-	assert.True(t, errors.Is(fatals[0], pkerr.ErrCorrupted))
+	assert.True(t, errors.Is(fatals[0], pkroot.ErrCorrupted))
 
 	// A decider error that is not corruption is not fatal. The engine of
 	// another Index is closed while the Index stays open, so Decide reaches
@@ -282,7 +281,7 @@ func TestDecideCorruptionIsFatal(t *testing.T) {
 	_, err = other.Decide(ctx, insertRequest(other, 2))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, engine.ErrClosed))
-	assert.False(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.False(t, errors.Is(err, pkroot.ErrCorrupted))
 	assert.Len(t, env.fatalList(), 1)
 	// the failed Decide released the writer
 	ch.Tick(30)

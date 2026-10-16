@@ -24,7 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -89,7 +89,7 @@ func newChannel(m *Manager, info types.PChannelInfo, seed uint64, tail func() WA
 // as "pchannel <name>". It wraps engine.ErrClosed, so the caller handles it
 // like a closed engine.
 func errClosed(what string) error {
-	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of %s is closed", what), pkerr.ErrUnavailable)
+	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of %s is closed", what), pkroot.ErrUnavailable)
 }
 
 // Add opens the Index of a vchannel and returns it, with whether this call
@@ -149,7 +149,7 @@ func (c *Channel) Drop(ctx context.Context, vchannel string) error {
 	c.closeIndex(ctx, vchannel)
 	dir := indexDir(c.m.cfg.Root, vchannel)
 	if err := os.RemoveAll(dir); err != nil {
-		return pkerr.MarkIO(err, "remove dir %s", dir)
+		return pkroot.MarkIO(err, "remove dir %s", dir)
 	}
 	return nil
 }

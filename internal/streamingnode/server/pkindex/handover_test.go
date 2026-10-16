@@ -29,10 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
@@ -58,17 +57,17 @@ func refIDs(refs []TableRef) []int64 {
 func storeIDs(t *testing.T, store *countingStore, basePath string) []int64 {
 	var ids []int64
 	for _, k := range store.Keys() {
-		id, ok := objpath.ParseSSTKey(basePath, k)
+		id, ok := pkroot.ParseSSTKey(basePath, k)
 		require.True(t, ok, k)
 		ids = append(ids, id)
 	}
 	return ids
 }
 
-// TestSSTKeyExtension checks that objpath writes the extension of
+// TestSSTKeyExtension checks that pkroot.SSTKey writes the extension of
 // sst.Extension.
 func TestSSTKeyExtension(t *testing.T) {
-	assert.True(t, strings.HasSuffix(objpath.SSTKey("base", 1), sst.Extension))
+	assert.True(t, strings.HasSuffix(pkroot.SSTKey("base", 1), sst.Extension))
 }
 
 func TestHandoverNormal(t *testing.T) {
@@ -154,10 +153,10 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
-	env.client.set(func(c *fakeClient) { c.commitErrs = []error{pkerr.MarkIO(errors.New("disk gone"), "commit")} })
+	env.client.set(func(c *fakeClient) { c.commitErrs = []error{pkroot.MarkIO(errors.New("disk gone"), "commit")} })
 	err = idx.commit(ctx, p)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, pkerr.ErrIO))
+	assert.True(t, errors.Is(err, pkroot.ErrIO))
 	objects := env.store.Len()
 	assert.Equal(t, len(p.request.AddTables), objects)
 	assert.Empty(t, env.client.appliedList())
@@ -278,7 +277,7 @@ func TestLinkCommittedReusesExistingLink(t *testing.T) {
 	assert.Equal(t, p1, p2)
 
 	_, err = linkCommitted(dir, engine.StagedTable{Info: sst.Info{ID: 43}, Path: filepath.Join(t.TempDir(), "missing")})
-	assert.True(t, errors.Is(err, pkerr.ErrIO))
+	assert.True(t, errors.Is(err, pkroot.ErrIO))
 }
 
 func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
@@ -293,7 +292,7 @@ func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
 	p.uploadedAt = old
 	env.store.FailUploads(1)
 	err = idx.commit(ctx, p)
-	assert.True(t, errors.Is(err, pkerr.ErrIO))
+	assert.True(t, errors.Is(err, pkroot.ErrIO))
 	assert.Empty(t, env.client.requestList(), "no commit after a failed re-upload")
 	assert.Equal(t, old, p.uploadedAt)
 	assert.Equal(t, 1, idx.eng.Stats().FrozenGenerations)

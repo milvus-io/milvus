@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
@@ -101,7 +101,7 @@ func TestPKStoreRejectsCorruptValue(t *testing.T) {
 
 	_, err := s.get(ctx, Int64PK(1))
 	require.Error(t, err)
-	require.True(t, errors.Is(err, pkerr.ErrCorrupted))
+	require.True(t, errors.Is(err, pkroot.ErrCorrupted))
 }
 
 func TestPKStoreAfterEngineClose(t *testing.T) {
@@ -149,5 +149,5 @@ func TestKeyAndValueUseCodec(t *testing.T) {
 
 func TestCorruptEntryIsMarked(t *testing.T) {
 	_, err := decodeEntry([]byte{0x7f})
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkroot.ErrCorrupted))
 }

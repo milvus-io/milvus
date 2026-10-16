@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -411,7 +411,7 @@ func TestMissingObjectIsFatal(t *testing.T) {
 	ch.step(farFuture)
 
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkroot.ErrCorrupted))
 	assert.True(t, idx.handoverStopped.Load())
 }
 
@@ -423,9 +423,9 @@ func TestIsFatal(t *testing.T) {
 	}{
 		{"fenced", errors.Wrap(ErrFenced, "v0"), true},
 		{"rejected", errors.Wrap(ErrRejected, "v0"), true},
-		{"corrupted", errors.Mark(errors.New("bad block"), pkerr.ErrCorrupted), true},
-		{"unavailable", errors.Mark(errors.New("connection reset"), pkerr.ErrUnavailable), false},
-		{"io", errors.Mark(errors.New("disk full"), pkerr.ErrIO), false},
+		{"corrupted", errors.Mark(errors.New("bad block"), pkroot.ErrCorrupted), true},
+		{"unavailable", errors.Mark(errors.New("connection reset"), pkroot.ErrUnavailable), false},
+		{"io", errors.Mark(errors.New("disk full"), pkroot.ErrIO), false},
 		// The Committer translates the codes of the manifest service. A code
 		// that it did not translate is retryable.
 		{"untranslated service internal", merr.WrapErrServiceInternal("bug"), false},
@@ -564,7 +564,7 @@ func TestClosedChannelAndIndex(t *testing.T) {
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 	_, err = idx.Decide(context.Background(), insertRequest(idx, 1))
 	assert.True(t, errors.Is(err, engine.ErrClosed))
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkroot.ErrUnavailable))
 	assert.Nil(t, ch.Get("v0"))
 }
 

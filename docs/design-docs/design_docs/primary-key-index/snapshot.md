@@ -108,17 +108,17 @@ later change (see [Not done in this change](#not-done-in-this-change)):
 | `ServiceUnavailable`, `ServiceNotReady`, a timeout, a cancel | retryable, unchanged |
 
 The streaming node computes the SST base path of a vchannel itself, with
-`objpath.SSTBasePath(rootPath, collectionID, vchannel)`:
+`pkindex.SSTBasePath(rootPath, collectionID, vchannel)`:
 `<rootPath>/pk_index/<collectionID>/<vchannel>/sst`, where `rootPath` is
 `ChunkManager.RootPath()`. The handover uploads under the computed path. The
 manifest records its own `SSTBasePath`, and the install downloads with it.
 When the two differ, the commit is `ErrRejected`.
 
-`objpath.SSTKey` builds the object key of a table:
-`<sst_base_path>/<id>.sst`. The package `internal/pkindex/objpath` builds
+`pkindex.SSTKey` builds the object key of a table:
+`<sst_base_path>/<id>.sst`. The file `internal/pkindex/objpath.go` builds
 and parses all object keys of the primary key index. The manifest service and
-its garbage collection use the same package, so both sides use one key
-format. `objpath` and the constant `common.PKIndexPath` are byte-identical to
+its garbage collection use the same functions, so both sides use one key
+format. `objpath.go` and the constant `common.PKIndexPath` are byte-identical to
 the copies in the manifest service change. The change that merges second
 drops its copy at the rebase.
 
@@ -580,8 +580,8 @@ reach 64 MiB and hand over through trigger 2.
 | Local disk error when the index of an existing collection opens at WAL open | `OnFatal` marks the WAL unavailable. The streaming node and its other WALs keep running. |
 | Concurrency | At most one handover per vchannel at a time. The node scheduler limits the handovers of the node. |
 
-- `isFatal` checks only `index.ErrFenced`, `index.ErrRejected` and
-  `pkerr.ErrCorrupted`. The adapter of the later change maps the merr codes
+- `isFatal` checks only `ErrFenced`, `ErrRejected` and
+  `pkindex.ErrCorrupted`. The adapter of the later change maps the merr codes
   of the manifest service to the sentinels (see [Committer](#committer)).
   The mapping relies on the manifest service to return
   `ServiceUnavailable` for every transient failure. A transient failure that
@@ -590,9 +590,9 @@ reach 64 MiB and hand over through trigger 2.
 
   | Failure | Error |
   |---|---|
-  | Remote object storage (`PutObject`, a reader, the network read of a download) | `pkerr.ErrUnavailable`, retried |
-  | Local disk (open, stat, temporary file, rename, sync, a write of the local chunk manager) | `pkerr.ErrIO`, retried |
-  | Missing object on download | `pkerr.ErrCorrupted`, fatal |
+  | Remote object storage (`PutObject`, a reader, the network read of a download) | `pkindex.ErrUnavailable`, retried |
+  | Local disk (open, stat, temporary file, rename, sync, a write of the local chunk manager) | `pkindex.ErrIO`, retried |
+  | Missing object on download | `pkindex.ErrCorrupted`, fatal |
 
 - The backoff state and the failure count belong to the `Index`. The task returns no error to the
   scheduler. The scheduler only has a fixed 100 ms requeue for a delayed task.
@@ -729,7 +729,7 @@ Unit tests cover these cases:
   of the `LastAcked` heap, and still deduplicates the writes.
 - Fatal errors: `ErrFenced`, `ErrRejected` and `ErrCorrupted` are fatal.
   Other errors are retryable, also a merr code that no adapter translated.
-- Object key: `objpath.SSTKey` gives `<sst_base_path>/<id>.sst`.
+- Object key: `pkindex.SSTKey` gives `<sst_base_path>/<id>.sst`.
 - Duplicate CreateCollection: an `Add` of an `Index` that exists reports
   that it created nothing, so the rollback after a failed append does not
   remove the `Index` in use.

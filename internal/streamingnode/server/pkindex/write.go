@@ -23,7 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -44,7 +44,7 @@ func (idx *Index) Decide(ctx context.Context, req Request) (*Intent, error) {
 	if err != nil {
 		idx.ch.wm.end(token)
 		idx.lifetime.Done()
-		if errors.Is(err, pkerr.ErrCorrupted) {
+		if errors.Is(err, pkroot.ErrCorrupted) {
 			idx.logger.Error(ctx, "primary key index lookup found corrupted data, the WAL becomes unavailable", mlog.Err(err))
 			idx.ch.fatal(err)
 		}

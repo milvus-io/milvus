@@ -26,9 +26,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	pkerr "github.com/milvus-io/milvus/internal/pkindex"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
@@ -136,7 +135,7 @@ func (idx *Index) commit(ctx context.Context, p *pendingHandover) error {
 	if p.request != nil && (p.uploadedAt.IsZero() || time.Since(p.uploadedAt) > cfg.Params().ReuploadAfter) {
 		start := time.Now()
 		for _, ref := range p.request.AddTables {
-			if err := cfg.Store.UploadFile(ctx, objpath.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]); err != nil {
+			if err := cfg.Store.UploadFile(ctx, pkroot.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]); err != nil {
 				return err
 			}
 		}
@@ -185,11 +184,11 @@ func committedPath(dir string, id sst.ID) string {
 // link keeps the table on local disk. It reuses a link from an earlier attempt.
 func linkCommitted(dir string, s engine.StagedTable) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", pkerr.MarkIO(err, "create committed dir %s", dir)
+		return "", pkroot.MarkIO(err, "create committed dir %s", dir)
 	}
 	path := committedPath(dir, s.Info.ID)
 	if err := os.Link(s.Path, path); err != nil && !errors.Is(err, fs.ErrExist) {
-		return "", pkerr.MarkIO(err, "link sst %d to %s", s.Info.ID, path)
+		return "", pkroot.MarkIO(err, "link sst %d to %s", s.Info.ID, path)
 	}
 	return path, nil
 }
