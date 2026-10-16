@@ -317,7 +317,6 @@ func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) *wals
 		FlushMaxBytes:     uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
 		CacheMaxBytes:     uint64(max(0, paramtable.Get().StreamingCfg.SummaryCacheBytesPerPChannel.GetAsSize())),
 		RetentionMaxBytes: uint64(paramtable.Get().StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize()),
-		CacheMaxBytes:     uint64(max(0, paramtable.Get().StreamingCfg.SummaryCacheBytesPerPChannel.GetAsSize())),
 		Logger:            r.Logger(),
 		OnFatal: func(err error) {
 			if r.backgroundTaskNotifier.Context().Err() == nil && r.onFatal != nil {
