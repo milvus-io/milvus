@@ -815,8 +815,6 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
 
-	var principalName string
-
 	schema := colInfo.Schema
 	t.schema = schema
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
