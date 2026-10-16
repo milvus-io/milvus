@@ -121,12 +121,20 @@ The validation response carries a business Status and, on success, resource IDs.
 Native validation failures return in Status, preserving their error code, input
 classification and retriability. HandlerClient checks this Status after the
 readiness loop and does not retry business failures, even when Status marks an
-I/O error retriable. A mismatched remote filename returns a parameter error;
-a missing local path returns the native I/O error without readiness retries.
-The outer Proxy-to-Coordinator client may retry retriable I/O Status within its
-existing attempt limit and the caller context. Filesystem absence alone does not prove
-invalid input: concurrent resource removal or worker-local state can cause the
-same failure, so these errors retain their system classification.
+I/O error retriable. A mismatched remote filename returns a parameter error.
+Rust classifies a direct I/O error with `ErrorKind::NotFound` as the generic
+`IoNotFound` FFI discriminant, independently of the caller. The C++ analyzer
+validation boundary maps this to the existing `PathNotExist` code.
+This is a non-retriable system error, so a missing local path
+or a missing downloaded resource file does not trigger outer DDL retries either.
+Filesystem absence alone does not prove invalid input: concurrent resource
+removal or worker-local state can cause the same failure. The caller must
+resubmit validation after that state recovers. Permission errors and other I/O
+failures retain `FileReadFailed`; the outer Proxy-to-Coordinator client may retry
+them within its existing attempt limit and the caller context. Runtime analyzer
+creation and index operations keep mapping both `Io` and `IoNotFound` to
+`FileReadFailed`. Only analyzer validation, after resource preparation, applies
+the terminal missing-path policy.
 Deterministically invalid analyzer options remain input errors at their Rust
 origin; HandlerClient maps these to the public DDL parameter-error contract.
 Discovery and resource preparation still use the existing streaming readiness
