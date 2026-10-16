@@ -611,6 +611,13 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		}
 	}
 
+	mlog.Info(ctx, "meta update success", mlog.String("requestDatabase", database), mlog.String("database", bucketDB),
+		mlog.FieldCollectionName(collectionName),
+		mlog.String("actual collection Name", collection.Schema.GetName()), mlog.FieldCollectionID(collection.CollectionID),
+		mlog.Uint64("version", collection.GetRequestTime()), mlog.Strings("Aliases", collection.Aliases),
+		mlog.Bool("partition key isolation", isolation), mlog.String("QueryMode", queryMode),
+	)
+
 	return info, nil
 }
 
