@@ -24,6 +24,7 @@
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <ranges>
 #include <string.h>
 #include <unordered_map>
 #include <unordered_set>
@@ -1933,18 +1934,16 @@ JsonKeyStats::LoadShreddingMeta(
     if (*file_manager_context_.use_async_load) {
         auto inspect =
             [&]() -> folly::coro::Task<std::vector<JsonStatsParquetMetadata>> {
-            std::vector<folly::coro::Task<JsonStatsParquetMetadata>> tasks;
-            tasks.reserve(files.size());
-            for (const auto& [file, first] : files) {
-                tasks.push_back(
-                    ReadJsonStatsParquetMetadata(file,
-                                                 file_manager_context_.fs,
-                                                 properties,
-                                                 true,
-                                                 first,
-                                                 token,
-                                                 priority));
-            }
+            auto tasks = files | std::views::transform([&](const auto& entry) {
+                             return ReadJsonStatsParquetMetadata(
+                                 entry.first,
+                                 file_manager_context_.fs,
+                                 properties,
+                                 true,
+                                 entry.second,
+                                 token,
+                                 priority);
+                         });
             // The per-batch window also bounds tasks waiting for shared slots.
             auto result = co_await folly::coro::co_awaitTry(
                 folly::coro::co_withCancellation(

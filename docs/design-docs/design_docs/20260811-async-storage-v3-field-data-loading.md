@@ -256,7 +256,9 @@ the configured priority with the request's override and supplies cancellation to
    ChunkManager. Neither mode stages another local metadata copy.
 2. Parquet footer inspection through `ParquetFormatReader::open_async()` or
    `open()`. Async opens use the shared priority-aware executor and a window of
-   at most 16 outstanding files per preparation call. Synchronous first-file reads
+   at most 16 outstanding files per preparation call. Footer tasks are created
+   lazily as the window advances; file paths and metadata results still scale
+   with file count. Synchronous first-file reads
    stay on the caller; remaining files use the existing HIGH worker pool. Each
    async footer inspection reserves one shared load slot without charging footer bytes.
 3. Eager or lazy projected-reader opening through `OpenChunkReadersAsync`, and

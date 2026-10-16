@@ -195,7 +195,9 @@ When no typed-key map is available, the compatibility path additionally reads
 the first raw footer for legacy layout metadata, using the same transport mode.
 This preserves KV entries omitted from Arrow's stored schema and does not
 eliminate footer reads needed by subsequent projected-reader opening. The preparation batch limits async
-footer opens to 16. Each async `meta.json` read, footer inspection, legacy-layout
+footer opens to 16 and creates footer tasks lazily as the window advances, without
+an all-files task vector. File paths and metadata results still scale with file
+count. Each async `meta.json` read, footer inspection, legacy-layout
 footer read and projected-reader open also reserves one shared load slot without
 charging footer bytes. Preparation releases its slots before nested BSON or
 column-data loading. Issued opens drain before returning failure or cancellation.
