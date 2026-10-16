@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -3338,9 +3339,14 @@ func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.Gra
 			newGrants = append(newGrants, newGrant)
 		}
 	}
-	// uniq by role + object + object name + grantor user + privilege name + db name
+	// uniq by role + object + object name + grantor user + privilege name + db name.
+	// Use the names directly: formatting the proto messages with %s goes through
+	// prototext and dominated the cost for roles with thousands of expanded grants.
 	return lo.UniqBy(newGrants, func(g *milvuspb.GrantEntity) string {
-		return fmt.Sprintf("%s-%s-%s-%s-%s-%s", g.Role, g.Object, g.ObjectName, g.Grantor.User, g.Grantor.Privilege.Name, g.DbName)
+		return strings.Join([]string{
+			g.GetRole().GetName(), g.GetObject().GetName(), g.GetObjectName(),
+			g.GetGrantor().GetUser().GetName(), g.GetGrantor().GetPrivilege().GetName(), g.GetDbName(),
+		}, "\x00")
 	}), nil
 }
 
