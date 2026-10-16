@@ -1,9 +1,7 @@
 package search_agg
 
 import (
-	"container/heap"
 	"context"
-	"math"
 	"slices"
 	"sort"
 
@@ -145,22 +143,25 @@ func (c *SearchAggregationComputer) Compute(ctx context.Context) ([][]*AggBucket
 	}
 
 	output := make([][]*AggBucketResult, c.ctx.NQ)
-	var start int64
 	for qi := int64(0); qi < c.ctx.NQ; qi++ {
-		if qi >= int64(len(c.topks)) {
-			return nil, merr.WrapErrServiceInternalMsg("invalid qi %d, topks length=%d", qi, len(c.topks))
-		}
-		buckets, err := c.computeForRange(ctx, start, c.topks[qi])
+		buckets, err := c.computeForQi(ctx, qi)
 		if err != nil {
 			return nil, err
 		}
 		output[qi] = buckets
-		start += c.topks[qi]
 	}
 	return output, nil
 }
 
-func (c *SearchAggregationComputer) computeForRange(ctx context.Context, start, count int64) ([]*AggBucketResult, error) {
+func (c *SearchAggregationComputer) computeForQi(ctx context.Context, qi int64) ([]*AggBucketResult, error) {
+	if qi < 0 || qi >= int64(len(c.topks)) {
+		return nil, merr.WrapErrServiceInternalMsg("invalid qi %d, topks length=%d", qi, len(c.topks))
+	}
+	var start int64
+	for i := int64(0); i < qi; i++ {
+		start += c.topks[i]
+	}
+	count := c.topks[qi]
 	rows := make([]int64, count)
 	groupCount := 0
 	if c.selection != nil && count > 0 {
@@ -258,9 +259,7 @@ func (c *SearchAggregationComputer) computeLevel(ctx context.Context, levelIdx i
 		}
 
 		bucket.count++
-		if !isLeaf || level.TopHits != nil {
-			bucket.rows = append(bucket.rows, ref)
-		}
+		bucket.rows = append(bucket.rows, ref)
 
 		if err := c.updateMetrics(bucket, ref, c.metricSources[levelIdx]); err != nil {
 			return nil, err
@@ -321,34 +320,7 @@ func (c *SearchAggregationComputer) buildTopHits(rows []int64, cfg *TopHitsConfi
 		return nil, nil
 	}
 
-	limit := min(int(normalizeAggregationSize(cfg.Size)), len(rows))
-	var sorted []int64
-	if limit > 0 && limit < len(rows)/4 && c.canUseTopHitsHeap(rows, cfg.Sort) {
-		h := &topHitsHeap{computer: c, criteria: cfg.Sort, rows: append([]int64(nil), rows[:limit]...)}
-		heap.Init(h)
-		if h.err != nil {
-			return nil, h.err
-		}
-		for _, row := range rows[limit:] {
-			cmp, err := c.compareRowsForTopHits(row, h.rows[0], cfg.Sort)
-			if err != nil {
-				return nil, err
-			}
-			if cmp < 0 {
-				h.rows[0] = row
-				heap.Fix(h, 0)
-			}
-			if h.err != nil {
-				return nil, h.err
-			}
-		}
-		if h.err != nil {
-			return nil, h.err
-		}
-		sorted = h.rows
-	} else {
-		sorted = append([]int64(nil), rows...)
-	}
+	sorted := append([]int64(nil), rows...)
 	var sortErr error
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sortErr != nil {
@@ -365,6 +337,7 @@ func (c *SearchAggregationComputer) buildTopHits(rows []int64, cfg *TopHitsConfi
 		return nil, sortErr
 	}
 
+	limit := min(int(normalizeAggregationSize(cfg.Size)), len(sorted))
 	hits := make([]*HitResult, 0, limit)
 	for i := 0; i < limit; i++ {
 		hit, err := c.buildHitResult(sorted[i])
@@ -734,55 +707,4 @@ func compareBool(a, b bool) int {
 	default:
 		return 0
 	}
-}
-
-// NaN makes the legacy float comparator non-transitive; preserve stable-sort
-// behavior for these inputs instead of applying a heap's total-order premise.
-func (c *SearchAggregationComputer) canUseTopHitsHeap(rows []int64, criteria []SortCriterion) bool {
-	for _, row := range rows {
-		if math.IsNaN(float64(c.score(row))) {
-			return false
-		}
-		for _, criterion := range criteria {
-			value, _, err := c.readValueByFieldID(row, criterion.FieldID)
-			if err != nil {
-				return false
-			} // Preserve lazy comparator errors on the stable-sort path.
-			switch v := value.(type) {
-			case float32:
-				if math.IsNaN(float64(v)) {
-					return false
-				}
-			case float64:
-				if math.IsNaN(v) {
-					return false
-				}
-			}
-		}
-	}
-	return true
-}
-
-type topHitsHeap struct {
-	computer *SearchAggregationComputer
-	criteria []SortCriterion
-	rows     []int64
-	err      error
-}
-
-func (h *topHitsHeap) Len() int { return len(h.rows) }
-func (h *topHitsHeap) Less(i, j int) bool {
-	if h.err != nil {
-		return false
-	}
-	cmp, err := h.computer.compareRowsForTopHits(h.rows[i], h.rows[j], h.criteria)
-	h.err = err
-	return cmp > 0 // Worst retained hit at the root.
-}
-func (h *topHitsHeap) Swap(i, j int)  { h.rows[i], h.rows[j] = h.rows[j], h.rows[i] }
-func (h *topHitsHeap) Push(value any) { h.rows = append(h.rows, value.(int64)) }
-func (h *topHitsHeap) Pop() any {
-	last := h.rows[len(h.rows)-1]
-	h.rows = h.rows[:len(h.rows)-1]
-	return last
 }

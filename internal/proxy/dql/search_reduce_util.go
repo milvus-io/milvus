@@ -229,7 +229,6 @@ func runSingleFieldGroupByHotLoop(
 
 	for i := int64(0); i < nq; i++ {
 		cursors := make([]int64, subSearchNum)
-		merge := newGroupByMerge(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
 		// Bucket stores just (subIdx, rowIdx) — id and score are re-fetched
 		// from the source shard at emit time. Saves 24B per accepted row
 		// plus interface-boxing allocs for int64/string pk values.
@@ -239,7 +238,7 @@ func runSingleFieldGroupByHotLoop(
 
 		var j int64
 		for j = 0; j < groupBound; {
-			subSearchIdx, resultDataIdx := merge.peek()
+			subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
 			if subSearchIdx == -1 {
 				break
 			}
@@ -260,7 +259,7 @@ func runSingleFieldGroupByHotLoop(
 				})
 				j++
 			}
-			merge.advance(subSearchIdx)
+			cursors[subSearchIdx]++
 		}
 
 		for _, key := range groupByValList {
@@ -332,7 +331,6 @@ func runMultiFieldGroupByHotLoop(
 
 	for i := int64(0); i < nq; i++ {
 		cursors := make([]int64, subSearchNum)
-		merge := newGroupByMerge(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
 		groupBuckets := make(map[uint64][]*multiGroupEntry)
 		skipGroups := make(map[uint64][]*multiGroupEntry)
 		distinctSkipped := int64(0)
@@ -346,7 +344,7 @@ func runMultiFieldGroupByHotLoop(
 
 		var j int64
 		for j = 0; j < groupBound; {
-			subSearchIdx, resultDataIdx := merge.peek()
+			subSearchIdx, resultDataIdx := selectHighestScoreIndex(ctx, subSearchResultData, subSearchNqOffset, cursors, i)
 			if subSearchIdx == -1 {
 				break
 			}
@@ -354,13 +352,13 @@ func runMultiFieldGroupByHotLoop(
 
 			if offset > 0 {
 				if findMultiGroupEntry(skipGroups[hash], values) != nil {
-					merge.advance(subSearchIdx)
+					cursors[subSearchIdx]++
 					continue
 				}
 				if distinctSkipped < offset {
 					skipGroups[hash] = append(skipGroups[hash], &multiGroupEntry{values: values})
 					distinctSkipped++
-					merge.advance(subSearchIdx)
+					cursors[subSearchIdx]++
 					continue
 				}
 			}
@@ -396,7 +394,7 @@ func runMultiFieldGroupByHotLoop(
 				}
 				j++
 			}
-			merge.advance(subSearchIdx)
+			cursors[subSearchIdx]++
 		}
 
 		if !isSearchAggregation {
@@ -931,7 +929,7 @@ func selectHighestScoreIndex(ctx context.Context, subSearchResultData []*schemap
 				// A bad case happens where Knowhere returns distance/score == +/-maxFloat32
 				// by mistake.
 				mlog.Error(ctx, "a bad score is returned, something is wrong here!", mlog.Float32("score", sScore))
-			} else if subSearchIdx >= 0 && subSearchIdx < len(subSearchResultData) && typeutil.ComparePK(
+			} else if typeutil.ComparePK(
 				typeutil.GetPK(subSearchResultData[i].GetIds(), sIdx),
 				typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)) {
 				subSearchIdx = i

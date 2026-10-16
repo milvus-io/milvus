@@ -134,7 +134,7 @@ func (s *SearchPipelineSuite) TestSerializeBucketKeyPreservesRequestedOrder() {
 		100: "category",
 	}
 
-	serialized := serializeAggBucket(bucket, fieldIDToName, []search_agg.LevelContext{{OwnFieldIDs: []int64{200, 100}}}, 0, nil)
+	serialized := serializeAggBucket(bucket, fieldIDToName, []search_agg.LevelContext{{OwnFieldIDs: []int64{200, 100}}}, 0)
 
 	s.Require().Len(serialized.GetKey(), 2)
 	s.Equal(int64(200), serialized.GetKey()[0].GetFieldId())
@@ -153,7 +153,7 @@ func (s *SearchPipelineSuite) TestSerializeBucketKeyLeavesNullValueUnset() {
 	}
 	fieldIDToName := map[int64]string{100: "category"}
 
-	serialized := serializeAggBucket(bucket, fieldIDToName, []search_agg.LevelContext{{OwnFieldIDs: []int64{100}}}, 0, nil)
+	serialized := serializeAggBucket(bucket, fieldIDToName, []search_agg.LevelContext{{OwnFieldIDs: []int64{100}}}, 0)
 
 	s.Require().Len(serialized.GetKey(), 1)
 	s.Equal(int64(100), serialized.GetKey()[0].GetFieldId())
@@ -162,7 +162,7 @@ func (s *SearchPipelineSuite) TestSerializeBucketKeyLeavesNullValueUnset() {
 }
 
 func (s *SearchPipelineSuite) TestSerializeAggHitFieldsLeavesNullValueUnset() {
-	fields := serializeAggHitFields(map[int64]interface{}{100: nil}, map[int64]string{100: "nullable_field"}, []int64{100})
+	fields := serializeAggHitFields(map[int64]interface{}{100: nil}, map[int64]string{100: "nullable_field"})
 
 	s.Require().Len(fields, 1)
 	s.Equal(int64(100), fields[0].GetFieldId())
