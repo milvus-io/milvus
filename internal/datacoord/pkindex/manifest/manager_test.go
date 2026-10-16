@@ -1264,3 +1264,30 @@ func TestObserverNotCalledOnFailedCommit(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, []int64{1}, obs.versions)
 }
+
+// An edit that is rejected as stale drops the cached manifest: the next read
+// sees the version that another coordinator committed.
+func TestStaleEditForgetsCache(t *testing.T) {
+	ctx := context.Background()
+	m, p, s := assigned(t, 1)
+	_, err := m.CommitFlush(ctx, flush(1, 10, 2, 1))
+	require.NoError(t, err)
+
+	// another coordinator on the same stores flushes SST 3
+	other := New(p, s, testRoot)
+	_, err = other.CommitFlush(ctx, flush(1, 20, 3))
+	require.NoError(t, err)
+
+	cached, err := m.Current(ctx, Target{CollectionID: 1, VChannel: vch})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, cached.GetVersion())
+
+	// the compaction plans SST 3, which the cached manifest does not hold
+	_, err = m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{3, 2}, Outputs: runOut(7, 11)})
+	require.True(t, errors.Is(err, ErrStaleEdit))
+
+	cur, err := m.Current(ctx, Target{CollectionID: 1, VChannel: vch})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, cur.GetVersion())
+	assert.ElementsMatch(t, []int64{1, 2, 3}, sstIDs(cur))
+}
