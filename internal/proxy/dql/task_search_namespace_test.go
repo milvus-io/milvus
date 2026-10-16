@@ -183,9 +183,6 @@ func (n *namespaceRequeryMockNode) LBPolicy() shardclient.LBPolicy       { retur
 func (n *namespaceRequeryMockNode) ShardMgr() shardclient.ShardClientMgr { return nil }
 func (n *namespaceRequeryMockNode) ChMgr() channelmgr.ChannelsMgr        { return nil }
 func (n *namespaceRequeryMockNode) TsoAllocator() taskmodel.TsoAllocator { return &mockTsoAllocator{} }
-func (n *namespaceRequeryMockNode) ResolveRLSEnforcement(_ context.Context, _ metacache.Cache, rlsEnabled, _, _ bool, _, _, _ string) (bool, error) {
-	return rlsEnabled, nil
-}
 
 func (n *namespaceRequeryMockNode) CheckManageRLSPrivilege(_ context.Context, _ metacache.Cache, _ *milvuspb.AlterCollectionRequest, _, _ string) error {
 	return nil
