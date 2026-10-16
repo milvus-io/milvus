@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 
@@ -278,15 +277,15 @@ func fetchFieldsProto(
 	merged *MergedResultWithOffsets,
 	ret *segcorepb.RetrieveResults,
 ) ([]any, error) {
-	groups := lo.GroupBy(merged.Selections, func(sel OffsetSelection) int {
-		return sel.SegmentIndex
-	})
+	groups := make(map[int][]int64)
+	for _, sel := range merged.Selections {
+		groups[sel.SegmentIndex] = append(groups[sel.SegmentIndex], sel.Offset)
+	}
 
 	segmentResults := make([]*segcorepb.RetrieveResults, len(validSegments))
 	futures := make([]*conc.Future[any], 0, len(groups))
-	for segIdx, sels := range groups {
+	for segIdx, offsets := range groups {
 		idx := segIdx
-		offsets := lo.Map(sels, func(sel OffsetSelection, _ int) int64 { return sel.Offset })
 		future := GetSQPool().Submit(func() (any, error) {
 			var r *segcorepb.RetrieveResults
 			var err error
