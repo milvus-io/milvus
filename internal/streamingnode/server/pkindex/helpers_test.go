@@ -512,7 +512,7 @@ func int64PKs(values ...int64) []authority.PK {
 	return pks
 }
 
-// slotOf returns the driver bookkeeping of idx.
-func slotOf(ch *PChannelIndexManager, idx *index.Index) *handoverSlot {
-	return ch.slotOf(idx)
+// scheduleOf returns the driver bookkeeping of idx.
+func scheduleOf(ch *PChannelIndexManager, idx *index.Index) *handoverSchedule {
+	return ch.scheduleOf(idx)
 }

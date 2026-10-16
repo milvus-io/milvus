@@ -356,7 +356,7 @@ func TestFencedCommitStopsTheHandovers(t *testing.T) {
 
 	err := env.waitFatal()
 	assert.True(t, errors.Is(err, index.ErrFenced))
-	assert.True(t, slotOf(ch, idx).stopped.Load())
+	assert.True(t, scheduleOf(ch, idx).stopped.Load())
 	assert.Len(t, idx.EngineForTest().FrozenGenerations(), 1, "the generations stay frozen")
 	// the Index keeps serving writes, but it does not hand over again
 	insert(t, idx, 2, 2)
@@ -381,7 +381,7 @@ func TestRetryableCommitErrorBacksOff(t *testing.T) {
 	ch.step(now)
 
 	assert.Empty(t, env.fatalList())
-	assert.Equal(t, 1, slotOf(ch, idx).failures)
+	assert.Equal(t, 1, scheduleOf(ch, idx).failures)
 	require.NotNil(t, idx.PendingForTest())
 	assert.Empty(t, ch.pickHandovers(now), "the backoff is not over")
 	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(now.Add(2*time.Hour)), "the backoff is over")
@@ -411,7 +411,7 @@ func TestMissingObjectIsFatal(t *testing.T) {
 
 	err := env.waitFatal()
 	assert.True(t, errors.Is(err, pkroot.ErrCorrupted))
-	assert.True(t, slotOf(ch, idx).stopped.Load())
+	assert.True(t, scheduleOf(ch, idx).stopped.Load())
 }
 
 func TestIsFatal(t *testing.T) {
@@ -449,8 +449,8 @@ func TestRejectedCommitIsFatal(t *testing.T) {
 
 	err := env.waitFatal()
 	assert.True(t, errors.Is(err, index.ErrRejected))
-	assert.True(t, slotOf(ch, idx).stopped.Load())
-	assert.Zero(t, slotOf(ch, idx).failures, "no retry is scheduled")
+	assert.True(t, scheduleOf(ch, idx).stopped.Load())
+	assert.Zero(t, scheduleOf(ch, idx).failures, "no retry is scheduled")
 	assert.Len(t, idx.EngineForTest().FrozenGenerations(), 1, "the generations stay frozen")
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	assert.Len(t, env.client.requestList(), 1)
@@ -485,7 +485,7 @@ func TestBackoffParamsApplyAfterASuccess(t *testing.T) {
 	insert(t, idx, 1, 1)
 	ch.ObserveTimeTick(10)
 	ch.step(farFuture)
-	require.Equal(t, 1, slotOf(ch, idx).failures)
+	require.Equal(t, 1, scheduleOf(ch, idx).failures)
 	assert.Empty(t, ch.pickHandovers(time.Now().Add(time.Minute)), "the wait is about one hour")
 
 	// a smaller max applies after the next success
@@ -494,14 +494,14 @@ func TestBackoffParamsApplyAfterASuccess(t *testing.T) {
 		p.MaxBackoff = time.Millisecond
 	})
 	ch.step(farFuture)
-	require.Zero(t, slotOf(ch, idx).failures)
+	require.Zero(t, scheduleOf(ch, idx).failures)
 	require.EqualValues(t, 10, idx.LastCommittedTimeTick())
 
 	env.client.set(func(c *fakeClient) { c.commitErrs = []error{merr.WrapErrServiceUnavailable("down")} })
 	insert(t, idx, 2, 2)
 	ch.ObserveTimeTick(20)
 	ch.step(farFuture)
-	require.Equal(t, 1, slotOf(ch, idx).failures)
+	require.Equal(t, 1, scheduleOf(ch, idx).failures)
 	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(time.Now().Add(time.Second)), "the wait is the new max")
 	assert.Empty(t, env.fatalList())
 }
@@ -538,7 +538,7 @@ func TestRemoveWaitsForARunningHandover(t *testing.T) {
 		t.Fatal("Remove did not return after the handover ended")
 	}
 	assert.Nil(t, ch.get("v0"))
-	assert.False(t, slotOf(ch, idx).running.Load())
+	assert.False(t, scheduleOf(ch, idx).running.Load())
 }
 
 func TestDriverClearsATaskThatNeverRan(t *testing.T) {
@@ -548,7 +548,7 @@ func TestDriverClearsATaskThatNeverRan(t *testing.T) {
 	insert(t, idx, 1, 1)
 	ch.ObserveTimeTick(10)
 	ch.step(farFuture)
-	assert.True(t, slotOf(ch, idx).running.Load())
+	assert.True(t, scheduleOf(ch, idx).running.Load())
 	// the next step sees the finished handle and picks the Index again
 	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(farFuture))
 }

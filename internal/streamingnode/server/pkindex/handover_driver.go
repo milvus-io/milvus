@@ -35,11 +35,12 @@ import (
 // handover logs at warn level.
 const warnFailures = 5
 
-// handoverSlot is what the driver keeps about the handovers of one Index.
+// handoverSchedule is what the driver keeps about the handovers of one Index:
+// whether one runs, whether they stopped, and when the next one may start.
 // The driver step reads and changes it only while running is false, and the
 // handover task only while running is true. running is set before the submit
 // and cleared as the last action of the task, so the two never overlap.
-type handoverSlot struct {
+type handoverSchedule struct {
 	// running is true from the submit of a handover until its end.
 	running atomic.Bool
 	// stopped is set after a fatal handover error. The Index keeps serving
@@ -83,30 +84,30 @@ func (c *PChannelIndexManager) step(now time.Time) {
 	}
 }
 
-// slotOf returns the handover slot of idx. Add creates the slot with the
+// scheduleOf returns the handover schedule of idx. Add creates the schedule with the
 // Index, so that the first instant of its backoff is the open of the Index,
-// and detachLocked deletes it. A detached Index gets a slot that no step sees.
-func (c *PChannelIndexManager) slotOf(idx *index.Index) *handoverSlot {
+// and detachLocked deletes it. A detached Index gets a schedule that no step sees.
+func (c *PChannelIndexManager) scheduleOf(idx *index.Index) *handoverSchedule {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if s, ok := c.slots[idx]; ok {
+	if s, ok := c.schedules[idx]; ok {
 		return s
 	}
-	return &handoverSlot{backoff: c.newBackoff()}
+	return &handoverSchedule{backoff: c.newBackoff()}
 }
 
 // submitHandover submits one handover of idx to the node scheduler. Only the
 // driver step and the tests call it.
 func (c *PChannelIndexManager) submitHandover(idx *index.Index) {
-	s := c.slotOf(idx)
+	s := c.scheduleOf(idx)
 	s.running.Store(true)
-	s.handle = c.m.cfg.Sched.Submit(&handoverTask{c: c, idx: idx, slot: s})
+	s.handle = c.m.cfg.Sched.Submit(&handoverTask{c: c, idx: idx, schedule: s})
 }
 
 // reapHandover clears running when the scheduler finished the task without
 // running it, for example after the scheduler closed. Only the driver step
 // calls it.
-func (c *PChannelIndexManager) reapHandover(s *handoverSlot) {
+func (c *PChannelIndexManager) reapHandover(s *handoverSchedule) {
 	if s.handle == nil || !s.running.Load() {
 		return
 	}
@@ -122,22 +123,22 @@ func (c *PChannelIndexManager) reapHandover(s *handoverSlot) {
 
 // handoverTask runs one handover of an Index on the node scheduler.
 type handoverTask struct {
-	c    *PChannelIndexManager
-	idx  *index.Index
-	slot *handoverSlot
+	c        *PChannelIndexManager
+	idx      *index.Index
+	schedule *handoverSchedule
 }
 
 // Execute runs the handover. It always returns nil: the driver retries a
 // failed handover with backoff.
 func (t *handoverTask) Execute(ctx context.Context) error {
-	t.c.runHandover(ctx, t.idx, t.slot)
+	t.c.runHandover(ctx, t.idx, t.schedule)
 	return nil
 }
 
 // runHandover runs one handover step of idx and records its outcome in the
-// slot: a success resets the backoff, a retryable failure advances it, a
+// schedule: a success resets the backoff, a retryable failure advances it, a
 // fatal error stops the handovers of the Index and marks the WAL unavailable.
-func (c *PChannelIndexManager) runHandover(ctx context.Context, idx *index.Index, s *handoverSlot) {
+func (c *PChannelIndexManager) runHandover(ctx context.Context, idx *index.Index, s *handoverSchedule) {
 	defer s.running.Store(false)
 	committed, err := idx.Handover(ctx)
 	switch {
@@ -169,8 +170,8 @@ func (c *PChannelIndexManager) runHandover(ctx context.Context, idx *index.Index
 
 // pickHandovers returns the indexes that hand over now.
 //
-// Only the driver step calls it. It reads and changes the slot of an Index
-// only when no handover of that Index runs, see handoverSlot.
+// Only the driver step calls it. It reads and changes the schedule of an Index
+// only when no handover of that Index runs, see handoverSchedule.
 //
 // The candidates come from the LastAcked heap, which holds every dirty and
 // fresh Index: an Index with nothing to publish is never a candidate, and a
@@ -182,7 +183,7 @@ func (c *PChannelIndexManager) pickHandovers(now time.Time) []*index.Index {
 	var out []*index.Index
 	var oldest *index.Index
 	for _, idx := range c.dirtyIndexes() {
-		s := c.slotOf(idx)
+		s := c.scheduleOf(idx)
 		c.reapHandover(s)
 		if s.running.Load() || s.stopped.Load() || !idx.Ready() || !idx.Fresh() {
 			continue

@@ -55,12 +55,12 @@ type PChannelIndexManager struct {
 	// happens outside mu.
 	opMu sync.Mutex
 
-	// mu guards indexes, the LastAcked heap, slots, ackedMax and claimed.
-	mu       sync.Mutex
-	indexes  map[string]*index.Index
-	acked    ackTracker
-	slots    map[*index.Index]*handoverSlot // the driver bookkeeping of each Index
-	ackedMax uint64
+	// mu guards indexes, the LastAcked heap, schedules, ackedMax and claimed.
+	mu        sync.Mutex
+	indexes   map[string]*index.Index
+	acked     ackTracker
+	schedules map[*index.Index]*handoverSchedule // the driver bookkeeping of each Index
+	ackedMax  uint64
 	// claimStarted is set by StartClaim. claimed is set when the pchannel is
 	// claimed and the manifests of the recovered indexes are looked up. An
 	// Index added after that is ready at once.
@@ -74,17 +74,17 @@ func newPChannelIndexManager(m *Manager, info types.PChannelInfo, seed uint64, t
 		tail = func() WALTail { return WALTail{} }
 	}
 	return &PChannelIndexManager{
-		m:        m,
-		info:     info,
-		wm:       newWatermark(seed),
-		tail:     tail,
-		onFatal:  onFatal,
-		logger:   mlog.With(mlog.FieldModule("pkindex"), mlog.FieldPChannel(info.Name), mlog.Int64("term", info.Term)),
-		ctx:      ctx,
-		cancel:   cancel,
-		lifetime: typeutil.NewLifetime(),
-		indexes:  make(map[string]*index.Index),
-		slots:    make(map[*index.Index]*handoverSlot),
+		m:         m,
+		info:      info,
+		wm:        newWatermark(seed),
+		tail:      tail,
+		onFatal:   onFatal,
+		logger:    mlog.With(mlog.FieldModule("pkindex"), mlog.FieldPChannel(info.Name), mlog.Int64("term", info.Term)),
+		ctx:       ctx,
+		cancel:    cancel,
+		lifetime:  typeutil.NewLifetime(),
+		indexes:   make(map[string]*index.Index),
+		schedules: make(map[*index.Index]*handoverSchedule),
 	}
 }
 
@@ -116,7 +116,7 @@ func (c *PChannelIndexManager) CreateCollection(ctx context.Context, vchannel st
 	}
 	c.mu.Lock()
 	c.indexes[vchannel] = idx
-	c.slots[idx] = &handoverSlot{backoff: c.newBackoff()}
+	c.schedules[idx] = &handoverSchedule{backoff: c.newBackoff()}
 	ready := c.claimed
 	c.mu.Unlock()
 	if ready {
@@ -182,11 +182,11 @@ func (c *PChannelIndexManager) attachedLocked(idx *index.Index) bool {
 }
 
 // detachLocked removes idx from the map, from the LastAcked heap and from the
-// driver slots. The caller holds mu.
+// driver schedules. The caller holds mu.
 func (c *PChannelIndexManager) detachLocked(idx *index.Index) {
 	delete(c.indexes, idx.VChannel())
 	c.acked.remove(idx)
-	delete(c.slots, idx)
+	delete(c.schedules, idx)
 }
 
 // indexConfig is what an Index of this PChannelIndexManager needs, see index.Config.
