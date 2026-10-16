@@ -1482,8 +1482,6 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	evicted := 0
 	for start := 0; start < len(ids); start += removeBatch {
 		end := min(start+removeBatch, len(ids))
-		for _, id := range ids[start:end] {
-		}
 		m.mu.Lock()
 		for _, id := range ids[start:end] {
 			// Unified eviction, not a raw delete: if a fill racing this walk has
