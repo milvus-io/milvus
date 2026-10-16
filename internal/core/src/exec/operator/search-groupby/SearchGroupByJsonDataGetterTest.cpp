@@ -100,7 +100,9 @@ class JsonColumnSegment : public segcore::ChunkedSegmentSealedImpl {
     }
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId, int64_t offset) const override {
+    get_chunk_by_offset(FieldId,
+                        int64_t offset,
+                        OpContext* = nullptr) const override {
         return column_->GetChunkIDByOffset(offset);
     }
 

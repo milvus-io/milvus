@@ -32,6 +32,12 @@ class ChunkedColumnInterface {
  public:
     virtual ~ChunkedColumnInterface() = default;
 
+    // Materialize lazy column-directory metadata with the caller's context
+    // before using context-free layout accessors. This does not pin raw data.
+    virtual void
+    Prepare(milvus::OpContext* op_ctx) const {
+    }
+
     // Check if this column is part of a multi-field column group.
     // Used to guard DropFieldData from breaking shared storage.
     virtual bool
