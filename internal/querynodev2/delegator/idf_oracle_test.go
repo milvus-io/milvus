@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -47,6 +49,64 @@ type bytesFileReader struct {
 
 func (r *bytesFileReader) Close() error         { return nil }
 func (r *bytesFileReader) Size() (int64, error) { return int64(r.Len()), nil }
+
+type blockedBM25Reader struct {
+	*bytesFileReader
+	started chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (r *blockedBM25Reader) Read(p []byte) (int, error) {
+	r.once.Do(func() { close(r.started) })
+	<-r.release
+	return r.bytesFileReader.Read(p)
+}
+
+func installSealedStatsForReopenTest(t *testing.T, o *idfOracle, segmentID int64, values bm25Stats) *sealedBm25Stats {
+	t.Helper()
+	segmentDir := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
+	fields := make([]int64, 0, len(values))
+	var diskSize int64
+	for fieldID, stats := range values {
+		data, err := stats.Serialize()
+		require.NoError(t, err)
+		fieldDir := path.Join(segmentDir, fmt.Sprintf("%d", fieldID))
+		require.NoError(t, os.MkdirAll(fieldDir, os.ModePerm))
+		require.NoError(t, os.WriteFile(path.Join(fieldDir, "0.data"), data, 0o600))
+		fields = append(fields, fieldID)
+		diskSize += int64(len(data))
+	}
+	segment := &sealedBm25Stats{
+		ts:        time.Now(),
+		activate:  atomic.NewBool(false),
+		segmentID: segmentID,
+		localDir:  segmentDir,
+		fieldList: fields,
+		diskSize:  diskSize,
+	}
+	o.preloadSealed(segmentID, segment, values)
+	o.sealedDiskSize.Add(diskSize)
+	return segment
+}
+
+func waitReopenBM25Result(t *testing.T, result <-chan error) {
+	t.Helper()
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("reopen did not finish after BM25 read was released")
+	}
+}
+
+// Simulate a target already committed while this segment has not yet registered its stats.
+func markSealedInCommittedTarget(o *idfOracle, segmentID int64) {
+	o.Lock()
+	o.activeSealed[segmentID] = struct{}{}
+	o.targetVersion.Store(1)
+	o.Unlock()
+}
 
 type IDFOracleSuite struct {
 	suite.Suite
@@ -534,7 +594,7 @@ func TestLoadSealedForReopenLoadsOnlyMissingFields(t *testing.T) {
 			bm25LogsForField(104, newPath)...,
 		),
 	}
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, false)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm)
 	require.NoError(t, err)
 
 	sealedStats, ok := idfOracle.sealed.Get(1)
@@ -579,11 +639,11 @@ func TestLoadSealedForReopenIdempotentAfterSuccess(t *testing.T) {
 	).Once()
 
 	reopenInfo := &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, false)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm)
 	require.NoError(t, err)
 	diskSize := idfOracle.sealedDiskSize.Load()
 
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, false)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm)
 	require.NoError(t, err)
 	assert.Equal(t, diskSize, idfOracle.sealedDiskSize.Load())
 }
@@ -609,7 +669,7 @@ func TestLoadSealedForReopenActivatesExistingInactiveSegment(t *testing.T) {
 	).Once()
 	reopenInfo := &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}
 
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, false)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm)
 	require.NoError(t, err)
 	sealedStats, ok := idfOracle.sealed.Get(1)
 	require.True(t, ok)
@@ -618,7 +678,8 @@ func TestLoadSealedForReopenActivatesExistingInactiveSegment(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(0), current.NumRow())
 
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, true)
+	markSealedInCommittedTarget(idfOracle, 1)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm)
 	require.NoError(t, err)
 	assert.True(t, sealedStats.activate.Load())
 	current, err = idfOracle.current.GetStats(104)
@@ -646,7 +707,8 @@ func TestLoadSealedForReopenCreatesMissingSegmentEntry(t *testing.T) {
 		&bytesFileReader{bytes.NewReader(data)}, nil,
 	).Once()
 
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, false)
+	markSealedInCommittedTarget(idfOracle, 1)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm)
 	require.NoError(t, err)
 
 	sealedStats, ok := idfOracle.sealed.Get(1)
@@ -687,7 +749,7 @@ func TestLoadSealedForReopenFailureCleanupPreservesExistingFields(t *testing.T) 
 		nil, errors.New("remote read failed"),
 	).Once()
 
-	err := idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, false)
+	err := idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm)
 	require.Error(t, err)
 
 	sealedStats, ok := idfOracle.sealed.Get(1)
@@ -735,7 +797,7 @@ func TestActiveReopenBM25MergesNewFieldStats(t *testing.T) {
 		&bytesFileReader{bytes.NewReader(data)}, nil,
 	).Once()
 
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, false)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm)
 	require.NoError(t, err)
 
 	current, err := idfOracle.current.GetStats(104)
@@ -764,7 +826,8 @@ func TestReadableReopenBM25MergesNewFieldStats(t *testing.T) {
 		&bytesFileReader{bytes.NewReader(data)}, nil,
 	).Once()
 
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, true)
+	markSealedInCommittedTarget(idfOracle, 1)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm)
 	require.NoError(t, err)
 
 	sealedStats, ok := idfOracle.sealed.Get(1)
@@ -817,6 +880,7 @@ func TestReadableReopenBM25ActivatesExistingInactiveSegment(t *testing.T) {
 	current, err := idfOracle.current.GetStats(102)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), current.NumRow())
+	markSealedInCommittedTarget(idfOracle, 1)
 
 	reopenInfo := &querypb.SegmentLoadInfo{
 		Bm25Logs: append(
@@ -824,7 +888,7 @@ func TestReadableReopenBM25ActivatesExistingInactiveSegment(t *testing.T) {
 			bm25LogsForField(104, newPath)...,
 		),
 	}
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, true)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm)
 	require.NoError(t, err)
 
 	assert.True(t, sealedStats.activate.Load())
@@ -857,9 +921,10 @@ func TestReadableReopenBM25RetryDoesNotDoubleMerge(t *testing.T) {
 	).Once()
 	reopenInfo := &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}
 
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, true)
+	markSealedInCommittedTarget(idfOracle, 1)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm)
 	require.NoError(t, err)
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm, true)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, reopenInfo, cm)
 	require.NoError(t, err)
 
 	current, err := idfOracle.current.GetStats(104)
@@ -887,7 +952,7 @@ func TestSyncDistributionReopenBM25InactiveThenActivate(t *testing.T) {
 		&bytesFileReader{bytes.NewReader(data)}, nil,
 	).Once()
 
-	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm, false)
+	err = idfOracle.LoadSealedForReopen(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(104, remotePath)}, cm)
 	require.NoError(t, err)
 	current, err := idfOracle.current.GetStats(104)
 	require.NoError(t, err)
@@ -907,6 +972,132 @@ func TestSyncDistributionReopenBM25InactiveThenActivate(t *testing.T) {
 	current, err = idfOracle.current.GetStats(104)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), current.NumRow())
+}
+
+func TestReopenBM25TargetBecomesReadableDuringDownload(t *testing.T) {
+	const fieldID int64 = 104
+	o := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{{
+		Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{103}, OutputFieldIds: []int64{fieldID},
+	}}).(*idfOracle)
+	o.dirPath = t.TempDir()
+	o.Start()
+	defer o.Close()
+
+	// S1 replaces growing G1 after flush; S2 remains sealed in both targets.
+	o.RegisterGrowing(100, genBM25StatsForField(fieldID, 0, 10))
+	installSealedStatsForReopenTest(t, o, 2, genBM25StatsForField(fieldID, 10, 30))
+	o.SetNext(&snapshot{dist: []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{
+		{NodeID: 1, SegmentID: 1, TargetVersion: unreadableTargetVersion},
+		{NodeID: 1, SegmentID: 2, TargetVersion: 1},
+	}}}, targetVersion: 1})
+	require.Equal(t, int64(30), o.current[fieldID].NumRow())
+
+	data, err := genBM25StatsForField(fieldID, 0, 10)[fieldID].Serialize()
+	require.NoError(t, err)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	reader := &blockedBM25Reader{
+		bytesFileReader: &bytesFileReader{bytes.NewReader(data)},
+		started:         make(chan struct{}),
+		release:         release,
+	}
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(reader, nil).Once()
+	o.BeginReopen(1, []int64{fieldID})
+	result := make(chan error, 1)
+	go func() {
+		result <- o.LoadSealedForReopen(context.Background(), 1,
+			&querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(fieldID, remotePath)}, cm)
+	}()
+	select {
+	case <-reader.started:
+	case <-time.After(time.Second):
+		t.Fatal("reopen did not start reading BM25 stats")
+	}
+
+	o.LazyRemoveGrowings(2, 100)
+	o.SetNext(&snapshot{dist: []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{
+		{NodeID: 1, SegmentID: 1, TargetVersion: 2},
+		{NodeID: 1, SegmentID: 2, TargetVersion: 2},
+	}}}, targetVersion: 2})
+	require.Eventually(t, func() bool { return o.TargetVersion() == 2 }, 5*time.Second, 10*time.Millisecond)
+	_, _, err = o.BuildIDF(fieldID, &schemapb.SparseFloatArray{})
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+
+	releaseOnce.Do(func() { close(release) })
+	waitReopenBM25Result(t, result)
+	require.Equal(t, int64(30), o.current[fieldID].NumRow())
+	_, _, err = o.BuildIDF(fieldID, &schemapb.SparseFloatArray{})
+	require.NoError(t, err)
+}
+
+func TestReopenBM25TargetReplacesSegmentDuringDownload(t *testing.T) {
+	const fieldA, fieldB int64 = 102, 104
+	o := NewIDFOracle("test-channel", []*schemapb.FunctionSchema{
+		{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{fieldA}},
+		{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{103}, OutputFieldIds: []int64{fieldB}},
+	}).(*idfOracle)
+	o.dirPath = t.TempDir()
+	o.Start()
+	defer o.Close()
+
+	// Compacted S3 replaces S1's ten rows; S2's twenty rows remain unchanged.
+	installSealedStatsForReopenTest(t, o, 1, genBM25StatsForField(fieldA, 0, 10))
+	s2 := bm25Stats(genBM25StatsForField(fieldA, 10, 30))
+	s2.Merge(genBM25StatsForField(fieldB, 10, 30))
+	installSealedStatsForReopenTest(t, o, 2, s2)
+	o.SetNext(&snapshot{dist: []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{
+		{NodeID: 1, SegmentID: 1, TargetVersion: 1},
+		{NodeID: 1, SegmentID: 2, TargetVersion: 1},
+	}}}, targetVersion: 1})
+	s3 := bm25Stats(genBM25StatsForField(fieldA, 0, 10))
+	s3.Merge(genBM25StatsForField(fieldB, 0, 10))
+	installSealedStatsForReopenTest(t, o, 3, s3)
+
+	data, err := genBM25StatsForField(fieldB, 0, 10)[fieldB].Serialize()
+	require.NoError(t, err)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	reader := &blockedBM25Reader{
+		bytesFileReader: &bytesFileReader{bytes.NewReader(data)},
+		started:         make(chan struct{}),
+		release:         release,
+	}
+	cm := mocks.NewChunkManager(t)
+	remotePath := "bm25stats/seg_1/field_104/0"
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(reader, nil).Once()
+	o.BeginReopen(1, []int64{fieldB})
+	result := make(chan error, 1)
+	go func() {
+		result <- o.LoadSealedForReopen(context.Background(), 1,
+			&querypb.SegmentLoadInfo{Bm25Logs: bm25LogsForField(fieldB, remotePath)}, cm)
+	}()
+	select {
+	case <-reader.started:
+	case <-time.After(time.Second):
+		t.Fatal("reopen did not start reading BM25 stats")
+	}
+
+	o.SetNext(&snapshot{dist: []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{
+		{NodeID: 1, SegmentID: 2, TargetVersion: 2},
+		{NodeID: 1, SegmentID: 3, TargetVersion: 2},
+	}}}, targetVersion: 2})
+	require.Eventually(t, func() bool { return o.TargetVersion() == 2 }, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, int64(30), o.current[fieldA].NumRow())
+	require.Equal(t, int64(30), o.current[fieldB].NumRow())
+	_, _, err = o.BuildIDF(fieldB, &schemapb.SparseFloatArray{})
+	require.NoError(t, err)
+
+	releaseOnce.Do(func() { close(release) })
+	waitReopenBM25Result(t, result)
+	require.Equal(t, int64(30), o.current[fieldA].NumRow())
+	require.Equal(t, int64(30), o.current[fieldB].NumRow())
+	lateS1, ok := o.sealed.Get(1)
+	require.True(t, ok)
+	require.False(t, lateS1.activate.Load())
 }
 
 func TestSealedBM25StatsFieldTracking(t *testing.T) {
