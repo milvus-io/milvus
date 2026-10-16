@@ -73,8 +73,10 @@ func (c *fakeCommitter) CommitCompaction(_ context.Context, _ int64, _ string, c
 
 func newTestTask(t *testing.T, committer *fakeCommitter, onTerminal func(*Task)) *Task {
 	t.Helper()
-	p := plan{target: manifest.Target{CollectionID: 1, VChannel: "v"}, sstBasePath: "base", rule: ruleL0,
-		inputs: []*pkindexpb.SSTRef{ref(9, 0, 100), ref(8, 0, 100)}, inputBytes: 200}
+	p := plan{
+		target: manifest.Target{CollectionID: 1, VChannel: "v"}, sstBasePath: "base", rule: ruleL0,
+		inputs: []*pkindexpb.SSTRef{ref(9, 0, 100), ref(8, 0, 100)}, inputBytes: 200,
+	}
 	return newTask(context.Background(), p, 100, 7, testConfig(), &fakeAlloc{next: 1000}, committer, onTerminal)
 }
 

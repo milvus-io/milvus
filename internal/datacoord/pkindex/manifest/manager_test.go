@@ -1147,8 +1147,10 @@ func TestApplyCompactionRunRules(t *testing.T) {
 }
 
 func TestApplyFlushClearsRunID(t *testing.T) {
-	req := &pkindexpb.CommitFlushRequest{CollectionId: 1, Vchannel: vch, PchannelTerm: 1, CheckpointTimeTick: 10,
-		AddSsts: []*pkindexpb.SSTRef{sstRef(1, 99, "a", "z")}}
+	req := &pkindexpb.CommitFlushRequest{
+		CollectionId: 1, Vchannel: vch, PchannelTerm: 1, CheckpointTimeTick: 10,
+		AddSsts: []*pkindexpb.SSTRef{sstRef(1, 99, "a", "z")},
+	}
 	next, err := applyFlush(nil, req, "base")
 	require.NoError(t, err)
 	require.Zero(t, next.GetSsts()[0].GetRunId())
