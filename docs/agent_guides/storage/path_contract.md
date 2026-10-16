@@ -30,10 +30,10 @@ Explore is a separate layout: local temporary manifests live under
   `minio.rootPath/pk_index/<collectionID>/<vchannel>/`: manifest bodies in
   `manifest/<version>-<uuid>.pb` and SSTs in `sst/<id>.sst`. All writers, the
   manifest service and its GC build these keys with
-  `internal/pkindex/core/objpath`. `pk_index` is `common.PKIndexPath` and is
+  `internal/pkindex/objpath`. `pk_index` is `common.PKIndexPath` and is
   listed in `InternalStorageRootSegments`. The manifest pointers and pchannel
   claim records are meta kv keys under `pkindex-meta/`, built by
-  `internal/pkindex/coordinator/manifest`.
+  `internal/datacoord/pkindex/manifest`.
 - Readers consume the complete key recorded in metadata or the manifest.
   They must not prepend another root.
 - Some API fields describe relative file names rather than complete keys.
@@ -135,7 +135,7 @@ directory from the output manifest base.
   covers them; malformed objects without a segment row can remain orphaned.
 - Therefore an uncommitted stats file inside a live V3 segment is not guaranteed
   to be reclaimed by DataCoord's orphan scan.
-- Primary key index: only the GC in `internal/pkindex/coordinator/gc` deletes
+- Primary key index: only the GC in `internal/datacoord/pkindex/gc` deletes
   under `pk_index/`. It finds a vchannel only through its manifest pointer,
   and keeps the manifest bodies of the retention and the SSTs that they
   reference. The other orphan scans do not enter `pk_index/`. Nothing deletes
@@ -154,9 +154,9 @@ directory from the output manifest base.
 - Compatibility: `internal/datacoord/meta_local_manifest*.go` and
   `snapshot_local_manifest_test.go`.
 - Cleanup: `internal/datacoord/garbage_collector*.go` and `task_stats*.go`.
-- Primary key index: `internal/pkindex/core/objpath`,
-  `internal/pkindex/coordinator/manifest/metakey.go`,
-  `internal/pkindex/coordinator/gc`.
+- Primary key index: `internal/pkindex/objpath`,
+  `internal/datacoord/pkindex/manifest/metakey.go`,
+  `internal/datacoord/pkindex/gc`.
 
 Source review and unit tests do not replace a real version-to-version upgrade
 test. Report which versions, layouts, and failure cases were actually exercised.

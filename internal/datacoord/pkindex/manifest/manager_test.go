@@ -30,8 +30,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/core/objpath"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -232,7 +232,7 @@ func TestFlushFailsWhenClaimChangesBeforeWrite(t *testing.T) {
 	p.BeforeWrite = func() { claimErr = b.ClaimPChannel(ctx, pch, 4) }
 	_, err = a.CommitFlush(ctx, flush(3, 20, 2))
 	require.NoError(t, claimErr)
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable), "%v", err)
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
 
 	_, err = a.CommitFlush(ctx, flush(3, 20, 2))
 	assert.True(t, errors.Is(err, ErrFenced))
@@ -250,7 +250,7 @@ func TestFlushWithStaleCachedClaim(t *testing.T) {
 	require.NoError(t, New(p, s, testRoot).ClaimPChannel(ctx, pch, 4))
 
 	_, err := a.CommitFlush(ctx, flush(3, 10, 1))
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable), "%v", err)
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
 	_, found, err := get(ctx, New(p, s, testRoot), 1, vch)
 	require.NoError(t, err)
 	assert.False(t, found)
@@ -292,7 +292,7 @@ func TestClaimFailedIsRetryable(t *testing.T) {
 	cause := errors.New("timeout")
 	p.WriteErr = cause
 	err := m.ClaimPChannel(ctx, pch, 3)
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	assert.True(t, errors.Is(err, cause), "the cause stays in the chain")
 	require.NoError(t, m.ClaimPChannel(ctx, pch, 3))
 }
@@ -303,17 +303,17 @@ func TestClaimRecordLoadErrors(t *testing.T) {
 
 	p.LoadErr = errors.New("etcd down")
 	err := m.ClaimPChannel(ctx, pch, 3)
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	p.LoadErr = errors.New("etcd down")
 	_, err = New(p, s, testRoot).CommitFlush(ctx, flush(3, 10))
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 
 	for _, v := range []string{"\xff", ""} {
 		p.Put(ClaimKey(pch), v)
 		err = New(p, s, testRoot).ClaimPChannel(ctx, pch, 3)
-		assert.True(t, errors.Is(err, pkerr.ErrCorrupted), "record %q", v)
+		assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "record %q", v)
 		_, err = New(p, s, testRoot).CommitFlush(ctx, flush(3, 10))
-		assert.True(t, errors.Is(err, pkerr.ErrCorrupted), "record %q", v)
+		assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "record %q", v)
 	}
 }
 
@@ -377,7 +377,7 @@ func TestCreateFailedIsRetryable(t *testing.T) {
 	cause := errors.New("timeout")
 	p.WriteErr = cause
 	_, err := m.CommitFlush(ctx, flush(1, 5, 1))
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	assert.True(t, errors.Is(err, cause), "the cause stays in the chain")
 
 	got, err := m.CommitFlush(ctx, flush(1, 5, 1))
@@ -395,7 +395,7 @@ func TestSwapFailedIsRetryable(t *testing.T) {
 	cause := errors.New("timeout")
 	p.WriteErr = cause
 	_, err = m.CommitFlush(ctx, flush(1, 5, 1))
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	assert.True(t, errors.Is(err, cause), "the cause stays in the chain")
 	got, err := m.CommitFlush(ctx, flush(1, 5, 1))
 	require.NoError(t, err)
@@ -413,7 +413,7 @@ func TestReadBackFails(t *testing.T) {
 	p.WriteErr, p.WriteApplies = errors.New("timeout"), true
 	p.LoadErr = errors.New("etcd down")
 	_, err = m.CommitFlush(ctx, flush(1, 5, 1))
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	assert.Contains(t, fmt.Sprintf("%+v", err), "etcd down", "the read-back error is kept")
 
 	got, err := m.CommitFlush(ctx, flush(1, 5, 1))
@@ -467,7 +467,7 @@ func TestTwoManagersCreateFirstVersion(t *testing.T) {
 	// version before b writes the pointer
 	p.BeforeWrite = func() { aGot, aErr = a.CommitFlush(ctx, flush(1, 5, 1)) }
 	_, err := b.CommitFlush(ctx, flush(1, 6, 2))
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	require.NoError(t, aErr)
 	assert.EqualValues(t, 1, aGot.GetVersion())
 
@@ -495,9 +495,9 @@ func TestLoadVersionMismatch(t *testing.T) {
 	p.Put(PointerKey(1, vch), string(ptr))
 
 	_, _, err = get(ctx, m, 1, vch)
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 	_, err = m.CommitFlush(ctx, flush(1, 5, 1))
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 }
 
 func TestLoadErrors(t *testing.T) {
@@ -510,24 +510,24 @@ func TestLoadErrors(t *testing.T) {
 	t.Run("pointer read fails", func(t *testing.T) {
 		p.LoadErr = errors.New("etcd down")
 		_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
-		assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+		assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	})
 	t.Run("body read fails", func(t *testing.T) {
 		s.ReadErr = errors.New("s3 down")
 		_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
-		assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
-		assert.False(t, errors.Is(err, pkerr.ErrCorrupted))
+		assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
+		assert.False(t, errors.Is(err, pkindex.ErrCorrupted))
 	})
 	t.Run("body missing", func(t *testing.T) {
 		require.NoError(t, s.MultiRemove(ctx, bodyKeys(t, s)))
 		_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
-		assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
-		assert.Equal(t, merr.Code(merr.ErrDataIntegrity), merr.Code(pkerr.ToMerr(err)), "a missing body is not retryable")
+		assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
+		assert.Equal(t, merr.Code(merr.ErrDataIntegrity), merr.Code(pkindex.ToMerr(err)), "a missing body is not retryable")
 	})
 	t.Run("pointer undecodable", func(t *testing.T) {
 		p.Put(PointerKey(1, vch), "\xff")
 		_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
-		assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+		assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 	})
 	t.Run("pointer names no body", func(t *testing.T) {
 		zeroVersion, err := proto.Marshal(&pkindexpb.ManifestPointer{BodyKey: objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, vch), 1, "x")})
@@ -538,8 +538,8 @@ func TestLoadErrors(t *testing.T) {
 			s.ReadErr = errors.New("object name cannot be empty")
 			_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
 			s.ReadErr = nil
-			assert.True(t, errors.Is(err, pkerr.ErrCorrupted), "pointer %q", ptr)
-			assert.False(t, errors.Is(err, pkerr.ErrUnavailable), "pointer %q", ptr)
+			assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "pointer %q", ptr)
+			assert.False(t, errors.Is(err, pkindex.ErrUnavailable), "pointer %q", ptr)
 		}
 	})
 }
@@ -549,7 +549,7 @@ func TestBodyWriteFails(t *testing.T) {
 	ctx := context.Background()
 	s.WriteErr = errors.New("s3 down")
 	_, err := m.CommitFlush(ctx, flush(1, 5, 1))
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	_, found, err := get(ctx, New(p, s, testRoot), 1, vch)
 	require.NoError(t, err)
 	assert.False(t, found)
@@ -651,7 +651,7 @@ func TestTwoWriters(t *testing.T) {
 				tick := uint64(id + 10)
 				got, err := mgr.CommitFlush(ctx, flush(1, tick, id))
 				if err != nil {
-					assert.True(t, errors.Is(err, pkerr.ErrUnavailable), "%v", err)
+					assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
 					continue
 				}
 				// a flush whose checkpoint is not after the current one is an
@@ -716,7 +716,7 @@ func TestLoadPointers(t *testing.T) {
 	for i, r := range results {
 		switch {
 		case i == 1:
-			assert.True(t, errors.Is(r.Err, pkerr.ErrCorrupted), "target %d", i)
+			assert.True(t, errors.Is(r.Err, pkindex.ErrCorrupted), "target %d", i)
 			assert.False(t, r.Found)
 		case i%3 == 0:
 			require.NoError(t, r.Err, "target %d", i)
@@ -746,7 +746,7 @@ func TestLoadPointersBatchFailure(t *testing.T) {
 	p.MultiLoadErr = errors.New("etcd down")
 	results := m.LoadPointers(ctx, targets)
 	for _, r := range results[:pointerBatchSize] {
-		assert.True(t, errors.Is(r.Err, pkerr.ErrUnavailable))
+		assert.True(t, errors.Is(r.Err, pkindex.ErrUnavailable))
 	}
 	require.NoError(t, results[pointerBatchSize].Err)
 	assert.True(t, results[pointerBatchSize].Found)
@@ -1120,7 +1120,7 @@ func TestParseManifestBodyKey(t *testing.T) {
 
 // A store failure that a retry does not fix keeps its own merr code. Other
 // store failures, such as a throttle or a generic IO failure, are marked as
-// pkerr.ErrUnavailable.
+// pkindex.ErrUnavailable.
 func TestStoreFailureClassification(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -1142,8 +1142,8 @@ func TestStoreFailureClassification(t *testing.T) {
 			s.WriteErr = c.err
 			_, err := m.CommitFlush(context.Background(), flush(3, 10, 1))
 			require.Error(t, err)
-			assert.Equal(t, c.unavailable, errors.Is(err, pkerr.ErrUnavailable), "%v", err)
-			got := pkerr.ToMerr(err)
+			assert.Equal(t, c.unavailable, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
+			got := pkindex.ToMerr(err)
 			assert.Equal(t, c.code, merr.Code(got), "%v", got)
 			assert.Equal(t, c.unavailable, merr.IsRetryableErr(got), "%v", got)
 		})

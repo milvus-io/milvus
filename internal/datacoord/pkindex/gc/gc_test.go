@@ -27,9 +27,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
-	"github.com/milvus-io/milvus/internal/pkindex/core/objpath"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
@@ -417,7 +417,7 @@ func TestRunOnceListError(t *testing.T) {
 	e := newEnv(t, testConfig)
 	e.pointers.ListErr = errors.New("etcd down")
 	err := e.gc.RunOnce(context.Background())
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 }
 
 func TestNewRejectsInvalidConfig(t *testing.T) {
@@ -543,7 +543,7 @@ func TestInFlightErrorIsUnavailable(t *testing.T) {
 	}
 
 	err := e.gc.runVChannel(context.Background(), 1, "v")
-	assert.True(t, errors.Is(err, pkerr.ErrUnavailable))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	assert.True(t, e.has(sstKey("v", 9)))
 }
 

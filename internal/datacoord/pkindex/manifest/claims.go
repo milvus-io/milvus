@@ -23,7 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -152,10 +152,10 @@ func (c *claimTable) load(ctx context.Context, pchannel string) (*pchannelClaim,
 	}
 	var pb pkindexpb.PChannelClaim
 	if err := proto.Unmarshal([]byte(value), &pb); err != nil {
-		return nil, errors.Mark(errors.Wrapf(err, "decode claim record %s", key), pkerr.ErrCorrupted)
+		return nil, errors.Mark(errors.Wrapf(err, "decode claim record %s", key), pkindex.ErrCorrupted)
 	}
 	if pb.GetPchannelTerm() <= 0 {
-		return nil, errors.Mark(errors.Newf("claim record %s has term %d", key, pb.GetPchannelTerm()), pkerr.ErrCorrupted)
+		return nil, errors.Mark(errors.Newf("claim record %s has term %d", key, pb.GetPchannelTerm()), pkindex.ErrCorrupted)
 	}
 	return &pchannelClaim{pb: &pb, value: value}, nil
 }
