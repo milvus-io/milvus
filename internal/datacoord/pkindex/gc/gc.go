@@ -27,9 +27,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
-	"github.com/milvus-io/milvus/internal/pkindex/core/objpath"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 )
@@ -255,7 +255,7 @@ func (g *GC) current(ctx context.Context, collectionID int64, vchannel string) (
 	}
 	var p pkindexpb.ManifestPointer
 	if err := proto.Unmarshal([]byte(value), &p); err != nil {
-		return nil, "", errors.Mark(errors.Wrapf(err, "decode manifest pointer %s", key), pkerr.ErrCorrupted)
+		return nil, "", errors.Mark(errors.Wrapf(err, "decode manifest pointer %s", key), pkindex.ErrCorrupted)
 	}
 	m, err := g.readBody(ctx, p.GetBodyKey())
 	if err != nil {
@@ -263,7 +263,7 @@ func (g *GC) current(ctx context.Context, collectionID int64, vchannel string) (
 	}
 	if m.GetVersion() != p.GetVersion() {
 		return nil, "", errors.Mark(errors.Newf("manifest body %s has version %d, pointer has %d",
-			p.GetBodyKey(), m.GetVersion(), p.GetVersion()), pkerr.ErrCorrupted)
+			p.GetBodyKey(), m.GetVersion(), p.GetVersion()), pkindex.ErrCorrupted)
 	}
 	return m, p.GetBodyKey(), nil
 }
@@ -287,7 +287,7 @@ func (g *GC) readBody(ctx context.Context, key string) (*pkindexpb.Manifest, err
 	}
 	var m pkindexpb.Manifest
 	if err := proto.Unmarshal(b, &m); err != nil {
-		return nil, errors.Mark(errors.Wrapf(err, "decode manifest body %s", key), pkerr.ErrCorrupted)
+		return nil, errors.Mark(errors.Wrapf(err, "decode manifest body %s", key), pkindex.ErrCorrupted)
 	}
 	return &m, nil
 }
@@ -299,8 +299,8 @@ func addSSTs(live map[int64]struct{}, m *pkindexpb.Manifest) {
 }
 
 // markUnavailable adds context to a failure of a remote store and marks it as
-// pkerr.ErrUnavailable. A mark that err already has, such as pkerr.ErrCorrupted
+// pkindex.ErrUnavailable. A mark that err already has, such as pkindex.ErrCorrupted
 // for a missing object, stays.
 func markUnavailable(err error, format string, args ...any) error {
-	return errors.Mark(errors.Wrapf(err, format, args...), pkerr.ErrUnavailable)
+	return errors.Mark(errors.Wrapf(err, format, args...), pkindex.ErrUnavailable)
 }

@@ -28,11 +28,11 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
+	pkindexservice "github.com/milvus-io/milvus/internal/datacoord/pkindex/service"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/pkindex/coordinator/manifest"
-	pkindexservice "github.com/milvus-io/milvus/internal/pkindex/coordinator/service"
-	"github.com/milvus-io/milvus/internal/pkindex/core/objpath"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -112,7 +112,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	root := cm.RootPath()
 
 	_, err := s.Read(ctx, objpath.ManifestBodyKey(objpath.ManifestDir(root, 1, "ch_v0"), 1, "n"))
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 
 	written := []string{
 		objpath.ManifestBodyKey(objpath.ManifestDir(root, 1, "ch_v0"), 1, "n1"),
@@ -143,7 +143,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 
 	require.NoError(t, s.MultiRemove(ctx, written))
 	_, err = s.Read(ctx, written[0])
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 }
 
 func TestInitPKIndexInvalidGCConfig(t *testing.T) {

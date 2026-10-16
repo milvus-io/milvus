@@ -28,7 +28,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 )
 
@@ -204,7 +204,7 @@ func (s *FakeObjectStore) Write(_ context.Context, key string, data []byte) erro
 }
 
 // Read returns the object under key, or an error marked with
-// pkerr.ErrCorrupted when key does not exist.
+// pkindex.ErrCorrupted when key does not exist.
 func (s *FakeObjectStore) Read(_ context.Context, key string) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -214,7 +214,7 @@ func (s *FakeObjectStore) Read(_ context.Context, key string) ([]byte, error) {
 	}
 	b, ok := s.objs[key]
 	if !ok {
-		return nil, errors.Mark(errors.Newf("object %s not found", key), pkerr.ErrCorrupted)
+		return nil, errors.Mark(errors.Newf("object %s not found", key), pkindex.ErrCorrupted)
 	}
 	return b, nil
 }
