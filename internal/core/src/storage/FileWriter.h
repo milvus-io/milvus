@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <folly/executors/thread_factory/NamedThreadFactory.h>
 #include <algorithm>
@@ -297,9 +299,11 @@ class FileWriter {
 
 class PositionedFileWriter {
  public:
-    explicit PositionedFileWriter(std::string filename,
-                                  size_t file_size,
-                                  io::Priority priority = io::Priority::MIDDLE);
+    explicit PositionedFileWriter(
+        std::string filename,
+        size_t file_size,
+        io::Priority priority = io::Priority::MIDDLE,
+        std::optional<FileWriter::WriteMode> mode = std::nullopt);
 
     ~PositionedFileWriter();
 
