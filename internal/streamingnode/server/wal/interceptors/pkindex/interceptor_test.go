@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/authority"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -62,7 +62,7 @@ func TestMain(m *testing.M) {
 
 // testEngine is a memory engine that a test can read back and that counts probes.
 type testEngine struct {
-	authority.Engine
+	snpkindex.Engine
 	mu       sync.Mutex
 	multiGet int
 }
@@ -83,14 +83,14 @@ func (e *testEngine) probes() int {
 // put seeds the index of one primary key, as an earlier insert would have done.
 func (e *testEngine) put(t *testing.T, pk int64, segmentID int64) {
 	t.Helper()
-	e.putPK(t, authority.Int64PK(pk), segmentID)
+	e.putPK(t, snpkindex.Int64PK(pk), segmentID)
 }
 
-func (e *testEngine) putPK(t *testing.T, pk authority.PK, segmentID int64) {
+func (e *testEngine) putPK(t *testing.T, pk snpkindex.PK, segmentID int64) {
 	t.Helper()
 	value := make([]byte, 8)
 	binary.BigEndian.PutUint64(value, uint64(segmentID))
-	require.NoError(t, e.Write(context.Background(), []authority.Mutation{
+	require.NoError(t, e.Write(context.Background(), []snpkindex.Mutation{
 		{Key: pk.Encode(), Value: value},
 	}))
 }
@@ -98,10 +98,10 @@ func (e *testEngine) putPK(t *testing.T, pk authority.PK, segmentID int64) {
 // segmentOf returns the segment of a primary key and whether it is in the index.
 func (e *testEngine) segmentOf(t *testing.T, pk int64) (int64, bool) {
 	t.Helper()
-	return e.segmentOfPK(t, authority.Int64PK(pk))
+	return e.segmentOfPK(t, snpkindex.Int64PK(pk))
 }
 
-func (e *testEngine) segmentOfPK(t *testing.T, pk authority.PK) (int64, bool) {
+func (e *testEngine) segmentOfPK(t *testing.T, pk snpkindex.PK) (int64, bool) {
 	t.Helper()
 	values, err := e.Engine.MultiGet(context.Background(), [][]byte{pk.Encode()})
 	require.NoError(t, err)
@@ -120,13 +120,13 @@ type testEngines struct {
 
 func newTestEngines(t *testing.T) *testEngines {
 	e := &testEngines{engines: make(map[string]*testEngine)}
-	authority.RegisterEngineFactory(e.create)
-	t.Cleanup(func() { authority.RegisterEngineFactory(authority.NewMemoryEngine) })
+	snpkindex.RegisterEngineFactory(e.create)
+	t.Cleanup(func() { snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine) })
 	return e
 }
 
-func (e *testEngines) create(vchannel string) (authority.Engine, error) {
-	inner, err := authority.NewMemoryEngine(vchannel)
+func (e *testEngines) create(vchannel string) (snpkindex.Engine, error) {
+	inner, err := snpkindex.NewMemoryEngine(vchannel)
 	if err != nil {
 		return nil, err
 	}
@@ -441,8 +441,8 @@ func TestNewBuilderPanicsWhenEnabledWithoutEngineFactory(t *testing.T) {
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
 	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-	authority.RegisterEngineFactory(nil)
-	defer authority.RegisterEngineFactory(authority.NewMemoryEngine)
+	snpkindex.RegisterEngineFactory(nil)
+	defer snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine)
 
 	require.PanicsWithValue(t, params.StreamingCfg.PKIndexEnabled.Key+" is true but this binary has no primary key index engine", func() {
 		NewInterceptorBuilder()
@@ -450,8 +450,8 @@ func TestNewBuilderPanicsWhenEnabledWithoutEngineFactory(t *testing.T) {
 }
 
 func TestNewBuilderWithoutEngineFactoryWhenDisabled(t *testing.T) {
-	authority.RegisterEngineFactory(nil)
-	defer authority.RegisterEngineFactory(authority.NewMemoryEngine)
+	snpkindex.RegisterEngineFactory(nil)
+	defer snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine)
 
 	require.NotPanics(t, func() {
 		i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
@@ -495,10 +495,10 @@ func TestBuildPanicsWhenTheIndexOfAnExistingCollectionCanNotBeCreated(t *testing
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
 	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-	authority.RegisterEngineFactory(func(string) (authority.Engine, error) {
+	snpkindex.RegisterEngineFactory(func(string) (snpkindex.Engine, error) {
 		return nil, errors.New("disk is full")
 	})
-	t.Cleanup(func() { authority.RegisterEngineFactory(authority.NewMemoryEngine) })
+	t.Cleanup(func() { snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine) })
 
 	defer func() {
 		value := recover()
@@ -774,7 +774,7 @@ func TestVarCharInsertMiss(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
 
-	segmentID, ok := engines.of(t, testVChannel).segmentOfPK(t, authority.VarCharPK("a"))
+	segmentID, ok := engines.of(t, testVChannel).segmentOfPK(t, snpkindex.VarCharPK("a"))
 	require.True(t, ok)
 	require.Equal(t, f.segmentID, segmentID)
 }
@@ -782,7 +782,7 @@ func TestVarCharInsertMiss(t *testing.T) {
 func TestVarCharInsertHit(t *testing.T) {
 	i, engines := newTestInterceptorOfSchema(t, nil, testVarCharSchema())
 	engine := engines.of(t, testVChannel)
-	engine.putPK(t, authority.VarCharPK("a"), 100)
+	engine.putPK(t, snpkindex.VarCharPK("a"), 100)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newVarCharInsert(testVChannel, "a"), f.append)
@@ -799,7 +799,7 @@ func TestVarCharInsertHit(t *testing.T) {
 	require.Nil(t, body.GetPrimaryKeys().GetIntId())
 	require.Equal(t, int64(1), body.GetNumRows())
 
-	segmentID, ok := engine.segmentOfPK(t, authority.VarCharPK("a"))
+	segmentID, ok := engine.segmentOfPK(t, snpkindex.VarCharPK("a"))
 	require.True(t, ok)
 	require.Equal(t, f.segmentID, segmentID)
 }
@@ -807,8 +807,8 @@ func TestVarCharInsertHit(t *testing.T) {
 func TestVarCharDeleteOfPresentKeys(t *testing.T) {
 	i, engines := newTestInterceptorOfSchema(t, nil, testVarCharSchema())
 	engine := engines.of(t, testVChannel)
-	engine.putPK(t, authority.VarCharPK("a"), 100)
-	engine.putPK(t, authority.VarCharPK("b"), 100)
+	engine.putPK(t, snpkindex.VarCharPK("a"), 100)
+	engine.putPK(t, snpkindex.VarCharPK("b"), 100)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newVarCharDelete(testVChannel, "a", "b"), f.append)
@@ -817,7 +817,7 @@ func TestVarCharDeleteOfPresentKeys(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, f.deleteBodyAt(t, 0).GetPrimaryKeys().GetStrId().GetData())
 
 	for _, pk := range []string{"a", "b"} {
-		_, ok := engine.segmentOfPK(t, authority.VarCharPK(pk))
+		_, ok := engine.segmentOfPK(t, snpkindex.VarCharPK(pk))
 		require.False(t, ok)
 	}
 }
@@ -1150,10 +1150,10 @@ func TestCreateCollectionOfAutoIDHasNoTarget(t *testing.T) {
 }
 
 func TestCreateCollectionRejectedWhenTheIndexCanNotBeCreated(t *testing.T) {
-	authority.RegisterEngineFactory(func(string) (authority.Engine, error) {
+	snpkindex.RegisterEngineFactory(func(string) (snpkindex.Engine, error) {
 		return nil, errors.New("disk is full")
 	})
-	t.Cleanup(func() { authority.RegisterEngineFactory(authority.NewMemoryEngine) })
+	t.Cleanup(func() { snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine) })
 	i := &appendInterceptor{registry: newRegistry(16), sessions: nil, metrics: newMetrics()}
 	defer i.Close()
 	f := newFakeAppender()

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package authority
+package pkindex
 
 import (
 	"context"
@@ -25,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ErrNoEngineFactory is returned by New when no engine factory is registered.
+// ErrNoEngineFactory is returned by NewAuthority when no engine factory is registered.
 // It is a plain identity sentinel, not a merr error, so that errors.Is matches
 // only this error and not every merr service-internal error.
 var ErrNoEngineFactory = errors.New("no primary key index engine factory is registered")
@@ -66,8 +66,8 @@ type Authority interface {
 	Close() error
 }
 
-// New creates the Authority of a vchannel with the registered engine factory.
-func New(vchannel string) (Authority, error) {
+// NewAuthority creates the Authority of a vchannel with the registered engine factory.
+func NewAuthority(vchannel string) (Authority, error) {
 	factory := getEngineFactory()
 	if factory == nil {
 		return nil, ErrNoEngineFactory

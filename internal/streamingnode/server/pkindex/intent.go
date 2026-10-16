@@ -14,14 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dedup
+package pkindex
 
 import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/milvus-io/milvus/internal/pkindex/authority"
 )
 
 // Intent is a decision that has not been confirmed yet. It belongs to one
@@ -65,7 +63,7 @@ func (i *Intent) Apply(ctx context.Context, r Applied) {
 			batch.Delete(pk)
 		}
 		for _, put := range i.txn.puts {
-			batch.Put(put.pk, authority.Entry{SegmentID: put.segmentID})
+			batch.Put(put.pk, Entry{SegmentID: put.segmentID})
 		}
 		i.mustWrite(ctx, batch)
 
@@ -97,7 +95,7 @@ func (i *Intent) Apply(ctx context.Context, r Applied) {
 	case i.req.Kind == KindInsert:
 		batch := i.d.authority.NewBatch()
 		for _, pk := range i.req.PKs {
-			batch.Put(pk, authority.Entry{SegmentID: r.SegmentID})
+			batch.Put(pk, Entry{SegmentID: r.SegmentID})
 		}
 		i.mustWrite(ctx, batch)
 	case i.req.Kind == KindDelete:
@@ -132,7 +130,7 @@ func (i *Intent) resolve() {
 // only its values are kept. An engine write is a memory operation that fails only
 // on a bug or a closed engine. Continuing would leave the index stale for these
 // keys and let duplicates through in silence, so the failure ends the process.
-func (i *Intent) mustWrite(ctx context.Context, batch *authority.Batch) {
+func (i *Intent) mustWrite(ctx context.Context, batch *Batch) {
 	if err := i.d.authority.Write(context.WithoutCancel(ctx), batch); err != nil {
 		panic(fmt.Sprintf("failed to apply an appended write to the primary key index of vchannel %s (%d keys): %v",
 			i.req.VChannel, batch.Len(), err))

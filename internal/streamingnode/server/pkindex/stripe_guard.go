@@ -14,13 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dedup
+package pkindex
 
 import (
 	"sort"
 	"sync"
-
-	"github.com/milvus-io/milvus/internal/pkindex/authority"
 )
 
 // stripeLocks is lock striping: primary keys are hashed onto a fixed number of mutexes.
@@ -37,7 +35,7 @@ func newStripeLocks(n int) *stripeLocks {
 
 // acquire locks the stripes of pks in ascending stripe order, so that two
 // callers with overlapping keys can never deadlock.
-func (s *stripeLocks) acquire(pks []authority.PK) *StripeGuard {
+func (s *stripeLocks) acquire(pks []PK) *StripeGuard {
 	seen := make(map[int]struct{}, len(pks))
 	stripes := make([]int, 0, len(pks))
 	for _, pk := range pks {

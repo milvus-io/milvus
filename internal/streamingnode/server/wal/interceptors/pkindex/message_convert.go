@@ -20,7 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/authority"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -28,18 +28,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func toPKs(keys primarykey.Keys) []authority.PK {
-	pks := make([]authority.PK, 0, keys.Len())
+func toPKs(keys primarykey.Keys) []snpkindex.PK {
+	pks := make([]snpkindex.PK, 0, keys.Len())
 	for _, v := range keys.Int64Values {
-		pks = append(pks, authority.Int64PK(v))
+		pks = append(pks, snpkindex.Int64PK(v))
 	}
 	for _, v := range keys.StringValues {
-		pks = append(pks, authority.VarCharPK(v))
+		pks = append(pks, snpkindex.VarCharPK(v))
 	}
 	return pks
 }
 
-func toIDs(pks []authority.PK) *schemapb.IDs {
+func toIDs(pks []snpkindex.PK) *schemapb.IDs {
 	if len(pks) == 0 {
 		return &schemapb.IDs{}
 	}
@@ -60,7 +60,7 @@ func toIDs(pks []authority.PK) *schemapb.IDs {
 // newCompanionDelete builds the delete that removes the old rows of pks.
 // It covers all partitions: the old row may live in any of them. The time tick
 // and the row timestamps are assigned downstream and at consume time.
-func newCompanionDelete(vchannel string, t *target, pks []authority.PK) (message.MutableMessage, error) {
+func newCompanionDelete(vchannel string, t *target, pks []snpkindex.PK) (message.MutableMessage, error) {
 	return message.NewDeleteMessageBuilderV1().
 		WithVChannel(vchannel).
 		WithHeader(&message.DeleteMessageHeader{

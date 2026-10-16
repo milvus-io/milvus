@@ -17,7 +17,7 @@
 //go:build test
 // +build test
 
-package authority
+package pkindex
 
 import (
 	"context"

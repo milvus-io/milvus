@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dedup
+package pkindex
 
 import (
 	"context"
@@ -25,39 +25,37 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/internal/pkindex/authority"
 )
 
-func newTestDecider(t *testing.T) (*Decider, authority.Authority) {
+func newTestDecider(t *testing.T) (*Decider, Authority) {
 	t.Helper()
-	a, err := authority.New("v1")
+	a, err := NewAuthority("v1")
 	require.NoError(t, err)
-	d := New(a, 16)
+	d := NewDecider(a, 16)
 	t.Cleanup(func() { _ = d.Close() })
 	return d, a
 }
 
-func int64PKs(values ...int64) []authority.PK {
-	pks := make([]authority.PK, 0, len(values))
+func int64PKs(values ...int64) []PK {
+	pks := make([]PK, 0, len(values))
 	for _, v := range values {
-		pks = append(pks, authority.Int64PK(v))
+		pks = append(pks, Int64PK(v))
 	}
 	return pks
 }
 
-func seed(t *testing.T, a authority.Authority, segmentID int64, values ...int64) {
+func seed(t *testing.T, a Authority, segmentID int64, values ...int64) {
 	t.Helper()
 	b := a.NewBatch()
 	for _, pk := range int64PKs(values...) {
-		b.Put(pk, authority.Entry{SegmentID: segmentID})
+		b.Put(pk, Entry{SegmentID: segmentID})
 	}
 	require.NoError(t, a.Write(context.Background(), b))
 }
 
-func requireSegment(t *testing.T, a authority.Authority, pk int64, segmentID int64) {
+func requireSegment(t *testing.T, a Authority, pk int64, segmentID int64) {
 	t.Helper()
-	entry, err := a.Get(context.Background(), authority.Int64PK(pk))
+	entry, err := a.Get(context.Background(), Int64PK(pk))
 	require.NoError(t, err)
 	if segmentID == 0 {
 		require.Nil(t, entry)
@@ -269,16 +267,16 @@ func TestIntentResolvedOnce(t *testing.T) {
 func TestDecideHonorsContextWhileWaitingForReady(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	d := New(&notReadyAuthority{ready: make(chan struct{})}, 4)
+	d := NewDecider(&notReadyAuthority{ready: make(chan struct{})}, 4)
 	_, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestDecideReturnsProbeError(t *testing.T) {
 	ctx := context.Background()
-	a, err := authority.New("v1")
+	a, err := NewAuthority("v1")
 	require.NoError(t, err)
-	d := New(a, 4)
+	d := NewDecider(a, 4)
 	require.NoError(t, a.Close()) // the memory engine fails every call after Close
 
 	_, err = d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
@@ -483,13 +481,13 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 	wg.Wait()
 
 	require.Equal(t, int64(1), misses.Load())
-	entry, err := a.Get(ctx, authority.Int64PK(1))
+	entry, err := a.Get(ctx, Int64PK(1))
 	require.NoError(t, err)
 	require.NotNil(t, entry)
 }
 
 type notReadyAuthority struct {
-	authority.Authority
+	Authority
 	ready chan struct{}
 }
 
