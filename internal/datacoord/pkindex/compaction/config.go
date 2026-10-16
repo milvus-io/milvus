@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -120,9 +122,34 @@ func ConfigFromParams(ctx context.Context) Config {
 		TargetFileSize:  p.PKIndexCompactionTargetFileSize.GetAsInt64(),
 		TaskSlot:        p.PKIndexCompactionSlotUsage.GetAsInt64(),
 	}.normalize()
+	logCorrections(ctx, fixes)
+	return cfg
+}
+
+var (
+	lastCorrectionsMu sync.Mutex
+	lastCorrections   string
+)
+
+// logCorrections logs each correction, but only when the set differs from
+// the set it logged last: the configuration is read on every inspection, and
+// the same bad value must not warn every time. It reports whether it logged.
+func logCorrections(ctx context.Context, fixes []correction) bool {
+	parts := make([]string, 0, len(fixes))
+	for _, f := range fixes {
+		parts = append(parts, f.field+":"+f.from+"->"+f.to)
+	}
+	joined := strings.Join(parts, ",")
+	lastCorrectionsMu.Lock()
+	same := joined == lastCorrections
+	lastCorrections = joined
+	lastCorrectionsMu.Unlock()
+	if same {
+		return false
+	}
 	for _, f := range fixes {
 		mlog.Warn(ctx, "primary key index compaction config value corrected",
 			mlog.String("field", f.field), mlog.String("configured", f.from), mlog.String("used", f.to))
 	}
-	return cfg
+	return len(fixes) > 0
 }
