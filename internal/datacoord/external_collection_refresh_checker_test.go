@@ -2192,8 +2192,11 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 		}})
 		// Neither segment is indexed, but 557 already has its index task, so
 		// only 556 needs a nudge.
-		mt := &meta{segments: NewSegmentsInfo(), collections: collections,
-			indexMeta: newTestIndexMeta(100, 557, 1, "", &model.SegmentIndex{SegmentID: 557, CollectionID: 100, IndexID: 1})}
+		mt := &meta{
+			segments:    NewSegmentsInfo(),
+			collections: collections,
+			indexMeta:   newTestIndexMeta(100, 557, 1, "", &model.SegmentIndex{SegmentID: 557, CollectionID: 100, IndexID: 1}),
+		}
 		for _, id := range []int64{556, 557} {
 			mt.segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
