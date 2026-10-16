@@ -1437,6 +1437,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.PKIndexHandoverActiveBytes.GetAsSize())
 		assert.Equal(t, int64(2*1024*1024*1024), params.StreamingCfg.PKIndexHandoverTailBytes.GetAsSize())
 		assert.Equal(t, 60*time.Second, params.StreamingCfg.PKIndexHandoverMaxBackoff.GetAsDurationByParse())
+		assert.Equal(t, 64, params.StreamingCfg.PKIndexRecoveryManifestReadConcurrency.GetAsInt())
 		params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
 		assert.True(t, params.StreamingCfg.PKIndexEnabled.GetAsBool())
 		params.Reset(params.StreamingCfg.PKIndexEnabled.Key)

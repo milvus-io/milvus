@@ -1750,6 +1750,8 @@ streaming:
       activeBytes: 64m # A vchannel hands over its primary key index writes to object storage after this many bytes of writes.
       tailBytes: 2g # When the unpublished WAL tail reaches this size, the vchannel with the oldest committed primary key index hands over. Keep it below streaming.walRecovery.tail.lowWatermark.
       maxBackoff: 60s # The maximum wait between two attempts of a failed primary key index handover.
+    recovery:
+      manifestReadConcurrency: 64 # The number of manifest bodies the primary key index reads in parallel when a WAL opens.
   flush:
     # The threshold of memory usage for one streaming node,
     # If the memory usage is higher than this threshold, the node will try to trigger flush action to decrease the total of growing segment until growingSegmentBytesLwmThreshold,

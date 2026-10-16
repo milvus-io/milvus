@@ -295,6 +295,8 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 			Tail:    r.pkindexTail,
 			OnFatal: r.fatalHandler("primary key index stopped"),
 			Sched:   r.nodeScheduler,
+
+			ManifestReadConcurrency: paramtable.Get().StreamingCfg.PKIndexRecoveryManifestReadConcurrency.GetAsInt(),
 		})
 		if err != nil {
 			return merr.Wrap(err, "recover the primary key index")

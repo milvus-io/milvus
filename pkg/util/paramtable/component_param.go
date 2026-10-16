@@ -9155,6 +9155,8 @@ type streamingConfig struct {
 	PKIndexHandoverTailBytes   ParamItem `refreshable:"true"`
 	PKIndexHandoverMaxBackoff  ParamItem `refreshable:"true"`
 
+	PKIndexRecoveryManifestReadConcurrency ParamItem `refreshable:"false"`
+
 	// memory usage control
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
@@ -9630,6 +9632,15 @@ so that an insert of an existing primary key also deletes the old row. Off by de
 		Export:       true,
 	}
 	p.PKIndexHandoverMaxBackoff.Init(base.mgr)
+
+	p.PKIndexRecoveryManifestReadConcurrency = ParamItem{
+		Key:          "streaming.pkindex.recovery.manifestReadConcurrency",
+		Version:      "3.0.0",
+		Doc:          "The number of manifest bodies the primary key index reads in parallel when a WAL opens.",
+		DefaultValue: "64",
+		Export:       true,
+	}
+	p.PKIndexRecoveryManifestReadConcurrency.Init(base.mgr)
 
 	p.FlushMemoryThreshold = ParamItem{
 		Key:     "streaming.flush.memoryThreshold",
