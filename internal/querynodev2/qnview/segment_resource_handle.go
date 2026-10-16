@@ -62,6 +62,7 @@ func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context
 			r.wakeLocked()
 			if len(r.bindings) == 0 && r.queryRefs == 0 {
 				r.closing = true
+				r.stopRetryLocked()
 				r.cancel()
 			}
 			m.mu.Unlock()

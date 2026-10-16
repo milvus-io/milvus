@@ -98,12 +98,14 @@ type segmentResource struct {
 	bases          []*segmentBase
 	reads          []*preparedSegmentRead
 	queryRefs      int
-	scheduled      bool
-	dirty          bool
-	closing        bool
-	done           chan struct{}
-	cursor         int
-	operations     sync.WaitGroup
+	// scheduled covers only running or immediately queued work, never backoff.
+	scheduled  bool
+	retryTimer *time.Timer
+	dirty      bool
+	closing    bool
+	done       chan struct{}
+	cursor     int
+	operations sync.WaitGroup
 }
 
 func NewSegmentResourceManager(ctx context.Context, scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimator SegmentResourceEstimator, stream SegmentLoadInfoStream, buffer TransformLogBuffer, collections QueryViewCollectionRuntimeManager) *SegmentResourceManager {
@@ -243,104 +245,146 @@ func (r *segmentResource) wakeLocked() {
 	if r.scheduled || r.closing {
 		return
 	}
+	r.submitLocked()
+}
+
+func (r *segmentResource) submitLocked() {
 	r.scheduled = true
 	r.manager.scheduler.Submit(schedulerTaskFunc(func(ctx context.Context) error { return r.reconcile(ctx) }))
+}
+
+func (r *segmentResource) stopRetryLocked() {
+	if r.retryTimer != nil {
+		r.retryTimer.Stop()
+		r.retryTimer = nil
+	}
+}
+
+func (r *segmentResource) retryAtLocked(at time.Time) {
+	if at.IsZero() || r.closing {
+		return
+	}
+	var timer *time.Timer
+	timer = time.AfterFunc(time.Until(at), func() {
+		r.manager.mu.Lock()
+		defer r.manager.mu.Unlock()
+		// Stop may race with an already fired callback. Only the current timer
+		// may wake this concrete owner, never its replacement with the same ID.
+		if r.retryTimer != timer || r.closing {
+			return
+		}
+		r.retryTimer = nil
+		r.wakeLocked()
+	})
+	r.retryTimer = timer
 }
 
 func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 	m := r.manager
 	m.mu.Lock()
-	r.dirty = false
-	if r.closing || (len(r.bindings) == 0 && r.queryRefs == 0) {
-		r.closing = true
+	// Every return holds mu. Events arriving during I/O either get consumed
+	// by the next iteration or transfer to a successor under this same lock.
+	defer func() {
 		r.scheduled = false
-		r.cancel()
-		m.mu.Unlock()
-		go r.close()
-		return nil
-	}
-	if r.metadataClosed {
-		subscription := r.subscription
-		affected := append([]*segmentBinding(nil), r.bindings...)
-		r.scheduled = false
-		m.mu.Unlock()
-		// Error uses the transport's callback mutex: never read it under mu.
-		err := subscription.Error()
-		if err == nil {
-			err = merr.WrapErrServiceNotReadyMsg("segment %d metadata subscription closed", r.id)
+		if r.dirty {
+			// Release can set closing during I/O. Its successor must still run
+			// to close the resource after the physical operation finishes.
+			r.submitLocked()
 		}
-		for _, binding := range affected {
-			m.failView(binding.view, err)
+		m.mu.Unlock()
+	}()
+	r.stopRetryLocked()
+	prepared := false
+	for {
+		r.dirty = false
+		if r.closing || (len(r.bindings) == 0 && r.queryRefs == 0) {
+			r.closing = true
+			r.cancel()
+			go r.close()
+			return nil
 		}
-		return nil
-	}
-	if r.subscription == nil {
-		m.mu.Unlock()
-		sub := m.stream.Subscribe(SegmentLoadInfoSubscriptionOption{CollectionID: r.collectionID, SegmentID: r.id, Handler: resourceMetadataHandler{r}})
-		m.mu.Lock()
-		r.subscription = sub
-		r.dirty = true
-		m.mu.Unlock()
-		return nodescheduler.ErrDelay
-	}
-	b, retry := r.nextBindingLocked()
-	obsolete := r.pruneReadsLocked()
-	anchors := append([]*preparedSegmentRead(nil), r.reads...)
-	retired := r.pruneBasesLocked()
-	if b == nil {
+		if r.metadataClosed {
+			subscription := r.subscription
+			affected := append([]*segmentBinding(nil), r.bindings...)
+			m.mu.Unlock()
+			// Error uses the transport's callback mutex: never read it under mu.
+			err := subscription.Error()
+			if err == nil {
+				err = merr.WrapErrServiceNotReadyMsg("segment %d metadata subscription closed", r.id)
+			}
+			for _, binding := range affected {
+				m.failView(binding.view, err)
+			}
+			m.mu.Lock()
+			return nil
+		}
+		if r.subscription == nil {
+			m.mu.Unlock()
+			sub := m.stream.Subscribe(SegmentLoadInfoSubscriptionOption{CollectionID: r.collectionID, SegmentID: r.id, Handler: resourceMetadataHandler{r}})
+			m.mu.Lock()
+			r.subscription = sub
+			// Subscribe may deliver its first snapshot synchronously.
+			continue
+		}
+		cursor := r.cursor
+		b, retryAt := r.nextBindingLocked()
+		if b != nil && prepared {
+			// Publish ready reads immediately, but yield further physical work
+			// to the queue tail so one resource cannot monopolize a worker.
+			r.cursor = cursor
+			r.dirty = true
+			b = nil
+		}
+		obsolete := r.pruneReadsLocked()
+		anchors := append([]*preparedSegmentRead(nil), r.reads...)
+		retired := r.pruneBasesLocked()
+		if b == nil {
+			r.retryAtLocked(retryAt)
+			m.mu.Unlock()
+			r.retainBaseReads(anchors)
+			for _, read := range obsolete {
+				read.ReleaseReadState()
+			}
+			r.releaseBases(retired)
+			m.mu.Lock()
+			return nil
+		}
+		snapshot := *r.snapshot
+		collection := b.view.collection
+		unpin := collection.Pin()
 		m.mu.Unlock()
 		r.retainBaseReads(anchors)
 		for _, read := range obsolete {
 			read.ReleaseReadState()
 		}
 		r.releaseBases(retired)
+		ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
+		result, err := r.prepare(ctx, b, collection, snapshot)
+		cancel()
+		unpin()
+		if err != nil {
+			mlog.RatedWarn(r.ctx, rate.Limit(0.2), "segment resource preparation will retry", mlog.FieldSegmentID(r.id), mlog.Int64("schemaVersion", collection.SchemaVersion()), mlog.Err(err))
+			if merr.GetErrorType(err) == merr.InputError {
+				m.failView(b.view, err)
+			}
+		}
 		m.mu.Lock()
-		retry = retry || r.dirty
-		if !retry {
-			r.scheduled = false
+		if err != nil {
+			b.retryAfter = time.Now().Add(200 * time.Millisecond)
+		} else {
+			r.reads = append(r.reads, result)
 		}
-		m.mu.Unlock()
-		if retry {
-			return nodescheduler.ErrDelay
-		}
-		return nil
+		prepared = true
+		// Recheck readiness now; unfinished catch-up has its own wakeup.
 	}
-	snapshot := *r.snapshot
-	collection := b.view.collection
-	unpin := collection.Pin()
-	m.mu.Unlock()
-	r.retainBaseReads(anchors)
-	for _, read := range obsolete {
-		read.ReleaseReadState()
-	}
-	r.releaseBases(retired)
-	ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
-	result, err := r.prepare(ctx, b, collection, snapshot)
-	cancel()
-	unpin()
-	m.mu.Lock()
-	if err != nil {
-		b.retryAfter = time.Now().Add(200 * time.Millisecond)
-	} else {
-		r.reads = append(r.reads, result)
-	}
-	r.dirty = true
-	m.mu.Unlock()
-	if err != nil {
-		mlog.RatedWarn(r.ctx, rate.Limit(0.2), "segment resource preparation will retry", mlog.FieldSegmentID(r.id), mlog.Int64("schemaVersion", collection.SchemaVersion()), mlog.Err(err))
-		if merr.GetErrorType(err) == merr.InputError {
-			m.failView(b.view, err)
-		}
-	}
-	return nodescheduler.ErrDelay
 }
 
 // Complete compatible reads are published before selecting another operation.
 // The rotating cursor gives every executable requirement an opportunity even
 // while another schema is waiting for materialization.
-func (r *segmentResource) nextBindingLocked() (*segmentBinding, bool) {
+func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 	m := r.manager
-	retry := false
+	var retryAt time.Time
 	for _, b := range r.bindings {
 		if b.view.collection == nil || b.view.buffer == nil || b.view.failed {
 			continue
@@ -365,7 +409,7 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, bool) {
 		}
 	}
 	if r.snapshot == nil {
-		return nil, false
+		return nil, retryAt
 	}
 	for n := 0; n < len(r.bindings); n++ {
 		i := (r.cursor + n) % len(r.bindings)
@@ -402,13 +446,15 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, bool) {
 			continue
 		}
 		if time.Now().Before(b.retryAfter) {
-			retry = true
+			if retryAt.IsZero() || b.retryAfter.Before(retryAt) {
+				retryAt = b.retryAfter
+			}
 			continue
 		}
 		r.cursor = (i + 1) % len(r.bindings)
-		return b, true
+		return b, retryAt
 	}
-	return nil, retry
+	return nil, retryAt
 }
 
 func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (*preparedSegmentRead, error) {
@@ -543,6 +589,7 @@ func (m *SegmentResourceManager) Release(req ReleaseSegments) {
 				// Establish closure before another Bind can reuse this owner.
 				r.wakeLocked()
 				r.closing = true
+				r.stopRetryLocked()
 				r.cancel()
 				closed = append(closed, r.done)
 			} else {

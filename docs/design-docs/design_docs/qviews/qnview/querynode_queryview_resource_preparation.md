@@ -166,13 +166,22 @@ Every relevant change updates stored state and marks the resource dirty:
 | Final query/operation reference releases | Deferred destruction or waiting reconstruction |
 
 Notifications are coalesced wakeups, not the work itself. State and dirty work
-remain stored until reconciled. An event arriving during a pass schedules a
-successor pass; completing a pass cannot erase a concurrently published change.
+remain stored until reconciled. An event arriving during a pass is consumed by that pass or schedules an
+immediate successor; completing a pass cannot erase a concurrently published change.
 Use local scheduling state independently of content-based metadata revisions.
 
 A resource may be idle only if all required capabilities are satisfied, or if
 its unsatisfied bindings have a registered dependency wakeup or scheduled retry.
 Dependency observation and wakeup registration must have no missed-update gap.
+
+The resource's `scheduled` flag covers running or immediately queued work only.
+Subscription installation and successful preparation immediately recheck local
+state. Snapshot and catch-up waits rely on their registered callbacks rather
+than the NodeScheduler's `ErrDelay` backoff. Each pass performs at most one
+physical preparation, then yields further work to the queue tail. Failed
+bindings retain their 200 ms retry deadline; a resource-owned timer wakes the
+earliest pending retry without preventing other bindings or events from running.
+Release cancels the timer, and stale callbacks cannot wake a replacement owner.
 Neither another metadata revision nor a repeated Coordinator push is required
 to discover work already implied by local state.
 
