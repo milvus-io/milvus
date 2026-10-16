@@ -249,6 +249,20 @@ func (pi *ParamItem) configValueForLog(value string) string {
 	return pi.manager.RedactValue(pi.Key, value)
 }
 
+// IsSetByUser reports whether a value for this item comes from configuration
+// rather than from the item's own default. An item whose configured value
+// equals its DefaultValue counts as not set: the two are indistinguishable at
+// this layer, and for a key whose default means "derive one" (a 0 that a
+// Formatter turns into a CPU-derived number) that is the wanted reading.
+//
+// Use it to tell an operator's choice from a derived default -- for instance
+// to warn only about a setting someone asked for -- not to decide what value
+// to use: the accessors already resolve that.
+func (pi *ParamItem) IsSetByUser() bool {
+	_, raw, err := pi.getWithRaw()
+	return err == nil && raw != pi.DefaultValue
+}
+
 // Get original value with error
 func (pi *ParamItem) get() (string, error) {
 	result, _, err := pi.getWithRaw()
