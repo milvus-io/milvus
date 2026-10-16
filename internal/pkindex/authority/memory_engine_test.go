@@ -14,10 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build test
-// +build test
-
-package pkindex
+package authority
 
 import (
 	"context"

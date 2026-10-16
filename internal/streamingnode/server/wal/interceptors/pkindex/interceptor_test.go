@@ -31,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
@@ -119,10 +121,10 @@ type testEngine struct {
 // put seeds the index of one primary key, as an earlier insert would have done.
 func (e *testEngine) put(t *testing.T, pk int64, segmentID int64) {
 	t.Helper()
-	e.putPK(t, snpkindex.Int64PK(pk), segmentID)
+	e.putPK(t, authority.Int64PK(pk), segmentID)
 }
 
-func (e *testEngine) putPK(t *testing.T, pk snpkindex.PK, segmentID int64) {
+func (e *testEngine) putPK(t *testing.T, pk authority.PK, segmentID int64) {
 	t.Helper()
 	value := codec.EncodePKEntry(codec.PKEntry{SegmentID: segmentID})
 	require.NoError(t, e.idx.EngineForTest().Write(context.Background(), []engine.Mutation{
@@ -133,10 +135,10 @@ func (e *testEngine) putPK(t *testing.T, pk snpkindex.PK, segmentID int64) {
 // segmentOf returns the segment of a primary key and whether it is in the index.
 func (e *testEngine) segmentOf(t *testing.T, pk int64) (int64, bool) {
 	t.Helper()
-	return e.segmentOfPK(t, snpkindex.Int64PK(pk))
+	return e.segmentOfPK(t, authority.Int64PK(pk))
 }
 
-func (e *testEngine) segmentOfPK(t *testing.T, pk snpkindex.PK) (int64, bool) {
+func (e *testEngine) segmentOfPK(t *testing.T, pk authority.PK) (int64, bool) {
 	t.Helper()
 	values, err := e.idx.EngineForTest().MultiGet(context.Background(), [][]byte{pk.Encode()})
 	require.NoError(t, err)
@@ -414,6 +416,7 @@ func newEmptyTestInterceptor(t *testing.T, env *testIndexEnv, sessions txnSessio
 		registry: newRegistry(ch),
 		sessions: sessions,
 		metrics:  newMetrics(),
+		onFatal:  env.onFatal,
 	}
 	t.Cleanup(i.Close)
 	return i, &testEngines{ch: ch}
@@ -597,6 +600,26 @@ func TestBuildPassesOnFatalToTheIndex(t *testing.T) {
 }
 
 // ===== autocommit insert =====
+
+func TestInsertOnCorruptedIndexMarksTheWALUnavailable(t *testing.T) {
+	env := newTestIndexEnv(t)
+	i, engines := newEmptyTestInterceptor(t, env, nil)
+	created, err := i.registry.add(context.Background(), testVChannel, testCollectionID, testSchema(false))
+	require.NoError(t, err)
+	require.True(t, created)
+	e := engines.of(t, testVChannel)
+	require.NoError(t, e.idx.EngineForTest().Write(context.Background(), []engine.Mutation{
+		{Key: authority.Int64PK(1).Encode(), Value: []byte{0xff, 0xff}},
+	}))
+	f := newFakeAppender()
+
+	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+	require.Error(t, err)
+	require.Empty(t, f.types, "nothing is appended after a failed decision")
+	fatals := env.fatalList()
+	require.Len(t, fatals, 1)
+	require.ErrorIs(t, fatals[0], pkroot.ErrCorrupted)
+}
 
 func TestInsertMiss(t *testing.T) {
 	i, engines := newTestInterceptor(t, nil)
@@ -865,7 +888,7 @@ func TestVarCharInsertMiss(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
 
-	segmentID, ok := engines.of(t, testVChannel).segmentOfPK(t, snpkindex.VarCharPK("a"))
+	segmentID, ok := engines.of(t, testVChannel).segmentOfPK(t, authority.VarCharPK("a"))
 	require.True(t, ok)
 	require.Equal(t, f.segmentID, segmentID)
 }
@@ -873,7 +896,7 @@ func TestVarCharInsertMiss(t *testing.T) {
 func TestVarCharInsertHit(t *testing.T) {
 	i, engines := newTestInterceptorOfSchema(t, nil, testVarCharSchema())
 	engine := engines.of(t, testVChannel)
-	engine.putPK(t, snpkindex.VarCharPK("a"), 100)
+	engine.putPK(t, authority.VarCharPK("a"), 100)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newVarCharInsert(testVChannel, "a"), f.append)
@@ -890,7 +913,7 @@ func TestVarCharInsertHit(t *testing.T) {
 	require.Nil(t, body.GetPrimaryKeys().GetIntId())
 	require.Equal(t, int64(1), body.GetNumRows())
 
-	segmentID, ok := engine.segmentOfPK(t, snpkindex.VarCharPK("a"))
+	segmentID, ok := engine.segmentOfPK(t, authority.VarCharPK("a"))
 	require.True(t, ok)
 	require.Equal(t, f.segmentID, segmentID)
 }
@@ -898,8 +921,8 @@ func TestVarCharInsertHit(t *testing.T) {
 func TestVarCharDeleteOfPresentKeys(t *testing.T) {
 	i, engines := newTestInterceptorOfSchema(t, nil, testVarCharSchema())
 	engine := engines.of(t, testVChannel)
-	engine.putPK(t, snpkindex.VarCharPK("a"), 100)
-	engine.putPK(t, snpkindex.VarCharPK("b"), 100)
+	engine.putPK(t, authority.VarCharPK("a"), 100)
+	engine.putPK(t, authority.VarCharPK("b"), 100)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newVarCharDelete(testVChannel, "a", "b"), f.append)
@@ -908,7 +931,7 @@ func TestVarCharDeleteOfPresentKeys(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, f.deleteBodyAt(t, 0).GetPrimaryKeys().GetStrId().GetData())
 
 	for _, pk := range []string{"a", "b"} {
-		_, ok := engine.segmentOfPK(t, snpkindex.VarCharPK(pk))
+		_, ok := engine.segmentOfPK(t, authority.VarCharPK(pk))
 		require.False(t, ok)
 	}
 }
@@ -1107,14 +1130,14 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 		_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, pk).WithTxnContext(txnCtx), newFakeAppender().append)
 		require.NoError(t, err)
 	}
-	require.Equal(t, []int64{txnID}, target.PendingTxnIDs())
+	require.Equal(t, []int64{txnID}, target.Authority().PendingTxnIDs())
 
 	// the session is alive, so a TimeTick keeps the pending writes.
 	f := newFakeAppender()
 	_, err := i.DoAppend(newTestAppendContext(), newTimeTick(20), f.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeTimeTick}, f.types, "the TimeTick passes through")
-	require.Equal(t, []int64{txnID}, target.PendingTxnIDs())
+	require.Equal(t, []int64{txnID}, target.Authority().PendingTxnIDs())
 
 	// an exclusive DDL fails the transaction. The manager forgets the session.
 	manager.FailTxnAtVChannel(testVChannel)
@@ -1123,7 +1146,7 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 
 	_, err = i.DoAppend(newTestAppendContext(), newTimeTick(21), newFakeAppender().append)
 	require.NoError(t, err)
-	require.Empty(t, target.PendingTxnIDs(), "the pending writes of an ended transaction must be dropped")
+	require.Empty(t, target.Authority().PendingTxnIDs(), "the pending writes of an ended transaction must be dropped")
 
 	// a commit that still arrives has nothing to apply.
 	f2 := newFakeAppender()

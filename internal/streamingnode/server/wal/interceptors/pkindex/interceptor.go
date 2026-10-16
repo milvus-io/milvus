@@ -22,6 +22,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -48,6 +51,7 @@ type appendInterceptor struct {
 	registry *registry
 	sessions txnSessions
 	metrics  *pkindexMetrics
+	onFatal  func(error) // marks the WAL unavailable
 }
 
 func (i *appendInterceptor) Name() string {
@@ -155,8 +159,8 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 	}
 	i.rememberCipher(t, msg)
 
-	intent, err := i.decide(ctx, t, snpkindex.Request{
-		Kind:     snpkindex.KindInsert,
+	guard, err := i.decide(ctx, t, authority.DecideRequest{
+		Kind:     authority.KindInsert,
 		VChannel: msg.VChannel(),
 		PKs:      toPKs(keys),
 		TxnID:    txnIDOf(msg),
@@ -165,42 +169,42 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 		return nil, err
 	}
 
-	companionPKs := intent.Decision().CompanionDeletePKs
+	companionPKs := guard.Decision().CompanionDeletePKs
 	if len(companionPKs) == 0 {
 		id, err := appendOp(ctx, msg)
 		if err != nil {
-			intent.Discard(ctx, err)
+			guard.Discard(ctx, err)
 			return id, err
 		}
-		i.applyInsert(ctx, intent, msg.IntoImmutableMessage(id), msg.TimeTick())
+		i.applyInsert(ctx, guard, msg.IntoImmutableMessage(id), msg.TimeTick())
 		return id, nil
 	}
 
 	companion, err := newCompanionDelete(msg.VChannel(), t, companionPKs)
 	if err != nil {
-		intent.Discard(ctx, err)
+		guard.Discard(ctx, err)
 		return nil, status.NewInner("build the companion delete of the primary key index: %v", err)
 	}
 	result, err := txn.AppendInTxn(ctx, appendOp, msg, []message.MutableMessage{companion})
 	if err != nil {
 		// A redo runs the whole chain again and makes the decision anew.
-		intent.Discard(ctx, err)
+		guard.Discard(ctx, err)
 		return nil, err
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
-	i.applyInsert(ctx, intent, result.Main, result.Commit.TimeTick())
+	i.applyInsert(ctx, guard, result.Main, result.Commit.TimeTick())
 	return result.Commit.MessageID(), nil
 }
 
 // applyInsert reads the assigned segment back from the appended insert. The shard
 // interceptor rewrites the header downstream, so it must be decoded again here.
-func (i *appendInterceptor) applyInsert(ctx context.Context, intent *snpkindex.Intent, appended message.ImmutableMessage, timeTick uint64) {
+func (i *appendInterceptor) applyInsert(ctx context.Context, guard *authority.WriteGuard, appended message.ImmutableMessage, timeTick uint64) {
 	header := message.MustAsImmutableInsertMessageV1(appended).Header()
 	var segmentID int64
 	if partitions := header.GetPartitions(); len(partitions) > 0 {
 		segmentID = partitions[0].GetSegmentAssignment().GetSegmentId()
 	}
-	intent.Apply(ctx, snpkindex.Applied{SegmentID: segmentID, TimeTick: timeTick})
+	guard.Apply(ctx, authority.Applied{SegmentID: segmentID, TimeTick: timeTick})
 }
 
 func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
@@ -219,8 +223,8 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	}
 	i.rememberCipher(t, msg)
 
-	intent, err := i.decide(ctx, t, snpkindex.Request{
-		Kind:     snpkindex.KindDelete,
+	guard, err := i.decide(ctx, t, authority.DecideRequest{
+		Kind:     authority.KindDelete,
 		VChannel: msg.VChannel(),
 		PKs:      toPKs(keys),
 		TxnID:    txnIDOf(msg),
@@ -237,16 +241,16 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	// TODO: narrow or skip a delete once the index is proven complete for the collection.
 	id, err := appendOp(ctx, msg)
 	if err != nil {
-		intent.Discard(ctx, err)
+		guard.Discard(ctx, err)
 		return id, err
 	}
-	intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
+	guard.Apply(ctx, authority.Applied{TimeTick: msg.TimeTick()})
 	return id, nil
 }
 
 func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	intent, err := i.decide(ctx, t, snpkindex.Request{
-		Kind:     snpkindex.KindCommitTxn,
+	guard, err := i.decide(ctx, t, authority.DecideRequest{
+		Kind:     authority.KindCommitTxn,
 		VChannel: msg.VChannel(),
 		TxnID:    txnIDOf(msg),
 	})
@@ -254,7 +258,7 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 		return nil, err
 	}
 
-	companionPKs := intent.Decision().CompanionDeletePKs
+	companionPKs := guard.Decision().CompanionDeletePKs
 	// With no companion delete, AppendInTxn appends only the CommitTxn, which is
 	// the plain append. The companion delete is encrypted with the cipher config
 	// remembered for this vchannel, and this handler never remembers one itself.
@@ -266,24 +270,24 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 	if len(companionPKs) > 0 {
 		companion, err := newCompanionDelete(msg.VChannel(), t, companionPKs)
 		if err != nil {
-			intent.Discard(ctx, err)
+			guard.Discard(ctx, err)
 			return nil, status.NewInner("build the companion delete of the primary key index: %v", err)
 		}
 		extras = append(extras, companion)
 	}
 	result, err := txn.AppendInTxn(ctx, appendOp, msg, extras)
 	if err != nil {
-		intent.Discard(ctx, err)
+		guard.Discard(ctx, err)
 		return nil, err
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
-	intent.Apply(ctx, snpkindex.Applied{TimeTick: result.Commit.TimeTick()})
+	guard.Apply(ctx, authority.Applied{TimeTick: result.Commit.TimeTick()})
 	return result.Commit.MessageID(), nil
 }
 
 func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	intent, err := i.decide(ctx, t, snpkindex.Request{
-		Kind:     snpkindex.KindRollbackTxn,
+	guard, err := i.decide(ctx, t, authority.DecideRequest{
+		Kind:     authority.KindRollbackTxn,
 		VChannel: msg.VChannel(),
 		TxnID:    txnIDOf(msg),
 	})
@@ -293,40 +297,47 @@ func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg m
 
 	id, err := appendOp(ctx, msg)
 	if err != nil {
-		intent.Discard(ctx, err)
+		guard.Discard(ctx, err)
 		return id, err
 	}
-	intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
+	guard.Apply(ctx, authority.Applied{TimeTick: msg.TimeTick()})
 	return id, nil
 }
 
 // decide calls the index and classifies its error for the WAL.
-func (i *appendInterceptor) decide(ctx context.Context, t *target, req snpkindex.Request) (*snpkindex.Intent, error) {
+func (i *appendInterceptor) decide(ctx context.Context, t *target, req authority.DecideRequest) (*authority.WriteGuard, error) {
 	start := time.Now()
-	intent, err := t.idx.Decide(ctx, req)
+	guard, err := t.idx.Authority().Decide(ctx, req)
 	if err != nil {
+		if errors.Is(err, pkroot.ErrCorrupted) {
+			// The index of this vchannel is wrong, and every later decision
+			// would be too. The WAL becomes unavailable, like on a fenced claim.
+			mlog.Error(ctx, "primary key index lookup found corrupted data, the WAL becomes unavailable",
+				mlog.FieldVChannel(req.VChannel), mlog.Err(err))
+			i.onFatal(err)
+		}
 		return nil, decideError(err)
 	}
 	switch {
-	case req.Kind == snpkindex.KindCommitTxn:
+	case req.Kind == authority.KindCommitTxn:
 		// A commit probes the pending writes of its transaction, and the decider
 		// does not expose how many keys that is. Without that number the hit and
 		// miss counters can not both be fed, and feeding only the hits would make
 		// the ratio of the two wrong. Only the duration and the lock wait are
 		// observed until the decider reports the size of the pending snapshot.
-		i.metrics.observeCommitDecide(time.Since(start), intent.LockWait())
-	case req.TxnID == 0 && (req.Kind == snpkindex.KindInsert || req.Kind == snpkindex.KindDelete):
-		d := intent.Decision()
+		i.metrics.observeCommitDecide(time.Since(start), guard.LockWait())
+	case req.TxnID == 0 && (req.Kind == authority.KindInsert || req.Kind == authority.KindDelete):
+		d := guard.Decision()
 		hit := len(d.CompanionDeletePKs)
-		if req.Kind == snpkindex.KindDelete {
+		if req.Kind == authority.KindDelete {
 			hit = len(d.PresentPKs)
 		}
-		i.metrics.observeDecide(time.Since(start), intent.LockWait(), len(req.PKs), hit)
+		i.metrics.observeDecide(time.Since(start), guard.LockWait(), len(req.PKs), hit)
 	}
-	return intent, nil
+	return guard, nil
 }
 
-// decideError classifies an error of Index.Decide for the WAL.
+// decideError classifies an error of Authority.Decide for the WAL.
 func decideError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
@@ -350,9 +361,9 @@ func (i *appendInterceptor) dropPendingOfEndedTxns() {
 		return
 	}
 	i.registry.forEach(func(t *target) {
-		for _, txnID := range t.idx.PendingTxnIDs() {
+		for _, txnID := range t.idx.Authority().PendingTxnIDs() {
 			if _, err := i.sessions.GetSessionOfTxn(message.TxnID(txnID)); err != nil {
-				t.idx.DropTxn(txnID)
+				t.idx.Authority().DropTxn(txnID)
 			}
 		}
 	})

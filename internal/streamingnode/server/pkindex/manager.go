@@ -16,10 +16,9 @@
 
 // Package pkindex is the primary key index of a streaming node. A Manager
 // holds a Channel for each pchannel, and a Channel holds an Index for each
-// vchannel. The Index makes the write path decisions with its engine (which
-// keys of an insert need a companion delete, which keys of a delete exist, how
-// the writes of a transaction take effect at its commit) and hands its tables
-// over to object storage through a Committer.
+// vchannel. The Index owns the engine of its vchannel and the write path
+// authority on top of it (package internal/pkindex/authority), and hands its
+// tables over to object storage through a Committer.
 package pkindex
 
 import (
@@ -41,7 +40,7 @@ const defaultBackoffBase = time.Second
 type Params struct {
 	// MemTableSize is the memtable size of the engine of one vchannel.
 	MemTableSize uint64
-	// LockStripes is the number of lock stripes of the decider of one vchannel.
+	// LockStripes is the number of lock stripes of the authority of one vchannel.
 	LockStripes int
 	// ActiveBytes starts a handover when the active generation holds this many bytes.
 	ActiveBytes uint64

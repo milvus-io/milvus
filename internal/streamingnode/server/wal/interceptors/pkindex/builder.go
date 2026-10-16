@@ -102,6 +102,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		registry: reg,
 		sessions: sessions,
 		metrics:  newMetrics(),
+		onFatal:  onFatal,
 	}
 }
 

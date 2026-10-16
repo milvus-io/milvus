@@ -124,7 +124,7 @@ func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, 
 }
 
 // Remove closes the Index of a vchannel. It waits for a running handover
-// and for every open Intent of the vchannel. It keeps the local files.
+// and for every open WriteGuard of the vchannel. It keeps the local files.
 func (c *Channel) Remove(ctx context.Context, vchannel string) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return

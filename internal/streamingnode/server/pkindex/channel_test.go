@@ -562,7 +562,7 @@ func TestClosedChannelAndIndex(t *testing.T) {
 
 	_, _, err := ch.Add(context.Background(), "v1", testCollectionID, schemapb.DataType_Int64)
 	assert.True(t, errors.Is(err, engine.ErrClosed))
-	_, err = idx.Decide(context.Background(), insertRequest(idx, 1))
+	_, err = idx.Authority().Decide(context.Background(), insertRequest(idx, 1))
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 	assert.True(t, errors.Is(err, pkroot.ErrUnavailable))
 	assert.Nil(t, ch.Get("v0"))

@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -41,7 +42,7 @@ import (
 const warnFailures = 5
 
 // Index is the primary key index of one vchannel. It owns the engine, the
-// decider on top of it, and the handover state of the vchannel.
+// write path authority on top of it, and the handover state of the vchannel.
 type Index struct {
 	ch           *Channel
 	vchannel     string
@@ -49,7 +50,7 @@ type Index struct {
 	pkDataType   schemapb.DataType
 	committedDir string
 	eng          *engine.Engine
-	decider      *decider
+	auth         *authority.Authority
 	logger       *mlog.Logger
 
 	// ctx is canceled when the Index closes.
@@ -162,7 +163,13 @@ func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID in
 		heapPos:      -1,
 	}
 	idx.notFresh.Store(leftover)
-	idx.decider = newDecider(pkStore{eng: dirtyRW{eng: eng, idx: idx}}, params.LockStripes)
+	idx.auth = authority.New(dirtyRW{eng: eng, idx: idx}, authority.Config{
+		LockStripes: params.LockStripes,
+		OnWriterBegin: func() func() {
+			token := c.wm.enter()
+			return func() { c.wm.end(token) }
+		},
+	})
 	return idx, nil
 }
 
@@ -239,11 +246,19 @@ func (idx *Index) dirty() bool {
 	return idx.dirtyFlag.Load() || idx.pending.Load() != nil || len(idx.eng.FrozenGenerations()) > 0
 }
 
+// Authority returns the write path authority of the vchannel. The WAL
+// interceptor decides every write through it. Each open WriteGuard holds
+// the watermark of the pchannel back and keeps the Index open.
+func (idx *Index) Authority() *authority.Authority {
+	return idx.auth
+}
+
 // close stops the Index. It waits for a running handover and
-// every open Intent, then closes the engine. It keeps the local files.
+// every open WriteGuard, then closes the engine. It keeps the local files.
 func (idx *Index) close(ctx context.Context) {
 	idx.lifetime.SetState(typeutil.LifetimeStateStopped)
 	idx.cancel()
+	idx.auth.Close()
 	idx.lifetime.Wait()
 	if err := idx.eng.Close(); err != nil {
 		idx.logger.Warn(ctx, "failed to close primary key index engine", mlog.Err(err))

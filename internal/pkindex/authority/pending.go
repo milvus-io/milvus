@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package authority
 
 // pendingTxn collects the primary key writes of a transaction that has not been
 // committed yet. They reach the index only when the CommitTxn is applied.
@@ -47,7 +47,7 @@ func (p *pendingTxn) recordDelete(pks []PK) {
 	}
 }
 
-// snapshot returns a copy, so that it can be used outside the decider mutex.
+// snapshot returns a copy, so that it can be used outside the pendingMu of the Authority.
 func (p *pendingTxn) snapshot() *pendingTxn {
 	s := newPendingTxn()
 	for k, v := range p.puts {

@@ -39,7 +39,7 @@ problems stay:
 Manager                  one per streaming node: shared engine caches, config
  └─ Channel              one per pchannel: the claim, the manifest lookups,
      │                   the handover driver, lastAppliedTimeTick, LastAcked
-     └─ Index            one per vchannel: engine, decider, lastCommittedTimeTick
+     └─ Index            one per vchannel: engine, Authority, lastCommittedTimeTick
           └─ handover ── upload ──▶ object storage   (TableStore)
                       ── commit ──▶ manifest service (Committer)
                       ── install ─▶ engine           (InstallCommitted)
@@ -51,6 +51,11 @@ Manager                  one per streaming node: shared engine caches, config
   `Index`, and the pending request is a field of it. The package also defines
   the interfaces and types that the handover exchanges with object storage
   and the manifest service. It does not depend on the WAL.
+- `internal/pkindex/authority` holds the write path decision (`Authority`,
+  `WriteGuard`, the striped locks and the pending writes of transactions) over
+  the `engine.RW` of a vchannel. The `Index` owns one `Authority` and the
+  interceptor decides every write through `Index.Authority()`. The package
+  knows neither the `Index` nor the WAL.
 - `TableStore` has two methods, `UploadFile` and `DownloadFile`. The
   handover defines this interface for its own use. It does not use the
   object store interface of the manifest service.
@@ -132,11 +137,15 @@ the `LastAcked` heap. This change does not inject a `Committer` (see
 The pkindex interceptor is a thin shell. It translates WAL events into calls on
 the primary key index:
 
-- Before the downstream append, the interceptor calls `Index.Decide`. `Decide`
-  registers the writer with the watermark of the pchannel and returns an
-  `Intent`.
-- After the append, the interceptor calls `Intent.Apply` or `Intent.Discard`.
-  Both end the writer in the watermark.
+- Before the downstream append, the interceptor calls
+  `Index.Authority().Decide`. The `Index` configured its `Authority` so that
+  `Decide` registers the writer with the watermark of the pchannel. `Decide`
+  returns a `WriteGuard`.
+- After the append, the interceptor calls `WriteGuard.Apply` or
+  `WriteGuard.Discard`. Both end the writer in the watermark.
+- A `Decide` that fails with `pkindex.ErrCorrupted` makes the interceptor call
+  `OnFatal`: the index of the vchannel is wrong, and the WAL becomes
+  unavailable.
 - After each TimeTick message returns from the append, the interceptor calls
   `Channel.Tick(tt)`.
 - The interceptor build param carries an `OnFatal` callback. The WAL opener

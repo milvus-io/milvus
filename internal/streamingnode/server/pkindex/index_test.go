@@ -259,30 +259,28 @@ func TestNoManifestAndNoLeftoverIsFresh(t *testing.T) {
 	assert.Empty(t, env.fatalList())
 }
 
-func TestDecideCorruptionIsFatal(t *testing.T) {
+func TestDecideErrorsReachTheCallerAndReleaseTheWriter(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
 	ctx := context.Background()
 	require.NoError(t, idx.EngineForTest().Write(ctx, []engine.Mutation{{Key: codec.EncodeInt64PK(1), Value: []byte{0xff, 0xff}}}))
 
-	_, err := idx.Decide(ctx, insertRequest(idx, 1))
+	// Corrupted data is reported to the caller. The WAL interceptor, not the
+	// Index, decides that it makes the WAL unavailable.
+	_, err := idx.Authority().Decide(ctx, insertRequest(idx, 1))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, pkroot.ErrCorrupted))
-	fatals := env.fatalList()
-	require.Len(t, fatals, 1)
-	assert.True(t, errors.Is(fatals[0], pkroot.ErrCorrupted))
+	assert.Empty(t, env.fatalList())
 
-	// A decider error that is not corruption is not fatal. The engine of
-	// another Index is closed while the Index stays open, so Decide reaches
-	// the decider and its lookup fails.
+	// The engine of another Index is closed while the Index stays open, so
+	// Decide reaches the lookup and it fails with a closed error.
 	other := env.add(ch, "v1")
 	require.NoError(t, other.eng.Close())
-	_, err = other.Decide(ctx, insertRequest(other, 2))
+	_, err = other.Authority().Decide(ctx, insertRequest(other, 2))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 	assert.False(t, errors.Is(err, pkroot.ErrCorrupted))
-	assert.Len(t, env.fatalList(), 1)
 	// the failed Decide released the writer
 	ch.Tick(30)
 	assert.EqualValues(t, 30, other.ch.wm.lastApplied())

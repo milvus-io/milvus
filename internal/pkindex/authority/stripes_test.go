@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package authority
 
 import (
 	"sync"
@@ -30,7 +30,7 @@ func TestStripeGuardReleaseIsIdempotentAndNilSafe(t *testing.T) {
 	guard.Release()
 	guard.Release()
 
-	var nilGuard *StripeGuard
+	var nilGuard *stripeGuard
 	nilGuard.Release()
 
 	// released stripes can be acquired again.

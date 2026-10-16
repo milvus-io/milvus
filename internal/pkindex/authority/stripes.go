@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package authority
 
 import (
 	"sort"
@@ -35,7 +35,7 @@ func newStripeLocks(n int) *stripeLocks {
 
 // acquire locks the stripes of pks in ascending stripe order, so that two
 // callers with overlapping keys can never deadlock.
-func (s *stripeLocks) acquire(pks []PK) *StripeGuard {
+func (s *stripeLocks) acquire(pks []PK) *stripeGuard {
 	seen := make(map[int]struct{}, len(pks))
 	stripes := make([]int, 0, len(pks))
 	for _, pk := range pks {
@@ -50,19 +50,19 @@ func (s *stripeLocks) acquire(pks []PK) *StripeGuard {
 	for _, idx := range stripes {
 		s.locks[idx].Lock()
 	}
-	return &StripeGuard{locks: s, stripes: stripes}
+	return &stripeGuard{locks: s, stripes: stripes}
 }
 
-// StripeGuard holds the stripes of one decision until Release.
-type StripeGuard struct {
+// stripeGuard holds the stripes of one decision until Release.
+type stripeGuard struct {
 	locks    *stripeLocks
 	stripes  []int
 	released bool
 }
 
 // Release unlocks in descending order. It is safe to call on nil and more than once.
-// A guard is owned by one Intent and is not released concurrently.
-func (g *StripeGuard) Release() {
+// A guard is owned by one WriteGuard and is not released concurrently.
+func (g *stripeGuard) Release() {
 	if g == nil || g.released {
 		return
 	}

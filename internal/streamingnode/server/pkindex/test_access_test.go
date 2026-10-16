@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 )
 
@@ -44,12 +45,12 @@ func TestPendingTxnIDsAndDropTxn(t *testing.T) {
 	idx := env.add(ch, "v0")
 	ctx := context.Background()
 
-	intent, err := idx.Decide(ctx, Request{Kind: KindInsert, VChannel: "v0", PKs: int64PKs(1), TxnID: 7})
+	intent, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindInsert, VChannel: "v0", PKs: int64PKs(1), TxnID: 7})
 	require.NoError(t, err)
-	intent.Apply(ctx, Applied{SegmentID: 10})
-	require.Equal(t, []int64{7}, idx.PendingTxnIDs())
+	intent.Apply(ctx, authority.Applied{SegmentID: 10})
+	require.Equal(t, []int64{7}, idx.Authority().PendingTxnIDs())
 	require.False(t, idx.DirtyForTest(), "a transaction body only records pending writes")
 
-	idx.DropTxn(7)
-	require.Empty(t, idx.PendingTxnIDs())
+	idx.Authority().DropTxn(7)
+	require.Empty(t, idx.Authority().PendingTxnIDs())
 }

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package authority
 
 import (
 	"context"
@@ -29,87 +29,86 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
-func newTestPKStore(t *testing.T) pkStore {
+func newTestEngine(t *testing.T) *MemoryEngine {
 	t.Helper()
 	eng := NewMemoryEngine()
 	t.Cleanup(func() { _ = eng.Close() })
-	return pkStore{eng: eng}
+	return eng
 }
 
-func TestPKStoreGetAndWrite(t *testing.T) {
-	ctx := context.Background()
-	s := newTestPKStore(t)
-
-	entry, err := s.get(ctx, Int64PK(1))
+func lookupOne(t *testing.T, eng engine.RW, pk PK) *codec.PKEntry {
+	t.Helper()
+	entries, err := lookup(context.Background(), eng, []PK{pk})
 	require.NoError(t, err)
-	require.Nil(t, entry)
+	require.Len(t, entries, 1)
+	return entries[0]
+}
 
-	b := &entryBatch{}
-	b.put(Int64PK(1), Entry{SegmentID: 100})
-	b.put(Int64PK(2), Entry{SegmentID: 200})
+func TestRecordsLookupAndWrite(t *testing.T) {
+	ctx := context.Background()
+	eng := newTestEngine(t)
+
+	require.Nil(t, lookupOne(t, eng, Int64PK(1)))
+
+	b := &batch{}
+	b.put(Int64PK(1), codec.PKEntry{SegmentID: 100})
+	b.put(Int64PK(2), codec.PKEntry{SegmentID: 200})
 	require.Equal(t, 2, b.len())
 
-	// nothing is visible before Write.
-	entry, err = s.get(ctx, Int64PK(1))
-	require.NoError(t, err)
-	require.Nil(t, entry)
+	// nothing is visible before write.
+	require.Nil(t, lookupOne(t, eng, Int64PK(1)))
 
-	require.NoError(t, s.write(ctx, b))
-	entries, err := s.multiGet(ctx, []PK{Int64PK(2), Int64PK(3), Int64PK(1)})
+	require.NoError(t, write(ctx, eng, b))
+	entries, err := lookup(ctx, eng, []PK{Int64PK(2), Int64PK(3), Int64PK(1)})
 	require.NoError(t, err)
-	require.Equal(t, []*Entry{{SegmentID: 200}, nil, {SegmentID: 100}}, entries)
+	require.Equal(t, []*codec.PKEntry{{SegmentID: 200}, nil, {SegmentID: 100}}, entries)
 }
 
-func TestPKStoreOverwriteAndDelete(t *testing.T) {
+func TestRecordsOverwriteAndDelete(t *testing.T) {
 	ctx := context.Background()
-	s := newTestPKStore(t)
+	eng := newTestEngine(t)
 
-	b := &entryBatch{}
-	b.put(VarCharPK("a"), Entry{SegmentID: 1})
-	require.NoError(t, s.write(ctx, b))
+	b := &batch{}
+	b.put(VarCharPK("a"), codec.PKEntry{SegmentID: 1})
+	require.NoError(t, write(ctx, eng, b))
 
-	b = &entryBatch{}
-	b.put(VarCharPK("a"), Entry{SegmentID: 2})
+	b = &batch{}
+	b.put(VarCharPK("a"), codec.PKEntry{SegmentID: 2})
 	b.delete(VarCharPK("b")) // deleting an absent key is fine
-	require.NoError(t, s.write(ctx, b))
-	entry, err := s.get(ctx, VarCharPK("a"))
-	require.NoError(t, err)
-	require.Equal(t, &Entry{SegmentID: 2}, entry)
+	require.NoError(t, write(ctx, eng, b))
+	require.Equal(t, &codec.PKEntry{SegmentID: 2}, lookupOne(t, eng, VarCharPK("a")))
 
-	b = &entryBatch{}
+	b = &batch{}
 	b.delete(VarCharPK("a"))
-	require.NoError(t, s.write(ctx, b))
-	entry, err = s.get(ctx, VarCharPK("a"))
-	require.NoError(t, err)
-	require.Nil(t, entry)
+	require.NoError(t, write(ctx, eng, b))
+	require.Nil(t, lookupOne(t, eng, VarCharPK("a")))
 }
 
-func TestPKStoreEmptyBatchAndEmptyMultiGet(t *testing.T) {
+func TestRecordsEmptyBatchAndEmptyLookup(t *testing.T) {
 	ctx := context.Background()
-	s := newTestPKStore(t)
-	require.NoError(t, s.write(ctx, &entryBatch{}))
-	entries, err := s.multiGet(ctx, nil)
+	eng := newTestEngine(t)
+	require.NoError(t, write(ctx, eng, &batch{}))
+	require.NoError(t, write(ctx, eng, nil))
+	entries, err := lookup(ctx, eng, nil)
 	require.NoError(t, err)
 	require.Empty(t, entries)
 }
 
-func TestPKStoreRejectsCorruptValue(t *testing.T) {
+func TestRecordsRejectCorruptValue(t *testing.T) {
 	ctx := context.Background()
-	eng := NewMemoryEngine()
+	eng := newTestEngine(t)
 	require.NoError(t, eng.Write(ctx, []engine.Mutation{{Key: Int64PK(1).Encode(), Value: []byte{1, 2, 3}}}))
-	s := pkStore{eng: eng}
 
-	_, err := s.get(ctx, Int64PK(1))
+	_, err := lookup(ctx, eng, []PK{Int64PK(1)})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, pkroot.ErrCorrupted))
 }
 
-func TestPKStoreAfterEngineClose(t *testing.T) {
+func TestRecordsAfterEngineClose(t *testing.T) {
 	ctx := context.Background()
 	eng := NewMemoryEngine()
-	s := pkStore{eng: eng}
 	require.NoError(t, eng.Close())
-	_, err := s.get(ctx, Int64PK(1))
+	_, err := lookup(ctx, eng, []PK{Int64PK(1)})
 	require.Error(t, err)
 }
 
@@ -124,7 +123,7 @@ func (e *fakeLengthEngine) MultiGet(_ context.Context, _ [][]byte) ([][]byte, er
 	return make([][]byte, e.returnLen), nil
 }
 
-func TestPKStoreMultiGetRejectsWrongLength(t *testing.T) {
+func TestRecordsLookupRejectsWrongLength(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name      string
@@ -134,9 +133,9 @@ func TestPKStoreMultiGetRejectsWrongLength(t *testing.T) {
 		{"too many values", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := pkStore{eng: &fakeLengthEngine{returnLen: tc.returnLen}}
-			_, err := s.multiGet(ctx, []PK{Int64PK(1), Int64PK(2)})
+			_, err := lookup(ctx, &fakeLengthEngine{returnLen: tc.returnLen}, []PK{Int64PK(1), Int64PK(2)})
 			require.Error(t, err)
+			require.True(t, errors.Is(err, errValueCountMismatch))
 		})
 	}
 }
@@ -144,10 +143,7 @@ func TestPKStoreMultiGetRejectsWrongLength(t *testing.T) {
 func TestKeyAndValueUseCodec(t *testing.T) {
 	assert.Equal(t, codec.EncodeInt64PK(-5), Int64PK(-5).Encode())
 	assert.Equal(t, codec.EncodeVarcharPK("a"), VarCharPK("a").Encode())
-	assert.Equal(t, codec.EncodePKEntry(codec.PKEntry{SegmentID: 9}), Entry{SegmentID: 9}.encode())
-}
-
-func TestCorruptEntryIsMarked(t *testing.T) {
-	_, err := decodeEntry([]byte{0x7f})
-	assert.True(t, errors.Is(err, pkroot.ErrCorrupted))
+	b := &batch{}
+	b.put(Int64PK(9), codec.PKEntry{SegmentID: 9})
+	assert.Equal(t, codec.EncodePKEntry(codec.PKEntry{SegmentID: 9}), b.muts[0].Value)
 }

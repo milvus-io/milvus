@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -478,9 +479,9 @@ func waitReady(t *testing.T, idx *Index) {
 // insert runs an autocommit insert through Decide and Apply.
 func insert(t *testing.T, idx *Index, segmentID int64, pks ...int64) {
 	ctx := context.Background()
-	intent, err := idx.Decide(ctx, Request{Kind: KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pks...)})
+	intent, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pks...)})
 	require.NoError(t, err)
-	intent.Apply(ctx, Applied{SegmentID: segmentID})
+	intent.Apply(ctx, authority.Applied{SegmentID: segmentID})
 }
 
 // segmentOf returns the segment of pk in the engine, 0 when pk is absent.
@@ -501,4 +502,12 @@ func sstIDs(m ManifestView) []int64 {
 		ids = append(ids, int64(s.ID))
 	}
 	return ids
+}
+
+func int64PKs(values ...int64) []authority.PK {
+	pks := make([]authority.PK, 0, len(values))
+	for _, v := range values {
+		pks = append(pks, authority.Int64PK(v))
+	}
+	return pks
 }
