@@ -159,8 +159,8 @@ func TestReadSnapshotPinsObjectsAcrossGC(t *testing.T) {
 	// While the reader holds a captured durable/hot snapshot, move the hot
 	// section to disk and release the older manifest entry. Physical GC needs
 	// the exclusive read lock and must wait for this read to return.
-	var origin func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error)
-	patch := mockey.Mock((*Store).readChunkPayload).Origin(&origin).To(func(store *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+	var origin func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error)
+	patch := mockey.Mock((*Store).readChunkPayload).Origin(&origin).To(func(store *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
 		// Copy the mock pointer argument before calling back into the manager.
 		copied := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 		require.NoError(t, m.writeChunk(ctx, sc))
@@ -168,7 +168,7 @@ func TestReadSnapshotPinsObjectsAcrossGC(t *testing.T) {
 		m.cfg.RetentionMaxBytes = 1
 		require.NoError(t, m.GCOnce(ctx))
 		require.False(t, m.readMu.TryLock(), "physical GC cannot acquire its lock during a read")
-		return origin(store, ctx, copied)
+		return origin(store, ctx, copied, verified)
 	}).Build()
 	defer patch.UnPatch()
 	b, err := m.ReadTransform(ctx, "v1", 0, 200, ReadLimits{})

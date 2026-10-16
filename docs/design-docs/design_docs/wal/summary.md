@@ -713,6 +713,16 @@ same/cross-VChannel sharing and write admission; also cover eviction, disabled
 and oversized caches, concurrent cancellation/failure, out-of-order upload,
 equivalent write retries, GC during loading and restart without payload preload.
 
+Each retained immutable chunk index also keeps its successful footer-validation
+fingerprint independently of resident payload bytes. Eviction or disabled
+payload caching preserves that fingerprint; retirement discards both. Every
+reload still validates framing and hashes the footer. Only an unchanged digest
+and object size can reuse semantic validation against the same manifest index.
+Changed footer encodings undergo full decoding and index comparison. In-flight
+reads cannot repopulate retired cache state. A canceled loader is retried by
+independent waiters only when its returned error is caused by that cancellation;
+a simultaneous object error must remain visible.
+
 ### 5.5 TransformLog Adaptor
 
 [TransformLog](transform_log.md) wraps §5.4 without ObserveMessage, independent

@@ -8,8 +8,8 @@
 **Status:** The local SN bootstrap adaptor is implemented in
 `internal/streamingnode/server/wal/walsummary/stream.go` and wired through
 `vchannel.PChannelRecoveryManager` into GrowingRuntime. It performs bounded Delete replay for
-QueryRuntime preparation. Remote transport and QN continuous-subscription
-integration remain planned; the general subscription contract below includes
+QueryRuntime preparation. Remote transport is implemented through `SubscribeTransform`; QN buffer and
+segment-application integration remain planned; the general subscription contract below includes
 those future consumers.
 
 TransformLog is a read-only subscription adaptor over
@@ -26,7 +26,8 @@ WALSummary (one store per PChannel)
   +-- Summary L0 consumer               [retained, not wired]
   +-- TransformLog subscription adaptor
         +-- local SN bounded replay     [implemented]
-        +-- remote / QN subscriptions   [planned]
+        +-- remote subscriptions        [implemented]
+        +-- QN buffer/application       [planned]
 ```
 
 TransformLog owns stream and subscription lifetimes, delivery cursors,
@@ -159,8 +160,8 @@ unavailable prefix, never the retained interval still required through the end.
 ### Unbounded subscriptions for QueryNode
 
 The local adaptor's unbounded mode uses WALSummary's VChannel-scoped transform
-notifications. This prepares the server-side behavior for QueryNode; remote
-transport and QN integration remain outside this extraction. Bounded SN bootstrap
+notifications. The same adaptor serves remote subscribers; QN buffer and
+segment-application integration remain outside this extraction. Bounded SN bootstrap
 keeps its existing global-coverage notification behavior.
 
 The QN contract is to wait for the VChannel `transforming_timetick` selected by
@@ -253,7 +254,8 @@ classified as permanent merely because the generic error lacks a retryable flag.
 Remote Provider integration must preserve this distinction: owner shutdown,
 migration and PChannel unavailability end the physical stream for PChannel-level
 reconnection; only explicit logical terminal failures become SubscriptionError.
-That transport wiring remains outside the local SN implementation. Segment
+The resumable transport consumes these owner errors, including exact legacy
+UNKNOWN cancellation causes, and reacquires the assignment. Segment
 application failure handling is unchanged by read recovery.
 
 This retry policy does not alter the lower-bound compatibility rule above or
@@ -353,3 +355,49 @@ that segcore must retain. No new disk cache or per-version resources are planned
 Validation should cover multi-page replay, midstream failures, cancellation with
 a full queue and peak extra replay memory. The current implementation remains
 unchanged by this TODO.
+
+## 10. Remote Transport And Ordered MVCCBarriers
+
+`WALAccesser.TransformLogStreamManager` opens a logical PChannel stream.
+`HandlerClient.AcquireTransformLogStream` resolves its current assignment and
+selects a local WAL accessor or a bidirectional `SubscribeTransform` RPC.
+Creation metadata carries the PChannel name and term. Create acknowledgements
+precede all subscription events. Multiple VChannels share one physical stream;
+each retains its own exclusive cursor and optional end timestamp.
+
+The resumable layer checkpoints only Entries/SyncUp accepted by the handler.
+On owner cancellation, fencing or transport loss it closes that attempt and
+resubscribes from those cursors. Explicit Close ends the logical lifetime;
+canceling one Subscribe call does not own that lifetime. Unsupported older
+peers return Unimplemented without indefinite retry. A Send EOF must yield to
+Recv's final gRPC status. Other semantic subscription errors remain visible.
+
+All client sends and CloseSend are serialized. Explicit stream close sends a
+CloseStream request and waits for acknowledgement, bounded by five seconds.
+Receive completion cancels only the physical RPC, without waiting for its send
+lock. For an explicit subscription close the server disables event delivery
+before canceling/joining its Summary worker, then acknowledges closure; this
+internal cancellation must not escape as a SubscriptionError. Failed create
+acknowledgements also release the event gate before joining the worker.
+
+`GetQueryPlanRequest.barrier_mvcc` requests a fixed read timestamp on the primary
+RW WAL. The TimeTick inspector coalesces per-VChannel requests and publishes an
+MVCCBarrier after the acknowledged prefix reaches the requested timestamp.
+The barrier carries target VChannels and traverses the same ordered WAB/scanner
+path as confirmations. Durable barriers confirm the full WAL prefix; volatile
+barriers advance only scoped query visibility and Summary read coverage.
+RecoveryStorage observes preceding records before publishing barrier progress.
+It does not use volatile barriers to advance durable checkpoints, seal chunks,
+acknowledge handles or authorize GC. Scoped Summary notifications wake readers,
+which deliver retained Entries before SyncUp. GrowingRuntime consumes the same
+ordered query barrier to advance its observed query frontier.
+
+A query waits for the requested timestamp, not a later publication timestamp.
+Owner shutdown cancels pending planning and permits replanning on the new owner;
+caller cancellation remains caller cancellation. Barrier state belongs to one
+WAL registration and is rebuilt after owner replacement.
+
+This transport does not implement QN TransformLogBuffer, DataView/QueryView
+replay-frontier or retention wiring, read-proof/CAS, or a query-path switch.
+Existing Delete/L0 behavior and the retained-history lower-bound contract stay
+in force. Remote subscription progress alone is not a retention guarantee.

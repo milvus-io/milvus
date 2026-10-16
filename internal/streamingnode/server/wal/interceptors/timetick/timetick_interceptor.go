@@ -45,7 +45,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	ackManager := impl.operator.AckManager()
 	var txnSession *txn.TxnSession
 	var immutableMsg message.ImmutableMessage
-	if msg.MessageType() != message.MessageTypeTimeTick {
+	if msg.MessageType() != message.MessageTypeTimeTick && msg.MessageType() != message.MessageTypeMVCCBarrier {
 		// Allocate new timestamp acker for message.
 		var acker *ack.Acker
 		if msg.BarrierTimeTick() == 0 {
@@ -98,7 +98,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			return nil, err
 		}
 		defer txnSession.RollbackDone()
-	case message.MessageTypeTimeTick:
+	case message.MessageTypeTimeTick, message.MessageTypeMVCCBarrier:
 		// cleanup the expired transaction sessions and the already done transaction.
 		impl.txnManager.CleanupTxnUntil(msg.TimeTick())
 	default:

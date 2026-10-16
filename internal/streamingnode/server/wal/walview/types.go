@@ -87,6 +87,7 @@ type VChannelResourceEvent struct {
 	Barrier       func()
 	Message       message.ImmutableMessage
 	SegmentSealed *SegmentSealedEvent
+	QueryBarrier  *QueryBarrierEvent
 }
 
 // SegmentSealedEvent reports the DataVersion assigned when a flushed growing
@@ -95,4 +96,10 @@ type SegmentSealedEvent struct {
 	SegmentID           int64
 	VChannel            string
 	SealedAtDataVersion qviews.DataVersion
+}
+
+// QueryBarrierEvent proves complete ordered application through TimeTick for
+// one VChannel. It carries no data and is not a recovery/persistence frontier.
+type QueryBarrierEvent struct {
+	TimeTick uint64
 }
