@@ -1254,9 +1254,70 @@ func TestApplyCompactionRunRules(t *testing.T) {
 }
 
 func TestApplyFlushClearsRunID(t *testing.T) {
-	req := &pkindexpb.CommitFlushRequest{CollectionId: 1, Vchannel: "v1", PchannelTerm: 1, CheckpointTimeTick: 10,
+	req := &pkindexpb.CommitFlushRequest{CollectionId: 1, Vchannel: vch, PchannelTerm: 1, CheckpointTimeTick: 10,
 		AddSsts: []*pkindexpb.SSTRef{sstRef(1, 99, "a", "z")}}
 	next, err := applyFlush(nil, req, "base")
 	require.NoError(t, err)
 	require.Zero(t, next.GetSsts()[0].GetRunId())
+}
+
+type recordingObserver struct {
+	mu       sync.Mutex
+	versions []int64
+}
+
+func (o *recordingObserver) ManifestChanged(_ context.Context, m *pkindexpb.Manifest) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.versions = append(o.versions, m.GetVersion())
+}
+
+func TestManagerObserverAndCurrent(t *testing.T) {
+	ctx := context.Background()
+	m, _, _ := claimed(t, 1)
+	obs := &recordingObserver{}
+	m.SetObserver(obs)
+	_, err := m.CommitFlush(ctx, flush(1, 10, 1))
+	require.NoError(t, err)
+	_, err = m.CommitFlush(ctx, flush(1, 20, 2))
+	require.NoError(t, err)
+	// an applied retry changes nothing and is not reported
+	_, err = m.CommitFlush(ctx, flush(1, 20, 2))
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, obs.versions)
+
+	cur, err := m.Current(ctx, Target{CollectionID: 1, VChannel: vch})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, cur.GetVersion())
+	none, err := m.Current(ctx, Target{CollectionID: 1, VChannel: vch + "x"})
+	require.NoError(t, err)
+	require.Nil(t, none)
+}
+
+// A zero-output compaction that is applied a second time is an applied retry.
+func TestZeroOutputCompactionRetry(t *testing.T) {
+	m, err := applyEditFlush(nil, editFlush(1, 10, 2, 1))
+	require.NoError(t, err)
+	edit := Compaction{Inputs: []int64{2, 1}}
+	c, err := applyCompaction(m, edit)
+	require.NoError(t, err)
+	require.NotNil(t, c)
+	again, err := applyCompaction(c, edit)
+	require.NoError(t, err)
+	require.Nil(t, again)
+}
+
+// A commit whose pointer write fails and is not confirmed by the read-back is
+// not reported.
+func TestObserverNotCalledOnFailedCommit(t *testing.T) {
+	ctx := context.Background()
+	m, p, _ := claimed(t, 1)
+	obs := &recordingObserver{}
+	m.SetObserver(obs)
+	_, err := m.CommitFlush(ctx, flush(1, 10, 1))
+	require.NoError(t, err)
+	p.WriteErr = errors.New("crash")
+	_, err = m.CommitFlush(ctx, flush(1, 20, 2))
+	require.Error(t, err)
+	require.Equal(t, []int64{1}, obs.versions)
 }

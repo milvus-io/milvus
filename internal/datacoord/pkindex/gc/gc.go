@@ -76,10 +76,15 @@ type GC struct {
 	cfg      Config
 	inFlight InFlightOutputs
 	now      func() time.Time
+	observer manifest.Observer
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
+
+// SetObserver sets the observer told of every current manifest a round reads.
+// Call it before Start.
+func (g *GC) SetObserver(o manifest.Observer) { g.observer = o }
 
 // New returns a GC over the pointers in meta and the objects in store, under
 // rootPath of the object storage. It returns ErrInvalidConfig when cfg.Interval is not
@@ -177,6 +182,9 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel),
 			mlog.String("bodyKey", curKey), mlog.String("sstBasePath", cur.GetSstBasePath()))
 		return nil
+	}
+	if g.observer != nil {
+		g.observer.ManifestChanged(ctx, cur)
 	}
 	now := g.now()
 
