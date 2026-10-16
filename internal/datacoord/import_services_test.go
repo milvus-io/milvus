@@ -441,6 +441,22 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_InvalidTimeoutReturnsEr
 	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 }
 
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_BackupExpansionFailure() {
+	server := &Server{meta: &meta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	expand := mockey.Mock(ListBinlogImportRequestFiles).Return(nil, merr.ErrServiceUnavailable).Build()
+	defer expand.UnPatch()
+
+	resp, err := server.createImportJobFromAck(context.Background(), &internalpb.ImportRequestInternal{
+		Files: []*internalpb.ImportFile{{Paths: []string{"insert", "delta"}}},
+		Options: []*commonpb.KeyValuePair{
+			{Key: "backup", Value: "true"},
+		},
+	})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
+}
+
 func (s *ImportServicesSuite) TestCreateImportJobFromAck_AllocatorFailsReturnsError() {
 	ctx := context.Background()
 	server := &Server{}
