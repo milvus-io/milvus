@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -125,7 +126,7 @@ func TestReopenedIndexStartsEmpty(t *testing.T) {
 
 	idx = env.add(ch, "v0")
 	assert.Empty(t, idx.EngineForTest().FrozenGenerations())
-	assert.NoDirExists(t, idx.CommittedDirForTest())
+	assert.DirExists(t, idx.CommittedDirForTest(), "the committed dir is kept")
 	assert.Zero(t, segmentOf(t, idx, 1), "the old key is gone")
 
 	insert(t, idx, 20, 3)
@@ -141,20 +142,24 @@ func inHeap(ch *PChannelIndexManager, idx *index.Index) bool {
 	return ch.acked.contains(idx)
 }
 
-// TestLeftoverInCommittedOnlyIsRemovedAtOpen checks that a file left in the
-// committed directory alone, such as a download that did not finish, is
-// removed at open, and the Index starts empty.
-func TestLeftoverInCommittedOnlyIsRemovedAtOpen(t *testing.T) {
+// TestLeftoverInEngineDirOnlyIsRemovedAtOpen checks that a file left in the
+// engine directory is removed at open, the committed directory is kept, and
+// the Index starts empty.
+func TestLeftoverInEngineDirOnlyIsRemovedAtOpen(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
+	engineDir := filepath.Join(env.root, "v0", "engine")
 	committed := filepath.Join(env.root, "v0", "committed")
+	require.NoError(t, os.MkdirAll(engineDir, 0o755))
 	require.NoError(t, os.MkdirAll(committed, 0o755))
-	// a download that did not finish, and no engine directory
-	leftover := filepath.Join(committed, "1001.sst.download-123")
-	require.NoError(t, os.WriteFile(leftover, []byte("partial"), 0o600))
+	stale := filepath.Join(engineDir, "stale")
+	require.NoError(t, os.WriteFile(stale, []byte("partial"), 0o600))
+	kept := filepath.Join(committed, "1001.sst")
+	require.NoError(t, os.WriteFile(kept, []byte("table"), 0o600))
 
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	assert.NoDirExists(t, committed)
+	assert.NoFileExists(t, stale)
+	assert.FileExists(t, kept)
 	assert.Empty(t, idx.EngineForTest().FrozenGenerations())
 	assert.Zero(t, segmentOf(t, idx, 1))
 	assert.Empty(t, env.fatalList())
@@ -403,4 +408,85 @@ func TestNotReadyIndexDecidesDegraded(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64PKs(1), guard.Decision().CompanionDeletePKs, "ready: only the present key")
 	guard.Discard(ctx, nil)
+}
+
+func TestOpenKeepsCommittedDirAndWipesEngineDir(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	env := NewFakeEnv(t, root)
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	committed := idx.CommittedDirForTest()
+	require.NoError(t, os.MkdirAll(committed, 0o755))
+	kept := filepath.Join(committed, "7.sst")
+	require.NoError(t, os.WriteFile(kept, []byte("table"), 0o644))
+	idx.MarkReady(ctx, false)
+	insert(t, idx, 1, 5)
+	engineDir := filepath.Join(index.Dir(root, "v1"), "engine")
+	c.RemoveForTest(ctx, "v1") // keeps the files, like a restart
+	require.DirExists(t, engineDir)
+
+	idx, _, err = c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	assert.FileExists(t, kept)
+	idx.MarkReady(ctx, false)
+	g, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindDelete, VChannel: "v1", PKs: []authority.PK{authority.Int64PK(5)}})
+	require.NoError(t, err)
+	assert.Empty(t, g.Decision().PresentPKs, "the engine dir was wiped")
+	g.Discard(ctx, nil)
+	c.Close()
+}
+
+func TestResolveLocalRedownloadsATableWithTheWrongSize(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.MarkReady(ctx, false)
+	// a real table in the store, built by one handover
+	insert(t, idx, 1, 1, 2, 3)
+	c.ObserveTimeTick(12)
+	p, err := idx.PrepareForTest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	ref := p.Request().AddTables[0]
+	key := pkroot.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID))
+	store := env.Manager.StoreForTest().(*index.FakeStore)
+	require.NoError(t, store.UploadFile(ctx, key, p.Local()[ref.ID]))
+	// corrupt the local copy: wrong size
+	local := index.CommittedPathForTest(idx.CommittedDirForTest(), ref.ID)
+	require.NoError(t, os.WriteFile(local, []byte("short"), 0o644))
+
+	view := index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 11, Tables: []index.TableRef{ref}}
+	require.NoError(t, idx.InstallIfNewerForTest(ctx, view, nil))
+	fi, err := os.Stat(local)
+	require.NoError(t, err)
+	assert.Equal(t, ref.Size, fi.Size())
+}
+
+func TestResolveLocalReusesATableWithTheRightSize(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.MarkReady(ctx, false)
+	insert(t, idx, 1, 1, 2, 3)
+	c.ObserveTimeTick(12)
+	p, err := idx.PrepareForTest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	ref := p.Request().AddTables[0]
+	key := pkroot.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID))
+	store := env.Manager.StoreForTest().(*index.FakeStore)
+	require.NoError(t, store.UploadFile(ctx, key, p.Local()[ref.ID]))
+	// a download would fail, so the install must use the local file
+	store.FailDownloads(1)
+
+	view := index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 11, Tables: []index.TableRef{ref}}
+	require.NoError(t, idx.InstallIfNewerForTest(ctx, view, nil))
 }

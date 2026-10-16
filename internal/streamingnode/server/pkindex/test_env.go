@@ -179,3 +179,6 @@ func (c *PChannelIndexManager) IndexForTest(vchannel string) *index.Index {
 func (c *PChannelIndexManager) RemoveForTest(ctx context.Context, vchannel string) {
 	c.remove(ctx, vchannel)
 }
+
+// StoreForTest returns the TableStore of the Manager.
+func (m *Manager) StoreForTest() TableStore { return m.cfg.Store }
