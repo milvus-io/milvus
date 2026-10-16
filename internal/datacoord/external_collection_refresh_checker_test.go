@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -2144,21 +2145,6 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 	})
 }
 
-// drainBuildIndexCh empties the build-acceleration channel and returns what it
-// held, so a test can assert on exactly what one call pushed.
-func drainBuildIndexCh() []int64 {
-	ch := getBuildIndexChSingleton()
-	out := make([]int64, 0)
-	for {
-		select {
-		case id := <-ch:
-			out = append(out, id)
-		default:
-			return out
-		}
-	}
-}
-
 // TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish pins that
 // the wait never accelerates a build that would read the PREVIOUS external
 // source/spec.
@@ -2204,21 +2190,25 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 			ExternalSource: "s3://old",
 			ExternalSpec:   `{"format":"parquet"}`,
 		}})
-		mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
-		mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-		}})
-		mockey.Mock((*indexMeta).GetUnindexedSegments).Return([]int64{556}).Build()
+		// Neither segment is indexed, but 557 already has its index task, so
+		// only 556 needs a nudge.
+		mt := &meta{segments: NewSegmentsInfo(), collections: collections,
+			indexMeta: newTestIndexMeta(100, 557, 1, "", &model.SegmentIndex{SegmentID: 557, CollectionID: 100, IndexID: 1})}
+		for _, id := range []int64{556, 557} {
+			mt.segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			}})
+		}
 
 		checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
 			func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 			nil, nil, nil)
 
-		drainBuildIndexCh() // ignore whatever earlier tests left behind
+		drainBuildIndexChForTest() // ignore whatever earlier tests left behind
 
 		checker.aggregateJobState(refreshMeta.GetJob(1)) // entry pass: apply + mark
 		require.NotZero(t, refreshMeta.GetJob(1).GetIndexWaitStartedTime())
-		assert.Empty(t, drainBuildIndexCh(),
+		assert.Empty(t, drainBuildIndexChForTest(),
 			"the entry pass runs before the publish; a build dispatched now would read the pre-refresh source/spec")
 
 		// The AlterCollection round trip lands in DataCoord's meta.
@@ -2229,8 +2219,8 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 		}})
 
 		checker.aggregateJobState(refreshMeta.GetJob(1))
-		assert.Equal(t, []int64{556}, drainBuildIndexCh(),
-			"once the refreshed schema is visible the wait accelerates the build as before")
+		assert.Equal(t, []int64{556}, drainBuildIndexChForTest(),
+			"once the refreshed schema is visible the wait accelerates the builds that have no task yet")
 	})
 }
 
