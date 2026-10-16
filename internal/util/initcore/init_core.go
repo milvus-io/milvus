@@ -865,6 +865,15 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 		return err
 	}
 
+	sparseIPAlgo := C.CString(params.QueryNodeCfg.InterimIndexSparseIPAlgo.GetValue())
+	defer C.free(unsafe.Pointer(sparseIPAlgo))
+	sparseBM25Algo := C.CString(params.QueryNodeCfg.InterimIndexSparseBM25Algo.GetValue())
+	defer C.free(unsafe.Pointer(sparseBM25Algo))
+	status = C.SegcoreSetSparseInterimIndexAlgorithms(sparseIPAlgo, sparseBM25Algo)
+	if err := HandleCStatus(&status, "SegcoreSetSparseInterimIndexAlgorithms failed"); err != nil {
+		return err
+	}
+
 	enableInterminIndex := C.bool(params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool())
 	C.SegcoreSetEnableInterminSegmentIndex(enableInterminIndex)
 
