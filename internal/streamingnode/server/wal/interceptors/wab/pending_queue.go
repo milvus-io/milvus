@@ -90,8 +90,8 @@ func (q *pendingQueue) CurrentOffset() int {
 
 // push adds a message to the buffer.
 func (q *pendingQueue) pushOne(msg message.ImmutableMessage, now time.Time) {
-	if (msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() < q.lastTimeTick) ||
-		(msg.MessageType() != message.MessageTypeTimeTick && msg.TimeTick() <= q.lastTimeTick) {
+	isSync := msg.MessageType() == message.MessageTypeTimeTick || msg.MessageType() == message.MessageTypeMVCCBarrier
+	if (isSync && msg.TimeTick() < q.lastTimeTick) || (!isSync && msg.TimeTick() <= q.lastTimeTick) {
 		// only timetick message can be repeated with the last time tick.
 		panic("message time tick is not in ascending order")
 	}

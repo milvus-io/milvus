@@ -539,3 +539,7 @@ func buildInterceptorsAndReleaseInitialSnapshot(
 	param.InitialRecoverSnapshot = nil
 	return result
 }
+
+func (w *walAdaptorImpl) TransformLog() wal.TransformLogAccesser {
+	return w.viewResourceManager
+}

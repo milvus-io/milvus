@@ -364,6 +364,7 @@ service StreamingNodeHandlerService {
     rpc GetCollectionSchema(StreamingNodeGetCollectionSchemaRequest) returns (StreamingNodeGetCollectionSchemaResponse) {};
 
     rpc ValidateAnalyzer(StreamingNodeValidateAnalyzerRequest) returns (StreamingNodeValidateAnalyzerResponse) {};
+    rpc SubscribeTransform(stream TransformRequest) returns (stream TransformResponse) {};
     rpc RunAnalyzer(StreamingNodeRunAnalyzerRequest) returns (StreamingNodeRunAnalyzerResponse) {};
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
     // from the correct position, ensuring no duplicate or missing messages.
@@ -1031,6 +1032,88 @@ message StreamingFieldAnalyzer {
 message StreamingNodeRunAnalyzerResponse {
     repeated milvus.AnalyzerResult results = 1;
     common.Status status = 2;
+}
+
+message CreateTransformStreamRequest {
+    PChannelInfo pchannel = 1;
+}
+
+message TransformRequest {
+    oneof request {
+        CreateTransformSubscriptionRequest create = 1;
+        CloseTransformSubscriptionRequest close_subscription = 2;
+        CloseTransformStreamRequest close_stream = 3;
+    }
+}
+
+message CreateTransformSubscriptionRequest {
+    uint64 end_time_tick = 4;
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Exclusive. Server sends TransformLog entries with time_tick >
+    // start_after_time_tick.
+    uint64 start_after_time_tick = 3;
+}
+
+message CloseTransformSubscriptionRequest {
+    int64 subscription_id = 1;
+}
+
+message CloseTransformStreamRequest {}
+
+// TransformResponse is the response of the SubscribeTransform RPC.
+message TransformResponse {
+    oneof response {
+        CreateTransformSubscriptionResponse create = 1;
+        TransformMessageBatch message_batch = 2;
+        TransformSubscriptionSyncUp sync_up = 3;
+        TransformSubscriptionError subscription_error = 4;
+        CloseTransformSubscriptionResponse close_subscription = 5;
+        CloseTransformStreamResponse close_stream = 6;
+    }
+}
+
+message CreateTransformSubscriptionResponse {
+    uint64 end_time_tick = 5;
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    uint64 start_after_time_tick = 3;
+
+    // Current SN TransformLog truncation cursor.
+    uint64 truncate_time_tick = 4;
+}
+
+message CloseTransformSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+}
+
+message TransformSubscriptionSyncUp {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Every requested transform through this TimeTick has been delivered.
+    // This is readable coverage, not a persistence acknowledgement.
+    uint64 time_tick = 3;
+}
+
+message TransformSubscriptionError {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    StreamingError error = 3;
+}
+
+message CloseTransformStreamResponse {}
+
+// TransformMessageBatch is an at-least-once delivery unit for transform
+// entries.
+message TransformMessageBatch {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Entries are ordered by TransformLogEntry.time_tick.
+    repeated TransformLogEntry entries = 3;
 }
 
 // Schema access is independent of collection loading. The selector distinguishes
