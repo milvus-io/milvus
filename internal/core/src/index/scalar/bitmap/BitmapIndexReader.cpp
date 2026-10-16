@@ -19,6 +19,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -52,6 +53,17 @@ UnionPosting(TargetBitmap& result, const roaring::Roaring& posting) {
 void
 UnionPosting(TargetBitmap& result, const TargetBitmap& posting) {
     result |= posting;
+}
+
+void
+ClearPosting(TargetBitmap& result, const roaring::Roaring& posting) {
+    for (auto coordinate : posting) {
+        AssertInfo(coordinate < result.size(),
+                   "bitmap posting coordinate {} exceeds count {}",
+                   coordinate,
+                   result.size());
+        result.reset(coordinate);
+    }
 }
 
 bool
@@ -114,6 +126,16 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
         if (options_.offset_cache) {
             BuildOffsetCache();
         }
+        // Complement range evaluation needs every valid row in exactly one
+        // posting: the loader enforces disjoint postings for value_lookup
+        // readers, and nested readers index element coordinates instead of
+        // rows. Frozen mmap and dense bitset layouts keep the forward path.
+        if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+            if (storage_->mmap_owner == nullptr && options_.value_lookup &&
+                !options_.nested) {
+                BuildRowPrefix();
+            }
+        }
     }
 
     ReaderCaps
@@ -151,6 +173,9 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
         total += static_cast<int64_t>(
             offset_cache_.capacity() *
             sizeof(typename decltype(offset_cache_)::value_type));
+        total +=
+            static_cast<int64_t>(keys_.capacity() * sizeof(const StoredT*) +
+                                 prefix_rows_.capacity() * sizeof(uint64_t));
         return total;
     }
 
@@ -196,7 +221,6 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
             return result;
         }
 
-        TargetBitmap result(options_.total_num_rows, false);
         auto begin = storage_->postings.begin();
         auto end = storage_->postings.end();
         switch (op) {
@@ -216,26 +240,19 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
             case CompareOp::NotEqual:
                 break;
         }
-        for (auto it = begin; it != end; ++it) {
-            UnionPosting(result, it->second);
-        }
-        return result;
+        return UnionKeyRange(begin, end);
     }
 
     TargetBitmap
     Range(const T& lo, bool lo_inc, const T& hi, bool hi_inc) const override {
-        TargetBitmap result(options_.total_num_rows, false);
         if (hi < lo || (lo == hi && !(lo_inc && hi_inc))) {
-            return result;
+            return TargetBitmap(options_.total_num_rows, false);
         }
         const auto begin = lo_inc ? storage_->postings.lower_bound(lo)
                                   : storage_->postings.upper_bound(lo);
         const auto end = hi_inc ? storage_->postings.upper_bound(hi)
                                 : storage_->postings.lower_bound(hi);
-        for (auto it = begin; it != end; ++it) {
-            UnionPosting(result, it->second);
-        }
-        return result;
+        return UnionKeyRange(begin, end);
     }
 
     std::optional<StoredT>
@@ -332,6 +349,66 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
                    operation,
                    coordinate,
                    options_.total_num_rows);
+    }
+
+    using PostingIter =
+        typename BitmapPostingMap<StoredT, Posting>::const_iterator;
+
+    // Unions [begin, end), or clears the postings outside it from a copy of
+    // the valid bitset when that is less work.
+    TargetBitmap
+    UnionKeyRange(PostingIter begin, PostingIter end) const {
+        if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+            if (!prefix_rows_.empty() && PreferComplement(begin, end)) {
+                auto result = options_.valid_bitset.clone();
+                for (auto it = storage_->postings.begin(); it != begin; ++it) {
+                    ClearPosting(result, it->second);
+                }
+                for (auto it = end; it != storage_->postings.end(); ++it) {
+                    ClearPosting(result, it->second);
+                }
+                return result;
+            }
+        }
+        TargetBitmap result(options_.total_num_rows, false);
+        for (auto it = begin; it != end; ++it) {
+            UnionPosting(result, it->second);
+        }
+        return result;
+    }
+
+    void
+    BuildRowPrefix() {
+        keys_.reserve(storage_->postings.size());
+        prefix_rows_.reserve(storage_->postings.size() + 1);
+        prefix_rows_.push_back(0);
+        for (const auto& [key, posting] : storage_->postings) {
+            keys_.push_back(&key);
+            prefix_rows_.push_back(prefix_rows_.back() + posting.cardinality());
+        }
+    }
+
+    size_t
+    Rank(PostingIter it) const {
+        if (it == storage_->postings.end()) {
+            return keys_.size();
+        }
+        const auto pos =
+            std::lower_bound(keys_.begin(),
+                             keys_.end(),
+                             it->first,
+                             [](const StoredT* key, const StoredT& value) {
+                                 return *key < value;
+                             });
+        return static_cast<size_t>(pos - keys_.begin());
+    }
+
+    // Complement when fewer rows lie outside the range than inside it.
+    bool
+    PreferComplement(PostingIter begin, PostingIter end) const {
+        const uint64_t inside_rows =
+            prefix_rows_[Rank(end)] - prefix_rows_[Rank(begin)];
+        return prefix_rows_.back() - inside_rows < inside_rows;
     }
 
     void
@@ -433,6 +510,10 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
     std::shared_ptr<const Storage> storage_;
     BitmapReaderOptions options_;
     std::vector<const StoredT*> offset_cache_;
+    // Keys in map order and prefix_rows_[i] = rows in the first i postings.
+    // Empty unless the complement path is allowed.
+    std::vector<const StoredT*> keys_;
+    std::vector<uint64_t> prefix_rows_;
 };
 
 template <typename T, typename Posting>
