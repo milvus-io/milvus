@@ -31,7 +31,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -87,7 +86,7 @@ func sstIDs(m *pkindexpb.Manifest) []int64 {
 // bodyKeys returns the manifest body keys of vch in the store.
 func bodyKeys(t *testing.T, s *FakeObjectStore) []string {
 	keys := []string{}
-	err := s.Walk(context.Background(), objpath.ManifestDir(testRoot, 1, vch)+"/", func(k string, _ time.Time) bool {
+	err := s.Walk(context.Background(), pkindex.ManifestDir(testRoot, 1, vch)+"/", func(k string, _ time.Time) bool {
 		keys = append(keys, k)
 		return true
 	})
@@ -153,7 +152,7 @@ func TestFirstFlushCreatesVersion1(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, got.GetVersion())
 	assert.Equal(t, "files/pk_index/1/p_1v0/sst", got.GetSstBasePath())
-	assert.Equal(t, objpath.SSTBasePath("files", 1, vch), got.GetSstBasePath())
+	assert.Equal(t, pkindex.SSTBasePath("files", 1, vch), got.GetSstBasePath())
 	assert.Equal(t, schemapb.DataType_Int64, got.GetPkDataType())
 	assert.EqualValues(t, 3, got.GetLastFlushTerm())
 	assert.Equal(t, []int64{9}, sstIDs(got))
@@ -444,7 +443,7 @@ func TestCrashBeforeSwap(t *testing.T) {
 	require.Len(t, keys, 2)
 	var orphans int
 	for _, k := range keys {
-		v, ok := objpath.ParseManifestBodyKey(objpath.ManifestDir(testRoot, 1, vch), k)
+		v, ok := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, vch), k)
 		require.True(t, ok)
 		if v == 2 {
 			orphans++
@@ -488,7 +487,7 @@ func TestLoadVersionMismatch(t *testing.T) {
 	ctx := context.Background()
 	body, err := proto.Marshal(&pkindexpb.Manifest{CollectionId: 1, Vchannel: vch, Version: 5})
 	require.NoError(t, err)
-	bodyKey := objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, vch), 5, "x")
+	bodyKey := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, vch), 5, "x")
 	require.NoError(t, s.Write(ctx, bodyKey, body))
 	ptr, err := proto.Marshal(&pkindexpb.ManifestPointer{Version: 6, BodyKey: bodyKey})
 	require.NoError(t, err)
@@ -530,7 +529,7 @@ func TestLoadErrors(t *testing.T) {
 		assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 	})
 	t.Run("pointer names no body", func(t *testing.T) {
-		zeroVersion, err := proto.Marshal(&pkindexpb.ManifestPointer{BodyKey: objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, vch), 1, "x")})
+		zeroVersion, err := proto.Marshal(&pkindexpb.ManifestPointer{BodyKey: pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, vch), 1, "x")})
 		require.NoError(t, err)
 		for _, ptr := range []string{"", string(zeroVersion)} {
 			p.Put(PointerKey(1, vch), ptr)
@@ -722,7 +721,7 @@ func TestLoadPointers(t *testing.T) {
 			require.NoError(t, r.Err, "target %d", i)
 			assert.True(t, r.Found)
 			assert.EqualValues(t, 1, r.Pointer.GetVersion())
-			assert.Contains(t, r.Pointer.GetBodyKey(), objpath.ManifestDir(testRoot, 1, targets[i].VChannel)+"/")
+			assert.Contains(t, r.Pointer.GetBodyKey(), pkindex.ManifestDir(testRoot, 1, targets[i].VChannel)+"/")
 		default:
 			require.NoError(t, r.Err, "target %d", i)
 			assert.False(t, r.Found)
@@ -1072,9 +1071,9 @@ func TestFlushAndCompactCommute(t *testing.T) {
 func TestKeys(t *testing.T) {
 	assert.Equal(t, "pkindex-meta/manifest/7/by-dev-dml_0_7v0", PointerKey(7, "by-dev-dml_0_7v0"))
 	assert.Equal(t, "pkindex-meta/claim/by-dev-dml_0", ClaimKey("by-dev-dml_0"))
-	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst", objpath.SSTBasePath("files", 7, "by-dev-dml_0_7v0"))
-	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst/42.sst", objpath.SSTKey("files/pk_index/7/by-dev-dml_0_7v0/sst", 42))
-	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/manifest/3-abc.pb", objpath.ManifestBodyKey(objpath.ManifestDir("files", 7, "by-dev-dml_0_7v0"), 3, "abc"))
+	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst", pkindex.SSTBasePath("files", 7, "by-dev-dml_0_7v0"))
+	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst/42.sst", pkindex.SSTKey("files/pk_index/7/by-dev-dml_0_7v0/sst", 42))
+	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/manifest/3-abc.pb", pkindex.ManifestBodyKey(pkindex.ManifestDir("files", 7, "by-dev-dml_0_7v0"), 3, "abc"))
 }
 
 func TestParsePointerKey(t *testing.T) {
@@ -1095,25 +1094,25 @@ func TestParsePointerKey(t *testing.T) {
 
 func TestParseSSTKey(t *testing.T) {
 	base := "files/pk_index/7/v/sst"
-	id, ok := objpath.ParseSSTKey(base, base+"/42.sst")
+	id, ok := pkindex.ParseSSTKey(base, base+"/42.sst")
 	assert.True(t, ok)
 	assert.EqualValues(t, 42, id)
 	for _, bad := range []string{base + "/42.tmp", base + "/x.sst", "other/42.sst", base + "/sub/42.sst"} {
-		_, ok := objpath.ParseSSTKey(base, bad)
+		_, ok := pkindex.ParseSSTKey(base, bad)
 		assert.False(t, ok, bad)
 	}
 }
 
 func TestParseManifestBodyKey(t *testing.T) {
-	dir := objpath.ManifestDir("files", 7, "v")
-	v, ok := objpath.ParseManifestBodyKey(dir, dir+"/12-abc.pb")
+	dir := pkindex.ManifestDir("files", 7, "v")
+	v, ok := pkindex.ParseManifestBodyKey(dir, dir+"/12-abc.pb")
 	assert.True(t, ok)
 	assert.EqualValues(t, 12, v)
-	v, ok = objpath.ParseManifestBodyKey(dir, dir+"/13-0b2f6c1e-8d4a-4f7e-9c3b-5a1d2e3f4a5b.pb")
+	v, ok = pkindex.ParseManifestBodyKey(dir, dir+"/13-0b2f6c1e-8d4a-4f7e-9c3b-5a1d2e3f4a5b.pb")
 	assert.True(t, ok)
 	assert.EqualValues(t, 13, v)
 	for _, bad := range []string{dir + "/12.pb", dir + "/x-abc.pb", dir + "/12-abc.txt"} {
-		_, ok := objpath.ParseManifestBodyKey(dir, bad)
+		_, ok := pkindex.ParseManifestBodyKey(dir, bad)
 		assert.False(t, ok, bad)
 	}
 }
