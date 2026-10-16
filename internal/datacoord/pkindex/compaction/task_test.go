@@ -17,21 +17,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type fakeAlloc struct{ next int64 }
+type fakeAlloc struct {
+	next int64
+	err  error
+}
 
 func (a *fakeAlloc) AllocN(n int64) (int64, int64, error) {
+	if a.err != nil {
+		return 0, 0, a.err
+	}
 	b := a.next
 	a.next += n
 	return b, b + n, nil
 }
 
 type fakeCommitter struct {
-	current *pkindexpb.Manifest
-	commits []manifest.Compaction
-	err     error
+	current  *pkindexpb.Manifest
+	byTarget map[manifest.Target]*pkindexpb.Manifest
+	commits  []manifest.Compaction
+	// currentErr is returned by Current when set.
+	currentErr error
+	err        error
 }
 
-func (c *fakeCommitter) Current(context.Context, manifest.Target) (*pkindexpb.Manifest, error) {
+func (c *fakeCommitter) Current(_ context.Context, t manifest.Target) (*pkindexpb.Manifest, error) {
+	if c.currentErr != nil {
+		return nil, c.currentErr
+	}
+	if c.byTarget != nil {
+		return c.byTarget[t], nil
+	}
 	return c.current, nil
 }
 
