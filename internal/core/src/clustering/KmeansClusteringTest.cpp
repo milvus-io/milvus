@@ -382,8 +382,7 @@ prepare_storage_v2(const std::string& root_path,
         // metautil.BuildInsertLogPath layout (.../<segment>/<columnGroup>/<logID>).
         // Lay the single column group out as "<base_path>/0/0" so the trailing
         // component is a valid binlog log-id.
-        auto paths =
-            std::vector<std::string>{fmt::format("{}/0/0", base_path)};
+        auto paths = std::vector<std::string>{fmt::format("{}/0/0", base_path)};
         for (auto& p : paths)
             boost::filesystem::create_directories(
                 boost::filesystem::path(p).parent_path());
@@ -709,8 +708,7 @@ test_run_unified(const std::string& storage_version, bool train_full = false) {
     // (mutating the temporary was a silent no-op that left training to run over
     // the full dataset -- the dominant cost of this test).
     {
-        auto num_rows =
-            config["num_rows"].get<std::map<int64_t, int64_t>>();
+        auto num_rows = config["num_rows"].get<std::map<int64_t, int64_t>>();
         for (auto& [seg_id, n] : num_rows) {
             n = 1;  // tiny segment to trigger exception
         }
