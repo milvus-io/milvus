@@ -54,10 +54,10 @@ type Channel struct {
 	opMu sync.Mutex
 
 	// mu guards indexes, the LastAcked heap, ackedMax, claimed, and
-	// Index.removed, Index.heapPos, Index.heapKey and Index.recovered.
+	// Index.removed and Index.recovered.
 	mu       sync.Mutex
 	indexes  map[string]*Index
-	acked    ackHeap
+	acked    ackTracker
 	ackedMax uint64
 	// claimStarted is set by StartClaim. claimed is set when the pchannel is
 	// claimed and the manifests of the recovered indexes are looked up. An

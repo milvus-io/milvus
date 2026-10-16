@@ -69,8 +69,8 @@ func (c *Channel) lastAckedUnclamped() uint64 {
 // caller holds mu.
 func (c *Channel) lastAckedLocked() uint64 {
 	v := c.wm.lastApplied()
-	if len(c.acked) > 0 && c.acked[0].heapKey < v {
-		v = c.acked[0].heapKey
+	if k, ok := c.acked.min(); ok && k < v {
+		v = k
 	}
 	return v
 }
@@ -98,11 +98,10 @@ func (c *Channel) lastAckedLocked() uint64 {
 func (c *Channel) trackDirty(idx *Index) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if idx.removed || idx.heapPos >= 0 || !idx.fresh() {
+	if idx.removed || c.acked.contains(idx) || !idx.fresh() {
 		return
 	}
-	idx.heapKey = idx.lastCommittedTimeTick()
-	heap.Push(&c.acked, idx)
+	c.acked.update(idx, idx.lastCommittedTimeTick())
 }
 
 // refreshAcked removes idx from the heap when it is no longer dirty or not
@@ -117,45 +116,96 @@ func (c *Channel) refreshAcked(idx *Index) {
 		c.acked.remove(idx)
 		return
 	}
-	idx.heapKey = idx.lastCommittedTimeTick()
-	if idx.heapPos >= 0 {
-		heap.Fix(&c.acked, idx.heapPos)
+	c.acked.update(idx, idx.lastCommittedTimeTick())
+}
+
+// dirtyIndexes returns the members of the heap: the dirty and fresh Indexes
+// of the pchannel. The driver picks its handover candidates from them, so a
+// step costs the number of dirty Indexes, not the number of Indexes.
+func (c *Channel) dirtyIndexes() []*Index {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.acked.members()
+}
+
+// ackTracker is a min-heap of Indexes by their key, the LastCommittedTimeTick
+// at the last refresh. It keeps the position of every member itself, so an
+// Index carries nothing of the heap. The Channel guards it with mu.
+type ackTracker struct {
+	items []ackItem
+	pos   map[*Index]int
+}
+
+type ackItem struct {
+	idx *Index
+	key uint64
+}
+
+// contains reports whether idx is a member.
+func (t *ackTracker) contains(idx *Index) bool {
+	_, ok := t.pos[idx]
+	return ok
+}
+
+// update sets the key of idx, and adds idx when it is not a member.
+func (t *ackTracker) update(idx *Index, key uint64) {
+	if i, ok := t.pos[idx]; ok {
+		t.items[i].key = key
+		heap.Fix(t, i)
 		return
 	}
-	heap.Push(&c.acked, idx)
+	heap.Push(t, ackItem{idx: idx, key: key})
 }
 
-// ackHeap is a min-heap of Indexes by heapKey. It implements heap.Interface.
-type ackHeap []*Index
-
-func (h ackHeap) Len() int           { return len(h) }
-func (h ackHeap) Less(i, j int) bool { return h[i].heapKey < h[j].heapKey }
-
-func (h ackHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-	h[i].heapPos = i
-	h[j].heapPos = j
-}
-
-func (h *ackHeap) Push(x any) {
-	idx := x.(*Index)
-	idx.heapPos = len(*h)
-	*h = append(*h, idx)
-}
-
-func (h *ackHeap) Pop() any {
-	old := *h
-	n := len(old)
-	idx := old[n-1]
-	old[n-1] = nil
-	idx.heapPos = -1
-	*h = old[:n-1]
-	return idx
-}
-
-// remove deletes idx from the heap if it is in it.
-func (h *ackHeap) remove(idx *Index) {
-	if idx.heapPos >= 0 {
-		heap.Remove(h, idx.heapPos)
+// remove deletes idx if it is a member.
+func (t *ackTracker) remove(idx *Index) {
+	if i, ok := t.pos[idx]; ok {
+		heap.Remove(t, i)
 	}
+}
+
+// min returns the smallest key, and false when the heap is empty.
+func (t *ackTracker) min() (uint64, bool) {
+	if len(t.items) == 0 {
+		return 0, false
+	}
+	return t.items[0].key, true
+}
+
+// members returns the Indexes in the heap, in no particular order.
+func (t *ackTracker) members() []*Index {
+	out := make([]*Index, len(t.items))
+	for i, it := range t.items {
+		out[i] = it.idx
+	}
+	return out
+}
+
+// heap.Interface. Only the methods above call it.
+
+func (t *ackTracker) Len() int           { return len(t.items) }
+func (t *ackTracker) Less(i, j int) bool { return t.items[i].key < t.items[j].key }
+
+func (t *ackTracker) Swap(i, j int) {
+	t.items[i], t.items[j] = t.items[j], t.items[i]
+	t.pos[t.items[i].idx] = i
+	t.pos[t.items[j].idx] = j
+}
+
+func (t *ackTracker) Push(x any) {
+	it := x.(ackItem)
+	if t.pos == nil {
+		t.pos = make(map[*Index]int)
+	}
+	t.pos[it.idx] = len(t.items)
+	t.items = append(t.items, it)
+}
+
+func (t *ackTracker) Pop() any {
+	n := len(t.items)
+	it := t.items[n-1]
+	t.items[n-1] = ackItem{}
+	t.items = t.items[:n-1]
+	delete(t.pos, it.idx)
+	return it
 }

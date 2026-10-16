@@ -60,12 +60,17 @@ func (c *Channel) step(now time.Time) {
 // Index only when no handover of that Index runs. The running flag, set
 // before the submit and cleared as the last action of the handover, keeps
 // the driver and the handover task apart.
+//
+// The candidates come from the LastAcked heap, which holds every dirty and
+// fresh Index: an Index with nothing to publish is never a candidate, and a
+// pending request counts as dirty. So a step costs the number of dirty
+// Indexes.
 func (c *Channel) pickHandovers(now time.Time) []*Index {
 	params := c.m.cfg.Params()
 	tail := c.tail()
 	var out []*Index
 	var oldest *Index
-	for _, idx := range c.list() {
+	for _, idx := range c.dirtyIndexes() {
 		idx.reapHandover()
 		if idx.running.Load() || idx.handoverStopped.Load() || !idx.readyDone() || !idx.fresh() {
 			continue

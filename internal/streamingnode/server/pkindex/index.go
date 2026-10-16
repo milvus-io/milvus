@@ -99,8 +99,6 @@ type Index struct {
 
 	// These fields are guarded by Channel.mu.
 	removed bool
-	heapPos int
-	heapKey uint64
 	// recovered is set for an Index that is open when the claim starts: the
 	// Index of a collection that existed at WAL open. Only such an Index
 	// looks up its manifest.
@@ -160,7 +158,6 @@ func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID in
 		ready:        make(chan struct{}),
 		sstBasePath:  pkroot.SSTBasePath(cfg.StorageRootPath, collectionID, vchannel),
 		backoff:      c.newBackoff(),
-		heapPos:      -1,
 	}
 	idx.notFresh.Store(leftover)
 	idx.auth = authority.New(dirtyRW{eng: eng, idx: idx}, authority.Config{

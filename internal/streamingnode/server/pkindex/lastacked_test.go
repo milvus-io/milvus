@@ -108,12 +108,12 @@ func TestWriteMarksTheIndexDirty(t *testing.T) {
 	require.NoError(t, err)
 	body.Apply(ctx, authority.Applied{SegmentID: 3})
 	assert.False(t, idx.dirty())
-	assert.Equal(t, -1, idx.heapPos)
+	assert.False(t, inHeap(idx))
 	assert.Equal(t, []int64{7}, idx.Authority().PendingTxnIDs())
 
 	insert(t, idx, 4, 2)
 	assert.True(t, idx.dirtyFlag.Load())
-	assert.GreaterOrEqual(t, idx.heapPos, 0)
+	assert.True(t, inHeap(idx))
 
 	idx.Authority().DropTxn(7)
 	assert.Empty(t, idx.Authority().PendingTxnIDs())

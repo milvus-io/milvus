@@ -142,7 +142,7 @@ func TestReopenedIndexStartsEmptyAndDoesNotHandOver(t *testing.T) {
 func inHeap(idx *Index) bool {
 	idx.ch.mu.Lock()
 	defer idx.ch.mu.Unlock()
-	return idx.heapPos >= 0
+	return idx.ch.acked.contains(idx)
 }
 
 func TestFoundManifestStopsTheHandovers(t *testing.T) {
