@@ -28,23 +28,36 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-// FakeCommitter applies claims the way the manifest service does. No vchannel
-// has a manifest. A handover is not tested with it, so CommitFlush always
-// fails.
+// FakeCommitter applies claims the way the manifest service does and serves
+// the manifests that SetManifest gives. A handover is not tested with it, so
+// CommitFlush always fails.
 type FakeCommitter struct {
-	mu       sync.Mutex
-	claimed  map[string]int64
-	claimErr error
+	mu        sync.Mutex
+	claimed   map[string]int64
+	claimErr  error
+	manifests map[string]*index.FakeManifest // by vchannel
 }
 
-// NewFakeCommitter creates a FakeCommitter with no claims.
+// NewFakeCommitter creates a FakeCommitter with no claims and no manifests.
 func NewFakeCommitter() *FakeCommitter {
-	return &FakeCommitter{claimed: make(map[string]int64)}
+	return &FakeCommitter{claimed: make(map[string]int64), manifests: make(map[string]*index.FakeManifest)}
+}
+
+// SetManifest gives a vchannel a manifest, nil removes it.
+func (c *FakeCommitter) SetManifest(vchannel string, m *index.FakeManifest) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m == nil {
+		delete(c.manifests, vchannel)
+		return
+	}
+	c.manifests[vchannel] = m
 }
 
 // SetClaimErr makes every later claim fail with err.
@@ -69,10 +82,27 @@ func (c *FakeCommitter) ClaimPChannel(ctx context.Context, pchannel string, term
 	return nil
 }
 
-// GetRecoveryManifests implements Committer. No vchannel has a
-// manifest.
+// GetRecoveryManifests implements Committer.
 func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error) {
-	return make([]RecoveryManifest, len(refs)), nil
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]RecoveryManifest, len(refs))
+	for i, ref := range refs {
+		out[i] = FakeRecoveryManifest(ref.VChannel, c.manifests[ref.VChannel])
+	}
+	return out, nil
+}
+
+// ReadManifest implements Committer. The body key names the vchannel and the version.
+func (c *FakeCommitter) ReadManifest(ctx context.Context, bodyKey string) (index.ManifestView, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for vchannel, m := range c.manifests {
+		if FakeRecoveryManifest(vchannel, m).BodyKey == bodyKey {
+			return m.View, nil
+		}
+	}
+	return index.ManifestView{}, errors.Wrapf(pkroot.ErrCorrupted, "manifest body %s does not exist", bodyKey)
 }
 
 var errFakeNoHandover = errors.New("a handover is not tested here")

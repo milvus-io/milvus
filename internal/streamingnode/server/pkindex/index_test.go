@@ -18,6 +18,7 @@ package pkindex
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -368,7 +369,7 @@ func TestNoCommitterDedupsButNeverHandsOver(t *testing.T) {
 	ch.step(farFuture)
 	assert.Empty(t, env.client.requestList())
 	assert.Zero(t, env.client.manifest("v0").Version, "no claim reached the manifest service")
-	assert.EqualValues(t, 20, ch.LastAcked(), "the Index does not hold LastAcked back")
+	assert.EqualValues(t, uint64(math.MaxUint64), ch.LastAcked(), "a node without a Committer never holds LastAcked back")
 	assert.Empty(t, env.fatalList())
 
 	ch.remove(context.Background(), "v0")

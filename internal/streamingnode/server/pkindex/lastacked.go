@@ -25,27 +25,31 @@ import (
 
 // LastAcked returns the time tick through which the primary key indexes of
 // this pchannel are committed. A vchannel without unpublished writes does not
-// hold it back. It returns math.MaxUint64 when the pchannel has no index.
+// hold it back. It returns math.MaxUint64 when the pchannel has no index or
+// the node has no Committer. In the no-Committer case it returns before it
+// reads or updates ackedMax.
 //
-// The value is min(lastAppliedTimeTick, LastCommittedTimeTick of every dirty
-// Index). An Index is dirty when it has writes since its last rotate, frozen
-// generations, or a pending handover.
+// The value is min(lastApplied of the pchannel watermark, LastCommittedTimeTick
+// of every dirty Index). An Index is dirty when it has writes since its last
+// rotate, frozen generations, or a pending handover. An Index of a node
+// without a Committer never joins the heap.
 //
-// The value does not go down while the pchannel has an index. An idle Index
-// does not hold the value back, and its first new write makes it dirty again
-// with its old LastCommittedTimeTick. That write has a time tick above the
-// value that was already returned, and the Index did not change between its
-// commit and that write, so the returned value stays correct. LastAcked keeps
-// the largest returned value and never returns less.
-//
-// An Index of a node without a Committer never joins the heap, so it does not
-// hold the value back.
-//
-// TODO: the clamp to ackedMax can report too much. An Index that joins the
-// heap after a larger value was returned, such as one opened while the
-// pchannel already had indexes, has a LastCommittedTimeTick below that value.
-// Recovery must handle this before the WAL truncation uses LastAcked.
+// The value does not go down while the pchannel has an index: LastAcked keeps
+// the largest value it returned in ackedMax and never returns less. The clamp
+// never reports too much, for two reasons. First, every value returned before
+// is at most the lastApplied of the watermark at that time. Second, when
+// lastApplied is V, every writer that entered the watermark before tick V has
+// ended, and markDirty, which adds the Index to the heap through OnDirtied,
+// runs inside the write before the writer ends. So every write with a time
+// tick at or below V either joined the heap already or is committed, and a
+// writer that enters after tick V gets a time tick above V. An Index that
+// joins the heap with a key below ackedMax therefore has only writes above
+// ackedMax, and ackedMax stays a safe answer.
 func (c *PChannelIndexManager) LastAcked() uint64 {
+	if c.m.cfg.Committer == nil {
+		// Nothing ever commits, so the index never holds the WAL truncation back.
+		return math.MaxUint64
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.indexes) == 0 {
@@ -60,7 +64,11 @@ func (c *PChannelIndexManager) LastAcked() uint64 {
 }
 
 // lastAckedUnclamped returns LastAcked without the clamp to ackedMax, and
-// does not change ackedMax. The caller makes sure that the PChannelIndexManager has an index.
+// does not change ackedMax. The clamp hides an Index whose key is below
+// ackedMax. The truncation does not wait for that Index, because its
+// uncommitted writes are above ackedMax, but the handover triggers that
+// compare with the WAL tail must still see it, so they use this value. The
+// caller makes sure that the PChannelIndexManager has an index.
 func (c *PChannelIndexManager) lastAckedUnclamped() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()

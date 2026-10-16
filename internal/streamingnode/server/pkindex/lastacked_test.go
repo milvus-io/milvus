@@ -27,8 +27,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 func insertRequest(idx *index.Index, pks ...int64) authority.DecideRequest {
@@ -221,4 +223,15 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 	}
 	assert.Empty(t, env.client.applyErrList())
 	assert.Empty(t, env.fatalList())
+}
+
+func TestLastAckedWithoutCommitterStaysOut(t *testing.T) {
+	root := t.TempDir()
+	env := NewFakeEnv(t, root)
+	env.Manager.cfg.Committer = nil
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10})
+	t.Cleanup(c.Close)
+	_, _, err := c.CreateCollection(context.Background(), "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(math.MaxUint64), c.LastAcked())
 }

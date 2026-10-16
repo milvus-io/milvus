@@ -43,10 +43,10 @@ func FakeClaimPChannel(pchannel string, cur, term int64) (int64, error) {
 }
 
 // FakeRecoveryManifest returns the answer for the manifest cur (nil when
-// the vchannel has none).
-func FakeRecoveryManifest(cur *index.FakeManifest) RecoveryManifest {
+// the vchannel has none). The body key names the vchannel and the version.
+func FakeRecoveryManifest(vchannel string, cur *index.FakeManifest) RecoveryManifest {
 	if cur == nil {
 		return RecoveryManifest{}
 	}
-	return RecoveryManifest{Found: true, Version: cur.View.Version, BodyKey: "manifest/" + strconv.FormatInt(cur.View.Version, 10) + ".pb"}
+	return RecoveryManifest{Found: true, Version: cur.View.Version, BodyKey: "manifest/" + vchannel + "/" + strconv.FormatInt(cur.View.Version, 10) + ".pb"}
 }

@@ -151,9 +151,20 @@ func (c *fakeClient) GetRecoveryManifests(ctx context.Context, refs []VChannelRe
 			out = append(out, RecoveryManifest{Err: errs[0]})
 			continue
 		}
-		out = append(out, FakeRecoveryManifest(c.manifests[ref.VChannel]))
+		out = append(out, FakeRecoveryManifest(ref.VChannel, c.manifests[ref.VChannel]))
 	}
 	return out, nil
+}
+
+func (c *fakeClient) ReadManifest(ctx context.Context, bodyKey string) (index.ManifestView, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for vchannel, m := range c.manifests {
+		if FakeRecoveryManifest(vchannel, m).BodyKey == bodyKey {
+			return m.View, nil
+		}
+	}
+	return index.ManifestView{}, errors.Wrapf(pkroot.ErrCorrupted, "manifest body %s does not exist", bodyKey)
 }
 
 // seed gives vchannel a manifest with view, as if another owner committed it.

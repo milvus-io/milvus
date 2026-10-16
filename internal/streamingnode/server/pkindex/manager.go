@@ -54,6 +54,9 @@ type Params struct {
 	BackoffBase time.Duration
 	// MaxBackoff is the longest wait after a failure.
 	MaxBackoff time.Duration
+	// StallTimeout is how long the index may hold the WAL checkpoint back
+	// before the driver hands over the oldest dirty Index.
+	StallTimeout time.Duration
 }
 
 // ParamsFromConfig reads the params from paramtable. It leaves ReuploadAfter
@@ -71,6 +74,7 @@ func ParamsFromConfig() Params {
 		SoftWatermark: uint64(cfg.WALRecoveryTailSoftWatermark.GetAsSize()),
 		BackoffBase:   defaultBackoffBase,
 		MaxBackoff:    cfg.PKIndexHandoverMaxBackoff.GetAsDurationByParse(),
+		StallTimeout:  paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second),
 	}
 }
 
@@ -164,6 +168,16 @@ func (m *Manager) New(cfg PChannelConfig) *PChannelIndexManager {
 	return c
 }
 
+// Committer returns the Committer of the node, nil when it has none.
+func (m *Manager) Committer() Committer { return m.cfg.Committer }
+
+// Scheduler returns the node scheduler that runs the tasks of the indexes.
+func (m *Manager) Scheduler() nodescheduler.Scheduler { return m.cfg.Sched }
+
+// Params reads the params now. The config field is a function that the
+// Manager calls on every use.
+func (m *Manager) Params() Params { return m.cfg.Params() }
+
 // Get returns the primary key index of a pchannel, nil when none is open.
 // The WAL interceptor borrows it from here; it does not own it.
 func (m *Manager) Get(pchannel string) *PChannelIndexManager {
@@ -229,6 +243,10 @@ type Claimer interface {
 	// refs. An item that fails has its own Err. The caller sends at most
 	// MaxRecoveryManifests refs in one call.
 	GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error)
+	// ReadManifest reads the manifest body at bodyKey, the BodyKey of a
+	// RecoveryManifest. A body that does not exist or does not decode returns
+	// an error marked pkroot.ErrCorrupted.
+	ReadManifest(ctx context.Context, bodyKey string) (index.ManifestView, error)
 }
 
 // MaxRecoveryManifests is the largest number of refs in one
