@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
@@ -54,6 +56,7 @@ func TestSegmentLoadInfoStream_ReopensAndResubscribesFromDeliveredRevision(t *te
 	assert.Equal(t, uint64(1), subscriptionRevision(t, req1, 1000))
 	assert.Equal(t, uint64(5), subscriptionRevision(t, req1, 2000))
 	stream1.recv <- &querypb.WatchQueryViewSegmentLoadInfoResponse{
+		CollectionIndexes: []*querypb.QueryViewCollectionIndexes{{CollectionID: 100, IndexInfoList: []*indexpb.IndexInfo{{IndexID: 7}}}},
 		Snapshots: []*querypb.QueryViewSegmentLoadInfoSnapshot{{
 			CollectionID: 100,
 			SegmentID:    1000,
@@ -64,6 +67,8 @@ func TestSegmentLoadInfoStream_ReopensAndResubscribesFromDeliveredRevision(t *te
 	select {
 	case snapshot := <-snapshots:
 		assert.Equal(t, qnview.SegmentLoadInfoRevision{Revision: 2}, snapshot.Revision)
+		require.Len(t, snapshot.IndexInfos, 1)
+		assert.EqualValues(t, 7, snapshot.IndexInfos[0].GetIndexID())
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for snapshot")
 	}
@@ -202,5 +207,42 @@ func (s *fakeSegmentLoadInfoWatchStream) assertNoSend(t *testing.T) {
 	case req := <-s.sent:
 		t.Fatalf("unexpected watch request: %v", req)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestSegmentLoadInfoStream_ReceivesWhileInitialSubscriptionsAreSending(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	receiving := make(chan struct{})
+	sent := make(chan struct{})
+	sendMock := mockey.Mock((*fakeSegmentLoadInfoWatchStream).Send).To(func(_ *fakeSegmentLoadInfoWatchStream, _ *querypb.WatchQueryViewSegmentLoadInfoRequest) error {
+		select {
+		case <-receiving:
+			close(sent)
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}).Build()
+	defer sendMock.UnPatch()
+	recvMock := mockey.Mock((*fakeSegmentLoadInfoWatchStream).Recv).To(func(_ *fakeSegmentLoadInfoWatchStream) (*querypb.WatchQueryViewSegmentLoadInfoResponse, error) {
+		close(receiving)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}).Build()
+	defer recvMock.UnPatch()
+	stream := newSegmentLoadInfoStream(ctx, func(context.Context) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
+		return &fakeSegmentLoadInfoWatchStream{}, nil
+	})
+	defer func() { cancel(); stream.Close() }()
+	stream.Subscribe(qnview.SegmentLoadInfoSubscriptionOption{
+		CollectionID: 100,
+		SegmentID:    1000,
+		Handler:      segmentLoadInfoHandlerFunc(func(qnview.SegmentLoadInfoSnapshot) error { return nil }),
+	})
+	select {
+	case <-sent:
+	case <-time.After(3 * time.Second):
+		t.Fatal("initial send blocked waiting for the receive loop")
 	}
 }

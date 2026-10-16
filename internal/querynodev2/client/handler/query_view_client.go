@@ -14,7 +14,6 @@ import (
 type QueryViewClient interface {
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
-	RequeryOnView(ctx context.Context, nodeID int64, req *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error)
 }
 
 type queryViewClient struct {
@@ -38,12 +37,6 @@ func (qvc *queryViewClient) SearchOnView(ctx context.Context, nodeID int64, req 
 func (qvc *queryViewClient) QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	return executeViewQueryRPC(ctx, qvc, nodeID, "ViewQueryService.QueryOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.QueryOnViewResponse, error) {
 		return client.QueryOnView(ctx, req)
-	})
-}
-
-func (qvc *queryViewClient) RequeryOnView(ctx context.Context, nodeID int64, req *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	return executeViewQueryRPC(ctx, qvc, nodeID, "ViewQueryService.RequeryOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.RequeryOnViewResponse, error) {
-		return client.RequeryOnView(ctx, req)
 	})
 }
 

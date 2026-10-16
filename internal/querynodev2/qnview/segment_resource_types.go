@@ -49,17 +49,15 @@ type CollectionRuntimeGuard interface {
 	Release()
 }
 
-// CollectionRuntime is the QueryView-pinned collection runtime borrowed by
+// CollectionRuntime is the QueryView-owned collection runtime borrowed by
 // segment lifecycle, scheduler, and physical loader.
 type CollectionRuntime interface {
-	// Pin retains the exact schema/load runtime independently of its view.
-	Pin() func()
 	CollectionID() int64
 	DatabaseName() string
 	Schema() *schemapb.CollectionSchema
 	SchemaVersion() int64
 	CCollection() *segcore.CCollection
-	PinnedCollection() *segments.Collection
+	Collection() *segments.Collection
 }
 
 type CollectionIndexMetaUpdater interface {

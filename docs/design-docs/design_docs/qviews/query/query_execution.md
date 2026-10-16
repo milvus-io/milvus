@@ -20,8 +20,7 @@ The first runnable implementation focuses on the primary path:
 
 - StreamingNode executes growing-side data for an `Up` QueryView.
 - QueryNode executes sealed segments for a `Ready` QueryView.
-- `RequeryOnView` remains part of the protocol, but node-side requery task
-  planning and execution are TODO.
+- Requery uses `QueryOnView` with the original View version and MVCC.
 - Secondary-specific catch-up behavior is postponed.
 
 The central execution boundary is:
@@ -374,20 +373,10 @@ execution. The task refs keep selected segment resources alive until
 
 ## 11. Requery
 
-`RequeryOnView` uses the same QueryView version and `QueryPlanMVCC` as the
-preceding search/query. It exists to fetch fields for PKs selected after
-Proxy-side reduce.
-
-Node-side requery task planning and execution are TODO for the first runnable
-implementation. Open design points include:
-
-- whether Search results should carry PK-to-segment or PK-to-node location;
-- whether Requery should broadcast to all planned work nodes and rely on local
-  pruning;
-- how much PK/bloom pruning belongs in the Requery LocalOptimizer.
-
-Until this is implemented, `RequeryOnView` may be registered as a protocol
-stub, but it is not part of the first node-side execution milestone.
+Requery sends `QueryOnView` requests for the reduced PKs to the original plan's
+work nodes, retaining its QueryView version, Schema binding and MVCC. Required
+output/render fields are validated during Phase 1. There is no separate requery
+RPC or node-side stub. Existing local PK pruning and Query reduction apply.
 
 ## 12. Error Semantics
 
@@ -462,4 +451,4 @@ The first node-side Phase 2 milestone is:
 6. Register `ViewQueryService` on StreamingNode and QueryNode.
 7. Implement `SearchOnView` and `QueryOnView` RPC paths using provider plus
    scheduler.
-8. Keep `RequeryOnView` as TODO/stub until Search/Query execution is runnable.
+8. Reuse QueryOnView for requery with the original validated plan.

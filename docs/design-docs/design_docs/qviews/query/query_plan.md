@@ -405,3 +405,14 @@ The first node-side Phase 1 milestone is:
 6. Add fail-open StreamingNode work-node pruning for already-visible empty
    growing runtime candidate sets.
 7. Keep secondary and advanced optimizer behavior behind explicit follow-up work.
+
+## Query payload transport
+
+Phase 1 validates the complete optimized request before omitting large payloads
+that are byte-identical to the input. `QueryPlan.reused_payloads` identifies
+omitted placeholder groups and serialized expressions, including each hybrid
+sub-request. Proxy restores these from its immutable input before Phase 2;
+changed and explicitly cleared payloads remain authoritative in the response.
+Small optimized parameters stay explicit, avoiding a general field-patch
+interpreter. Ordinary dense search and retrieve do not echo their large input
+payloads through every shard's plan response.

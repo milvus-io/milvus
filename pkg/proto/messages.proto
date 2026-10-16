@@ -397,7 +397,6 @@ message AlterLoadConfigMessageHeader {
     repeated LoadFieldConfig load_fields = 4; // Preload hints; empty follows the target schema. Does not restrict queries.
     repeated LoadReplicaConfig replicas = 5; // the replicas that has to be loaded.
     bool user_specified_replica_mode = 6; // whether the replica mode is user specified.
-    int32 schema_version = 8 [deprecated = true]; // Ignored: not part of the load configuration.
     optional bool load_all_fields = 9; // absent on legacy messages; preserve/infer loading intent.
     bool skip_load_dynamic_field = 10;
     repeated LoadFieldConfig required_fields = 11; // Internal, explicit nonempty query field scope. Never inferred from preload hints.

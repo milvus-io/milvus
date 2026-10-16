@@ -64,8 +64,8 @@ For node-side Phase 1 planning and Phase 2 execution, see
   Boost scorers follow the same ownership rule: SN adapters borrow the pinned
   CSegments through asynchronous scoring, while LocalSegments keep their local
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
-- **Scope:** `RequeryOnView` returns Unimplemented. Proxy orchestration and
-  QN execution are wired in this qv branch. The persisted W/A and derived `min(W, A)`
+- **Scope:** Requery uses `QueryOnView` with the original View/MVCC and
+  declared output dependencies. Proxy orchestration and QN execution are wired. The persisted W/A and derived `min(W, A)`
   frontier and shared buffer retention requirements are described in
   [Transform Start Frontier](transform_start_after_timetick.md).
   TransformLog subscriptions accept Summary's retained lower bound; this

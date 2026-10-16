@@ -1140,27 +1140,6 @@ message TransformMessageBatch {
     repeated TransformLogEntry entries = 3;
 }
 
-// Legacy wire definition; WALSummary owns current transform storage.
-message TransformLogChunk {
-    uint64 chunk_id = 1;
-    repeated TransformLogEntry entries = 2;
-}
-
-// Legacy wire definition; not used by RecoveryStorage catalog persistence.
-message VChannelTransformLogMeta {
-    // TransformLog durable frontier published in recovery catalog.
-    uint64 checkpoint_time_tick = 1;
-
-    // Entries with time_tick <= truncate_time_tick may be removed.
-    uint64 truncate_time_tick = 2;
-
-    // Retained dense chunk id range: [first_chunk_id, next_chunk_id).
-    uint64 first_chunk_id = 3;
-    uint64 next_chunk_id = 4;
-
-    // L0 materializer cursor.
-    uint64 materialized_time_tick = 5;
-}
 
 // Analyzer validation is collection-independent. Failures use native streaming
 // RPC errors; successful responses identify the resources to reserve before DDL.

@@ -29,7 +29,8 @@ A View requirement contains:
 - CollectionID, VChannel and the complete QueryViewKey;
 - exact SchemaVersion and immutable LoadInfoVersion;
 - assigned partitions and Segments;
-- each Segment's required Manifest/base and exclusive transform replay cursor;
+- each Segment's required Manifest/base; its exact replay cursor comes from the
+  same fetched SegmentLoadInfo snapshot as the base that will actually be loaded;
 - the shard's exclusive TransformLog retention start F.
 
 Schema is resolved through `streaming.WAL().SchemaClient()` using the VChannel
@@ -306,22 +307,29 @@ use the deletion container's atomic cardinality in O(1), without allocating a
 query bitmap. Public `count(*)` uses the query's bound Schema, MVCC and TTL.
 The physical segment keeps independent PK/delete-storage metadata and finalized
 resource estimates; it releases the initial preparing Collection before becoming
-available to Views. Subsequent operations pin their own exact Collection.
+available to Views. The Go View owns its Collection until all operations finish.
 
 
 Physical ReadStates retain immutable resource generations: columns, indexes,
-readers, row-domain metadata and independently owned descriptions of the required
-physical fields/groups. Manifest discovery may keep lightweight storage-name
-mappings for unselected columns; it does not copy their full field descriptions.
-Physical layout also retains each column's alias IDs and combined local-format
-choice. All aliases participate in Vortex eligibility, including aliases outside
-the View's load scope. These compact values are independently owned and do not
-retain a logical Schema.
-PublishedSegmentState and stored SegmentLoadInfo do not retain a borrowed logical
-Schema, directly or through an alias. Reopen consumes the borrowed schema and
-scope to prepare a successor and publishes only its physical resources and
-necessary independently owned metadata. A retained successful result remains
-valid after its preparing View and operation have disappeared.
+readers and row-domain metadata. They do not retain a collection-wide copy of
+FieldMeta, default values, analyzer parameters, storage-name mappings or loading
+policies under another name. PublishedSegmentState and stored SegmentLoadInfo
+must contain neither a logical Schema reference nor a substitute Schema object.
+
+Loading and Reopen borrow the caller's Schema and LoadScope for the entire
+operation. Manifest discovery resolves names, aliases and local-format choices
+from those inputs, including aliases outside the requested scope. The operation
+waits for all children that borrow these inputs before returning. It publishes
+only physical resources and their necessary independently owned metadata.
+Queries and output conversion use the operation's Plan Schema, not metadata
+reconstructed from a Segment. A retained successful preparation remains valid
+after its preparing View and operation have disappeared.
+
+Long-lived decoding resources may own the encoding and column-group descriptors
+they actually need for eviction and reload. Delete owns the physical primary-key
+description and does not depend on a query Schema. Neither case justifies a
+second collection-wide field table in the Segment. Loading policy and logical
+field authorization stay in the operation's LoadScope.
 
 For A requiring `{x, y}` and B requiring `{x, z}`, unchanged x can be shared,
 A retains y, and B prepares z. B becoming Ready does not wait for y to be removed.
@@ -340,24 +348,22 @@ the continuously updated shared delete bitmap.
 
 ### 6.2 Borrowing and asynchronous lifetime
 
-Each View and derived operation owns a reference to the exact CCollection and
-physical resources it uses. The QueryView object itself need not remain alive
-once independent operation handles have been acquired. Registry removal, Down,
-Release and cancellation are not proof that native dependencies can be freed.
+The Go View owns its CCollection. Queries and synchronous preparation increment
+that View's active-operation count before releasing the manager lock. Release
+withdraws the View, but its Collection is released only after the last operation
+finishes. No additional per-Segment/per-operation Collection.Pin is needed.
+Physical ReadState references still protect column/index generations across
+Reopen; those references are independent of Schema ownership.
 
 ```text
-acquire dependency handles
-  -> enqueue / execute / complete asynchronous children
-  -> reduce / refill fields / finish zero-copy result consumption
-  -> destroy objects still borrowing dependencies
-  -> release dependency handles
+acquire View operation -> borrow CCollection Schema -> execute native operation
+  -> join native children and output conversion -> release View operation
 ```
 
-Pin acquisition precedes queueing. Queued cancellation, execution failure and
-running cancellation release each reference exactly once after actual completion.
-A task that continues independently acquires its own pin before detaching, or
-owns all physical metadata it needs. Future completion certifies only work whose
-completion is actually joined by that future.
+CSegment wrappers wait for their native futures; Future.Release also waits for
+actual completion on cancellation. SealedSegment and helpers must not retain
+borrowed Schema pointers beyond that synchronous boundary. Detached cache
+warmup/reload owns the physical descriptors it needs, not a borrowed Schema.
 
 Long-lived Reader/Translator/cache resources own necessary physical metadata;
 they do not borrow FieldMeta references from a collection schema. Copying a field
@@ -373,6 +379,16 @@ removing that initial pin. Runtime destruction releases dependent objects before
 their schema/physical owner handles, including exception and cancellation paths.
 
 ## 7. Metadata subscription ownership
+
+Metadata responses carry collection index definitions once per collection per
+batch. Each batch is self-contained; Segment snapshots refer to that table by
+collection ID. Combined metadata revision includes the current collection index
+revision, which is canonicalized once per collection. Subscription requests and
+snapshot responses use a 4 MiB aggregate target; an oversized single snapshot is
+sent alone under the configured RPC limit. Only successfully sent snapshots
+advance server-side resume revisions, and unsubscribe precedes resubscribe.
+The client receives concurrently with the initial subscription batches as well as
+later deltas, so bidirectional flow control cannot block subscription completion.
 
 A live SegmentResource owns its metadata subscription, independent of how many
 Views bind it. The shared QueryNode stream delivers complete snapshots and
@@ -405,8 +421,13 @@ unfinished replay pins. Neither segment catch-up progress nor the set of segment
 currently placed on this node authorizes advancing it: future balance reuses this
 range. Trimming clears removed payload references in the backing-array tail as
 well as the logical slice.
-Each Segment's cursor C belongs to its selected physical base and identifies
-its exclusive replay start. The buffer retains history required by live range
+Each Segment's cursor C belongs to its actual physical base and identifies
+its exclusive replay start. It is fetched atomically with Manifest/binlogs in
+SegmentLoadInfo, never inferred from DeltaPosition/StartPosition. QueryView does
+not duplicate per-Segment cursors. A normal sealed View specifies a minimum
+Manifest version; external bases require the exact Manifest. An existing base
+keeps its original cursor/transform registration when compatible data resources
+are reused; a different fetched cursor never rewrites that registration. The buffer retains history required by live range
 references and unfinished replay. Compatible Views reuse one buffer and its
 subscription; moving a Segment within that covered range does not create an
 independent remote subscription for the Segment.

@@ -61,13 +61,7 @@ func qvSegmentVChannel(info *querypb.SegmentLoadInfo) string {
 }
 
 func qvSegmentTransformStartAfter(info *querypb.SegmentLoadInfo) uint64 {
-	if info == nil {
-		return 0
-	}
-	if info.GetDeltaPosition() != nil {
-		return info.GetDeltaPosition().GetTimestamp()
-	}
-	return info.GetStartPosition().GetTimestamp()
+	return info.GetTransformStartAfterTimetick()
 }
 
 type realQVSegmentLoader struct {
@@ -79,7 +73,7 @@ func (l realQVSegmentLoader) NewSegment(ctx context.Context, collection qnview.C
 	if collection == nil {
 		return nil, merr.WrapErrServiceInternalMsg("query view collection runtime is nil")
 	}
-	localCollection := collection.PinnedCollection()
+	localCollection := collection.Collection()
 	if localCollection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collection.CollectionID())
 	}
@@ -89,7 +83,7 @@ func (l realQVSegmentLoader) NewSegment(ctx context.Context, collection qnview.C
 	}
 	return &qvLocalSegment{
 		segment: segment, collection: localCollection,
-		collectionID: collection.CollectionID(), unpinCollection: collection.Pin(),
+		collectionID: collection.CollectionID(),
 	}, nil
 }
 
@@ -163,17 +157,14 @@ func (l realQVSegmentLoader) FinalizeLoad(segment qvLoadedSegment) error {
 		return err
 	}
 	local.collection = nil
-	local.unpinCollection()
-	local.unpinCollection = nil
 	return nil
 }
 
 type qvLocalSegment struct {
-	collection      *segments.Collection
-	unpinCollection func()
-	releaseOnce     sync.Once
-	segment         segments.Segment
-	collectionID    int64
+	collection   *segments.Collection
+	releaseOnce  sync.Once
+	segment      segments.Segment
+	collectionID int64
 }
 
 func (s *qvLocalSegment) ID() int64 {
@@ -199,9 +190,6 @@ func (s *qvLocalSegment) Delete(ctx context.Context, primaryKeys storage.Primary
 func (s *qvLocalSegment) Release(ctx context.Context) error {
 	s.releaseOnce.Do(func() {
 		s.segment.Release(ctx)
-		if s.unpinCollection != nil {
-			s.unpinCollection()
-		}
 	})
 	return nil
 }
@@ -233,7 +221,7 @@ func (l *queryViewPhysicalSegmentLoader) PrepareReadState(ctx context.Context, s
 	if err := l.loader.LoadDeltaLogs(ctx, transform.segment, info); err != nil {
 		return nil, err
 	}
-	return transform.QuerySegment().(*segments.LocalSegment).PrepareReadState(ctx, reuse, info, collection.PinnedCollection())
+	return transform.QuerySegment().(*segments.LocalSegment).PrepareReadState(ctx, reuse, info, collection.Collection())
 }
 
 func (l *queryViewPhysicalSegmentLoader) AdoptReadState(segment qnview.TransformSegment, read segments.ReadState) error {

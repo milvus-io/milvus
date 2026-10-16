@@ -30,6 +30,9 @@ C is a continuous-prefix guarantee. A maximum Delete timestamp, Manifest
 version, or task scheduling position alone does not prove it. C must be stored
 with its base/Manifest/deltalog revision and supplied to the Segment loader.
 An old View must not combine an old base with a newer cursor from SegmentMeta.
+QN fetches the cursor with its actual base in one SegmentLoadInfo snapshot;
+QueryView carries the shard retention floor and Manifest requirements, without
+duplicating the per-Segment cursor.
 Indirect Manifest version 0 loading must also freeze a matching base/cursor
 pair when resolving metadata.
 

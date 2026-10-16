@@ -375,12 +375,19 @@ message QueryViewSegmentLoadInfoSnapshot {
     int64 segmentID = 2;
     QueryViewSegmentLoadInfoRevision revision = 3;
     SegmentLoadInfo load_info = 4;
-    repeated index.IndexInfo index_info_list = 5;
+}
+
+// Shared once per collection within each response; snapshots in that response
+// resolve their collection's current index definitions from this table.
+message QueryViewCollectionIndexes {
+    int64 collectionID = 1;
+    repeated index.IndexInfo index_info_list = 2;
 }
 
 message WatchQueryViewSegmentLoadInfoResponse {
     common.Status status = 1;
     repeated QueryViewSegmentLoadInfoSnapshot snapshots = 2;
+    repeated QueryViewCollectionIndexes collection_indexes = 3;
 }
 
 message GetShardLeadersRequest {
@@ -517,6 +524,9 @@ message SegmentLoadInfo {
     repeated string child_manifest_paths = 29;
     // stats carries the durable segment aggregates used for resource estimation.
     data.Statistics stats = 30;
+    // Replay cursor of this exact physical base, fetched atomically with its
+    // manifest/binlogs. QueryView carries only the shard buffer retention floor.
+    uint64 transform_start_after_timetick = 31;
 }
 
 message FieldIndexInfo {
@@ -851,7 +861,6 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
-    int32 schema_version = 11 [deprecated = true]; // Ignored: QueryViews use the latest collection schema.
     optional bool load_all_fields = 12;
     bool skip_load_dynamic_field = 13;
     repeated messages.LoadFieldConfig required_fields = 14; // Materialized internal scope; empty only in legacy persisted records.
@@ -1140,11 +1149,6 @@ message UpdateLoadConfigRequest {
     repeated int64 collectionIDs = 3;
     int32 replica_number = 4;
     repeated string resource_groups = 5;
-    // RootCoord sends this only after publishing the schema. No WAL broadcast
-    // is needed here: the AlterCollection callback already owns the DDL lock.
-    optional int32 schema_version = 6;
-    // Newly added function outputs with indexes materialized by this DDL.
-    repeated .milvus.proto.messages.LoadFieldConfig added_load_fields = 7;
 }
 
 message UpdateSchemaRequest {

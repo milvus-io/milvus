@@ -160,10 +160,6 @@ func (f *fakeViewQueryServiceClient) QueryOnView(context.Context, qviews.WorkNod
 	return &viewpb.QueryOnViewResponse{}, nil
 }
 
-func (f *fakeViewQueryServiceClient) RequeryOnView(context.Context, qviews.WorkNode, *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	return &viewpb.RequeryOnViewResponse{}, nil
-}
-
 type fakeSearchResultReducer struct{}
 
 func (fakeSearchResultReducer) Add(qviews.ShardID, *viewpb.SearchOnViewResponse) error {

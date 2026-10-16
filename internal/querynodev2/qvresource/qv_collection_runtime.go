@@ -163,7 +163,7 @@ func (g *queryViewCollectionRuntimeGuard) CCollection() *segcore.CCollection {
 	return g.ccollection
 }
 
-func (g *queryViewCollectionRuntimeGuard) PinnedCollection() *segments.Collection {
+func (g *queryViewCollectionRuntimeGuard) Collection() *segments.Collection {
 	return g.collection
 }
 
@@ -174,16 +174,6 @@ func (g *queryViewCollectionRuntimeGuard) UpdateIndexMeta(ctx context.Context, i
 
 func (g *queryViewCollectionRuntimeGuard) Release() {
 	g.manager.release(g.key)
-}
-
-// Pin retains this exact collection for physical segments and active queries,
-// which can outlive the view that initially prepared them.
-func (g *queryViewCollectionRuntimeGuard) Pin() func() {
-	g.manager.mu.Lock()
-	g.manager.collections[g.key].Ref(g.collectionID, 1)
-	g.manager.mu.Unlock()
-	var once sync.Once
-	return func() { once.Do(func() { g.manager.release(g.key) }) }
 }
 
 func (m *queryViewCollectionRuntimeManager) release(key collectionRuntimeKey) {

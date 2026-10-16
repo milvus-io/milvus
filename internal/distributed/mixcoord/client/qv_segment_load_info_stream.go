@@ -8,7 +8,9 @@ import (
 	"github.com/cenkalti/backoff/v4"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -130,18 +132,15 @@ func (s *segmentLoadInfoStream) loop() {
 			}
 			continue
 		}
-		if err := s.sendSnapshot(stream); err != nil {
-			cancel()
-			_ = stream.CloseSend()
-			if !s.waitBackoff(bo.NextBackOff()) {
-				return
-			}
-			continue
-		}
-
 		sendDone := make(chan struct{})
 		go func() {
 			defer close(sendDone)
+			// The initial subscription can span many frames. Receive concurrently
+			// so server responses cannot block both sides on transport flow control.
+			if err := s.sendSnapshot(stream); err != nil {
+				cancel()
+				return
+			}
 			s.sendLoop(streamCtx, cancel, stream)
 		}()
 		s.recvLoop(stream)
@@ -208,13 +207,17 @@ func (s *segmentLoadInfoStream) recvLoop(stream querypb.QueryCoord_WatchQueryVie
 			mlog.Warn(s.ctx, "query view segment load info stream response failed", mlog.Err(err))
 			return
 		}
+		indexes := make(map[int64][]*indexpb.IndexInfo, len(resp.GetCollectionIndexes()))
+		for _, collection := range resp.GetCollectionIndexes() {
+			indexes[collection.GetCollectionID()] = collection.GetIndexInfoList()
+		}
 		for _, snapshot := range resp.GetSnapshots() {
-			s.handleSnapshot(snapshot)
+			s.handleSnapshot(snapshot, indexes[snapshot.GetCollectionID()])
 		}
 	}
 }
 
-func (s *segmentLoadInfoStream) handleSnapshot(snapshot *querypb.QueryViewSegmentLoadInfoSnapshot) {
+func (s *segmentLoadInfoStream) handleSnapshot(snapshot *querypb.QueryViewSegmentLoadInfoSnapshot, indexes []*indexpb.IndexInfo) {
 	if snapshot == nil {
 		return
 	}
@@ -231,7 +234,7 @@ func (s *segmentLoadInfoStream) handleSnapshot(snapshot *querypb.QueryViewSegmen
 		SegmentID:    snapshot.GetSegmentID(),
 		Revision:     fromQueryViewSegmentLoadInfoRevisionPB(snapshot.GetRevision()),
 		LoadInfo:     snapshot.GetLoadInfo(),
-		IndexInfos:   snapshot.GetIndexInfoList(),
+		IndexInfos:   indexes,
 	}
 	if err := sub.handle(localSnapshot); err != nil {
 		s.removeSubscription(sub, err)
@@ -247,7 +250,7 @@ func (s *segmentLoadInfoStream) sendSnapshot(stream querypb.QueryCoord_WatchQuer
 	if len(req.GetSubscribe()) == 0 && len(req.GetUnsubscribe()) == 0 {
 		return nil
 	}
-	return stream.Send(req)
+	return qviews.SendSegmentLoadInfoRequests(req, stream.Send)
 }
 
 func (s *segmentLoadInfoStream) sendDelta(stream querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient) error {
@@ -259,7 +262,7 @@ func (s *segmentLoadInfoStream) sendDelta(stream querypb.QueryCoord_WatchQueryVi
 	if len(req.GetSubscribe()) == 0 && len(req.GetUnsubscribe()) == 0 {
 		return nil
 	}
-	return stream.Send(req)
+	return qviews.SendSegmentLoadInfoRequests(req, stream.Send)
 }
 
 func (s *segmentLoadInfoStream) buildRequestLocked(

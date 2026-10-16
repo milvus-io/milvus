@@ -24,7 +24,7 @@ func TestQueryViewPhysicalSegmentLoader_LoadBorrowsCollectionAndWrapsSegment(t *
 
 	loaded, err := physical.Load(
 		context.Background(),
-		&querypb.SegmentLoadInfo{CollectionID: 1, SegmentID: 10, PartitionID: 100, InsertChannel: "v1", DeltaPosition: &msgpb.MsgPosition{Timestamp: 50}},
+		&querypb.SegmentLoadInfo{CollectionID: 1, SegmentID: 10, PartitionID: 100, InsertChannel: "v1", DeltaPosition: &msgpb.MsgPosition{Timestamp: 999}, TransformStartAfterTimetick: 50},
 		fakeQVCollectionRuntime{collectionID: 1, schema: &schemapb.CollectionSchema{Name: "coll"}, schemaVersion: 9},
 	)
 	require.NoError(t, err)
@@ -49,7 +49,7 @@ func (s *testTransformSegmentWrapper) UnwrapTransformSegment() qnview.TransformS
 	return s.TransformSegment
 }
 
-func TestRealQVSegmentLoader_NewSegmentUsesPinnedCollection(t *testing.T) {
+func TestRealQVSegmentLoader_NewSegmentUsesCollection(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Name: "coll"}
 	localCollection := segments.NewCollectionWithoutSegcoreForTest(1, schema)
 	collections := &fakeQVCollectionManager{collection: localCollection}

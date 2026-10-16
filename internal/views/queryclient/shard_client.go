@@ -186,6 +186,9 @@ func (s *shardViewQueryClient) executeShard(
 			return nil, err
 		}
 
+		if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
+			return nil, err
+		}
 		shardID := qviews.FromProtoShardID(plan.ShardId)
 		workNodes := workNodesFromPlan(plan)
 

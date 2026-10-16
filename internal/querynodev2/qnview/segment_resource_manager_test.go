@@ -83,7 +83,7 @@ func setupResourceTest(t *testing.T, prepare func(CollectionRuntime) error) *res
 	mockey.Mock((*resourceTestSubscription).Close).Return().Build()
 	mockey.Mock((*resourceTestStream).Subscribe).To(func(_ *resourceTestStream, option SegmentLoadInfoSubscriptionOption) SegmentLoadInfoSubscription {
 		f.handler <- option.Handler
-		require.NoError(t, option.Handler.Handle(SegmentLoadInfoSnapshot{SegmentID: option.SegmentID, CollectionID: option.CollectionID, Revision: SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: option.SegmentID, CollectionID: option.CollectionID, PartitionID: 10, NumOfRows: 10}}))
+		require.NoError(t, option.Handler.Handle(SegmentLoadInfoSnapshot{SegmentID: option.SegmentID, CollectionID: option.CollectionID, Revision: SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: option.SegmentID, CollectionID: option.CollectionID, PartitionID: 10, NumOfRows: 10, TransformStartAfterTimetick: 50}}))
 		return &resourceTestSubscription{}
 	}).Build()
 	f.dependencyMock = mockey.Mock((*fakeQueryViewCollectionRuntimeManager).Acquire).To(func(_ *fakeQueryViewCollectionRuntimeManager, _ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
@@ -133,6 +133,8 @@ func (f *resourceTestFixture) await(t *testing.T, schema int32) {
 func TestSegmentResourceOutOfOrderSchemasAndQueryLifetime(t *testing.T) {
 	mockey.PatchConvey("older schema prepares after newer schema without reloading shared rows", t, func() {
 		f := setupResourceTest(t, nil)
+		var retiredCollections atomic.Int32
+		mockey.Mock((*fakeCollectionRuntimeGuard).Release).To(func(*fakeCollectionRuntimeGuard) { retiredCollections.Add(1) }).Build()
 		newer := f.acquire(2, 2, 99)
 		f.await(t, 2)
 		older := f.acquire(3, 1, 2)
@@ -145,10 +147,12 @@ func TestSegmentResourceOutOfOrderSchemasAndQueryLifetime(t *testing.T) {
 		require.NotNil(t, handles[0].Segment())
 		f.drop(t, newer)
 		f.drop(t, older)
+		require.EqualValues(t, 1, retiredCollections.Load(), "the executing query retains its View's collection")
 		require.Zero(t, f.releases.Load(), "executing query owns the concrete resource")
 		handles[0].Release()
 		handles[0].Release()
 		require.Eventually(t, func() bool { return f.releases.Load() == 1 }, 5*time.Second, time.Millisecond)
+		require.Eventually(t, func() bool { return retiredCollections.Load() == 2 }, 5*time.Second, time.Millisecond)
 	})
 }
 
@@ -252,7 +256,7 @@ func TestSegmentResourceSameSchemaDifferentScopeAndMetadataRefresh(t *testing.T)
 		f.await(t, 1)
 		require.EqualValues(t, 1, f.loads.Load())
 		handler := <-f.handler
-		require.NoError(t, handler.Handle(SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 2}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, NumOfRows: 10}}))
+		require.NoError(t, handler.Handle(SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 2}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, NumOfRows: 10, TransformStartAfterTimetick: 50}}))
 		require.Eventually(t, func() bool {
 			f.manager.mu.Lock()
 			defer f.manager.mu.Unlock()
@@ -335,13 +339,17 @@ func TestSegmentResourceSharedPreparationSurvivesInitiatorRelease(t *testing.T) 
 			}
 			return nil
 		})
+		var retiredCollections atomic.Int32
+		mockey.Mock((*fakeCollectionRuntimeGuard).Release).To(func(*fakeCollectionRuntimeGuard) { retiredCollections.Add(1) }).Build()
 		first := f.acquire(1, 1, 1)
 		<-entered
 		next := f.acquire(2, 1, 1)
 		f.drop(t, first)
+		require.Zero(t, retiredCollections.Load(), "native preparation still borrows the released View's schema")
 		require.Zero(t, f.releases.Load())
 		close(resume)
 		f.await(t, 1)
+		require.Eventually(t, func() bool { return retiredCollections.Load() == 1 }, 5*time.Second, time.Millisecond)
 		require.EqualValues(t, 1, f.loads.Load())
 		f.drop(t, next)
 	})

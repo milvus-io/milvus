@@ -2307,6 +2307,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     int64_t id_;
+    // Stable physical PK identity. Transform replay must remain usable after
+    // the collection that prepared this segment has been released.
+    const FieldId primary_key_field_id_;
+    const DataType primary_key_type_;
     // commit_ts_ remains the writer-side source of truth for load-time data
     // preparation; published readers consume the value through
     // PublishedSegmentState.

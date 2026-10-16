@@ -124,10 +124,8 @@ func TestQVFinalizeCompactsPhysicalSegmentMetadata(t *testing.T) {
 	t.Cleanup(func() { segment.Release(ctx) })
 	before := segment.ResourceUsageEstimate()
 	require.NotEmpty(t, segment.LoadInfo().GetBinlogPaths())
-	unpins := 0
-	physical := &qvLocalSegment{segment: segment, collection: collection, unpinCollection: func() { unpins++ }}
+	physical := &qvLocalSegment{segment: segment, collection: collection}
 	require.NoError(t, (realQVSegmentLoader{}).FinalizeLoad(physical))
-	require.Equal(t, 1, unpins)
 	require.Nil(t, physical.Collection())
 	require.Nil(t, segment.(*segments.LocalSegment).GetCollection())
 	require.Empty(t, segment.LoadInfo().GetBinlogPaths())

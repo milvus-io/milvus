@@ -68,7 +68,7 @@ following the same pattern as `StreamingCode` / `StreamingError`. Key error code
 Both services also use the WAL gRPC `waitForReady` and transport retry policy;
 transport readiness alone does not prove that an assigned WAL is available.
 The readiness flow covers both Phase 1 (`GetQueryPlan`, `GetMVCCTimestamp`) and
-SN Phase 2 (`SearchOnView`, `QueryOnView`, `RequeryOnView`). A Phase 2 retry keeps
+SN Phase 2 (`SearchOnView`, `QueryOnView`). A Phase 2 retry keeps
 the original request, including its View version and MVCC. It never substitutes
 a new snapshot. If the current SN cannot serve that version, the normal view
 error returns control to Phase 1. QN execution keeps its own node-client path.
@@ -256,9 +256,9 @@ Plan → Search → [RerankQuery] → [Rerank] → [Requery] → Render
 |---|---|---|
 | 1 | **Plan** | Shard resolution + Reranker/Renderer construction + FieldFetchPlan generation + GetQueryPlan (Phase 1) |
 | 2 | **Search** | Dispatch to work nodes + streaming reduce (Phase 2) |
-| 3 | **RerankQuery** | Fetch reranker-required fields via RequeryOnView (optional) |
+| 3 | **RerankQuery** | Fetch reranker-required fields via QueryOnView (optional) |
 | 4 | **Rerank** | Cross-sub-search reranking (optional) |
-| 5 | **Requery** | Fetch remaining output/render fields via RequeryOnView (optional) |
+| 5 | **Requery** | Fetch remaining output/render fields via QueryOnView (optional) |
 | 6 | **Render** | Result post-processing (always runs; noop for plain queries, text highlighting for BM25, etc.) |
 
 The reranker's required fields, renderer's required fields, and the user's output
@@ -267,9 +267,9 @@ construction) decides which fields to fetch at each stage:
 
 - **SearchFields**: Returned from work nodes alongside PKs + scores during Search.
   Avoids requery but increases per-node response size.
-- **RerankQueryFields**: Fetched via RequeryOnView during RerankQuery, on the full
+- **RerankQueryFields**: Fetched via QueryOnView during RerankQuery, on the full
   candidate set. Only needed if the reranker requires fields not in SearchFields.
-- **RequeryFields**: Fetched via RequeryOnView during Requery, on the final top-k
+- **RequeryFields**: Fetched via QueryOnView during Requery, on the final top-k
   only. For output and render fields not yet available.
 
 The three sets are disjoint; their union equals
@@ -293,7 +293,7 @@ All dependencies are injected as interfaces:
 
 - **QueryPlanClient**: Phase 1 operations (GetQueryPlan, GetMVCCTimestamp). Takes ShardID
   as routing key. Implementation by StreamingNode HandlerClient (see Section 5.4).
-- **ViewQueryServiceClient**: Phase 2 operations (SearchOnView, QueryOnView, RequeryOnView).
+- **ViewQueryServiceClient**: Phase 2 operations (SearchOnView, QueryOnView).
   Takes WorkNode as routing key. Dispatches to SN or QN sub-client based on node type
   (see Section 5.4).
 - **ShardResolver**: Resolves collection → per-vchannel replica info (all replicas +
@@ -336,13 +336,13 @@ Search(req):
   6. reducer.Finish() → per-sub-search results
   [RerankQuery] (optional)
   7. if RerankQueryFields non-empty:
-       RequeryOnView(candidate PKs, RerankQueryFields) using same plans
+       QueryOnView(candidate PKs, RerankQueryFields) using same plans
   [Rerank] (optional)
   8. if Reranker present:
        Reranker.Rerank(per-sub-search results) → final top-k
   [Requery] (optional)
   9. if RequeryFields non-empty:
-       RequeryOnView(final top-k PKs, RequeryFields) using same plans
+       QueryOnView(final top-k PKs, RequeryFields) using same plans
   [Render]
   10. Renderer.Render(results) → post-processed results
   11. Return final SearchResult
@@ -361,7 +361,7 @@ Query(req):
   5. reducer.Finish() → reduced result
   [Requery] (optional)
   6. if RequeryFields non-empty:
-       RequeryOnView(PKs, RequeryFields) using same plans
+       QueryOnView(PKs, RequeryFields) using same plans
   [Render]
   7. Renderer.Render(results) → post-processed results
   8. Return final QueryResult
@@ -463,7 +463,7 @@ ViewQueryServiceClient
   └── QNClient (QN part)      → for QueryWorkNode
 ```
 
-- **SN part**: Extends `HandlerClient` with SearchOnView/QueryOnView/RequeryOnView
+- **SN part**: Extends `HandlerClient` with SearchOnView/QueryOnView
   methods. Reuses the same SN connection pool and routing infrastructure.
 - **QN part**: Independent implementation managing QN connections. References the
   existing querynodev2 cluster worker connection management pattern.

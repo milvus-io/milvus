@@ -41,10 +41,6 @@ func (f *fakeStreamingNodeViewQueryServiceClient) QueryOnView(context.Context, t
 	return &viewpb.QueryOnViewResponse{}, nil
 }
 
-func (f *fakeStreamingNodeViewQueryServiceClient) RequeryOnView(context.Context, types.PChannelInfo, *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	return &viewpb.RequeryOnViewResponse{}, nil
-}
-
 type fakeQueryNodeViewQueryServiceClient struct {
 	nodeID    int64
 	queryResp *viewpb.QueryOnViewResponse
@@ -57,8 +53,4 @@ func (f *fakeQueryNodeViewQueryServiceClient) SearchOnView(context.Context, int6
 func (f *fakeQueryNodeViewQueryServiceClient) QueryOnView(_ context.Context, nodeID int64, _ *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	f.nodeID = nodeID
 	return f.queryResp, nil
-}
-
-func (f *fakeQueryNodeViewQueryServiceClient) RequeryOnView(context.Context, int64, *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	return &viewpb.RequeryOnViewResponse{}, nil
 }

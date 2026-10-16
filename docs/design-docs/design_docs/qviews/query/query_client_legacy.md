@@ -48,8 +48,7 @@ existing Proxy query path:
 3. Replace only the raw execution currently driven by `t.lb.Execute`.
 4. Return `[]*internalpb.SearchResults` and `[]*internalpb.RetrieveResults`
    directly to Proxy.
-5. Let Search requery reuse the normal Query path instead of implementing
-   `RequeryOnView` in the first version.
+5. Let Search requery reuse QueryOnView with the original View and MVCC.
 
 ## 3. Non-goals
 
@@ -57,7 +56,6 @@ The first `Legacy()` implementation does not:
 
 - move cross-shard reduction, reranker, renderer, or field-fetch planning into
   the legacy domain;
-- optimize Search requery with `RequeryOnView`;
 - preserve old QueryNode leader routing or look-aside balancing semantics;
 - use `preferredNodes` for requery locality;
 - perform per-channel fast skip based on old `channelsMvcc`;
@@ -338,8 +336,7 @@ SearchPipeline binds internal requery to the parent's schema and `ShardPlan`s.
 `Legacy().Query` with non-nil `Plans` dispatches directly to those exact work
 nodes, View versions and MVCCs without Phase 1. It then performs the same
 shard-local Query reduction. Failure aborts the parent operation; this path
-cannot silently switch to a newer schema or snapshot. `RequeryOnView` remains
-a separate future optimization.
+cannot silently switch to a newer schema or snapshot.
 
 ## 10. Error Handling
 

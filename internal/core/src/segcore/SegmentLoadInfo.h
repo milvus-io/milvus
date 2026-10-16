@@ -413,46 +413,42 @@ class SegmentLoadInfo {
 
     SegmentLoadInfo() = delete;
 
-    /**
-     * @brief Construct from a protobuf SegmentLoadInfo (copy)
-     * @param info The protobuf SegmentLoadInfo to wrap
-     */
     explicit SegmentLoadInfo(const ProtoType& info, SchemaPtr schema)
-        : info_(info),
-          fields_(std::make_shared<const SealedFieldLayout>(
-              schema.get(), LoadScope::FromLegacySchema(*schema))) {
-        BuildCache();
+        : SegmentLoadInfo(
+              info,
+              std::make_shared<const SealedFieldLayout>(
+                  schema.get(), LoadScope::FromLegacySchema(*schema))) {
     }
 
-    /**
-     * @brief Construct from a protobuf SegmentLoadInfo (move)
-     * @param info The protobuf SegmentLoadInfo to wrap
-     */
     explicit SegmentLoadInfo(ProtoType&& info, SchemaPtr schema)
-        : info_(std::move(info)),
-          fields_(std::make_shared<const SealedFieldLayout>(
-              schema.get(), LoadScope::FromLegacySchema(*schema))) {
-        BuildCache();
+        : SegmentLoadInfo(
+              std::move(info),
+              std::make_shared<const SealedFieldLayout>(
+                  schema.get(), LoadScope::FromLegacySchema(*schema))) {
     }
 
     SegmentLoadInfo(const ProtoType& info,
                     const Schema* schema,
                     const LoadScope& scope)
-        : SegmentLoadInfo(
-              info, std::make_shared<const SealedFieldLayout>(schema, scope)) {
-        RestrictToLoadFields();
+        : info_(info), restrict_load_fields_(true) {
+        const auto fields =
+            std::make_shared<const SealedFieldLayout>(schema, scope);
+        SetFieldSelection(*fields);
+        BuildCache(fields);
     }
 
-    SegmentLoadInfo(const ProtoType& info, SealedFieldLayoutPtr fields)
-        : info_(info), fields_(std::move(fields)) {
-        restrict_load_fields_ = fields_->HasExplicitLoadScope();
-        BuildCache();
+    SegmentLoadInfo(const ProtoType& info, const SealedFieldLayoutPtr& fields)
+        : info_(info) {
+        restrict_load_fields_ = fields->HasExplicitLoadScope();
+        SetFieldSelection(*fields);
+        BuildCache(fields);
     }
 
-    SegmentLoadInfo(ProtoType&& info, SealedFieldLayoutPtr fields)
-        : info_(std::move(info)), fields_(std::move(fields)) {
-        restrict_load_fields_ = fields_->HasExplicitLoadScope();
-        BuildCache();
+    SegmentLoadInfo(ProtoType&& info, const SealedFieldLayoutPtr& fields)
+        : info_(std::move(info)) {
+        restrict_load_fields_ = fields->HasExplicitLoadScope();
+        SetFieldSelection(*fields);
+        BuildCache(fields);
     }
 
     /**
@@ -462,7 +458,8 @@ class SegmentLoadInfo {
      */
     SegmentLoadInfo(const SegmentLoadInfo& other)
         : info_(other.info_),
-          fields_(other.fields_),
+          field_ids_(other.field_ids_),
+          external_(other.external_),
           restrict_load_fields_(other.restrict_load_fields_),
           converted_field_index_cache_(other.converted_field_index_cache_),
           field_index_id_cache_(other.field_index_id_cache_),
@@ -479,7 +476,8 @@ class SegmentLoadInfo {
      */
     SegmentLoadInfo(SegmentLoadInfo&& other) noexcept
         : info_(std::move(other.info_)),
-          fields_(std::move(other.fields_)),
+          field_ids_(std::move(other.field_ids_)),
+          external_(other.external_),
           restrict_load_fields_(other.restrict_load_fields_),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
@@ -502,7 +500,8 @@ class SegmentLoadInfo {
     operator=(const SegmentLoadInfo& other) {
         if (this != &other) {
             info_ = other.info_;
-            fields_ = other.fields_;
+            field_ids_ = other.field_ids_;
+            external_ = other.external_;
             restrict_load_fields_ = other.restrict_load_fields_;
             converted_field_index_cache_ = other.converted_field_index_cache_;
             field_index_id_cache_ = other.field_index_id_cache_;
@@ -523,7 +522,8 @@ class SegmentLoadInfo {
     operator=(SegmentLoadInfo&& other) noexcept {
         if (this != &other) {
             info_ = std::move(other.info_);
-            fields_ = std::move(other.fields_);
+            field_ids_ = std::move(other.field_ids_);
+            external_ = other.external_;
             restrict_load_fields_ = other.restrict_load_fields_;
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
@@ -546,9 +546,10 @@ class SegmentLoadInfo {
     void
     Set(const ProtoType& info, SchemaPtr schema) {
         info_ = info;
-        fields_ = std::make_shared<const SealedFieldLayout>(
+        const auto fields = std::make_shared<const SealedFieldLayout>(
             schema.get(), LoadScope::FromLegacySchema(*schema));
-        BuildCache();
+        SetFieldSelection(*fields);
+        BuildCache(fields);
     }
 
     /**
@@ -557,9 +558,10 @@ class SegmentLoadInfo {
     void
     Set(ProtoType&& info, SchemaPtr schema) {
         info_ = std::move(info);
-        fields_ = std::make_shared<const SealedFieldLayout>(
+        const auto fields = std::make_shared<const SealedFieldLayout>(
             schema.get(), LoadScope::FromLegacySchema(*schema));
-        BuildCache();
+        SetFieldSelection(*fields);
+        BuildCache(fields);
     }
 
     // ==================== Basic Accessors ====================
@@ -637,17 +639,16 @@ class SegmentLoadInfo {
     [[nodiscard]] bool
     HasFieldInSchema(FieldId field_id) const {
         return field_id.get() < START_USER_FIELDID ||
-               (fields_->get_fields().find(field_id) !=
-                    fields_->get_fields().end() &&
-                (!restrict_load_fields_ ||
-                 fields_->IsFieldInLoadScope(field_id)));
+               std::binary_search(
+                   field_ids_.begin(), field_ids_.end(), field_id);
     }
 
     // QueryView forks own an exact load scope; ordinary segments retain their
     // existing lazy-column behavior.
     void
-    RestrictToLoadFields() {
+    RestrictToLoadFields(const SealedFieldLayout& fields) {
         restrict_load_fields_ = true;
+        SetFieldSelection(fields);
         PruneRuntimeStateNotInSchema();
     }
 
@@ -1020,7 +1021,7 @@ class SegmentLoadInfo {
      * @return LoadDiff containing the differences
      */
     [[nodiscard]] LoadDiff
-    ComputeDiff(SegmentLoadInfo& new_info);
+    ComputeDiff(SegmentLoadInfo& new_info, const SealedFieldLayoutPtr& fields);
 
     /**
      * @brief Get the LoadDiff from the current SegmentLoadInfo
@@ -1031,7 +1032,7 @@ class SegmentLoadInfo {
      * @return LoadDiff containing the differences
      */
     [[nodiscard]] LoadDiff
-    GetLoadDiff();
+    GetLoadDiff(const SealedFieldLayoutPtr& fields);
 
     // ==================== Underlying Proto Access ====================
 
@@ -1056,13 +1057,13 @@ class SegmentLoadInfo {
      * @brief Rebuild internal caches after direct proto modification
      */
     void
-    RebuildCache() {
-        BuildCache();
+    RebuildCache(const SealedFieldLayoutPtr& fields) {
+        BuildCache(fields);
     }
 
     void
     ReplaceSchemaForReopen(SealedFieldLayoutPtr fields) {
-        fields_ = std::move(fields);
+        SetFieldSelection(*fields);
         PruneRuntimeStateNotInSchema();
     }
 
@@ -1071,8 +1072,9 @@ class SegmentLoadInfo {
         if (!schema) {
             return;
         }
-        fields_ = std::make_shared<const SealedFieldLayout>(
-            schema.get(), LoadScope::FromLegacySchema(*schema));
+        const SealedFieldLayout fields(schema.get(),
+                                       LoadScope::FromLegacySchema(*schema));
+        SetFieldSelection(fields);
         PruneRuntimeStateNotInSchema();
     }
 
@@ -1137,7 +1139,8 @@ class SegmentLoadInfo {
     [[nodiscard]] LoadIndexInfo
     ConvertFieldIndexInfoToLoadIndexInfo(
         const proto::segcore::FieldIndexInfo* field_index_info,
-        int64_t segment_id) const;
+        int64_t segment_id,
+        const SealedFieldLayoutPtr& fields) const;
 
     /**
      * @brief Convert a TextIndexStats to LoadTextIndexInfo
@@ -1152,14 +1155,28 @@ class SegmentLoadInfo {
     [[nodiscard]] std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>
     ConvertTextIndexStatsToLoadTextIndexInfo(
         const proto::segcore::TextIndexStats& text_index_stats,
-        FieldId field_id) const;
+        FieldId field_id,
+        const SealedFieldLayoutPtr& fields) const;
 
     [[nodiscard]] std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>
     ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
         const proto::segcore::JsonKeyStats& json_key_stats,
-        FieldId field_id) const;
+        FieldId field_id,
+        const SealedFieldLayoutPtr& fields) const;
 
  private:
+    void
+    SetFieldSelection(const SealedFieldLayout& fields) {
+        external_ = fields.is_external_collection();
+        field_ids_.clear();
+        for (auto id : fields.get_field_ids()) {
+            if (!restrict_load_fields_ || fields.IsFieldInLoadScope(id)) {
+                field_ids_.push_back(id);
+            }
+        }
+        std::sort(field_ids_.begin(), field_ids_.end());
+    }
+
     void
     PruneRuntimeStateNotInSchema() {
         auto prune_map = [this](auto& values) {
@@ -1201,7 +1218,7 @@ class SegmentLoadInfo {
     }
 
     void
-    BuildCache() {
+    BuildCache(const SealedFieldLayoutPtr& fields) {
         BuildFieldBinlogCache();
 
         // Convert index infos to LoadIndexInfo and build per-field cache
@@ -1220,7 +1237,7 @@ class SegmentLoadInfo {
             }
             field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
-                &index_info, info_.segmentid());
+                &index_info, info_.segmentid(), fields);
             auto index_type_it =
                 load_index_info.index_params.find(milvus::index::INDEX_TYPE);
             auto scalar_version_it = load_index_info.index_params.find(
@@ -1269,26 +1286,37 @@ class SegmentLoadInfo {
     ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info);
 
     void
-    ComputeDiffColumnGroups(LoadDiff& diff, SegmentLoadInfo& new_info);
+    ComputeDiffColumnGroups(LoadDiff& diff,
+                            SegmentLoadInfo& new_info,
+                            const SealedFieldLayoutPtr& fields);
 
     void
     ComputeDiffReloadFields(LoadDiff& diff, SegmentLoadInfo& new_info);
 
     void
-    ComputeDiffDefaultFields(LoadDiff& diff, SegmentLoadInfo& new_info);
+    ComputeDiffDefaultFields(LoadDiff& diff,
+                             SegmentLoadInfo& new_info,
+                             const SealedFieldLayoutPtr& fields);
 
     void
-    ComputeDiffTextIndexes(LoadDiff& diff, SegmentLoadInfo& new_info);
+    ComputeDiffTextIndexes(LoadDiff& diff,
+                           SegmentLoadInfo& new_info,
+                           const SealedFieldLayoutPtr& fields);
 
     void
-    ComputeDiffJsonKeyStats(LoadDiff& diff, SegmentLoadInfo& new_info);
+    ComputeDiffJsonKeyStats(LoadDiff& diff,
+                            SegmentLoadInfo& new_info,
+                            const SealedFieldLayoutPtr& fields);
 
     [[nodiscard]] std::set<FieldId>
     CollectDataFields() const;
 
     ProtoType info_;
 
-    SealedFieldLayoutPtr fields_;
+    // Only the prepared field identities survive the operation. FieldMeta,
+    // policies and defaults are borrowed from the caller while preparing.
+    std::vector<FieldId> field_ids_;
+    bool external_{false};
     bool restrict_load_fields_{false};
 
     // Cache for quick field -> converted LoadIndexInfo lookup

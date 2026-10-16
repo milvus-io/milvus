@@ -213,6 +213,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		mlog.Int("workNodeCount", len(plan.WorkNodes)),
 	)
 	// Preserve a full inter-phase serving window after planning completes.
+	qviews.OmitUnchangedQueryPayloads(plan, req)
 	lease.Renew()
 	return plan, nil
 }

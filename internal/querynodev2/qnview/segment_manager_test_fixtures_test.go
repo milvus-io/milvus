@@ -200,8 +200,6 @@ type fakeCollectionRuntimeGuard struct {
 	updateErr      error
 }
 
-func (g *fakeCollectionRuntimeGuard) Pin() func() { return func() {} }
-
 func (g *fakeCollectionRuntimeGuard) Release() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -228,7 +226,7 @@ func (g *fakeCollectionRuntimeGuard) CCollection() *segcore.CCollection {
 	return nil
 }
 
-func (g *fakeCollectionRuntimeGuard) PinnedCollection() *segments.Collection {
+func (g *fakeCollectionRuntimeGuard) Collection() *segments.Collection {
 	return nil
 }
 

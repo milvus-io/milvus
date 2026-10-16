@@ -228,10 +228,6 @@ func (c *legacyServiceClient) QueryOnView(_ context.Context, _ qviews.WorkNode, 
 	}, nil
 }
 
-func (c *legacyServiceClient) RequeryOnView(context.Context, qviews.WorkNode, *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	return &viewpb.RequeryOnViewResponse{}, nil
-}
-
 func legacySearchPlan(shardID qviews.ShardID, node qviews.QueryNode) *viewpb.QueryPlan {
 	return &viewpb.QueryPlan{
 		ShardId: shardID.IntoProto(),

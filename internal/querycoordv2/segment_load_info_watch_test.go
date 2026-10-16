@@ -97,7 +97,7 @@ func TestCalculateQueryViewSegmentLoadInfoRevisionIsStable(t *testing.T) {
 	for _, stats := range reorderedLoadInfo.TextStatsLogs {
 		slices.Reverse(stats.Files)
 	}
-	reorderedIndexes := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{IndexInfoList: indexes}).(*querypb.QueryViewSegmentLoadInfoSnapshot).IndexInfoList
+	reorderedIndexes := proto.Clone(&querypb.QueryViewCollectionIndexes{IndexInfoList: indexes}).(*querypb.QueryViewCollectionIndexes).IndexInfoList
 	slices.Reverse(reorderedIndexes)
 	for _, index := range reorderedIndexes {
 		slices.Reverse(index.TypeParams)
@@ -109,7 +109,7 @@ func TestCalculateQueryViewSegmentLoadInfoRevisionIsStable(t *testing.T) {
 	actual := calculateQueryViewSegmentLoadInfoRevision(reorderedLoadInfo, reorderedIndexes)
 	assert.Equal(t, expected, actual)
 
-	changedIndexes := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{IndexInfoList: reorderedIndexes}).(*querypb.QueryViewSegmentLoadInfoSnapshot).IndexInfoList
+	changedIndexes := proto.Clone(&querypb.QueryViewCollectionIndexes{IndexInfoList: reorderedIndexes}).(*querypb.QueryViewCollectionIndexes).IndexInfoList
 	changedIndexes[0].IndexParams[0].Value = "changed"
 	changed := calculateQueryViewSegmentLoadInfoRevision(reorderedLoadInfo, changedIndexes)
 	assert.NotEqual(t, expected, changed)
@@ -133,7 +133,7 @@ func TestCalculateQueryViewSegmentLoadInfoRevisionIsStable(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			changedLoadInfo := proto.Clone(loadInfo).(*querypb.SegmentLoadInfo)
-			changedIndexes := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{IndexInfoList: indexes}).(*querypb.QueryViewSegmentLoadInfoSnapshot).IndexInfoList
+			changedIndexes := proto.Clone(&querypb.QueryViewCollectionIndexes{IndexInfoList: indexes}).(*querypb.QueryViewCollectionIndexes).IndexInfoList
 			mutate(changedLoadInfo, changedIndexes)
 			assert.NotEqual(t, expected, calculateQueryViewSegmentLoadInfoRevision(changedLoadInfo, changedIndexes))
 		})
@@ -211,12 +211,12 @@ func TestCalculateQueryViewSegmentLoadInfoRevisionDoesNotMutateInputs(t *testing
 		},
 	}
 	originalLoadInfo := proto.Clone(loadInfo)
-	originalIndexes := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{IndexInfoList: indexes})
+	originalIndexes := proto.Clone(&querypb.QueryViewCollectionIndexes{IndexInfoList: indexes})
 
 	calculateQueryViewSegmentLoadInfoRevision(loadInfo, indexes)
 
 	assert.True(t, proto.Equal(originalLoadInfo, loadInfo))
-	assert.True(t, proto.Equal(originalIndexes, &querypb.QueryViewSegmentLoadInfoSnapshot{IndexInfoList: indexes}))
+	assert.True(t, proto.Equal(originalIndexes, &querypb.QueryViewCollectionIndexes{IndexInfoList: indexes}))
 }
 
 func TestCalculateQueryViewSegmentLoadInfoRevisionIsStableForEqualSortKeys(t *testing.T) {
@@ -258,7 +258,7 @@ func TestCalculateQueryViewSegmentLoadInfoRevisionIsStableForEqualSortKeys(t *te
 	}
 	reorderedLoadInfo := proto.Clone(loadInfo).(*querypb.SegmentLoadInfo)
 	slices.Reverse(reorderedLoadInfo.IndexInfos)
-	reorderedIndexes := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{IndexInfoList: indexes}).(*querypb.QueryViewSegmentLoadInfoSnapshot).IndexInfoList
+	reorderedIndexes := proto.Clone(&querypb.QueryViewCollectionIndexes{IndexInfoList: indexes}).(*querypb.QueryViewCollectionIndexes).IndexInfoList
 	slices.Reverse(reorderedIndexes)
 
 	assert.Equal(t,
@@ -289,7 +289,7 @@ func TestCalculateQueryViewSegmentLoadInfoRevisionIsStableForEqualSortKeys(t *te
 		}}
 		reorderedLoadInfo := proto.Clone(loadInfo).(*querypb.SegmentLoadInfo)
 		slices.Reverse(reorderedLoadInfo.BinlogPaths)
-		reorderedIndexes := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{IndexInfoList: indexes}).(*querypb.QueryViewSegmentLoadInfoSnapshot).IndexInfoList
+		reorderedIndexes := proto.Clone(&querypb.QueryViewCollectionIndexes{IndexInfoList: indexes}).(*querypb.QueryViewCollectionIndexes).IndexInfoList
 		slices.Reverse(reorderedIndexes[0].UserIndexParams)
 
 		assert.Equal(t,

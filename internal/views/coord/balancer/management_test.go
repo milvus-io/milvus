@@ -73,7 +73,6 @@ func TestManualBalance(t *testing.T) {
 		for _, partition := range node.Partitions {
 			if node.NodeId == 2 {
 				require.Equal(t, []int64{8}, partition.SegmentManifestVersions)
-				require.Equal(t, []uint64{55}, partition.SegmentTransformStartAfterTimeticks)
 			}
 		}
 	}

@@ -169,10 +169,6 @@ func (c *routedViewSyncServiceClient) SyncQueryView(ctx context.Context, opts ..
 	return c.client.SyncQueryView(contextutil.WithPickServerID(ctx, c.queryNodeID), opts...)
 }
 
-func (c *routedViewSyncServiceClient) SyncDataView(ctx context.Context, in *viewpb.SyncDataViewRequest, opts ...grpc.CallOption) (*viewpb.SyncDataViewResponse, error) {
-	return c.client.SyncDataView(contextutil.WithPickServerID(ctx, c.queryNodeID), in, opts...)
-}
-
 func (c *managerClientImpl) RegisterQueryNodeListener(ctx context.Context, listener func(int64, *NodeInfo)) (func(), error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, merr.WrapErrServiceUnavailableMsg("querynode manager client is closing")

@@ -47,18 +47,16 @@ func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context
 		b := v.bindings[id]
 		r, read := b.resource, b.prepared
 		unpinRead := read.read.RetainReadState()
-		unpinCollection := v.collection.Pin()
 		r.queryRefs++
 		read.base.queryRefs++
-		v.queryRefs++
-		segment := &viewSchemaSegment{TransformSegment: read.base.segment, collection: v.collection.PinnedCollection(), read: read.read}
+		v.operationRefs++
+		segment := &viewSchemaSegment{TransformSegment: read.base.segment, collection: v.collection.Collection(), read: read.read}
 		handles = append(handles, &resourceSegmentHandle{segment: segment, registration: read.base.registration, release: func() {
 			unpinRead()
-			unpinCollection()
 			m.mu.Lock()
 			r.queryRefs--
 			read.base.queryRefs--
-			v.queryRefs--
+			v.operationRefs--
 			r.wakeLocked()
 			if len(r.bindings) == 0 && r.queryRefs == 0 {
 				r.closing = true

@@ -44,9 +44,6 @@ func newPublishedRecoveryBase(id qviews.ShardID, recovery *coordview.PublishedRe
 				if i < len(part.GetSegmentManifestVersions()) {
 					segment.ManifestVersion = part.GetSegmentManifestVersions()[i]
 				}
-				if i < len(part.GetSegmentTransformStartAfterTimeticks()) {
-					segment.TransformStartAfterTimetick = part.GetSegmentTransformStartAfterTimeticks()[i]
-				}
 				partition.Segments = append(partition.Segments, segment)
 			}
 		}

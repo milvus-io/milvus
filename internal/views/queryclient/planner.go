@@ -8,15 +8,15 @@ import "context"
 //
 // - Plan:        Shard resolution + Reranker/Renderer construction + FieldFetchPlan generation + GetQueryPlan (Phase 1).
 // - Search:      Dispatch to work nodes + streaming reduce (Phase 2).
-// - RerankQuery: Fetch reranker-required fields via RequeryOnView (optional).
+// - RerankQuery: Fetch reranker-required fields via QueryOnView (optional).
 // - Rerank:      Cross-sub-search reranking (optional).
-// - Requery:     Fetch remaining output/render fields via RequeryOnView (optional).
+// - Requery:     Fetch remaining output/render fields via QueryOnView (optional).
 // - Render:      Result post-processing — noop for plain queries, text highlighting for BM25, etc. (always runs).
 //
 // Fields can be fetched at three stages:
 // - SearchFields:      returned from work nodes alongside PKs + scores during Search.
-// - RerankQueryFields: fetched via RequeryOnView during RerankQuery (for reranker use).
-// - RequeryFields:     fetched via RequeryOnView during Requery (for output + render use).
+// - RerankQueryFields: fetched via QueryOnView during RerankQuery (for reranker use).
+// - RequeryFields:     fetched via QueryOnView during Requery (for output + render use).
 
 // FieldFetchPlanner decides which fields to fetch at each execution stage.
 // The planner examines reranker requirements, renderer requirements, user-requested
@@ -52,12 +52,12 @@ type FieldFetchPlan struct {
 	// during the Search stage. Avoids requery but increases per-node response size.
 	SearchFields []string
 
-	// RerankQueryFields are fetched via RequeryOnView during the RerankQuery stage,
+	// RerankQueryFields are fetched via QueryOnView during the RerankQuery stage,
 	// on the full candidate set. Only needed if the reranker requires fields
 	// not already available from SearchFields.
 	RerankQueryFields []string
 
-	// RequeryFields are fetched via RequeryOnView during the Requery stage,
+	// RequeryFields are fetched via QueryOnView during the Requery stage,
 	// on the final top-k only. For output and render fields not yet available
 	// from SearchFields or RerankQueryFields.
 	RequeryFields []string

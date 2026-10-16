@@ -206,9 +206,7 @@ func (r fakeQVCollectionRuntime) CCollection() *segcore.CCollection {
 	return nil
 }
 
-func (r fakeQVCollectionRuntime) Pin() func() { return func() {} }
-
-func (r fakeQVCollectionRuntime) PinnedCollection() *segments.Collection {
+func (r fakeQVCollectionRuntime) Collection() *segments.Collection {
 	return r.collection
 }
 

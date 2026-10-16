@@ -179,9 +179,8 @@ func (c *fakeQueryPlanServiceClient) GetMVCCTimestamp(ctx context.Context, req *
 }
 
 type fakeViewQueryServiceClient struct {
-	searchOnView  func(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
-	queryOnView   func(context.Context, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
-	requeryOnView func(context.Context, *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error)
+	searchOnView func(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
+	queryOnView  func(context.Context, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
 }
 
 func (c *fakeViewQueryServiceClient) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewRequest, _ ...grpc.CallOption) (*viewpb.SearchOnViewResponse, error) {
@@ -192,20 +191,12 @@ func (c *fakeViewQueryServiceClient) QueryOnView(ctx context.Context, req *viewp
 	return c.queryOnView(ctx, req)
 }
 
-func (c *fakeViewQueryServiceClient) RequeryOnView(ctx context.Context, req *viewpb.RequeryOnViewRequest, _ ...grpc.CallOption) (*viewpb.RequeryOnViewResponse, error) {
-	return c.requeryOnView(ctx, req)
-}
-
 type fakeViewSyncServiceClient struct {
 	syncQueryView func(context.Context) (viewpb.ViewSyncService_SyncQueryViewClient, error)
 }
 
 func (c *fakeViewSyncServiceClient) SyncQueryView(ctx context.Context, _ ...grpc.CallOption) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
 	return c.syncQueryView(ctx)
-}
-
-func (c *fakeViewSyncServiceClient) SyncDataView(context.Context, *viewpb.SyncDataViewRequest, ...grpc.CallOption) (*viewpb.SyncDataViewResponse, error) {
-	return &viewpb.SyncDataViewResponse{}, nil
 }
 
 type noopViewSyncClientStream struct {

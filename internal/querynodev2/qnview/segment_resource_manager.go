@@ -46,7 +46,7 @@ type viewResources struct {
 	bindings         map[int64]*segmentBinding
 	failed           bool
 	released         bool
-	queryRefs        int
+	operationRefs    int // queries and synchronous resource preparation borrowing the View collection
 	cleanupOnce      sync.Once
 }
 
@@ -55,7 +55,6 @@ type segmentBinding struct {
 	resource    *segmentResource
 	partitionID int64
 	manifest    int64
-	startAfter  uint64
 	prepared    *preparedSegmentRead
 	reported    bool
 	retryAfter  time.Time
@@ -135,12 +134,9 @@ func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
 			if r == nil {
 				r = m.newResourceLocked(id, req.Meta.GetCollectionId())
 			}
-			b := &segmentBinding{view: v, resource: r, partitionID: partition.GetPartitionId(), startAfter: req.Meta.GetTransformStartAfterTimetick()}
+			b := &segmentBinding{view: v, resource: r, partitionID: partition.GetPartitionId()}
 			if i < len(partition.GetSegmentManifestVersions()) {
 				b.manifest = partition.GetSegmentManifestVersions()[i]
-			}
-			if i < len(partition.GetSegmentTransformStartAfterTimeticks()) && partition.GetSegmentTransformStartAfterTimeticks()[i] != 0 {
-				b.startAfter = partition.GetSegmentTransformStartAfterTimeticks()[i]
 			}
 			v.bindings[id] = b
 			r.bindings = append(r.bindings, b)
@@ -351,7 +347,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		}
 		snapshot := *r.snapshot
 		collection := b.view.collection
-		unpin := collection.Pin()
+		b.view.operationRefs++
 		m.mu.Unlock()
 		r.retainBaseReads(anchors)
 		for _, read := range obsolete {
@@ -361,7 +357,6 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
 		result, err := r.prepare(ctx, b, collection, snapshot)
 		cancel()
-		unpin()
 		if err != nil {
 			mlog.RatedWarn(r.ctx, rate.Limit(0.2), "segment resource preparation will retry", mlog.FieldSegmentID(r.id), mlog.Int64("schemaVersion", collection.SchemaVersion()), mlog.Err(err))
 			if merr.GetErrorType(err) == merr.InputError {
@@ -369,12 +364,16 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			}
 		}
 		m.mu.Lock()
+		b.view.operationRefs--
 		if err != nil {
 			b.retryAfter = time.Now().Add(200 * time.Millisecond)
 		} else {
 			r.reads = append(r.reads, result)
 		}
 		prepared = true
+		m.mu.Unlock()
+		m.cleanupView(b.view)
+		m.mu.Lock()
 		// Recheck readiness now; unfinished catch-up has its own wakeup.
 	}
 }
@@ -394,7 +393,7 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 			continue
 		}
 		for _, read := range r.reads {
-			if read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() && read.manifest >= b.manifest && (!typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || read.manifest == b.manifest) && read.base.segment.TransformStartAfterTimeTick() <= b.startAfter && read.base.caughtUp {
+			if read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() && read.manifest >= b.manifest && (!typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || read.manifest == b.manifest) && read.base.caughtUp {
 				if b.prepared == nil || read.revision == r.snapshot.Revision {
 					b.prepared = read
 				}
@@ -432,7 +431,7 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 		// Do not build a duplicate while its transform attachment is catching up.
 		waiting := false
 		for _, read := range r.reads {
-			if read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() && read.revision == r.snapshot.Revision && read.manifest >= b.manifest && read.base.segment.TransformStartAfterTimeTick() <= b.startAfter {
+			if read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() && read.revision == r.snapshot.Revision && read.manifest >= b.manifest {
 				waiting = true
 				if read.base.catchupErr != nil {
 					go m.failView(b.view, read.base.catchupErr)
@@ -479,7 +478,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	m.mu.Lock()
 	for _, candidate := range r.bases {
 		sameManifest := candidate.snapshot.LoadInfo.GetManifestPath() == info.GetManifestPath()
-		if candidate.segment.TransformStartAfterTimeTick() <= b.startAfter && (sameManifest || (!typeutil.IsExternalCollection(collection.Schema()) && candidate.snapshot.LoadInfo.GetNumOfRows() == info.GetNumOfRows())) {
+		if candidate.segment.TransformStartAfterTimeTick() <= info.GetTransformStartAfterTimetick() && (sameManifest || (!typeutil.IsExternalCollection(collection.Schema()) && candidate.snapshot.LoadInfo.GetNumOfRows() == info.GetNumOfRows())) {
 			base = candidate
 			break
 		}
@@ -497,7 +496,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		if err != nil {
 			return nil, err
 		}
-		segment = &transformStartSegment{TransformSegment: segment, startAfter: b.startAfter}
+		segment = &transformStartSegment{TransformSegment: segment, startAfter: info.GetTransformStartAfterTimetick()}
 		baseCtx, cancel := context.WithCancel(r.ctx) //nolint:gosec // Ownership transfers to the base; resource closure or base retirement cancels it.
 		base = &segmentBase{segment: segment, snapshot: snapshot, ctx: baseCtx, cancel: cancel}
 		m.mu.Lock()
@@ -614,7 +613,7 @@ func (m *SegmentResourceManager) Release(req ReleaseSegments) {
 
 func (m *SegmentResourceManager) cleanupView(v *viewResources) {
 	m.mu.Lock()
-	cleanup := v.released && v.queryRefs == 0
+	cleanup := v.released && v.operationRefs == 0
 	m.mu.Unlock()
 	if cleanup {
 		v.cleanupOnce.Do(func() {
@@ -693,8 +692,7 @@ func (r *segmentResource) pruneReadsLocked() []segments.ReadState {
 			continue
 		}
 		for _, b := range r.bindings {
-			if b.prepared == nil && !b.view.failed && base.segment.TransformStartAfterTimeTick() <= b.startAfter &&
-				(b.view.collection == nil || !typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || b.manifest == read.manifest) {
+			if b.prepared == nil && !b.view.failed && (b.view.collection == nil || !typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || b.manifest == read.manifest) {
 				keep[read] = true
 				break
 			}

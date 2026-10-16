@@ -30,9 +30,6 @@ type QueryViewClient interface {
 
 	// QueryOnView executes a QueryView retrieve on the StreamingNode owning the pchannel.
 	QueryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
-
-	// RequeryOnView fetches fields from the StreamingNode owning the pchannel for a previous QueryView plan.
-	RequeryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error)
 }
 
 type queryViewClient struct {
@@ -82,13 +79,6 @@ func (qvc *queryViewClient) SearchOnView(ctx context.Context, pchannel types.PCh
 func (qvc *queryViewClient) QueryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	result, err := executeViewQueryRPC(ctx, qvc, pchannel, "ViewQueryService.QueryOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.QueryOnViewResponse, error) {
 		return client.QueryOnView(ctx, req)
-	})
-	return result, err
-}
-
-func (qvc *queryViewClient) RequeryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	result, err := executeViewQueryRPC(ctx, qvc, pchannel, "ViewQueryService.RequeryOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.RequeryOnViewResponse, error) {
-		return client.RequeryOnView(ctx, req)
 	})
 	return result, err
 }

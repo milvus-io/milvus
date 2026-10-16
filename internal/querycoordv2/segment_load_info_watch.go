@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -114,14 +115,20 @@ func (s *queryViewSegmentLoadInfoWatchSession) sendResponse(resp *querypb.WatchQ
 	if resp == nil || len(resp.GetSnapshots()) == 0 && merr.Ok(resp.GetStatus()) {
 		return true
 	}
-	if err := s.stream.Send(resp); err != nil {
+	err := qviews.SendSegmentLoadInfoResponses(resp, func(batch *querypb.WatchQueryViewSegmentLoadInfoResponse) error {
+		if err := s.stream.Send(batch); err != nil {
+			return err
+		}
+		s.updateSnapshotRevisions(batch.GetSnapshots())
+		return nil
+	})
+	if err != nil {
 		mlog.Warn(s.stream.Context(), "query view segment load info watch send failed", mlog.Err(err))
 		return false
 	}
 	if !merr.Ok(resp.GetStatus()) {
 		return false
 	}
-	s.updateSnapshotRevisions(resp.GetSnapshots())
 	return true
 }
 
@@ -156,12 +163,13 @@ func (s *queryViewSegmentLoadInfoWatchSession) handle(req *querypb.WatchQueryVie
 		subscriptions = append(subscriptions, subscription)
 	}
 
-	snapshots, err := s.buildSnapshots(ctx, subscriptions)
+	snapshots, indexes, err := s.buildSnapshots(ctx, subscriptions)
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp
 	}
 	resp.Snapshots = snapshots
+	resp.CollectionIndexes = indexes
 	return resp
 }
 
@@ -179,16 +187,17 @@ func (s *queryViewSegmentLoadInfoWatchSession) handleDirtySegments() *querypb.Wa
 		return resp
 	}
 
-	snapshots, err := s.buildSnapshots(ctx, s.drainDirtySubscriptions())
+	snapshots, indexes, err := s.buildSnapshots(ctx, s.drainDirtySubscriptions())
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp
 	}
 	resp.Snapshots = snapshots
+	resp.CollectionIndexes = indexes
 	return resp
 }
 
-func (s *queryViewSegmentLoadInfoWatchSession) buildSnapshots(ctx context.Context, subscriptions []queryViewSegmentLoadInfoSubscription) ([]*querypb.QueryViewSegmentLoadInfoSnapshot, error) {
+func (s *queryViewSegmentLoadInfoWatchSession) buildSnapshots(ctx context.Context, subscriptions []queryViewSegmentLoadInfoSubscription) ([]*querypb.QueryViewSegmentLoadInfoSnapshot, []*querypb.QueryViewCollectionIndexes, error) {
 	byCollection := make(map[int64][]queryViewSegmentLoadInfoSubscription)
 	for _, subscription := range subscriptions {
 		if subscription.collectionID == 0 || subscription.segmentID == 0 {
@@ -197,6 +206,7 @@ func (s *queryViewSegmentLoadInfoWatchSession) buildSnapshots(ctx context.Contex
 		byCollection[subscription.collectionID] = append(byCollection[subscription.collectionID], subscription)
 	}
 	snapshots := make([]*querypb.QueryViewSegmentLoadInfoSnapshot, 0, len(subscriptions))
+	var collections []*querypb.QueryViewCollectionIndexes
 	for collectionID, collectionSubscriptions := range byCollection {
 		segmentIDs := make([]int64, 0, len(collectionSubscriptions))
 		expected := make(map[int64]*querypb.QueryViewSegmentLoadInfoRevision, len(collectionSubscriptions))
@@ -206,23 +216,27 @@ func (s *queryViewSegmentLoadInfoWatchSession) buildSnapshots(ctx context.Contex
 		}
 		infos, indexInfos, err := s.server.mixCoord.GetQueryViewSegmentLoadInfos(ctx, collectionID, segmentIDs)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		indexRevision := calculateQueryViewIndexRevision(indexInfos)
+		before := len(snapshots)
 		for _, loadInfo := range infos {
-			revision := calculateQueryViewSegmentLoadInfoRevision(loadInfo, indexInfos)
+			revision := calculateQueryViewSegmentRevision(loadInfo, indexRevision)
 			if sameQueryViewSegmentLoadInfoRevision(expected[loadInfo.GetSegmentID()], revision) {
 				continue
 			}
 			snapshots = append(snapshots, &querypb.QueryViewSegmentLoadInfoSnapshot{
-				CollectionID:  collectionID,
-				SegmentID:     loadInfo.GetSegmentID(),
-				Revision:      revision,
-				LoadInfo:      loadInfo,
-				IndexInfoList: indexInfos,
+				CollectionID: collectionID,
+				SegmentID:    loadInfo.GetSegmentID(),
+				Revision:     revision,
+				LoadInfo:     loadInfo,
 			})
 		}
+		if len(snapshots) > before {
+			collections = append(collections, &querypb.QueryViewCollectionIndexes{CollectionID: collectionID, IndexInfoList: indexInfos})
+		}
 	}
-	return snapshots, nil
+	return snapshots, collections, nil
 }
 
 func (s *queryViewSegmentLoadInfoWatchSession) subscribe(subscription queryViewSegmentLoadInfoSubscription) {
@@ -382,24 +396,30 @@ func (w *queryViewSegmentLoadInfoWatcher) notify(collectionID int64, segmentIDs 
 }
 
 func calculateQueryViewSegmentLoadInfoRevision(loadInfo *querypb.SegmentLoadInfo, indexInfos []*indexpb.IndexInfo) *querypb.QueryViewSegmentLoadInfoRevision {
-	snapshot := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{
-		LoadInfo:      loadInfo,
-		IndexInfoList: indexInfos,
-	}).(*querypb.QueryViewSegmentLoadInfoSnapshot)
-	canonicalizeQueryViewSegmentLoadInfoSnapshot(snapshot)
-	return &querypb.QueryViewSegmentLoadInfoRevision{
-		LoadInfoRevision: hashProto(snapshot),
-	}
+	return calculateQueryViewSegmentRevision(loadInfo, calculateQueryViewIndexRevision(indexInfos))
 }
 
-func canonicalizeQueryViewSegmentLoadInfoSnapshot(snapshot *querypb.QueryViewSegmentLoadInfoSnapshot) {
-	for _, index := range snapshot.GetIndexInfoList() {
+func calculateQueryViewIndexRevision(indexInfos []*indexpb.IndexInfo) uint64 {
+	indexes := proto.Clone(&querypb.QueryViewCollectionIndexes{IndexInfoList: indexInfos}).(*querypb.QueryViewCollectionIndexes)
+	for _, index := range indexes.GetIndexInfoList() {
 		sortKeyValuePairs(index.TypeParams)
 		sortKeyValuePairs(index.IndexParams)
 		sortKeyValuePairs(index.UserIndexParams)
 	}
-	slices.SortFunc(snapshot.IndexInfoList, compareIndexInfo)
+	slices.SortFunc(indexes.IndexInfoList, compareIndexInfo)
+	return hashProto(indexes)
+}
 
+func calculateQueryViewSegmentRevision(loadInfo *querypb.SegmentLoadInfo, indexRevision uint64) *querypb.QueryViewSegmentLoadInfoRevision {
+	snapshot := proto.Clone(&querypb.QueryViewSegmentLoadInfoSnapshot{
+		LoadInfo: loadInfo,
+		Revision: &querypb.QueryViewSegmentLoadInfoRevision{LoadInfoRevision: indexRevision},
+	}).(*querypb.QueryViewSegmentLoadInfoSnapshot)
+	canonicalizeQueryViewSegmentLoadInfoSnapshot(snapshot)
+	return &querypb.QueryViewSegmentLoadInfoRevision{LoadInfoRevision: hashProto(snapshot)}
+}
+
+func canonicalizeQueryViewSegmentLoadInfoSnapshot(snapshot *querypb.QueryViewSegmentLoadInfoSnapshot) {
 	loadInfo := snapshot.GetLoadInfo()
 	if loadInfo == nil {
 		return

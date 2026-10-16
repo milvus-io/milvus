@@ -28,7 +28,4 @@ type ViewQueryServiceClient interface {
 
 	// QueryOnView executes a query (retrieve by expression) on the given work node.
 	QueryOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
-
-	// RequeryOnView fetches output fields for a set of PKs on the given work node.
-	RequeryOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error)
 }

@@ -52,10 +52,6 @@ func (s *PChannelViewQueryServer) QueryOnView(ctx context.Context, req *viewpb.Q
 	return viewquery.NewServer(provider, s.scheduler).QueryOnView(ctx, req)
 }
 
-func (s *PChannelViewQueryServer) RequeryOnView(ctx context.Context, req *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	return viewquery.NewServer(nil, s.scheduler).RequeryOnView(ctx, req)
-}
-
 func (s *PChannelViewQueryServer) taskProviderForVChannel(ctx context.Context, vchannel string) (viewquery.TaskProvider, error) {
 	if s == nil || s.walManager == nil {
 		return nil, viewerror.NewOnShutdownError("view query service is unavailable")

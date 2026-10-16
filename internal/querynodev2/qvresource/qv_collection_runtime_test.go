@@ -50,9 +50,9 @@ func TestQueryViewCollectionRuntimeManager_AcquireRefsCollectionAndReleaseUnrefs
 	require.NoError(t, err)
 	assert.False(t, retryable)
 	require.NotNil(t, guard)
-	assert.NotSame(t, localCollection, guard.PinnedCollection())
-	assert.Equal(t, localCollection.ID(), guard.PinnedCollection().ID())
-	assert.ElementsMatch(t, []int64{10, 20}, guard.PinnedCollection().GetPartitions())
+	assert.NotSame(t, localCollection, guard.Collection())
+	assert.Equal(t, localCollection.ID(), guard.Collection().ID())
+	assert.ElementsMatch(t, []int64{10, 20}, guard.Collection().GetPartitions())
 
 	assert.Equal(t, int64(1), guard.CollectionID())
 	assert.Equal(t, "db", guard.DatabaseName())
@@ -143,7 +143,7 @@ func TestQueryViewCollectionRuntimeManager_AcquireClassifiesRetryability(t *test
 	})
 }
 
-func TestQueryViewCollectionRuntimeGuard_UpdateIndexMetaUsesPinnedCollection(t *testing.T) {
+func TestQueryViewCollectionRuntimeGuard_UpdateIndexMetaUsesCollection(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Name: "coll"}
 	localCollection := segments.NewCollectionWithoutSegcoreForTest(1, schema)
 	collection := &fakeQVCollectionManager{collection: localCollection}
@@ -274,17 +274,14 @@ func TestQueryViewCollectionRuntimeIsolatesReadGenerations(t *testing.T) {
 	require.Same(t, old.CCollection(), oldAgain.CCollection(), "identical read generations share planning resources")
 	require.NotSame(t, old.CCollection(), target.CCollection())
 	require.Same(t, target.CCollection(), changedLoad.CCollection(), "load scope is not a native schema identity")
-	require.EqualValues(t, 0, old.PinnedCollection().Schema().GetVersion())
-	require.EqualValues(t, 1, target.PinnedCollection().Schema().GetVersion())
-	unpin := old.Pin()
+	require.EqualValues(t, 0, old.Collection().Schema().GetVersion())
+	require.EqualValues(t, 1, target.Collection().Schema().GetVersion())
 	old.Release()
-	oldAgain.Release()
-	require.Len(t, manager.collections, 2, "an active query keeps its exact read collection alive")
+	require.Len(t, manager.collections, 2, "another View keeps its exact schema collection alive")
 	target.Release()
 	changedLoad.Release()
 	require.Len(t, manager.collections, 1)
-	unpin()
-	unpin()
+	oldAgain.Release()
 	require.Empty(t, manager.collections)
 }
 
@@ -314,7 +311,7 @@ func TestQueryViewCollectionRuntimeIgnoresPerChannelSchemaTicks(t *testing.T) {
 			first = guard
 		}
 		require.Same(t, first.CCollection(), guard.CCollection())
-		schema, nativeVersion := guard.PinnedCollection().SchemaAndSegcoreVersion()
+		schema, nativeVersion := guard.Collection().SchemaAndSegcoreVersion()
 		require.EqualValues(t, 2, nativeVersion)
 		require.EqualValues(t, schema.GetVersion(), guard.SchemaVersion())
 		require.EqualValues(t, nativeVersion, guard.SchemaVersion(), "reopen and initial segment load use the same collection-wide identity")

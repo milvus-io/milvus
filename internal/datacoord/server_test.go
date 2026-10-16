@@ -618,23 +618,24 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		startPos := &msgpb.MsgPosition{ChannelName: "vchan", Timestamp: 11}
 		dmlPos := &msgpb.MsgPosition{ChannelName: "vchan", Timestamp: 22}
 		segment := &datapb.SegmentInfo{
-			ID:              segmentID,
-			CollectionID:    collectionID,
-			PartitionID:     partitionID,
-			InsertChannel:   "vchan",
-			State:           commonpb.SegmentState_Flushed,
-			NumOfRows:       100,
-			Binlogs:         []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
-			Statslogs:       []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
-			Deltalogs:       []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 3}}}},
-			Bm25Statslogs:   []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 4}}}},
-			StartPosition:   startPos,
-			DmlPosition:     dmlPos,
-			Level:           datapb.SegmentLevel_L1,
-			StorageVersion:  2,
-			IsSorted:        true,
-			DataVersion:     7,
-			CommitTimestamp: 99,
+			ID:                          segmentID,
+			CollectionID:                collectionID,
+			PartitionID:                 partitionID,
+			InsertChannel:               "vchan",
+			State:                       commonpb.SegmentState_Flushed,
+			NumOfRows:                   100,
+			Binlogs:                     []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+			Statslogs:                   []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
+			Deltalogs:                   []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 3}}}},
+			Bm25Statslogs:               []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 4}}}},
+			StartPosition:               startPos,
+			DmlPosition:                 dmlPos,
+			Level:                       datapb.SegmentLevel_L1,
+			StorageVersion:              2,
+			IsSorted:                    true,
+			DataVersion:                 7,
+			CommitTimestamp:             99,
+			TransformStartAfterTimetick: 17,
 		}
 		require.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment)))
 		require.NoError(t, svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
@@ -680,6 +681,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		assert.True(t, info.GetIsSorted())
 		assert.Equal(t, int32(7), info.GetDataVersion())
 		assert.Equal(t, uint64(99), info.GetCommitTimestamp())
+		assert.Equal(t, uint64(17), info.GetTransformStartAfterTimetick(), "replay starts at the segment cursor, not its DML position")
 		assert.Equal(t, commonpb.LoadPriority_HIGH, info.GetPriority())
 		assert.Contains(t, info.GetBinlogPaths()[0].GetBinlogs()[0].GetLogPath(), "/insert_log/100/10/1000/101/1")
 		assert.Contains(t, info.GetStatslogs()[0].GetBinlogs()[0].GetLogPath(), "/stats_log/100/10/1000/101/2")
@@ -802,19 +804,22 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
 		}
 		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
-			ID:            segmentID,
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			State:         commonpb.SegmentState_Dropped,
-			ManifestPath:  parentManifest,
-			Deltalogs:     []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 3}}}},
-			JsonKeyStats:  map[int64]*datapb.JsonKeyStats{fieldID: jsonPlaceholder},
-			InsertChannel: "vchan",
+			ID:                          segmentID,
+			CollectionID:                collectionID,
+			PartitionID:                 partitionID,
+			State:                       commonpb.SegmentState_Dropped,
+			ManifestPath:                parentManifest,
+			TransformStartAfterTimetick: 123,
+			Deltalogs:                   []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 3}}}},
+			JsonKeyStats:                map[int64]*datapb.JsonKeyStats{fieldID: jsonPlaceholder},
+			InsertChannel:               "vchan",
 		})))
 		infos, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID})
 
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
+		assert.Equal(t, parentManifest, infos[0].GetManifestPath())
+		assert.Equal(t, uint64(123), infos[0].GetTransformStartAfterTimetick())
 		assert.Equal(t, jsonPlaceholder, infos[0].GetJsonKeyStatsLogs()[fieldID])
 		assert.Empty(t, infos[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath(), "manifest delta summaries are not legacy files")
 	})

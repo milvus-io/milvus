@@ -30,11 +30,10 @@ func TestSegmentResourceWaitsForManifestAndCatchup(t *testing.T) {
 		}).Build()
 		req := f.request(1, 1, 1)
 		req.View.Partitions[0].SegmentManifestVersions = []int64{2}
-		req.View.Partitions[0].SegmentTransformStartAfterTimeticks = []uint64{50}
 		f.manager.Acquire(req)
 		handler := <-f.handler
 		require.Never(t, func() bool { return f.loads.Load() != 0 }, 100*time.Millisecond, time.Millisecond)
-		require.NoError(t, handler.Handle(SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 2}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, ManifestPath: packed.MarshalManifestPath("test", 2), NumOfRows: 10}}))
+		require.NoError(t, handler.Handle(SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 2}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, ManifestPath: packed.MarshalManifestPath("test", 2), NumOfRows: 10, TransformStartAfterTimetick: 50}}))
 		<-entered
 		require.Empty(t, f.ready)
 		_, err := f.manager.AcquireSealedSegmentHandles(t.Context(), req.Key, req.View, 0)
@@ -274,25 +273,23 @@ func TestSegmentResourceQueryWaitCancellationReleasesPins(t *testing.T) {
 	})
 }
 
-func TestSegmentResourceEarlierCursorUsesIndependentBase(t *testing.T) {
-	mockey.PatchConvey("a matching schema/scope cannot hide incompatible transform coverage", t, func() {
+func TestSegmentResourceUsesFetchedCursorAcrossViewVersions(t *testing.T) {
+	mockey.PatchConvey("View versions reuse the actual base and its fetched replay cursor", t, func() {
 		f := setupResourceTest(t, nil)
 		later := f.request(2, 1, 1)
-		later.View.Partitions[0].SegmentTransformStartAfterTimeticks = []uint64{100}
 		f.manager.Acquire(later)
 		f.await(t, 1)
 		earlier := f.request(1, 1, 1)
-		earlier.View.Partitions[0].SegmentTransformStartAfterTimeticks = []uint64{50}
 		f.manager.Acquire(earlier)
 		f.await(t, 1)
-		require.EqualValues(t, 2, f.loads.Load())
+		require.EqualValues(t, 1, f.loads.Load())
 		f.drop(t, later)
-		require.Eventually(t, func() bool { return f.releases.Load() == 1 }, 5*time.Second, time.Millisecond)
+		require.Zero(t, f.releases.Load())
 		handles, err := f.manager.AcquireSealedSegmentHandles(t.Context(), earlier.Key, earlier.View, 0)
 		require.NoError(t, err)
 		require.EqualValues(t, 50, handles[0].Segment().TransformStartAfterTimeTick())
 		handles[0].Release()
 		f.drop(t, earlier)
-		require.EqualValues(t, 2, f.releases.Load())
+		require.EqualValues(t, 1, f.releases.Load())
 	})
 }

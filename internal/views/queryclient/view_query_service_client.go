@@ -17,13 +17,11 @@ type compositeViewQueryServiceClient struct {
 type StreamingNodeViewQueryServiceClient interface {
 	SearchOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	QueryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
-	RequeryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error)
 }
 
 type QueryNodeViewQueryServiceClient interface {
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
-	RequeryOnView(ctx context.Context, nodeID int64, req *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error)
 }
 
 func NewCompositeViewQueryServiceClient(streamingNode StreamingNodeViewQueryServiceClient, queryNode QueryNodeViewQueryServiceClient) ViewQueryServiceClient {
@@ -50,17 +48,6 @@ func (c *compositeViewQueryServiceClient) QueryOnView(ctx context.Context, node 
 		return c.streamingNode.QueryOnView(ctx, types.PChannelInfo{Name: typed.PChannel}, req)
 	case qviews.QueryNode:
 		return c.queryNode.QueryOnView(ctx, typed.ID, req)
-	default:
-		return nil, invalidWorkNodeError(node)
-	}
-}
-
-func (c *compositeViewQueryServiceClient) RequeryOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	switch typed := node.(type) {
-	case qviews.StreamingNode:
-		return c.streamingNode.RequeryOnView(ctx, types.PChannelInfo{Name: typed.PChannel}, req)
-	case qviews.QueryNode:
-		return c.queryNode.RequeryOnView(ctx, typed.ID, req)
 	default:
 		return nil, invalidWorkNodeError(node)
 	}

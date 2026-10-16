@@ -24,7 +24,7 @@ import (
 )
 
 func TestQueryViewRPCWaitForReady(t *testing.T) {
-	for _, method := range []string{"plan", "mvcc", "search", "query", "requery"} {
+	for _, method := range []string{"plan", "mvcc", "search", "query"} {
 		mockey.PatchConvey(method, t, func() {
 			term := int64(1)
 			calls, waits := 0, 0
@@ -100,16 +100,6 @@ func TestQueryViewRPCWaitForReady(t *testing.T) {
 					return &viewpb.QueryOnViewResponse{}, attempt(ctx)
 				}).Build()
 				_, err := client.QueryViewClient().QueryOnView(t.Context(), types.PChannelInfo{Name: "p0", Term: 1}, req)
-				require.NoError(t, err)
-			case "requery":
-				req := &viewpb.RequeryOnViewRequest{ShardId: shard.IntoProto(), Version: &viewpb.QueryViewVersion{QueryVersion: 7}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 200}}
-				before := proto.Clone(req)
-				mockey.Mock((*fakeViewQueryServiceClient).RequeryOnView).To(func(_ *fakeViewQueryServiceClient, ctx context.Context, actual *viewpb.RequeryOnViewRequest, _ ...grpc.CallOption) (*viewpb.RequeryOnViewResponse, error) {
-					require.Same(t, req, actual)
-					require.True(t, proto.Equal(before, actual))
-					return &viewpb.RequeryOnViewResponse{}, attempt(ctx)
-				}).Build()
-				_, err := client.QueryViewClient().RequeryOnView(t.Context(), types.PChannelInfo{Name: "p0", Term: 1}, req)
 				require.NoError(t, err)
 			}
 			require.Equal(t, 5, calls)
@@ -193,7 +183,7 @@ func TestQueryViewRPCUsesWALWaitForReady(t *testing.T) {
 			return conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName).RetryPolicy != nil
 		}, time.Second, time.Millisecond)
 		walConfig := conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName)
-		for _, method := range []string{viewpb.QueryPlanService_GetQueryPlan_FullMethodName, viewpb.QueryPlanService_GetMVCCTimestamp_FullMethodName, viewpb.ViewQueryService_SearchOnView_FullMethodName, viewpb.ViewQueryService_QueryOnView_FullMethodName, viewpb.ViewQueryService_RequeryOnView_FullMethodName} {
+		for _, method := range []string{viewpb.QueryPlanService_GetQueryPlan_FullMethodName, viewpb.QueryPlanService_GetMVCCTimestamp_FullMethodName, viewpb.ViewQueryService_SearchOnView_FullMethodName, viewpb.ViewQueryService_QueryOnView_FullMethodName} {
 			cfg := conn.GetMethodConfig(method)
 			require.NotNil(t, cfg.WaitForReady, method)
 			require.True(t, *cfg.WaitForReady, method)
