@@ -224,32 +224,35 @@ depends on the reliable-retention TODO, not on accepting an older cursor.
 
 ### Local read recovery
 
-The SN adaptor retries temporary and unclassified `ReadTransform` failures in
-the same subscription, including ordinary `ErrIoFailed` and operation-local
-timeouts. It uses exponential backoff with a 100 ms initial interval, a 10 s
-maximum base interval and jitter, without a retry-count or elapsed-time limit.
-A successful read resets backoff; successful reads allocate no retry timer.
-Retries emit rate-limited warnings with the unchanged read cursor.
+Temporary chunk reads retry inside WALSummary's shared load, so SN bootstrap,
+remote subscriptions and idempotency readers waiting for the same chunk share
+one retry sequence. The adaptor does not start a separate retry loop for each
+subscription. Backoff uses a 100 ms initial interval, a 10 s maximum base interval
+and jitter, without a retry-count or elapsed-time limit. Successful loads
+allocate no retry timer. Generic I/O, unclassified failures and operation-local
+timeouts remain retryable while the shared load is active.
 
-Each failed read returns no deliverable batch. The adaptor keeps its previous
-cursor, delivers no partial entries and sends no SyncUp for that attempt. It
-retries only the read, not handler delivery or Segment application. After success,
-it delivers complete entries before advancing coverage, following the same
-bounded/unbounded rules as a read that never failed.
+A waiting read delivers no partial batch or SyncUp. Successful earlier chunks
+in that batch do not have to be downloaded and decoded again when a later chunk
+retries. After success, the adaptor delivers complete entries before advancing
+coverage, following the same bounded/unbounded rules as a read that never failed.
+Handler delivery and Segment application are never retried by this mechanism.
 
-The retry loop sits outside `ReadTransform`, releasing its snapshot lock and
-local GC pin before waiting. Chunk-cache and Store reads retain their single
-attempt semantics. Subscription cancellation and stream closure cancel both
-backoff and context-aware storage reads. Only the subscription context ending
-means cancellation; a timeout or cancellation of a lower-level attempt while
-that context is active remains retryable.
+Each caller owns only its wait, not the shared load context. Subscription
+cancellation or stream closure releases that subscriber without interrupting
+other callers or resetting backoff. Once the final waiter leaves, the shared
+context cancels both backoff and context-aware storage I/O. The last waiter joins
+the task before releasing its local GC snapshot pin. Unlike the previous
+subscription-level retries, the snapshot stays pinned during shared backoff;
+sustained failures can defer this Manager's physical garbage collection until
+reads recover or all waiters cancel. Download slots are released during backoff.
 
-Known store corruption (`ErrStoreCorrupted`), data-integrity failures and a
-missing object still referenced by the retained index terminate the read
-explicitly. Summary's terminal state also returns `ErrStoreCorrupted`; it must
-not enter an indefinite retry loop. These errors and consumer-handler failures
-keep the existing terminal notification path. Unknown read failures are not
-classified as permanent merely because the generic error lacks a retryable flag.
+Known corruption (`ErrStoreCorrupted`), data-integrity failures, truncated objects
+(`io.ErrUnexpectedEOF`), and permanent storage errors such as missing objects or
+permission failures terminate the shared load and fail every remaining waiter.
+Summary terminal-state errors, decoding failures and consumer-handler failures
+also keep the terminal notification path. No error becomes an empty history or
+a successful SyncUp.
 
 Remote Provider integration must preserve this distinction: owner shutdown,
 migration and PChannel unavailability end the physical stream for PChannel-level

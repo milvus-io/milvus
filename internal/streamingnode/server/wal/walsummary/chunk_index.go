@@ -3,12 +3,17 @@ package walsummary
 import (
 	"container/list"
 	"context"
+	"io"
 	"sort"
 	"sync"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // chunkIndex mirrors the retained manifest. Membership and snapshots are guarded
@@ -29,10 +34,12 @@ type indexedChunk struct {
 }
 
 type chunkLoad struct {
-	done     chan struct{}
-	payload  *chunkPayload
-	err      error
-	canceled bool
+	done    chan struct{}
+	cancel  context.CancelFunc
+	waiters int // Protected by cache.mu; zero means this load cannot be joined.
+	// Published by closing done.
+	payload *chunkPayload
+	err     error
 }
 
 type chunkCache struct {
@@ -91,45 +98,114 @@ func (c *chunkCache) read(ctx context.Context, store *Store, chunk *indexedChunk
 			c.mu.Unlock()
 			return payload, nil
 		}
-		if loading := chunk.loading; loading != nil {
+		loading := chunk.loading
+		if loading != nil && loading.waiters == 0 {
+			// The last waiter canceled this load. Join its cleanup before
+			// starting a new one, rather than attaching to a canceled context.
 			c.mu.Unlock()
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-loading.done:
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				// A canceled loader must not cancel other subscriptions. They
-				// retry ownership using their own context; other failures propagate.
-				if loading.canceled {
-					continue
-				}
-				return loading.payload, loading.err
+				continue
 			}
 		}
-		loading := &chunkLoad{done: make(chan struct{})}
-		chunk.loading = loading
-		verified := chunk.verified
+		if loading == nil {
+			loadCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+			loading = &chunkLoad{done: make(chan struct{}), cancel: cancel}
+			chunk.loading = loading
+			go func(load *chunkLoad, verified *chunkValidation) {
+				defer cancel()
+				c.load(loadCtx, store, chunk, load, verified)
+			}(loading, chunk.verified)
+		}
+		loading.waiters++
 		c.mu.Unlock()
-
+		defer c.releaseLoad(loading)
 		select {
 		case <-ctx.Done():
-			loading.err = ctx.Err()
+			return nil, ctx.Err()
+		case <-loading.done:
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return loading.payload, loading.err
+		}
+	}
+}
+
+func (c *chunkCache) releaseLoad(loading *chunkLoad) {
+	c.mu.Lock()
+	loading.waiters--
+	last := loading.waiters == 0
+	if last {
+		loading.cancel()
+	}
+	c.mu.Unlock()
+	if last {
+		// The caller still owns its ReadTransform/idempotency snapshot pin.
+		// Do not let GC reclaim its objects until the storage read has exited.
+		<-loading.done
+	}
+}
+
+func (c *chunkCache) load(ctx context.Context, store *Store, chunk *indexedChunk, loading *chunkLoad, verified *chunkValidation) {
+	loading.payload, loading.err = c.readPayload(ctx, store, chunk, verified)
+	c.mu.Lock()
+	if loading.err == nil && loading.waiters != 0 && !chunk.retired {
+		chunk.verified = loading.payload.verified
+		c.putLocked(chunk, loading.payload)
+	}
+	chunk.loading = nil
+	close(loading.done)
+	c.mu.Unlock()
+}
+
+// readPayload owns one retry sequence for all waiters. Joining or leaving a
+// load never resets its backoff; the last waiter cancels both I/O and backoff.
+func (c *chunkCache) readPayload(ctx context.Context, store *Store, chunk *indexedChunk, verified *chunkValidation) (*chunkPayload, error) {
+	var retryBackoff *backoff.ExponentialBackOff
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case c.loadSlots <- struct{}{}:
-			loading.payload, loading.err = store.readChunkPayload(ctx, chunk.PChannelSummaryChunkIndexEntry, verified)
+		}
+		if err := ctx.Err(); err != nil {
 			<-c.loadSlots
+			return nil, err
 		}
-		loading.canceled = ctx.Err() != nil && errors.Is(loading.err, ctx.Err())
-		c.mu.Lock()
-		if loading.err == nil && !chunk.retired {
-			chunk.verified = loading.payload.verified
-			c.putLocked(chunk, loading.payload)
+		payload, err := store.readChunkPayload(ctx, chunk.PChannelSummaryChunkIndexEntry, verified)
+		<-c.loadSlots
+		if err == nil {
+			return payload, nil
 		}
-		chunk.loading = nil
-		close(loading.done)
-		c.mu.Unlock()
-		return loading.payload, loading.err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// Preserve retries for generic I/O and operation-local failures, but
+		// never hide a missing, malformed, or inaccessible retained object.
+		if errors.IsAny(err, ErrStoreCorrupted, merr.ErrDataIntegrity, io.ErrUnexpectedEOF) || merr.IsNonRetryableErr(err) {
+			return nil, err
+		}
+		if retryBackoff == nil {
+			retryBackoff = backoff.NewExponentialBackOff()
+			retryBackoff.InitialInterval = 100 * time.Millisecond
+			retryBackoff.MaxInterval = 10 * time.Second
+			retryBackoff.MaxElapsedTime = 0
+			retryBackoff.Reset()
+		}
+		delay := retryBackoff.NextBackOff()
+		mlog.RatedWarn(ctx, 1, "retrying shared summary chunk read",
+			mlog.FieldPChannel(store.PChannel()), mlog.Uint64("generation", chunk.GetGeneration()),
+			mlog.Duration("backoff", delay), mlog.Err(err))
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 
