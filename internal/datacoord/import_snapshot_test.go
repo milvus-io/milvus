@@ -38,16 +38,19 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	idallocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	milvusstorage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -318,10 +321,15 @@ func TestBroadcastSnapshotImportLargeMetadataReference(t *testing.T) {
 	patchSnapshotImportInstance(t)
 	ctx := context.Background()
 	cm := milvusstorage.NewLocalChunkManager()
-	server := &Server{meta: &meta{chunkManager: cm}}
+	// The 3.0 broadcast path fetches the canonical schema before taking the lock.
+	type testBroker struct{ broker.Broker }
+	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
+	defer describe.UnPatch()
+	server := &Server{broker: &testBroker{}, meta: &meta{chunkManager: cm}}
 	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
 	defer validation.UnPatch()
-	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(nil, merr.ErrIoFailed).Build()
+	start := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(nil, merr.ErrIoFailed).Build()
 	defer start.UnPatch()
 	for _, layout := range []datapb.SnapshotLayout{
 		datapb.SnapshotLayout_SnapshotLayoutReferenced,

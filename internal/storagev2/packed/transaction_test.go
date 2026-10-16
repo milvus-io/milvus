@@ -174,12 +174,10 @@ func TestReadColumnGroupsInvalidSourceRowCount(t *testing.T) {
 	paramtable.Init()
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 	base := filepath.Join(cfg.RootPath, "segment")
-	manifest, err := CommitManifestUpdates(base, ManifestEarliest, cfg, &ManifestUpdates{
-		ColumnGroups: []ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []ColumnGroupFileEntry{{
-			Path: filepath.Join(base, "data.parquet"), EndIndex: 1,
-			Properties: map[string]string{milvusTableSourceManifestPathProperty: "source", milvusTableSourceRowCountProperty: "invalid"},
-		}}}},
-	})
+	manifest, err := CreateManifestForSegment(base, []string{"100"}, "parquet", []Fragment{{
+		FilePath: filepath.Join(base, "data.parquet"), EndRow: 1, RowCount: 1,
+		Properties: map[string]string{milvusTableSourceManifestPathProperty: "source", milvusTableSourceRowCountProperty: "invalid"},
+	}}, cfg)
 	require.NoError(t, err)
 	_, err = readColumnGroupsFromManifest(manifest, cfg)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
