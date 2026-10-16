@@ -75,6 +75,23 @@ func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMes
 			i.dropPendingOfEndedTxns()
 		}
 		return id, err
+	case message.MessageTypeManualFlush:
+		// A flush of a collection is broadcast to every vchannel of the
+		// collection, so the message names the vchannel it flushes. The
+		// timetick interceptor sets the time tick of the message in place.
+		id, err := appendOp(ctx, msg)
+		if err == nil {
+			i.ch.RequestHandover(msg.VChannel(), msg.TimeTick())
+		}
+		return id, err
+	case message.MessageTypeFlushAll:
+		// A flush of the cluster is broadcast to the control channel of every
+		// pchannel, so it flushes every vchannel of this pchannel.
+		id, err := appendOp(ctx, msg)
+		if err == nil {
+			i.ch.RequestHandoverAll(msg.TimeTick())
+		}
+		return id, err
 	case message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeCommitTxn, message.MessageTypeRollbackTxn:
 	default:
 		return appendOp(ctx, msg)

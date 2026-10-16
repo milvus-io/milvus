@@ -1149,6 +1149,73 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 	}
 }
 
+// newManualFlush builds the ManualFlush message that a flush of a collection
+// broadcasts to every vchannel of the collection.
+func newManualFlush(vchannel string) message.MutableMessage {
+	return message.NewManualFlushMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.ManualFlushMessageHeader{CollectionId: testCollectionID}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		MustBuildMutable()
+}
+
+// newFlushAll builds the FlushAll message that a flush of the cluster
+// broadcasts to the control channel of every pchannel.
+func newFlushAll() message.MutableMessage {
+	return message.NewFlushAllMessageBuilderV2().
+		WithVChannel(funcutil.GetControlChannel(testPChannel)).
+		WithHeader(&message.FlushAllMessageHeader{}).
+		WithBody(&message.FlushAllMessageBody{}).
+		MustBuildMutable()
+}
+
+// TestManualFlushRequestsAHandoverOfTheVChannel checks that an appended
+// ManualFlush requests a handover of its vchannel that covers the time tick
+// of the flush, and only of its vchannel, and that a failed append requests
+// nothing.
+func TestManualFlushRequestsAHandoverOfTheVChannel(t *testing.T) {
+	i, _ := newTestInterceptor(t, nil)
+	other := "by-dev-rootcoord-dml_0_2v0"
+	created, err := i.registry.add(context.Background(), other, 2, testSchema(false))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	f := newFakeAppender()
+	f.failAt, f.failErr = 0, errors.New("append failed")
+	_, err = i.DoAppend(newTestAppendContext(), newManualFlush(testVChannel), f.append)
+	require.Error(t, err)
+	require.Zero(t, i.ch.RequestedForTest(testVChannel), "a failed append requests nothing")
+
+	f = newFakeAppender()
+	msg := newManualFlush(testVChannel)
+	_, err = i.DoAppend(newTestAppendContext(), msg, f.append)
+	require.NoError(t, err)
+	require.Equal(t, []message.MessageType{message.MessageTypeManualFlush}, f.types, "the ManualFlush passes through")
+	require.NotZero(t, msg.TimeTick())
+	require.Equal(t, msg.TimeTick(), i.ch.RequestedForTest(testVChannel))
+	require.Zero(t, i.ch.RequestedForTest(other))
+}
+
+// TestFlushAllRequestsAHandoverOfEveryVChannel checks that an appended
+// FlushAll requests a handover of every vchannel of the pchannel that covers
+// the time tick of the flush.
+func TestFlushAllRequestsAHandoverOfEveryVChannel(t *testing.T) {
+	i, _ := newTestInterceptor(t, nil)
+	other := "by-dev-rootcoord-dml_0_2v0"
+	created, err := i.registry.add(context.Background(), other, 2, testSchema(false))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	f := newFakeAppender()
+	msg := newFlushAll()
+	_, err = i.DoAppend(newTestAppendContext(), msg, f.append)
+	require.NoError(t, err)
+	require.Equal(t, []message.MessageType{message.MessageTypeFlushAll}, f.types, "the FlushAll passes through")
+	require.NotZero(t, msg.TimeTick())
+	require.Equal(t, msg.TimeTick(), i.ch.RequestedForTest(testVChannel))
+	require.Equal(t, msg.TimeTick(), i.ch.RequestedForTest(other))
+}
+
 // TestTimeTickWithoutSessionsIsPassthrough covers the interceptor without a
 // transaction manager, which only tests build.
 func TestTimeTickWithoutSessionsIsPassthrough(t *testing.T) {

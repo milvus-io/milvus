@@ -18,7 +18,9 @@ package pkindex
 
 import (
 	"context"
+	"math"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 // The tests in this file call prepare and commit of a ready Index directly,
@@ -276,4 +279,212 @@ func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
 
 	require.NoError(t, idx.CommitForTest(ctx, p))
 	assert.Equal(t, uint64(50), idx.LastCommittedTimeTick())
+}
+
+// The tests below call pickHandovers of a started PChannelIndexManager without
+// the driver, to check the explicit request and the stall triggers. The sizes
+// never trigger.
+
+// requestEnv returns a started PChannelIndexManager whose sizes never trigger,
+// with a ready Index of v0 that a handover of the fake client commits.
+func requestEnv(t *testing.T) (*testEnv, *PChannelIndexManager, *index.Index) {
+	env := newTestEnv(t, syncScheduler{})
+	env.setParams(func(p *Params) { p.ActiveBytes = math.MaxUint64 })
+	ch := env.channel(0)
+	return env, ch, env.add(ch, "v0")
+}
+
+// TestRequestHandoverWaitsForTheWatermark checks that a request fires once the
+// watermark of the pchannel reaches the requested time tick, that the
+// handover then commits at or above it, and that a satisfied request does not
+// fire again.
+func TestRequestHandoverWaitsForTheWatermark(t *testing.T) {
+	_, ch, idx := requestEnv(t)
+	insert(t, idx, 1, 1)
+	ch.ObserveTimeTick(5)
+	ch.RequestHandover("v0", 10)
+	assert.EqualValues(t, 10, ch.RequestedForTest("v0"))
+	assert.Empty(t, ch.pickHandovers(farFuture), "the watermark is below the request")
+
+	ch.ObserveTimeTick(10)
+	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(farFuture))
+	ch.submitHandover(idx)
+	require.GreaterOrEqual(t, idx.LastCommittedTimeTick(), uint64(10))
+	assert.EqualValues(t, 10, ch.RequestedForTest("v0"), "a request is never reset")
+
+	insert(t, idx, 1, 2)
+	ch.ObserveTimeTick(11)
+	assert.Empty(t, ch.pickHandovers(farFuture), "the request is satisfied")
+}
+
+// TestRequestHandoverRepeatsUntilACommitCoversIt checks that a handover
+// that commits below the requested time tick leaves the request in force.
+func TestRequestHandoverRepeatsUntilACommitCoversIt(t *testing.T) {
+	_, ch, idx := requestEnv(t)
+	insert(t, idx, 1, 1)
+	ch.ObserveTimeTick(10)
+	ch.RequestHandover("v0", 10)
+	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(farFuture))
+	ch.submitHandover(idx)
+	require.EqualValues(t, 10, idx.LastCommittedTimeTick())
+
+	insert(t, idx, 1, 2)
+	idx.SetLastCommittedForTest(7)
+	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(farFuture), "the commit did not cover the request")
+	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(farFuture), "picked at every step")
+}
+
+// TestRequestHandoverKeepsTheHighestTick checks that requests keep the
+// highest time tick, that a request of an unknown vchannel is ignored, and
+// that RequestHandoverAll requests every vchannel.
+func TestRequestHandoverKeepsTheHighestTick(t *testing.T) {
+	env, ch, a := requestEnv(t)
+	b := env.add(ch, "v1")
+	ch.RequestHandover("v0", 10)
+	ch.RequestHandover("v0", 8)
+	assert.EqualValues(t, 10, ch.RequestedForTest("v0"))
+	ch.RequestHandover("v0", 12)
+	assert.EqualValues(t, 12, ch.RequestedForTest("v0"))
+
+	ch.RequestHandover("unknown", 20)
+	assert.Zero(t, ch.RequestedForTest("unknown"))
+	assert.Zero(t, ch.RequestedForTest("v1"))
+
+	ch.RequestHandoverAll(11)
+	assert.EqualValues(t, 12, ch.RequestedForTest("v0"), "a lower request does not lower it")
+	assert.EqualValues(t, 11, ch.RequestedForTest("v1"))
+
+	insert(t, a, 1, 1)
+	insert(t, b, 1, 1)
+	ch.ObserveTimeTick(12)
+	assert.ElementsMatch(t, []*index.Index{a, b}, ch.pickHandovers(farFuture))
+}
+
+// TestRequestHandoverOfACleanOrNotReadyIndexWaits checks that a request does
+// not pick an Index with nothing to commit, nor one that is not ready, and
+// stays in force until the Index is dirty and ready.
+func TestRequestHandoverOfACleanOrNotReadyIndexWaits(t *testing.T) {
+	ctx := context.Background()
+	t.Run("clean", func(t *testing.T) {
+		_, ch, idx := requestEnv(t)
+		ch.ObserveTimeTick(10)
+		ch.RequestHandover("v0", 10)
+		assert.Empty(t, ch.pickHandovers(farFuture))
+		assert.EqualValues(t, 10, ch.RequestedForTest("v0"), "the request waits for a write")
+
+		insert(t, idx, 1, 1)
+		ch.ObserveTimeTick(11)
+		assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(farFuture))
+	})
+	t.Run("not ready", func(t *testing.T) {
+		env := newTestEnv(t, syncScheduler{})
+		env.setParams(func(p *Params) { p.ActiveBytes = math.MaxUint64 })
+		ch := env.recoveredChannel(0, "v0")
+		idx := ch.get("v0")
+		ch.start(false)
+		require.False(t, idx.Ready())
+		insert(t, idx, 1, 1)
+		ch.ObserveTimeTick(10)
+		ch.RequestHandover("v0", 10)
+		assert.Empty(t, ch.pickHandovers(farFuture))
+		assert.EqualValues(t, 10, ch.RequestedForTest("v0"), "the request waits for the recovery")
+
+		idx.MarkReady(ctx, false)
+		assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(farFuture))
+	})
+}
+
+// TestStalledCheckpointHandsOverTheOldestIndex checks that an index that held
+// the WAL checkpoint back for the stall timeout hands the oldest dirty Index
+// over, and that the stall restarts when the index no longer holds the
+// checkpoint back.
+func TestStalledCheckpointHandsOverTheOldestIndex(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	env.SetStallTimeoutForTest(time.Second)
+	var tt atomic.Uint64
+	tt.Store(50)
+	c := env.Manager.New(PChannelConfig{
+		PChannel: types.PChannelInfo{Name: "p", Term: 1},
+		Tail:     func() WALTail { return WALTail{RecoveryTimeTick: tt.Load()} },
+	})
+	t.Cleanup(c.Close)
+	old, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	young, _, err := c.CreateCollection(ctx, "v2", 2, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	c.start(false)
+	old.MarkReady(ctx, false)
+	young.MarkReady(ctx, false)
+	old.SetLastCommittedForTest(10)
+	young.SetLastCommittedForTest(20)
+	insert(t, old, 1, 1)
+	insert(t, young, 1, 1)
+	c.ObserveTimeTick(60)
+	require.EqualValues(t, 10, c.lastAckedUnclamped())
+
+	now := time.Now()
+	assert.Empty(t, c.pickHandovers(now), "the stall starts now")
+	assert.Empty(t, c.pickHandovers(now.Add(500*time.Millisecond)))
+	assert.Equal(t, []*index.Index{old}, c.pickHandovers(now.Add(2*time.Second)))
+
+	// once the index no longer holds the checkpoint back, the stall resets
+	tt.Store(5)
+	assert.Empty(t, c.pickHandovers(now.Add(3*time.Second)))
+	tt.Store(50)
+	assert.Empty(t, c.pickHandovers(now.Add(3500*time.Millisecond)), "a new stall starts")
+	assert.Equal(t, []*index.Index{old}, c.pickHandovers(now.Add(4500*time.Millisecond)))
+}
+
+// TestStallClockRunsThroughABackoff checks that an Index that waits in its
+// backoff after a failed handover keeps the stall clock running.
+func TestStallClockRunsThroughABackoff(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	env.setParams(func(p *Params) {
+		p.ActiveBytes = math.MaxUint64
+		p.BackoffBase = time.Hour
+		p.MaxBackoff = time.Hour
+		p.StallTimeout = time.Second
+	})
+	ch := env.channel(0)
+	a := env.add(ch, "va")
+	insert(t, a, 1, 1)
+	ch.ObserveTimeTick(50)
+	env.recoveryTimeTick.Store(40)
+
+	now := time.Now()
+	assert.Empty(t, ch.pickHandovers(now), "the stall starts now")
+	require.Equal(t, now, ch.stallSince)
+
+	// the commit fails, the Index keeps its pending handover and backs off
+	env.client.set(func(c *fakeClient) { c.commitErrs = []error{pkroot.MarkIO(errors.New("disk gone"), "commit")} })
+	ch.submitHandover(a)
+	require.True(t, a.HasPending())
+	require.True(t, now.Add(2*time.Second).Before(scheduleOf(ch, a).backoff.NextInstant()))
+
+	assert.Empty(t, ch.pickHandovers(now.Add(2*time.Second)), "the Index waits in its backoff")
+	assert.Equal(t, now, ch.stallSince, "the stall clock keeps running")
+	assert.Equal(t, []*index.Index{a}, ch.pickHandovers(now.Add(2*time.Hour)), "the pending handover is retried after the backoff")
+}
+
+// TestStallTimeoutZeroNeverTriggers checks that a zero stall timeout turns
+// the stall trigger off.
+func TestStallTimeoutZeroNeverTriggers(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{
+		PChannel: types.PChannelInfo{Name: "p", Term: 1},
+		Tail:     func() WALTail { return WALTail{RecoveryTimeTick: 50} },
+	})
+	t.Cleanup(c.Close)
+	c.start(false)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	require.True(t, idx.Ready())
+	insert(t, idx, 1, 1)
+	c.ObserveTimeTick(60)
+	require.Less(t, c.lastAckedUnclamped(), uint64(50), "the index holds the checkpoint back")
+	now := time.Now()
+	assert.Empty(t, c.pickHandovers(now))
+	assert.Empty(t, c.pickHandovers(now.Add(24*time.Hour)))
 }

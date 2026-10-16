@@ -36,16 +36,21 @@ import (
 const warnFailures = 5
 
 // handoverSchedule is what the driver keeps about the handovers of one Index:
-// whether one runs, whether they stopped, and when the next one may start.
-// The driver step reads and changes it only while running is false, and the
-// handover task only while running is true. running is set before the submit
-// and cleared as the last action of the task, so the two never overlap.
+// whether one runs, whether they stopped, whether one is requested, and when
+// the next one may start. The driver step reads and changes it only while
+// running is false, and the handover task only while running is true. running
+// is set before the submit and cleared as the last action of the task, so the
+// two never overlap. requestedTT is the exception: RequestHandover raises it
+// from any goroutine.
 type handoverSchedule struct {
 	// running is true from the submit of a handover until its end.
 	running atomic.Bool
 	// stopped is set after a fatal handover error. The Index keeps serving
 	// writes, but it does not hand over again.
 	stopped atomic.Bool
+	// requestedTT is the highest time tick an explicit flush asked the Index
+	// to cover, see RequestHandover. It is never reset.
+	requestedTT atomic.Uint64
 	// backoff and failures are reset on a success with the current params.
 	backoff  *typeutil.BackoffWithInstant
 	failures int
@@ -182,7 +187,8 @@ func (c *PChannelIndexManager) pickHandovers(now time.Time) []*index.Index {
 	tail := c.tail()
 	var out []*index.Index
 	var oldest *index.Index
-	for _, idx := range c.dirtyIndexes() {
+	dirtyIndexes := c.dirtyIndexes()
+	for _, idx := range dirtyIndexes {
 		s := c.scheduleOf(idx)
 		c.reapHandover(s)
 		if s.running.Load() || s.stopped.Load() || !idx.Ready() {
@@ -197,6 +203,14 @@ func (c *PChannelIndexManager) pickHandovers(now time.Time) []*index.Index {
 			continue
 		}
 		dirty := idx.Dirty()
+		// An explicit flush asked the Index to cover want, see RequestHandover.
+		// The Index is picked at every step until a handover commits at or
+		// above want. The watermark only moves forward, and prepare reads it
+		// after this pick, so the handover covers want.
+		if want := s.requestedTT.Load(); dirty && idx.LastCommittedTimeTick() < want && c.wm.lastApplied() >= want {
+			out = append(out, idx)
+			continue
+		}
 		// trigger 1: the active generation is large
 		if dirty && idx.ActiveBytes() >= params.ActiveBytes {
 			out = append(out, idx)
@@ -206,19 +220,29 @@ func (c *PChannelIndexManager) pickHandovers(now time.Time) []*index.Index {
 			oldest = idx
 		}
 	}
+	// The triggers below need the index to hold the WAL truncation back. Else
+	// another component holds the tail, and a handover only makes a small
+	// table. The check uses the value without the clamp to ackedMax: the clamp
+	// hides an Index whose key is below ackedMax. RecoveryTimeTick is the
+	// completed point of the WAL recovery, which the LastAcked of the index
+	// does not clamp. The stall clock runs while any dirty Index holds the
+	// truncation back, also one that waits in its backoff.
+	behind := len(dirtyIndexes) > 0 && c.lastAckedUnclamped() < tail.RecoveryTimeTick
+	if !behind {
+		c.stallSince = time.Time{}
+		return out
+	}
+	if c.stallSince.IsZero() {
+		c.stallSince = now
+	}
+	if oldest == nil {
+		return out
+	}
 	// trigger 2: the WAL tail reaches the early threshold of the index
 	// trigger 3: the WAL is under soft pressure, a fallback for trigger 2
-	// Both need the index to hold the WAL truncation back. Else another
-	// component holds the tail, and a handover only makes a small table.
-	// The check uses the value without the clamp to ackedMax: the clamp can
-	// hide an Index that holds the truncation back.
-	//
-	// TODO: after recovery adds LastAcked to the checkpoint of the WAL
-	// recovery, RecoveryTimeTick is never above LastAcked, and these
-	// triggers never fire. Then compare with the checkpoint of the other
-	// components, without the index.
-	if oldest != nil && (tail.Bytes >= params.TailBytes || tail.Bytes >= params.SoftWatermark) &&
-		c.lastAckedUnclamped() < tail.RecoveryTimeTick {
+	// trigger 4: the index held the WAL checkpoint back for the stall timeout
+	if tail.Bytes >= params.TailBytes || tail.Bytes >= params.SoftWatermark ||
+		(params.StallTimeout > 0 && now.Sub(c.stallSince) >= params.StallTimeout) {
 		out = append(out, oldest)
 	}
 	return out

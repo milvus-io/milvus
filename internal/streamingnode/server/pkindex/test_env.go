@@ -147,6 +147,7 @@ func (neverHandle) Wait(ctx context.Context) error {
 type FakeEnv struct {
 	Manager   *Manager
 	Committer *FakeCommitter
+	params    atomic.Pointer[Params]
 }
 
 // NewFakeEnv creates an index Manager over a real engine with root as the local
@@ -158,14 +159,14 @@ func NewFakeEnv(t *testing.T, root string) *FakeEnv {
 	t.Cleanup(shared.Release)
 	var nextID atomic.Int64
 	nextID.Store(1000)
-	params := Params{
+	env.params.Store(&Params{
 		Params:        index.Params{LockStripes: 16, ReuploadAfter: time.Hour},
 		ActiveBytes:   math.MaxUint64,
 		TailBytes:     math.MaxUint64,
 		SoftWatermark: math.MaxUint64,
 		BackoffBase:   time.Millisecond,
 		MaxBackoff:    10 * time.Millisecond,
-	}
+	})
 	env.Manager = NewManager(ManagerConfig{
 		Root:            root,
 		Shared:          shared,
@@ -174,10 +175,18 @@ func NewFakeEnv(t *testing.T, root string) *FakeEnv {
 		StorageRootPath: "root",
 		Committer:       env.Committer,
 		Sched:           neverScheduler{},
-		Params:          func() Params { return params },
+		Params:          func() Params { return *env.params.Load() },
 	})
 	t.Cleanup(env.Manager.Close)
 	return env
+}
+
+// SetStallTimeoutForTest sets the stall timeout of the handover driver, zero
+// turns the stall trigger off.
+func (env *FakeEnv) SetStallTimeoutForTest(d time.Duration) {
+	p := *env.params.Load()
+	p.StallTimeout = d
+	env.params.Store(&p)
 }
 
 // NewManagerForTest creates the index Manager of NewFakeEnv.
@@ -188,6 +197,17 @@ func NewManagerForTest(t *testing.T, root string) *Manager {
 // IndexForTest returns the Index of a vchannel, nil when it does not exist.
 func (c *PChannelIndexManager) IndexForTest(vchannel string) *index.Index {
 	return c.get(vchannel)
+}
+
+// RequestedForTest returns the highest time tick an explicit flush asked
+// the Index of a vchannel to cover, 0 when none or when the vchannel has no
+// Index.
+func (c *PChannelIndexManager) RequestedForTest(vchannel string) uint64 {
+	idx := c.get(vchannel)
+	if idx == nil {
+		return 0
+	}
+	return c.scheduleOf(idx).requestedTT.Load()
 }
 
 // RemoveForTest closes the Index of a vchannel and keeps its local files, as

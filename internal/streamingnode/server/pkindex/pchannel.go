@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -50,6 +51,9 @@ type PChannelIndexManager struct {
 	// driverDone is closed when the driver goroutine exits. It is nil when
 	// the driver does not run.
 	driverDone chan struct{}
+	// stallSince is when the index first held the WAL checkpoint back, zero
+	// while it does not. Only the driver step reads and writes it.
+	stallSince time.Time
 
 	// opMu serializes Add, Remove and Close, so that the engine IO of an Add
 	// happens outside mu.
@@ -252,6 +256,38 @@ func (c *PChannelIndexManager) Authority(vchannel string) *authority.Authority {
 		return nil
 	}
 	return idx.Authority()
+}
+
+// RequestHandover asks for a handover of a vchannel that covers tt,
+// regardless of size and tail. The WAL interceptor calls it after an explicit
+// flush, with the time tick of the flush. A handover is requested until one
+// commits a checkpoint at or above tt: the driver step picks the Index once
+// the watermark of the pchannel reaches tt, and skips it while it is clean or
+// not ready. A vchannel without an Index is ignored.
+func (c *PChannelIndexManager) RequestHandover(vchannel string, tt uint64) {
+	idx := c.get(vchannel)
+	if idx == nil {
+		return
+	}
+	c.requestHandover(idx, tt)
+}
+
+// RequestHandoverAll is RequestHandover for every vchannel of the pchannel.
+func (c *PChannelIndexManager) RequestHandoverAll(tt uint64) {
+	for _, idx := range c.list() {
+		c.requestHandover(idx, tt)
+	}
+}
+
+// requestHandover raises the requested time tick of idx to tt.
+func (c *PChannelIndexManager) requestHandover(idx *index.Index, tt uint64) {
+	s := c.scheduleOf(idx)
+	for {
+		cur := s.requestedTT.Load()
+		if cur >= tt || s.requestedTT.CompareAndSwap(cur, tt) {
+			return
+		}
+	}
 }
 
 // get returns the Index of a vchannel, nil when it does not exist.
