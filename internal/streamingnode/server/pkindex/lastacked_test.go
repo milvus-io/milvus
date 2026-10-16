@@ -133,15 +133,15 @@ func TestLastAckedIgnoresIdleVChannels(t *testing.T) {
 	insert(t, b, 1, 1)
 	ch.Tick(10)
 	assert.EqualValues(t, 5, ch.LastAcked(), "a and b hold it at their commit")
-	a.submitHandover()
-	b.submitHandover()
+	a.ch.submitHandover(a)
+	b.ch.submitHandover(b)
 	assert.EqualValues(t, 10, ch.LastAcked())
 
 	// b stays idle and does not hold back the writes of a
 	insert(t, a, 2, 2)
 	ch.Tick(20)
 	assert.EqualValues(t, 10, ch.LastAcked())
-	a.submitHandover()
+	a.ch.submitHandover(a)
 	ch.Tick(30)
 	assert.EqualValues(t, 30, ch.LastAcked())
 
@@ -207,7 +207,7 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 			ch.Tick(tt)
 		default:
 			if idx.dirty() {
-				idx.submitHandover()
+				idx.ch.submitHandover(idx)
 			}
 		}
 		require.Equal(t, bruteLastAcked(ch), ch.lastAckedRaw(), "step %d", i)

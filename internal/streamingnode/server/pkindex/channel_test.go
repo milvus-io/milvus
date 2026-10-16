@@ -62,7 +62,7 @@ func TestTailTriggerPicksTheOldestCommit(t *testing.T) {
 
 	insert(t, a, 1, 1)
 	ch.Tick(10)
-	a.submitHandover()
+	a.ch.submitHandover(a)
 	require.EqualValues(t, 10, a.lastCommittedTimeTick())
 	insert(t, a, 1, 2)
 	insert(t, b, 1, 1)
@@ -74,7 +74,7 @@ func TestTailTriggerPicksTheOldestCommit(t *testing.T) {
 	env.tailBytes.Store(100)
 	assert.Equal(t, []*Index{b}, ch.pickHandovers(farFuture))
 
-	b.submitHandover()
+	b.ch.submitHandover(b)
 	require.EqualValues(t, 20, b.lastCommittedTimeTick())
 	insert(t, b, 1, 2)
 	assert.Equal(t, []*Index{a}, ch.pickHandovers(farFuture))
@@ -131,7 +131,7 @@ func TestTailTriggerIgnoresTheLastAckedClamp(t *testing.T) {
 	})
 	insert(t, a, 1, 1)
 	ch.Tick(10)
-	a.submitHandover()
+	a.ch.submitHandover(a)
 	require.False(t, a.dirty())
 	ch.Tick(100)
 	require.EqualValues(t, 100, ch.LastAcked())
@@ -355,7 +355,7 @@ func TestFencedCommitStopsTheHandovers(t *testing.T) {
 
 	err := env.waitFatal()
 	assert.True(t, errors.Is(err, ErrFenced))
-	assert.True(t, idx.handoverStopped.Load())
+	assert.True(t, slotOf(idx).stopped.Load())
 	assert.Len(t, idx.eng.FrozenGenerations(), 1, "the generations stay frozen")
 	// the Index keeps serving writes, but it does not hand over again
 	insert(t, idx, 2, 2)
@@ -380,7 +380,7 @@ func TestRetryableCommitErrorBacksOff(t *testing.T) {
 	ch.step(now)
 
 	assert.Empty(t, env.fatalList())
-	assert.Equal(t, 1, idx.failures)
+	assert.Equal(t, 1, slotOf(idx).failures)
 	require.NotNil(t, idx.pending.Load())
 	assert.Empty(t, ch.pickHandovers(now), "the backoff is not over")
 	assert.Equal(t, []*Index{idx}, ch.pickHandovers(now.Add(2*time.Hour)), "the backoff is over")
@@ -412,7 +412,7 @@ func TestMissingObjectIsFatal(t *testing.T) {
 
 	err := env.waitFatal()
 	assert.True(t, errors.Is(err, pkroot.ErrCorrupted))
-	assert.True(t, idx.handoverStopped.Load())
+	assert.True(t, slotOf(idx).stopped.Load())
 }
 
 func TestIsFatal(t *testing.T) {
@@ -450,8 +450,8 @@ func TestRejectedCommitIsFatal(t *testing.T) {
 
 	err := env.waitFatal()
 	assert.True(t, errors.Is(err, ErrRejected))
-	assert.True(t, idx.handoverStopped.Load())
-	assert.Zero(t, idx.failures, "no retry is scheduled")
+	assert.True(t, slotOf(idx).stopped.Load())
+	assert.Zero(t, slotOf(idx).failures, "no retry is scheduled")
 	assert.Len(t, idx.eng.FrozenGenerations(), 1, "the generations stay frozen")
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	assert.Len(t, env.client.requestList(), 1)
@@ -486,7 +486,7 @@ func TestBackoffParamsApplyAfterASuccess(t *testing.T) {
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
-	require.Equal(t, 1, idx.failures)
+	require.Equal(t, 1, slotOf(idx).failures)
 	assert.Empty(t, ch.pickHandovers(time.Now().Add(time.Minute)), "the wait is about one hour")
 
 	// a smaller max applies after the next success
@@ -495,14 +495,14 @@ func TestBackoffParamsApplyAfterASuccess(t *testing.T) {
 		p.MaxBackoff = time.Millisecond
 	})
 	ch.step(farFuture)
-	require.Zero(t, idx.failures)
+	require.Zero(t, slotOf(idx).failures)
 	require.EqualValues(t, 10, idx.lastCommittedTimeTick())
 
 	env.client.set(func(c *fakeClient) { c.commitErrs = []error{merr.WrapErrServiceUnavailable("down")} })
 	insert(t, idx, 2, 2)
 	ch.Tick(20)
 	ch.step(farFuture)
-	require.Equal(t, 1, idx.failures)
+	require.Equal(t, 1, slotOf(idx).failures)
 	assert.Equal(t, []*Index{idx}, ch.pickHandovers(time.Now().Add(time.Second)), "the wait is the new max")
 	assert.Empty(t, env.fatalList())
 }
@@ -539,7 +539,7 @@ func TestRemoveWaitsForARunningHandover(t *testing.T) {
 		t.Fatal("Remove did not return after the handover ended")
 	}
 	assert.Nil(t, ch.Get("v0"))
-	assert.False(t, idx.running.Load())
+	assert.False(t, slotOf(idx).running.Load())
 }
 
 func TestDriverClearsATaskThatNeverRan(t *testing.T) {
@@ -549,7 +549,7 @@ func TestDriverClearsATaskThatNeverRan(t *testing.T) {
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
-	assert.True(t, idx.running.Load())
+	assert.True(t, slotOf(idx).running.Load())
 	// the next step sees the finished handle and picks the Index again
 	assert.Equal(t, []*Index{idx}, ch.pickHandovers(farFuture))
 }

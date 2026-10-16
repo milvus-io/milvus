@@ -30,16 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// warnFailures is the number of failures in a row after which a failed
-// handover logs at warn level.
-const warnFailures = 5
 
 // Index is the primary key index of one vchannel. It owns the engine, the
 // write path authority on top of it, and the handover state of the vchannel.
@@ -69,11 +62,6 @@ type Index struct {
 	// dirtyFlag is set by every successful engine write and cleared right
 	// before a handover rotates.
 	dirtyFlag atomic.Bool
-	// running is true from the submit of a handover until its end.
-	running atomic.Bool
-	// handoverStopped is set after a fatal handover error. The Index keeps
-	// serving writes, but it does not hand over again.
-	handoverStopped atomic.Bool
 	// notFresh is set when the Index may miss writes that the WAL holds: the
 	// local directories had files from before this open, or the vchannel has
 	// a manifest. Such an Index serves writes, but it never hands over and it
@@ -84,14 +72,6 @@ type Index struct {
 	notFresh atomic.Bool
 	// pending is the prepared handover that is not committed yet.
 	pending atomic.Pointer[pendingHandover]
-	// backoff, failures and handle are used only by the driver step while
-	// running is false, and only by the handover task while running is true.
-	// A success makes a new backoff with the current params, so they are
-	// refreshable.
-	backoff  *typeutil.BackoffWithInstant
-	failures int
-	handle   nodescheduler.TaskHandle
-
 	// installMu serializes the installs of committed table sets.
 	installMu        sync.Mutex
 	installedVersion int64
@@ -157,7 +137,6 @@ func openIndex(ctx context.Context, c *Channel, vchannel string, collectionID in
 		lifetime:     typeutil.NewLifetime(),
 		ready:        make(chan struct{}),
 		sstBasePath:  pkroot.SSTBasePath(cfg.StorageRootPath, collectionID, vchannel),
-		backoff:      c.newBackoff(),
 	}
 	idx.notFresh.Store(leftover)
 	idx.auth = authority.New(dirtyRW{eng: eng, idx: idx}, authority.Config{
@@ -428,48 +407,15 @@ func (idx *Index) markReady(ctx context.Context, found bool) {
 	idx.logger.Info(ctx, "primary key index ready", mlog.Bool("manifestFound", found), mlog.Bool("fresh", idx.fresh()))
 }
 
-// submitHandover submits one handover of the Index to the node scheduler.
-// Only the driver step calls it.
-func (idx *Index) submitHandover() {
-	idx.running.Store(true)
-	idx.handle = idx.ch.m.cfg.Sched.Submit(&handoverTask{idx: idx})
-}
-
-// reapHandover clears running when the scheduler finished the task without
-// running it, for example after the scheduler closed. Only the driver step
-// calls it.
-func (idx *Index) reapHandover() {
-	if idx.handle == nil || !idx.running.Load() {
-		return
-	}
-	done, cancel := context.WithCancel(context.Background())
-	cancel()
-	// Wait returns nil only when the task is finished. A finished task that
-	// ran already cleared running, so this store changes nothing for it.
-	if idx.handle.Wait(done) == nil {
-		idx.handle = nil
-		idx.running.Store(false)
-	}
-}
-
-// handoverTask runs one handover of an Index on the node scheduler.
-type handoverTask struct {
-	idx *Index
-}
-
-// Execute runs the handover. It always returns nil: the driver retries a
-// failed handover with backoff.
-func (t *handoverTask) Execute(ctx context.Context) error {
-	t.idx.runHandover(ctx)
-	return nil
-}
-
-// runHandover runs one handover under the lifetime of the Index, with a
-// context that ends when the task or the Index ends.
-func (idx *Index) runHandover(taskCtx context.Context) {
-	defer idx.running.Store(false)
+// Handover runs one handover step under the lifetime of the Index: it
+// prepares a handover when none is pending, else it commits the pending one.
+// It reports whether a commit succeeded. It returns context.Canceled when
+// the Index or taskCtx ends during the step, and the error of the step
+// otherwise; the caller classifies it with isFatal. The handover driver is
+// the only caller, and it runs at most one step of an Index at a time.
+func (idx *Index) Handover(taskCtx context.Context) (committed bool, err error) {
 	if !idx.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return
+		return false, context.Canceled
 	}
 	defer idx.lifetime.Done()
 	ctx, cancel := context.WithCancel(idx.ctx)
@@ -477,33 +423,13 @@ func (idx *Index) runHandover(taskCtx context.Context) {
 	stop := context.AfterFunc(taskCtx, cancel)
 	defer stop()
 
-	committed, err := idx.handover(ctx)
-	switch {
-	case err == nil:
-		if committed {
-			if idx.failures > 0 {
-				idx.backoff, idx.failures = idx.ch.newBackoff(), 0
-			}
-			metrics.StreamingNodePKIndexHandoverTotal.WithLabelValues(paramtable.GetStringNodeID()).Inc()
-		}
-	case ctx.Err() != nil:
-		// the Index or the scheduler is closing, this is not a failure
-	case isFatal(err):
-		idx.handoverStopped.Store(true)
-		idx.logger.Error(ctx, "primary key index handover failed, the WAL becomes unavailable", mlog.Err(err))
-		idx.ch.fatal(err)
-	default:
-		idx.failures++
-		idx.backoff.UpdateInstantWithNextBackOff()
-		metrics.StreamingNodePKIndexHandoverFailuresTotal.WithLabelValues(paramtable.GetStringNodeID()).Inc()
-		fields := []mlog.Field{mlog.Int("failures", idx.failures), mlog.Bool("pending", idx.pending.Load() != nil), mlog.Err(err)}
-		if idx.failures > warnFailures {
-			idx.logger.Warn(ctx, "primary key index handover failed, retry later", fields...)
-		} else {
-			idx.logger.Info(ctx, "primary key index handover failed, retry later", fields...)
-		}
-	}
+	committed, err = idx.handover(ctx)
 	idx.ch.refreshAcked(idx)
+	if err != nil && ctx.Err() != nil {
+		// the Index or the scheduler is closing, this is not a failure
+		return false, context.Canceled
+	}
+	return committed, err
 }
 
 // handover prepares a handover when none is pending, and commits the pending

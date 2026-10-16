@@ -53,11 +53,12 @@ type Channel struct {
 	// happens outside mu.
 	opMu sync.Mutex
 
-	// mu guards indexes, the LastAcked heap, ackedMax, claimed, and
+	// mu guards indexes, the LastAcked heap, slots, ackedMax, claimed, and
 	// Index.removed and Index.recovered.
 	mu       sync.Mutex
 	indexes  map[string]*Index
 	acked    ackTracker
+	slots    map[*Index]*handoverSlot // the driver bookkeeping of each Index
 	ackedMax uint64
 	// claimStarted is set by StartClaim. claimed is set when the pchannel is
 	// claimed and the manifests of the recovered indexes are looked up. An
@@ -82,6 +83,7 @@ func newChannel(m *Manager, info types.PChannelInfo, seed uint64, tail func() WA
 		cancel:   cancel,
 		lifetime: typeutil.NewLifetime(),
 		indexes:  make(map[string]*Index),
+		slots:    make(map[*Index]*handoverSlot),
 	}
 }
 
@@ -113,6 +115,7 @@ func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, 
 	}
 	c.mu.Lock()
 	c.indexes[vchannel] = idx
+	c.slots[idx] = &handoverSlot{backoff: c.newBackoff()}
 	ready := c.claimed
 	c.mu.Unlock()
 	if ready {
@@ -174,6 +177,7 @@ func (c *Channel) detachLocked(idx *Index) {
 	delete(c.indexes, idx.vchannel)
 	idx.removed = true
 	c.acked.remove(idx)
+	delete(c.slots, idx)
 }
 
 // Get returns the Index of a vchannel, nil when it does not exist.

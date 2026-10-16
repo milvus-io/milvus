@@ -511,3 +511,8 @@ func int64PKs(values ...int64) []authority.PK {
 	}
 	return pks
 }
+
+// slotOf returns the driver bookkeeping of idx.
+func slotOf(idx *Index) *handoverSlot {
+	return idx.ch.slotOf(idx)
+}
