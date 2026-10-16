@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1518,10 +1519,19 @@ func PickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	// on the payload type then see no vector column -- searching by IDs that
 	// all name null-vector rows failed on exactly that.
 	//
-	// Capacity 0: the seeding is all that is needed here. Sizing by the ID
-	// count would reserve dim*size for a dense vector column even when every
-	// picked row is null and nothing is ever appended.
-	fieldsData := typeutil.PrepareResultFieldData(fields, 0)
+	// A vector source with neither validity nor payload, as a nullable vector
+	// with every row null may come, takes no rows, so only the seeding is
+	// reserved for it.
+	fieldsData := make([]*schemapb.FieldData, len(fields))
+	for i, field := range fields {
+		rows := int64(size)
+		if field.GetVectors() != nil && len(typeutil.GetFieldDataValidData(field)) == 0 {
+			if n, err := funcutil.GetNumRowOfFieldData(field); err == nil && n == 0 {
+				rows = 0
+			}
+		}
+		fieldsData[i] = typeutil.PrepareResultFieldData(fields[i:i+1], rows)[0]
+	}
 	idxComputer := typeutil.NewFieldDataIdxComputerWithSchema(fields, schema)
 
 	rowIdxs := make([]int64, 0, size)
@@ -1686,7 +1696,11 @@ func (op *hybridAssembleOperator) run(ctx context.Context, span trace.Span, inpu
 		}
 	}
 
-	fieldsData := make([]*schemapb.FieldData, len(templateFields))
+	sources := make([][]*schemapb.FieldData, len(reducedResults))
+	for i, r := range reducedResults {
+		sources[i] = r.GetResults().GetFieldsData()
+	}
+	fieldsData := typeutil.PresizeAppendFieldData(int64(numReranked), sources...)
 	for i, loc := range locs {
 		srcFields := reducedResults[loc.resultIdx].GetResults().GetFieldsData()
 		typeutil.AppendFieldData(fieldsData, srcFields, int64(loc.rowIdx), fieldIdxsByOutput[i]...)
