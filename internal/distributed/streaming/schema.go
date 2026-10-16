@@ -10,6 +10,8 @@ import (
 
 // SchemaSnapshot is an owned schema and its effective boundary on the channel.
 // EffectiveTimeTick does not imply global DDL completion or persistence.
+// Zero means the exact boundary is unknown for a legacy schema baseline;
+// it must not be used as proof that a channel has crossed a schema boundary.
 type SchemaSnapshot struct {
 	Schema            *schemapb.CollectionSchema
 	EffectiveTimeTick uint64

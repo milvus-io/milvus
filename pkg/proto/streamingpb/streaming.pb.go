@@ -7465,8 +7465,10 @@ type StreamingNodeGetCollectionSchemaResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Schema            *schemapb.CollectionSchema `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"`
-	EffectiveTimeTick uint64                     `protobuf:"varint,2,opt,name=effective_time_tick,json=effectiveTimeTick,proto3" json:"effective_time_tick,omitempty"`
+	Schema *schemapb.CollectionSchema `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"`
+	// Zero means the exact effective boundary is unknown for a legacy schema
+	// baseline, not proof that the channel has crossed a schema boundary.
+	EffectiveTimeTick uint64 `protobuf:"varint,2,opt,name=effective_time_tick,json=effectiveTimeTick,proto3" json:"effective_time_tick,omitempty"`
 }
 
 func (x *StreamingNodeGetCollectionSchemaResponse) Reset() {

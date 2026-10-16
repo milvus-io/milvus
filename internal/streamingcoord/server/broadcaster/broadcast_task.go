@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -105,7 +106,8 @@ type broadcastTask struct {
 
 	// Immutable collection index key; zero for tasks without schema intent.
 	schemaCollectionID       int64
-	schemaTasks              *schemaTaskIndex // set by the manager before publication; contains durable snapshots only.
+	schemaTasks              *schemaTaskIndex           // set by the manager before publication; contains durable snapshots only.
+	schemaForTarget          *schemapb.CollectionSchema // lazily decoded, owned and immutable; protected by mu.
 	mu                       sync.Mutex
 	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
 	task                     *streamingpb.BroadcastTask

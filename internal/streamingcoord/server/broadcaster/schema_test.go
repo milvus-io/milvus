@@ -87,12 +87,14 @@ func TestSchemaTargetPersistenceBoundary(t *testing.T) {
 		require.True(t, created)
 		requireSchemaTarget(t, bm, 100, 0)
 		require.Zero(t, bm.schemaTaskCount(100))
+		require.Nil(t, task.schemaForTarget, "registration must not decode the body")
 
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		save := mockey.Mock((*schemaTestCatalog).SaveBroadcastTask).Return(context.Canceled).Build()
 		require.ErrorIs(t, task.InitializeRecovery(ctx), context.Canceled)
 		require.True(t, task.dirty)
+		require.Nil(t, task.schemaForTarget, "failed persistence must not populate the schema cache")
 		requireSchemaTarget(t, bm, 100, 0)
 		save.UnPatch()
 
@@ -113,6 +115,8 @@ func TestSchemaTargetPersistenceBoundary(t *testing.T) {
 		first := requireSchemaTarget(t, bm, 100, 1)
 		require.Empty(t, first.TimeTicks, "initial persistence needs neither WAL append nor ACK")
 		require.False(t, task.dirty)
+		cachedSchema := task.schemaForTarget
+		require.NotSame(t, cachedSchema, first.Schema, "public snapshots must own their schema")
 
 		// Failed ACK persistence must not leak its checkpoint into the snapshot.
 		mockey.Mock(registry.CallMessageAckOnceCallbacks).Return(nil).Build()
@@ -123,6 +127,8 @@ func TestSchemaTargetPersistenceBoundary(t *testing.T) {
 		save.UnPatch()
 		save = mockey.Mock((*schemaTestCatalog).SaveBroadcastTask).Return(nil).Build()
 		require.NoError(t, task.Ack(t.Context(), ack))
+		require.NoError(t, task.Ack(t.Context(), ack), "duplicate ACK must not decode again")
+		require.Same(t, cachedSchema, bm.schemaTasks.collections[100].head.Schema, "index updates must not clone the cached schema")
 		snapshot := requireSchemaTarget(t, bm, 100, 1)
 		require.Equal(t, map[string]uint64{"v1": 10}, snapshot.TimeTicks)
 		snapshot.Schema.Name = "mutated"
@@ -142,6 +148,8 @@ func TestSchemaTargetPersistenceBoundary(t *testing.T) {
 		requireSchemaTarget(t, bm, 100, 0)
 		require.Contains(t, bm.tasks, uint64(1), "retirement preserves the tombstone and deduplication")
 		require.NoError(t, task.MarkAckCallbackDone(t.Context()))
+		require.Nil(t, task.schemaForTarget, "completion releases the task's cached schema")
+		require.NoError(t, task.DropTombstone(t.Context()))
 		bm.removeBroadcastTask(1)
 		require.Zero(t, bm.schemaTaskCount(100))
 	})

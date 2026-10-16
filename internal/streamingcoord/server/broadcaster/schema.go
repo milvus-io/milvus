@@ -99,17 +99,23 @@ func (i *schemaTaskIndex) update(task *broadcastTask) {
 // pendingSchemaTarget snapshots the task under its lock (or before publication).
 func (b *broadcastTask) pendingSchemaTarget() *SchemaTarget {
 	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE || b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+		b.schemaForTarget = nil
 		return nil
 	}
-	msg := message.MustAsMutableAlterCollectionMessageV2(b.msg)
-	schema := msg.MustBody().GetUpdates().GetSchema()
-	if schema == nil {
-		return nil
+	if b.schemaForTarget == nil {
+		msg := message.MustAsMutableAlterCollectionMessageV2(b.msg)
+		schema := msg.MustBody().GetUpdates().GetSchema()
+		if schema == nil {
+			return nil
+		}
+		// A schema ALTER's body never changes. Own it once and share it across
+		// immutable index snapshots; only the ACK checkpoints change on save.
+		b.schemaForTarget = proto.Clone(schema).(*schemapb.CollectionSchema)
 	}
 	snapshot := &SchemaTarget{
 		CollectionID: b.schemaCollectionID,
 		BroadcastID:  b.header().BroadcastID,
-		Schema:       proto.Clone(schema).(*schemapb.CollectionSchema),
+		Schema:       b.schemaForTarget,
 		TimeTicks:    make(map[string]uint64),
 	}
 	for i, channel := range b.header().VChannels {
