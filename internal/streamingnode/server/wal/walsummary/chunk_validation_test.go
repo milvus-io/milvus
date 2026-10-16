@@ -125,15 +125,18 @@ func TestChunkValidationCanceledLoader(t *testing.T) {
 	payload, index := footerTestFixture(t)
 	retained := newChunkIndex(1 << 20)
 	leaf := retained.newChunk(index, nil)
-	entered := make(chan struct{})
+	entered, resume := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int64
 	patch := mockey.Mock((*Store).readChunkPayload).To(func(_ *Store, ctx context.Context, captured *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
-		if calls.Add(1) == 1 {
-			close(entered)
-			<-ctx.Done()
+		captured = proto.Clone(captured).(*streamingpb.PChannelSummaryChunkIndexEntry)
+		calls.Add(1)
+		close(entered)
+		select {
+		case <-resume:
+			return validateChunkPayload(payload, "p1", captured, verified)
+		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		return validateChunkPayload(payload, "p1", captured, verified)
 	}).Build()
 	defer patch.UnPatch()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -157,14 +160,17 @@ func TestChunkValidationCanceledLoader(t *testing.T) {
 			results <- err
 		}()
 	}
+	awaitChunkWaiters(t, &retained.cache, leaf, 17)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
+	require.Nil(t, leaf.verified)
+	close(resume)
 	wg.Wait()
 	close(results)
 	for err := range results {
 		require.NoError(t, err)
 	}
-	require.Equal(t, int64(2), calls.Load())
+	require.Equal(t, int64(1), calls.Load())
 	require.NotNil(t, leaf.verified)
 	require.NotNil(t, leaf.payload)
 }

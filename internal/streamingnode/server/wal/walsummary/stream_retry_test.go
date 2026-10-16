@@ -104,9 +104,7 @@ func TestQueryStreamRetriesTransientReads(t *testing.T) {
 				require.NoError(t, event.Err)
 				require.NotNil(t, event.SyncUp)
 				require.Equal(t, uint64(40), event.SyncUp.TimeTick)
-				if firstRows == 4096 {
-					require.Equal(t, int64(1), firstChunkReads.Load(), "retry must retain the accepted page cursor")
-				}
+				require.Equal(t, int64(1), firstChunkReads.Load(), "retry must not reread earlier chunks, even within the same page")
 				require.Equal(t, int64(len(failures)+1), attempts.Load())
 			})
 		}
@@ -153,8 +151,7 @@ func TestQueryStreamReadFailureCancellation(t *testing.T) {
 					t.Fatal("read did not enter the wait")
 				}
 				if waiting == "backoff" {
-					require.True(t, m.readMu.TryLock(), "backoff must not hold the read/GC pin")
-					m.readMu.Unlock()
+					require.False(t, m.readMu.TryLock(), "shared retry must retain its object snapshot")
 				}
 				closed := make(chan error, 1)
 				go func() {
@@ -177,6 +174,8 @@ func TestQueryStreamReadFailureCancellation(t *testing.T) {
 				}
 				require.ErrorIs(t, nextTransformEvent(t, handler).Err, context.Canceled)
 				require.Equal(t, int64(1), attempts.Load(), "canceled subscription must not retry")
+				require.True(t, m.readMu.TryLock(), "last subscriber must join the load before releasing its snapshot")
+				m.readMu.Unlock()
 				m.mu.Lock()
 				require.Empty(t, m.transformNotifiers, "subscription must release its watcher")
 				m.mu.Unlock()

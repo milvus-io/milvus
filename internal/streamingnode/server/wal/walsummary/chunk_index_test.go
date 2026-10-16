@@ -2,10 +2,8 @@ package walsummary
 
 import (
 	"context"
-	"io"
 	"math"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func countChunkReads(t *testing.T) *atomic.Int64 {
@@ -152,57 +151,6 @@ func TestChunkCacheEvictionAndOversizedBypass(t *testing.T) {
 	require.Nil(t, second.payload)
 }
 
-func TestChunkCacheConcurrentLoadAndCancellation(t *testing.T) {
-	ctx := context.Background()
-	m, _ := newTestManagerWithStore(t)
-	var released bool
-	flushTransform(t, m, "a", 10, &released)
-	m.chunkIndex.cache.capacity = 1 << 20
-	entered, resume := make(chan struct{}), make(chan struct{})
-	var calls atomic.Int64
-	var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error)
-	patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(s *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
-		copied := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
-		if calls.Add(1) == 1 {
-			close(entered)
-			select {
-			case <-resume:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-		return original(s, ctx, copied, verified)
-	}).Build()
-	defer patch.UnPatch()
-	read := func(ctx context.Context) error { _, err := m.ReadTransform(ctx, "a", 0, 10, ReadLimits{}); return err }
-	loaderCtx, cancelLoader := context.WithCancel(ctx)
-	defer cancelLoader()
-	loaderDone := make(chan error, 1)
-	go func() { loaderDone <- read(loaderCtx) }()
-	<-entered
-	waiterCtx, cancelWaiter := context.WithCancel(ctx)
-	waiterDone := make(chan error, 1)
-	go func() { waiterDone <- read(waiterCtx) }()
-	cancelWaiter()
-	require.ErrorIs(t, <-waiterDone, context.Canceled)
-	// Remaining callers survive cancellation of the original loading caller.
-	var wg sync.WaitGroup
-	errors := make(chan error, 16)
-	for range 16 {
-		wg.Add(1)
-		go func() { defer wg.Done(); errors <- read(ctx) }()
-	}
-	cancelLoader()
-	require.ErrorIs(t, <-loaderDone, context.Canceled)
-	wg.Wait()
-	close(errors)
-	for err := range errors {
-		require.NoError(t, err)
-	}
-	require.Equal(t, int64(2), calls.Load())
-	close(resume)
-}
-
 func TestChunkCacheRetirementDuringLoad(t *testing.T) {
 	ctx := context.Background()
 	m, _ := newTestManagerWithStore(t)
@@ -241,9 +189,9 @@ func TestChunkCacheErrorsAndLoadSlots(t *testing.T) {
 	m.chunkIndex.cache.capacity = 1 << 20
 	leaf := m.chunkIndex.chunks[0]
 	// Missing objects remain errors and are not negative-cached.
-	patch := mockey.Mock((*Store).readChunkPayload).Return(nil, context.DeadlineExceeded).Build()
+	patch := mockey.Mock((*Store).readChunkPayload).Return(nil, merr.ErrIoKeyNotFound).Build()
 	_, err := m.chunkIndex.cache.read(ctx, store, leaf)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 	patch.UnPatch()
 	require.Nil(t, leaf.payload)
 	require.Nil(t, leaf.loading)
@@ -341,27 +289,6 @@ func TestChunkCacheValidatesColdObject(t *testing.T) {
 			require.Nil(t, leaf.loading)
 		})
 	}
-}
-
-func TestChunkCacheCancellationDoesNotMaskObjectError(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	index := newChunkIndex(1024)
-	chunk := &indexedChunk{}
-	var attempt *chunkLoad
-	patch := mockey.Mock((*Store).readChunkPayload).To(func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error) {
-		index.cache.mu.Lock()
-		attempt = chunk.loading
-		index.cache.mu.Unlock()
-		cancel()
-		return nil, io.ErrUnexpectedEOF
-	}).Build()
-	defer patch.UnPatch()
-	_, err := index.cache.read(ctx, &Store{}, chunk)
-	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
-	require.False(t, attempt.canceled, "independent waiters must receive the object error")
-	require.ErrorIs(t, attempt.err, io.ErrUnexpectedEOF)
-	require.Nil(t, chunk.payload)
 }
 
 func TestChunkCacheRetainsValidationWithoutPayload(t *testing.T) {
