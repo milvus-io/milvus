@@ -206,6 +206,15 @@ func TestCommitManifestUpdates_AllSections(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), version,
 		"inserts + delta + stats together must bump version exactly once")
+	inventory, err := ReadManifestFiles(got, cfg)
+	require.NoError(t, err)
+	require.NotEmpty(t, inventory.ColumnFiles)
+	require.Equal(t, []string{deltaPath}, inventory.DeltaFiles)
+	require.Equal(t, []string{statPath}, inventory.StatsFiles)
+	manifestFile, err := ManifestFilePath(got)
+	require.NoError(t, err)
+	require.Equal(t, manifestFile, inventory.ManifestFile)
+
 }
 
 // TestCommitManifestUpdates_AddNewColumnGroups exercises the
@@ -359,4 +368,39 @@ func TestFFIPackedWriter_DoubleCloseRejected(t *testing.T) {
 	_, err = w.Close()
 	require.Error(t, err, "second Close must return an error")
 	require.Contains(t, err.Error(), "already closed")
+}
+
+func TestReadManifestFilesPinnedRevision(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	base := path.Join(cfg.RootPath, "insert_log/1/2/3")
+	firstStat := path.Join(base, "_stats/text/first")
+	index := indexEntry(t, base, path.Join(cfg.RootPath, "index_v1/1/2/3/500/1"), 10, 500)
+	first, err := CommitManifestUpdates(base, 0, cfg, &ManifestUpdates{
+		Stats: []StatEntry{{Key: "text.101", Files: []string{firstStat}}}, Indexes: []ManifestIndexInfo{index},
+	})
+	require.NoError(t, err)
+	_, version, err := UnmarshalManifestPath(first)
+	require.NoError(t, err)
+	_, err = CommitManifestUpdates(base, version, cfg, &ManifestUpdates{
+		Stats: []StatEntry{{Key: "text.101", Files: []string{path.Join(base, "_stats/text/second")}}},
+	})
+	require.NoError(t, err)
+	files, err := ReadManifestFiles(first, cfg)
+	require.NoError(t, err)
+	require.Equal(t, []string{firstStat}, files.StatsFiles)
+	require.Len(t, files.Indexes, 1)
+	require.Equal(t, path.Join(cfg.RootPath, "index_v1/1/2/3/500/1"), files.Indexes[0].Path)
+	for _, descriptor := range []string{"invalid", MarshalManifestPath("", 1), MarshalManifestPath(base, ManifestLatest), MarshalManifestPath(base, 999)} {
+		_, err := ReadManifestFiles(descriptor, cfg)
+		require.Error(t, err)
+	}
+	corruptPath, err := ManifestFilePath(MarshalManifestPath(base, 99))
+	require.NoError(t, err)
+	require.NoError(t, WriteFile(cfg, corruptPath, []byte("invalid avro")))
+	_, err = ReadManifestFiles(MarshalManifestPath(base, 99), cfg)
+	require.Error(t, err)
+	empty, err := ReadManifestFiles(MarshalManifestPath(base, ManifestEarliest), cfg)
+	require.NoError(t, err)
+	require.Empty(t, empty.ManifestFile)
+	require.Empty(t, empty.ColumnFiles)
 }

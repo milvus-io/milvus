@@ -278,6 +278,28 @@ func (s *globalTaskScheduler) schedule() {
 		if task == nil {
 			break
 		}
+		retired := func() bool {
+			s.mu.RLock(task.GetTaskID())
+			defer s.mu.RUnlock(task.GetTaskID())
+			// A job can time out while waiting for a free worker. Retire its
+			// task even when no worker has slots, rather than retain it forever.
+			switch task.GetTaskState() {
+			case taskcommon.InProgress:
+				// A pending export may time out before assignment and enter its
+				// cleanup phase. Cleanup must not wait for a free worker slot.
+				task.SetTaskTime(taskcommon.TimeStart, time.Now())
+				s.runningTasks.Insert(task.GetTaskID(), task)
+				return true
+			case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
+				task.DropTaskOnWorker(s.cluster)
+				s.backoffs.Remove(task.GetTaskID())
+				return true
+			}
+			return false
+		}()
+		if retired {
+			continue
+		}
 		// A task in failure backoff gives way: it re-enters the queue after
 		// this round and is dispatched once its delay elapses, so one
 		// persistently failing task cannot occupy the scheduler.
@@ -285,11 +307,10 @@ func (s *globalTaskScheduler) schedule() {
 			delayed = append(delayed, task)
 			continue
 		}
-		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		nodeID := s.pickNode(slotHeap, task.GetTaskSlot())
 		if nodeID == NullNodeID {
-			s.pendingTasks.Push(task)
-			break
+			delayed = append(delayed, task)
+			continue
 		}
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())

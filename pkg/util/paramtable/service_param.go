@@ -2303,9 +2303,9 @@ Leave it empty if you want to use AWS default endpoint`,
 	p.MultipartCopyThreshold = ParamItem{
 		Key:          "minio.multipartCopyThreshold",
 		Version:      "3.0.3",
-		DefaultValue: "1073741824",
+		DefaultValue: "524288000",
 		Doc: "Object size threshold in bytes for switching from a single CopyObject request to multipart copy. " +
-			"Larger objects use multipart copy. Default is 1 GiB (1073741824 bytes). " +
+			"Objects at or above the threshold use multipart copy (minimum 10 MiB). Default is 500 MiB (524288000 bytes). " +
 			"Must be a positive integer; invalid values fall back to the default. " +
 			"Single CopyObject requests remain capped at 5 GiB regardless of this threshold. " +
 			"Changes apply to subsequent copies, not copies already in progress. " +
@@ -2313,7 +2313,7 @@ Leave it empty if you want to use AWS default endpoint`,
 		Formatter: func(v string) string {
 			size, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || size <= 0 {
-				return "1073741824"
+				return "524288000"
 			}
 			return v
 		},

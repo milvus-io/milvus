@@ -38,6 +38,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+func TestRebaseObjectPath(t *testing.T) {
+	for _, tc := range []struct {
+		name, src, oldRoot, newRoot, want string
+	}{
+		{"unchanged_root", "old/files/data", "old", "old", "old/files/data"},
+		{"root_itself", "old", "old", "new", "new"},
+		{"relocated", "old/files/data", "old", "new", "new/files/data"},
+		{"nested_destination", "old/files/data", "old", "old/nested", "old/nested/files/data"},
+		{"outside_root", "other/files/data", "old", "new", "other/files/data"},
+		{"sibling_prefix", "older/files/data", "old", "new", "older/files/data"},
+		{"from_bucket_root", "files/data", "", "new", "new/files/data"},
+		{"from_bucket_root_leading_slash", "/files/data", "", "new", "new/files/data"},
+		{"empty_bucket_root", "", "", "new", "new"},
+		{"to_bucket_root", "old/files/data", "old", "", "files/data"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, RebaseObjectPath(tc.src, tc.oldRoot, tc.newRoot))
+		})
+	}
+}
+
 func TestManifestSchemaByVersion(t *testing.T) {
 	schema, err := ManifestSchema()
 	require.NoError(t, err)
@@ -565,5 +586,33 @@ func TestOCFManifestRetainsUpstreamIndexMarker(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, segment.ManifestHasIndex)
 		assert.Equal(t, marker, segment.GetManifestHasIndex())
+	}
+}
+
+func TestMarshalSegmentManifestStableIndexOrder(t *testing.T) {
+	segment := &datapb.SegmentDescription{
+		TextIndexFiles:    map[int64]*datapb.TextIndexStats{},
+		JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{},
+	}
+	for _, id := range []int64{9, 2, 7, 1} {
+		segment.TextIndexFiles[id] = &datapb.TextIndexStats{FieldID: id}
+		segment.JsonKeyIndexFiles[id] = &datapb.JsonKeyStats{FieldID: id}
+	}
+	expected, err := MarshalSegmentManifest(segment)
+	require.NoError(t, err)
+	for i := 0; i < 20; i++ {
+		actual, err := MarshalSegmentManifest(segment)
+		require.NoError(t, err)
+		expectedSegment, err := ParseSegmentManifest(expected, SnapshotFormatVersion)
+		require.NoError(t, err)
+		actualSegment, err := ParseSegmentManifest(actual, SnapshotFormatVersion)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(expectedSegment, actualSegment))
+	}
+	text := TextIndexMapToAvro(segment.TextIndexFiles)
+	json := JSONKeyIndexMapToAvro(segment.JsonKeyIndexFiles)
+	for i, id := range []int64{1, 2, 7, 9} {
+		require.Equal(t, id, text[i].FieldID)
+		require.Equal(t, id, json[i].FieldID)
 	}
 }

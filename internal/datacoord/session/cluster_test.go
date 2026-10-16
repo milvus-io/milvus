@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -1512,4 +1513,103 @@ func TestCopySegmentSharedDefinitionsPayloadSize(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, wire, sharedSize)
 	t.Logf("100 segments, 27 definitions: shared=%d bytes, legacy=%d bytes", sharedSize, legacySize)
+}
+
+func TestCluster_SnapshotExportCopy(t *testing.T) {
+	c := &cluster{}
+	req := &datapb.SnapshotExportCopyRequest{TaskId: 17}
+	defer mockey.Mock((*cluster).createTask).To(func(_ *cluster, nodeID int64, payload proto.Message, p taskcommon.Properties) error {
+		assert.Equal(t, int64(5), nodeID)
+		assert.Same(t, req, payload)
+		typ, err := p.GetTaskType()
+		require.NoError(t, err)
+		assert.Equal(t, taskcommon.SnapshotExportCopy, typ)
+		slots, err := p.GetTaskSlot()
+		require.NoError(t, err)
+		assert.Equal(t, max(req.GetTaskSlot(), 1), slots)
+		return nil
+	}).Build().UnPatch()
+	for _, slots := range []int64{0, 1, 8} {
+		req.TaskSlot = slots
+		require.NoError(t, c.CreateSnapshotExportCopy(5, req))
+	}
+	defer mockey.Mock((*cluster).dropTask).To(func(_ *cluster, nodeID int64, p taskcommon.Properties) error {
+		assert.Equal(t, snapshotExportProperties(17), p)
+		assert.EqualValues(t, 5, nodeID)
+		return nil
+	}).Build().UnPatch()
+	require.NoError(t, c.DropSnapshotExportCopy(5, 17))
+	wire := func(state datapb.ImportTaskStateV2, status *commonpb.Status) []byte {
+		payload, err := proto.Marshal(&datapb.SnapshotExportCopyResponse{
+			Status: status, TaskId: 17, State: state, Reason: "worker reason",
+			CopiedFiles: 3, TotalFiles: 3, CopiedBytes: 42,
+		})
+		require.NoError(t, err)
+		return payload
+	}
+	completed := wire(datapb.ImportTaskStateV2_Completed, merr.Success())
+	for _, tc := range []struct {
+		name     string
+		state    string
+		payload  []byte
+		queryErr error
+		wantErr  bool
+	}{
+		{"none", taskcommon.None.String(), nil, nil, false},
+		{"queued ignores payload", taskcommon.Init.String(), []byte{0xff}, nil, false},
+		{"retry", taskcommon.Retry.String(), nil, nil, false},
+		{"running without payload", taskcommon.InProgress.String(), nil, nil, false},
+		{"running empty payload", taskcommon.InProgress.String(), []byte{}, nil, false},
+		{"progress", taskcommon.InProgress.String(), wire(datapb.ImportTaskStateV2_InProgress, merr.Success()), nil, false},
+		{"completed", taskcommon.Finished.String(), completed, nil, false},
+		{"failed without payload", taskcommon.Failed.String(), nil, nil, false},
+		{"failed payload", taskcommon.Failed.String(), wire(datapb.ImportTaskStateV2_Failed, merr.Success()), nil, false},
+		{"transport", taskcommon.Init.String(), nil, context.DeadlineExceeded, true},
+		{"missing state", "", completed, nil, true},
+		{"invalid state", "invalid", completed, nil, true},
+		{"missing completion", taskcommon.Finished.String(), nil, nil, true},
+		{"malformed", taskcommon.Finished.String(), []byte{0xff}, nil, true},
+		{"worker missing", taskcommon.Finished.String(), wire(datapb.ImportTaskStateV2_Completed, merr.Status(merr.ErrImportSysFailed)), nil, true},
+		{"running with completion", taskcommon.InProgress.String(), completed, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			properties := taskcommon.NewProperties(nil)
+			properties.AppendReason("manager reason")
+			if tc.state != "" {
+				properties[taskcommon.StateKey] = tc.state
+			}
+			defer mockey.Mock((*cluster).queryTask).Return(&workerpb.QueryTaskResponse{
+				Status: merr.Success(), Properties: properties, Payload: tc.payload,
+			}, tc.queryErr).Build().UnPatch()
+			response, err := c.QuerySnapshotExportCopy(5, 17)
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.queryErr != nil {
+					require.ErrorIs(t, err, tc.queryErr)
+				}
+				if tc.name == "worker missing" {
+					require.ErrorIs(t, err, merr.ErrImportSysFailed)
+				}
+				return
+			}
+			require.NoError(t, err)
+			state, err := properties.GetTaskState()
+			require.NoError(t, err)
+			assert.Equal(t, int64(17), response.GetTaskId())
+			assert.NoError(t, merr.Error(response.GetStatus()))
+			if tc.name == "progress" || tc.name == "completed" || tc.name == "failed payload" || tc.name == "running with completion" {
+				want := &datapb.SnapshotExportCopyResponse{}
+				require.NoError(t, proto.Unmarshal(tc.payload, want))
+				assert.Equal(t, want.GetState(), response.GetState())
+				assert.EqualValues(t, 42, response.GetCopiedBytes())
+				assert.EqualValues(t, 3, response.GetCopiedFiles())
+				assert.EqualValues(t, 3, response.GetTotalFiles())
+				assert.Equal(t, "worker reason", response.GetReason())
+			} else {
+				assert.Equal(t, taskcommon.ToImportState(state), response.GetState())
+				assert.Zero(t, response.GetCopiedFiles())
+				assert.Equal(t, "manager reason", response.GetReason())
+			}
+		})
+	}
 }

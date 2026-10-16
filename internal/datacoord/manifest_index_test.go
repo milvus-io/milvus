@@ -179,14 +179,17 @@ func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
 }
 
 func TestManifestIndexFileKeysRejectPathTraversal(t *testing.T) {
-	_, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
+	entry := packed.ManifestIndexInfo{
 		IndexName:             "index",
 		IndexType:             "HNSW",
 		Path:                  "index_v1/1/2/3/102/4",
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-		IndexFileKeys:         []string{"../other-build/file"},
-	})
-	require.False(t, ok)
+	}
+	for _, key := range []string{"", ".", "..", "/absolute", "dir/file", "../other-build/file"} {
+		entry.IndexFileKeys = []string{key}
+		_, ok := manifestIndexFilePathInfo(3, entry)
+		require.False(t, ok, key)
+	}
 }
 
 // GetIndexInfos serves the load path from in-memory SegmentIndex metadata and

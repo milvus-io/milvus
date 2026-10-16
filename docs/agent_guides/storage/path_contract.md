@@ -120,3 +120,35 @@ directory from the output manifest base.
 
 Source review and unit tests do not replace a real version-to-version upgrade
 test. Report which versions, layouts, and failure cases were actually exercised.
+
+
+## Snapshot export and Restore paths
+
+The [distributed execution design](../../design-docs/design_docs/20260923-snapshot-export-datanode.md)
+owns scheduling, inventory, concurrency, statistics, publication and recovery.
+The [external snapshot design](../../design-docs/design_docs/20260609-external-snapshot-export-restore.md)
+owns bundle layouts, credentials and relocation.
+
+- All Export ranges in a generation share `<job-root>/attempts/<generation-id>`.
+  Lost ranges retry with fresh task IDs in the same root. Pinned immutable
+  inputs and equivalent decoded Avro records make late/repeated writes safe
+  under complete-object writes. V6 OCF sync markers may differ across retries;
+  worker cleanup never deletes these target objects.
+- Source keys are complete keys. Preserve native relative data/LOB layout when
+  copying pinned native manifests unchanged. Reject mappings that change it.
+  V6 Avro OCF records explicit target paths; top-level metadata relocates native
+  entry points. Relocating self-contained bundles rebases their root; referenced
+  snapshots retain original paths.
+- Ordinary V3 physical inventory comes from the pinned manifest plus nonempty
+  PB delta/stats/BM25 supplements, never a segment-directory walk. Avro IndexFiles
+  alone selects vector/scalar index artifacts, including an empty inventory.
+  Missing references/read failures fail closed; they do not enable LIST fallback.
+- Validate raw external URI ownership before key deduplication. Destination
+  keys remain literal. Per-segment source/destination conflicts fail before that
+  segment writes; there is no task/job-wide preparation barrier.
+- Shared immutable LOBs may be copied repeatedly. Restore task cleanup excludes
+  the actual target partition's `lobs/` namespace; coordinator cleanup prefixes
+  stay segment/index-owned. Reference-aware LOB GC owns orphan reclamation under
+  its safety window. Disabling it can retain orphan LOBs.
+- Export worker removal never deletes copied objects. Failed/abandoned attempt
+  prefixes are not reclaimed by generic orphan GC.

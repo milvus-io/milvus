@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 
@@ -544,4 +545,102 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	assert.False(t, ok, "backoff entry must be removed once the task reaches a terminal state")
 	assert.Equal(t, 0, scheduler.runningTasks.Len())
 	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
+}
+
+type exportSchedulingTask struct{ Task }
+
+type exportSchedulingCluster struct{ session.Cluster }
+
+func TestGlobalScheduler_ExportUsesAvailableSlots(t *testing.T) {
+	cluster := &exportSchedulingCluster{}
+	// Shared-pool managers report capacity without Export-specific capabilities.
+	slots := map[int64]*session.WorkerSlots{1: {AvailableSlots: 3}}
+	defer mockey.Mock((*exportSchedulingCluster).QuerySlot).Return(slots).Build().UnPatch()
+	pending := &exportSchedulingTask{}
+	defer mockey.Mock((*exportSchedulingTask).GetTaskID).Return(int64(99)).Build().UnPatch()
+	defer mockey.Mock((*exportSchedulingTask).GetTaskType).Return(taskcommon.SnapshotExportCopy).Build().UnPatch()
+	defer mockey.Mock((*exportSchedulingTask).GetTaskSlot).Return(int64(2)).Build().UnPatch()
+	defer mockey.Mock((*exportSchedulingTask).SetTaskTime).Return().Build().UnPatch()
+	state := taskcommon.Init
+	defer mockey.Mock((*exportSchedulingTask).GetTaskState).To(func() taskcommon.State { return state }).Build().UnPatch()
+	var assigned int64
+	defer mockey.Mock((*exportSchedulingTask).CreateTaskOnWorker).To(func(nodeID int64, _ session.Cluster) {
+		assigned = nodeID
+		state = taskcommon.InProgress
+	}).Build().UnPatch()
+	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	scheduler.Enqueue(pending)
+	scheduler.schedule()
+	assert.EqualValues(t, 1, assigned)
+	assert.EqualValues(t, 1, slots[1].AvailableSlots)
+	assert.Zero(t, scheduler.pendingTasks.TaskCount())
+	assert.Equal(t, 1, scheduler.runningTasks.Len())
+}
+
+func TestGlobalScheduler_ExportWithoutSlots(t *testing.T) {
+	for _, cleanup := range []bool{false, true} {
+		name := "failed pending task"
+		if cleanup {
+			name = "running task cleanup"
+		}
+		t.Run(name, func(t *testing.T) {
+			cluster := &exportSchedulingCluster{}
+			defer mockey.Mock((*exportSchedulingCluster).QuerySlot).Return(map[int64]*session.WorkerSlots{}).Build().UnPatch()
+			pending := &exportSchedulingTask{}
+			defer mockey.Mock((*exportSchedulingTask).GetTaskID).Return(int64(99)).Build().UnPatch()
+			defer mockey.Mock((*exportSchedulingTask).GetTaskType).Return(taskcommon.SnapshotExportCopy).Build().UnPatch()
+			defer mockey.Mock((*exportSchedulingTask).GetTaskSlot).Return(int64(1)).Build().UnPatch()
+			defer mockey.Mock((*exportSchedulingTask).SetTaskTime).Return().Build().UnPatch()
+			state := taskcommon.Init
+			defer mockey.Mock((*exportSchedulingTask).GetTaskState).To(func() taskcommon.State { return state }).Build().UnPatch()
+			var dropped, queried int
+			defer mockey.Mock((*exportSchedulingTask).DropTaskOnWorker).To(func(session.Cluster) { dropped++ }).Build().UnPatch()
+			defer mockey.Mock((*exportSchedulingTask).QueryTaskOnWorker).To(func(session.Cluster) { queried++; state = taskcommon.None }).Build().UnPatch()
+			scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+			scheduler.Enqueue(pending)
+			scheduler.schedule()
+			assert.Equal(t, 1, scheduler.pendingTasks.TaskCount())
+			assert.Zero(t, dropped)
+			if cleanup {
+				state = taskcommon.InProgress
+				scheduler.Enqueue(pending) // Reconciliation must reuse the queued entry.
+				scheduler.schedule()
+				assert.Equal(t, 1, scheduler.runningTasks.Len())
+				scheduler.check()
+				assert.Equal(t, 1, queried)
+				assert.Zero(t, scheduler.runningTasks.Len())
+			} else {
+				state = taskcommon.Failed
+				scheduler.schedule()
+				assert.Equal(t, 1, dropped)
+			}
+			assert.Zero(t, scheduler.pendingTasks.TaskCount())
+		})
+	}
+}
+
+func TestGlobalScheduler_TerminalCleanupSerializesAbort(t *testing.T) {
+	cluster := &exportSchedulingCluster{}
+	defer mockey.Mock((*exportSchedulingCluster).QuerySlot).Return(map[int64]*session.WorkerSlots{}).Build().UnPatch()
+	pending := &exportSchedulingTask{}
+	defer mockey.Mock((*exportSchedulingTask).GetTaskID).Return(int64(99)).Build().UnPatch()
+	defer mockey.Mock((*exportSchedulingTask).GetTaskType).Return(taskcommon.SnapshotExportCopy).Build().UnPatch()
+	defer mockey.Mock((*exportSchedulingTask).GetTaskState).Return(taskcommon.Failed).Build().UnPatch()
+	defer mockey.Mock((*exportSchedulingTask).SetTaskTime).Return().Build().UnPatch()
+	entered, release, scheduled, aborted := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	defer mockey.Mock((*exportSchedulingTask).DropTaskOnWorker).To(func(session.Cluster) { close(entered); <-release }).Build().UnPatch()
+	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	scheduler.pendingTasks.Push(pending)
+	go func() { scheduler.schedule(); close(scheduled) }()
+	<-entered
+	go func() { scheduler.AbortAndRemoveTask(99); close(aborted) }()
+	select {
+	case <-aborted:
+		t.Error("abort passed an active terminal cleanup")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-scheduled
+	<-aborted
+	assert.Zero(t, scheduler.pendingTasks.TaskCount())
 }

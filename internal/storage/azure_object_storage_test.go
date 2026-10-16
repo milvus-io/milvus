@@ -21,12 +21,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
@@ -298,6 +301,156 @@ func TestStartOrResumeAzureCopy(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, startCalls)
 	})
+
+	for _, scenario := range []struct {
+		name     string
+		code     bloberror.Code
+		source   string
+		statuses []blob.CopyStatusType
+		wantErr  string
+	}{
+		{"joins destination condition conflict", bloberror.ConditionNotMet, "source", []blob.CopyStatusType{blob.CopyStatusTypePending, blob.CopyStatusTypeSuccess}, ""},
+		{"reuses completed copy", bloberror.ConditionNotMet, "source", []blob.CopyStatusType{blob.CopyStatusTypeSuccess}, ""},
+		{"joins target condition conflict", bloberror.TargetConditionNotMet, "source", []blob.CopyStatusType{blob.CopyStatusTypeSuccess}, ""},
+		{"rejects another source", bloberror.ConditionNotMet, "other-source", []blob.CopyStatusType{blob.CopyStatusTypeSuccess}, "copy source mismatch"},
+		{"rejects failed copy", bloberror.ConditionNotMet, "source", []blob.CopyStatusType{blob.CopyStatusTypeFailed}, "failed"},
+		{"rejects aborted copy", bloberror.ConditionNotMet, "source", []blob.CopyStatusType{blob.CopyStatusTypeAborted}, "aborted"},
+		{"rejects missing copy status", bloberror.ConditionNotMet, "source", nil, "copy status"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			starts := 0
+			patch := mockey.Mock((*blockblob.Client).StartCopyFromURL).To(
+				func(_ *blockblob.Client, _ context.Context, _ string, options *blob.StartCopyFromURLOptions) (blob.StartCopyFromURLResponse, error) {
+					starts++
+					require.Equal(t, azcore.ETag("*"), *options.AccessConditions.ModifiedAccessConditions.IfNoneMatch)
+					return blob.StartCopyFromURLResponse{}, &azcore.ResponseError{ErrorCode: string(scenario.code)}
+				}).Build()
+			t.Cleanup(func() { patch.UnPatch() })
+			client, calls := mockAzureCopyStatuses(t, scenario.statuses, scenario.source, "existing-copy-id", "")
+			err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
+			if scenario.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, scenario.wantErr)
+			}
+			require.Equal(t, 1, starts)
+			require.Greater(t, *calls, 0)
+		})
+	}
+
+	t.Run("start permission error does not resume", func(t *testing.T) {
+		patch := mockey.Mock((*blockblob.Client).StartCopyFromURL).Return(blob.StartCopyFromURLResponse{},
+			&azcore.ResponseError{ErrorCode: string(bloberror.AuthorizationFailure)}).Build()
+		t.Cleanup(func() { patch.UnPatch() })
+		client, calls := mockAzureCopyStatuses(t, nil, "source", "", "")
+		err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
+		require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+		require.Zero(t, *calls)
+	})
+}
+
+// Exercise real SDK request serialization, retry and error decoding. Only HTTP
+// I/O is patched; separate clients represent workers without shared copy state.
+func TestStartOrResumeAzureCopyCompletedDestination(t *testing.T) {
+	for _, retry := range []bool{false, true} {
+		t.Run(fmt.Sprintf("sdk_retry=%t", retry), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			const source = "https://source.blob.core.windows.net/container/object"
+			var mu sync.Mutex
+			var copies, starts, polls int
+			firstPoll, releaseFirstPoll := make(chan struct{}), make(chan struct{})
+			defer mockey.Mock((*http.Client).Do).To(func(_ *http.Client, req *http.Request) (*http.Response, error) {
+				mu.Lock()
+				header := make(http.Header)
+				status, body := http.StatusOK, ""
+				if req.Method == http.MethodPut {
+					starts++
+					assert.Equal(t, "*", req.Header.Get("If-None-Match"))
+					if copies == 0 {
+						copies++
+						status = http.StatusAccepted
+						header.Set("x-ms-copy-id", "original-copy")
+						header.Set("x-ms-copy-status", "success")
+						header.Set("Content-Length", "42")
+					}
+					code := bloberror.ConditionNotMet
+					if retry && starts == 1 {
+						// The copy completed, but its first response was transient.
+						code, status = bloberror.ServerBusy, http.StatusServiceUnavailable
+					} else if starts > 1 {
+						status = http.StatusPreconditionFailed
+					}
+					if status >= 400 {
+						header.Set("x-ms-error-code", string(code))
+						body = "<Error><Code>" + string(code) + "</Code></Error>"
+					}
+					mu.Unlock()
+				} else {
+					polls++
+					first := polls == 1
+					mu.Unlock()
+					if first && !retry {
+						close(firstPoll)
+						select {
+						case <-releaseFirstPoll:
+						case <-req.Context().Done():
+							return nil, req.Context().Err()
+						}
+					}
+					header.Set("x-ms-copy-id", "original-copy")
+					header.Set("x-ms-copy-source", source)
+					header.Set("x-ms-copy-status", "success")
+					header.Set("Content-Length", "42")
+				}
+				return &http.Response{StatusCode: status, Header: header, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+			}).Build().UnPatch()
+			newClient := func() *blockblob.Client {
+				client, err := blockblob.NewClientWithNoCredential("https://target.blob.core.windows.net/container/object", &blockblob.ClientOptions{
+					ClientOptions: azcore.ClientOptions{Retry: policy.RetryOptions{MaxRetries: 1, RetryDelay: time.Millisecond, MaxRetryDelay: time.Millisecond}},
+				})
+				require.NoError(t, err)
+				return client
+			}
+			first, second := newClient(), newClient()
+			if retry {
+				_, err := startOrResumeAzureCopy(ctx, first, source, "object")
+				require.NoError(t, err)
+			} else {
+				done := make(chan error, 1)
+				var workers sync.WaitGroup
+				workers.Add(1)
+				go func() {
+					defer workers.Done()
+					_, err := startOrResumeAzureCopy(ctx, first, source, "object")
+					done <- err
+				}()
+				defer func() { cancel(); workers.Wait() }()
+				select {
+				case <-firstPoll:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+				_, err := startOrResumeAzureCopy(ctx, second, source, "object")
+				close(releaseFirstPoll)
+				require.NoError(t, err)
+				require.NoError(t, <-done)
+			}
+			// A later task retry must also preserve the completed CopyID.
+			if !retry {
+				_, err := startOrResumeAzureCopy(ctx, second, source, "object")
+				require.NoError(t, err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			wantStarts := 2
+			if !retry {
+				wantStarts = 3
+			}
+			require.Equal(t, 1, copies)
+			require.Equal(t, wantStarts, starts)
+		})
+	}
 }
 
 func mockAzureCopyStatuses(
@@ -314,7 +467,7 @@ func mockAzureCopyStatuses(
 			idx := calls
 			calls++
 			if len(statuses) == 0 {
-				return blob.GetPropertiesResponse{}, nil
+				return blob.GetPropertiesResponse{CopyID: &copyID, CopySource: &source}, nil
 			}
 			if idx >= len(statuses) {
 				idx = len(statuses) - 1

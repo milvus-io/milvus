@@ -88,28 +88,7 @@ func (c chunkManagerCopier) CopyCrossBucket(ctx context.Context, srcBucket, srcO
 }
 
 func objectstorageConfigFromIndexConfig(config *indexpb.StorageConfig) *objectstorage.Config {
-	cfg := objectstorage.NewDefaultConfig()
-	if config == nil {
-		return cfg
-	}
-
-	cfg.Address = config.GetAddress()
-	cfg.BucketName = config.GetBucketName()
-	cfg.AccessKeyID = config.GetAccessKeyID()
-	cfg.SecretAccessKeyID = config.GetSecretAccessKey()
-	cfg.UseSSL = config.GetUseSSL()
-	cfg.SslCACert = config.GetSslCACert()
-	cfg.SslTLSMinVersion = config.GetSslTlsMinVersion()
-	cfg.CreateBucket = true
-	cfg.RootPath = config.GetRootPath()
-	cfg.UseIAM = config.GetUseIAM()
-	cfg.CloudProvider = config.GetCloudProvider()
-	cfg.IAMEndpoint = config.GetIAMEndpoint()
-	cfg.UseVirtualHost = config.GetUseVirtualHost()
-	cfg.Region = config.GetRegion()
-	cfg.RequestTimeoutMs = config.GetRequestTimeoutMs()
-	cfg.GcpCredentialJSON = config.GetGcpCredentialJSON()
-	return cfg
+	return snapshotstorage.ObjectStorageConfigFromIndexConfig(config)
 }
 
 func firstExternalSourceURI(sources []*datapb.CopySegmentSource) (string, error) {
@@ -678,6 +657,7 @@ func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRe
 
 	task := importv2.NewCopySegmentTask(
 		node.ctx,
+		snapshotstorage.NewTaskCopyPermits(req.GetCopyConcurrency()),
 		req,
 		node.importTaskMgr,
 		sourceCM,
@@ -784,7 +764,11 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	)
 	importUsed := importV2Used + importV3Used
 
-	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed - queueUsed
+	exportUsed := int64(0)
+	if node.snapshotExportExecutor != nil {
+		exportUsed = node.snapshotExportExecutor.slots()
+	}
+	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed - queueUsed - exportUsed
 	if availableSlots < 0 {
 		availableSlots = 0
 	}
@@ -797,6 +781,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		mlog.Int64("importUsed", importUsed),
 		mlog.Int64("importV3Used", importV3Used),
 		mlog.Int64("importV3QueuedSlots", queueUsed),
+		mlog.Int64("exportUsed", exportUsed),
 	)
 
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
@@ -804,6 +789,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "exportUsed").Set(float64(exportUsed))
 
 	return &datapb.QuerySlotResponse{
 		Status:                   merr.Success(),
@@ -929,6 +915,23 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			req.ClusterID = clusterID
 		}
 		return node.createRefreshExternalCollectionTask(ctx, req)
+	case taskcommon.SnapshotExportCopy:
+		req := &datapb.SnapshotExportCopyRequest{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		taskID, err := properties.GetTaskID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if req.GetTaskId() != taskID || req.GetClusterId() != clusterID {
+			return merr.Status(merr.WrapErrServiceInternalMsg("snapshot export task identity mismatch")), nil
+		}
+		return node.createSnapshotExportCopy(ctx, req)
 	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		req := &datapb.CopySegmentRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -1105,6 +1108,12 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(info.State)
 		resProperties.AppendReason(info.FailReason)
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.SnapshotExportCopy:
+		resp := node.querySnapshotExportCopy(clusterID, taskID)
+		resProperties := taskcommon.NewProperties(nil)
+		resProperties.AppendTaskState(taskcommon.FromImportState(resp.GetState()))
+		resProperties.AppendReason(resp.GetReason())
+		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		resp, err := node.QueryCopySegment(ctx, &datapb.QueryCopySegmentRequest{
 			ClusterID: clusterID,
@@ -1159,6 +1168,12 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 		return node.dropPreImportTaskV3(taskID)
 	case taskcommon.Reshard, taskcommon.ImportV3:
 		return node.dropImportV3WorkerTask(taskID, properties.GetTaskVersion())
+	case taskcommon.SnapshotExportCopy:
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		return node.dropSnapshotExportCopy(ctx, clusterID, taskID)
 	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{TaskID: taskID})
 	case taskcommon.Compaction:

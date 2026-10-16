@@ -1296,6 +1296,8 @@ message CopySegmentRequest {
   string external_spec = 8;
   // Shared collection definitions. Older workers receive the legacy per-target field.
   repeated CopySegmentTargetIndex target_indexes = 9;
+  // Per-task file-operation limit; zero uses the worker default (128).
+  int32 copy_concurrency = 10;
 }
 
 message QueryCopySegmentRequest {
@@ -1360,7 +1362,9 @@ message CopySegmentResult {
 
   // Present on workers that rewrote (or proved empty) the copied manifest's
   // index section. The build IDs are the entries actually published there.
-  // Absence identifies an older worker and requires DataCoord read-back.
+  // Absence identifies an older worker and requires target-manifest readback.
+  // Nonempty acknowledged index sections also require readback; only an
+  // explicitly acknowledged empty section can skip it.
   optional bool manifest_index_rewritten = 11;
   repeated int64 manifest_index_build_ids = 12;
 }
@@ -2282,7 +2286,7 @@ enum ExportSnapshotJobState {
   ExportSnapshotJobPublishing = 5;
 }
 
-// ExportSnapshotJob is the constant-size durable record owned by DataCoord.
+// ExportSnapshotJob stores task assignments and completions, never file lists.
 // external_spec is retained only while the job is non-terminal.
 message ExportSnapshotJob {
   int64 job_id = 1;
@@ -2307,6 +2311,9 @@ message ExportSnapshotJob {
   string snapshot_metadata_uri = 20;
   int64 pin_id = 21;
   int64 total_bytes = 22;
+  SnapshotExportCopyRequest copy_request = 25;
+  repeated SnapshotExportCopyTask copy_tasks = 26;
+  repeated SnapshotExportCopyTask retired_copy_tasks = 27;
 }
 
 message ExportSnapshotJobInfo {
@@ -2373,4 +2380,44 @@ message StreamingNodeBM25Resource {
   repeated FieldBinlog bm25_binlogs = 3;
   int64 storage_version = 4;
   string manifest_path = 5;
+}
+
+// One durable segment-range copy task. Results persist only at completion.
+message SnapshotExportCopyTask {
+  int64 task_id = 1;
+  int64 node_id = 2;
+  int64 segment_start = 3;
+  int64 segment_end = 4;
+  SnapshotExportCopyResponse result = 5;
+}
+
+message SnapshotExportCopyRequest {
+  string cluster_id = 1;
+  int64 job_id = 2;
+  int64 task_id = 3;
+  uint64 deadline_time = 5;
+  index.StorageConfig source_storage_config = 6;
+  string target_uri = 7; // Job root; tasks share their generation subdirectory.
+  string external_spec = 8;
+  string snapshot_metadata_path = 10;
+  int64 snapshot_id = 11;
+  int64 collection_id = 12;
+  // Ranges share a generation root. Worker loss replaces only the lost task ID.
+  int64 generation_id = 13;
+  int64 segment_start = 14;
+  int64 segment_end = 15;
+  // Per-task file-operation limit; zero uses the worker default (128).
+  int32 copy_concurrency = 16;
+  // Scheduler weight frozen by DataCoord; zero defaults to one slot.
+  int64 task_slot = 17;
+}
+
+message SnapshotExportCopyResponse {
+  common.Status status = 1;
+  int64 task_id = 2;
+  ImportTaskStateV2 state = 4;
+  string reason = 5;
+  int64 copied_files = 6;
+  int64 copied_bytes = 7;
+  int64 total_files = 8;
 }

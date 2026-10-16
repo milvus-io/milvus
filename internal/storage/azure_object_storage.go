@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
@@ -265,13 +266,20 @@ func (AzureObjectStorage *AzureObjectStorage) sourceCopyURL(srcContainer, srcObj
 		"?" + AzureObjectStorage.sourceSAS
 }
 
-// startOrResumeAzureCopy starts one asynchronous Azure copy. If an SDK retry
-// observes the copy already in progress, polling resumes that operation rather
-// than issuing another non-idempotent start request.
+// startOrResumeAzureCopy copies immutable snapshot objects into task/job-owned
+// destinations. Conditional creation prevents another task or an SDK retry from
+// replacing a completed copy's ID while its original caller is still polling.
+// Existing destinations are reusable only after source and status validation;
+// failed/aborted copies are not overwritten or treated as successful.
 func startOrResumeAzureCopy(ctx context.Context, dstBlobClient *blockblob.Client, srcURL, dstObjectName string) error {
-	response, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{})
+	ifNoneMatch := azcore.ETag("*")
+	response, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{
+		AccessConditions: &blob.AccessConditions{
+			ModifiedAccessConditions: &blob.ModifiedAccessConditions{IfNoneMatch: &ifNoneMatch},
+		},
+	})
 	if err != nil {
-		if !bloberror.HasCode(err, bloberror.PendingCopyOperation) {
+		if !bloberror.HasCode(err, bloberror.PendingCopyOperation, bloberror.ConditionNotMet, bloberror.TargetConditionNotMet) {
 			return mapObjectStorageError(dstObjectName, err)
 		}
 	}

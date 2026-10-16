@@ -17,11 +17,15 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// Snapshot manifest GETs share a DataCoord-wide budget across named and external
+// readers. Keep this independent of DataNode copy concurrency: these operations
+// prepare metadata before tasks are dispatched, and must not fan out per job.
+var snapshotManifestReadPermits = make(chan struct{}, 16)
 
 // Snapshot Metadata Management
 //
@@ -311,7 +315,7 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 		loaderCtx:                    loaderCtx,
 		loaderCancel:                 loaderCancel,
 		chunkManager:                 chunkManager,
-		reader:                       snapshotstorage.NewSnapshotReader(chunkManager),
+		reader:                       snapshotstorage.NewSnapshotReader(chunkManager, snapshotstorage.WithManifestReadPermits(snapshotManifestReadPermits)),
 		writer:                       snapshotstorage.NewSnapshotWriter(chunkManager),
 	}
 
@@ -977,7 +981,7 @@ func (sm *snapshotMeta) ReadExternalSnapshotDataWithChunkManager(
 	if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot_s3_location", snapshotS3Location, ""); err != nil {
 		return nil, err
 	}
-	snapshotData, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, snapshotS3Location, includeSegments)
+	snapshotData, err := snapshotstorage.NewSnapshotReader(cm, snapshotstorage.WithManifestReadPermits(snapshotManifestReadPermits)).ReadSnapshot(ctx, snapshotS3Location, includeSegments)
 	if err != nil {
 		logger.Error(ctx, "failed to read external snapshot data from S3", mlog.Err(err))
 		return nil, err
@@ -994,7 +998,6 @@ func (sm *snapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 	cm storage.ChunkManager,
 	snapshotS3Location string,
 	includeSegments bool,
-	storageConfig *indexpb.StorageConfig,
 ) (*snapshotstorage.SnapshotData, error) {
 	snapshotData, err := sm.ReadExternalSnapshotDataWithChunkManager(ctx, cm, snapshotS3Location, includeSegments)
 	if err != nil {
@@ -1003,10 +1006,8 @@ func (sm *snapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 	if includeSegments {
 		if err := snapshotstorage.ValidateExternalSnapshotDataFiles(
 			ctx,
-			cm,
 			snapshotS3Location,
 			snapshotData,
-			storageConfig,
 		); err != nil {
 			return nil, merr.Wrap(err, "invalid external snapshot data files")
 		}

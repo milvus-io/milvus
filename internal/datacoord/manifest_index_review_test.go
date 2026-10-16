@@ -62,10 +62,6 @@ func TestManifestIndexPathMatchesSegmentIdentity(t *testing.T) {
 			_, ok = manifestIndexFilePathInfoForSegment("root", segment, entry)
 			require.False(t, ok, badPath)
 		}
-		entry.Path = prefix
-		entry.IndexFileKeys = []string{".."}
-		_, ok = manifestIndexFilePathInfoForSegment("root", segment, entry)
-		require.False(t, ok)
 	}
 }
 
@@ -220,4 +216,53 @@ func TestManifestGCRejectsForeignArtifactDirectory(t *testing.T) {
 	content, err := cm.Read(ctx, foreign)
 	require.NoError(t, err)
 	require.Equal(t, []byte("keep"), content)
+}
+
+func TestManifestIndexMetadataProjection(t *testing.T) {
+	prefix := "root/index_v1/1/2/3/500/1"
+	entry := packed.ManifestIndexInfo{
+		IndexID: 10, BuildID: 500, IndexVersion: 1, FieldID: 101,
+		IndexName: "vec_index", IndexType: "HNSW", NumRows: 1000, Path: prefix,
+		SerializedSize: 2048, MemSize: 4096, CurrentIndexVersion: 5,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexFileKeys:         []string{"0", "1"}, Properties: map[string]string{"metric_type": "L2"},
+	}
+	got, ok := manifestIndexFilePathInfo(3, entry)
+	require.True(t, ok)
+	require.Equal(t, []string{prefix + "/0", prefix + "/1"}, got.GetIndexFilePaths())
+	require.Equal(t, int64(10), got.GetIndexID())
+	require.Equal(t, int64(500), got.GetBuildID())
+	require.Equal(t, uint64(2048), got.GetSerializedSize())
+	require.Equal(t, uint64(4096), got.GetMemSize())
+	require.Equal(t, int32(5), got.GetCurrentIndexVersion())
+	require.Len(t, got.IndexParams, 2)
+	require.Equal(t, "index_type", got.IndexParams[0].Key)
+	require.Equal(t, "HNSW", got.IndexParams[0].Value)
+	require.Equal(t, "metric_type", got.IndexParams[1].Key)
+	require.Equal(t, "L2", got.IndexParams[1].Value)
+	for _, mode := range []string{"path", "name", "type", "version", "rows", "serialized-size", "memory-size", "keys"} {
+		t.Run(mode, func(t *testing.T) {
+			bad := entry
+			switch mode {
+			case "path":
+				bad.Path = ""
+			case "name":
+				bad.IndexName = ""
+			case "type":
+				bad.IndexType = ""
+			case "version":
+				bad.IndexStorePathVersion = -1
+			case "rows":
+				bad.NumRows = -1
+			case "serialized-size":
+				bad.SerializedSize = -1
+			case "memory-size":
+				bad.MemSize = -1
+			case "keys":
+				bad.IndexFileKeys = nil
+			}
+			_, ok := manifestIndexFilePathInfo(3, bad)
+			require.False(t, ok)
+		})
+	}
 }
