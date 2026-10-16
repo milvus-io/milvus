@@ -193,11 +193,14 @@ func (r *Reader) Iter(fn func(key, value []byte) error) error {
 	return it.Error()
 }
 
+// errIteratorsOpen marks a Close that failed because iterators are still open.
+var errIteratorsOpen = errors.New("sst reader has open iterators")
+
 // Close releases the reader and the source it was opened from. Close every
 // Iter before its Reader: while one is open, Close fails and releases nothing.
 func (r *Reader) Close() error {
 	if n := r.openIters.Load(); n > 0 {
-		return errors.Newf("close sst %s: %d iterators are still open", r.name, n)
+		return errors.Wrapf(errIteratorsOpen, "close sst %s: %d iterators are still open", r.name, n)
 	}
 	if err := r.r.Close(); err != nil {
 		return MarkPebbleErr(errors.Wrapf(err, "close sst %s", r.name))

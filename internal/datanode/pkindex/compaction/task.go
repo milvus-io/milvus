@@ -50,10 +50,10 @@ type task struct {
 	lastQueried atomic.Int64
 }
 
-func (t *task) getState() (taskcommon.State, error, []*pkindexpb.SSTRef) {
+func (t *task) getState() (taskcommon.State, []*pkindexpb.SSTRef, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.state, t.err, t.outputs
+	return t.state, t.outputs, t.err
 }
 
 func (t *task) setDone(outputs []*pkindexpb.SSTRef, err error) {
