@@ -16,7 +16,7 @@
 
 //go:build test
 
-package pkindex
+package index
 
 import (
 	"context"

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -55,9 +56,9 @@ type Channel struct {
 
 	// mu guards indexes, the LastAcked heap, slots, ackedMax and claimed.
 	mu       sync.Mutex
-	indexes  map[string]*Index
+	indexes  map[string]*index.Index
 	acked    ackTracker
-	slots    map[*Index]*handoverSlot // the driver bookkeeping of each Index
+	slots    map[*index.Index]*handoverSlot // the driver bookkeeping of each Index
 	ackedMax uint64
 	// claimStarted is set by StartClaim. claimed is set when the pchannel is
 	// claimed and the manifests of the recovered indexes are looked up. An
@@ -81,8 +82,8 @@ func newChannel(m *Manager, info types.PChannelInfo, seed uint64, tail func() WA
 		ctx:      ctx,
 		cancel:   cancel,
 		lifetime: typeutil.NewLifetime(),
-		indexes:  make(map[string]*Index),
-		slots:    make(map[*Index]*handoverSlot),
+		indexes:  make(map[string]*index.Index),
+		slots:    make(map[*index.Index]*handoverSlot),
 	}
 }
 
@@ -97,7 +98,7 @@ func errClosed(what string) error {
 // opened it. It returns the existing Index and false when the Index exists,
 // so a caller that rolls back after a failure removes only an Index that it
 // opened. It returns the error of the engine open.
-func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, pkDataType schemapb.DataType) (*Index, bool, error) {
+func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, pkDataType schemapb.DataType) (*index.Index, bool, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, false, errClosed("pchannel " + c.info.Name)
 	}
@@ -108,7 +109,7 @@ func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, 
 	if idx := c.Get(vchannel); idx != nil {
 		return idx, false, nil
 	}
-	idx, err := openIndex(ctx, c, vchannel, collectionID, pkDataType)
+	idx, err := index.Open(ctx, c.indexConfig(vchannel, collectionID, pkDataType))
 	if err != nil {
 		return nil, false, err
 	}
@@ -120,7 +121,7 @@ func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, 
 	if ready {
 		// A collection created after the claim has a new collection ID in its
 		// vchannel name, so no manifest can exist for it.
-		idx.markReady(ctx, false)
+		idx.MarkReady(ctx, false)
 	}
 	return idx, true, nil
 }
@@ -149,7 +150,7 @@ func (c *Channel) Drop(ctx context.Context, vchannel string) error {
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.closeIndex(ctx, vchannel)
-	dir := indexDir(c.m.cfg.Root, vchannel)
+	dir := index.Dir(c.m.cfg.Root, vchannel)
 	if err := os.RemoveAll(dir); err != nil {
 		return pkroot.MarkIO(err, "remove dir %s", dir)
 	}
@@ -166,26 +167,53 @@ func (c *Channel) closeIndex(ctx context.Context, vchannel string) {
 	}
 	c.mu.Unlock()
 	if ok {
-		idx.close(ctx)
+		idx.Close(ctx)
 	}
 }
 
 // attachedLocked reports whether idx is the open Index of its vchannel. The
 // caller holds mu.
-func (c *Channel) attachedLocked(idx *Index) bool {
-	return c.indexes[idx.vchannel] == idx
+func (c *Channel) attachedLocked(idx *index.Index) bool {
+	return c.indexes[idx.VChannel()] == idx
 }
 
 // detachLocked removes idx from the map, from the LastAcked heap and from the
 // driver slots. The caller holds mu.
-func (c *Channel) detachLocked(idx *Index) {
-	delete(c.indexes, idx.vchannel)
+func (c *Channel) detachLocked(idx *index.Index) {
+	delete(c.indexes, idx.VChannel())
 	c.acked.remove(idx)
 	delete(c.slots, idx)
 }
 
+// indexConfig is what an Index of this Channel needs, see index.Config.
+func (c *Channel) indexConfig(vchannel string, collectionID int64, pkDataType schemapb.DataType) index.Config {
+	cfg := c.m.cfg
+	return index.Config{
+		VChannel:        vchannel,
+		CollectionID:    collectionID,
+		PKDataType:      pkDataType,
+		Term:            c.info.Term,
+		Ctx:             c.ctx,
+		Logger:          c.logger,
+		Root:            cfg.Root,
+		StorageRootPath: cfg.StorageRootPath,
+		Shared:          cfg.Shared,
+		AllocID:         cfg.AllocID,
+		Store:           cfg.Store,
+		Committer:       cfg.Committer,
+		Params:          func() index.Params { return cfg.Params().Params },
+		OnWriterBegin: func() func() {
+			token := c.wm.enter()
+			return func() { c.wm.end(token) }
+		},
+		LastApplied: c.wm.lastApplied,
+		OnDirtied:   c.trackDirty,
+		OnRefresh:   c.refreshAcked,
+	}
+}
+
 // Get returns the Index of a vchannel, nil when it does not exist.
-func (c *Channel) Get(vchannel string) *Index {
+func (c *Channel) Get(vchannel string) *index.Index {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.indexes[vchannel]
@@ -208,7 +236,7 @@ func (c *Channel) Close() {
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.mu.Lock()
-	indexes := make([]*Index, 0, len(c.indexes))
+	indexes := make([]*index.Index, 0, len(c.indexes))
 	for _, idx := range c.indexes {
 		indexes = append(indexes, idx)
 	}
@@ -217,7 +245,7 @@ func (c *Channel) Close() {
 	}
 	c.mu.Unlock()
 	for _, idx := range indexes {
-		idx.close(c.ctx)
+		idx.Close(c.ctx)
 	}
 	c.m.forget(c)
 	c.logger.Info(c.ctx, "primary key index channel closed", mlog.Int("vchannels", len(indexes)))
@@ -231,10 +259,10 @@ func (c *Channel) fatal(err error) {
 }
 
 // list returns the open indexes.
-func (c *Channel) list() []*Index {
+func (c *Channel) list() []*index.Index {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]*Index, 0, len(c.indexes))
+	out := make([]*index.Index, 0, len(c.indexes))
 	for _, idx := range c.indexes {
 		out = append(out, idx)
 	}

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package index
 
 import (
 	"context"
@@ -65,11 +65,11 @@ type pendingHandover struct {
 func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 	// Read the watermark before the rotate, so that the frozen generations
 	// hold at least all writes up to it.
-	covered := idx.ch.wm.lastApplied()
+	covered := idx.cfg.LastApplied()
 	// The manifest service treats a flush of the same term whose checkpoint
 	// does not move forward as an applied retry, and does not add its tables.
 	// So wait: the writes stay in the engine, and a later handover covers them.
-	if covered <= idx.lastCommittedTimeTick() {
+	if covered <= idx.LastCommittedTimeTick() {
 		return nil, nil
 	}
 
@@ -100,7 +100,7 @@ func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 		p.request = &FlushArgs{
 			CollectionID:       idx.collectionID,
 			VChannel:           idx.vchannel,
-			PChannelTerm:       idx.ch.info.Term,
+			PChannelTerm:       idx.cfg.Term,
 			PKDataType:         idx.pkDataType,
 			AddTables:          refs,
 			CheckpointTimeTick: covered,
@@ -131,7 +131,7 @@ func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 // commit does not read the watermark again and does not rotate. Only one
 // prepare or commit of one Index runs at a time.
 func (idx *Index) commit(ctx context.Context, p *pendingHandover) error {
-	cfg := idx.ch.m.cfg
+	cfg := idx.cfg
 	if p.request != nil && (p.uploadedAt.IsZero() || time.Since(p.uploadedAt) > cfg.Params().ReuploadAfter) {
 		start := time.Now()
 		for _, ref := range p.request.AddTables {

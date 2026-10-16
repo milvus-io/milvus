@@ -28,10 +28,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 )
 
-func insertRequest(idx *Index, pks ...int64) authority.DecideRequest {
-	return authority.DecideRequest{Kind: authority.KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pks...)}
+func insertRequest(idx *index.Index, pks ...int64) authority.DecideRequest {
+	return authority.DecideRequest{Kind: authority.KindInsert, VChannel: idx.VChannel(), PKs: int64PKs(pks...)}
 }
 
 func TestLateApplyHoldsTheWatermark(t *testing.T) {
@@ -43,12 +44,12 @@ func TestLateApplyHoldsTheWatermark(t *testing.T) {
 	intent, err := idx.Authority().Decide(ctx, insertRequest(idx, 1))
 	require.NoError(t, err)
 	ch.Tick(10)
-	assert.EqualValues(t, 0, idx.ch.wm.lastApplied(), "the writer is still in flight")
+	assert.EqualValues(t, 0, ch.wm.lastApplied(), "the writer is still in flight")
 	intent.Apply(ctx, authority.Applied{SegmentID: 5})
-	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
+	assert.EqualValues(t, 10, ch.wm.lastApplied())
 	assert.Panics(t, func() { intent.Apply(ctx, authority.Applied{SegmentID: 5}) })
 	assert.Panics(t, func() { intent.Discard(ctx, nil) })
-	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
+	assert.EqualValues(t, 10, ch.wm.lastApplied())
 }
 
 func TestDiscardEndsTheWriter(t *testing.T) {
@@ -63,8 +64,8 @@ func TestDiscardEndsTheWriter(t *testing.T) {
 	assert.GreaterOrEqual(t, intent.LockWait(), time.Duration(0))
 	ch.Tick(10)
 	intent.Discard(ctx, errors.New("append failed"))
-	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
-	assert.False(t, idx.dirty(), "a discarded write does not touch the engine")
+	assert.EqualValues(t, 10, ch.wm.lastApplied())
+	assert.False(t, idx.Dirty(), "a discarded write does not touch the engine")
 	assert.Panics(t, func() { intent.Discard(ctx, nil) })
 }
 
@@ -75,11 +76,11 @@ func TestDecideErrorEndsTheWriter(t *testing.T) {
 	idx := env.add(ch, "v0")
 
 	// a closed engine makes the probe of Decide fail
-	require.NoError(t, idx.eng.Close())
+	require.NoError(t, idx.EngineForTest().Close())
 	_, err := idx.Authority().Decide(ctx, insertRequest(idx, 1))
 	require.Error(t, err)
 	ch.Tick(10)
-	assert.EqualValues(t, 10, idx.ch.wm.lastApplied())
+	assert.EqualValues(t, 10, ch.wm.lastApplied())
 }
 
 func TestCompanionDeleteDecision(t *testing.T) {
@@ -101,19 +102,19 @@ func TestWriteMarksTheIndexDirty(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	assert.False(t, idx.dirty())
+	assert.False(t, idx.Dirty())
 
 	// a transaction body only records pending writes
 	body, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindInsert, VChannel: "v0", PKs: int64PKs(1), TxnID: 7})
 	require.NoError(t, err)
 	body.Apply(ctx, authority.Applied{SegmentID: 3})
-	assert.False(t, idx.dirty())
-	assert.False(t, inHeap(idx))
+	assert.False(t, idx.Dirty())
+	assert.False(t, inHeap(ch, idx))
 	assert.Equal(t, []int64{7}, idx.Authority().PendingTxnIDs())
 
 	insert(t, idx, 4, 2)
-	assert.True(t, idx.dirtyFlag.Load())
-	assert.True(t, inHeap(idx))
+	assert.True(t, idx.DirtyForTest())
+	assert.True(t, inHeap(ch, idx))
 
 	idx.Authority().DropTxn(7)
 	assert.Empty(t, idx.Authority().PendingTxnIDs())
@@ -133,15 +134,15 @@ func TestLastAckedIgnoresIdleVChannels(t *testing.T) {
 	insert(t, b, 1, 1)
 	ch.Tick(10)
 	assert.EqualValues(t, 5, ch.LastAcked(), "a and b hold it at their commit")
-	a.ch.submitHandover(a)
-	b.ch.submitHandover(b)
+	ch.submitHandover(a)
+	ch.submitHandover(b)
 	assert.EqualValues(t, 10, ch.LastAcked())
 
 	// b stays idle and does not hold back the writes of a
 	insert(t, a, 2, 2)
 	ch.Tick(20)
 	assert.EqualValues(t, 10, ch.LastAcked())
-	a.ch.submitHandover(a)
+	ch.submitHandover(a)
 	ch.Tick(30)
 	assert.EqualValues(t, 30, ch.LastAcked())
 
@@ -162,8 +163,8 @@ func (c *Channel) lastAckedRaw() uint64 {
 func bruteLastAcked(c *Channel) uint64 {
 	v := c.wm.lastApplied()
 	for _, idx := range c.list() {
-		if idx.dirty() && idx.lastCommittedTimeTick() < v {
-			v = idx.lastCommittedTimeTick()
+		if idx.Dirty() && idx.LastCommittedTimeTick() < v {
+			v = idx.LastCommittedTimeTick()
 		}
 	}
 	return v
@@ -174,7 +175,7 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	vchannels := []string{"va", "vb", "vc", "vd"}
-	indexes := make([]*Index, 0, len(vchannels))
+	indexes := make([]*index.Index, 0, len(vchannels))
 	for _, v := range vchannels {
 		indexes = append(indexes, env.add(ch, v))
 	}
@@ -195,7 +196,7 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 		case op < 9:
 			// a transaction body takes no stripe lock, so it can stay open
 			// across later steps and hold the watermark back
-			intent, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pk), TxnID: int64(i + 1)})
+			intent, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindInsert, VChannel: idx.VChannel(), PKs: int64PKs(pk), TxnID: int64(i + 1)})
 			require.NoError(t, err)
 			open = append(open, intent)
 		case op < 11 && len(open) > 0:
@@ -206,8 +207,8 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 			tt++
 			ch.Tick(tt)
 		default:
-			if idx.dirty() {
-				idx.ch.submitHandover(idx)
+			if idx.Dirty() {
+				ch.submitHandover(idx)
 			}
 		}
 		require.Equal(t, bruteLastAcked(ch), ch.lastAckedRaw(), "step %d", i)

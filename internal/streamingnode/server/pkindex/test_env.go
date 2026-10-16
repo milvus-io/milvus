@@ -29,6 +29,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -77,8 +78,8 @@ func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChanne
 var errFakeNoHandover = errors.New("a handover is not tested here")
 
 // CommitFlush implements Committer. It always fails.
-func (c *FakeCommitter) CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error) {
-	return ManifestView{}, errFakeNoHandover
+func (c *FakeCommitter) CommitFlush(ctx context.Context, args index.FlushArgs) (index.ManifestView, error) {
+	return index.ManifestView{}, errFakeNoHandover
 }
 
 // neverScheduler accepts every task and never runs it.
@@ -112,19 +113,18 @@ func NewFakeEnv(t *testing.T, root string) *FakeEnv {
 	var nextID atomic.Int64
 	nextID.Store(1000)
 	params := Params{
-		LockStripes:   16,
+		Params:        index.Params{LockStripes: 16, ReuploadAfter: time.Hour},
 		ActiveBytes:   math.MaxUint64,
 		TailBytes:     math.MaxUint64,
 		SoftWatermark: math.MaxUint64,
 		BackoffBase:   time.Millisecond,
 		MaxBackoff:    10 * time.Millisecond,
-		ReuploadAfter: time.Hour,
 	}
 	env.Manager = NewManager(ManagerConfig{
 		Root:            root,
 		Shared:          shared,
 		AllocID:         func(context.Context) (int64, error) { return nextID.Add(1), nil },
-		Store:           NewFakeStore(),
+		Store:           index.NewFakeStore(),
 		StorageRootPath: "root",
 		Committer:       env.Committer,
 		Sched:           neverScheduler{},

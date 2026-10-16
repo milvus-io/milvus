@@ -18,6 +18,7 @@ package pkindex
 
 import (
 	"container/heap"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"math"
 )
 
@@ -95,34 +96,34 @@ func (c *Channel) lastAckedLocked() uint64 {
 
 // trackDirty adds idx to the heap after its first write since the dirty flag
 // was cleared.
-func (c *Channel) trackDirty(idx *Index) {
+func (c *Channel) trackDirty(idx *index.Index) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.attachedLocked(idx) || c.acked.contains(idx) || !idx.fresh() {
+	if !c.attachedLocked(idx) || c.acked.contains(idx) || !idx.Fresh() {
 		return
 	}
-	c.acked.update(idx, idx.lastCommittedTimeTick())
+	c.acked.update(idx, idx.LastCommittedTimeTick())
 }
 
 // refreshAcked removes idx from the heap when it is no longer dirty or not
 // fresh, and otherwise updates its key.
-func (c *Channel) refreshAcked(idx *Index) {
+func (c *Channel) refreshAcked(idx *index.Index) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.attachedLocked(idx) {
 		return
 	}
-	if !idx.dirty() || !idx.fresh() {
+	if !idx.Dirty() || !idx.Fresh() {
 		c.acked.remove(idx)
 		return
 	}
-	c.acked.update(idx, idx.lastCommittedTimeTick())
+	c.acked.update(idx, idx.LastCommittedTimeTick())
 }
 
 // dirtyIndexes returns the members of the heap: the dirty and fresh Indexes
 // of the pchannel. The driver picks its handover candidates from them, so a
 // step costs the number of dirty Indexes, not the number of Indexes.
-func (c *Channel) dirtyIndexes() []*Index {
+func (c *Channel) dirtyIndexes() []*index.Index {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.acked.members()
@@ -133,22 +134,22 @@ func (c *Channel) dirtyIndexes() []*Index {
 // Index carries nothing of the heap. The Channel guards it with mu.
 type ackTracker struct {
 	items []ackItem
-	pos   map[*Index]int
+	pos   map[*index.Index]int
 }
 
 type ackItem struct {
-	idx *Index
+	idx *index.Index
 	key uint64
 }
 
 // contains reports whether idx is a member.
-func (t *ackTracker) contains(idx *Index) bool {
+func (t *ackTracker) contains(idx *index.Index) bool {
 	_, ok := t.pos[idx]
 	return ok
 }
 
 // update sets the key of idx, and adds idx when it is not a member.
-func (t *ackTracker) update(idx *Index, key uint64) {
+func (t *ackTracker) update(idx *index.Index, key uint64) {
 	if i, ok := t.pos[idx]; ok {
 		t.items[i].key = key
 		heap.Fix(t, i)
@@ -158,7 +159,7 @@ func (t *ackTracker) update(idx *Index, key uint64) {
 }
 
 // remove deletes idx if it is a member.
-func (t *ackTracker) remove(idx *Index) {
+func (t *ackTracker) remove(idx *index.Index) {
 	if i, ok := t.pos[idx]; ok {
 		heap.Remove(t, i)
 	}
@@ -173,8 +174,8 @@ func (t *ackTracker) min() (uint64, bool) {
 }
 
 // members returns the Indexes in the heap, in no particular order.
-func (t *ackTracker) members() []*Index {
-	out := make([]*Index, len(t.items))
+func (t *ackTracker) members() []*index.Index {
+	out := make([]*index.Index, len(t.items))
 	for i, it := range t.items {
 		out[i] = it.idx
 	}
@@ -195,7 +196,7 @@ func (t *ackTracker) Swap(i, j int) {
 func (t *ackTracker) Push(x any) {
 	it := x.(ackItem)
 	if t.pos == nil {
-		t.pos = make(map[*Index]int)
+		t.pos = make(map[*index.Index]int)
 	}
 	t.pos[it.idx] = len(t.items)
 	t.items = append(t.items, it)

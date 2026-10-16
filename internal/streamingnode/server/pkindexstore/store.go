@@ -30,7 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/storage"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -42,9 +42,9 @@ const (
 	azureBlobNotFound = "BlobNotFound"
 )
 
-var _ snpkindex.TableStore = (*Store)(nil)
+var _ index.TableStore = (*Store)(nil)
 
-// Store implements snpkindex.TableStore on a storage.ChunkManager.
+// Store implements index.TableStore on a storage.ChunkManager.
 type Store struct {
 	cm storage.ChunkManager
 }

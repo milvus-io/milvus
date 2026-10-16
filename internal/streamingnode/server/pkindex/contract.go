@@ -14,44 +14,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package pkindex is the primary key index of a streaming node. A Manager
+// holds a Channel for each pchannel, and a Channel holds an Index for each
+// vchannel. The Index owns the engine of its vchannel and the write path
+// authority on top of it (package internal/pkindex/authority), and hands its
+// tables over to object storage through a Committer.
 package pkindex
 
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/sst"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 )
-
-// The errors of a Committer that a retry cannot fix. Every other error of a
-// Committer is retryable.
-var (
-	// ErrFenced reports that a newer owner claimed the pchannel with a
-	// higher term. The WAL instance of the old term must stop.
-	ErrFenced = errors.New("primary key index manifest is fenced by a newer term")
-	// ErrRejected reports that the manifest service rejected the request
-	// for good: a bug of the caller, an invalid request, or a corrupted
-	// stored manifest. The same request fails the same way again.
-	ErrRejected = errors.New("primary key index manifest rejected the request")
-)
-
-// TableRef describes a committed table in a manifest.
-type TableRef = sst.Info
-
-// ManifestView is the part of a vchannel manifest that the handover uses.
-type ManifestView struct {
-	// Version goes up by one with each change of the manifest. The first
-	// flush of a vchannel creates the manifest at version 1.
-	Version int64
-	// SSTBasePath is the object key prefix of the tables. See objpath.SSTKey.
-	SSTBasePath string
-	// CheckpointTimeTick is the time tick that the tables cover.
-	CheckpointTimeTick uint64
-	// Tables is the complete committed table set.
-	Tables []TableRef
-}
 
 // VChannelRef names the manifest of a vchannel.
 type VChannelRef struct {
@@ -72,24 +46,12 @@ type RecoveryManifest struct {
 	Err error
 }
 
-// FlushArgs adds tables to the manifest of a vchannel and moves its
-// checkpoint to CheckpointTimeTick. The first flush of a vchannel creates
-// its manifest with PKDataType.
-type FlushArgs struct {
-	CollectionID       int64
-	VChannel           string
-	PChannelTerm       int64
-	PKDataType         schemapb.DataType
-	AddTables          []TableRef
-	CheckpointTimeTick uint64
-}
-
-// Committer claims a pchannel, finds the manifests of its vchannels and
-// changes them.
+// Claimer claims a pchannel and finds the manifests of its vchannels. The
+// Channel defines the part of the manifest service that it uses.
 //
-// The calls return an error that matches ErrFenced when a newer term owns
-// the pchannel, and ErrRejected when a retry cannot fix the error.
-type Committer interface {
+// The calls return an error that matches index.ErrFenced when a newer term
+// owns the pchannel, and index.ErrRejected when a retry cannot fix the error.
+type Claimer interface {
 	// ClaimPChannel claims the pchannel for term. A claim with the claimed
 	// term again succeeds.
 	ClaimPChannel(ctx context.Context, pchannel string, term int64) error
@@ -97,27 +59,20 @@ type Committer interface {
 	// refs. An item that fails has its own Err. The caller sends at most
 	// MaxRecoveryManifests refs in one call.
 	GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error)
-	// CommitFlush applies a flush and returns the complete manifest after
-	// it. A retry with the same arguments after a lost response returns the
-	// manifest that the first call committed.
-	CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error)
 }
 
 // MaxRecoveryManifests is the largest number of refs in one
 // GetRecoveryManifests call.
 const MaxRecoveryManifests = 10000
 
-// TableStore moves SST files between local disk and object storage.
-type TableStore interface {
-	// UploadFile writes the local file at path to key.
-	UploadFile(ctx context.Context, key, path string) error
-
-	// DownloadFile writes the object at key to the local file at path. It
-	// writes a temporary file in the same directory and renames it, so path
-	// either does not exist or holds the whole object.
-	//
-	// A missing object returns an error marked pkerr.ErrCorrupted. A manifest
-	// references the table, so a table that is gone is data corruption and
-	// not an IO failure that a retry can clear.
-	DownloadFile(ctx context.Context, key, path string) error
+// Committer is what the primary key index of a streaming node needs from the
+// manifest service: the claim and the lookups of the Channel, and the flush
+// commits of the Index.
+type Committer interface {
+	Claimer
+	index.Committer
 }
+
+// TableStore moves SST files between local disk and object storage. See
+// index.TableStore.
+type TableStore = index.TableStore

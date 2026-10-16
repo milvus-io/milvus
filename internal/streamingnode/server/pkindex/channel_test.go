@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -46,11 +47,11 @@ func TestSizeTrigger(t *testing.T) {
 	}
 	insert(t, a, 1, pks...)
 	insert(t, b, 1, 1)
-	small := b.eng.Stats().ActiveBytes
-	require.Greater(t, a.eng.Stats().ActiveBytes, small)
+	small := b.ActiveBytes()
+	require.Greater(t, a.ActiveBytes(), small)
 	env.setParams(func(p *Params) { p.ActiveBytes = small + 1 })
 
-	assert.Equal(t, []*Index{a}, ch.pickHandovers(farFuture))
+	assert.Equal(t, []*index.Index{a}, ch.pickHandovers(farFuture))
 }
 
 func TestTailTriggerPicksTheOldestCommit(t *testing.T) {
@@ -62,8 +63,8 @@ func TestTailTriggerPicksTheOldestCommit(t *testing.T) {
 
 	insert(t, a, 1, 1)
 	ch.Tick(10)
-	a.ch.submitHandover(a)
-	require.EqualValues(t, 10, a.lastCommittedTimeTick())
+	ch.submitHandover(a)
+	require.EqualValues(t, 10, a.LastCommittedTimeTick())
 	insert(t, a, 1, 2)
 	insert(t, b, 1, 1)
 	ch.Tick(20)
@@ -72,12 +73,12 @@ func TestTailTriggerPicksTheOldestCommit(t *testing.T) {
 	assert.Empty(t, ch.pickHandovers(farFuture), "the tail is below every threshold")
 	env.setParams(func(p *Params) { p.TailBytes = 100 })
 	env.tailBytes.Store(100)
-	assert.Equal(t, []*Index{b}, ch.pickHandovers(farFuture))
+	assert.Equal(t, []*index.Index{b}, ch.pickHandovers(farFuture))
 
-	b.ch.submitHandover(b)
-	require.EqualValues(t, 20, b.lastCommittedTimeTick())
+	ch.submitHandover(b)
+	require.EqualValues(t, 20, b.LastCommittedTimeTick())
 	insert(t, b, 1, 2)
-	assert.Equal(t, []*Index{a}, ch.pickHandovers(farFuture))
+	assert.Equal(t, []*index.Index{a}, ch.pickHandovers(farFuture))
 }
 
 func TestSoftPressureTrigger(t *testing.T) {
@@ -94,7 +95,7 @@ func TestSoftPressureTrigger(t *testing.T) {
 	env.tailBytes.Store(40)
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	env.tailBytes.Store(60)
-	assert.Equal(t, []*Index{a}, ch.pickHandovers(farFuture))
+	assert.Equal(t, []*index.Index{a}, ch.pickHandovers(farFuture))
 }
 
 func TestTailTriggerNeedsTheIndexBehind(t *testing.T) {
@@ -118,7 +119,7 @@ func TestTailTriggerNeedsTheIndexBehind(t *testing.T) {
 	assert.Empty(t, ch.pickHandovers(farFuture))
 
 	env.recoveryTimeTick.Store(40)
-	assert.Equal(t, []*Index{a}, ch.pickHandovers(farFuture))
+	assert.Equal(t, []*index.Index{a}, ch.pickHandovers(farFuture))
 }
 
 func TestTailTriggerIgnoresTheLastAckedClamp(t *testing.T) {
@@ -131,8 +132,8 @@ func TestTailTriggerIgnoresTheLastAckedClamp(t *testing.T) {
 	})
 	insert(t, a, 1, 1)
 	ch.Tick(10)
-	a.ch.submitHandover(a)
-	require.False(t, a.dirty())
+	ch.submitHandover(a)
+	require.False(t, a.Dirty())
 	ch.Tick(100)
 	require.EqualValues(t, 100, ch.LastAcked())
 
@@ -144,7 +145,7 @@ func TestTailTriggerIgnoresTheLastAckedClamp(t *testing.T) {
 
 	env.tailBytes.Store(300)
 	env.recoveryTimeTick.Store(50)
-	assert.Equal(t, []*Index{b}, ch.pickHandovers(farFuture))
+	assert.Equal(t, []*index.Index{b}, ch.pickHandovers(farFuture))
 }
 
 func TestNoWALTailNeverTriggers(t *testing.T) {
@@ -177,7 +178,7 @@ func TestNoHandoverBeforeTheClaim(t *testing.T) {
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	close(block)
 	waitReady(t, idx)
-	assert.Equal(t, []*Index{idx}, ch.pickHandovers(farFuture))
+	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(farFuture))
 }
 
 // refNames returns the vchannels of refs.
@@ -200,8 +201,8 @@ func TestOneClaimAndOneLookupForManyVChannels(t *testing.T) {
 	for _, v := range vchannels {
 		idx := ch.Get(v)
 		waitReady(t, idx)
-		assert.True(t, idx.fresh())
-		assert.Equal(t, testBasePath(v), idx.sstBasePath)
+		assert.True(t, idx.Fresh())
+		assert.Equal(t, testBasePath(v), idx.SSTBasePathForTest())
 	}
 	assert.Equal(t, 1, env.client.claimCount())
 	lookups := env.client.lookupList()
@@ -212,7 +213,7 @@ func TestOneClaimAndOneLookupForManyVChannels(t *testing.T) {
 	assert.ElementsMatch(t, vchannels, refNames(lookups[0]))
 
 	created := env.add(ch, "v5")
-	assert.True(t, created.fresh())
+	assert.True(t, created.Fresh())
 	assert.Equal(t, 1, env.client.claimCount(), "a new collection does not claim")
 	assert.Len(t, env.client.lookupList(), 1, "a new collection does not look up")
 	assert.Empty(t, env.fatalList())
@@ -229,7 +230,7 @@ func TestNewCollectionBeforeTheClaimWaitsForIt(t *testing.T) {
 	_, created, err := ch.Add(context.Background(), "v1", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
-	assert.False(t, ch.Get("v1").readyDone())
+	assert.False(t, ch.Get("v1").Ready())
 
 	close(block)
 	waitReady(t, ch.Get("v0"))
@@ -261,7 +262,7 @@ func TestLookupSplitsIntoBatches(t *testing.T) {
 
 func TestLookupRetriesOnlyTheFailedItems(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
-	env.client.seed("v2", ManifestView{Version: 3, CheckpointTimeTick: 5})
+	env.client.seed("v2", index.ManifestView{Version: 3, CheckpointTimeTick: 5})
 	env.client.set(func(c *fakeClient) {
 		c.itemErrs = map[string][]error{"v1": {merr.WrapErrServiceUnavailable("down")}}
 	})
@@ -273,21 +274,21 @@ func TestLookupRetriesOnlyTheFailedItems(t *testing.T) {
 	require.Len(t, lookups, 2)
 	assert.ElementsMatch(t, []string{"v0", "v1", "v2"}, refNames(lookups[0]))
 	assert.Equal(t, []string{"v1"}, refNames(lookups[1]), "only the failed item is retried")
-	assert.True(t, ch.Get("v0").fresh())
-	assert.True(t, ch.Get("v1").fresh())
-	assert.False(t, ch.Get("v2").fresh(), "a found manifest makes the Index not fresh")
+	assert.True(t, ch.Get("v0").Fresh())
+	assert.True(t, ch.Get("v1").Fresh())
+	assert.False(t, ch.Get("v2").Fresh(), "a found manifest makes the Index not fresh")
 	assert.Empty(t, env.fatalList())
 }
 
 func TestFatalItemErrorIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.client.set(func(c *fakeClient) {
-		c.itemErrs = map[string][]error{"v1": {errors.Wrap(ErrRejected, "corrupted pointer")}}
+		c.itemErrs = map[string][]error{"v1": {errors.Wrap(index.ErrRejected, "corrupted pointer")}}
 	})
 	ch := env.recoveredChannel(0, "v0", "v1")
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, ErrRejected))
-	assert.False(t, ch.Get("v1").readyDone())
+	assert.True(t, errors.Is(err, index.ErrRejected))
+	assert.False(t, ch.Get("v1").Ready())
 	insert(t, ch.Get("v1"), 1, 1)
 	assert.Empty(t, ch.pickHandovers(farFuture))
 }
@@ -300,7 +301,7 @@ func TestLookupRetriesAfterARetryableError(t *testing.T) {
 	ch := env.recoveredChannel(0, "v0")
 	idx := ch.Get("v0")
 	waitReady(t, idx)
-	assert.True(t, idx.fresh())
+	assert.True(t, idx.Fresh())
 	assert.Len(t, env.client.lookupList(), 2)
 	assert.Empty(t, env.fatalList())
 }
@@ -308,13 +309,13 @@ func TestLookupRetriesAfterARetryableError(t *testing.T) {
 func TestRejectedLookupIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.client.set(func(c *fakeClient) {
-		c.lookupErrs = []error{errors.Wrap(ErrRejected, "invalid request")}
+		c.lookupErrs = []error{errors.Wrap(index.ErrRejected, "invalid request")}
 	})
 	ch := env.recoveredChannel(0, "v0")
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, ErrRejected))
+	assert.True(t, errors.Is(err, index.ErrRejected))
 	idx := ch.Get("v0")
-	assert.False(t, idx.readyDone())
+	assert.False(t, idx.Ready())
 	insert(t, idx, 1, 1)
 	assert.Empty(t, ch.pickHandovers(farFuture))
 }
@@ -331,15 +332,15 @@ func TestClaimRetriesAfterARetryableError(t *testing.T) {
 
 func TestFencedClaimIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
-	env.client.set(func(c *fakeClient) { c.claimErrs = []error{errors.Wrap(ErrFenced, "v0")} })
+	env.client.set(func(c *fakeClient) { c.claimErrs = []error{errors.Wrap(index.ErrFenced, "v0")} })
 	ch := env.channel(0)
 	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
 	err = env.waitFatal()
-	assert.True(t, errors.Is(err, ErrFenced))
+	assert.True(t, errors.Is(err, index.ErrFenced))
 	idx := ch.Get("v0")
-	assert.False(t, idx.readyDone())
+	assert.False(t, idx.Ready())
 	insert(t, idx, 1, 1)
 	assert.Empty(t, ch.pickHandovers(farFuture))
 }
@@ -348,19 +349,19 @@ func TestFencedCommitStopsTheHandovers(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	env.client.set(func(c *fakeClient) { c.commitErrs = []error{errors.Wrap(ErrFenced, "v0")} })
+	env.client.set(func(c *fakeClient) { c.commitErrs = []error{errors.Wrap(index.ErrFenced, "v0")} })
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
 
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, ErrFenced))
-	assert.True(t, slotOf(idx).stopped.Load())
-	assert.Len(t, idx.eng.FrozenGenerations(), 1, "the generations stay frozen")
+	assert.True(t, errors.Is(err, index.ErrFenced))
+	assert.True(t, slotOf(ch, idx).stopped.Load())
+	assert.Len(t, idx.EngineForTest().FrozenGenerations(), 1, "the generations stay frozen")
 	// the Index keeps serving writes, but it does not hand over again
 	insert(t, idx, 2, 2)
 	ch.Tick(20)
-	assert.True(t, idx.dirty())
+	assert.True(t, idx.Dirty())
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	assert.EqualValues(t, 2, segmentOf(t, idx, 2))
 }
@@ -380,18 +381,16 @@ func TestRetryableCommitErrorBacksOff(t *testing.T) {
 	ch.step(now)
 
 	assert.Empty(t, env.fatalList())
-	assert.Equal(t, 1, slotOf(idx).failures)
-	require.NotNil(t, idx.pending.Load())
+	assert.Equal(t, 1, slotOf(ch, idx).failures)
+	require.NotNil(t, idx.PendingForTest())
 	assert.Empty(t, ch.pickHandovers(now), "the backoff is not over")
-	assert.Equal(t, []*Index{idx}, ch.pickHandovers(now.Add(2*time.Hour)), "the backoff is over")
+	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(now.Add(2*time.Hour)), "the backoff is over")
 }
 
 // dropCommittedFiles makes the committed tables of idx missing on this node.
-func dropCommittedFiles(t *testing.T, idx *Index) {
-	require.NoError(t, os.RemoveAll(idx.committedDir))
-	idx.installMu.Lock()
-	idx.installedPaths = nil
-	idx.installMu.Unlock()
+func dropCommittedFiles(t *testing.T, idx *index.Index) {
+	require.NoError(t, os.RemoveAll(idx.CommittedDirForTest()))
+	idx.ForgetInstalledPathsForTest()
 }
 
 func TestMissingObjectIsFatal(t *testing.T) {
@@ -401,7 +400,7 @@ func TestMissingObjectIsFatal(t *testing.T) {
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
-	require.EqualValues(t, 10, idx.lastCommittedTimeTick())
+	require.EqualValues(t, 10, idx.LastCommittedTimeTick())
 
 	// the next install needs the first tables, which are gone everywhere
 	dropCommittedFiles(t, idx)
@@ -412,7 +411,7 @@ func TestMissingObjectIsFatal(t *testing.T) {
 
 	err := env.waitFatal()
 	assert.True(t, errors.Is(err, pkroot.ErrCorrupted))
-	assert.True(t, slotOf(idx).stopped.Load())
+	assert.True(t, slotOf(ch, idx).stopped.Load())
 }
 
 func TestIsFatal(t *testing.T) {
@@ -421,8 +420,8 @@ func TestIsFatal(t *testing.T) {
 		err   error
 		fatal bool
 	}{
-		{"fenced", errors.Wrap(ErrFenced, "v0"), true},
-		{"rejected", errors.Wrap(ErrRejected, "v0"), true},
+		{"fenced", errors.Wrap(index.ErrFenced, "v0"), true},
+		{"rejected", errors.Wrap(index.ErrRejected, "v0"), true},
 		{"corrupted", errors.Mark(errors.New("bad block"), pkroot.ErrCorrupted), true},
 		{"unavailable", errors.Mark(errors.New("connection reset"), pkroot.ErrUnavailable), false},
 		{"io", errors.Mark(errors.New("disk full"), pkroot.ErrIO), false},
@@ -434,7 +433,7 @@ func TestIsFatal(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.fatal, isFatal(c.err))
+			assert.Equal(t, c.fatal, index.IsFatal(c.err))
 		})
 	}
 }
@@ -443,16 +442,16 @@ func TestRejectedCommitIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	env.client.set(func(c *fakeClient) { c.commitErrs = []error{errors.Wrap(ErrRejected, "duplicate table")} })
+	env.client.set(func(c *fakeClient) { c.commitErrs = []error{errors.Wrap(index.ErrRejected, "duplicate table")} })
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
 
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, ErrRejected))
-	assert.True(t, slotOf(idx).stopped.Load())
-	assert.Zero(t, slotOf(idx).failures, "no retry is scheduled")
-	assert.Len(t, idx.eng.FrozenGenerations(), 1, "the generations stay frozen")
+	assert.True(t, errors.Is(err, index.ErrRejected))
+	assert.True(t, slotOf(ch, idx).stopped.Load())
+	assert.Zero(t, slotOf(ch, idx).failures, "no retry is scheduled")
+	assert.Len(t, idx.EngineForTest().FrozenGenerations(), 1, "the generations stay frozen")
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	assert.Len(t, env.client.requestList(), 1)
 }
@@ -460,16 +459,16 @@ func TestRejectedCommitIsFatal(t *testing.T) {
 func TestRejectedClaimIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.client.set(func(c *fakeClient) {
-		c.claimErrs = []error{errors.Wrap(ErrRejected, "schema mismatch")}
+		c.claimErrs = []error{errors.Wrap(index.ErrRejected, "schema mismatch")}
 	})
 	ch := env.channel(0)
 	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
 	err = env.waitFatal()
-	assert.True(t, errors.Is(err, ErrRejected))
+	assert.True(t, errors.Is(err, index.ErrRejected))
 	idx := ch.Get("v0")
-	assert.False(t, idx.readyDone())
+	assert.False(t, idx.Ready())
 	insert(t, idx, 1, 1)
 	assert.Empty(t, ch.pickHandovers(farFuture))
 }
@@ -486,7 +485,7 @@ func TestBackoffParamsApplyAfterASuccess(t *testing.T) {
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
-	require.Equal(t, 1, slotOf(idx).failures)
+	require.Equal(t, 1, slotOf(ch, idx).failures)
 	assert.Empty(t, ch.pickHandovers(time.Now().Add(time.Minute)), "the wait is about one hour")
 
 	// a smaller max applies after the next success
@@ -495,15 +494,15 @@ func TestBackoffParamsApplyAfterASuccess(t *testing.T) {
 		p.MaxBackoff = time.Millisecond
 	})
 	ch.step(farFuture)
-	require.Zero(t, slotOf(idx).failures)
-	require.EqualValues(t, 10, idx.lastCommittedTimeTick())
+	require.Zero(t, slotOf(ch, idx).failures)
+	require.EqualValues(t, 10, idx.LastCommittedTimeTick())
 
 	env.client.set(func(c *fakeClient) { c.commitErrs = []error{merr.WrapErrServiceUnavailable("down")} })
 	insert(t, idx, 2, 2)
 	ch.Tick(20)
 	ch.step(farFuture)
-	require.Equal(t, 1, slotOf(idx).failures)
-	assert.Equal(t, []*Index{idx}, ch.pickHandovers(time.Now().Add(time.Second)), "the wait is the new max")
+	require.Equal(t, 1, slotOf(ch, idx).failures)
+	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(time.Now().Add(time.Second)), "the wait is the new max")
 	assert.Empty(t, env.fatalList())
 }
 
@@ -539,7 +538,7 @@ func TestRemoveWaitsForARunningHandover(t *testing.T) {
 		t.Fatal("Remove did not return after the handover ended")
 	}
 	assert.Nil(t, ch.Get("v0"))
-	assert.False(t, slotOf(idx).running.Load())
+	assert.False(t, slotOf(ch, idx).running.Load())
 }
 
 func TestDriverClearsATaskThatNeverRan(t *testing.T) {
@@ -549,9 +548,9 @@ func TestDriverClearsATaskThatNeverRan(t *testing.T) {
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
-	assert.True(t, slotOf(idx).running.Load())
+	assert.True(t, slotOf(ch, idx).running.Load())
 	// the next step sees the finished handle and picks the Index again
-	assert.Equal(t, []*Index{idx}, ch.pickHandovers(farFuture))
+	assert.Equal(t, []*index.Index{idx}, ch.pickHandovers(farFuture))
 }
 
 func TestClosedChannelAndIndex(t *testing.T) {
@@ -586,7 +585,7 @@ func TestDriverRunsHandovers(t *testing.T) {
 	idx := env.add(ch, "v0")
 	insert(t, idx, 1, 1)
 	ch.Tick(10)
-	require.Eventually(t, func() bool { return idx.lastCommittedTimeTick() == 10 }, waitTimeout, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return idx.LastCommittedTimeTick() == 10 }, waitTimeout, 10*time.Millisecond)
 	ch.Close()
 }
 
@@ -610,7 +609,7 @@ func TestDropRemovesTheLocalFiles(t *testing.T) {
 	insert(t, idx, 10, 1)
 	ch.Tick(10)
 	ch.step(farFuture)
-	require.DirExists(t, idx.committedDir)
+	require.DirExists(t, idx.CommittedDirForTest())
 
 	require.NoError(t, ch.Drop(context.Background(), "v0"))
 	assert.Nil(t, ch.Get("v0"))

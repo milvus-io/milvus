@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -38,10 +39,8 @@ const defaultBackoffBase = time.Second
 
 // Params are the tunables of the primary key index of a streaming node.
 type Params struct {
-	// MemTableSize is the memtable size of the engine of one vchannel.
-	MemTableSize uint64
-	// LockStripes is the number of lock stripes of the authority of one vchannel.
-	LockStripes int
+	// Params of the Index: MemTableSize, LockStripes and ReuploadAfter.
+	index.Params
 	// ActiveBytes starts a handover when the active generation holds this many bytes.
 	ActiveBytes uint64
 	// TailBytes starts a handover when the WAL recovery tail reaches this size.
@@ -52,20 +51,18 @@ type Params struct {
 	BackoffBase time.Duration
 	// MaxBackoff is the longest wait after a failure.
 	MaxBackoff time.Duration
-	// ReuploadAfter is the age after which a retried handover uploads its
-	// tables again, so that the garbage collection of the manifest service
-	// keeps them. The caller that injects the Committer sets it from the
-	// grace window of that garbage collection.
-	ReuploadAfter time.Duration
 }
 
 // ParamsFromConfig reads the params from paramtable. It leaves ReuploadAfter
-// zero: the caller that injects the Committer sets it.
+// zero: the caller that injects the Committer sets it from the grace window
+// of the garbage collection of the manifest service.
 func ParamsFromConfig() Params {
 	cfg := &paramtable.Get().StreamingCfg
 	return Params{
-		MemTableSize:  uint64(cfg.PKIndexMemTableSize.GetAsSize()),
-		LockStripes:   cfg.PKIndexLockStripes.GetAsInt(),
+		Params: index.Params{
+			MemTableSize: uint64(cfg.PKIndexMemTableSize.GetAsSize()),
+			LockStripes:  cfg.PKIndexLockStripes.GetAsInt(),
+		},
 		ActiveBytes:   uint64(cfg.PKIndexHandoverActiveBytes.GetAsSize()),
 		TailBytes:     uint64(cfg.PKIndexHandoverTailBytes.GetAsSize()),
 		SoftWatermark: uint64(cfg.WALRecoveryTailSoftWatermark.GetAsSize()),

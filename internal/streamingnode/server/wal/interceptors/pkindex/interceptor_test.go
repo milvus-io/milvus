@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -115,7 +116,7 @@ func (env *testIndexEnv) useResource(t *testing.T) {
 
 // testEngine reads and seeds the engine of the Index of one vchannel.
 type testEngine struct {
-	idx *snpkindex.Index
+	idx *index.Index
 }
 
 // put seeds the index of one primary key, as an earlier insert would have done.
@@ -573,7 +574,7 @@ func TestBuildPanicsWhenAnExistingCollectionHasAnUnsupportedPrimaryKey(t *testin
 // unavailable through param.OnFatal.
 func TestBuildPassesOnFatalToTheIndex(t *testing.T) {
 	env := newTestIndexEnv(t)
-	env.committer.SetClaimErr(errors.Wrap(snpkindex.ErrFenced, testVChannel))
+	env.committer.SetClaimErr(errors.Wrap(index.ErrFenced, testVChannel))
 	env.useResource(t)
 
 	fatal := make(chan error, 1)
@@ -593,7 +594,7 @@ func TestBuildPassesOnFatalToTheIndex(t *testing.T) {
 
 	select {
 	case err := <-fatal:
-		require.ErrorIs(t, err, snpkindex.ErrFenced)
+		require.ErrorIs(t, err, index.ErrFenced)
 	case <-time.After(10 * time.Second):
 		t.Fatal("OnFatal was not called after a fenced claim")
 	}

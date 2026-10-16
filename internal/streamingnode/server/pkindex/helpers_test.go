@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -58,9 +59,9 @@ type fakeClient struct {
 	mu sync.Mutex
 	// claimedTerm is the claimed term of the pchannel, 0 before a claim.
 	claimedTerm int64
-	manifests   map[string]*FakeManifest
+	manifests   map[string]*index.FakeManifest
 	// history keeps every manifest version, by vchannel.
-	history map[string][]*FakeManifest
+	history map[string][]*index.FakeManifest
 
 	claimErrs  []error
 	claimBlock chan struct{}
@@ -80,20 +81,20 @@ type fakeClient struct {
 	// commitBlock blocks CommitFlush until it is closed, if it is not nil.
 	commitBlock chan struct{}
 
-	requests []FlushArgs
+	requests []index.FlushArgs
 	// applied records whether each flush that the fake manifest service
 	// accepted changed the manifest.
 	applied []bool
 	// rewrite changes the returned manifest, if it is not nil.
-	rewrite func(m ManifestView) ManifestView
+	rewrite func(m index.ManifestView) index.ManifestView
 	// applyErrs are the errors of the manifest edits, such as a duplicate table.
 	applyErrs []error
 }
 
 func newFakeClient() *fakeClient {
 	return &fakeClient{
-		manifests: make(map[string]*FakeManifest),
-		history:   make(map[string][]*FakeManifest),
+		manifests: make(map[string]*index.FakeManifest),
+		history:   make(map[string][]*index.FakeManifest),
 	}
 }
 
@@ -156,11 +157,11 @@ func (c *fakeClient) GetRecoveryManifests(ctx context.Context, refs []VChannelRe
 }
 
 // seed gives vchannel a manifest with view, as if another owner committed it.
-func (c *fakeClient) seed(vchannel string, view ManifestView) {
+func (c *fakeClient) seed(vchannel string, view index.ManifestView) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	view.SSTBasePath = testBasePath(vchannel)
-	c.store(vchannel, &FakeManifest{View: view, LastFlushTerm: 1, PKDataType: schemapb.DataType_Int64}, true)
+	c.store(vchannel, &index.FakeManifest{View: view, LastFlushTerm: 1, PKDataType: schemapb.DataType_Int64}, true)
 }
 
 // claimCount returns the number of ClaimPChannel calls.
@@ -177,15 +178,15 @@ func (c *fakeClient) lookupList() [][]VChannelRef {
 	return append([][]VChannelRef(nil), c.lookups...)
 }
 
-func (c *fakeClient) store(vchannel string, m *FakeManifest, changed bool) {
+func (c *fakeClient) store(vchannel string, m *index.FakeManifest, changed bool) {
 	c.manifests[vchannel] = m
 	if changed {
 		c.history[vchannel] = append(c.history[vchannel], m)
 	}
 }
 
-func (c *fakeClient) CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error) {
-	args.AddTables = append([]TableRef(nil), args.AddTables...)
+func (c *fakeClient) CommitFlush(ctx context.Context, args index.FlushArgs) (index.ManifestView, error) {
+	args.AddTables = append([]index.TableRef(nil), args.AddTables...)
 	c.mu.Lock()
 	c.requests = append(c.requests, args)
 	entered, block := c.commitEntered, c.commitBlock
@@ -202,18 +203,18 @@ func (c *fakeClient) CommitFlush(ctx context.Context, args FlushArgs) (ManifestV
 	if len(c.commitErrs) > 0 {
 		err := c.commitErrs[0]
 		c.commitErrs = c.commitErrs[1:]
-		return ManifestView{}, err
+		return index.ManifestView{}, err
 	}
-	next, changed, err := FakeFlush(c.manifests[args.VChannel], c.claimedTerm, args, testBasePath(args.VChannel))
+	next, changed, err := index.FakeFlush(c.manifests[args.VChannel], c.claimedTerm, args, testBasePath(args.VChannel))
 	if err != nil {
 		c.applyErrs = append(c.applyErrs, err)
-		return ManifestView{}, err
+		return index.ManifestView{}, err
 	}
 	c.store(args.VChannel, next, changed)
 	c.applied = append(c.applied, changed)
 	if c.loseNext {
 		c.loseNext = false
-		return ManifestView{}, errors.Mark(errors.New("response lost"), pkroot.ErrUnavailable)
+		return index.ManifestView{}, errors.Mark(errors.New("response lost"), pkroot.ErrUnavailable)
 	}
 	if c.rewrite != nil {
 		return c.rewrite(next.View), nil
@@ -229,18 +230,18 @@ func (c *fakeClient) appliedList() []bool {
 
 // manifest returns the current manifest of vchannel, a zero value when it
 // does not exist.
-func (c *fakeClient) manifest(vchannel string) ManifestView {
+func (c *fakeClient) manifest(vchannel string) index.ManifestView {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if m := c.manifests[vchannel]; m != nil {
 		return m.View
 	}
-	return ManifestView{}
+	return index.ManifestView{}
 }
 
 // version returns version v of the manifest of vchannel, nil when it does
 // not exist.
-func (c *fakeClient) version(vchannel string, v int64) *ManifestView {
+func (c *fakeClient) version(vchannel string, v int64) *index.ManifestView {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, m := range c.history[vchannel] {
@@ -252,10 +253,10 @@ func (c *fakeClient) version(vchannel string, v int64) *ManifestView {
 	return nil
 }
 
-func (c *fakeClient) requestList() []FlushArgs {
+func (c *fakeClient) requestList() []index.FlushArgs {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]FlushArgs(nil), c.requests...)
+	return append([]index.FlushArgs(nil), c.requests...)
 }
 
 func (c *fakeClient) applyErrList() []error {
@@ -272,7 +273,7 @@ func (c *fakeClient) set(f func(c *fakeClient)) {
 
 // countingStore counts uploads and downloads, and can report every object as missing.
 type countingStore struct {
-	*FakeStore
+	*index.FakeStore
 	downloads atomic.Int64
 	uploads   atomic.Int64
 	missing   atomic.Bool
@@ -358,13 +359,12 @@ type testEnv struct {
 
 func defaultTestParams() Params {
 	return Params{
-		LockStripes:   16,
+		Params:        index.Params{LockStripes: 16, ReuploadAfter: time.Hour},
 		ActiveBytes:   1,
 		TailBytes:     math.MaxUint64,
 		SoftWatermark: math.MaxUint64,
 		BackoffBase:   time.Millisecond,
 		MaxBackoff:    10 * time.Millisecond,
-		ReuploadAfter: time.Hour,
 	}
 }
 
@@ -372,7 +372,7 @@ func newTestEnv(t *testing.T, sched nodescheduler.Scheduler) *testEnv {
 	env := &testEnv{
 		t:      t,
 		root:   t.TempDir(),
-		store:  &countingStore{FakeStore: NewFakeStore()},
+		store:  &countingStore{FakeStore: index.NewFakeStore()},
 		client: newFakeClient(),
 	}
 	p := defaultTestParams()
@@ -458,7 +458,7 @@ func (env *testEnv) waitFatal() error {
 }
 
 // add opens the Index of vchannel and waits until it is ready.
-func (env *testEnv) add(ch *Channel, vchannel string) *Index {
+func (env *testEnv) add(ch *Channel, vchannel string) *index.Index {
 	_, created, err := ch.Add(context.Background(), vchannel, testCollectionID, schemapb.DataType_Int64)
 	require.NoError(env.t, err)
 	require.True(env.t, created)
@@ -468,25 +468,25 @@ func (env *testEnv) add(ch *Channel, vchannel string) *Index {
 	return idx
 }
 
-func waitReady(t *testing.T, idx *Index) {
+func waitReady(t *testing.T, idx *index.Index) {
 	select {
-	case <-idx.ready:
+	case <-idx.ReadyForTest():
 	case <-time.After(waitTimeout):
-		t.Fatalf("claim and manifest lookup of %s did not finish", idx.vchannel)
+		t.Fatalf("claim and manifest lookup of %s did not finish", idx.VChannel())
 	}
 }
 
 // insert runs an autocommit insert through Decide and Apply.
-func insert(t *testing.T, idx *Index, segmentID int64, pks ...int64) {
+func insert(t *testing.T, idx *index.Index, segmentID int64, pks ...int64) {
 	ctx := context.Background()
-	intent, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindInsert, VChannel: idx.vchannel, PKs: int64PKs(pks...)})
+	intent, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindInsert, VChannel: idx.VChannel(), PKs: int64PKs(pks...)})
 	require.NoError(t, err)
 	intent.Apply(ctx, authority.Applied{SegmentID: segmentID})
 }
 
 // segmentOf returns the segment of pk in the engine, 0 when pk is absent.
-func segmentOf(t *testing.T, idx *Index, pk int64) int64 {
-	vs, err := idx.eng.MultiGet(context.Background(), [][]byte{codec.EncodeInt64PK(pk)})
+func segmentOf(t *testing.T, idx *index.Index, pk int64) int64 {
+	vs, err := idx.EngineForTest().MultiGet(context.Background(), [][]byte{codec.EncodeInt64PK(pk)})
 	require.NoError(t, err)
 	if vs[0] == nil {
 		return 0
@@ -496,7 +496,7 @@ func segmentOf(t *testing.T, idx *Index, pk int64) int64 {
 	return e.SegmentID
 }
 
-func sstIDs(m ManifestView) []int64 {
+func sstIDs(m index.ManifestView) []int64 {
 	ids := make([]int64, 0, len(m.Tables))
 	for _, s := range m.Tables {
 		ids = append(ids, int64(s.ID))
@@ -513,6 +513,6 @@ func int64PKs(values ...int64) []authority.PK {
 }
 
 // slotOf returns the driver bookkeeping of idx.
-func slotOf(idx *Index) *handoverSlot {
-	return idx.ch.slotOf(idx)
+func slotOf(ch *Channel, idx *index.Index) *handoverSlot {
+	return ch.slotOf(idx)
 }

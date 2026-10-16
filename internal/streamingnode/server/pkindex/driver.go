@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -85,7 +86,7 @@ func (c *Channel) step(now time.Time) {
 // slotOf returns the handover slot of idx. Add creates the slot with the
 // Index, so that the first instant of its backoff is the open of the Index,
 // and detachLocked deletes it. A detached Index gets a slot that no step sees.
-func (c *Channel) slotOf(idx *Index) *handoverSlot {
+func (c *Channel) slotOf(idx *index.Index) *handoverSlot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if s, ok := c.slots[idx]; ok {
@@ -96,7 +97,7 @@ func (c *Channel) slotOf(idx *Index) *handoverSlot {
 
 // submitHandover submits one handover of idx to the node scheduler. Only the
 // driver step and the tests call it.
-func (c *Channel) submitHandover(idx *Index) {
+func (c *Channel) submitHandover(idx *index.Index) {
 	s := c.slotOf(idx)
 	s.running.Store(true)
 	s.handle = c.m.cfg.Sched.Submit(&handoverTask{c: c, idx: idx, slot: s})
@@ -122,7 +123,7 @@ func (c *Channel) reapHandover(s *handoverSlot) {
 // handoverTask runs one handover of an Index on the node scheduler.
 type handoverTask struct {
 	c    *Channel
-	idx  *Index
+	idx  *index.Index
 	slot *handoverSlot
 }
 
@@ -136,7 +137,7 @@ func (t *handoverTask) Execute(ctx context.Context) error {
 // runHandover runs one handover step of idx and records its outcome in the
 // slot: a success resets the backoff, a retryable failure advances it, a
 // fatal error stops the handovers of the Index and marks the WAL unavailable.
-func (c *Channel) runHandover(ctx context.Context, idx *Index, s *handoverSlot) {
+func (c *Channel) runHandover(ctx context.Context, idx *index.Index, s *handoverSlot) {
 	defer s.running.Store(false)
 	committed, err := idx.Handover(ctx)
 	switch {
@@ -149,19 +150,19 @@ func (c *Channel) runHandover(ctx context.Context, idx *Index, s *handoverSlot) 
 		}
 	case errors.Is(err, context.Canceled):
 		// the Index or the scheduler is closing, this is not a failure
-	case isFatal(err):
+	case index.IsFatal(err):
 		s.stopped.Store(true)
-		idx.logger.Error(ctx, "primary key index handover failed, the WAL becomes unavailable", mlog.Err(err))
+		idx.Logger().Error(ctx, "primary key index handover failed, the WAL becomes unavailable", mlog.Err(err))
 		c.fatal(err)
 	default:
 		s.failures++
 		s.backoff.UpdateInstantWithNextBackOff()
 		metrics.StreamingNodePKIndexHandoverFailuresTotal.WithLabelValues(paramtable.GetStringNodeID()).Inc()
-		fields := []mlog.Field{mlog.Int("failures", s.failures), mlog.Bool("pending", idx.pending.Load() != nil), mlog.Err(err)}
+		fields := []mlog.Field{mlog.Int("failures", s.failures), mlog.Bool("pending", idx.HasPending()), mlog.Err(err)}
 		if s.failures > warnFailures {
-			idx.logger.Warn(ctx, "primary key index handover failed, retry later", fields...)
+			idx.Logger().Warn(ctx, "primary key index handover failed, retry later", fields...)
 		} else {
-			idx.logger.Info(ctx, "primary key index handover failed, retry later", fields...)
+			idx.Logger().Info(ctx, "primary key index handover failed, retry later", fields...)
 		}
 	}
 }
@@ -175,32 +176,32 @@ func (c *Channel) runHandover(ctx context.Context, idx *Index, s *handoverSlot) 
 // fresh Index: an Index with nothing to publish is never a candidate, and a
 // pending request counts as dirty. So a step costs the number of dirty
 // Indexes.
-func (c *Channel) pickHandovers(now time.Time) []*Index {
+func (c *Channel) pickHandovers(now time.Time) []*index.Index {
 	params := c.m.cfg.Params()
 	tail := c.tail()
-	var out []*Index
-	var oldest *Index
+	var out []*index.Index
+	var oldest *index.Index
 	for _, idx := range c.dirtyIndexes() {
 		s := c.slotOf(idx)
 		c.reapHandover(s)
-		if s.running.Load() || s.stopped.Load() || !idx.readyDone() || !idx.fresh() {
+		if s.running.Load() || s.stopped.Load() || !idx.Ready() || !idx.Fresh() {
 			continue
 		}
 		if now.Before(s.backoff.NextInstant()) {
 			continue
 		}
 		// a pending request is retried first, regardless of size or tail
-		if idx.pending.Load() != nil {
+		if idx.HasPending() {
 			out = append(out, idx)
 			continue
 		}
-		dirty := idx.dirty()
+		dirty := idx.Dirty()
 		// trigger 1: the active generation is large
-		if dirty && idx.eng.Stats().ActiveBytes >= params.ActiveBytes {
+		if dirty && idx.ActiveBytes() >= params.ActiveBytes {
 			out = append(out, idx)
 			continue
 		}
-		if dirty && (oldest == nil || idx.lastCommittedTimeTick() < oldest.lastCommittedTimeTick()) {
+		if dirty && (oldest == nil || idx.LastCommittedTimeTick() < oldest.LastCommittedTimeTick()) {
 			oldest = idx
 		}
 	}

@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -37,7 +38,7 @@ var errOpenIndex = errors.New("open the primary key index")
 
 // target is what the interceptor needs to translate the writes of one vchannel.
 type target struct {
-	idx          *snpkindex.Index
+	idx          *index.Index
 	collectionID int64
 	pkFieldID    int64
 	pkDataType   schemapb.DataType

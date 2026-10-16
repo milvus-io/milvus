@@ -18,8 +18,6 @@ package pkindex
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -31,21 +29,21 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
-	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 )
 
 // The tests in this file call prepare and commit of a ready Index directly,
 // without the driver, to check the steps of one handover.
 
 // handoverIndex returns a ready Index of v0 on a Channel without the driver.
-func handoverIndex(t *testing.T) (*testEnv, *Channel, *Index) {
+func handoverIndex(t *testing.T) (*testEnv, *Channel, *index.Index) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	return env, ch, env.add(ch, "v0")
 }
 
-func refIDs(refs []TableRef) []int64 {
+func refIDs(refs []index.TableRef) []int64 {
 	ids := make([]int64, 0, len(refs))
 	for _, r := range refs {
 		ids = append(ids, int64(r.ID))
@@ -76,17 +74,17 @@ func TestHandoverNormal(t *testing.T) {
 	insert(t, idx, 10, 1, 2, 3)
 	ch.Tick(50)
 
-	p, err := idx.prepare(ctx)
+	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, p)
-	require.NotNil(t, p.request)
-	assert.Equal(t, uint64(50), p.covered)
+	require.NotNil(t, p.Request())
+	assert.Equal(t, uint64(50), p.Covered())
 	assert.Empty(t, env.client.requestList())
-	assert.Zero(t, idx.lastCommittedTimeTick())
+	assert.Zero(t, idx.LastCommittedTimeTick())
 	assert.Equal(t, 0, env.store.Len(), "prepare does not upload")
-	assert.True(t, p.uploadedAt.IsZero())
+	assert.True(t, p.UploadedAt().IsZero())
 
-	require.NoError(t, idx.commit(ctx, p))
+	require.NoError(t, idx.CommitForTest(ctx, p))
 
 	reqs := env.client.requestList()
 	require.Len(t, reqs, 1)
@@ -104,43 +102,43 @@ func TestHandoverNormal(t *testing.T) {
 		assert.NotZero(t, ref.TableFormat)
 		assert.Equal(t, codec.EncodeInt64PK(1), ref.MinKey)
 		assert.Equal(t, codec.EncodeInt64PK(3), ref.MaxKey)
-		path := committedPath(idx.committedDir, ref.ID)
+		path := index.CommittedPathForTest(idx.CommittedDirForTest(), ref.ID)
 		assert.FileExists(t, path)
-		assert.Equal(t, path, p.local[ref.ID])
+		assert.Equal(t, path, p.Local()[ref.ID])
 	}
 	addIDs := refIDs(req.AddTables)
-	assert.ElementsMatch(t, addIDs, storeIDs(t, env.store, idx.sstBasePath))
+	assert.ElementsMatch(t, addIDs, storeIDs(t, env.store, idx.SSTBasePathForTest()))
 
-	assert.Equal(t, int64(1), idx.currentInstalledVersion(), "the first flush creates version 1")
+	assert.Equal(t, int64(1), idx.InstalledVersionForTest(), "the first flush creates version 1")
 	for _, pk := range []int64{1, 2, 3} {
 		assert.EqualValues(t, 10, segmentOf(t, idx, pk))
 	}
-	stats := idx.eng.Stats()
+	stats := idx.EngineForTest().Stats()
 	assert.Equal(t, 0, stats.FrozenGenerations)
 	assert.Equal(t, len(addIDs), stats.CommittedTables)
-	assert.Equal(t, uint64(50), idx.lastCommittedTimeTick())
+	assert.Equal(t, uint64(50), idx.LastCommittedTimeTick())
 }
 
 func TestHandoverNothingToPublish(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
-	idx.lastCommitted.Store(10)
+	idx.SetLastCommittedForTest(10)
 	ch.Tick(20)
 
-	p, err := idx.prepare(ctx)
+	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, p)
-	assert.Nil(t, p.request)
-	assert.Equal(t, uint64(20), p.covered)
-	assert.Len(t, p.gens, 1)
+	assert.Nil(t, p.Request())
+	assert.Equal(t, uint64(20), p.Covered())
+	assert.Len(t, p.Gens(), 1)
 
-	require.NoError(t, idx.commit(ctx, p))
+	require.NoError(t, idx.CommitForTest(ctx, p))
 
 	assert.Empty(t, env.client.requestList())
 	assert.Equal(t, 0, env.store.Len())
-	assert.Zero(t, idx.currentInstalledVersion())
-	assert.Equal(t, uint64(20), idx.lastCommittedTimeTick())
-	assert.Equal(t, 0, idx.eng.Stats().FrozenGenerations)
+	assert.Zero(t, idx.InstalledVersionForTest())
+	assert.Equal(t, uint64(20), idx.LastCommittedTimeTick())
+	assert.Equal(t, 0, idx.EngineForTest().Stats().FrozenGenerations)
 }
 
 func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
@@ -149,22 +147,22 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 	insert(t, idx, 10, 1, 2, 3)
 	ch.Tick(50)
 
-	p, err := idx.prepare(ctx)
+	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
 	env.client.set(func(c *fakeClient) { c.commitErrs = []error{pkroot.MarkIO(errors.New("disk gone"), "commit")} })
-	err = idx.commit(ctx, p)
+	err = idx.CommitForTest(ctx, p)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, pkroot.ErrIO))
 	objects := env.store.Len()
-	assert.Equal(t, len(p.request.AddTables), objects)
+	assert.Equal(t, len(p.Request().AddTables), objects)
 	assert.Empty(t, env.client.appliedList())
-	assert.Equal(t, 1, idx.eng.Stats().FrozenGenerations)
-	assert.Zero(t, idx.currentInstalledVersion())
-	assert.Zero(t, idx.lastCommittedTimeTick())
+	assert.Equal(t, 1, idx.EngineForTest().Stats().FrozenGenerations)
+	assert.Zero(t, idx.InstalledVersionForTest())
+	assert.Zero(t, idx.LastCommittedTimeTick())
 
-	require.NoError(t, idx.commit(ctx, p))
+	require.NoError(t, idx.CommitForTest(ctx, p))
 
 	assert.Equal(t, objects, env.store.Len())
 	reqs := env.client.requestList()
@@ -172,8 +170,8 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 	assert.Equal(t, reqs[0], reqs[1])
 	assert.Equal(t, []bool{true}, env.client.appliedList())
 	assert.Equal(t, uint64(50), env.client.manifest("v0").CheckpointTimeTick)
-	assert.Equal(t, 0, idx.eng.Stats().FrozenGenerations)
-	assert.Equal(t, uint64(50), idx.lastCommittedTimeTick())
+	assert.Equal(t, 0, idx.EngineForTest().Stats().FrozenGenerations)
+	assert.Equal(t, uint64(50), idx.LastCommittedTimeTick())
 	for _, pk := range []int64{1, 2, 3} {
 		assert.EqualValues(t, 10, segmentOf(t, idx, pk))
 	}
@@ -187,14 +185,14 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 func TestHandoverRejectsAManifestThatWentBack(t *testing.T) {
 	cases := map[string]struct {
 		installed int64
-		rewrite   func(m ManifestView) ManifestView
+		rewrite   func(m index.ManifestView) index.ManifestView
 	}{
 		"version below the installed one": {installed: 100},
-		"checkpoint below the covered time tick": {rewrite: func(m ManifestView) ManifestView {
+		"checkpoint below the covered time tick": {rewrite: func(m index.ManifestView) index.ManifestView {
 			m.CheckpointTimeTick = 49
 			return m
 		}},
-		"another SST base path": {rewrite: func(m ManifestView) ManifestView {
+		"another SST base path": {rewrite: func(m index.ManifestView) index.ManifestView {
 			m.SSTBasePath = "other/sst"
 			return m
 		}},
@@ -206,20 +204,18 @@ func TestHandoverRejectsAManifestThatWentBack(t *testing.T) {
 			env.client.set(func(c *fakeClient) { c.rewrite = tc.rewrite })
 			insert(t, idx, 10, 1)
 			ch.Tick(50)
-			idx.installMu.Lock()
-			idx.installedVersion = tc.installed
-			idx.installMu.Unlock()
+			idx.SetInstalledVersionForTest(tc.installed)
 
-			p, err := idx.prepare(ctx)
+			p, err := idx.PrepareForTest(ctx)
 			require.NoError(t, err)
 			require.NotNil(t, p)
-			err = idx.commit(ctx, p)
+			err = idx.CommitForTest(ctx, p)
 			require.Error(t, err)
-			assert.True(t, errors.Is(err, ErrRejected))
-			assert.Equal(t, 0, idx.eng.Stats().CommittedTables, "nothing is installed")
-			assert.Zero(t, idx.lastCommittedTimeTick())
-			assert.Equal(t, tc.installed, idx.currentInstalledVersion())
-			assert.Equal(t, 1, idx.eng.Stats().FrozenGenerations)
+			assert.True(t, errors.Is(err, index.ErrRejected))
+			assert.Equal(t, 0, idx.EngineForTest().Stats().CommittedTables, "nothing is installed")
+			assert.Zero(t, idx.LastCommittedTimeTick())
+			assert.Equal(t, tc.installed, idx.InstalledVersionForTest())
+			assert.Equal(t, 1, idx.EngineForTest().Stats().FrozenGenerations)
 		})
 	}
 }
@@ -232,52 +228,33 @@ func TestHandoverAcceptsTheSameVersion(t *testing.T) {
 	_, ch, idx := handoverIndex(t)
 	insert(t, idx, 10, 1)
 	ch.Tick(50)
-	idx.installMu.Lock()
-	idx.installedVersion = 1
-	idx.installMu.Unlock()
+	idx.SetInstalledVersionForTest(1)
 
-	p, err := idx.prepare(ctx)
+	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, p)
-	require.NoError(t, idx.commit(ctx, p))
+	require.NoError(t, idx.CommitForTest(ctx, p))
 
-	assert.Equal(t, int64(1), idx.currentInstalledVersion())
-	assert.Equal(t, 0, idx.eng.Stats().FrozenGenerations, "the generations of the handover retire")
-	assert.Equal(t, uint64(50), idx.lastCommittedTimeTick())
+	assert.Equal(t, int64(1), idx.InstalledVersionForTest())
+	assert.Equal(t, 0, idx.EngineForTest().Stats().FrozenGenerations, "the generations of the handover retire")
+	assert.Equal(t, uint64(50), idx.LastCommittedTimeTick())
 }
 
 func TestHandoverWatermarkDidNotMove(t *testing.T) {
 	env, ch, idx := handoverIndex(t)
 	insert(t, idx, 10, 1, 2)
 	ch.Tick(30)
-	idx.lastCommitted.Store(30)
+	idx.SetLastCommittedForTest(30)
 
-	p, err := idx.prepare(context.Background())
+	p, err := idx.PrepareForTest(context.Background())
 	require.NoError(t, err)
 	assert.Nil(t, p)
 
 	assert.Equal(t, 0, env.store.Len())
-	assert.Equal(t, uint64(30), idx.lastCommittedTimeTick())
-	stats := idx.eng.Stats()
+	assert.Equal(t, uint64(30), idx.LastCommittedTimeTick())
+	stats := idx.EngineForTest().Stats()
 	assert.Equal(t, 0, stats.FrozenGenerations)
 	assert.Greater(t, stats.ActiveBytes, uint64(0))
-}
-
-func TestLinkCommittedReusesExistingLink(t *testing.T) {
-	src := filepath.Join(t.TempDir(), "staged.sst")
-	require.NoError(t, os.WriteFile(src, []byte("x"), 0o600))
-	dir := filepath.Join(t.TempDir(), "committed")
-	s := engine.StagedTable{Info: sst.Info{ID: 42}, Path: src}
-
-	p1, err := linkCommitted(dir, s)
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(dir, "42.sst"), p1)
-	p2, err := linkCommitted(dir, s)
-	require.NoError(t, err)
-	assert.Equal(t, p1, p2)
-
-	_, err = linkCommitted(dir, engine.StagedTable{Info: sst.Info{ID: 43}, Path: filepath.Join(t.TempDir(), "missing")})
-	assert.True(t, errors.Is(err, pkroot.ErrIO))
 }
 
 func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
@@ -286,17 +263,17 @@ func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
 	insert(t, idx, 10, 1)
 	ch.Tick(50)
 
-	p, err := idx.prepare(ctx)
+	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
 	old := time.Now().Add(-2 * time.Hour)
-	p.uploadedAt = old
+	p.SetUploadedAt(old)
 	env.store.FailUploads(1)
-	err = idx.commit(ctx, p)
+	err = idx.CommitForTest(ctx, p)
 	assert.True(t, errors.Is(err, pkroot.ErrIO))
 	assert.Empty(t, env.client.requestList(), "no commit after a failed re-upload")
-	assert.Equal(t, old, p.uploadedAt)
-	assert.Equal(t, 1, idx.eng.Stats().FrozenGenerations)
+	assert.Equal(t, old, p.UploadedAt())
+	assert.Equal(t, 1, idx.EngineForTest().Stats().FrozenGenerations)
 
-	require.NoError(t, idx.commit(ctx, p))
-	assert.Equal(t, uint64(50), idx.lastCommittedTimeTick())
+	require.NoError(t, idx.CommitForTest(ctx, p))
+	assert.Equal(t, uint64(50), idx.LastCommittedTimeTick())
 }

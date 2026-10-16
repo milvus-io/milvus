@@ -21,6 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -56,7 +57,7 @@ func (c *Channel) StartClaim() {
 	c.claimStarted = true
 	// The Indexes that are open now are those of the collections that existed
 	// at WAL open. Only they look up their manifests.
-	recovered := make([]*Index, 0, len(c.indexes))
+	recovered := make([]*index.Index, 0, len(c.indexes))
 	for _, idx := range c.indexes {
 		recovered = append(recovered, idx)
 	}
@@ -66,7 +67,7 @@ func (c *Channel) StartClaim() {
 
 // claim claims the pchannel for its term once, looks up the manifests of the
 // recovered indexes, and then makes the other indexes ready.
-func (c *Channel) claim(recovered []*Index) {
+func (c *Channel) claim(recovered []*index.Index) {
 	defer c.lifetime.Done()
 	ctx := c.ctx
 	committer := c.m.cfg.Committer
@@ -83,13 +84,13 @@ func (c *Channel) claim(recovered []*Index) {
 		return
 	}
 
-	lookedUp := make(map[*Index]struct{}, len(recovered))
+	lookedUp := make(map[*index.Index]struct{}, len(recovered))
 	for _, idx := range recovered {
 		lookedUp[idx] = struct{}{}
 	}
 	c.mu.Lock()
 	c.claimed = true
-	var created []*Index
+	var created []*index.Index
 	for _, idx := range c.indexes {
 		if _, ok := lookedUp[idx]; !ok {
 			created = append(created, idx)
@@ -97,7 +98,7 @@ func (c *Channel) claim(recovered []*Index) {
 	}
 	c.mu.Unlock()
 	for _, idx := range created {
-		idx.markReady(ctx, false)
+		idx.MarkReady(ctx, false)
 	}
 }
 
@@ -105,24 +106,24 @@ func (c *Channel) claim(recovered []*Index) {
 // recoveryBatch refs, and marks each Index ready with its answer. It retries
 // only the items that failed. It returns an error when ctx ends or a failure
 // is fatal.
-func (c *Channel) lookupRecovered(ctx context.Context, idxs []*Index) error {
+func (c *Channel) lookupRecovered(ctx context.Context, idxs []*index.Index) error {
 	committer := c.m.cfg.Committer
 	pending := idxs
 	return retry.Do(ctx, func() error {
-		var failed []*Index
+		var failed []*index.Index
 		var lastErr error
 		for start := 0; start < len(pending); start += recoveryBatch {
 			batch := pending[start:min(start+recoveryBatch, len(pending))]
 			refs := make([]VChannelRef, 0, len(batch))
 			for _, idx := range batch {
-				refs = append(refs, VChannelRef{CollectionID: idx.collectionID, VChannel: idx.vchannel})
+				refs = append(refs, VChannelRef{CollectionID: idx.CollectionID(), VChannel: idx.VChannel()})
 			}
 			answers, err := committer.GetRecoveryManifests(ctx, refs)
 			if err == nil && len(answers) != len(refs) {
-				err = errors.Wrapf(ErrRejected, "pchannel %s: %d manifest answers for %d vchannels", c.info.Name, len(answers), len(refs))
+				err = errors.Wrapf(index.ErrRejected, "pchannel %s: %d manifest answers for %d vchannels", c.info.Name, len(answers), len(refs))
 			}
 			if err != nil {
-				if ctx.Err() != nil || isFatal(err) {
+				if ctx.Err() != nil || index.IsFatal(err) {
 					return retry.Unrecoverable(err)
 				}
 				failed, lastErr = append(failed, batch...), err
@@ -130,10 +131,10 @@ func (c *Channel) lookupRecovered(ctx context.Context, idxs []*Index) error {
 			}
 			for i, a := range answers {
 				if a.Err == nil {
-					batch[i].markReady(ctx, a.Found)
+					batch[i].MarkReady(ctx, a.Found)
 					continue
 				}
-				if isFatal(a.Err) {
+				if index.IsFatal(a.Err) {
 					return retry.Unrecoverable(a.Err)
 				}
 				failed, lastErr = append(failed, batch[i]), a.Err
@@ -166,7 +167,7 @@ func (c *Channel) retryable(ctx context.Context, step string, items int, err err
 	if err == nil {
 		return nil
 	}
-	if ctx.Err() != nil || isFatal(err) {
+	if ctx.Err() != nil || index.IsFatal(err) {
 		return retry.Unrecoverable(err)
 	}
 	c.logger.Warn(ctx, "primary key index manifest call failed, retry later",
