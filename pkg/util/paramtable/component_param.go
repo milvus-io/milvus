@@ -56,6 +56,15 @@ const (
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
+
+	DefaultMaxDegree                = 56
+	DefaultSearchListSize           = 100
+	DefaultPQCodeBudgetGBRatio      = 0.125
+	DefaultBuildNumThreadsRatio     = 1.0
+	DefaultSearchCacheBudgetGBRatio = 0.10
+	DefaultLoadNumThreadRatio       = 8.0
+	DefaultBeamWidthRatio           = 4.0
+	MaxClusterIDBits                = 3
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
