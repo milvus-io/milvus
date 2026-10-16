@@ -135,6 +135,9 @@ func (e *Executor) Close() {
 	}
 }
 
+// errInvalidRequest marks a malformed compaction request.
+var errInvalidRequest = errors.New("invalid pkindex compaction request")
+
 // Create starts a task. A request whose task id is already here replaces the
 // earlier attempt: the coordinator sent it again with new output ids. It
 // returns an error marked pkindex.ErrUnavailable when the local disk has no
@@ -142,7 +145,7 @@ func (e *Executor) Close() {
 // another node later; a malformed request returns an unmarked error.
 func (e *Executor) Create(ctx context.Context, req *pkindexpb.CompactionRequest) error {
 	if len(req.GetInputs()) == 0 || req.GetOutputIdEnd() <= req.GetOutputIdBegin() || req.GetTargetFileSize() <= 0 || req.GetSstBasePath() == "" {
-		return errors.Newf("invalid compaction request %d: %d inputs, output ids [%d, %d), target file size %d, base path %q",
+		return errors.Wrapf(errInvalidRequest, "task %d: %d inputs, output ids [%d, %d), target file size %d, base path %q",
 			req.GetTaskId(), len(req.GetInputs()), req.GetOutputIdBegin(), req.GetOutputIdEnd(), req.GetTargetFileSize(), req.GetSstBasePath())
 	}
 	var inputBytes int64
@@ -225,7 +228,7 @@ func (e *Executor) Query(taskID int64) (state taskcommon.State, reason string, r
 		return taskcommon.None, "", nil, false
 	}
 	t.lastQueried.Store(e.now().UnixNano())
-	state, err, outputs := t.getState()
+	state, outputs, err := t.getState()
 	result = &pkindexpb.CompactionResult{EntriesProcessed: t.processed.Load()}
 	switch state {
 	case taskcommon.Finished:
