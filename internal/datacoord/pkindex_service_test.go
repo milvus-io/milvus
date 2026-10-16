@@ -32,7 +32,6 @@ import (
 	pkindexservice "github.com/milvus-io/milvus/internal/datacoord/pkindex/service"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -111,13 +110,13 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	s := chunkManagerStore{cm: cm}
 	root := cm.RootPath()
 
-	_, err := s.Read(ctx, objpath.ManifestBodyKey(objpath.ManifestDir(root, 1, "ch_v0"), 1, "n"))
+	_, err := s.Read(ctx, pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, "ch_v0"), 1, "n"))
 	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 
 	written := []string{
-		objpath.ManifestBodyKey(objpath.ManifestDir(root, 1, "ch_v0"), 1, "n1"),
-		objpath.ManifestBodyKey(objpath.ManifestDir(root, 1, "ch_v0"), 2, "n2"),
-		objpath.SSTKey(objpath.SSTBasePath(root, 1, "ch_v0"), 7),
+		pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, "ch_v0"), 1, "n1"),
+		pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, "ch_v0"), 2, "n2"),
+		pkindex.SSTKey(pkindex.SSTBasePath(root, 1, "ch_v0"), 7),
 	}
 	for _, key := range written {
 		require.NoError(t, s.Write(ctx, key, []byte(key)))
@@ -127,7 +126,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	assert.Equal(t, []byte(written[0]), b)
 
 	var walked []string
-	require.NoError(t, s.Walk(ctx, objpath.ManifestDir(root, 1, "ch_v0")+"/", func(key string, _ time.Time) bool {
+	require.NoError(t, s.Walk(ctx, pkindex.ManifestDir(root, 1, "ch_v0")+"/", func(key string, _ time.Time) bool {
 		walked = append(walked, key)
 		return true
 	}))
@@ -135,7 +134,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	assert.Equal(t, written[:2], walked)
 
 	walked = nil
-	require.NoError(t, s.Walk(ctx, objpath.SSTBasePath(root, 1, "ch_v0")+"/", func(key string, _ time.Time) bool {
+	require.NoError(t, s.Walk(ctx, pkindex.SSTBasePath(root, 1, "ch_v0")+"/", func(key string, _ time.Time) bool {
 		walked = append(walked, key)
 		return true
 	}))

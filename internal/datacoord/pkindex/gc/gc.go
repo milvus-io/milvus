@@ -29,7 +29,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 )
@@ -153,7 +152,7 @@ func (g *GC) RunOnce(ctx context.Context) error {
 // outputs, then the pointer and the current body, then the other manifest
 // bodies, then the SSTs. It deletes nothing when the current body key is not
 // directly under the manifest dir of the vchannel or the current
-// sst_base_path is not the SST base path of the vchannel (see objpath). It
+// sst_base_path is not the SST base path of the vchannel (see pkindex.SSTBasePath). It
 // deletes the bodies outside the retention, and, when every
 // retained body could be read, the SSTs older than Grace that are neither
 // referenced by a retained body nor an in-flight output.
@@ -172,8 +171,8 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 	if err != nil || cur == nil {
 		return err
 	}
-	dir := objpath.ManifestDir(g.rootPath, collectionID, vchannel)
-	if _, ok := objpath.ParseManifestBodyKey(dir, curKey); !ok || cur.GetSstBasePath() != objpath.SSTBasePath(g.rootPath, collectionID, vchannel) {
+	dir := pkindex.ManifestDir(g.rootPath, collectionID, vchannel)
+	if _, ok := pkindex.ParseManifestBodyKey(dir, curKey); !ok || cur.GetSstBasePath() != pkindex.SSTBasePath(g.rootPath, collectionID, vchannel) {
 		mlog.Warn(ctx, "pkindex gc skips vchannel whose manifest does not match the layout",
 			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel),
 			mlog.String("bodyKey", curKey), mlog.String("sstBasePath", cur.GetSstBasePath()))
@@ -184,7 +183,7 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 	minKept := cur.GetVersion() - int64(g.cfg.RetainVersions) + 1
 	var kept, drop []string
 	err = g.store.Walk(ctx, dir+"/", func(key string, mod time.Time) bool {
-		version, ok := objpath.ParseManifestBodyKey(dir, key)
+		version, ok := pkindex.ParseManifestBodyKey(dir, key)
 		if !ok || key == curKey {
 			return true
 		}
@@ -215,7 +214,7 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 	} else {
 		base := cur.GetSstBasePath()
 		err = g.store.Walk(ctx, base+"/", func(key string, mod time.Time) bool {
-			id, ok := objpath.ParseSSTKey(base, key)
+			id, ok := pkindex.ParseSSTKey(base, key)
 			if !ok {
 				return true
 			}

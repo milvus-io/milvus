@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
@@ -76,7 +75,7 @@ func (e *env) claim(t *testing.T, vchannel string) {
 }
 
 func sstKey(vchannel string, id int64) string {
-	return objpath.SSTKey(objpath.SSTBasePath(testRoot, 1, vchannel), id)
+	return pkindex.SSTKey(pkindex.SSTBasePath(testRoot, 1, vchannel), id)
 }
 
 func refs(ids ...int64) []*pkindexpb.SSTRef {
@@ -113,7 +112,7 @@ func (e *env) has(key string) bool {
 // bodies returns the manifest body keys of a vchannel.
 func (e *env) bodies(t *testing.T, vchannel string) []string {
 	keys := []string{}
-	err := e.store.Walk(context.Background(), objpath.ManifestDir(testRoot, 1, vchannel)+"/", func(k string, _ time.Time) bool {
+	err := e.store.Walk(context.Background(), pkindex.ManifestDir(testRoot, 1, vchannel)+"/", func(k string, _ time.Time) bool {
 		keys = append(keys, k)
 		return true
 	})
@@ -207,7 +206,7 @@ func TestBodyRetentionKeepsRecentBodies(t *testing.T) {
 	require.NoError(t, e.gc.RunOnce(ctx))
 	got := map[int64]bool{}
 	for _, k := range e.bodies(t, "v") {
-		v, ok := objpath.ParseManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), k)
+		v, ok := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), k)
 		require.True(t, ok)
 		got[v] = true
 	}
@@ -220,7 +219,7 @@ func TestKeepsCASLosersWithinRetainedVersions(t *testing.T) {
 	e.claim(t, "v")
 	e.flush(t, "v", 10, 1)
 	e.upload(t, "v", 9)
-	loser := objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), 2, "loser")
+	loser := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "loser")
 	e.writeBody(t, loser, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
 	e.now = e.now.Add(3 * time.Hour)
 
@@ -268,10 +267,10 @@ func TestOrphanBodyAfterGrace(t *testing.T) {
 	e.claim(t, "v")
 	e.upload(t, "v", 9, 10)
 	// bodies of commits that never swapped the pointer
-	oldOrphan := objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), 2, "old")
+	oldOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "old")
 	e.writeBody(t, oldOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
 	e.now = e.now.Add(2 * time.Hour)
-	youngOrphan := objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), 2, "young")
+	youngOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "young")
 	e.writeBody(t, youngOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(10)})
 	e.now = e.now.Add(10 * time.Minute)
 
@@ -354,7 +353,7 @@ func TestUndecodableRetainedBodySkipsSSTSweep(t *testing.T) {
 	e.upload(t, "v", 1, 2, 9)
 	var v1, v2 string
 	for _, k := range e.bodies(t, "v") {
-		switch v, _ := objpath.ParseManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), k); v {
+		switch v, _ := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), k); v {
 		case 1:
 			v1 = k
 		case 2:
@@ -375,10 +374,10 @@ func TestForeignObjectsAreKept(t *testing.T) {
 	ctx := context.Background()
 	e.claim(t, "v")
 	foreign := []string{
-		objpath.SSTBasePath(testRoot, 1, "v") + "/x.tmp",
-		objpath.SSTBasePath(testRoot, 1, "v") + "/sub/7.sst",
-		objpath.ManifestDir(testRoot, 1, "v") + "/x.tmp",
-		objpath.ManifestDir(testRoot, 1, "v") + "/1.pb",
+		pkindex.SSTBasePath(testRoot, 1, "v") + "/x.tmp",
+		pkindex.SSTBasePath(testRoot, 1, "v") + "/sub/7.sst",
+		pkindex.ManifestDir(testRoot, 1, "v") + "/x.tmp",
+		pkindex.ManifestDir(testRoot, 1, "v") + "/1.pb",
 	}
 	for _, k := range foreign {
 		require.NoError(t, e.store.Write(ctx, k, []byte("x")))
@@ -480,15 +479,15 @@ func TestLayoutMismatchSkipsVChannel(t *testing.T) {
 	// or sst_base_path is not the layout's
 	cases := map[string]func(m *pkindexpb.Manifest) string{
 		"body key outside the manifest dir": func(m *pkindexpb.Manifest) string {
-			return objpath.ManifestDir(testRoot, 1, "other") + "/" + "9-x.pb"
+			return pkindex.ManifestDir(testRoot, 1, "other") + "/" + "9-x.pb"
 		},
 		"sst base path differs": func(m *pkindexpb.Manifest) string {
-			m.SstBasePath = objpath.SSTBasePath(testRoot, 1, "other")
-			return objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "bad"), m.GetVersion(), "x")
+			m.SstBasePath = pkindex.SSTBasePath(testRoot, 1, "other")
+			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "bad"), m.GetVersion(), "x")
 		},
 		"empty sst base path": func(m *pkindexpb.Manifest) string {
 			m.SstBasePath = ""
-			return objpath.ManifestBodyKey(objpath.ManifestDir(testRoot, 1, "bad"), m.GetVersion(), "x")
+			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "bad"), m.GetVersion(), "x")
 		},
 	}
 	for name, change := range cases {
@@ -588,7 +587,7 @@ func TestRetainedBodyReadFailureSkipsSSTSweep(t *testing.T) {
 	e.upload(t, "v", 1, 2, 9)
 	var v1, v2 string
 	for _, k := range e.bodies(t, "v") {
-		switch v, _ := objpath.ParseManifestBodyKey(objpath.ManifestDir(testRoot, 1, "v"), k); v {
+		switch v, _ := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), k); v {
 		case 1:
 			v1 = k
 		case 2:

@@ -29,7 +29,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/objpath"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -158,7 +157,7 @@ func (m *Manager) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushReq
 	if err != nil {
 		return nil, err
 	}
-	sstBasePath := objpath.SSTBasePath(m.rootPath, req.GetCollectionId(), req.GetVchannel())
+	sstBasePath := pkindex.SSTBasePath(m.rootPath, req.GetCollectionId(), req.GetVchannel())
 	return m.commit(ctx, req.GetCollectionId(), req.GetVchannel(), cp, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error) {
 		return applyFlush(cur, req, sstBasePath)
 	})
@@ -245,7 +244,7 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 		return curManifest, nil
 	}
 
-	bodyKey := objpath.ManifestBodyKey(objpath.ManifestDir(m.rootPath, collectionID, vchannel), next.GetVersion(), uuid.NewString())
+	bodyKey := pkindex.ManifestBodyKey(pkindex.ManifestDir(m.rootPath, collectionID, vchannel), next.GetVersion(), uuid.NewString())
 	body, err := marshal.Marshal(next)
 	if err != nil {
 		return nil, errors.Wrapf(err, "marshal manifest of %s", vchannel)
