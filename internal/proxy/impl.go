@@ -2776,8 +2776,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	)
 
 	err = qt.WaitToFinish()
-	if ctx.Err() == nil {
-	}
 	if err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
@@ -2993,8 +2991,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	)
 
 	waitErr := qt.WaitToFinish()
-	if ctx.Err() == nil {
-	}
 	if waitErr != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
