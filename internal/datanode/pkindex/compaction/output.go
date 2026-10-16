@@ -34,7 +34,8 @@ import (
 var errOutputIDsExhausted = errors.New("pkindex compaction ran out of output ids")
 
 // splitOutput writes the merged entries to tables of about maxBytes on disk
-// each (the estimated size after compression), with IDs from [nextID, endID)
+// each (the estimated size: the pending data block is counted before
+// compression and the filter block is not counted), with IDs from [nextID, endID)
 // in order. onClose is called with each table as it is closed, before the
 // next one opens. When onClose fails, the table is already closed and may be
 // uploaded; the caller abandons the whole output and the GC collects the
@@ -116,7 +117,7 @@ func (o *splitOutput) Abort() {
 // queue has room for one table, so the merge is at most one table ahead of
 // the upload. The first failure is kept and later tables are skipped. Call
 // finish exactly once on every path, success or error, or the goroutine
-// leaks.
+// leaks. It is not safe for concurrent calls of enqueue and finish.
 type uploader struct {
 	ctx      context.Context
 	ch       chan sst.Info
