@@ -188,7 +188,7 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 	for i := range vchannels {
 		i := i
 		g.Go(func() error {
-			stream, plan, err := c.shardClient.SearchStream(ctx, vchannels[i], req.Req, c.reduceStreamChunkBytes)
+			stream, plan, err := c.shardClient.SearchStream(ctx, vchannels[i], req, c.reduceStreamChunkBytes)
 			if err != nil {
 				return err
 			}
@@ -289,7 +289,7 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest)
 	for i := range vchannels {
 		i := i
 		group.Go(func() error {
-			stream, plan, err := c.shardClient.QueryStream(ctx, vchannels[i], req.Req, req.Schema, c.reduceStreamChunkBytes)
+			stream, plan, err := c.shardClient.QueryStream(ctx, vchannels[i], req, c.reduceStreamChunkBytes)
 			if err != nil {
 				return err
 			}
