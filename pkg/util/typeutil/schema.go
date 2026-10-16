@@ -854,9 +854,16 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 					Int8Vector: make([]byte, 0, topK*dim),
 				}
 			case *schemapb.VectorField_VectorArray:
+				// Sealed segments may leave VectorArray.dim unset and only fill the
+				// enclosing VectorField.dim. An empty page has no rows for the client
+				// to infer the dim from, so fall back to the enclosing dim.
+				arrayDim := vectorField.GetVectorArray().GetDim()
+				if arrayDim == 0 {
+					arrayDim = dim
+				}
 				vectors.Vectors.Data = &schemapb.VectorField_VectorArray{
 					VectorArray: &schemapb.VectorArray{
-						Dim:         vectorField.GetVectorArray().GetDim(),
+						Dim:         arrayDim,
 						ElementType: vectorField.GetVectorArray().GetElementType(),
 						Data:        make([]*schemapb.VectorField, 0, topK),
 					},

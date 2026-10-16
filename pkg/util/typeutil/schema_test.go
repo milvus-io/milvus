@@ -2705,6 +2705,35 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 		s.Equal(schemapb.DataType_FloatVector, vectorArray.GetElementType())
 		s.Empty(vectorArray.GetData())
 	})
+
+	// Sealed segments may only set the enclosing VectorField.dim.
+	s.Run("vector_array_falls_back_to_enclosing_dim", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_ArrayOfVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 128,
+						Data: &schemapb.VectorField_VectorArray{
+							VectorArray: &schemapb.VectorArray{
+								ElementType: schemapb.DataType_FloatVector,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, 0)
+		s.Require().Len(fields, 1)
+		vectorArray := fields[0].GetVectors().GetVectorArray()
+		s.Require().NotNil(vectorArray)
+		s.EqualValues(128, vectorArray.GetDim())
+		s.Equal(schemapb.DataType_FloatVector, vectorArray.GetElementType())
+		s.Empty(vectorArray.GetData())
+	})
 }
 
 func TestFieldData(t *testing.T) {
