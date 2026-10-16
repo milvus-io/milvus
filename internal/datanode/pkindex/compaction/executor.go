@@ -37,7 +37,9 @@ import (
 // Executor runs the compaction tasks of this node. It owns the task
 // directories under Config.LocalRoot: it creates them, and it deletes them
 // when a task is dropped, deleted after its TTL, or found at start. A task
-// reports Finished only after every output is uploaded.
+// reports Finished only after every output is uploaded. The executor deletes
+// LocalRoot before its first task runs: nothing of this process has written
+// there before, so that removes exactly the leftovers of an earlier process.
 //
 // Create returns at once. At most Config.Parallelism tasks run; the others
 // wait for a free worker and stay InProgress. A waiting task holds a slot
@@ -61,17 +63,14 @@ type Executor struct {
 	mu     sync.Mutex
 	tasks  map[int64]*task
 	closed bool
+	// rootReady is true once prepareRoot has succeeded.
+	rootReady bool
 }
 
-// New returns an executor with an empty Config.LocalRoot. Call Start to run
-// the deletion of unqueried terminal tasks.
+// New returns an executor. It does not touch the file system: the first Create
+// prepares Config.LocalRoot. Call Start to run the deletion of unqueried
+// terminal tasks.
 func New(ctx context.Context, cfg Config, store Store) (*Executor, error) {
-	if err := os.RemoveAll(cfg.LocalRoot); err != nil {
-		return nil, pkindex.MarkIO(err, "clear %s", cfg.LocalRoot)
-	}
-	if err := os.MkdirAll(cfg.LocalRoot, 0o755); err != nil {
-		return nil, pkindex.MarkIO(err, "create %s", cfg.LocalRoot)
-	}
 	if cfg.TerminalTaskTTL <= 0 {
 		mlog.Warn(ctx, "pkindex compaction terminal task ttl is not positive, using one minute", mlog.Duration("ttl", cfg.TerminalTaskTTL))
 		cfg.TerminalTaskTTL = time.Minute
@@ -152,6 +151,9 @@ func (e *Executor) Create(ctx context.Context, req *pkindexpb.CompactionRequest)
 	for _, s := range req.GetInputs() {
 		inputBytes += s.GetSize()
 	}
+	if err := e.prepareRoot(); err != nil {
+		return err
+	}
 	if err := e.admitDisk(inputBytes); err != nil {
 		return err
 	}
@@ -199,6 +201,24 @@ func (e *Executor) Create(ctx context.Context, req *pkindexpb.CompactionRequest)
 				mlog.Int64("entries", t.processed.Load()), mlog.Duration("elapsed", time.Since(start)))
 		}
 	}()
+	return nil
+}
+
+// prepareRoot empties and creates Config.LocalRoot on the first successful
+// call. A failure is not remembered, so the next Create tries again.
+func (e *Executor) prepareRoot() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.rootReady {
+		return nil
+	}
+	if err := os.RemoveAll(e.cfg.LocalRoot); err != nil {
+		return pkindex.MarkIO(err, "clear %s", e.cfg.LocalRoot)
+	}
+	if err := os.MkdirAll(e.cfg.LocalRoot, 0o755); err != nil {
+		return pkindex.MarkIO(err, "create %s", e.cfg.LocalRoot)
+	}
+	e.rootReady = true
 	return nil
 }
 
