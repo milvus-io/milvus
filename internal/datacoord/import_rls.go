@@ -61,31 +61,27 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 	if err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties")
 	}
-	force, err := common.IsRLSForce(properties...)
+	mode, err := common.GetRLSMode(properties...)
 	if err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties")
 	}
-	if !enabled {
-		return nil, nil
-	}
-	if !paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
+	if enabled && !paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
 		return nil, merr.WrapErrImportSysFailed(
 			"RLS import enforcement is unavailable until the cluster upgrade completes")
 	}
-	if in.GetSkipRls() {
-		if force {
-			return nil, merr.WrapErrPrivilegeNotPermitted(
-				"import operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
-				in.GetSchema().GetName())
-		}
+	principalName, enforceRLS, err := rlsutil.ResolveEnforcement(enabled, in.GetRlsPrincipal(), in.GetSkipRls(), mode, in.GetSchema().GetName(), "import", func() error {
+		// Proxy has already authorized the internal skip flag.
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !enforceRLS {
 		return nil, nil
 	}
 	if importutilv2.IsL0Import(in.GetOptions()) {
-		return nil, merr.WrapErrOperationNotSupportedMsg("RLS-protected L0 import is not supported")
-	}
-	principalName, _, err := rlsutil.ResolveRuntimePrincipal(true, in.GetRlsPrincipal(), "import")
-	if err != nil {
-		return nil, err
+		// L0 delete logs contain no full rows to check; fail before creating a runnable job.
+		return nil, merr.WrapErrPrivilegeNotPermitted("import operation denied by RLS: L0 import requires an authorized skip_rls=true; skip_rls is not allowed when rls.mode is Force")
 	}
 	if s.mixCoord == nil {
 		return nil, merr.WrapErrServiceUnavailable("mixcoord is unavailable")

@@ -1284,11 +1284,16 @@ func TestCatalog_AlterCollectionDB(t *testing.T) {
 		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 10}
 		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 11}
 		policy := &model.RLSPolicy{DBID: 10, CollectionID: collectionID, PolicyID: 100, PolicyName: "policy"}
-		principal := &model.RLSPrincipal{DBID: 10, CollectionID: collectionID, PrincipalName: "alice"}
+		principal := &model.RLSPrincipal{DBID: 10, CollectionID: collectionID, PrincipalName: "alice", Tags: map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")}}
 
 		require.NoError(t, catalog.SaveRLSPolicy(ctx, policy))
-		require.NoError(t, catalog.SaveRLSPrincipal(ctx, principal))
+		count, err := catalog.SaveRLSPrincipal(ctx, principal)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), count)
 		require.NoError(t, catalog.AlterCollectionDB(ctx, oldC, newC, 0))
+		count, err = catalog.GetRLSPrincipalCount(ctx, collectionID)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), count)
 
 		policies, err := catalog.ListRLSPolicies(ctx, collectionID)
 		require.NoError(t, err)
@@ -1707,7 +1712,9 @@ func TestCatalog_RLSMetadata(t *testing.T) {
 			"score": rlsutil.NewDoubleTagValue(0.75),
 		},
 	}
-	require.NoError(t, catalog.SaveRLSPrincipal(ctx, principal))
+	count, err := catalog.SaveRLSPrincipal(ctx, principal)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
 
 	principalKey := buildRLSPrincipalKey(20, principal.PrincipalName)
 	assert.Equal(t, RLSPrincipalMetaPrefix+"/20/team%2Fa%20user", principalKey)
@@ -1735,7 +1742,9 @@ func TestCatalog_RLSMetadata(t *testing.T) {
 	require.Len(t, principals, 1)
 	assert.Equal(t, principal.Tags, principals[0].Tags)
 
-	require.NoError(t, catalog.DropRLSPrincipal(ctx, 20, principal.PrincipalName))
+	count, err = catalog.DropRLSPrincipal(ctx, 20, principal.PrincipalName)
+	require.NoError(t, err)
+	require.Zero(t, count)
 	_, err = catalog.GetRLSPrincipal(ctx, 20, principal.PrincipalName)
 	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 }
@@ -1749,7 +1758,8 @@ func TestCatalog_ListRLSPrincipalsLimits(t *testing.T) {
 		{CollectionID: 20, PrincipalName: "bob", Tags: map[string]rlsutil.TagValue{"level": rlsutil.NewInt64TagValue(3)}},
 	}
 	for _, principal := range principals {
-		require.NoError(t, catalog.SaveRLSPrincipal(ctx, principal))
+		_, err := catalog.SaveRLSPrincipal(ctx, principal)
+		require.NoError(t, err)
 	}
 
 	params := paramtable.Get()

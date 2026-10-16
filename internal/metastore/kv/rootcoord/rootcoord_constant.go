@@ -61,7 +61,8 @@ const (
 	RLSPolicyMetaPrefix = ComponentPrefix + "/rls/policy"
 
 	// RLSPrincipalMetaPrefix prefix for row-level security principals
-	RLSPrincipalMetaPrefix = ComponentPrefix + "/rls/principal"
+	RLSPrincipalMetaPrefix  = ComponentPrefix + "/rls/principal"
+	RLSPrincipalCountPrefix = ComponentPrefix + "/rls/principal-count"
 
 	// FileResourceMetaPrefix prefix for file resource meta
 	FileResourceMetaPrefix = ComponentPrefix + "/file_resource_info"
@@ -101,6 +102,10 @@ func BuildRLSPolicyKey(collectionID int64, policyID int64) string {
 
 func BuildRLSPrincipalPrefix(collectionID int64) string {
 	return fmt.Sprintf("%s/%d/", RLSPrincipalMetaPrefix, collectionID)
+}
+
+func BuildRLSPrincipalCountKey(collectionID int64) string {
+	return fmt.Sprintf("%s/%d", RLSPrincipalCountPrefix, collectionID)
 }
 
 // Legacy snapshot utilities — kept for migration tool compatibility only.

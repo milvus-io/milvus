@@ -771,6 +771,67 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSDenialCreatesFailedJ
 	s.Equal("1000", resp.GetJobID())
 }
 
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0RLSCheckFailureAndSkip() {
+	gate := &paramtable.Get().DataCoordCfg.EnableL0Import
+	oldGate := gate.SwapTempValue("true")
+	s.T().Cleanup(func() { gate.SwapTempValue(oldGate) })
+
+	for _, test := range []struct {
+		name string
+		skip bool
+	}{
+		{name: "check failure"},
+		{name: "authorized skip", skip: true},
+	} {
+		s.Run(test.name, func() {
+			mockHandler := NewNMockHandler(s.T())
+			mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+				ID: 100, VChannelNames: []string{"v1"},
+			}, nil).Once()
+			var savedJob ImportJob
+			importMeta := NewMockImportMeta(s.T())
+			importMeta.EXPECT().AddJob(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, job ImportJob) error {
+				savedJob = job
+				return nil
+			}).Once()
+			allocator := allocator.NewMockAllocator(s.T())
+			allocator.EXPECT().AllocN(int64(2)).Return(int64(1000), int64(1002), nil).Once()
+			server := &Server{handler: mockHandler, importMeta: importMeta, allocator: allocator}
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			resp, err := server.createImportJobFromAck(context.Background(), &internalpb.ImportRequestInternal{
+				CollectionID:   100,
+				CollectionName: "test_collection",
+				PartitionIDs:   []int64{1},
+				ChannelNames:   []string{"v1"},
+				Schema: &schemapb.CollectionSchema{
+					Name: "test_collection",
+					Properties: []*commonpb.KeyValuePair{
+						{Key: common.RLSEnabledKey, Value: "true"},
+						{Key: common.RLSModeKey, Value: "ExplicitSkip"},
+					},
+				},
+				Files:        []*internalpb.ImportFile{{Paths: []string{"/test/deltalog"}}},
+				Options:      []*commonpb.KeyValuePair{{Key: "l0_import", Value: "true"}},
+				RlsPrincipal: "alice",
+				SkipRls:      test.skip,
+			}, false)
+			s.Require().NoError(err)
+			s.Require().NoError(merr.Error(resp.GetStatus()))
+			s.Equal("1000", resp.GetJobID())
+			s.Require().NotNil(savedJob)
+			s.Nil(savedJob.GetRlsCheckPredicate())
+			if test.skip {
+				s.Equal(internalpb.ImportJobState_Pending, savedJob.GetState())
+				s.Empty(savedJob.GetReason())
+			} else {
+				s.Equal(internalpb.ImportJobState_Failed, savedJob.GetState())
+				s.Contains(savedJob.GetReason(), "L0 import requires an authorized skip_rls=true")
+				s.NotEqual(uint64(math.MaxUint64), savedJob.GetCleanupTs())
+			}
+		})
+	}
+}
+
 func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSVersionGateCreatesFailedJob() {
 	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
 	oldGate := gate.SwapTempValue("false")

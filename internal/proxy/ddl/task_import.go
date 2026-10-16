@@ -131,22 +131,20 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 
 	rlsEnabled := colInfo.RlsEnabled
 	// Keep this before skip authorization: an old DataCoord cannot re-check a
-	// concurrent rls.force transition before it creates the import job.
+	// concurrent rls.mode transition before it creates the import job.
 	if rlsEnabled && !paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
 		return merr.WrapErrServiceUnavailable("RLS import enforcement is unavailable until the cluster upgrade completes")
 	}
-	if rlsEnabled && requestedSkipRLS {
-		rlsEnabled, err = node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, requestedSkipRLS,
-			canonicalDBName, canonicalCollectionName, "import")
-		if err != nil {
-			return err
-		}
-		it.skipRLS = !rlsEnabled
-	}
-	it.rlsPrincipal, _, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, rlsPrincipal, "import")
+	_, _, err = rlsutil.ResolveEnforcement(rlsEnabled, rlsPrincipal, requestedSkipRLS, colInfo.RlsMode, canonicalCollectionName, "import", func() error {
+		err := node.CheckSkipRLSPrivilege(ctx, it.GetMetaCache(), canonicalDBName, canonicalCollectionName, "import")
+		it.skipRLS = err == nil
+		return err
+	})
 	if err != nil {
 		return err
 	}
+	// Preserve the caller's identity for Coord's ordered mode/enable recheck.
+	it.rlsPrincipal = rlsPrincipal
 
 	schema := colInfo.Schema
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {

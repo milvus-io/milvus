@@ -22,11 +22,14 @@ import (
 	"path"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"golang.org/x/exp/maps"
 
 	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -710,6 +713,57 @@ func TestEmbedEtcd(te *testing.T) {
 		success, err = metaKv.CompareVersionAndSwapBytes(context.TODO(), "a/b/c", 0, []byte("1"))
 		assert.NoError(t, err)
 		assert.False(t, success)
+	})
+
+	te.Run("WalkKeysWithPrefixSnapshot", func(t *testing.T) {
+		ctx := context.Background()
+		const requestTimeout = 2 * time.Second
+		oldTimeout := param.EtcdCfg.RequestTimeout.SwapTempValue("2000")
+		t.Cleanup(func() { param.EtcdCfg.RequestTimeout.SwapTempValue(oldTimeout) })
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory("/etcd/test/keys", &param.EtcdCfg)
+		require.NoError(t, err)
+		defer metaKv.Close()
+		cfg, err := embed.ConfigFromFile(param.EtcdCfg.ConfigPath.GetValue())
+		require.NoError(t, err)
+		client, err := clientv3.New(clientv3.Config{Endpoints: []string{cfg.AdvertiseClientUrls[0].String()}, DialTimeout: 5 * time.Second})
+		require.NoError(t, err)
+		defer client.Close()
+		for name, backend := range map[string]kv.MetaKv{
+			"embedded": metaKv,
+			"client":   embed_etcd_kv.NewEtcdKV(client, "/etcd/test/client-keys", embed_etcd_kv.WithRequestTimeout(requestTimeout)),
+		} {
+			t.Run(name, func(t *testing.T) {
+				defer backend.RemoveWithPrefix(ctx, "")
+				walker := backend.(interface {
+					WalkKeysWithPrefix(context.Context, string, int, func([]byte) error) error
+				})
+				require.NoError(t, backend.MultiSave(ctx, map[string]string{"names/a": "tags", "names/c": "tags", "names2/x": "other"}))
+				var keys []string
+				require.NoError(t, walker.WalkKeysWithPrefix(ctx, "names/", 1, func(key []byte) error {
+					keys = append(keys, string(key))
+					if len(keys) == 1 {
+						require.NoError(t, backend.MultiSaveAndRemove(ctx, map[string]string{"names/b": "tags"}, []string{"names/c"}))
+						// Later pages must get a fresh timeout without losing the snapshot.
+						time.Sleep(requestTimeout + 100*time.Millisecond)
+					}
+					return nil
+				}))
+				require.Equal(t, []string{backend.GetPath("names/a"), backend.GetPath("names/c")}, keys)
+				err := walker.WalkKeysWithPrefix(ctx, "names/", 1, func([]byte) error { return context.Canceled })
+				require.ErrorIs(t, err, context.Canceled)
+
+				canceled, cancel := context.WithCancel(ctx)
+				defer cancel()
+				visited := 0
+				err = walker.WalkKeysWithPrefix(canceled, "names/", 1, func([]byte) error {
+					visited++
+					cancel()
+					return nil
+				})
+				require.Error(t, err)
+				require.Equal(t, 1, visited)
+			})
+		}
 	})
 
 	te.Run("Etcd WalkWithPagination", func(t *testing.T) {

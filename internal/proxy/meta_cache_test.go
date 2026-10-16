@@ -29,6 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1102,7 +1103,7 @@ func TestMetaCache_RLSProperties(t *testing.T) {
 		},
 		Properties: []*commonpb.KeyValuePair{
 			{Key: common.RLSEnabledKey, Value: "true"},
-			{Key: common.RLSForceKey, Value: "true"},
+			{Key: common.RLSModeKey, Value: "Force"},
 		},
 	}, nil).Once()
 
@@ -1111,7 +1112,33 @@ func TestMetaCache_RLSProperties(t *testing.T) {
 	info, err := cache.GetCollectionInfo(ctx, "default", "rls_collection", 0)
 	assert.NoError(t, err)
 	assert.True(t, info.RlsEnabled)
-	assert.True(t, info.RlsForce)
+	assert.Equal(t, common.RLSModeForce, info.RlsMode)
+	for _, mode := range []struct {
+		value string
+		want  common.RLSMode
+	}{
+		{"ExplicitSkip", common.RLSModeExplicitSkip},
+		{"AutoSkip", common.RLSModeAutoSkip},
+		{"Force", common.RLSModeForce},
+		{"", common.RLSModeAutoSkip},
+	} {
+		properties := []*commonpb.KeyValuePair{
+			{Key: common.RLSEnabledKey, Value: "true"},
+			{Key: "rls.force", Value: "true"},
+		}
+		if mode.value != "" {
+			properties = append(properties, &commonpb.KeyValuePair{Key: common.RLSModeKey, Value: mode.value})
+		}
+		rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(), CollectionID: 100, DbName: "default",
+			Schema: &schemapb.CollectionSchema{Name: "rls_collection"}, Properties: properties,
+		}, nil).Once()
+		cache.RemoveCollectionsByID(ctx, 100)
+		info, err = cache.GetCollectionInfo(ctx, "default", "rls_collection", 0)
+		require.NoError(t, err)
+		assert.True(t, info.RlsEnabled)
+		assert.Equal(t, mode.want, info.RlsMode)
+	}
 }
 
 func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {

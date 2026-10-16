@@ -18,6 +18,7 @@ package rlsutil
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -26,10 +27,64 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestResolveEnforcement(t *testing.T) {
+	for _, mode := range []common.RLSMode{common.RLSModeAutoSkip, common.RLSModeExplicitSkip, common.RLSModeForce} {
+		for principalIndex, principal := range []string{"", "alice", " \t ", strings.Repeat("a", MaxTransportIdentifierLength+1)} {
+			for _, enabled := range []bool{false, true} {
+				for _, skip := range []bool{false, true} {
+					for _, authorizationErr := range []error{nil, merr.ErrPrivilegeNotPermitted, merr.ErrServiceUnavailable} {
+						name := fmt.Sprintf("mode=%d/principal-case=%d/enabled=%t/skip=%t/auth=%v", mode, principalIndex, enabled, skip, authorizationErr)
+						t.Run(name, func(t *testing.T) {
+							calls := 0
+							gotPrincipal, enforce, err := ResolveEnforcement(enabled, principal, skip, mode, "coll", "query", func() error {
+								calls++
+								return authorizationErr
+							})
+							wantCalls := 0
+							var wantErr error
+							wantPrincipal := ""
+							wantEnforce := false
+							// Reproduce the pre-refactor composition, including validation
+							// order and exact errors, as the behavior-preservation oracle.
+							previousEnabled := enabled && !(mode == common.RLSModeAutoSkip && principal == "" && !skip)
+							if previousEnabled && skip {
+								if mode == common.RLSModeForce {
+									wantErr = merr.WrapErrPrivilegeNotPermitted("query operation denied by RLS: skip_rls is not allowed when rls.mode is Force on collection coll")
+								} else {
+									wantCalls = 1
+									wantErr = authorizationErr
+								}
+								previousEnabled = false
+							}
+							if wantErr == nil {
+								wantPrincipal, wantEnforce, wantErr = ResolveRuntimePrincipal(previousEnabled, principal, "query")
+							}
+							assert.Equal(t, wantCalls, calls)
+							assert.Equal(t, wantPrincipal, gotPrincipal)
+							assert.Equal(t, wantEnforce, enforce)
+							if wantErr == nil {
+								require.NoError(t, err)
+							} else {
+								require.Error(t, err)
+								assert.Equal(t, wantErr.Error(), err.Error())
+								assert.Equal(t, merr.Code(wantErr), merr.Code(err))
+								if wantCalls > 0 {
+									assert.ErrorIs(t, err, authorizationErr)
+								}
+							}
+						})
+					}
+				}
+			}
+		}
+	}
+}
 
 type testStorageFieldData struct {
 	data        any

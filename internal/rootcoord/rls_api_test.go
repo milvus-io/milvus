@@ -205,11 +205,25 @@ func TestCoreListRowPoliciesProtoConversion(t *testing.T) {
 	require.ErrorIs(t, merr.Error(nilResp.GetStatus()), merr.ErrParameterInvalid)
 }
 
+func TestCoreCountRLSPrincipals(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().ListRLSPrincipals(mock.Anything, mock.MatchedBy(func(req *rlsutil.ListRLSPrincipalsRequest) bool {
+		return req.GetCount() && req.GetDbName() == "db" && req.GetCollectionName() == "coll"
+	})).Return(nil, int64(5000000000), nil).Once()
+	core := newTestCore(withHealthyCode(), withMeta(meta))
+	resp, err := core.ListRLSPrincipals(context.Background(), &milvuspb.ListRLSPrincipalsRequest{
+		DbName: "db", CollectionName: "coll", Count: true,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Empty(t, resp.GetPrincipalNames())
+	require.Equal(t, int64(5000000000), resp.GetPrincipalCnt())
+}
+
 func TestCoreListRLSPrincipalsPreservesQuotaStatus(t *testing.T) {
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().ListRLSPrincipals(mock.Anything, mock.MatchedBy(func(req *rlsutil.ListRLSPrincipalsRequest) bool {
 		return req.GetDbName() == "db" && req.GetCollectionName() == "coll"
-	})).Return(nil, merr.WrapErrServiceQuotaExceededMsg("list too large")).Once()
+	})).Return(nil, int64(0), merr.WrapErrServiceQuotaExceededMsg("list too large")).Once()
 
 	core := newTestCore(withHealthyCode(), withMeta(meta))
 	resp, err := core.ListRLSPrincipals(context.Background(), &milvuspb.ListRLSPrincipalsRequest{

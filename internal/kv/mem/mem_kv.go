@@ -287,6 +287,14 @@ func (kv *MemoryKV) LoadWithPrefix(ctx context.Context, key string) ([]string, [
 // WalkWithPrefix visits matching entries in key order until the callback
 // returns an error. paginationSize is irrelevant for the in-memory store.
 func (kv *MemoryKV) WalkWithPrefix(ctx context.Context, prefix string, _ int, fn func([]byte, []byte) error) error {
+	return kv.walkWithPrefix(ctx, prefix, false, fn)
+}
+
+func (kv *MemoryKV) WalkKeysWithPrefix(ctx context.Context, prefix string, _ int, fn func([]byte) error) error {
+	return kv.walkWithPrefix(ctx, prefix, true, func(key, _ []byte) error { return fn(key) })
+}
+
+func (kv *MemoryKV) walkWithPrefix(ctx context.Context, prefix string, keysOnly bool, fn func([]byte, []byte) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -302,7 +310,11 @@ func (kv *MemoryKV) WalkWithPrefix(ctx context.Context, prefix string, _ int, fn
 		if !strings.HasPrefix(item.key, prefix) {
 			return false
 		}
-		walkErr = fn([]byte(item.key), item.value.ByteSlice())
+		var value []byte
+		if !keysOnly {
+			value = item.value.ByteSlice()
+		}
+		walkErr = fn([]byte(item.key), value)
 		return walkErr == nil
 	})
 	return walkErr

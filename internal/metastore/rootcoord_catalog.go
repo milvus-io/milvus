@@ -100,12 +100,15 @@ type RootCoordCatalog interface {
 	SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
 	DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error
 	ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error)
-	SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
+	// Principal mutations return the persisted count, including on idempotent replay.
+	SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) (int64, error)
 	// GetRLSPrincipal and ListRLSPrincipals return caller-owned results,
 	// including nested tag maps.
 	GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error)
-	DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
+	DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (int64, error)
 	ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error)
+	ListRLSPrincipalNames(ctx context.Context, collectionID int64) ([]string, error)
+	GetRLSPrincipalCount(ctx context.Context, collectionID int64) (int64, error)
 
 	// File resource related
 	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error

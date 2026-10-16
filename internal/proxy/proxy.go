@@ -222,10 +222,10 @@ func (node *Proxy) TsoAllocator() taskmodel.TsoAllocator {
 	return node.tsoAllocator
 }
 
-// ResolveRLSEnforcement applies the proxy-owned SkipRLS authorization rules
+// CheckSkipRLSPrivilege applies the proxy-owned SkipRLS authorization rules
 // for tasks implemented outside the root proxy package.
-func (node *Proxy) ResolveRLSEnforcement(ctx context.Context, cache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
-	return resolveRLSEnforcement(ctx, cache, rlsEnabled, rlsForce, skipRLS, dbName, collectionName, operation)
+func (node *Proxy) CheckSkipRLSPrivilege(ctx context.Context, cache Cache, dbName, collectionName, operation string) error {
+	return checkSkipRLSPrivilege(ctx, cache, dbName, collectionName, operation)
 }
 
 // CheckManageRLSPrivilege verifies the caller holds the ManageRLS privilege

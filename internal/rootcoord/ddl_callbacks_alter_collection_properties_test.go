@@ -127,11 +127,11 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
-	// rls.force delete key must use the exact property key casing.
+	// rls.mode delete key must use the exact property key casing.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-		DeleteKeys:     []string{"RLS.Force"},
+		DeleteKeys:     []string{"RLS.Mode"},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 

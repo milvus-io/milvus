@@ -217,7 +217,6 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
-	rlsEnabled := colInfo.RlsEnabled
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = it.insertMsg.GetDbName()
@@ -226,14 +225,9 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	it.insertMsg.DbName = canonicalDBName
 	it.insertMsg.CollectionName = collectionName
 	it.insertMsg.CollectionID = collID
-	if rlsEnabled && it.skipRLS {
-		rlsEnabled, err = it.node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
-			canonicalDBName, collectionName, "insert")
-		if err != nil {
-			return err
-		}
-	}
-	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, it.rlsPrincipal, "insert")
+	principalName, enforceRLS, err := rlsutil.ResolveEnforcement(colInfo.RlsEnabled, it.rlsPrincipal, it.skipRLS, colInfo.RlsMode, collectionName, "insert", func() error {
+		return it.node.CheckSkipRLSPrivilege(ctx, it.GetMetaCache(), canonicalDBName, collectionName, "insert")
+	})
 	if err != nil {
 		return err
 	}

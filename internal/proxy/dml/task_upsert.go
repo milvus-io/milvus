@@ -1988,19 +1988,14 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.collectionName = colInfo.Schema.GetName()
-	it.rlsEnabled = colInfo.RlsEnabled
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = it.req.GetDbName()
 	}
-	if it.rlsEnabled && it.req.GetSkipRls() {
-		it.rlsEnabled, err = it.node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), it.rlsEnabled, colInfo.RlsForce, true,
-			canonicalDBName, colInfo.Schema.GetName(), "upsert")
-		if err != nil {
-			return err
-		}
-	}
-	if _, _, err := rlsutil.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert"); err != nil {
+	_, it.rlsEnabled, err = rlsutil.ResolveEnforcement(colInfo.RlsEnabled, it.req.GetRlsPrincipal(), it.req.GetSkipRls(), colInfo.RlsMode, colInfo.Schema.GetName(), "upsert", func() error {
+		return it.node.CheckSkipRLSPrivilege(ctx, it.GetMetaCache(), canonicalDBName, colInfo.Schema.GetName(), "upsert")
+	})
+	if err != nil {
 		return err
 	}
 

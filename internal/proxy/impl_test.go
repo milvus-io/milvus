@@ -2766,6 +2766,31 @@ func TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity(t *
 	})
 }
 
+func TestSearchByPKAutoSkip(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() { Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key) })
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).Return(&collectionInfo{
+		CollID: 993002, Schema: mustNewSchemaInfo(searchByPKTestSchema(false)), RlsEnabled: true,
+	}, nil)
+	node := &Proxy{metaCache: cache}
+	req := &milvuspb.SearchRequest{
+		DbName: "default", CollectionName: "test_collection",
+		SearchInput: &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+		}},
+	}
+	preflight, err := node.preflightSearchByPK(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, preflight)
+	require.Nil(t, preflight.rlsPredicate)
+	// An explicit skip still requires authentication/SkipRLS; AutoSkip does not authorize it.
+	req.SkipRls = true
+	_, err = node.preflightSearchByPK(context.Background(), req)
+	require.Error(t, err)
+}
+
 func TestHandleIfSearchByPK_RLSForceRejectsSkip(t *testing.T) {
 	mockey.PatchConvey("TestHandleIfSearchByPK_RLSForceRejectsSkip", t, func() {
 		paramtable.Init()
@@ -2795,7 +2820,7 @@ func TestHandleIfSearchByPK_RLSForceRejectsSkip(t *testing.T) {
 				CollID:     987654322,
 				Schema:     mustNewSchemaInfo(schema),
 				RlsEnabled: true,
-				RlsForce:   true,
+				RlsMode:    common.RLSModeForce,
 			}, nil)
 		node := &Proxy{metaCache: cache}
 
@@ -2813,7 +2838,7 @@ func TestHandleIfSearchByPK_RLSForceRejectsSkip(t *testing.T) {
 
 		_, _, err := handleIfSearchByPKForTest(ctx, node, req)
 		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		assert.Contains(t, err.Error(), "rls.force")
+		assert.Contains(t, err.Error(), "rls.mode is Force")
 		assert.Contains(t, err.Error(), canonicalName)
 		assert.NotContains(t, err.Error(), aliasName)
 	})

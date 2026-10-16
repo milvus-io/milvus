@@ -3,6 +3,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
 	"sort"
 	"strconv"
@@ -50,6 +51,10 @@ type Catalog struct {
 
 type prefixWalker interface {
 	WalkWithPrefix(context.Context, string, int, func([]byte, []byte) error) error
+}
+
+type keyPrefixWalker interface {
+	WalkKeysWithPrefix(context.Context, string, int, func([]byte) error) error
 }
 
 const rlsPrincipalScanBatchSize = 128
@@ -721,7 +726,7 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 func buildDropCollectionKeys(collectionInfo *model.Collection) (string, []string) {
 	collectionKey := BuildCollectionKey(collectionInfo.DBID, collectionInfo.CollectionID)
 
-	var delMetakeysSnap []string
+	delMetakeysSnap := []string{BuildRLSPrincipalCountKey(collectionInfo.CollectionID)}
 	for _, alias := range collectionInfo.Aliases {
 		delMetakeysSnap = append(delMetakeysSnap,
 			BuildAliasKey210(alias),
@@ -2399,20 +2404,43 @@ func buildRLSPrincipalKey(collectionID int64, principalName string) string {
 	return BuildRLSPrincipalPrefix(collectionID) + url.PathEscape(principalName)
 }
 
-func (kc *Catalog) SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error {
+func (kc *Catalog) SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) (int64, error) {
 	if principal == nil {
-		return merr.WrapErrServiceInternalMsg("RLS principal is nil")
+		return 0, merr.WrapErrServiceInternalMsg("RLS principal is nil")
+	}
+	if len(principal.Tags) == 0 {
+		return 0, merr.WrapErrServiceInternalMsg("RLS principal has no tags")
 	}
 	key := buildRLSPrincipalKey(principal.CollectionID, principal.PrincipalName)
 	info, err := model.MarshalRLSPrincipalModel(principal)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	value, err := proto.Marshal(info)
 	if err != nil {
-		return merr.WrapErrSerializationFailed(err, "marshal RLS principal info")
+		return 0, merr.WrapErrSerializationFailed(err, "marshal RLS principal info")
 	}
-	return kc.Txn.Save(ctx, key, string(value))
+	// Collection-scoped broadcast callbacks serialize mutations. Read persisted
+	// state so a retry after an uncertain commit cannot increment twice.
+	count, err := kc.ensureRLSPrincipalCount(ctx, principal.CollectionID)
+	if err != nil {
+		return 0, err
+	}
+	exists, err := kc.Txn.Has(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		if count == math.MaxInt64 {
+			return 0, merr.WrapErrDataIntegrityMsg("RLS principal count overflow for collection %d", principal.CollectionID)
+		}
+		count++
+	}
+	err = kc.Txn.MultiSave(ctx, map[string]string{
+		key: string(value),
+		BuildRLSPrincipalCountKey(principal.CollectionID): strconv.FormatInt(count, 10),
+	})
+	return count, err
 }
 
 func (kc *Catalog) GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error) {
@@ -2432,8 +2460,94 @@ func (kc *Catalog) GetRLSPrincipal(ctx context.Context, collectionID int64, prin
 	return principal, nil
 }
 
-func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error {
-	return kc.Txn.Remove(ctx, buildRLSPrincipalKey(collectionID, principalName))
+func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (int64, error) {
+	count, err := kc.ensureRLSPrincipalCount(ctx, collectionID)
+	if err != nil {
+		return 0, err
+	}
+	key := buildRLSPrincipalKey(collectionID, principalName)
+	exists, err := kc.Txn.Has(ctx, key)
+	if err != nil || !exists {
+		return count, err
+	}
+	if count == 0 {
+		return 0, merr.WrapErrDataIntegrityMsg("RLS principal count underflow for collection %d", collectionID)
+	}
+	count--
+	err = kc.Txn.MultiSaveAndRemove(ctx, map[string]string{
+		BuildRLSPrincipalCountKey(collectionID): strconv.FormatInt(count, 10),
+	}, []string{key})
+	return count, err
+}
+
+// GetRLSPrincipalCount reads the persisted counter; an absent counter means zero.
+func (kc *Catalog) GetRLSPrincipalCount(ctx context.Context, collectionID int64) (int64, error) {
+	count, err := kc.loadRLSPrincipalCount(ctx, collectionID)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return 0, nil
+	}
+	return count, err
+}
+
+// Called under the collection mutation guard; bootstrap legacy bindings only on writes.
+func (kc *Catalog) ensureRLSPrincipalCount(ctx context.Context, collectionID int64) (int64, error) {
+	count, err := kc.loadRLSPrincipalCount(ctx, collectionID)
+	if !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return count, err
+	}
+	if err := kc.walkRLSPrincipalKeys(ctx, collectionID, func(_ []byte) error {
+		count++
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	if count > 0 {
+		return count, kc.Txn.Save(ctx, BuildRLSPrincipalCountKey(collectionID), strconv.FormatInt(count, 10))
+	}
+	return 0, nil
+}
+
+func (kc *Catalog) loadRLSPrincipalCount(ctx context.Context, collectionID int64) (int64, error) {
+	key := BuildRLSPrincipalCountKey(collectionID)
+	value, err := kc.Txn.Load(ctx, key)
+	if err == nil {
+		count, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return 0, merr.WrapErrDataIntegrity(err, "decode RLS principal count for collection %d", collectionID)
+		}
+		if count < 0 {
+			return 0, merr.WrapErrDataIntegrityMsg("negative RLS principal count for collection %d", collectionID)
+		}
+		return count, nil
+	}
+	return 0, err
+}
+
+func (kc *Catalog) walkRLSPrincipalKeys(ctx context.Context, collectionID int64, fn func([]byte) error) error {
+	walker, ok := kc.Txn.(keyPrefixWalker)
+	if !ok {
+		return merr.Wrapf(merr.ErrServiceUnimplemented, "metadata store does not support RLS principal key scans")
+	}
+	return walker.WalkKeysWithPrefix(ctx, BuildRLSPrincipalPrefix(collectionID), rlsPrincipalScanBatchSize, fn)
+}
+
+func (kc *Catalog) ListRLSPrincipalNames(ctx context.Context, collectionID int64) ([]string, error) {
+	names := make([]string, 0)
+	err := kc.walkRLSPrincipalKeys(ctx, collectionID, func(key []byte) error {
+		// Backends return fully qualified keys; the escaped name is the last component.
+		encoded := string(key)
+		name, err := url.PathUnescape(encoded[strings.LastIndexByte(encoded, '/')+1:])
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "decode RLS principal name for collection %d", collectionID)
+		}
+		names = append(names, name)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func (kc *Catalog) ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error) {

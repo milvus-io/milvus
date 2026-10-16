@@ -75,6 +75,7 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, enabled != "false", actual)
 		require.Len(t, coll.RLSPolicies, 1)
+		require.Equal(t, int64(1), coll.RLSPrincipalCount)
 
 		if enabled == "false" {
 			// Disabling also permits editing the configuration for the next enable.
@@ -95,19 +96,30 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	}
 	require.Equal(t, "field1 == 2", coll.RLSPolicies["tenant"].UsingExpr)
 
+	for _, mode := range []string{"ExplicitSkip", "AutoSkip", "Force"} {
+		status, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			DbName: db, CollectionName: name,
+			Properties: []*commonpb.KeyValuePair{{Key: common.RLSModeKey, Value: mode}},
+		})
+		require.NoError(t, merr.CheckRPCCall(status, err))
+		coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
+		require.NoError(t, err)
+		actual, err := common.GetRLSMode(coll.Properties...)
+		require.NoError(t, err)
+		expected, err := common.GetRLSMode(&commonpb.KeyValuePair{Key: common.RLSModeKey, Value: mode})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+		require.Len(t, coll.RLSPolicies, 1)
+		require.Equal(t, int64(1), coll.RLSPrincipalCount)
+	}
 	status, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName: db, CollectionName: name,
-		Properties: []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "true"}},
+		Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "false"}},
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
 	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName: db, CollectionName: name,
-		Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "false"}},
-	})
-	require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrParameterInvalid)
-	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-		DbName: db, CollectionName: name,
-		DeleteKeys: []string{common.RLSEnabledKey, common.RLSForceKey},
+		DeleteKeys: []string{common.RLSEnabledKey, common.RLSModeKey},
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
 	coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
@@ -115,12 +127,16 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	enabled, err := common.IsRLSEnabled(coll.Properties...)
 	require.NoError(t, err)
 	require.False(t, enabled)
+	mode, err := common.GetRLSMode(coll.Properties...)
+	require.NoError(t, err)
+	require.Equal(t, common.RLSModeAutoSkip, mode)
 
 	// Recovery restores metadata even while enforcement is disabled.
 	coll = coll.Clone()
 	coll.RLSPolicies = nil
 	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
 	require.Len(t, coll.RLSPolicies, 1)
+	require.Equal(t, int64(1), coll.RLSPrincipalCount)
 	meta.ddLock.Lock()
 	meta.collID2Meta[id] = coll.Clone()
 	meta.ddLock.Unlock()
@@ -157,9 +173,10 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	policies, err := meta.ListRLSPolicies(ctx, &rlsutil.ListRowPoliciesRequest{DbName: db, CollectionName: name})
 	require.NoError(t, err)
 	require.Empty(t, policies)
-	principals, err := meta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: db, CollectionName: name})
+	principals, count, err := meta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: db, CollectionName: name})
 	require.NoError(t, err)
 	require.Empty(t, principals)
+	require.Zero(t, count)
 
 	// Dropping a disabled collection, unlike toggling enforcement, removes metadata.
 	require.NoError(t, core.broadcastCreateRLSPolicy(ctx, createPolicy))

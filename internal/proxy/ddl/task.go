@@ -2089,14 +2089,14 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	requiresManageRLS := false
 	for _, property := range t.GetProperties() {
-		if property.GetKey() == common.RLSEnabledKey || property.GetKey() == common.RLSForceKey {
+		if property.GetKey() == common.RLSEnabledKey || property.GetKey() == common.RLSModeKey {
 			requiresManageRLS = true
 			break
 		}
 	}
 	if !requiresManageRLS {
 		for _, key := range t.GetDeleteKeys() {
-			if key == common.RLSEnabledKey || key == common.RLSForceKey {
+			if key == common.RLSEnabledKey || key == common.RLSModeKey {
 				requiresManageRLS = true
 				break
 			}
@@ -2145,7 +2145,7 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	for _, key := range t.GetDeleteKeys() {
-		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
+		for _, expected := range []string{common.RLSEnabledKey, common.RLSModeKey} {
 			if strings.EqualFold(key, expected) && key != expected {
 				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
 			}

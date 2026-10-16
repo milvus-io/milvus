@@ -86,6 +86,8 @@ type principalBackoffEntry struct {
 
 type principalRefreshToken uint64
 
+// Callers decide enforcement from collection properties and request authorization.
+// These caches do not store mode/enable decisions, so property changes need no reset.
 type manager struct {
 	mu sync.RWMutex
 

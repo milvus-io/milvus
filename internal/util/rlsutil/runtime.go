@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -745,6 +746,35 @@ func combinePredicate(left *planpb.Expr, right *planpb.Expr, op planpb.BinaryExp
 
 func policyMatchesAction(policy *RowPolicy, action PolicyAction) bool {
 	return policy != nil && slices.Contains(policy.GetActions(), action)
+}
+
+// ResolveEnforcement decides admission before any policy or tag cache is used.
+// authorizeSkip is called only for an explicit bypass allowed by the mode.
+func ResolveEnforcement(enabled bool, principal string, skip bool, mode common.RLSMode, collectionName, operation string, authorizeSkip func() error) (string, bool, error) {
+	if !enabled {
+		return "", false, nil
+	}
+	switch mode {
+	case common.RLSModeAutoSkip:
+		if principal == "" && !skip {
+			return "", false, nil
+		}
+	case common.RLSModeExplicitSkip:
+		// Only an explicit, authorized skip can bypass principal validation.
+	case common.RLSModeForce:
+		if skip {
+			return "", false, merr.WrapErrPrivilegeNotPermitted(
+				"%s operation denied by RLS: skip_rls is not allowed when rls.mode is Force on collection %s",
+				operation, collectionName)
+		}
+	}
+	if skip {
+		if err := authorizeSkip(); err != nil {
+			return "", false, err
+		}
+		return "", false, nil
+	}
+	return ResolveRuntimePrincipal(true, principal, operation)
 }
 
 func ResolveRuntimePrincipal(rlsEnabled bool, principalName string, operation string) (string, bool, error) {

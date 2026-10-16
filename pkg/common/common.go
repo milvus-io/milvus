@@ -485,7 +485,7 @@ const (
 
 	// row level security
 	RLSEnabledKey       = "rls.enabled"
-	RLSForceKey         = "rls.force"
+	RLSModeKey          = "rls.mode"
 	RLSPrincipalNameKey = "rls.principal_name"
 	RLSClearAllCacheKey = "rls.clear_all_cache"
 
@@ -807,18 +807,30 @@ func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
 	return enabled, nil
 }
 
-// IsRLSForce extracts rls.force from collection properties.
-// Returns false if not set.
-func IsRLSForce(kvs ...*commonpb.KeyValuePair) (bool, error) {
-	value, ok := getProperty(kvs, RLSForceKey)
+type RLSMode int
+
+const (
+	RLSModeAutoSkip RLSMode = iota
+	RLSModeExplicitSkip
+	RLSModeForce
+)
+
+// GetRLSMode defaults to AutoSkip when the property is absent.
+func GetRLSMode(kvs ...*commonpb.KeyValuePair) (RLSMode, error) {
+	value, ok := getProperty(kvs, RLSModeKey)
 	if !ok {
-		return false, nil
+		return RLSModeAutoSkip, nil
 	}
-	force, err := strconv.ParseBool(value)
-	if err != nil {
-		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSForceKey, value)
+	switch value {
+	case "AutoSkip":
+		return RLSModeAutoSkip, nil
+	case "ExplicitSkip":
+		return RLSModeExplicitSkip, nil
+	case "Force":
+		return RLSModeForce, nil
+	default:
+		return RLSModeAutoSkip, merr.WrapErrParameterInvalidMsg("invalid %s value %q: expected AutoSkip, ExplicitSkip or Force", RLSModeKey, value)
 	}
-	return force, nil
 }
 
 func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
@@ -848,38 +860,21 @@ func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
 			if _, err := IsRLSEnabled(kv); err != nil {
 				return err
 			}
-		case RLSForceKey:
-			if _, ok := seen[RLSForceKey]; ok {
-				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
+		case RLSModeKey:
+			if _, ok := seen[RLSModeKey]; ok {
+				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSModeKey)
 			}
-			seen[RLSForceKey] = struct{}{}
-			if _, err := IsRLSForce(kv); err != nil {
+			seen[RLSModeKey] = struct{}{}
+			if _, err := GetRLSMode(kv); err != nil {
 				return err
 			}
 		default:
-			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+			for _, key := range []string{RLSEnabledKey, RLSModeKey} {
 				if strings.EqualFold(kv.GetKey(), key) {
 					return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), key)
 				}
 			}
 		}
-	}
-	return nil
-}
-
-// ValidateRLSForceRequiresEnabled rejects an effective collection property set
-// that enables rls.force without enabling RLS itself.
-func ValidateRLSForceRequiresEnabled(kvs ...*commonpb.KeyValuePair) error {
-	force, err := IsRLSForce(kvs...)
-	if err != nil || !force {
-		return err
-	}
-	enabled, err := IsRLSEnabled(kvs...)
-	if err != nil {
-		return err
-	}
-	if !enabled {
-		return merr.WrapErrParameterInvalidMsg("%s=true requires %s=true", RLSForceKey, RLSEnabledKey)
 	}
 	return nil
 }

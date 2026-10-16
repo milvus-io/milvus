@@ -59,7 +59,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return err
 	}
 	for _, key := range req.GetDeleteKeys() {
-		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
+		for _, expected := range []string{common.RLSEnabledKey, common.RLSModeKey} {
 			if strings.EqualFold(key, expected) && key != expected {
 				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
 			}
@@ -158,9 +158,6 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	// Check if the properties are changed.
 	newPropsKeyValuePairs := common.NewKeyValuePairs(newProperties)
-	if err := common.ValidateRLSForceRequiresEnabled(newPropsKeyValuePairs...); err != nil {
-		return err
-	}
 	if !newPropsKeyValuePairs.Equal(coll.Properties) {
 		udpates.Properties = newPropsKeyValuePairs
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
