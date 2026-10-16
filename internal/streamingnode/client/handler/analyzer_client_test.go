@@ -309,7 +309,8 @@ func TestValidateAnalyzerDiscovery(t *testing.T) {
 
 func TestValidateAnalyzerBusinessFailuresDoNotRetry(t *testing.T) {
 	for _, failure := range []error{
-		merr.SegcoreError(int32(merr.CodeFileReadFailed), "dictionary file not found"),
+		merr.SegcoreError(int32(merr.CodePathNotExist), "dictionary file not found"),
+		merr.SegcoreError(int32(merr.CodeFileReadFailed), "dictionary file access denied"),
 		merr.ErrServiceUnavailable,
 		merr.ErrServiceInternal,
 		merr.SegcoreError(int32(merr.CodeInvalidParameter), "invalid analyzer"),

@@ -61,6 +61,8 @@ pub enum TantivyBindingErrorCode {
     Tantivy = 5,
     /// Binding-internal error (ad-hoc failures, poisoned locks, ...).
     Internal = 6,
+    /// An I/O operation reported ErrorKind::NotFound; policy belongs to the caller.
+    IoNotFound = 7,
 }
 
 fn tantivy_error_code(e: &tantivy::TantivyError) -> TantivyBindingErrorCode {
@@ -87,6 +89,9 @@ impl TantivyBindingError {
     pub fn code(&self) -> TantivyBindingErrorCode {
         match self {
             TantivyBindingError::JsonError(_) => TantivyBindingErrorCode::Json,
+            TantivyBindingError::IOError(err) if err.kind() == io::ErrorKind::NotFound => {
+                TantivyBindingErrorCode::IoNotFound
+            }
             TantivyBindingError::IOError(_) => TantivyBindingErrorCode::Io,
             TantivyBindingError::InvalidArgument(_) => TantivyBindingErrorCode::InvalidArgument,
             TantivyBindingError::InternalError(_) => TantivyBindingErrorCode::Internal,
@@ -129,3 +134,33 @@ impl From<str::Utf8Error> for TantivyBindingError {
 }
 
 pub type Result<T> = std::result::Result<T, TantivyBindingError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn io_errors_distinguish_not_found_by_kind() {
+        for kind in [
+            io::ErrorKind::NotFound,
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::Interrupted,
+            io::ErrorKind::Other,
+        ] {
+            // Identical text must not affect the structured classification.
+            let err = TantivyBindingError::from(io::Error::new(kind, "No such file or directory"));
+            assert_eq!(
+                err.code(),
+                if kind == io::ErrorKind::NotFound {
+                    TantivyBindingErrorCode::IoNotFound
+                } else {
+                    TantivyBindingErrorCode::Io
+                }
+            );
+        }
+        let err = TantivyBindingError::InvalidArgument("invalid analyzer".to_string());
+        assert_eq!(err.code(), TantivyBindingErrorCode::InvalidArgument);
+        let err = TantivyBindingError::InternalError("No such file or directory".to_string());
+        assert_eq!(err.code(), TantivyBindingErrorCode::Internal);
+    }
+}
