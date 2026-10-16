@@ -74,44 +74,51 @@ func (w *ownedBodyCapture) Write(data []byte) (int, error) {
 }
 
 func TestTimeoutRecorderOwnedBody(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	recorder := newTimeoutResponseRecorder(buffer)
+	data := []byte(`{"data":[1]}`)
+	n, err := recorder.WriteOwned(data)
+	require.NoError(t, err)
+	require.Equal(t, len(data), n)
+	n, err = recorder.WriteOwned([]byte(`{"data":[2]}`))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Zero(t, n)
+	require.Empty(t, buffer.Bytes())
+	borrowed := []byte("\n")
+	_, err = recorder.Write(borrowed)
+	require.NoError(t, err)
+	borrowed[0] = 'x' // Ordinary Write must not retain caller-owned bytes.
+	want := "{\"data\":[1]}\n"
+	require.Equal(t, len(want), recorder.Size())
+	output := &ownedBodyCapture{ResponseRecorder: httptest.NewRecorder()}
+	c, _ := gin.CreateTestContext(output)
+	require.NoError(t, recorder.CommitTo(c.Writer))
+	require.Equal(t, want, output.Body.String())
+	require.Same(t, &data[0], &output.first[0], "CommitTo must send the transferred slice without copying it")
+	recorder.CloseForTimeout()
+	require.Nil(t, recorder.ownedBody)
+	// Reusing the pooled buffer must not let a late worker modify it.
+	next := newTimeoutResponseRecorder(buffer)
+	_, err = next.WriteString("next request")
+	require.NoError(t, err)
+	n, err = recorder.WriteOwned([]byte("late result"))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Zero(t, n)
+	require.Equal(t, "next request", buffer.String())
+}
+
+func TestTimeoutRecorderOwnedBodyRejectsPriorWrite(t *testing.T) {
 	for _, prefix := range []string{"", "prefix:"} {
 		t.Run("prefix="+prefix, func(t *testing.T) {
-			buffer := &bytes.Buffer{}
-			recorder := newTimeoutResponseRecorder(buffer)
-			if prefix != "" {
-				_, err := recorder.WriteString(prefix)
-				require.NoError(t, err)
-			}
-			data := []byte(`{"data":[1]}`)
-			n, err := recorder.WriteOwned(data)
+			recorder := newTimeoutResponseRecorder(&bytes.Buffer{})
+			_, err := recorder.WriteString(prefix)
 			require.NoError(t, err)
-			require.Equal(t, len(data), n)
-			borrowed := []byte("\n")
-			_, err = recorder.Write(borrowed)
-			require.NoError(t, err)
-			borrowed[0] = 'x' // Ordinary Write must not retain caller-owned bytes.
-			_, err = recorder.WriteOwned([]byte(`{"data":[2]}`))
-			require.NoError(t, err)
-			want := prefix + "{\"data\":[1]}\n{\"data\":[2]}"
-			require.Equal(t, len(want), recorder.Size())
-			output := &ownedBodyCapture{ResponseRecorder: httptest.NewRecorder()}
-			c, _ := gin.CreateTestContext(output)
-			require.NoError(t, recorder.CommitTo(c.Writer))
-			require.Equal(t, want, output.Body.String())
-			if prefix == "" {
-				require.Same(t, &data[0], &output.first[0], "CommitTo must send the transferred slice without copying it")
-			}
-			recorder.CloseForTimeout()
-			require.Nil(t, recorder.ownedBody)
-			// Simulate reuse of the pooled buffer by the next request. A closed
-			// recorder must never adopt bytes or modify that buffer again.
-			next := newTimeoutResponseRecorder(buffer)
-			_, err = next.WriteString("next request")
-			require.NoError(t, err)
-			n, err = recorder.WriteOwned([]byte("late result"))
-			require.Error(t, err)
+			n, err := recorder.WriteOwned([]byte(`{"data":[1]}`))
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.Zero(t, n)
-			require.Equal(t, "next request", buffer.String())
+			require.Nil(t, recorder.ownedBody)
+			require.Equal(t, prefix, recorder.body.String())
+			require.Equal(t, len(prefix), recorder.Size())
 		})
 	}
 }

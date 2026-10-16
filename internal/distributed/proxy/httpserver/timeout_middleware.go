@@ -102,26 +102,20 @@ func (w *timeoutResponseRecorder) Write(data []byte) (int, error) {
 	return n, err
 }
 
-// WriteOwned transfers ownership of data on success. The caller must not modify
-// or reuse it afterward. Ordinary Write must still copy its caller-owned bytes.
+// WriteOwned accepts only the first response write and transfers ownership of
+// data on success. The caller must not modify or reuse it afterward.
 func (w *timeoutResponseRecorder) WriteOwned(data []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed || w.body == nil {
 		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
 	}
-	if !w.written() {
-		w.size = 0
+	if w.written() {
+		return 0, merr.WrapErrServiceInternalMsg("response body already written")
 	}
-	if w.ownedBody == nil && w.body.Len() == 0 {
-		w.ownedBody = data
-		w.size += len(data)
-		return len(data), nil
-	}
-	// Preserve append semantics for callers that have already written a body.
-	n, err := w.body.Write(data)
-	w.size += n
-	return n, err
+	w.ownedBody = data
+	w.size = len(data)
+	return len(data), nil
 }
 
 func (w *timeoutResponseRecorder) WriteString(s string) (int, error) {
