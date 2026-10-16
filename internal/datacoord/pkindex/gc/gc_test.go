@@ -18,6 +18,7 @@ package gc
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -519,8 +520,11 @@ func TestLayoutMismatchSkipsVChannel(t *testing.T) {
 			badBodies, otherBodies := len(e.bodies(t, "bad")), len(e.bodies(t, "other"))
 			e.now = e.now.Add(3 * time.Hour)
 
+			obs := &recordingObserver{}
+			e.gc.SetObserver(obs)
 			// collect "bad" alone, so that "other" stays as it was
 			require.NoError(t, e.gc.runVChannel(ctx, 1, "bad"))
+			assert.Empty(t, obs.versions, "a vchannel that fails the layout check is not reported")
 			assert.Len(t, e.bodies(t, "bad"), badBodies)
 			assert.Len(t, e.bodies(t, "other"), otherBodies)
 			for _, vch := range []string{"bad", "other"} {
@@ -607,4 +611,25 @@ func TestRetainedBodyReadFailureSkipsSSTSweep(t *testing.T) {
 
 	require.NoError(t, e.gc.RunOnce(ctx))
 	assert.False(t, e.has(sstKey("v", 9)))
+}
+
+type recordingObserver struct {
+	mu       sync.Mutex
+	versions []int64
+}
+
+func (o *recordingObserver) ManifestChanged(_ context.Context, m *pkindexpb.Manifest) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.versions = append(o.versions, m.GetVersion())
+}
+
+func TestGCReportsCurrentManifest(t *testing.T) {
+	e := newEnv(t, testConfig)
+	e.create(t, "v")
+	e.flush(t, "v", 10, 1)
+	obs := &recordingObserver{}
+	e.gc.SetObserver(obs)
+	require.NoError(t, e.gc.RunOnce(context.Background()))
+	require.Equal(t, []int64{2}, obs.versions)
 }
