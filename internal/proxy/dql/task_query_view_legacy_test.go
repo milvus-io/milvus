@@ -430,7 +430,7 @@ func TestSearchTaskRetryExhaustionReturnsLastFailure(t *testing.T) {
 func TestSearchTaskDoesNotAddRequestRetryToBatchPath(t *testing.T) {
 	legacy := &fakeLegacyQueryClient{
 		maxRetries: 3,
-		err:        viewerror.NewViewInvalidated("batch failed after its own retries"),
+		err:        merr.WrapErrServiceInternalMsg("batch failed after its own retries"),
 	}
 	task := newQueryViewSearchTask(legacy, 1)
 
