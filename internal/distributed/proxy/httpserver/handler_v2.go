@@ -1644,26 +1644,7 @@ const queryResponseBatchRows = 64
 func returnQueryResponse(ctx context.Context, c *gin.Context, code int, result gin.H) {
 	rows := result[HTTPReturnData].(*queryResponseRows)
 	delete(result, HTTPReturnData)
-	streamWriter, streaming := c.Writer.(*streamingWorkerWriter)
-	if !streaming {
-		// Direct callers without streaming failure handling must finish
-		// projection before rendering a complete response.
-		data := make([]map[string]interface{}, 0, rows.rowsNum)
-		for {
-			batch, err := rows.Next(ctx, queryResponseBatchRows)
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if err != nil {
-				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrInvalidSearchResult), HTTPReturnMessage: resultErrMessage(err)})
-				return
-			}
-			data = append(data, batch...)
-		}
-		result[HTTPReturnData] = data
-		HTTPReturnStream(c, code, result)
-		return
-	}
+	streamWriter := c.Writer.(*streamingWorkerWriter)
 	c.Set(HTTPReturnCode, result[HTTPReturnCode])
 	setTraceIDHeader(c)
 	jsonRender{}.WriteContentType(c.Writer)

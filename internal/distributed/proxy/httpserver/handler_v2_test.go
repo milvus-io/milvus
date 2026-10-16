@@ -1430,13 +1430,6 @@ func TestV2BatchedDQLRoutes(t *testing.T) {
 	}
 }
 
-func TestV2BatchedResponseDirectCaller(t *testing.T) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	returnQueryResponse(context.Background(), c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: streamTestRows(t, 1, 2, 3)})
-	require.JSONEq(t, `{"code":0,"data":[{"value":1},{"value":2},{"value":3}]}`, w.Body.String())
-}
-
 func TestDocInDocOutInsertInvalid(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
