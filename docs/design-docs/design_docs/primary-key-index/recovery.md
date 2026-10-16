@@ -128,7 +128,8 @@ The `Recovery` holds only the state of the replay period: the targets by
 vchannel (the `Index`, the primary key field ID and its data type), the
 indexes with a manifest that wait for their install, the first error of the
 replay, the `finished` and `closed` flags, and the handles of the submitted
-install tasks. `Observe` works only before `Finish`. `Finish` runs once.
+install tasks. `Observe` works only before `Finish`. `Finish` runs once; a second call
+does nothing.
 `Close` releases everything that `Recover` opened and is idempotent.
 
 ## Recovery of one pchannel
@@ -284,10 +285,12 @@ Two triggers join the three of [Triggers](snapshot.md#triggers):
 | 5 | Explicit flush | A ManualFlush or FlushAll was appended with time tick T, and the watermark reached T | The dirty `Index` of the flushed vchannel, or every dirty `Index` of the pchannel for a FlushAll, while its `lastCommittedTimeTick` is below T |
 
 Trigger 4 is the same idea as the stall request of the WAL ack tracker.
-`Params.StallTimeout` is `dataNode.sync.period` (600 s by default). The
+`Params.StallTimeout` is `dataNode.segment.syncPeriod` (600 s by default). The
 stall clock starts when the index first holds the truncation back and stops
 when it does not. It keeps running while the oldest `Index` waits in its
-backoff. The recovery time tick of the WAL is the completed point of the ack
+backoff. Once the stall timeout passed, every later step hands the next
+oldest dirty `Index` over, until the index no longer holds the checkpoint
+back. The recovery time tick of the WAL is the completed point of the ack
 tracker, which the `LastAcked` of the index does not clamp, so the condition
 stays meaningful after the index joined the checkpoint.
 
@@ -323,8 +326,8 @@ cost is a small table per flush.
 
 | Key | Default | Refreshable | Meaning |
 |---|---|---|---|
-| `streaming.pkindex.recovery.manifestReadConcurrency` | `64` | Read at each WAL open | The number of manifest bodies that the recovery reads in parallel. |
-| `dataNode.sync.period` | `600` (s) | Yes, at the next driver step | Existing key. The stall timeout of trigger 4, the same value as the stall timeout of the WAL ack tracker. |
+| `streaming.pkindex.recovery.manifestReadConcurrency` | `64` | No; the value is read at each WAL open | The number of manifest bodies that the recovery reads in parallel. |
+| `dataNode.segment.syncPeriod` | `600` (s) | Yes, at the next driver step | Existing key. The stall timeout of trigger 4, the same value as the stall timeout of the WAL ack tracker. |
 
 The retry of the claim and of the install reads `handover.maxBackoff` as in
 [Configuration](snapshot.md#configuration).
@@ -339,7 +342,7 @@ The retry of the claim and of the install reads `handover.maxBackoff` as in
 | Neon (RFC 025) | The pageserver finds `index_part.json` by generation and loads only indexes at or below its own generation | Reads download layers on demand (not verified against the source) | Local content is removed at a new attach; the RFC proposes secondary locations that keep local data for a faster failover | `remote_consistent_lsn` moves only after the index upload with a verified generation; the safekeeper drops WAL by it | — |
 | TiKV raftstore (`peer_storage.rs`) | Applies the raft log after `apply_state.applied_index` of the KV engine; `truncated_state` is the truncation point | No: no service during `SnapState::Applying` | The KV engine stays in place | `clear_meta_in_kv_and_raft` syncs the KV write before it clears the raft log; a comment says the raft log GC needs a flush first | `raft_log_gc` by size and count (not verified against the source) |
 | CockroachDB (`raft_log_queue.go`) | — | — | — | A truncated entry must be "already durably applied to the state machine"; with loose coupling it waits for a durable `RaftAppliedIndex` | `RaftLogQueueStaleThreshold` (100 entries) and `RaftLogQueueStaleSize` (64 KiB) allow a truncation; a slow follower forces one by size |
-| Milvus WAL recovery framework (`wal/recovery`) | One scanner replays from the global checkpoint to the barrier; each component skips by its own `checkpoint_time_tick` | No: no append before the barrier | The segment views come from the catalog | `CheckpointThrough(min(summary.LastAcked))` | The ack tracker sends a persist request to a stalled vchannel after `ackStallTimeout` (`dataNode.sync.period`); an explicit flush persists the segments at once |
+| Milvus WAL recovery framework (`wal/recovery`) | One scanner replays from the global checkpoint to the barrier; each component skips by its own `checkpoint_time_tick` | No: no append before the barrier | The segment views come from the catalog | `CheckpointThrough(min(summary.LastAcked))` | The ack tracker sends a persist request to a stalled vchannel after `ackStallTimeout` (`dataNode.segment.syncPeriod`); an explicit flush persists the segments at once |
 
 What the index follows:
 
@@ -382,6 +385,11 @@ What the index follows:
 - **A `checkpoint_time_tick` in the manifest pointer.** It would let R2 skip
   the body reads and move them into the install.
 - **The view refresh after a compaction.**
+- **A flush request is lost at a restart.** The replay does not re-create
+  the request of a ManualFlush, FlushAll or AlterWAL that was appended
+  before the crash; after a restart the checkpoint waits for the stall
+  timeout or a size trigger. The flushing stage of AlterWAL polls the
+  checkpoint, so it waits the same way.
 
 ## Test plan
 
@@ -409,8 +417,8 @@ Unit tests cover these behaviors.
   it. The first error is kept and `Finish` returns it. `Observe` after
   `Finish` does nothing.
 - The install task retries a failed download and marks the `Index` ready,
-  reports a missing object through `OnFatal`, and stops when the `Index`
-  closes.
+  reports a missing object through `OnFatal`, and stops when the `Recovery`
+  closes and when the `Index` closes.
 
 `pkindex` (index and driver):
 

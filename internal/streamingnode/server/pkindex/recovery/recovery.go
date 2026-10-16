@@ -162,9 +162,10 @@ func (r *Recovery) addCollection(ctx context.Context, vchannel string, collectio
 }
 
 // Finish ends the replay at the recovery barrier. It submits the install of
-// every index with a manifest and starts the handover driver. It returns the
-// first error of the replay, which makes the WAL open fail, and an error
-// marked pkroot.ErrUnavailable after Close.
+// every open index with a manifest and starts the handover driver. It
+// returns the first error of the replay, which makes the WAL open fail, and
+// an error marked pkroot.ErrUnavailable after Close. A second Finish does
+// nothing.
 func (r *Recovery) Finish(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -174,12 +175,21 @@ func (r *Recovery) Finish(ctx context.Context) error {
 	if r.err != nil {
 		return r.err
 	}
+	if r.finished {
+		return nil
+	}
 	r.finished = true
+	installs := 0
 	for _, idx := range r.pending {
+		if t, ok := r.targets[idx.VChannel()]; !ok || t.idx != idx {
+			// the replay dropped the collection
+			continue
+		}
+		installs++
 		r.handles = append(r.handles, r.sched.Submit(&installTask{idx: idx, params: r.mgr.Params, onFatal: r.onFatal, logger: r.logger}))
 	}
 	r.m.Start()
-	r.logger.Info(ctx, "primary key index recovery done", mlog.Int("indexes", len(r.targets)), mlog.Int("installs", len(r.pending)))
+	r.logger.Info(ctx, "primary key index recovery done", mlog.Int("indexes", len(r.targets)), mlog.Int("installs", installs))
 	return nil
 }
 

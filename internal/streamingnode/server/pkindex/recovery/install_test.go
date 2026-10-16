@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -167,4 +168,43 @@ func TestInstallTaskStopsAtClose(t *testing.T) {
 		t.Fatal("Close did not return while an install retries")
 	}
 	assert.Nil(t, env.Manager.Get("p"))
+}
+
+func TestInstallTaskEndsWhenTheIndexCloses(t *testing.T) {
+	ctx := context.Background()
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	view := committedTable(t, env, false)
+	store := env.Manager.StoreForTest().(*index.FakeStore)
+	store.FailDownloads(1 << 30) // every download fails: the install retries until the Index closes
+	m := env.Manager.New(pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}})
+	t.Cleanup(m.Close)
+	idx, _, err := m.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.SetCommitted(view)
+
+	var mu sync.Mutex
+	var fatals []error
+	task := &installTask{
+		idx:    idx,
+		params: env.Manager.Params,
+		onFatal: func(err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			fatals = append(fatals, err)
+		},
+		logger: mlog.With(),
+	}
+	done := make(chan error, 1)
+	go func() { done <- task.Execute(context.Background()) }()
+	time.Sleep(50 * time.Millisecond) // let the task start its retries
+	m.RemoveForTest(ctx, "v1")
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Execute did not return after the Index closed")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Empty(t, fatals)
 }

@@ -21,8 +21,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/cockroachdb/errors"
+
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 )
@@ -38,11 +41,9 @@ type ReplayWrite struct {
 	// TxnID is the transaction of a body, 0 for an autocommit write.
 	TxnID int64
 	// TimeTick is the time tick at which the write takes effect: the time
-	// tick of an autocommit write, the commit time tick of a transaction. The
-	// recovery passes the commit time tick for every body of a transaction,
-	// because the recovery framework delivers a transaction as one assembled
-	// message after its commit. So a transaction is skipped or replayed as a
-	// whole.
+	// tick of an autocommit write, the commit time tick of a transaction.
+	// Every body of a transaction carries the commit time tick, so a
+	// transaction is skipped or replayed as a whole.
 	TimeTick uint64
 }
 
@@ -89,10 +90,14 @@ func (idx *Index) Replay(ctx context.Context, w ReplayWrite) error {
 // right size and downloads the rest. An Index without a recovered manifest
 // only becomes ready. The recovery runs it once after the replay; a failure
 // returns and the caller retries, so every step is idempotent. It ends with
-// an error when ctx ends or the Index closes.
+// the error of ctx when ctx ends, and with an error that wraps
+// engine.ErrClosed when the Index closes.
 func (idx *Index) Install(ctx context.Context) error {
 	ctx, cancel := contextutil.MergeContext(ctx, idx.ctx)
 	defer cancel()
+	if err := idx.closedOr(nil); err != nil {
+		return err
+	}
 	idx.installMu.Lock()
 	view := idx.recovered
 	idx.installMu.Unlock()
@@ -101,13 +106,23 @@ func (idx *Index) Install(ctx context.Context) error {
 		return nil
 	}
 	if err := idx.reconcileCommittedDir(ctx, view); err != nil {
-		return err
+		return idx.closedOr(err)
 	}
 	if err := idx.installIfNewer(ctx, *view, nil); err != nil {
-		return err
+		return idx.closedOr(err)
 	}
 	idx.MarkReady(ctx, true)
 	return nil
+}
+
+// closedOr returns the closed error of the Index when the Index closed, else
+// err. The closed error wraps engine.ErrClosed and is marked
+// pkroot.ErrUnavailable.
+func (idx *Index) closedOr(err error) error {
+	if idx.ctx.Err() != nil {
+		return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of vchannel %s is closed", idx.vchannel), pkroot.ErrUnavailable)
+	}
+	return err
 }
 
 // reconcileCommittedDir removes the files of the committed dir that the

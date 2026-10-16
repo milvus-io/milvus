@@ -64,11 +64,11 @@ func (c *PChannelIndexManager) LastAcked() uint64 {
 }
 
 // lastAckedUnclamped returns LastAcked without the clamp to ackedMax, and
-// does not change ackedMax. The clamp hides an Index whose key is below
-// ackedMax. The truncation does not wait for that Index, because its
-// uncommitted writes are above ackedMax, but the handover triggers that
-// compare with the WAL tail must still see it, so they use this value. The
-// caller makes sure that the PChannelIndexManager has an index.
+// does not change ackedMax. It sees an Index whose key is below ackedMax,
+// which the clamp hides: the truncation does not wait for that Index, its
+// uncommitted writes are above ackedMax; the handover triggers that compare
+// with the WAL tail use this value. The caller makes sure that the
+// PChannelIndexManager has an index.
 func (c *PChannelIndexManager) lastAckedUnclamped() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -20,6 +20,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 // testMeta returns the vchannel meta of a collection with one primary key
@@ -310,4 +312,58 @@ func TestRecoverLooksManifestsUpInBatches(t *testing.T) {
 	assert.Equal(t, uint64(10), m.IndexForTest("v5").LastCommittedTimeTick())
 	assert.False(t, m.IndexForTest("v5").Ready())
 	assert.True(t, m.IndexForTest("v1").Ready())
+}
+
+// countingScheduler counts the submitted tasks and passes them on.
+type countingScheduler struct {
+	nodescheduler.Scheduler
+	submitted atomic.Int32
+}
+
+func (s *countingScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+	s.submitted.Add(1)
+	return s.Scheduler.Submit(task)
+}
+
+func TestFinishSkipsTheInstallOfADroppedIndex(t *testing.T) {
+	ctx := context.Background()
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/1/v1"}})
+	inner := nodescheduler.New(1)
+	t.Cleanup(inner.Close)
+	sched := &countingScheduler{Scheduler: inner}
+	rec, err := Recover(ctx, env.Manager, Param{
+		Info:  types.PChannelInfo{Name: "p", Term: 1},
+		Metas: map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
+		Sched: sched,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { rec.Close(ctx) })
+	m := env.Manager.Get("p")
+	require.False(t, m.IndexForTest("v1").Ready(), "waits for the install")
+
+	rec.Observe(ctx, dropCollectionMsg("v1", 1, 20))
+	require.Nil(t, m.IndexForTest("v1"))
+	require.NoError(t, rec.Finish(ctx))
+	assert.Equal(t, int32(0), sched.submitted.Load(), "no install of a dropped index")
+}
+
+func TestFinishRunsOnce(t *testing.T) {
+	ctx := context.Background()
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/1/v1"}})
+	inner := nodescheduler.New(1)
+	t.Cleanup(inner.Close)
+	sched := &countingScheduler{Scheduler: inner}
+	rec, err := Recover(ctx, env.Manager, Param{
+		Info:  types.PChannelInfo{Name: "p", Term: 1},
+		Metas: map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
+		Sched: sched,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { rec.Close(ctx) })
+	require.NoError(t, rec.Finish(ctx))
+	require.NoError(t, rec.Finish(ctx))
+	assert.Equal(t, int32(1), sched.submitted.Load(), "the install is submitted once")
+	require.Eventually(t, env.Manager.Get("p").IndexForTest("v1").Ready, 10*time.Second, 10*time.Millisecond)
 }
