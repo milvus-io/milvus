@@ -26,7 +26,8 @@ import (
 // Config is what the executor needs from the configuration.
 type Config struct {
 	// LocalRoot is the directory of the task directories. The executor
-	// deletes it at start.
+	// deletes it at start, so two data nodes must not share one local
+	// storage path.
 	LocalRoot string
 	// TerminalTaskTTL is how long a finished or failed task waits for a
 	// query before the executor deletes it.

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	pkcompaction "github.com/milvus-io/milvus/internal/datanode/pkindex/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
@@ -93,6 +94,7 @@ type DataNode struct {
 	externalCollectionManager *external.ExternalCollectionManager
 
 	compactionExecutor compactor.Executor
+	pkindexCompaction  *pkcompaction.Executor
 
 	etcdCli *clientv3.Client
 	address string
@@ -231,6 +233,12 @@ func (node *DataNode) Init() error {
 		node.importV3Scheduler = importv3.NewScheduler(node.ctx, node.importV3Capacity, node.importV3Metrics)
 		importv3.CleanImportV3Prefixes()
 
+		if err := node.initPKIndexCompaction(); err != nil {
+			log.Error(node.ctx, "init primary key index compaction failed", mlog.Err(err))
+			initError = err
+			return
+		}
+
 		err := index.InitSegcore(serverID)
 		if err != nil {
 			initError = err
@@ -265,6 +273,10 @@ func (node *DataNode) Start() error {
 	var startErr error
 	node.startOnce.Do(func() {
 		go node.compactionExecutor.Start(node.ctx)
+
+		if node.pkindexCompaction != nil {
+			node.pkindexCompaction.Start()
+		}
 
 		go node.importScheduler.Start()
 
@@ -345,6 +357,10 @@ func (node *DataNode) Stop() error {
 
 		if node.importScheduler != nil {
 			node.importScheduler.Close()
+		}
+
+		if node.pkindexCompaction != nil {
+			node.pkindexCompaction.Close()
 		}
 
 		if node.externalCollectionManager != nil {
