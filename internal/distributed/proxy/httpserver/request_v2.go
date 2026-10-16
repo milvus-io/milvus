@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -287,17 +288,17 @@ type JobIDReq struct {
 func (req *JobIDReq) GetJobID() string { return req.JobID }
 
 type QueryReqV2 struct {
-	DbName           string                 `json:"dbName"`
-	CollectionName   string                 `json:"collectionName" binding:"required"`
-	RlsPrincipal     string                 `json:"rlsPrincipal"`
-	SkipRls          bool                   `json:"skipRls"`
-	PartitionNames   []string               `json:"partitionNames"`
-	OutputFields     []string               `json:"outputFields"`
-	Filter           string                 `json:"filter"`
-	Limit            int32                  `json:"limit"`
-	Offset           int32                  `json:"offset"`
-	ExprParams       map[string]interface{} `json:"exprParams"`
-	ConsistencyLevel string                 `json:"consistencyLevel"`
+	DbName           string                     `json:"dbName"`
+	CollectionName   string                     `json:"collectionName" binding:"required"`
+	RlsPrincipal     string                     `json:"rlsPrincipal"`
+	SkipRls          bool                       `json:"skipRls"`
+	PartitionNames   []string                   `json:"partitionNames"`
+	OutputFields     []string                   `json:"outputFields"`
+	Filter           string                     `json:"filter"`
+	Limit            int32                      `json:"limit"`
+	Offset           int32                      `json:"offset"`
+	ExprParams       map[string]json.RawMessage `json:"exprParams"`
+	ConsistencyLevel string                     `json:"consistencyLevel"`
 }
 
 func (req *QueryReqV2) GetDbName() string         { return req.DbName }
@@ -319,13 +320,13 @@ func (req *CollectionIDReq) GetDbName() string         { return req.DbName }
 func (req *CollectionIDReq) GetCollectionName() string { return req.CollectionName }
 
 type CollectionFilterReq struct {
-	DbName         string                 `json:"dbName"`
-	CollectionName string                 `json:"collectionName" binding:"required"`
-	RlsPrincipal   string                 `json:"rlsPrincipal"`
-	SkipRls        bool                   `json:"skipRls"`
-	PartitionName  string                 `json:"partitionName"`
-	Filter         string                 `json:"filter" binding:"required"`
-	ExprParams     map[string]interface{} `json:"exprParams"`
+	DbName         string                     `json:"dbName"`
+	CollectionName string                     `json:"collectionName" binding:"required"`
+	RlsPrincipal   string                     `json:"rlsPrincipal"`
+	SkipRls        bool                       `json:"skipRls"`
+	PartitionName  string                     `json:"partitionName"`
+	Filter         string                     `json:"filter" binding:"required"`
+	ExprParams     map[string]json.RawMessage `json:"exprParams"`
 }
 
 func (req *CollectionFilterReq) GetDbName() string         { return req.DbName }
@@ -384,25 +385,25 @@ func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType,
 }
 
 type SearchReqV2 struct {
-	DbName           string                 `json:"dbName"`
-	CollectionName   string                 `json:"collectionName" binding:"required"`
-	RlsPrincipal     string                 `json:"rlsPrincipal"`
-	SkipRls          bool                   `json:"skipRls"`
-	Data             []interface{}          `json:"data"`
-	Ids              []interface{}          `json:"ids"`
-	AnnsField        string                 `json:"annsField"`
-	PartitionNames   []string               `json:"partitionNames"`
-	Filter           string                 `json:"filter"`
-	GroupByField     string                 `json:"groupingField"`
-	GroupSize        int32                  `json:"groupSize"`
-	StrictGroupSize  bool                   `json:"strictGroupSize"`
-	Limit            int32                  `json:"limit"`
-	Offset           int32                  `json:"offset"`
-	OutputFields     []string               `json:"outputFields"`
-	SearchParams     map[string]interface{} `json:"searchParams"`
-	ConsistencyLevel string                 `json:"consistencyLevel"`
-	ExprParams       map[string]interface{} `json:"exprParams"`
-	FunctionScore    FunctionScore          `json:"functionScore"`
+	DbName           string                     `json:"dbName"`
+	CollectionName   string                     `json:"collectionName" binding:"required"`
+	RlsPrincipal     string                     `json:"rlsPrincipal"`
+	SkipRls          bool                       `json:"skipRls"`
+	Data             []interface{}              `json:"data"`
+	Ids              []json.RawMessage          `json:"ids"`
+	AnnsField        string                     `json:"annsField"`
+	PartitionNames   []string                   `json:"partitionNames"`
+	Filter           string                     `json:"filter"`
+	GroupByField     string                     `json:"groupingField"`
+	GroupSize        int32                      `json:"groupSize"`
+	StrictGroupSize  bool                       `json:"strictGroupSize"`
+	Limit            int32                      `json:"limit"`
+	Offset           int32                      `json:"offset"`
+	OutputFields     []string                   `json:"outputFields"`
+	SearchParams     map[string]interface{}     `json:"searchParams"`
+	ConsistencyLevel string                     `json:"consistencyLevel"`
+	ExprParams       map[string]json.RawMessage `json:"exprParams"`
+	FunctionScore    FunctionScore              `json:"functionScore"`
 	// not use Params any more, just for compatibility
 	Params map[string]float64 `json:"params"`
 }
@@ -416,15 +417,15 @@ type Rand struct {
 }
 
 type SubSearchReq struct {
-	Data         []interface{}          `json:"data" binding:"required"`
-	AnnsField    string                 `json:"annsField"`
-	Filter       string                 `json:"filter"`
-	GroupByField string                 `json:"groupingField"`
-	MetricType   string                 `json:"metricType"`
-	Limit        int32                  `json:"limit"`
-	Offset       int32                  `json:"offset"`
-	SearchParams map[string]interface{} `json:"params"`
-	ExprParams   map[string]interface{} `json:"exprParams"`
+	Data         []interface{}              `json:"data" binding:"required"`
+	AnnsField    string                     `json:"annsField"`
+	Filter       string                     `json:"filter"`
+	GroupByField string                     `json:"groupingField"`
+	MetricType   string                     `json:"metricType"`
+	Limit        int32                      `json:"limit"`
+	Offset       int32                      `json:"offset"`
+	SearchParams map[string]interface{}     `json:"params"`
+	ExprParams   map[string]json.RawMessage `json:"exprParams"`
 }
 
 type HybridSearchReq struct {
@@ -837,10 +838,6 @@ func wrapperReturnRowCount(pairs []*commonpb.KeyValuePair) gin.H {
 
 func wrapperReturnDefault() gin.H {
 	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}}
-}
-
-func wrapperReturnDefaultWithCost(cost int) gin.H {
-	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}, HTTPReturnCost: cost}
 }
 
 type ResourceGroupNodeFilter struct {
