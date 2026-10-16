@@ -55,6 +55,12 @@ SetExternalVectorPartialNullAsRowNull(bool enabled);
 bool
 GetExternalVectorPartialNullAsRowNull();
 
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes);
+
+int64_t
+GetExternalSparseConversionMemoryLimit();
+
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads);
 
