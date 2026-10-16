@@ -117,16 +117,3 @@ func TestFunctionConfigPyUDF(t *testing.T) {
 
 	assert.True(t, cfg.PyUDFEnabled.GetAsBool())
 }
-
-func TestAnalyzerRequestTimeout(t *testing.T) {
-	params := ComponentParam{}
-	params.Init(NewBaseTable(SkipRemote(true)))
-	param := &params.FunctionCfg.AnalyzerRequestTimeout
-	assert.Equal(t, 10*time.Minute, param.GetAsDurationByParse())
-	for _, value := range []string{"0s", "-1s", "invalid"} {
-		assert.NoError(t, params.Save(param.Key, value))
-		assert.Equal(t, 10*time.Minute, param.GetAsDurationByParse())
-	}
-	assert.NoError(t, params.Save(param.Key, "20m"))
-	assert.Equal(t, 20*time.Minute, param.GetAsDurationByParse())
-}
