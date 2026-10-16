@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"maps"
 	"math/rand"
 	"sync"
 	"testing"
@@ -45,6 +46,15 @@ func allTokensTF(vocab int32) []byte {
 		all[uint32(i)] = 1
 	}
 	return typeutil.CreateAndSortSparseFloatRow(all)
+}
+
+// Missing tokens and zero-frequency entries have the same DF/IDF meaning.
+// Minus removes zero entries from BM25Stats, while concurrent updates retain
+// them. Compare every nonzero frequency, including negative counts in deltas.
+func nonZeroBM25Frequencies(frequencies map[uint32]int32) map[uint32]int32 {
+	result := maps.Clone(frequencies)
+	maps.DeleteFunc(result, func(_ uint32, count int32) bool { return count == 0 })
+	return result
 }
 
 func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
@@ -95,7 +105,7 @@ func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
 			got := c.Snapshot()
 			assert.Equal(t, expected.NumRow(), c.NumRow())
 			assert.Equal(t, expected.NumToken(), c.NumToken())
-			assert.Equal(t, expected.rowsWithToken, got.rowsWithToken)
+			assert.Equal(t, nonZeroBM25Frequencies(expected.rowsWithToken), nonZeroBM25Frequencies(got.rowsWithToken))
 			assert.Equal(t, expected.GetAvgdl(), c.GetAvgdl())
 			tf := allTokensTF(tc.vocab)
 			assert.Equal(t, expected.BuildIDF(tf), c.BuildIDF(tf))
@@ -120,7 +130,7 @@ func TestConcurrentBM25StatsUnlockedMatchesSerial(t *testing.T) {
 		}
 		assert.Equal(t, expected.NumRow(), c.NumRow())
 		assert.Equal(t, expected.NumToken(), c.NumToken())
-		assert.Equal(t, expected.rowsWithToken, c.Snapshot().rowsWithToken)
+		assert.Equal(t, nonZeroBM25Frequencies(expected.rowsWithToken), nonZeroBM25Frequencies(c.Snapshot().rowsWithToken))
 		tf := allTokensTF(20000)
 		assert.Equal(t, expected.BuildIDF(tf), c.BuildIDFUnlocked(tf))
 		assert.Equal(t, c.BuildIDF(tf), c.BuildIDFUnlocked(tf))
@@ -146,7 +156,7 @@ func TestConcurrentBM25StatsMergeFrom(t *testing.T) {
 	got := a.Snapshot()
 	assert.Equal(t, expected.NumRow(), a.NumRow())
 	assert.Equal(t, expected.NumToken(), a.NumToken())
-	assert.Equal(t, expected.rowsWithToken, got.rowsWithToken)
+	assert.Equal(t, nonZeroBM25Frequencies(expected.rowsWithToken), nonZeroBM25Frequencies(got.rowsWithToken))
 }
 
 // A search during preload reads current while segments merge into it. It must never see a token in more
