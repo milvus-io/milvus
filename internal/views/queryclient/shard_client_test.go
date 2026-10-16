@@ -181,12 +181,17 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 			}
 		},
 	}
-	client := newTestShardClient(1, shardID, plan, queryService)
+	planClient := &fakeQueryPlanClient{plan: plan}
+	client := newShardViewQueryClient(1, planClient, queryService)
 
-	stream, shardPlan, err := client.SearchStream(context.Background(), shardID.VChannel, request, 20)
+	stream, shardPlan, err := client.SearchStream(context.Background(), shardID.VChannel, &LegacySearchRequest{
+		Req: request, RequiredFieldIDs: []int64{101}, BarrierMVCC: 123,
+	}, 20)
 
 	require.NoError(t, err)
 	require.Equal(t, shardID, shardPlan.ShardID)
+	require.Equal(t, []int64{101}, planClient.planReq.GetRequiredFieldIds())
+	require.Equal(t, uint64(123), planClient.planReq.GetBarrierMvcc())
 	require.Equal(t, int64(20), queryService.searchReq.GetStreamChunkBytes())
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
@@ -234,12 +239,17 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 			}
 		},
 	}
-	client := newTestShardClient(1, shardID, plan, queryService)
+	planClient := &fakeQueryPlanClient{plan: plan}
+	client := newShardViewQueryClient(1, planClient, queryService)
 
-	stream, shardPlan, err := client.QueryStream(context.Background(), shardID.VChannel, request, nil, 32)
+	stream, shardPlan, err := client.QueryStream(context.Background(), shardID.VChannel, &LegacyQueryRequest{
+		Req: request, ReadProofAfter: 456, BarrierMVCC: 123,
+	}, 32)
 
 	require.NoError(t, err)
 	require.Equal(t, shardID, shardPlan.ShardID)
+	require.Equal(t, uint64(456), planClient.planReq.GetReadProofAfter())
+	require.Equal(t, uint64(123), planClient.planReq.GetBarrierMvcc())
 	require.Equal(t, int64(32), queryService.queryReq.GetStreamChunkBytes())
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
@@ -270,7 +280,7 @@ func TestShardSearchStreamCloseReleasesChildStream(t *testing.T) {
 		},
 	)
 
-	stream, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, 32)
+	stream, _, err := client.SearchStream(context.Background(), shardID.VChannel, &LegacySearchRequest{Req: request}, 32)
 	require.NoError(t, err)
 	require.NoError(t, stream.Close())
 
@@ -300,7 +310,7 @@ func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
 	}
 	client := newTestShardClient(1, shardID, plan, queryService)
 
-	_, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, 32)
+	_, _, err := client.SearchStream(context.Background(), shardID.VChannel, &LegacySearchRequest{Req: request}, 32)
 
 	require.ErrorContains(t, err, "open failed")
 	require.Equal(t, 1, openedStream.closeCount())
