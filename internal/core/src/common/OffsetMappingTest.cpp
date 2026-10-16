@@ -24,7 +24,8 @@
 #include "common/OffsetMapping.h"
 #include "common/SealedOffsetMapping.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
-#include "knowhere/id_map.h"
+#include "knowhere/index/index_factory.h"
+#include "knowhere/version.h"
 
 namespace milvus {
 
@@ -133,35 +134,19 @@ ExpectFilterValidLogicalOffsets(const SealedOffsetMapping& mapping) {
     EXPECT_EQ(filtered_offsets, (std::vector<int64_t>{0, 1}));
 }
 
-void
-ExpectIdSnapshotValues(const knowhere::IdArray& ids,
-                       const std::vector<int32_t>& expected) {
-    ASSERT_EQ(ids.size(), expected.size());
-    for (size_t i = 0; i < expected.size(); ++i) {
-        EXPECT_EQ(ids[i], expected[i]) << "physical offset: " << i;
+knowhere::Index<knowhere::IndexNode>
+CreateValidityIndex() {
+    auto result = knowhere::IndexFactory::Instance().Create<float>(
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    if (!result.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(result.error()),
+                  "create validity helper fixture: {}",
+                  result.what());
     }
+    return std::move(result.value());
 }
 
-void
-ExpectIdMapValues(const knowhere::IdMap& id_map,
-                  const std::vector<int64_t>& expected_l2p,
-                  const std::vector<int32_t>& expected_p2l) {
-    EXPECT_EQ(id_map.type(), knowhere::IdMap::Type::SEALED);
-    EXPECT_EQ(id_map.OutCount(), expected_l2p.size());
-    EXPECT_EQ(id_map.InCount(), expected_p2l.size());
-    // InToOutIds returns an owning value, including for mmap-backed arrays.
-    const auto ids = id_map.InToOutIds();
-    ExpectIdSnapshotValues(ids, expected_p2l);
-    for (size_t i = 0; i < expected_l2p.size(); ++i) {
-        EXPECT_EQ(id_map.MapOutToIn(i), expected_l2p[i])
-            << "logical offset: " << i;
-        EXPECT_EQ(id_map.IsValidOutId(i), expected_l2p[i] >= 0);
-    }
-    for (size_t i = 0; i < expected_p2l.size(); ++i) {
-        EXPECT_EQ(id_map.MapInToOut(i), expected_p2l[i])
-            << "physical offset: " << i;
-    }
-}
 }  // namespace
 
 // ---------- Default (disabled) state ----------
@@ -261,124 +246,107 @@ TEST(OffsetMapping, BuildTwiceResetsState) {
 
 TEST(IdMapValidDataHelpers, ConfigureMmapUsesOnlyIdMappingConfigKeys) {
     const std::vector<uint8_t> bitmap{0b00001101};
-    Config config;
-    config[index::ENABLE_MMAP] = true;
-
-    {
-        const auto mmap_root = MakeMmapRoot("mmap_disabled");
-        knowhere::IdMap id_map;
-        id_map.SetType(knowhere::IdMap::Type::SEALED);
-        index::ConfigureIdMapMmap(id_map, config, mmap_root.string());
-        id_map.AddFromData(
-            knowhere::IdMapData::FromValidBitmap(bitmap.data(), 5));
-        id_map.FinalizeVectorIds();
+    for (int flags = 0; flags < 4; ++flags) {
+        const auto mmap_root =
+            MakeMmapRoot("semantic_mmap_" + std::to_string(flags));
+        Config config;
+        // Payload mmap must not implicitly enable nullable mapping mmap.
+        config[index::ENABLE_MMAP] = true;
+        config[index::ENABLE_MMAP_I2O_MAP] = (flags & 1) ? "true" : "false";
+        config[index::ENABLE_MMAP_O2I_MAP] = (flags & 2) != 0;
+        {
+            auto native = CreateValidityIndex();
+            const auto input =
+                index::MakeNullableLoadInput({true, 5, bitmap.data()},
+                                             index::GetIdMapMmapFlags(config),
+                                             mmap_root.string());
+            ASSERT_TRUE(input.validity.has_value());
+            ASSERT_EQ(native.ImportValidity(*input.validity, input.mmap),
+                      knowhere::Status::success);
+            EXPECT_EQ(native.LogicalCount().value(), 5);
+            EXPECT_EQ(native.ValidCount().value(), 3);
+            EXPECT_FALSE(native.IsRowValid(1).value());
+            std::vector<uint64_t> expected;
+            if (flags & 1) {
+                expected.push_back(3 * sizeof(int32_t));
+            }
+            if (flags & 2) {
+                expected.push_back(5 * sizeof(int32_t));
+            }
+            ExpectMmapBlockFiles(mmap_root / index::ID_MAP_MMAP_DIR, expected);
+        }
         EXPECT_TRUE(MmapBlockFiles(mmap_root / index::ID_MAP_MMAP_DIR).empty());
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("mmap_i2o");
-        knowhere::IdMap id_map;
-        Config i2o_config = config;
-        i2o_config[index::ENABLE_MMAP_I2O_MAP] = true;
-        i2o_config[index::ENABLE_MMAP_O2I_MAP] = false;
-        index::ConfigureIdMapMmap(id_map, i2o_config, mmap_root.string());
-        id_map.AddFromData(
-            knowhere::IdMapData::FromValidBitmap(bitmap.data(), 5));
-        id_map.FinalizeVectorIds();
-        ExpectMmapBlockFiles(mmap_root / index::ID_MAP_MMAP_DIR,
-                             {3 * sizeof(int32_t)});
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("mmap_o2i");
-        knowhere::IdMap id_map;
-        Config o2i_config = config;
-        o2i_config[index::ENABLE_MMAP_I2O_MAP] = "false";
-        o2i_config[index::ENABLE_MMAP_O2I_MAP] = "true";
-        index::ConfigureIdMapMmap(id_map, o2i_config, mmap_root.string());
-        id_map.AddFromData(
-            knowhere::IdMapData::FromValidBitmap(bitmap.data(), 5));
-        id_map.FinalizeVectorIds();
-        ExpectMmapBlockFiles(mmap_root / index::ID_MAP_MMAP_DIR,
-                             {5 * sizeof(int32_t)});
+        std::filesystem::remove_all(mmap_root);
     }
 }
 
 TEST(IdMapValidDataHelpers, ValidDataHelpersPreserveSnapshotValues) {
     const std::vector<uint8_t> bitmap{0b00001101};
-    const std::vector<int64_t> expected_out_to_in{0, -1, 1, 2, -1};
-    const std::vector<int32_t> expected_in_to_out{0, 2, 3};
-
     for (const bool enable_mmap : {false, true}) {
         SCOPED_TRACE(enable_mmap);
         const auto mmap_root = MakeMmapRoot("bitmap_helper");
-        knowhere::IdArray ids_snapshot;
-        knowhere::BitmapArray valid_snapshot;
+        knowhere::ValidityData snapshot;
         {
-            knowhere::IdMap id_map;
-            id_map.SetType(knowhere::IdMap::Type::SEALED);
-            if (enable_mmap) {
-                id_map.ConfigureMmap(
-                    knowhere::IdMapMmapOptions{true, true, mmap_root.string()});
-            }
-            id_map.AddFromData(
-                knowhere::IdMapData::FromValidBitmap(bitmap.data(), 5));
-            EXPECT_TRUE(id_map.InToOutIds().empty());
-            id_map.FinalizeVectorIds();
-            ExpectIdMapValues(id_map, expected_out_to_in, expected_in_to_out);
-            ids_snapshot = id_map.InToOutIds();
-            valid_snapshot = id_map.ValidBitmap();
+            auto native = CreateValidityIndex();
+            ASSERT_EQ(native.ImportValidity(
+                          {bitmap.data(), bitmap.size(), 5},
+                          {enable_mmap, enable_mmap, mmap_root.string()}),
+                      knowhere::Status::success);
+            auto exported = native.ExportValidity();
+            ASSERT_TRUE(exported.has_value());
+            ASSERT_TRUE(exported.value().has_value());
+            snapshot = std::move(*exported.value());
+            EXPECT_EQ(native.ValidCount().value(), 3);
             if (enable_mmap) {
                 ExpectMmapBlockFiles(
                     mmap_root, {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
             }
         }
-        // The value snapshots retain their buffers after the IdMap is gone.
-        ExpectIdSnapshotValues(ids_snapshot, expected_in_to_out);
-        ASSERT_EQ(valid_snapshot.size(), expected_out_to_in.size());
-        for (size_t i = 0; i < expected_out_to_in.size(); ++i) {
-            EXPECT_EQ((valid_snapshot[i / 8] >> (i % 8)) & 1,
-                      expected_out_to_in[i] >= 0);
-        }
+        // The exported value owns its bytes after the native index is gone.
+        EXPECT_EQ(snapshot.logical_row_count, 5);
+        EXPECT_EQ(snapshot.packed_bits, bitmap);
+        EXPECT_TRUE(MmapBlockFiles(mmap_root).empty());
+        std::filesystem::remove_all(mmap_root);
     }
 }
 
-TEST(IdMapValidDataHelpers, LoadIdMapDataFromBinarySetRestoresIdMapData) {
-    const std::array<bool, 5> valid{{true, false, true, true, false}};
-    const std::vector<int64_t> expected_out_to_in{0, -1, 1, 2, -1};
-    const std::vector<int32_t> expected_in_to_out{0, 2, 3};
+TEST(IdMapValidDataHelpers, BinarySetRoundTripPreservesWireData) {
+    const std::vector<uint8_t> bitmap{0x0d};
     BinarySet binary_set;
     {
-        knowhere::IdMap source_id_map;
-        source_id_map.SetType(knowhere::IdMap::Type::SEALED);
-        source_id_map.AddFromData(
-            knowhere::IdMapData::FromValidData(valid.data(), valid.size()));
-        index::AppendValidDataToBinarySet(source_id_map, binary_set);
+        auto native = CreateValidityIndex();
+        ASSERT_EQ(native.ImportValidity({bitmap.data(), bitmap.size(), 5}),
+                  knowhere::Status::success);
+        index::AppendValidDataToBinarySet(native, binary_set);
     }
-
+    ASSERT_EQ(binary_set.GetByName(index::VALID_DATA_COUNT_KEY)->size,
+              sizeof(uint64_t));
+    ASSERT_EQ(binary_set.GetByName(index::VALID_DATA_KEY)->size, 1);
+    EXPECT_EQ(binary_set.GetByName(index::VALID_DATA_KEY)->data[0], 0x0d);
     for (const bool enable_mmap : {false, true}) {
         SCOPED_TRACE(enable_mmap);
         const auto mmap_root = MakeMmapRoot("binary_set_helper");
-        knowhere::IdMap id_map;
-        if (enable_mmap) {
-            id_map.SetType(knowhere::IdMap::Type::SEALED);
-            id_map.ConfigureMmap(
-                knowhere::IdMapMmapOptions{true, true, mmap_root.string()});
-        } else {
-            EXPECT_EQ(id_map.type(), knowhere::IdMap::Type::DISABLED);
+        {
+            auto native = CreateValidityIndex();
+            auto input = index::MakeNullableLoadInput(
+                index::LoadValidDataViewFromBinarySet(binary_set));
+            input.mmap = {enable_mmap, enable_mmap, mmap_root.string()};
+            ASSERT_TRUE(input.validity.has_value());
+            ASSERT_EQ(native.ImportValidity(*input.validity, input.mmap),
+                      knowhere::Status::success);
+            EXPECT_EQ(native.LogicalCount().value(), 5);
+            EXPECT_EQ(native.ValidCount().value(), 3);
+            for (int64_t row = 0; row < 5; ++row) {
+                EXPECT_EQ(native.IsRowValid(row).value(),
+                          ((bitmap[0] >> row) & 1) != 0);
+            }
+            if (enable_mmap) {
+                ExpectMmapBlockFiles(
+                    mmap_root, {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
+            }
         }
-        const auto restored =
-            index::RestoreIdMapFromBinarySet(binary_set, id_map);
-        ASSERT_TRUE(restored.has_valid_data);
-        EXPECT_FALSE(restored.IsAllNullNullable());
-        EXPECT_EQ(id_map.OutCount(), valid.size());
-        EXPECT_TRUE(id_map.InToOutIds().empty());
-        id_map.FinalizeVectorIds();
-        ExpectIdMapValues(id_map, expected_out_to_in, expected_in_to_out);
-        if (enable_mmap) {
-            ExpectMmapBlockFiles(mmap_root,
-                                 {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
-        }
+        EXPECT_TRUE(MmapBlockFiles(mmap_root).empty());
+        std::filesystem::remove_all(mmap_root);
     }
 }
 
