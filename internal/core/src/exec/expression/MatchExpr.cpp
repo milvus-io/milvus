@@ -247,7 +247,11 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
 
-    auto schema = segment_->get_schema_snapshot();
+    auto schema = segment_->type() == SegmentType::Growing
+                      ? segment_->get_schema_snapshot()
+                      : context.get_exec_context()
+                            ->get_query_context()
+                            ->get_read_schema();
     const auto& field_meta =
         schema->GetFirstArrayFieldInStruct(expr_->get_struct_name());
 

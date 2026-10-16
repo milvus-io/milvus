@@ -10,6 +10,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/viewpb";
 // coordinator and StreamingNode/QueryNode followers. State-machine execution
 // remains outside this transport contract.
 service ViewSyncService {
+    rpc SyncDataView(SyncDataViewRequest) returns (SyncDataViewResponse) {}
     rpc SyncQueryView(stream SyncRequest) returns (stream SyncResponse) {
     }
 }
@@ -34,12 +35,12 @@ message DataViewOfCollection {
 message DataViewOfShard {
     string vchannel = 1;
     repeated DataViewOfPartition partitions = 2;
-    // Shard delete-retention frontier, preserved on the wire for the
-    // QueryView consumer (QueryViewAtCoordBuilder). The DataCoord does not
-    // advance it yet: publishing a safe, monotonic Transform frontier is
-    // deferred until StreamingNode provides the shard-level Growing-Segment
-    // Flush barrier. Consumers must treat 0 as "not published".
-    uint64 transform_start_after_timetick = 3;
+    // W: WAL-certified lower bound for data not yet published into this view.
+    // Advanced atomically with final L1 Flush publication, never by checkpoint reports.
+    uint64 growing_transform_start_after_timetick = 3;
+    // A: minimum cursor of the exact Segment bases selected by this view.
+    // Recomputed for every membership/base change, including Flush. Empty shards use W.
+    uint64 compacted_transform_start_after_timetick = 4;
 }
 
 message DataViewOfPartition {
@@ -51,6 +52,9 @@ message DataViewOfPartition {
     // partition, Segment ID, and this version alone.
     repeated int64 segment_ids = 2 [packed = true];
     repeated int64 segment_manifest_versions = 3 [packed = true];
+    // Parallel to segment_ids; tied to the selected Segment data revision.
+    // Zero means legacy/unknown coverage, never a safe replay timestamp.
+    repeated uint64 segment_transform_start_after_timeticks = 4 [packed = true];
 }
 
 // QueryViewState represents the distributed lifecycle of a QueryView.
@@ -83,6 +87,7 @@ message QueryViewMeta {
     QueryViewState state = 5;
     uint64 load_info_version = 6;
     uint64 transform_start_after_timetick = 7;
+    int32 schema_version = 8; // Required logical collection schema revision.
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
@@ -108,6 +113,11 @@ message QueryViewOfPartition {
     int64 partition_id = 1;
     repeated int64 segment_ids = 2;
     repeated int64 ready_segment_ids = 3;
+    // Parallel to segment_ids, copied from the immutable DataView snapshot.
+    repeated uint64 segment_transform_start_after_timeticks = 4 [packed = true];
+    // Minimum physical base version required before this view reports Ready.
+    // Parallel to segment_ids; zero preserves legacy metadata resolution.
+    repeated int64 segment_manifest_versions = 5 [packed = true];
 }
 
 // SyncRequest carries an atomic state-machine input or closes the stream.
@@ -136,6 +146,10 @@ message SyncResponse {
 
 // SyncQueryViewsResponse reports the follower's latest local states.
 message SyncQueryViewsResponse {
+    oneof balance_attributes {
+        StreamingNodeBalanceAttributes streaming_node = 2;
+        QueryNodeBalanceAttributes query_node = 3;
+    }
     repeated QueryViewOfShard query_views = 1;
 }
 
@@ -201,6 +215,20 @@ message QueryPlanMVCC {
     // Latest timetick of the transforming stream. StreamingNode and QueryNode
     // wait for transform visibility up to this timetick before execution.
     uint64 transforming_timetick = 2;
+    // Installed by Phase 1 after validating schema history through the fixed MVCC.
+    QuerySchemaBinding schema_binding = 3;
+    // Complete WAL prefix certified together with these executor frontiers.
+    // Used for partial-update CAS, not as an executor wait/read timestamp.
+    uint64 read_proof_timetick = 4;
+}
+
+// QuerySchemaBinding prevents Phase 2 and requery from changing the schema,
+// MVCC or adding field accesses beyond those checked against WAL schema history.
+message QuerySchemaBinding {
+    int32 schema_version = 1;
+    uint64 growing_timetick = 2;
+    uint64 transforming_timetick = 3;
+    repeated int64 field_ids = 4;
 }
 
 // QueryPlanService generates shard-level query plans.
@@ -219,6 +247,11 @@ service QueryPlanService {
 }
 
 message GetQueryPlanRequest {
+    // Request a complete WAL read certificate at or after this timestamp.
+    // Only valid with consistency-based MVCC, not explicit snapshot modes.
+    uint64 read_proof_after = 9;
+    // Dependencies of later requery/render stages; validation only, not projection.
+    repeated int64 required_field_ids = 10;
     int64 collection_id = 1;
     ShardID shard_id = 2;
     // Mutually exclusive MVCC source:
@@ -229,6 +262,9 @@ message GetQueryPlanRequest {
     oneof mvcc {
         common.ConsistencyLevel consistency_level = 3;
         QueryPlanMVCC query_plan_mvcc = 7;
+        // Fixed read timestamp. Actively establish scoped, non-durable WAL
+        // coverage, then execute both growing and sealed reads at this timestamp.
+        uint64 barrier_mvcc = 8;
     }
     repeated int64 partition_ids = 4;
     // Original request for global optimization (BM25 IDF, search param tuning, etc.).
@@ -325,4 +361,25 @@ message RequeryOnViewRequest {
 message RequeryOnViewResponse {
     // TODO: replace with native view result types once legacy internal protos are removed.
     internal.RetrieveResults legacy_results = 1;
+}
+
+message SyncDataViewRequest {
+    repeated DataViewShardTimeTick shards = 1;
+}
+
+message DataViewShardTimeTick {
+    string vchannel = 1;
+    // TransformLog entries with timetick > this value need to be consumed for this shard.
+    uint64 transform_start_after_timetick = 2;
+}
+
+message SyncDataViewResponse {
+}
+
+message StreamingNodeBalanceAttributes {
+}
+
+message QueryNodeBalanceAttributes {
+    int64 memory_usage = 1;  // Current memory usage in bytes.
+    int64 disk_usage = 2;    // Current disk usage in bytes.
 }

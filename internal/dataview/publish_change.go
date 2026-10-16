@@ -91,6 +91,10 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 		unlock()
 		return nil, nil, nil, err
 	}
+	if err := m.advanceTransformFrontiers(ctx, next, nil); err != nil {
+		unlock()
+		return nil, nil, nil, err
+	}
 	canonicalizeDataView(next)
 	if dataViewMembershipEqual(base, next) {
 		// Idempotent replay of an already-published batch: no new snapshot to
@@ -182,8 +186,10 @@ func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64) error
 		for _, partition := range shard.GetPartitions() {
 			segments := partition.GetSegmentIds()
 			versions := partition.GetSegmentManifestVersions()
+			starts := partition.GetSegmentTransformStartAfterTimeticks()
 			keptSegments := segments[:0]
 			keptVersions := versions[:0]
+			keptStarts := starts[:0]
 			for idx, segmentID := range segments {
 				if _, ok := remove[segmentID]; ok {
 					continue
@@ -192,9 +198,13 @@ func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64) error
 				if idx < len(versions) {
 					keptVersions = append(keptVersions, versions[idx])
 				}
+				if idx < len(starts) {
+					keptStarts = append(keptStarts, starts[idx])
+				}
 			}
 			partition.SegmentIds = keptSegments
 			partition.SegmentManifestVersions = keptVersions
+			partition.SegmentTransformStartAfterTimeticks = keptStarts
 		}
 	}
 	return nil

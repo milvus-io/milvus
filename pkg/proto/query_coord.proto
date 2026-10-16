@@ -14,6 +14,7 @@ import "msg.proto";
 import "data_coord.proto";
 import "index_coord.proto";
 
+
 service QueryCoord {
     rpc GetQueryViewLoadInfo(GetQueryViewLoadInfoRequest) returns (GetQueryViewLoadInfoResponse) {}
     rpc ShowLoadCollections(ShowCollectionsRequest)
@@ -38,6 +39,10 @@ service QueryCoord {
         returns (GetPartitionStatesResponse) {
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
+    }
+
+    rpc WatchQueryViewSegmentLoadInfo(stream WatchQueryViewSegmentLoadInfoRequest)
+        returns (stream WatchQueryViewSegmentLoadInfoResponse) {
     }
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }
@@ -106,6 +111,7 @@ service QueryCoord {
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
   rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
+  rpc EnsureCollectionReady(EnsureCollectionReadyRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -257,6 +263,8 @@ message LoadCollectionRequest {
     repeated string resource_groups = 8;
     repeated int64 load_fields = 9;
     common.LoadPriority priority = 10;
+    optional bool load_all_fields = 11;
+    bool skip_load_dynamic_field = 12;
 }
 
 message ReleaseCollectionRequest {
@@ -289,6 +297,8 @@ message LoadPartitionsRequest {
     repeated index.IndexInfo index_info_list = 10;
     repeated int64 load_fields = 11;
     common.LoadPriority priority = 12;
+    optional bool load_all_fields = 13;
+    bool skip_load_dynamic_field = 14;
 }
 
 message ReleasePartitionsRequest {
@@ -320,6 +330,57 @@ message GetSegmentInfoRequest {
 message GetSegmentInfoResponse {
     common.Status status = 1;
     repeated SegmentInfo infos = 2;
+}
+
+message GetQueryViewLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+}
+
+message GetQueryViewLoadInfoResponse {
+    common.Status status = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+    repeated int64 partitionIDs = 4;
+    repeated messages.LoadFieldConfig load_fields = 5;
+    repeated index.IndexInfo index_info_list = 6;
+    repeated messages.LoadFieldConfig required_fields = 7; // Internal explicit query field scope, independent of load_fields hints.
+    bool skip_load_dynamic_field = 8; // Preload hint only.
+}
+
+message QueryViewSegmentLoadInfoRevision {
+    uint64 load_info_revision = 1;
+}
+
+message WatchQueryViewSegmentLoadInfoSubscription {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+    QueryViewSegmentLoadInfoRevision revision = 3;
+}
+
+message WatchQueryViewSegmentLoadInfoUnsubscription {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+}
+
+message WatchQueryViewSegmentLoadInfoRequest {
+    common.MsgBase base = 1;
+    repeated WatchQueryViewSegmentLoadInfoSubscription subscribe = 2;
+    repeated WatchQueryViewSegmentLoadInfoUnsubscription unsubscribe = 3;
+}
+
+message QueryViewSegmentLoadInfoSnapshot {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+    QueryViewSegmentLoadInfoRevision revision = 3;
+    SegmentLoadInfo load_info = 4;
+    repeated index.IndexInfo index_info_list = 5;
+}
+
+message WatchQueryViewSegmentLoadInfoResponse {
+    common.Status status = 1;
+    repeated QueryViewSegmentLoadInfoSnapshot snapshots = 2;
 }
 
 message GetShardLeadersRequest {
@@ -790,6 +851,10 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
+    int32 schema_version = 11 [deprecated = true]; // Ignored: QueryViews use the latest collection schema.
+    optional bool load_all_fields = 12;
+    bool skip_load_dynamic_field = 13;
+    repeated messages.LoadFieldConfig required_fields = 14; // Materialized internal scope; empty only in legacy persisted records.
 }
 
 message PartitionLoadInfo {
@@ -1075,6 +1140,11 @@ message UpdateLoadConfigRequest {
     repeated int64 collectionIDs = 3;
     int32 replica_number = 4;
     repeated string resource_groups = 5;
+    // RootCoord sends this only after publishing the schema. No WAL broadcast
+    // is needed here: the AlterCollection callback already owns the DDL lock.
+    optional int32 schema_version = 6;
+    // Newly added function outputs with indexes materialized by this DDL.
+    repeated .milvus.proto.messages.LoadFieldConfig added_load_fields = 7;
 }
 
 message UpdateSchemaRequest {
@@ -1197,18 +1267,8 @@ message ListLoadedSegmentsResponse {
     repeated int64 segmentIDs = 2;
 }
 
-
-message GetQueryViewLoadInfoRequest {
+message EnsureCollectionReadyRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
-    uint64 version = 3;
-}
-
-message GetQueryViewLoadInfoResponse {
-    common.Status status = 1;
-    int64 collectionID = 2;
-    uint64 version = 3;
-    repeated int64 partitionIDs = 4;
-    repeated messages.LoadFieldConfig load_fields = 5;
-    repeated index.IndexInfo index_info_list = 6;
+    repeated string expected_vchannels = 3;
 }

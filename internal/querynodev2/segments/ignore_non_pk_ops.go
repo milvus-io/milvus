@@ -379,6 +379,9 @@ func fetchFieldsAsRecord(
 			}
 			pinned = append(pinned, segment)
 			cSegments[i] = segment.csegment
+		case *sealedReadState:
+			// QueryOnView retains the read state and schema through Arrow refill.
+			cSegments[i] = segment.native
 		case *viewQueryGrowingSegment:
 			// QueryOnView holds the growing handles through execution and
 			// Arrow conversion. This adapter only borrows their C segments.

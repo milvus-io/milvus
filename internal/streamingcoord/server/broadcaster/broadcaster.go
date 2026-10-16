@@ -48,6 +48,10 @@ type Broadcaster interface {
 	// callback yet. Used during recovery to rebuild file resource refCnt.
 	GetPendingSchemaFileResources() map[int64][]int64
 
+	// GetPendingSchemaTarget returns the schema authorized by the ordered ACK
+	// callback, or a retriable error while a pending target is not yet eligible.
+	GetPendingSchemaTarget(collectionID int64) (*SchemaTarget, error)
+
 	// Close closes the broadcaster.
 	Close()
 }

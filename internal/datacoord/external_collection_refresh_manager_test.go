@@ -1380,7 +1380,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 
 		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
 
-		jobID, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
+		jobID, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "", map[string]uint64{"p_1_v100": 123})
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), jobID)
 
@@ -1389,6 +1389,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		assert.NotNil(t, job)
 		assert.Equal(t, int64(1), job.GetJobId())
 		assert.Equal(t, int64(100), job.GetCollectionId())
+		assert.Equal(t, map[string]uint64{"p_1_v100": 123}, job.GetTransformStartAfterTimeticks())
 		manager.Stop()
 	})
 

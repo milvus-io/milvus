@@ -20,6 +20,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -118,6 +119,9 @@ func (e *XGBoostExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) (
 	}
 	if len(inputs) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("xgboost: expected at least one input column")
+	}
+	if err := fileresource.Prepare(ctx.Context()); err != nil {
+		return nil, err
 	}
 	lease, err := e.cache.acquireByResourceName(e.modelResource)
 	if err != nil {

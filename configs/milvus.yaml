@@ -634,6 +634,11 @@ queryCoord:
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
+  autoRelease:
+    enabled: false # Effective only with proxy.enableAutoLoad=true. Disabling either switch clears activity; enabling both starts a new idle TTL at the next scan.
+    idleTTLSeconds: 600 # Supports runtime updates without resetting activity. Idle time before releasing a collection with load config, even if it is still loading or an earlier query is running.
+    checkIntervalSeconds: 30 # Supports runtime updates that reset the timer for scanning load configs and collection activity.
+    releaseConcurrency: 16 # Maximum concurrent automatic releases in one scan. Runtime updates apply to the next release batch.
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
   enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes
@@ -665,6 +670,9 @@ queryCoord:
     maxMemoryLimit: 0 # Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.
     maxDiskLimit: 0 # Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
+  queryView:
+    targetRowsPerShardNode: 100000 # Target sealed rows per QueryNode for QueryView shard fanout.
+    fullReconsileInterval: 10 # Interval in seconds for periodic QueryView full reconciliation.
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
   grpc:
@@ -836,6 +844,9 @@ queryNode:
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
+  queryView:
+    segmentCatchupConcurrency: 4 # Maximum number of concurrent QueryView sealed segment TransformLog catch-up tasks on each QueryNode.
+    transformLogDrainConcurrency: 4 # Maximum number of concurrent QueryView TransformLog backlog drain tasks on each QueryNode.
   idfOracle:
     preload: true # Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.
     readBufferSize: 4194304 # Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.
@@ -1676,10 +1687,65 @@ streamingNode:
 
 # Any configuration related to query views.
 queryView:
+  balancer:
+    # Enable optional placement optimization. Disable to reduce background segment movement.
+    # Mandatory recovery, view updates, replica isolation, and releases continue when false.
+    # Applies to both event-triggered and periodic reconciles; does not disable reconciliation.
+    # Independent of the legacy queryCoord.autoBalance switch.
+    autoBalance: true
+    # Positive duration with a unit (e.g. 500ms, 10s, 1m). Smaller values run periodic
+    # optimization and lifecycle checks more often at higher coordinator CPU cost;
+    # larger values reduce scan overhead.
+    # Event-triggered reconciliation continues independently, even when autoBalance is false.
+    reconcileInterval: 1m
+    # Positive concentration scale in rows for preferred shard fanout and the collection
+    # concentration floor. Increase to favor fewer participants; decrease to favor spreading.
+    # Not a capacity limit.
+    targetRowsPerShardNode: 100000
+    scoring:
+      # Weight of RG load-band improvement. Increase to favor reducing aggregate row skew over
+      # local concentration and loading cost.
+      globalWeight: 1
+      # Weight of excess shard rows on one node. Increase to spread large shards more strongly;
+      # small shards within their preferred footprint receive no spreading reward.
+      shardWeight: 1
+      # Weight of excess collection-replica rows on one node. Increase to distribute large
+      # collections made of many small shards more evenly.
+      collectionWeight: 1
+      # Weight of net excess shard fanout. Increase to favor consolidation and fewer query
+      # participants; decrease to permit wider spreading.
+      fanoutPenaltyWeight: 1
+      # Row-equivalent cost per row whose node changes. Increase to reduce movement; decrease to
+      # accept smaller placement improvements, even when destination resources already exist.
+      movePrice: 0.02
+      # Additional row-equivalent cost per row needing a compatible destination load. Increase
+      # to favor protected ready-resource reuse; decrease to favor balance despite additional
+      # loading.
+      loadPrice: 0.08
+      # Fractional RG load tolerance, in [0,1). Increase to accept more relative skew and reduce
+      # movement; decrease to pursue closer row balance.
+      relativeTolerance: 0.1
+      # Fractional allowance above shard and collection concentration targets. Increase to
+      # retain more concentrated layouts; decrease to spread large data more strongly.
+      localTolerance: 0.1
+      # Fractional growth/shrink margin for preferred fanout, in [0,1). Increase to reduce
+      # fanout changes near size boundaries; decrease to react sooner to data growth and
+      # shrinkage.
+      fanoutHysteresis: 0.1
+      # Positive minimum RG tolerance in rows. Increase to keep tiny shards concentrated at low
+      # total volume; decrease to rebalance smaller absolute load differences.
+      absoluteToleranceRows: 100000
+      # Positive minimum net optional gain in row-equivalent units. Increase to reject marginal
+      # moves; decrease to accept smaller improvements.
+      minGainRows: 1
+      # Positive maximum optional candidate evaluations per shard pass. Increase to search more
+      # candidates at higher CPU cost; decrease to yield earlier and continue on a later
+      # reconcile. Mandatory placement is not capped.
+      maxCandidateEvaluations: 100000
   idfOracle:
     lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
     sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.
-  leaseDuration: 60s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
+  leaseDuration: 5s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
 
 # Any configuration related to the streaming service.
 streaming:
@@ -1687,6 +1753,10 @@ streaming:
   # Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
   # Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.
   splitChunkSN: false
+  queryView:
+    liveEventDispatchConcurrencyPerPChannel: 4 # Maximum number of QueryRuntimes dispatching live events concurrently on each PChannel.
+  transformLog:
+    catchupConcurrencyPerStream: 4 # Maximum number of TransformLog subscriptions catching up concurrently on each stream.
   walBalancer:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
@@ -1772,6 +1842,10 @@ streaming:
       # The max size of l0 segment, 32m by default.
       # If the binary size of l0 segment is greater than this size, it will be flushed.
       maxSize: 32m
+    l1:
+      # The max concurrency of L1 segment commit tasks per streaming node, 4 by default.
+      # Non-positive value means unlimited.
+      commitConcurrency: 4
   summary:
     cacheBytesPerPChannel: 64MB # Encoded WALSummary chunk cache budget per PChannel. Zero disables residency. Indexes, in-flight reads and decoded delivery batches are accounted separately. Applied when the WAL opens.
   walRecovery:

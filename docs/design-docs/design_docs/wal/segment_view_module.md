@@ -265,3 +265,15 @@ objects. Cleanup tasks do not create a second checkpoint frontier.
 5. Txn assignment count does not change message ownership count per segment.
 6. Close and cancellation never release unfinished handles.
 7. Segment snapshots precede the global checkpoint that covers them.
+
+### Final Flush proof for DataView
+
+The final L1 SaveBinlogPaths request carries `growing_transform_start_after_timetick`.
+The VChannel owner captures it under its observation lock as the minimum of the
+fully observed WAL prefix and CreateSegment TimeTicks of all L1 whose final
+publication is outstanding. Only the current Segment is excluded, conditional
+on this request's atomic SegmentMeta/DataView commit. Other partitions and
+in-flight Flush requests remain blockers. DataCoord monotonically advances W
+with this proof and derives A from the candidate View's exact Segment bases.
+Checkpoint reports do not publish DataViews. See
+[DataView Transform frontiers](../qviews/transform_start_after_timetick.md).

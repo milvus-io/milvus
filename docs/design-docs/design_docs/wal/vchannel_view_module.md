@@ -12,7 +12,8 @@ RecoveryStorage constructs and dispatches through these modules during bounded
 recovery and live observation. It separately owns [WALSummary](summary.md),
 restores the Summary index, and caps checkpoint publication at `LastAcked`.
 RecoveryStorage also restores idempotency windows from retained Summary history
-and startup replay before accepting writes. QueryRuntime wiring remains follow-up work.
+and startup replay before accepting writes. QueryRuntime resource preparation and query execution are wired through the
+VChannel query-resource manager and the SN QueryView handler.
 
 The current [WAL L0 materializer](l0_materializer.md) retains Delete handles.
 The [Summary consumer](summary_l0_materializer.md) is retained for QueryView;
@@ -33,9 +34,9 @@ The module owns:
 - collection, partition, schema, lifecycle, and tombstone state;
 - one continuous VChannel metadata `checkpoint_time_tick`;
 - SegmentView creation, lookup, routing, and snapshot aggregation;
-- the VChannel WALMaterializer and its growing-registration prerequisite;
-- DataView recovery state and QueryRuntime live-event forwarding (design
-  intent, pending the qviews feature — not yet wired in the current code).
+- the VChannel WALMaterializer and its final-L1-publication prerequisite;
+- DataVersion summaries, QueryRuntime preparation and ordered live-event
+  forwarding through `queryresource.Manager`.
 
 It does not own the PChannel global checkpoint, AckTracker, Coordinator
 broadcast acknowledgement, or QueryView state transitions.
@@ -53,7 +54,7 @@ ObserveMessage(Retained)
 
 RecoveryStorage first installs the message's Summary records and readable
 coverage, then dispatches to this module. L0Materializer observation follows
-Segment state changes, so it knows all earlier L1 registration dependencies.
+Segment state changes, so it knows all earlier L1 final-publication dependencies.
 
 There is no mode argument. Metadata and Segment effects use their loaded
 `checkpoint_time_tick` to choose apply versus no-op. L0Materializer uses its own
@@ -191,7 +192,7 @@ own handle. Successful Tracker completion requires the entire graph to reach
 zero without poison. Summary copies Txn records separately; its `LastAcked`
 additionally bounds checkpoint publication. The retained Summary materializer reads those records without joining this
 reference graph. The currently wired WAL consumer retains Delete handles and
-uses only the growing-registration prerequisite described in
+uses only the final-L1-publication prerequisite described in
 [WAL L0 Materializer](l0_materializer.md).
 
 When the Summary consumer is reconnected, the VChannel module computes the L0 materialization safety bound across

@@ -47,8 +47,6 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionInfo() {
 		resp, err := suite.server.LoadCollection(ctx, req)
 		suite.Require().NoError(merr.CheckRPCCall(resp, err))
 		suite.NoError(err)
-		suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
-		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		suite.assertCollectionLoaded(collection)
 	}
 
@@ -161,8 +159,6 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionWithLoadFields() {
 			}
 			resp, err := suite.server.LoadCollection(ctx, req)
 			suite.Require().NoError(merr.CheckRPCCall(resp, err))
-			suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
-			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 			suite.assertCollectionLoaded(collection)
 		}
 	})
@@ -237,7 +233,7 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadPartition() {
 		suite.Require().NoError(merr.CheckRPCCall(resp, err))
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
 		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
-		suite.assertCollectionLoaded(collection)
+		suite.assertQViewsLoadConfigured(collection, 1, suite.partitions[collection], false)
 	}
 
 	// Test load partition again
@@ -353,7 +349,7 @@ func (suite *ServiceSuite) TestLoadPartitionWithLoadFields() {
 			suite.Require().NoError(merr.CheckRPCCall(resp, err))
 			suite.EqualValues(1, suite.meta.GetReplicaNumber(ctx, collection))
 			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
-			suite.assertCollectionLoaded(collection)
+			suite.assertQViewsLoadConfigured(collection, 1, suite.partitions[collection], false)
 		}
 	})
 
@@ -762,13 +758,9 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionWithUserSpecifiedReplic
 		resp, err := suite.server.LoadCollection(ctx, req)
 		suite.Require().NoError(merr.CheckRPCCall(resp, err))
 
-		// Verify UserSpecifiedReplicaMode is set correctly
-		loadedCollection := suite.meta.GetCollection(ctx, collection)
-		suite.NotNil(loadedCollection)
-		suite.True(loadedCollection.GetUserSpecifiedReplicaMode())
-
-		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		suite.assertCollectionLoaded(collection)
+		cfg := suite.server.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[collection]
+		suite.True(cfg.UserSpecifiedReplicaMode)
 	}
 }
 
@@ -827,7 +819,7 @@ func (suite *ServiceSuite) TestLoadPartitionWithUserSpecifiedReplicaMode() {
 		suite.True(loadedCollection.GetUserSpecifiedReplicaMode())
 
 		suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
-		suite.assertCollectionLoaded(collection)
+		suite.assertQViewsLoadConfigured(collection, 1, suite.partitions[collection], false)
 	}
 }
 
@@ -869,81 +861,6 @@ func (suite *ServiceSuite) TestLoadPartitionUpdateUserSpecifiedReplicaMode() {
 	suite.True(updatedCollection.GetUserSpecifiedReplicaMode())
 }
 
-func (suite *ServiceSuite) TestSyncNewCreatedPartition() {
-	newPartition := int64(999)
-	ctx := context.Background()
-
-	// test sync new created partition
-	suite.loadAll()
-	collectionID := suite.collections[0]
-	// make collection able to get into loaded state
-	suite.updateChannelDist(ctx, collectionID)
-	suite.updateSegmentDist(collectionID, 3000, suite.partitions[collectionID]...)
-
-	req := &querypb.SyncNewCreatedPartitionRequest{
-		CollectionID: collectionID,
-		PartitionID:  newPartition,
-	}
-	syncJob := job.NewSyncNewCreatedPartitionJob(
-		ctx,
-		req,
-		suite.meta,
-		suite.broker,
-		suite.targetObserver,
-		suite.targetMgr,
-	)
-	suite.jobScheduler.Add(syncJob)
-	err := syncJob.Wait()
-	suite.NoError(err)
-	partition := suite.meta.GetPartition(ctx, newPartition)
-	suite.NotNil(partition)
-	suite.Equal(querypb.LoadStatus_Loaded, partition.GetStatus())
-
-	// test collection not loaded
-	req = &querypb.SyncNewCreatedPartitionRequest{
-		CollectionID: int64(888),
-		PartitionID:  newPartition,
-	}
-	syncJob = job.NewSyncNewCreatedPartitionJob(
-		ctx,
-		req,
-		suite.meta,
-		suite.broker,
-		suite.targetObserver,
-		suite.targetMgr,
-	)
-	suite.jobScheduler.Add(syncJob)
-	err = syncJob.Wait()
-	suite.NoError(err)
-
-	// test collection loaded, but its loadType is loadPartition
-	req = &querypb.SyncNewCreatedPartitionRequest{
-		CollectionID: suite.collections[1],
-		PartitionID:  newPartition,
-	}
-	syncJob = job.NewSyncNewCreatedPartitionJob(
-		ctx,
-		req,
-		suite.meta,
-		suite.broker,
-		suite.targetObserver,
-		suite.targetMgr,
-	)
-	suite.jobScheduler.Add(syncJob)
-	err = syncJob.Wait()
-	suite.NoError(err)
-}
-
 func (suite *ServiceSuite) assertCollectionLoaded(collection int64) {
-	ctx := context.Background()
-	suite.True(suite.meta.Exist(ctx, collection))
-	suite.NotEqual(0, len(suite.meta.GetByCollection(ctx, collection)))
-	for _, channel := range suite.channels[collection] {
-		suite.NotNil(suite.targetMgr.GetDmChannel(ctx, collection, channel, meta.CurrentTarget))
-	}
-	for _, segments := range suite.segments[collection] {
-		for _, segment := range segments {
-			suite.NotNil(suite.targetMgr.GetSealedSegment(ctx, collection, segment, meta.CurrentTarget))
-		}
-	}
+	suite.assertQViewsLoadConfigured(collection, 0, suite.partitions[collection], true)
 }

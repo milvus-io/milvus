@@ -1947,7 +1947,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			mockey.Mock((*externalCollectionRefreshMeta).ClearTaskResultsByJobID).To(
 				func(_ *externalCollectionRefreshMeta, _ int64) error { clears++; return nil }).Build()
 
-			checker.finishAfterIndexWait(held)
+			checker.finishAppliedJob(held)
 
 			assert.Equal(t, indexpb.JobState_JobStateFailed, refreshMeta.GetJob(1).GetState(),
 				"the terminal guard owns the state; a stale snapshot must not overwrite it")

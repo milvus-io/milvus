@@ -216,7 +216,8 @@ func TestQueryTaskPreExecuteUsesStrongVisibility(t *testing.T) {
 	collectionTTL := time.Hour
 
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
-		Name: "test_collection",
+		Name:       "test_collection",
+		Properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}},
 		Fields: []*schemapb.FieldSchema{{
 			FieldID:      100,
 			Name:         "id",

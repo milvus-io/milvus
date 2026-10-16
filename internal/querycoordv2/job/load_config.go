@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -91,6 +92,8 @@ type ExpectedLoadConfig struct {
 	ExpectedReplicaNumber            map[string]int // map resource group name to replica number in resource group
 	ExpectedFieldIndexID             map[int64]int64
 	ExpectedLoadFields               []int64
+	ExpectedLoadAllFields            *bool
+	ExpectedSkipLoadDynamicField     bool
 	ExpectedPriority                 commonpb.LoadPriority
 	ExpectedUserSpecifiedReplicaMode bool
 }
@@ -165,6 +168,9 @@ func (c *CurrentLoadConfig) IntoLoadConfigMessageHeader() *messagespb.AlterLoadC
 		CollectionId:             c.Collection.CollectionID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
+		RequiredFields:           c.Collection.GetRequiredFields(),
+		LoadAllFields:            c.Collection.LoadAllFields,
+		SkipLoadDynamicField:     c.Collection.GetSkipLoadDynamicField(),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: c.GetUserSpecifiedReplicaMode(),
 	}
@@ -190,8 +196,18 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 		CollectionId:             req.CollectionInfo.CollectionID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
+		RequiredFields:           qviews.ResolveRequiredFields(req.CollectionInfo.GetSchema(), nil),
+		LoadAllFields:            req.Expected.ExpectedLoadAllFields,
+		SkipLoadDynamicField:     req.Expected.ExpectedSkipLoadDynamicField,
 		Replicas:                 loadReplicaConfigs,
 		UserSpecifiedReplicaMode: req.Expected.ExpectedUserSpecifiedReplicaMode,
+	}
+	if header.LoadAllFields == nil && req.Current.Collection != nil {
+		header.LoadAllFields = req.Current.Collection.LoadAllFields
+		header.SkipLoadDynamicField = req.Current.Collection.GetSkipLoadDynamicField()
+	}
+	if header.GetLoadAllFields() {
+		header.LoadFields = nil
 	}
 	// check if the load configuration is changed; nothing to broadcast if not.
 	if previousHeader := req.Current.IntoLoadConfigMessageHeader(); proto.Equal(previousHeader, header) {

@@ -893,6 +893,11 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	cpTimestamp Timestamp,
 ) bool {
 	log := mlog.With(mlog.Int64("segmentID", segment.ID))
+	if segment.GetIsImporting() && segment.GetCompacted() {
+		// Restore owns retired L0 inputs until its publication finishes. They
+		// also prove an applied mutation after a crash before task-state save.
+		return false
+	}
 
 	if !gc.isExpire(segment.GetDroppedAt()) {
 		return false

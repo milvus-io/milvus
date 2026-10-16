@@ -57,13 +57,18 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	querynodehandler "github.com/milvus-io/milvus/internal/querynodev2/client/handler"
 	"github.com/milvus-io/milvus/internal/storage"
+	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
+	streamingnodehandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
+	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -1023,6 +1028,16 @@ func TestProxy(t *testing.T) {
 	err = proxy.Init()
 	assert.NoError(t, err)
 
+	// This test constructs the Proxy component directly, bypassing the gRPC
+	// server bootstrap which normally installs the QueryView client.
+	viewCoord := streamingcoordclient.NewClient(etcdcli)
+	viewSN := streamingnodehandler.NewHandlerClient(viewCoord.Assignment())
+	viewQN := querynodehandler.NewClient(etcdcli)
+	viewResolver := resolver.NewShardResolverImpl(proxy)
+	proxy.SetViewQueryClient(queryclient.NewLegacyViewQueryClient(
+		queryclient.ViewQueryClientConfig{}, viewSN.QueryViewClient(),
+		queryclient.NewCompositeViewQueryServiceClient(viewSN.QueryViewClient(), viewQN.QueryViewClient()), viewResolver))
+
 	err = proxy.Start()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Healthy, proxy.GetStateCode())
@@ -1032,6 +1047,10 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	mlog.Info(context.TODO(), "Register proxy done")
 	defer func() {
+		viewResolver.Close()
+		viewSN.Close()
+		viewQN.Close()
+		viewCoord.Close()
 		a := []any{mix, qn, dn, sn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file

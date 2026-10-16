@@ -618,6 +618,65 @@ func (_c *MockQueryCoord_DropResourceGroup_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// EnsureCollectionReady provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) EnsureCollectionReady(_a0 context.Context, _a1 *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EnsureCollectionReady")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.EnsureCollectionReadyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.EnsureCollectionReadyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_EnsureCollectionReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnsureCollectionReady'
+type MockQueryCoord_EnsureCollectionReady_Call struct {
+	*mock.Call
+}
+
+// EnsureCollectionReady is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.EnsureCollectionReadyRequest
+func (_e *MockQueryCoord_Expecter) EnsureCollectionReady(_a0 interface{}, _a1 interface{}) *MockQueryCoord_EnsureCollectionReady_Call {
+	return &MockQueryCoord_EnsureCollectionReady_Call{Call: _e.mock.On("EnsureCollectionReady", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_EnsureCollectionReady_Call) Run(run func(_a0 context.Context, _a1 *querypb.EnsureCollectionReadyRequest)) *MockQueryCoord_EnsureCollectionReady_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.EnsureCollectionReadyRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_EnsureCollectionReady_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_EnsureCollectionReady_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_EnsureCollectionReady_Call) RunAndReturn(run func(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error)) *MockQueryCoord_EnsureCollectionReady_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetLoadSegmentInfo provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryCoord) GetLoadSegmentInfo(_a0 context.Context, _a1 *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2880,6 +2939,52 @@ func (_c *MockQueryCoord_ValidateAnalyzer_Call) Return(_a0 *querypb.ValidateAnal
 }
 
 func (_c *MockQueryCoord_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)) *MockQueryCoord_ValidateAnalyzer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WatchQueryViewSegmentLoadInfo provides a mock function with given fields: _a0
+func (_m *MockQueryCoord) WatchQueryViewSegmentLoadInfo(_a0 querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WatchQueryViewSegmentLoadInfo")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WatchQueryViewSegmentLoadInfo'
+type MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call struct {
+	*mock.Call
+}
+
+// WatchQueryViewSegmentLoadInfo is a helper method to define mock.On call
+//   - _a0 querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer
+func (_e *MockQueryCoord_Expecter) WatchQueryViewSegmentLoadInfo(_a0 interface{}) *MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call {
+	return &MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call{Call: _e.mock.On("WatchQueryViewSegmentLoadInfo", _a0)}
+}
+
+func (_c *MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call) Run(run func(_a0 querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer)) *MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call) Return(_a0 error) *MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call) RunAndReturn(run func(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error) *MockQueryCoord_WatchQueryViewSegmentLoadInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

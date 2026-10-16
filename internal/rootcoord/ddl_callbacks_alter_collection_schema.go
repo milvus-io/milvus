@@ -129,6 +129,17 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		if err := validator.ValidateFunction(schema, plan.Function.GetName(), true); err != nil {
 			return merr.Wrap(err, "invalid function schema")
 		}
+		// The Coordinator is the authoritative admission boundary: older Proxy
+		// versions or direct callers must not commit an impossible handoff.
+		if err := schemautil.ValidateAddFunctionRequiresStorageV3(); err != nil {
+			return err
+		}
+		if err := schemautil.ValidateAddFunctionInputNotText(schema, plan.Function); err != nil {
+			return err
+		}
+		if typeutil.IsExternalCollection(schema) {
+			return merr.WrapErrParameterInvalidMsg("adding a function to an external collection cannot backfill historical outputs")
+		}
 	}
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
@@ -177,7 +188,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		}).
 		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+	if err := c.broadcastCollectionAlter(ctx, broadcaster, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}
@@ -445,7 +456,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 		}).
 		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+	if err := c.broadcastCollectionAlter(ctx, broadcaster, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}

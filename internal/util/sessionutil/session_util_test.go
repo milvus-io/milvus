@@ -90,6 +90,7 @@ func TestInit(t *testing.T) {
 	sessions, _, err := s.GetSessions(ctx, "inittest")
 	assert.NoError(t, err)
 	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
+	assert.Equal(t, common.QueryViewSchemaProtocol, sessions["inittest-"+strconv.FormatInt(s.ServerID, 10)].QueryViewSchemaProtocol)
 }
 
 func TestInitNoArgs(t *testing.T) {

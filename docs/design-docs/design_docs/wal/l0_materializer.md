@@ -80,23 +80,24 @@ Summary remains permanently enabled, with independent persistence/backlog and
 LastAcked gating. Its materialization-request callback is disconnected for this
 consumer; it does not add a competing materialization policy.
 
-## 4. L1 Registration, Not L1 Flush
+## 4. Final L1 Publication Before Materialization
 
-L0 output can precede L1 final flush. DataCoord's L0 compaction policy waits on
-the earliest growing segment start position before merging eligible L0 output.
+Materialization through T requires every L1 created before T in the VChannel,
+across every partition, to complete final DataCoord publication or retirement.
+Initial AllocSegment registration or a durable first pack is insufficient.
+The owner checks final-commit state, including recovered `sealed_at_data_version`;
+concurrent final Flush RPCs remain blockers until acknowledged. A later
+CreateSegment cannot invalidate the captured earlier batch.
 
-Because SegmentView's initial AllocSegment is asynchronous, an L0 task must
-first check that every earlier L1 has completed growing registration. A stable
-Segment checkpoint at or after CreateSegment proves this. An unregistered L1
-returns scheduler delay; it does not block a worker or force L1 flush. A later
-CreateSegment cannot invalidate a captured earlier L0 batch.
+A blocked task returns scheduler delay, releasing its worker. L1 tasks run
+independently and never wait for L0; L0 retries after L1 publication. Explicit
+Flush message handles join both completions before acknowledging the request.
+Capacity/idle materialization also observes this prerequisite, so open earlier
+L1 can delay it until the ordinary segment seal/Flush path completes.
 
-Explicit Flush tasks on L1 and L0 execute independently. Their clones of the
-same message join through Tracker/BroadcastAck. There is no VChannel-wide L1
-creation upper bound on L0 output and no second L1 completion queue in L0.
-The shard manager's DropPartition API fences allocation for every earlier Segment
-in the Collection after successful WAL append, while the VChannel exclusive append
-lock is still held, matching its VChannel-wide persistence scope.
+The shard manager's DropPartition API fences allocation for every earlier
+Segment in the Collection after successful WAL append while the VChannel
+exclusive append lock is held, matching its VChannel-wide persistence scope.
 Only the requested partition is logically dropped; surviving partitions allocate
 new Segments for later Inserts.
 
@@ -170,7 +171,7 @@ progress; this is the deliberate cost of the shared checkpoint.
 
 Cover size/age/explicit/stall triggers, complete mixed Txns, frozen batches,
 retry and cancellation, replay before/after materialized metadata persistence,
-L0-before-L1-flush with registration delay, both L1/L0 Flush completion orders,
+L0 retry before final L1 publication, registration-insufficient and cross-partition gates,
 empty Flush, checkpoint pair reporting, and Drop/Summary retirement.
 Live validation must include growing Inserts plus Deletes, reload, SN/QN crash
 recovery, and enabled L0 compaction. WAL physical Truncate integration remains

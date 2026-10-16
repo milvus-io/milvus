@@ -22,6 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -79,9 +80,9 @@ func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, resul
 		return merr.Wrap(err, "when dropping segments by time")
 	}
 
-	// manually update current target to sync QueryCoord's view
-	if err := c.mixCoord.ManualUpdateCurrentTarget(ctx, header.CollectionId); err != nil {
-		return merr.Wrap(err, "when manually updating current target")
+	// Publish the post-truncate DataView and wait for serving QueryView handoff.
+	if err := qvresource.Resource().Refresh(ctx, header.CollectionId); err != nil {
+		return merr.Wrap(err, "when waiting for QueryView handoff")
 	}
 
 	if err := c.meta.TruncateCollection(ctx, result); err != nil {

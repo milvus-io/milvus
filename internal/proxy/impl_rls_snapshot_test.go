@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -34,6 +35,7 @@ import (
 )
 
 func TestProxyAlterCollectionRefreshesRLSEnforcement(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	coord := mocks.NewMockMixCoordClient(t)
 	cache, err := NewMetaCache(coord)

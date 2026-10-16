@@ -95,6 +95,7 @@ type IMetaTable interface {
 	AlterDatabase(ctx context.Context, newDB *model.Database, ts typeutil.Timestamp) error
 
 	AddCollection(ctx context.Context, coll *model.Collection) error
+	CompleteRestoreCollection(ctx context.Context, collectionID UniqueID) error
 	DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	// GetCollectionID retrieves the corresponding collectionID based on the collectionName.
@@ -311,7 +312,7 @@ func (mt *MetaTable) reload() error {
 					mt.partitionName2ID[collection.CollectionID][partition.PartitionName] = partition.PartitionID
 				}
 			}
-			if collection.Available() {
+			if collection.Available() || collection.State == pb.CollectionState_CollectionRestoring {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
 				for _, fileResourceID := range collection.FileResourceIds {
 					mt.fileResourceRefCnt[fileResourceID]++
@@ -349,7 +350,7 @@ func (mt *MetaTable) reload() error {
 	mlog.Info(mt.ctx, "rootcoord start to recover the channel stats for streaming coord balancer")
 	vchannels := make([]string, 0, len(mt.collID2Meta)*2)
 	for _, coll := range mt.collID2Meta {
-		if coll.Available() {
+		if coll.Available() || coll.State == pb.CollectionState_CollectionRestoring {
 			vchannels = append(vchannels, coll.VirtualChannelNames...)
 		}
 	}
@@ -519,6 +520,11 @@ func (mt *MetaTable) CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb
 		return err
 	}
 
+	for _, collection := range mt.collID2Meta {
+		if collection.DBName == dbName && collection.State == pb.CollectionState_CollectionRestoring {
+			return merr.WrapErrParameterInvalidMsg("database:%s contains a restoring collection", dbName)
+		}
+	}
 	colls, err := mt.listCollectionFromCache(ctx, dbName, true)
 	if err != nil {
 		return err
@@ -599,7 +605,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	// Note:
 	// 1, idempotency check was already done outside;
 	// 2, no need to check time travel logic, since ts should always be the latest;
-	if coll.State != pb.CollectionState_CollectionCreated {
+	if coll.State != pb.CollectionState_CollectionCreated && coll.State != pb.CollectionState_CollectionRestoring {
 		return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
@@ -633,7 +639,9 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
-	mt.increaseAvailableCollectionCountLocked(coll.DBID)
+	if coll.Available() {
+		mt.increaseAvailableCollectionCountLocked(coll.DBID)
+	}
 	// Build partition name index for the new collection
 	mt.partitionName2ID[coll.CollectionID] = make(map[string]int64)
 	for _, partition := range coll.Partitions {
@@ -654,6 +662,31 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		mlog.Int64("id", coll.CollectionID),
 		mlog.Uint64("ts", coll.CreateTime),
 	)
+	return nil
+}
+
+// CompleteRestoreCollection makes an already-published snapshot accessible.
+func (mt *MetaTable) CompleteRestoreCollection(ctx context.Context, collectionID UniqueID) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	coll := mt.collID2Meta[collectionID]
+	if coll == nil {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
+	if coll.Available() {
+		return nil
+	}
+	if coll.State != pb.CollectionState_CollectionRestoring {
+		return merr.WrapErrServiceNotReadyMsg("collection %d is no longer restoring", collectionID)
+	}
+	clone := coll.Clone()
+	clone.State = pb.CollectionState_CollectionCreated
+	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx, coll, clone, metastore.MODIFY, clone.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	mt.collID2Meta[collectionID] = clone
+	mt.increaseAvailableCollectionCountLocked(clone.DBID)
 	return nil
 }
 

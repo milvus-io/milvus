@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -331,7 +333,9 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 		return nil
 	}
 	module, _ := m.modules.Get(vchannel)
-	if module != nil || msg.MessageType() != message.MessageTypeCreateCollection {
+	createsCollection := msg.MessageType() == message.MessageTypeCreateCollection ||
+		(msg.MessageType() == message.MessageTypeRestoreSnapshot && messageutil.RestoreCollectionMessage(msg) != nil)
+	if module != nil || !createsCollection {
 		return module
 	}
 	module, err := m.newModule(vchannel)
@@ -482,7 +486,7 @@ func (m *PChannelRecoveryManager) Release(req snview.ReleaseResource) {
 }
 
 func (m *PChannelRecoveryManager) QueryRuntime(key qviews.QueryViewKey) (snview.QueryRuntime, bool) {
-	runtime, ok := m.GetQueryRuntime(key)
+	runtime, ok := m.GetQueryReadRuntime(key)
 	if !ok {
 		return nil, false
 	}
@@ -498,4 +502,38 @@ func (m *PChannelRecoveryManager) GetQueryRuntime(key qviews.QueryViewKey) (*que
 		return nil, false
 	}
 	return module.QueryRuntime(key)
+}
+
+func (m *PChannelRecoveryManager) GetQueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
+	module := m.Module(key.ShardID.VChannel)
+	if module == nil {
+		return nil, false
+	}
+	return module.QueryReadRuntime(key)
+}
+
+// AcquireStream gives each consumer an independent subscription lifetime while
+// retaining the recovery manager's single authoritative summary reader.
+func (m *PChannelRecoveryManager) AcquireStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
+	if pchannel != m.pchannel {
+		return nil, wal.ErrTransformLogVChannelUnavailable
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-m.closeCh:
+		return nil, wal.ErrTransformLogVChannelUnavailable
+	default:
+	}
+	stream := walsummary.NewStream(m.config.SummaryManager)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-m.closeCh:
+		case <-stream.Done():
+			return
+		}
+		_ = stream.Close()
+	}()
+	return stream, nil
 }

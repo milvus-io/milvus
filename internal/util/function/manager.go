@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/bm25"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -359,7 +360,7 @@ func (e *functionRunnerEntry) ensureRunner(ctx context.Context) error {
 		return nil
 	}
 	if runInit {
-		go e.runInit(init)
+		go e.runInit(ctx, init)
 	}
 	return e.waitInit(ctx, init)
 }
@@ -392,8 +393,12 @@ func (e *functionRunnerEntry) waitInit(ctx context.Context, init *functionRunner
 	}
 }
 
-func (e *functionRunnerEntry) runInit(init *functionRunnerInit) {
-	runner, err := BuildEmbeddingRunner(e.schema, e.function)
+func (e *functionRunnerEntry) runInit(ctx context.Context, init *functionRunnerInit) {
+	var runner FunctionRunner
+	err := fileresource.Prepare(ctx)
+	if err == nil {
+		runner, err = BuildEmbeddingRunner(e.schema, e.function)
+	}
 	if err == nil && runner == nil {
 		err = errors.New("function runner is nil")
 	}
@@ -814,6 +819,9 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 		return false, nil
 	}
 
+	if err := fileresource.Prepare(ctx); err != nil {
+		return true, err
+	}
 	analyzer, err := NewAnalyzerRunner(field)
 	if err != nil {
 		return true, err

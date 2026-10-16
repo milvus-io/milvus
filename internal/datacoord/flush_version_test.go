@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/dataview"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -264,4 +265,68 @@ func TestFlushVersionDoesNotExpandCompactionCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, views, 1)
 	require.Equal(t, int64(1), views[0].GetDataVersion().GetCompactVersion())
+}
+
+func (s *ServerSuite) TestDualFrontierFlushTransactionAndCheckpointIsolation() {
+	t := s.T()
+	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
+	manager := dataview.NewManager(catalog, nil,
+		dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+			t.Fatal("native Flush must not read collection cache or checkpoint")
+			return nil, nil
+		}),
+		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+			return pendingTransformBounds(ctx, s.testServer.meta, nil, view)
+		}))
+	_, err := manager.OnCreateCollection(t.Context(), dataview.CreateCollectionDataViewEvent{CollectionID: 100, VChannels: []string{"ch1"}, TransformStarts: map[string]uint64{"ch1": 10}})
+	require.NoError(t, err)
+	s.testServer.meta.catalog = catalog
+	s.testServer.dataViewManager = manager
+	req := s.addFlushVersionSegment(10, 10)
+	// Final Flush follows the durable first-pack publication.
+	require.NoError(t, s.testServer.meta.UpdateSegmentsInfo(t.Context(), UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 10, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: 50}}})))
+	req.GrowingTransformStartAfterTimetick = 100
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	patch := mockey.Mock((*datacoordkv.Catalog).Update).To(func(_ *datacoordkv.Catalog, _ context.Context, _ ...metastore.UpdateAction) error {
+		cancel()
+		return context.Canceled
+	}).Build()
+	defer patch.UnPatch()
+	resp, err := s.testServer.SaveBinlogPaths(ctx, proto.Clone(req).(*datapb.SaveBinlogPathsRequest))
+	require.Error(t, merr.CheckRPCCall(resp, err))
+	require.Positive(t, patch.Times(), "failure must reach the atomic persistence boundary")
+	ref, err := manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	require.Equal(t, uint64(10), ref.DataView().Shards[0].GetGrowingTransformStartAfterTimetick())
+	ref.Deref()
+	patch.UnPatch()
+	version := s.flushVersion(req)
+	ref, err = manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	defer ref.Deref()
+	published := ref.DataView()
+	require.Equal(t, uint64(100), published.Shards[0].GetGrowingTransformStartAfterTimetick())
+	require.Equal(t, uint64(50), published.Shards[0].GetCompactedTransformStartAfterTimetick())
+	stored, err := catalog.ListDataViews(t.Context(), 100)
+	require.NoError(t, err)
+	found := false
+	for _, view := range stored {
+		if proto.Equal(view.GetDataVersion(), version) {
+			require.True(t, proto.Equal(published, view))
+			found = true
+		}
+	}
+	require.True(t, found)
+	// A newer proof on a duplicate RPC must not change the original binding.
+	req.GrowingTransformStartAfterTimetick = 500
+	require.True(t, proto.Equal(version, s.flushVersion(req)))
+	recompute := mockey.Mock((*meta).recomputeDataView).To(func(_ *meta, _ context.Context, _ int64) { t.Fatal("checkpoint report must not enqueue a DataView") }).Build()
+	defer recompute.UnPatch()
+	require.NoError(t, s.testServer.meta.UpdateChannelCheckpoint(t.Context(), "ch1", &msgpb.MsgPosition{ChannelName: "ch1", MsgID: []byte{2}, Timestamp: 200}))
+	require.NoError(t, s.testServer.meta.UpdateChannelCheckpoints(t.Context(), []*msgpb.MsgPosition{{ChannelName: "ch1", MsgID: []byte{3}, Timestamp: 300}}))
+	latest, err := manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	defer latest.Deref()
+	require.True(t, proto.Equal(published, latest.DataView()))
 }

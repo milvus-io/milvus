@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
@@ -94,6 +95,8 @@ var Params = paramtable.Get()
 // Server implements `types.DataCoord`
 // handles Data Coordinator related jobs
 type Server struct {
+	queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
+
 	ctx              context.Context
 	serverLoopCtx    context.Context
 	serverLoopCancel context.CancelFunc
@@ -129,8 +132,9 @@ type Server struct {
 	copySegmentInspector CopySegmentInspector
 	copySegmentChecker   CopySegmentChecker
 
-	snapshotManager       SnapshotManager
-	snapshotExportManager *snapshotExportManager
+	snapshotManager          SnapshotManager
+	restoreCollectionManager RestoreCollectionManager
+	snapshotExportManager    *snapshotExportManager
 
 	compactionTrigger        trigger
 	compactionInspector      CompactionInspector
@@ -210,15 +214,16 @@ func WithSegmentManager(manager Manager) Option {
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                 ctx,
-		quitCh:              make(chan struct{}),
-		factory:             factory,
-		flushCh:             make(chan UniqueID, 1024),
-		notifyIndexChan:     make(chan UniqueID, 1024),
-		dataNodeCreator:     defaultDataNodeCreatorFunc,
-		importJobLock:       lock.NewKeyLock[int64](),
-		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
-		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		ctx:                       ctx,
+		quitCh:                    make(chan struct{}),
+		factory:                   factory,
+		flushCh:                   make(chan UniqueID, 1024),
+		notifyIndexChan:           make(chan UniqueID, 1024),
+		queryViewLoadInfoNotifier: noopQueryViewLoadInfoNotifier{},
+		dataNodeCreator:           defaultDataNodeCreatorFunc,
+		importJobLock:             lock.NewKeyLock[int64](),
+		metricsCacheManager:       metricsinfo.NewMetricsCacheManager(),
+		metricsRequest:            metricsinfo.NewMetricsRequest(),
 	}
 
 	for _, opt := range opts {
@@ -323,10 +328,6 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
-	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog, s.allocator, s.meta)
-	if err != nil {
-		return err
-	}
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -395,6 +396,10 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.getChannelsByCollectionID,
 		s.indexEngineVersionManager,
 	)
+	snapshotManager.collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).compactions = s.compactionInspector
+	s.compactionInspector.(*compactionInspector).restoreJobs = s.copySegmentMeta
 	s.snapshotManager = snapshotManager
 	snapshotExportMeta, err := newSnapshotExportMeta(s.ctx, s.meta.catalog)
 	if err != nil {
@@ -652,6 +657,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	reloadEtcdFn := func() error {
 		var err error
 		recoveredMeta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		if err == nil {
+			recoveredMeta.preparationSchema = coordinatorPreparationSchema
+		}
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -666,6 +674,15 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// not repeat newMeta's successful object-storage manifest scan.
 	if err := retry.Do(s.ctx, func() error {
 		return recoveredMeta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+
+	var recoveredImports ImportMeta
+	if err := retry.Do(s.ctx, func() error {
+		var err error
+		recoveredImports, err = NewImportMeta(s.ctx, catalog, s.allocator, recoveredMeta)
+		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
@@ -685,6 +702,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.loadableProjection,
 			collectionIDs,
 			collectionVChannels,
+			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
+				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
+			}),
+			dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+				return pendingTransformBounds(ctx, recoveredMeta, recoveredImports, view)
+			}),
 		)
 		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -692,8 +715,10 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	// Publish only fully recovered metadata. A failed later phase must not
 	// make a subsequent initMeta call return early with partial state.
+	recoveredMeta.queryViewLoadInfoNotifier = s.queryViewLoadInfoNotifier
 	recoveredMeta.dataViewManager = manager
 	s.meta = recoveredMeta
+	s.importMeta = recoveredImports
 	s.dataViewManager = manager
 	return nil
 }
@@ -1237,14 +1262,8 @@ func (s *Server) registerMetricsRequest() {
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
-	has, err := s.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	if !has {
-		return merr.WrapErrCollectionNotFound(collectionID)
-	}
-
+	// Internal metadata loading must include a Restoring collection. Public
+	// HasCollection hides it until its copy job publishes the restored data.
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return err

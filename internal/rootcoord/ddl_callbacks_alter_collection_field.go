@@ -186,7 +186,7 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		WithBody(body).
 		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
-	if _, err := broadcastAPI.Broadcast(ctx, msg); err != nil {
+	if err := c.broadcastCollectionAlter(ctx, broadcastAPI, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}

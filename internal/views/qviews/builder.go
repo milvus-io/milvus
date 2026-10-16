@@ -15,7 +15,10 @@ type QueryViewAtCoordBuilder struct {
 	queryVersion                int64
 	transformStartAfterTimetick uint64
 	loadInfoVersion             uint64
+	schemaVersion               int32
 	assignments                 map[int64]map[int64][]int64
+	segmentTransformStarts      map[int64]uint64
+	segmentManifestVersions     map[int64]int64
 }
 
 func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfCollection, vchannel string) *QueryViewAtCoordBuilder {
@@ -29,14 +32,28 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 	if shardView == nil {
 		panic("vchannel " + vchannel + " not found in DataViewOfCollection")
 	}
+	starts := make(map[int64]uint64)
+	manifests := make(map[int64]int64)
+	for _, partition := range shardView.GetPartitions() {
+		for idx, segmentID := range partition.GetSegmentIds() {
+			if idx < len(partition.GetSegmentManifestVersions()) {
+				manifests[segmentID] = partition.GetSegmentManifestVersions()[idx]
+			}
+			if idx < len(partition.GetSegmentTransformStartAfterTimeticks()) {
+				starts[segmentID] = partition.GetSegmentTransformStartAfterTimeticks()[idx]
+			}
+		}
+	}
 	return &QueryViewAtCoordBuilder{
 		collectionID:                dataView.CollectionId,
 		replicaID:                   replicaID,
 		vchannel:                    vchannel,
 		dataVersion:                 FromProtoDataVersion(dataView.DataVersion),
-		transformStartAfterTimetick: shardView.TransformStartAfterTimetick,
+		transformStartAfterTimetick: min(shardView.GetGrowingTransformStartAfterTimetick(), shardView.GetCompactedTransformStartAfterTimetick()),
 		queryVersion:                1,
 		assignments:                 make(map[int64]map[int64][]int64),
+		segmentTransformStarts:      starts,
+		segmentManifestVersions:     manifests,
 	}
 }
 
@@ -51,6 +68,11 @@ func (b *QueryViewAtCoordBuilder) SetQueryVersion(queryVersion int64) *QueryView
 
 func (b *QueryViewAtCoordBuilder) SetLoadInfoVersion(version uint64) *QueryViewAtCoordBuilder {
 	b.loadInfoVersion = version
+	return b
+}
+
+func (b *QueryViewAtCoordBuilder) SetSchemaVersion(version int32) *QueryViewAtCoordBuilder {
+	b.schemaVersion = version
 	return b
 }
 
@@ -71,6 +93,7 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 		State:                       viewpb.QueryViewState_QueryViewStatePreparing,
 		TransformStartAfterTimetick: b.transformStartAfterTimetick,
 		LoadInfoVersion:             b.loadInfoVersion,
+		SchemaVersion:               b.schemaVersion,
 	}
 
 	nodeIDs := make([]int64, 0, len(b.assignments))
@@ -90,10 +113,21 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 
 		partitions := make([]*viewpb.QueryViewOfPartition, 0, len(partitionIDs))
 		for _, partitionID := range partitionIDs {
-			partitions = append(partitions, &viewpb.QueryViewOfPartition{
+			partition := &viewpb.QueryViewOfPartition{
 				PartitionId: partitionID,
 				SegmentIds:  partitionsByID[partitionID],
-			})
+			}
+			if len(b.segmentTransformStarts) != 0 {
+				for _, segmentID := range partition.SegmentIds {
+					partition.SegmentTransformStartAfterTimeticks = append(partition.SegmentTransformStartAfterTimeticks, b.segmentTransformStarts[segmentID])
+				}
+			}
+			if len(b.segmentManifestVersions) != 0 {
+				for _, segmentID := range partition.SegmentIds {
+					partition.SegmentManifestVersions = append(partition.SegmentManifestVersions, b.segmentManifestVersions[segmentID])
+				}
+			}
+			partitions = append(partitions, partition)
 		}
 		queryNodes = append(queryNodes, &viewpb.QueryViewOfQueryNode{NodeId: nodeID, Partitions: partitions})
 	}

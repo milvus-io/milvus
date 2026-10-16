@@ -1510,6 +1510,53 @@ func (_c *IMetaTable_CheckIfUpdateCredential_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// CompleteRestoreCollection provides a mock function with given fields: ctx, collectionID
+func (_m *IMetaTable) CompleteRestoreCollection(ctx context.Context, collectionID int64) error {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CompleteRestoreCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CompleteRestoreCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompleteRestoreCollection'
+type IMetaTable_CompleteRestoreCollection_Call struct {
+	*mock.Call
+}
+
+// CompleteRestoreCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *IMetaTable_Expecter) CompleteRestoreCollection(ctx interface{}, collectionID interface{}) *IMetaTable_CompleteRestoreCollection_Call {
+	return &IMetaTable_CompleteRestoreCollection_Call{Call: _e.mock.On("CompleteRestoreCollection", ctx, collectionID)}
+}
+
+func (_c *IMetaTable_CompleteRestoreCollection_Call) Run(run func(ctx context.Context, collectionID int64)) *IMetaTable_CompleteRestoreCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CompleteRestoreCollection_Call) Return(_a0 error) *IMetaTable_CompleteRestoreCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CompleteRestoreCollection_Call) RunAndReturn(run func(context.Context, int64) error) *IMetaTable_CompleteRestoreCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateDatabase provides a mock function with given fields: ctx, db, ts
 func (_m *IMetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts uint64) error {
 	ret := _m.Called(ctx, db, ts)

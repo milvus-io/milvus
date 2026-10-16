@@ -56,7 +56,7 @@ func (policy *singleCompactionPolicy) Name() string {
 }
 
 func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	collections := policy.meta.GetCollections()
+	collections := policy.meta.collectionsForPreparation(ctx)
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
 	views := make([]CompactionView, 0)

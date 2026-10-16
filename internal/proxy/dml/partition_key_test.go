@@ -70,6 +70,7 @@ func TestPartitionKey(t *testing.T) {
 	fieldName2Type["partition_key_field"] = schemapb.DataType_Int64
 	schema.Fields = append(schema.Fields, partitionKeyField)
 	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionWriteInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
 	collectionID, err := cache.GetCollectionID(ctx, "", collectionName)
 	assert.NoError(t, err)
@@ -252,6 +253,7 @@ func TestDefaultPartition(t *testing.T) {
 	fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
 	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionWriteInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
 	collectionID, err := cache.GetCollectionID(ctx, "", collectionName)
 	assert.NoError(t, err)

@@ -311,9 +311,9 @@ type MixCoord interface {
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
 	NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error
 
-	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
+	GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error)
 
-	ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error
+	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
 
 	// GetFileResources resolves RootCoord-owned file resources inside MixCoord.
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)

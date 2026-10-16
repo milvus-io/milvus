@@ -114,6 +114,14 @@ type ReadOption struct {
 // AnalyzerClient exposes analyzer execution through the streaming WAL entry.
 type AnalyzerClient interface {
 	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
+
+	// ValidateAnalyzer prepares file resources and validates configs without a collection.
+	ValidateAnalyzer(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)
+}
+
+// SchemaClient resolves write or exact historical schemas through WAL ownership.
+type SchemaClient interface {
+	GetCollectionSchema(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error)
 }
 
 // Scanner is the interface for reading records from the wal.
@@ -182,6 +190,9 @@ type WALAccesser interface {
 	// AnalyzerClient returns the analyzer domain client backed by streaming discovery.
 	AnalyzerClient() AnalyzerClient
 
+	// SchemaClient returns schema access backed by streaming discovery.
+	SchemaClient() SchemaClient
+
 	// ForwardService returns the forward service of the wal.
 	ForwardService() ForwardService
 
@@ -210,6 +221,9 @@ type WALAccesser interface {
 
 	// Read returns a scanner for reading records from the wal.
 	Read(ctx context.Context, opts ReadOption) Scanner
+
+	// TransformLogStreamManager returns a pchannel-level transform log stream manager.
+	TransformLogStreamManager() wal.TransformLogStreamManager
 
 	// AppendMessages appends messages to the wal.
 	// It it a helper utility function to append messages to the wal.

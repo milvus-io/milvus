@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
@@ -96,6 +97,9 @@ func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result m
 	}
 	if err := c.meta.AddPartition(ctx, partition); err != nil {
 		return merr.Wrap(err, "failed to add partition meta")
+	}
+	if err := qvresource.Resource().AddPartition(ctx, header.CollectionId, header.PartitionId); err != nil {
+		return merr.Wrap(err, "when publishing new partition to QueryViews")
 	}
 	return c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(

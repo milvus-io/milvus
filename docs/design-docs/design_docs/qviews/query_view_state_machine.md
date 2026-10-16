@@ -30,10 +30,12 @@ L0 compaction advances DataView compact_version (a Manifest-version change
 with no dedicated counter). It invalidates the current
 QueryView: the state machine generates a new QueryView at the latest
 DataVersion so the old Manifest revision can be released. The TransformLog
-start frontier remains a TODO pending the StreamingNode shard barrier
-described in
-[Transform Start-After TimeTick](transform_start_after_timetick.md). The
-scheduling policy is not implemented by the current DataView-only PR.
+start frontier is generated from the version-bound W/A inputs described in
+[Transform Start-After TimeTick](transform_start_after_timetick.md). It
+calculates `min(W, A)` for QueryView; DataView persists only W/A.
+Checkpoint reports cannot generate a DataView. A Manifest update need not advance
+the frontier. The scheduling policy is not implemented by the current
+DataView-only PR.
 
 ### 1.1 Preparing
 
@@ -172,7 +174,7 @@ scheduling policy is not implemented by the current DataView-only PR.
 
 **Automatic Behavior:**
 1. Persist Unrecoverable to ETCD (if not already persisted).
-2. Wait for Manager to advance to Dropping (typically after generating a replacement view).
+2. If the shard has already received RequestRelease, the Manager immediately advances to Dropping, including when a node reports a failure after the release started. Otherwise, wait for the Manager to generate a replacement view before releasing protected resources.
 
 **Transitions:**
 
@@ -345,7 +347,10 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 **Automatic Behavior:**
 1. Replay WAL from the checkpoint position to recover growing segments.
-2. Do NOT serve queries (data is incomplete).
+2. Do NOT serve queries (data is incomplete). SN query acquisition waits on
+   local state notifications when a matching UpRecovering view is the only
+   eligible candidate, then acquires an Up lease after recovery. Cancellation,
+   recovery failure, teardown and shutdown terminate or wake the wait.
 3. Multiple UpRecovering versions may coexist. After recovery, query planning
    selects the highest available Up version.
 4. Resource preparation uses the same final-commit and applied-sealed-event
@@ -429,9 +434,9 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 ## 3. QueryNode State Machine
 
-The resource preparation steps below describe the target QN integration. Remote
-TransformLog consumption and its catch-up readiness wiring are not implemented
-by the current SN extraction.
+The qv branch wires remote TransformLog consumption through a shared VChannel
+buffer. Segment readiness waits for ordered catch-up application; queries still
+wait for their own Transform MVCC boundary.
 
 QueryNode is fully stateless with no persistence and no recovery process. It does NOT observe Up, Down, or Dropping states — it can serve queries as soon as it reaches Ready.
 

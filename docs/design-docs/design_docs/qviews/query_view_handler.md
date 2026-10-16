@@ -156,6 +156,13 @@ The pchannel is already present in the parent path, so the compact key stores
 only the canonical vchannel index plus the QueryView/DataView version tuple.
 Recovery validates the reconstructed key identity against the persisted proto.
 
+SN-local persisted key format:
+
+- `streamingnode-meta/wal/{pchannel}/query-view/{collectionID}/{replicaID}/{vchannel}/{streamingVersion}/{compactVersion}/{queryVersion}` — `QueryViewOfShard` proto.
+
+The key keeps the full vchannel name and the QueryView/DataView version tuple so
+multiple in-flight views for the same shard do not overwrite each other.
+
 ### 4.3 SN: Crash Recovery
 
 SN persists only the Up state. On crash recovery:
@@ -248,3 +255,37 @@ Violating any contract leaves the corresponding view stuck (Preparing/UpRecoveri
 | `worknode/handler` | `ApplyView`, `QueryViewHandler` interface, `ViewSyncServer`, `pendingReports` |
 | `querynodev2/qnview` | `QNQueryViewHandler`, `QNQueryViewStateMachine`, `SegmentManager` interface |
 | `streamingnode/server/wal/snview` | `SNQueryViewHandler`, `SNQueryViewStateMachine`, `StreamingNodeResourceManager` interface, pchannel-bound `metastore.StreamingNodeCataLog` usage |
+
+## 7. Partial Resource Handover
+
+The [Balancer policy](balancer_scoring.md#51-failure-does-not-erase-partial-success)
+requires reuse of confirmed successful segments even when their Preparing view
+fails. Invalidating a target-load contribution is not a resource Release.
+
+The existing QN state machine retains previously ready segment IDs when it
+reports Unrecoverable; Release starts only after Coord requests teardown.
+ApplyViews processes new Preparing before old teardown within the same batch.
+The resource layer synchronously registers complete View requirements and
+resource references before scheduling preparation. Each SegmentResource owns
+its physical lifecycle and reconciles all live bindings. Unresolved collection
+metadata is a dependency of an existing binding, so shared resources remain
+protected while it resolves. See [QueryNode resource preparation](qnview/querynode_queryview_resource_preparation.md).
+
+That implementation must establish the new view's compatible segment references
+before releasing the old view's references. Acquire must register references
+before returning, or provide an equivalent ordered handover. Loading and
+callbacks remain asynchronous. Calling Acquire first is insufficient if it
+defers reference registration until after Release can unload the resource.
+
+For A with S1/S2 ready and S3 failed, replacement B can retain S1/S2 on the same
+live node and load S3 elsewhere. Shared resources remain held by B when A is
+released; resources exclusive to A follow ordinary cleanup. Node loss,
+incompatibility, missing readiness, or an already-unprotected release path
+prevents guaranteed reuse. A reuse miss must fall back to correct loading.
+
+Verify partial-success failure reports, new-reference-before-old-release
+ordering, actual reference retention, cleanup when there is no replacement,
+and node loss. Handler call-order tests alone do not establish physical reuse.
+No RPC change is required for this handover. Validation blocks replacement
+preparation, releases the old View, then completes the dependency and verifies
+both protected resource reuse and eventual readiness without another push.

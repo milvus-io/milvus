@@ -265,6 +265,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
 		QueryRuntimeModuleBuilders: []queryresource.QueryRuntimeModuleBuilder{
 			queryresource.NewGrowingRuntimeModuleBuilder(nil),
+			queryresource.NewReadSchemaModuleBuilder(),
 			idf.NewFutureProvider(resource.Resource().MixCoordClient(), idf.WithChunkManager(resource.Resource().ChunkManager())),
 		},
 		QueryViewLoadInfoProvider: queryresource.NewFutureLoadInfoProvider(resource.Resource().MixCoordClient()),
@@ -530,17 +531,14 @@ func shouldAdvanceConsumePoint(current, next utility.WALCheckpoint) bool {
 
 // observeMessage observes a message and update the recovery storage.
 func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.ImmutableMessage) {
-	// Non-persisted time tick heartbeats carry no data and are not written to
-	// the WAL; consuming them would advance the tracker (and thus persist a
-	// recovery snapshot) on every heartbeat even while the pchannel is fully
-	// idle. Skip them entirely: the time tick sync inspector appends a
-	// persisted time tick every forcePersistedInterval, which keeps the
-	// checkpoint fresh on a bounded cadence instead.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Scoped query progress follows the ordered prefix. Only persisted
+	// confirmations enter the recovery tracker and dirty a snapshot.
+	defer r.observeQueryBarriers(ctx, msg)
 	if !msg.IsPersisted() {
 		return
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	owner := r.ackTracker.Track(msg)
 	r.refreshRecoveryTail()
 	r.metrics.ObserveObservedTimeTick(msg.TimeTick())
@@ -578,6 +576,9 @@ func (r *recoveryStorageImpl) observeModulesMessage(
 	if r.summaryManager != nil {
 		r.summaryManager.ObserveMessage(ctx, retained.Message())
 	}
+	// Persisted confirmations retain ordinary TimeTick complete-prefix effects
+	// (including confirming insert-only transactions in growing runtimes).
+	// The extra scoped query-plan progress is dispatched separately below.
 	r.vchannelManager.ObserveMessage(ctx, retained)
 }
 

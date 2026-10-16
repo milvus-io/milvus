@@ -2,7 +2,6 @@ package vchannel
 
 import (
 	"context"
-	"math"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
@@ -45,6 +44,10 @@ func (m *VChannelRecoveryModule) QueryRuntime(key qviews.QueryViewKey) (*queryre
 	return m.queryResources.QueryRuntime(key)
 }
 
+func (m *VChannelRecoveryModule) QueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
+	return m.queryResources.ReadRuntime(key)
+}
+
 func (m *VChannelRecoveryModule) CloseQueryResources() {
 	if m == nil || m.queryResources == nil {
 		return
@@ -67,6 +70,10 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	if !ok {
 		return walview.VChannelWALView{}, false
 	}
+	schema, err := m.vchannelView.GetSchemaVersion(state.CollectionID, meta.GetSchemaVersion())
+	if err != nil {
+		return walview.VChannelWALView{}, false
+	}
 	if !m.ensureFinalCommitsLocked() {
 		return walview.VChannelWALView{}, false
 	}
@@ -78,10 +85,20 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	}
 	return walview.VChannelWALView{
 		PChannel: m.pchannel, VChannel: m.vchannel, CollectionID: state.CollectionID,
+		CaptureQueryView: func(meta *viewpb.QueryViewMeta, captured func(walview.VChannelWALView)) bool {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			view, ok := m.queryWALViewLocked(meta)
+			if !ok || view.Schema.GetVersion() != meta.GetSchemaVersion() {
+				return false
+			}
+			captured(view)
+			return true
+		},
 		WithResourceEventLock: func(fn func()) { m.mu.Lock(); defer m.mu.Unlock(); fn() },
 		PrepareQueryView:      m.prepareQueryViewLocked,
 		BaseGrowingTimeTick:   m.queryObservedTimeTick, BaseTransformTimeTick: m.queryObservedTimeTick,
-		LoadInfoVersion: meta.GetLoadInfoVersion(), Schema: state.Schema,
+		LoadInfoVersion: meta.GetLoadInfoVersion(), Schema: schema.GetSchema(), WriteSchema: state.Schema,
 		SegmentSnapshot: snapshot, TransformLogStream: m.queryTransformLogStream,
 		DeleteReplayStartAfterTimeTick: start,
 	}, true
@@ -156,13 +173,19 @@ func deleteReplayStartAfter(snapshot walview.VisibleSegmentSnapshot) uint64 {
 	return minCreateTimeTick - 1
 }
 
-// refreshQueryRetentionLocked pins deletes needed to rebuild every retained
-// segment, including old-view segments already committed to DataCoord.
+// refreshQueryRetentionLocked protects both local recovery and QueryView
+// replay. Until distributed View retention is recovered, retain the complete
+// Transform suffix from collection creation even after all local Segments go.
 func (m *VChannelRecoveryModule) refreshQueryRetentionLocked() {
 	if m.summaryManager == nil {
 		return
 	}
-	floor := uint64(math.MaxUint64)
+	// A fresh module exists before it observes CreateCollection. Pin the
+	// unknown prefix until that message establishes the collection origin.
+	var floor uint64
+	if m.vchannelView != nil {
+		floor = m.vchannelView.AssignmentMeta().GetCreateCollectionTimeTick()
+	}
 	for _, segment := range m.segments {
 		created := segment.CreateTimeTick()
 		if created == 0 {
@@ -188,4 +211,21 @@ func (m *VChannelRecoveryModule) publishSegmentSealedLocked(id int64) {
 	}
 	m.querySealed[id] = true
 	m.observeQueryResourceEvent(context.TODO(), walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: id, VChannel: m.vchannel, SealedAtDataVersion: qviews.FromProtoDataVersion(meta.GetSealedAtDataVersion())}})
+}
+
+// ObserveQueryBarrier publishes scoped progress behind the ordered WAL prefix.
+// The caller serializes this with RecoveryStorage's message dispatch.
+func (m *VChannelRecoveryModule) ObserveQueryBarrier(ctx context.Context, timetick uint64) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removed || m.vchannelView == nil || !m.vchannelView.IsActive() {
+		return false
+	}
+	if timetick > m.queryBarrierTimeTick {
+		m.queryBarrierTimeTick = timetick
+		m.queryObservedTimeTick = max(m.queryObservedTimeTick, timetick)
+		m.observeQueryResourceEvent(ctx, walview.VChannelResourceEvent{QueryBarrier: &walview.QueryBarrierEvent{TimeTick: timetick}})
+		m.queryResources.TryBuildLocked(m.queryWALViewLocked)
+	}
+	return true
 }

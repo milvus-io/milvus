@@ -97,6 +97,17 @@ func (o globalOptimizer) optimizeRequests(ctx context.Context, requests []*inter
 	for _, req := range requests {
 		optimized := false
 		_, err := function.GetManager().RunWithRunner(ctx, req.GetCollectionID(), o.functionRunnerKey, req.GetFieldId(), func(runner function.FunctionRunner) error {
+			if runner.GetSchema().GetType() == schemapb.FunctionType_MinHash {
+				if req.GetMetricType() != metric.MHJACCARD && req.GetMetricType() != metric.EMPTY {
+					return merr.WrapErrParameterInvalid("MHJACCARD", req.GetMetricType(), "must use MHJACCARD metric type when searching against MinHash Function output field")
+				}
+				placeholder, err := function.MinHashSearchPlaceholder(req.GetPlaceholderGroup(), runner)
+				if err != nil {
+					return err
+				}
+				req.PlaceholderGroup = placeholder
+				return nil
+			}
 			if runner.GetSchema().GetType() != schemapb.FunctionType_BM25 {
 				return nil
 			}

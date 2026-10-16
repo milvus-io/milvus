@@ -279,6 +279,7 @@ message StreamingNodeInfo {
 
 // StreamingNodeAssignment is the assignment info of a streaming node.
 message StreamingNodeAssignment {
+    repeated PChannelInfo secondary_channels = 3;
     StreamingNodeInfo node         = 1;
     repeated PChannelInfo channels = 2;
 }
@@ -361,7 +362,10 @@ message StreamingError {
 // write on that log node. Server: all log node. Running on every log node.
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
+    rpc SubscribeTransform(stream TransformRequest) returns (stream TransformResponse) {};
+    rpc ValidateAnalyzer(StreamingNodeValidateAnalyzerRequest) returns (StreamingNodeValidateAnalyzerResponse) {};
     rpc RunAnalyzer(StreamingNodeRunAnalyzerRequest) returns (StreamingNodeRunAnalyzerResponse) {};
+    rpc GetCollectionSchema(StreamingNodeGetCollectionSchemaRequest) returns (StreamingNodeGetCollectionSchemaResponse) {};
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
     // from the correct position, ensuring no duplicate or missing messages.
     rpc GetReplicateCheckpoint(GetReplicateCheckpointRequest) returns (GetReplicateCheckpointResponse) {}
@@ -834,6 +838,9 @@ message VChannelMeta {
     // Oldest DataVersion reconstructible after segment recovery metadata cleanup.
     view.DataVersion segment_data_version_summary = 6;
     uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
+    // Immutable per-VChannel CreateCollection TimeTick. Protects TransformLog
+    // history independently of materialization and local Segment lifetime.
+    uint64 create_collection_time_tick = 7;
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -1024,8 +1031,149 @@ message StreamingFieldAnalyzer {
     reserved "schema_version";
     repeated string analyzer_names = 5;
     PChannelInfo pchannel = 6;
+    // Internal rendering binds the search schema, including version zero.
+    // Omitted for standalone analyzer requests, which use the WAL write schema.
+    optional int32 read_schema_version = 7;
 }
 message StreamingNodeRunAnalyzerResponse {
     repeated milvus.AnalyzerResult results = 1;
     common.Status status = 2;
+}
+
+// Schema access is independent of collection loading. The selector distinguishes
+// the current write schema from an exact historical version, including zero.
+// Failures use native streaming gRPC errors, not an embedded response status.
+message StreamingNodeGetCollectionSchemaRequest {
+    int64 collection_id = 1;
+    string vchannel = 2;
+    PChannelInfo pchannel = 3;
+    oneof selector {
+        bool current_write = 4;
+        int32 schema_version = 5;
+    }
+}
+
+message StreamingNodeGetCollectionSchemaResponse {
+    schema.CollectionSchema schema = 1;
+    uint64 effective_time_tick = 2;
+}
+
+message CreateTransformStreamRequest {
+    PChannelInfo pchannel = 1;
+}
+
+message TransformRequest {
+    oneof request {
+        CreateTransformSubscriptionRequest create = 1;
+        CloseTransformSubscriptionRequest close_subscription = 2;
+        CloseTransformStreamRequest close_stream = 3;
+    }
+}
+
+message CreateTransformSubscriptionRequest {
+    uint64 end_time_tick = 4;
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Exclusive. Server sends TransformLog entries with time_tick >
+    // start_after_time_tick.
+    uint64 start_after_time_tick = 3;
+}
+
+message CloseTransformSubscriptionRequest {
+    int64 subscription_id = 1;
+}
+
+message CloseTransformStreamRequest {}
+
+// TransformResponse is the response of the SubscribeTransform RPC.
+message TransformResponse {
+    oneof response {
+        CreateTransformSubscriptionResponse create = 1;
+        TransformMessageBatch message_batch = 2;
+        TransformSubscriptionSyncUp sync_up = 3;
+        TransformSubscriptionError subscription_error = 4;
+        CloseTransformSubscriptionResponse close_subscription = 5;
+        CloseTransformStreamResponse close_stream = 6;
+    }
+}
+
+message CreateTransformSubscriptionResponse {
+    uint64 end_time_tick = 5;
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    uint64 start_after_time_tick = 3;
+
+    // Current SN TransformLog truncation cursor.
+    uint64 truncate_time_tick = 4;
+}
+
+message CloseTransformSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+}
+
+message TransformSubscriptionSyncUp {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Every requested transform through this TimeTick has been delivered.
+    // This is readable coverage, not a persistence acknowledgement.
+    uint64 time_tick = 3;
+}
+
+message TransformSubscriptionError {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    StreamingError error = 3;
+}
+
+message CloseTransformStreamResponse {}
+
+// TransformMessageBatch is an at-least-once delivery unit for transform
+// entries.
+message TransformMessageBatch {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Entries are ordered by TransformLogEntry.time_tick.
+    repeated TransformLogEntry entries = 3;
+}
+
+// Legacy wire definition; WALSummary owns current transform storage.
+message TransformLogChunk {
+    uint64 chunk_id = 1;
+    repeated TransformLogEntry entries = 2;
+}
+
+// Legacy wire definition; not used by RecoveryStorage catalog persistence.
+message VChannelTransformLogMeta {
+    // TransformLog durable frontier published in recovery catalog.
+    uint64 checkpoint_time_tick = 1;
+
+    // Entries with time_tick <= truncate_time_tick may be removed.
+    uint64 truncate_time_tick = 2;
+
+    // Retained dense chunk id range: [first_chunk_id, next_chunk_id).
+    uint64 first_chunk_id = 3;
+    uint64 next_chunk_id = 4;
+
+    // L0 materializer cursor.
+    uint64 materialized_time_tick = 5;
+}
+
+// Analyzer validation is collection-independent. Failures use native streaming
+// RPC errors; successful responses identify the resources to reserve before DDL.
+message StreamingAnalyzerInfo {
+    string params = 1;
+    string field = 2;
+    string name = 3;
+}
+
+message StreamingNodeValidateAnalyzerRequest {
+    repeated StreamingAnalyzerInfo analyzer_infos = 1;
+}
+
+message StreamingNodeValidateAnalyzerResponse {
+    repeated int64 resource_ids = 1;
 }

@@ -2,6 +2,11 @@
 
 ## Contract
 
+The agreed [schema-handoff refactor](../schema_evolution.md) requires statistics
+and Function resources compatible with each retained read schema. It can share
+compatible current aggregates; it does not introduce per-MVCC statistics.
+Schema-specific resource isolation is pending, and GC coordination is deferred.
+
 A loaded vchannel owns one current BM25 aggregate, shared by all QueryViews and
 all request DataVersions. Statistics are the newest DataView baseline successfully prepared locally for
 a received QueryView, plus applied live growing events. "Newest" is local to SN;
@@ -18,7 +23,7 @@ implement a missing-object/GC full-rebuild fallback.
 
 ## Retained state
 
-- One aggregate per loaded BM25 field: document frequencies, row and token counts.
+- One aggregate per required BM25 field: document frequencies, row and token counts.
 - One mutable BM25Stats per contributing growing segment, with flush/seal metadata.
 - Sealed resource descriptors (segment, partition, exact stats paths/manifest),
   without per-segment sealed statistics, memory cache or local disk cache.
@@ -48,7 +53,10 @@ Large column values remain borrowed read-only; existing outputs are preserved,
 and neither consumer modifies the cached Body. Missing outputs use the local
 function-runner fallback. This schema-dependent materialization remains outside
 the Body cache and is not deduplicated by it.
-Only loaded BM25 output fields contribute. Live events buffered during build are
+Only required BM25 output fields contribute. Required fields come from the
+internal `required_fields` scope, independently of user preload hints. An
+unhinted required BM25 field still needs IDF statistics for query correctness.
+Live events buffered during build are
 applied before readiness. Partial initialization is never published.
 
 The default eager mode materializes the aggregate during initialization. With
@@ -142,6 +150,40 @@ the remaining view watermark; closing the last runtime instead cancels/drains
 refresh work and releases all statistics. No scheduled worker waits for another
 queued task on the same scheduler.
 
+## Schema changes
+
+A reused IDF runtime records its prepared schema revision and LoadInfoVersion,
+including when BM25 was initially disabled. Before a new QueryView can report
+Ready, a higher schema requirement or changed load-info identity rebuilds IDF
+from a fresh owner-captured WAL snapshot and current load metadata. This also
+covers an added BM25 field entering the load configuration after schema handoff. The snapshot and installation of a bounded live-event buffer
+share the VChannel owner lock. Already queued WAL messages through the captured
+TimeTick are represented by the snapshot and are not counted again; sealed
+notifications covered by its DataVersion are likewise excluded. Later seal
+notifications remain idempotent.
+
+The current oracle continues serving while the replacement reads sealed and
+persisted growing statistics. Snapshot insert tails and subsequent live events
+are applied before publishing the replacement and its prepared schema revision
+atomically. The regular QueryView event barrier and DataVersion preparation
+then run before Ready. GrowingRuntime and TransformLog replay are not restarted.
+Schema preparation and DataVersion advancement/release are serialized, and the
+replacement never regresses the shared aggregate's prepared DataVersion.
+
+A failed attempt discards its private state and retries from a fresh snapshot;
+it leaves the current oracle and prepared schema revision intact. Runtime close
+cancels preparation and wakes a producer blocked on the replacement's bounded
+queue before waiting for live application to drain. The usual eager/lazy setting
+still applies to sealed statistics. Lazy preparation does not promise eager
+sealed I/O completion.
+
+This covers IDF reconstruction for schema/load-info handoff, including enabling
+the first BM25 function. GrowingRuntime partition expansion and per-view query
+scopes are prepared separately as described in
+[Growing Segment Runtime](growing_segment_runtime.md#57-partition-load-handoff).
+General load-field scope reconciliation and field-removal MVCC semantics remain
+separate work.
+
 ## Query behavior
 
 BuildIDF/BuildIDFBatch accept a query context for lazy initialization and do not
@@ -153,7 +195,7 @@ plan parameters, without another Oracle read.
 An empty latest aggregate cannot prove that an older view has no rows. It must
 not set SearchOptimization.Skip. For an empty corpus, document-frequency lookup
 uses zero counts and average document length uses the positive fallback 1. Missing
-loaded fields are errors, not empty corpora. This keeps scoring finite without
+required fields are errors, not empty corpora. This keeps scoring finite without
 incorrectly suppressing old-view candidates.
 
 ## Cost and validation
@@ -185,5 +227,5 @@ to retained resources, local-file references/cleanup, and additional preparation
 state. DataView lifetime already protects the source objects. This implementation
 keeps the established no-cache resource contract and adopts lazy loading, bounded
 parallel reads, immediate aggregation, retryable streaming reads, and chunked
-decoding independently. It also preserves loaded partition/field scope, StorageV3
+decoding independently. It also preserves loaded partition and required field scopes, StorageV3
 manifest recovery, batched hybrid-search scoring and atomic delta validation.

@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
@@ -74,8 +75,10 @@ func (s *mockStream) Recv() (*viewpb.SyncResponse, error) {
 	}
 }
 
-func (s *mockStream) Header() (metadata.MD, error) { return nil, nil }
-func (s *mockStream) Trailer() metadata.MD         { return nil }
+func (s *mockStream) Header() (metadata.MD, error) {
+	return metadata.Pairs(common.QueryViewSchemaProtocolHeader, common.QueryViewSchemaProtocol), nil
+}
+func (s *mockStream) Trailer() metadata.MD { return nil }
 func (s *mockStream) CloseSend() error {
 	s.closed.Add(1)
 	if !s.sendReturned.Load() {

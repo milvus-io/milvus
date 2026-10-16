@@ -171,6 +171,7 @@ message SearchRequest {
   int32 pk_filter = 32;
   SearchType search_type = 33;
   repeated int64 group_by_field_ids = 34;
+  int32 schema_version = 35;
 }
 
 message SubSearchResults {
@@ -258,6 +259,7 @@ message RetrieveRequest {
   // PK filter from proxy: 0 = not checked (backward compat), 1 = has optimizable PK predicate, 2 = no PK predicate.
   // When 2, delegator can skip plan unmarshal for segment filter optimization.
   int32 pk_filter = 26;
+  int32 schema_version = 27;
 }
 
 // Element indices for element-level query results
