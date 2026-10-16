@@ -17,13 +17,36 @@ type lockAppendInterceptor struct {
 	glock          sync.RWMutex // glock is a wal level lock, it will acquire a highest level lock for wal.
 	vchannelLocker *lock.KeyLock[string]
 	txnManager     *txn.TxnManager
+	// Builders run in chain order; a later builder can install the row-lock hook.
+	buildParam *interceptors.InterceptorBuildParam
 }
 
 func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
 	g := r.acquireLockGuard(ctx, msg)
 	defer g()
 
+	// Row locks are taken under the shard lifecycle lock and before TimeTick
+	// allocates the write timestamp, so a later lock holder always receives a
+	// later timestamp. They are released after the downstream append returns,
+	// which is after transaction completion, acknowledgement and MVCC update.
+	// Replicated messages are already serialized by the replicate interceptor
+	// and must reach it before any partial-update admission check.
+	if rowLock := r.rowLock(); rowLock != nil && msg.ReplicateHeader() == nil {
+		var release func()
+		var err error
+		if ctx, release, err = rowLock.Acquire(ctx, msg); err != nil {
+			return nil, err
+		}
+		defer release()
+	}
 	return append(ctx, msg)
+}
+
+func (r *lockAppendInterceptor) rowLock() interceptors.MessageRowLock {
+	if r.buildParam == nil {
+		return nil
+	}
+	return r.buildParam.RowLock
 }
 
 // acquireLockGuard acquires the lock for the vchannel and return a function as a guard.
@@ -61,8 +84,7 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 		// messages already acquire the global write lock above.
 	}
 	// DML, including CAS commits, keeps the shard lifecycle stable with a
-	// shared lock. Row-level commit admission is synchronized by PK before
-	// the TimeTick interceptor allocates the write timestamp.
+	// shared lock. Row-level exclusion is taken by PK in DoAppend.
 	r.glock.RLock()
 	r.vchannelLocker.RLock(vchannel)
 	return func() {

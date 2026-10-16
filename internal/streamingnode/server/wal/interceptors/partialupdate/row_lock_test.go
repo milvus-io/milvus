@@ -10,10 +10,15 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func TestPartialUpdateChainCommitDrainsBodyBeforeTakingPKLock(t *testing.T) {
+// Producers send CommitTxn only after every body append has returned. A
+// CommitTxn that arrives while a body is still in flight would lock an
+// incomplete write set, so it is rejected and can be retried once the body
+// finishes.
+func TestPartialUpdateChainCommitRejectsInFlightBody(t *testing.T) {
 	env := newPartialUpdateChainTestEnv(t)
 	readTS := env.allocateReadTS(t)
 	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
@@ -36,25 +41,53 @@ func TestPartialUpdateChainCommitDrainsBodyBeforeTakingPKLock(t *testing.T) {
 		bodyDone <- err
 	}()
 	<-atWAL
-	commitDone := make(chan error, 1)
-	go func() {
-		_, err := env.append(newChainTestCASCommit(t, *result.TxnCtx), nil)
-		commitDone <- err
-	}()
+	_, err = env.append(newChainTestCASCommit(t, *result.TxnCtx), nil)
+	requirePartialUpdateRetryable(t, err)
 	session, err := env.txnManager.GetSessionOfTxn(result.TxnCtx.TxnID)
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return session.State() == message.TxnStateOnCommit }, time.Second, time.Millisecond)
-	select {
-	case err := <-commitDone:
-		close(releaseBody)
-		t.Fatalf("commit did not wait for its complete body write set: %v", err)
-	default:
-	}
+	require.Equal(t, message.TxnStateInFlight, session.State(), "rejected commit must not freeze the session")
 	close(releaseBody)
 	require.NoError(t, <-bodyDone)
-	require.NoError(t, <-commitDone)
+
+	_, err = env.append(newChainTestCASCommit(t, *result.TxnCtx), nil)
+	require.NoError(t, err)
 	require.True(t, env.hasPKVersionAfter("v1", 10, readTS))
 	require.True(t, env.hasPKVersionAfter("v1", 20, readTS))
+}
+
+// Once CommitTxn holds its row locks, the locked write set must not grow.
+func TestPartialUpdateChainBodyAfterCommitAdmissionIsRejected(t *testing.T) {
+	env := newPartialUpdateChainTestEnv(t)
+	cas := env.prepareCASTxn(t, env.allocateReadTS(t), 10)
+	atWAL, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	commitDone := make(chan error, 1)
+	go func() {
+		_, err := env.append(newChainTestCASCommit(t, cas), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			close(atWAL)
+			<-release
+			return env.nextMessageID(), nil
+		})
+		commitDone <- err
+	}()
+	<-atWAL
+	_, err := env.append(newGuardTestDelete(20).WithTxnContext(cas), nil)
+	require.True(t, status.AsStreamingError(err).IsTxnExpired(), "late body returned: %v", err)
+	once.Do(func() { close(release) })
+	require.NoError(t, <-commitDone)
+	require.False(t, env.hasPKVersionAfter("v1", 20, 0))
+}
+
+// A late body of a transaction that is already gone must not recreate partial
+// update state: TimeTick rejects the body and nothing would clean the record.
+func TestPartialUpdateBodyOfUnknownTxnDoesNotCreateState(t *testing.T) {
+	env := newPartialUpdateChainTestEnv(t)
+	body := newGuardTestDelete(10).WithTxnContext(message.TxnContext{TxnID: 999, Keepalive: time.Second})
+	_, release, err := env.partial.Acquire(context.Background(), body)
+	require.NoError(t, err)
+	release()
+	require.Nil(t, env.partial.state.getTxn(999))
 }
 
 func TestPartialUpdateChainRecoveredCommitPublishesPKBeforeCAS(t *testing.T) {
@@ -82,9 +115,8 @@ func TestPartialUpdateChainRecoveredCommitPublishesPKBeforeCAS(t *testing.T) {
 		_, err := env.append(newChainTestCASCommit(t, cas), nil)
 		casDone <- err
 	}()
-	session, err := env.txnManager.GetSessionOfTxn(cas.TxnID)
-	require.NoError(t, err)
-	require.Eventually(t, func() bool { return session.State() == message.TxnStateOnCommit }, time.Second, time.Millisecond)
+	// The CAS queues on the stripe in the lock interceptor, before TimeTick.
+	waitForTestPKWriter(t, env.partial.state.rowLocks, "v1", 10)
 	select {
 	case err := <-casDone:
 		close(release)
@@ -348,6 +380,7 @@ func TestRowLockManagerCancellationReleasesPartiallyAcquiredPKs(t *testing.T) {
 			result := startTestRowLock(ctx, g, "v1", primaryKeys{int64Values: []int64{10, 20, 10}}, exclusive)
 			// Stripe(20) precedes stripe(10); cancellation must release the
 			// already acquired stripe even though the input starts at PK 10.
+			require.Less(t, int64RowLockStripe(20), int64RowLockStripe(10), "test relies on stripe order")
 			waitForTestPKHeld(t, g, "v1", 20)
 			cancel()
 			// RWMutex itself is not cancellable. Release its blocker so acquire

@@ -309,17 +309,24 @@ func TestPartialUpdateChainRecoveredOrdinaryTxnKeepsCommitSemantics(t *testing.T
 	require.Equal(t, message.TxnStateCommitted, session.State())
 }
 
+// A recovered local CAS has no proof in the new WAL lifecycle. Commit admission
+// in the lock interceptor rejects it before TimeTick, so the WAL is untouched
+// and the session stays InFlight until its lease expires.
 func TestPartialUpdateChainRecoveredLocalCASReturnsRetry(t *testing.T) {
 	env := newPartialUpdateChainTestEnvWithRecoveredTxn(t, true)
 	commit := newCASCommitTxnMessage(t, "v1", 1, 0)
 
-	_, err := env.append(commit, nil)
+	appended := false
+	_, err := env.append(commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return env.nextMessageID(), nil
+	})
 	requirePartialUpdateRetryable(t, err)
-	require.True(t, txn.IsCommitAdmissionRejected(err))
+	require.False(t, appended)
 
 	session, err := env.txnManager.GetSessionOfTxn(1)
 	require.NoError(t, err)
-	require.Equal(t, message.TxnStateRollbacked, session.State())
+	require.Equal(t, message.TxnStateInFlight, session.State())
 }
 
 func TestPartialUpdateChainHistoryRejectionRollsBackBeforeAppend(t *testing.T) {

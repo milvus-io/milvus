@@ -21,9 +21,11 @@ type (
 )
 
 // MessageRowLock coordinates writes before their visibility timestamp is
-// allocated. CommitTxn is presented only after all its admitted bodies finish.
-// The returned context may retain decoded write metadata for later interceptors.
-// The release function runs after transaction, acknowledgement and MVCC publication.
+// allocated. The lock interceptor calls it under the shard lifecycle lock for
+// every non-replicated message. The returned context may retain decoded write
+// metadata for later interceptors. The release function runs after the
+// downstream append returns: after transaction, acknowledgement and MVCC
+// publication.
 type MessageRowLock interface {
 	Acquire(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error)
 }
@@ -41,7 +43,7 @@ type InterceptorBuildParam struct {
 	TxnManager             *txn.TxnManager              // The transaction manager for the wal, used to manage the transactions.
 	ShardManager           shards.ShardManager          // The shard manager for the wal, used to manage the shards, segment assignment, partition.
 	ReplicateManager       replicates.ReplicatesManager // The replicates manager for the wal, used to manage the replicates.
-	RowLock                MessageRowLock               // Optional per-write admission before timestamp allocation.
+	RowLock                MessageRowLock               // Optional per-write row lock, taken by the lock interceptor.
 }
 
 // Clear release the resources in the interceptor build param.

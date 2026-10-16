@@ -26,6 +26,5 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	return &timeTickAppendInterceptor{
 		operator:   operator,
 		txnManager: param.TxnManager,
-		buildParam: param,
 	}
 }

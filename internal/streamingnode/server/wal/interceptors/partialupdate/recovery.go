@@ -50,7 +50,10 @@ func (i *appendInterceptor) recoverTransactions(param *interceptors.InterceptorB
 		if complete {
 			i.state.recordTxnBegin(txnID)
 		}
-		if session, err := param.TxnManager.GetSessionOfTxn(txnID); err == nil {
+		// RegisterCleanup panics on an expired or finished session. The manager
+		// restores the lease from the same durable bodies, so this only guards
+		// against a lease that ended before its last durable body.
+		if session, err := param.TxnManager.GetSessionOfTxn(txnID); err == nil && !session.IsExpiredOrDone(lastBodyTS) {
 			// The manager already restored the original keepalive. Registering
 			// cleanup at its last durable body TS never extends that lease.
 			i.state.registerTxnCleanup(session, lastBodyTS)
