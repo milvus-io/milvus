@@ -61,6 +61,7 @@ func NewPipeLine(
 			enableTtChecker,
 			channel,
 			delegator,
+			base.WithFilteredTimeTickHandler(delegator.UpdateTSafe),
 			base.WithMsgPackBatcher(base.NewDMLMsgPackBatcher(paramtable.Get().QueryNodeCfg.DMLMicroBatchMaxMsgNum.GetAsInt)),
 		),
 	}
