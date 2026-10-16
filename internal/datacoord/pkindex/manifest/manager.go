@@ -124,6 +124,7 @@ type Manager struct {
 	store    ObjectStore
 	rootPath string
 	locks    *lock.KeyLock[string]
+	observer Observer
 
 	mu        sync.Mutex
 	manifests map[string]*vchannelManifest // by pointer key
@@ -267,7 +268,44 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 		}
 	}
 	m.remember(key, &vchannelManifest{pb: next, pointer: ptr})
+	if m.observer != nil {
+		m.observer.ManifestChanged(ctx, next)
+	}
 	return next, nil
+}
+
+// Observer is told of every manifest the manager commits and, by the GC, of
+// every current manifest it reads. The manifest is shared; do not change it.
+//
+// The manager may call ManifestChanged while it holds the lock of that
+// vchannel. The observer must return quickly and must not call the Manager
+// from inside the callback: a call to Current, CommitFlush or CommitCompaction
+// for the same vchannel would deadlock.
+//
+// Calls can be concurrent. They can repeat for an unchanged manifest (the GC
+// reports every round). They can carry an older version than one already
+// reported (the GC reads the pointer outside the lock of the manager). The
+// observer must keep the highest version per vchannel and ignore older ones.
+type Observer interface {
+	ManifestChanged(ctx context.Context, m *pkindexpb.Manifest)
+}
+
+// SetObserver sets the observer of committed manifests. Call it before
+// anything commits.
+func (m *Manager) SetObserver(o Observer) { m.observer = o }
+
+// Current returns the current manifest of t, or nil when t has none. The
+// manifest is shared with the cache; the caller must not change it. Current
+// serves from the cache and can lag the commits of another coordinator.
+func (m *Manager) Current(ctx context.Context, t Target) (*pkindexpb.Manifest, error) {
+	key := PointerKey(t.CollectionID, t.VChannel)
+	m.locks.Lock(key)
+	defer m.locks.Unlock(key)
+	cur, err := m.load(ctx, key)
+	if err != nil || cur == nil {
+		return nil, err
+	}
+	return cur.pb, nil
 }
 
 // decideByReadBack reads key from meta after a write of value that returned
@@ -429,16 +467,15 @@ func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstB
 
 // applyCompaction applies a compaction to cur. When the inputs are a non-empty
 // contiguous range of the SST list of cur, in the same order, and they do not
-// split a run, and the outputs are empty or one new run, and the L0 tables stay
-// a prefix of the list, it returns a new version, in which the outputs replace
-// the inputs at the position of the inputs; the checkpoint and the last flush
-// term do not change. When the inputs are
-// not empty, no input is in the SST list of cur and all outputs are in it, the
-// compaction is an applied retry and applyCompaction returns nil. It returns
-// ErrNoManifest when cur is nil, ErrStaleEdit in all other cases where
-// the inputs or the outputs break one of these rules, and ErrDuplicateSST when an output ID is
-// already in the SST list of cur or is listed twice in the outputs. It does
-// not change cur.
+// split a run, and the outputs are empty or one new run, and the L0 tables
+// stay a prefix of the list, it returns a new version, in which the outputs
+// replace the inputs at the position of the inputs; the checkpoint and the
+// last flush term do not change. When the inputs are not empty, no input is in
+// the SST list of cur and all outputs are in it, the compaction is an applied
+// retry and applyCompaction returns nil. It returns ErrNoManifest when cur is
+// nil, ErrStaleEdit in all other cases where the inputs or the outputs break
+// one of these rules, and ErrDuplicateSST when an output ID is already in the
+// SST list of cur or is listed twice in the outputs. It does not change cur.
 func applyCompaction(cur *pkindexpb.Manifest, c Compaction) (*pkindexpb.Manifest, error) {
 	if cur == nil {
 		return nil, ErrNoManifest
