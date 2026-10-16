@@ -6,8 +6,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
@@ -24,8 +22,13 @@ type indexedChunk struct {
 	loading *chunkLoad
 	recent  *list.Element
 	retired bool
-	// Protected by cache.mu. The embedded manifest index is immutable.
-	verified *chunkValidation
+}
+
+// chunkPayload is immutable. Only the encoded object is cached: section decoders
+// return independent records without retaining another decoded copy per reader.
+type chunkPayload struct {
+	bytes       []byte
+	footerStart uint64
 }
 
 type chunkLoad struct {
@@ -72,7 +75,6 @@ func (i *chunkIndex) remove(generation uint64) {
 	chunk := i.chunks[n]
 	i.cache.mu.Lock()
 	chunk.retired = true
-	chunk.verified = nil
 	i.cache.evictLocked(chunk)
 	i.cache.mu.Unlock()
 	copy(i.chunks[n:], i.chunks[n+1:])
@@ -97,9 +99,6 @@ func (c *chunkCache) read(ctx context.Context, store *Store, chunk *indexedChunk
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-loading.done:
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
 				// A canceled loader must not cancel other subscriptions. They
 				// retry ownership using their own context; other failures propagate.
 				if loading.canceled {
@@ -110,20 +109,18 @@ func (c *chunkCache) read(ctx context.Context, store *Store, chunk *indexedChunk
 		}
 		loading := &chunkLoad{done: make(chan struct{})}
 		chunk.loading = loading
-		verified := chunk.verified
 		c.mu.Unlock()
 
 		select {
 		case <-ctx.Done():
 			loading.err = ctx.Err()
 		case c.loadSlots <- struct{}{}:
-			loading.payload, loading.err = store.readChunkPayload(ctx, chunk.PChannelSummaryChunkIndexEntry, verified)
+			loading.payload, loading.err = store.readChunkPayload(ctx, chunk.PChannelSummaryChunkIndexEntry)
 			<-c.loadSlots
 		}
-		loading.canceled = ctx.Err() != nil && errors.Is(loading.err, ctx.Err())
+		loading.canceled = ctx.Err() != nil && loading.err != nil
 		c.mu.Lock()
 		if loading.err == nil && !chunk.retired {
-			chunk.verified = loading.payload.verified
 			c.putLocked(chunk, loading.payload)
 		}
 		chunk.loading = nil

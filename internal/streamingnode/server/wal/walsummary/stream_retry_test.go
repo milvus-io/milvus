@@ -45,8 +45,8 @@ func TestQueryStreamRetriesTransientReads(t *testing.T) {
 				}
 				var attempts, firstChunkReads atomic.Int64
 				blocked, resume := make(chan struct{}), make(chan struct{})
-				var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error)
-				patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(store *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
+				var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error)
+				patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(store *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
 					index = proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 					if index.GetGeneration() == firstGeneration {
 						firstChunkReads.Add(1)
@@ -63,7 +63,7 @@ func TestQueryStreamRetriesTransientReads(t *testing.T) {
 							return nil, ctx.Err()
 						}
 					}
-					return original(store, ctx, index, verified)
+					return original(store, ctx, index)
 				}).Build()
 				defer patch.UnPatch()
 				stream := NewStream(m)
@@ -124,7 +124,7 @@ func TestQueryStreamReadFailureCancellation(t *testing.T) {
 				require.NoError(t, persistSummary(ctx, m))
 				waitingCh := make(chan struct{})
 				var attempts atomic.Int64
-				readPatch := mockey.Mock((*Store).readChunkPayload).To(func(_ *Store, ctx context.Context, _ *streamingpb.PChannelSummaryChunkIndexEntry, _ *chunkValidation) (*chunkPayload, error) {
+				readPatch := mockey.Mock((*Store).readChunkPayload).To(func(_ *Store, ctx context.Context, _ *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
 					attempts.Add(1)
 					if waiting == "object read" {
 						close(waitingCh)

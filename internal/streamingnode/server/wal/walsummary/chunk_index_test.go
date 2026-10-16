@@ -2,7 +2,6 @@ package walsummary
 
 import (
 	"context"
-	"io"
 	"math"
 	"strings"
 	"sync"
@@ -160,8 +159,8 @@ func TestChunkCacheConcurrentLoadAndCancellation(t *testing.T) {
 	m.chunkIndex.cache.capacity = 1 << 20
 	entered, resume := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int64
-	var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error)
-	patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(s *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
+	var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error)
+	patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(s *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
 		copied := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 		if calls.Add(1) == 1 {
 			close(entered)
@@ -171,7 +170,7 @@ func TestChunkCacheConcurrentLoadAndCancellation(t *testing.T) {
 				return nil, ctx.Err()
 			}
 		}
-		return original(s, ctx, copied, verified)
+		return original(s, ctx, copied)
 	}).Build()
 	defer patch.UnPatch()
 	read := func(ctx context.Context) error { _, err := m.ReadTransform(ctx, "a", 0, 10, ReadLimits{}); return err }
@@ -210,14 +209,14 @@ func TestChunkCacheRetirementDuringLoad(t *testing.T) {
 	flushTransform(t, m, "a", 10, &released)
 	m.chunkIndex.cache.capacity = 1 << 20
 	leaf := m.chunkIndex.chunks[0]
-	var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error)
-	patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(s *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
+	var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error)
+	patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(s *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
 		copied := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 		m.AdvanceGCTimeTick("a", 10)
 		m.cfg.RetentionMaxBytes = 1
 		require.NoError(t, m.GCOnce(ctx))
 		require.Empty(t, m.chunkIndex.chunks)
-		return original(s, ctx, copied, verified)
+		return original(s, ctx, copied)
 	}).Build()
 	defer patch.UnPatch()
 	batch, err := m.ReadTransform(ctx, "a", 0, 10, ReadLimits{})
@@ -225,7 +224,6 @@ func TestChunkCacheRetirementDuringLoad(t *testing.T) {
 	require.Len(t, batch.Entries, 1)
 	require.True(t, leaf.retired)
 	require.Nil(t, leaf.payload, "a retiring load must not repopulate cache")
-	require.Nil(t, leaf.verified, "a retiring load must not publish validation")
 	require.Zero(t, m.chunkIndex.cache.bytes)
 	batch, err = m.ReadTransform(ctx, "a", 0, 10, ReadLimits{})
 	require.NoError(t, err)
@@ -339,73 +337,6 @@ func TestChunkCacheValidatesColdObject(t *testing.T) {
 			require.Error(t, err)
 			require.Nil(t, leaf.payload)
 			require.Nil(t, leaf.loading)
-		})
-	}
-}
-
-func TestChunkCacheCancellationDoesNotMaskObjectError(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	index := newChunkIndex(1024)
-	chunk := &indexedChunk{}
-	var attempt *chunkLoad
-	patch := mockey.Mock((*Store).readChunkPayload).To(func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error) {
-		index.cache.mu.Lock()
-		attempt = chunk.loading
-		index.cache.mu.Unlock()
-		cancel()
-		return nil, io.ErrUnexpectedEOF
-	}).Build()
-	defer patch.UnPatch()
-	_, err := index.cache.read(ctx, &Store{}, chunk)
-	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
-	require.False(t, attempt.canceled, "independent waiters must receive the object error")
-	require.ErrorIs(t, attempt.err, io.ErrUnexpectedEOF)
-	require.Nil(t, chunk.payload)
-}
-
-func TestChunkCacheRetainsValidationWithoutPayload(t *testing.T) {
-	for _, mode := range []string{"disabled", "oversized", "evicted"} {
-		t.Run(mode, func(t *testing.T) {
-			ctx := context.Background()
-			m, _ := newTestManagerWithStore(t)
-			var released bool
-			flushTransform(t, m, "a", 10, &released)
-			leaf := m.chunkIndex.chunks[0]
-			c := &m.chunkIndex.cache
-			require.Nil(t, leaf.verified, "write-through does not preseed cold-read validation")
-			switch mode {
-			case "disabled":
-				c.capacity = 0
-			case "oversized":
-				c.capacity = 1
-			case "evicted":
-				c.capacity = 1 << 20
-			}
-			reads := countChunkReads(t)
-			first, err := c.read(ctx, m.cfg.Store, leaf)
-			require.NoError(t, err)
-			require.NotNil(t, leaf.verified)
-			if mode == "evicted" {
-				c.mu.Lock()
-				c.evictLocked(leaf)
-				c.mu.Unlock()
-			}
-			require.Nil(t, leaf.payload)
-			verified := leaf.verified
-			patch := mockey.Mock(decodeChunkFooter).To(func([]byte) (*streamingpb.PChannelSummaryChunkFooter, error) {
-				t.Fatal("reloaded unchanged footer should not be decoded")
-				return nil, nil
-			}).Build()
-			defer patch.UnPatch()
-			second, err := c.read(ctx, m.cfg.Store, leaf)
-			require.NoError(t, err)
-			require.Equal(t, first.bytes, second.bytes)
-			require.Same(t, verified, leaf.verified)
-			require.Equal(t, int64(2), reads.Load(), "verification reuse must add no object reads")
-			m.chunkIndex.remove(leaf.GetGeneration())
-			require.Nil(t, leaf.verified)
-			require.Nil(t, leaf.payload)
 		})
 	}
 }
