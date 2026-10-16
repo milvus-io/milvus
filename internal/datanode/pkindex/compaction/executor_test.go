@@ -371,12 +371,40 @@ func (s blockingStore) DownloadFile(ctx context.Context, _, _ string) error {
 	}
 }
 
-func TestExecutorWipesLocalRootAtStart(t *testing.T) {
+func TestExecutorWipesLocalRootBeforeFirstTask(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "pkindex_compaction")
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "42", "in"), 0o755))
-	e, err := New(context.Background(), Config{LocalRoot: root, TerminalTaskTTL: time.Hour, TaskSlot: 1, Parallelism: 1}, dirStore{root: t.TempDir()})
+	store := dirStore{root: t.TempDir()}
+	e, err := New(context.Background(), Config{LocalRoot: root, TerminalTaskTTL: time.Hour, TaskSlot: 1, Parallelism: 1}, store)
 	require.NoError(t, err)
 	defer e.Close()
 	_, err = os.Stat(filepath.Join(root, "42"))
+	require.NoError(t, err) // New does not touch the disk
+
+	in := uploadInput(t, store, "b", 1, "a", "a")
+	req := &pkindexpb.CompactionRequest{TaskId: 1, SstBasePath: "b", Inputs: []*pkindexpb.SSTRef{in}, RunId: 9, OutputIdBegin: 100, OutputIdEnd: 110, TargetFileSize: 1 << 20}
+	require.NoError(t, e.Create(context.Background(), req))
+	_, err = os.Stat(filepath.Join(root, "42"))
 	require.True(t, os.IsNotExist(err))
+	waitState(t, e, 1, taskcommon.Finished)
+}
+
+func TestExecutorRetriesPreparingAnUnwritableRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	parent := t.TempDir()
+	require.NoError(t, os.Chmod(parent, 0o500))
+	defer func() { _ = os.Chmod(parent, 0o755) }()
+	store := dirStore{root: t.TempDir()}
+	e, err := New(context.Background(), Config{LocalRoot: filepath.Join(parent, "pkindex_compaction"), TerminalTaskTTL: time.Hour, TaskSlot: 1, Parallelism: 1}, store)
+	require.NoError(t, err)
+	defer e.Close()
+
+	in := uploadInput(t, store, "b", 1, "a", "a")
+	req := &pkindexpb.CompactionRequest{TaskId: 2, SstBasePath: "b", Inputs: []*pkindexpb.SSTRef{in}, RunId: 9, OutputIdBegin: 100, OutputIdEnd: 110, TargetFileSize: 1 << 20}
+	require.Error(t, e.Create(context.Background(), req))
+	require.NoError(t, os.Chmod(parent, 0o755))
+	require.NoError(t, e.Create(context.Background(), req))
+	waitState(t, e, 2, taskcommon.Finished)
 }
