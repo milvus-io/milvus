@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -115,7 +115,10 @@ func TestPartialUpdateRecoveryPreservesExistingFiniteLease(t *testing.T) {
 	}
 }
 
-func TestPartialUpdateRecoveryReplicatedCASUsesSharedPKLocks(t *testing.T) {
+// Replicated messages are serialized and deduplicated by the replicate
+// interceptor and skip the row-lock hook. A recovered replicated CAS keeps the
+// source-proof bypass and still publishes its PK versions.
+func TestPartialUpdateRecoveryReplicatedCASTakesNoRowLock(t *testing.T) {
 	body := newCASInsertMessage(t, []*schemapb.FieldData{int64PKFieldData(10)}, validCASMeta(5, 99)).
 		WithReplicateHeader(newChainTestReplicateHeader(11, 11))
 	env := newPartialUpdateChainTestEnvWithBuilders(t, recoveredRowLockBuilders(t, body))
@@ -129,9 +132,11 @@ func TestPartialUpdateRecoveryReplicatedCASUsesSharedPKLocks(t *testing.T) {
 	_, err := env.append(commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		called = true
 		key := pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: 10}
-		require.False(t, testPKMutex(t, env.partial.state.rowLocks, key).TryLock())
-		require.True(t, testPKMutex(t, env.partial.state.rowLocks, key).TryRLock())
-		testPKMutex(t, env.partial.state.rowLocks, key).RUnlock()
+		mutex := testPKMutex(t, env.partial.state.rowLocks, key)
+		if !mutex.TryLock() {
+			return nil, errors.New("replicated commit took a row lock")
+		}
+		mutex.Unlock()
 		return env.nextMessageID(), nil
 	})
 	require.NoError(t, err)
@@ -225,9 +230,14 @@ func TestPartialUpdateRecoveryMalformedNewInsertDoesNotBlockWALOpen(t *testing.T
 		appended = true
 		return env.nextMessageID(), nil
 	})
+	// Commit admission rejects the incomplete write set before TimeTick, so the
+	// producer replays the full transaction and the session stays InFlight
+	// until its lease expires.
 	require.True(t, status.AsStreamingError(err).IsTxnExpired())
-	require.True(t, txn.IsCommitAdmissionRejected(err))
 	require.False(t, appended)
+	session, err := env.txnManager.GetSessionOfTxn(1)
+	require.NoError(t, err)
+	require.Equal(t, message.TxnStateInFlight, session.State())
 }
 
 func TestPartialUpdateRecoveryPayloadDecodeRespectsWALOpenCancellation(t *testing.T) {

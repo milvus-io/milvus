@@ -49,7 +49,7 @@ func TestPartialUpdateCDCReplayAfterTSOFailure(t *testing.T) {
 		defer patch.UnPatch()
 		_, err := env.append(cdcReplayCommit(t), walAppend)
 		require.ErrorIs(t, err, failure)
-		require.EqualValues(t, 1, patch.MockTimes(), "fail the first provisional timestamp allocation")
+		require.EqualValues(t, 1, patch.MockTimes(), "fail the commit timestamp allocation")
 		session, err := env.txnManager.GetSessionOfTxn(1)
 		require.NoError(t, err)
 		require.Equal(t, message.TxnStateInFlight, session.State(), "failure must precede handleCommit")

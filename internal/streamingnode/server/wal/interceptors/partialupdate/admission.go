@@ -100,22 +100,81 @@ func (s *partialUpdateState) prepareTxnBegin(session *txn.TxnSession) {
 // Legacy schema-less inserts may be explicitly exempt from row coordination.
 func (s *partialUpdateState) completeTxnWriteSet(msg message.MutableMessage, txnID message.TxnID) (*pendingTxn, error) {
 	txnState := s.getTxn(txnID)
+	if err := checkTxnWriteSetComplete(msg, txnID, txnState); err != nil {
+		return nil, err
+	}
+	return txnState, nil
+}
+
+func checkTxnWriteSetComplete(msg message.MutableMessage, txnID message.TxnID, txnState *pendingTxn) error {
 	if msg.ReplicateHeader() == nil && message.HasPartialUpdateCAS(msg) && txnState != nil && txnState.recovered {
-		return nil, status.NewPartialUpdateRetryable("partial update transaction %d was recovered under a new WAL lifecycle", txnID)
+		return status.NewPartialUpdateRetryable("partial update transaction %d was recovered under a new WAL lifecycle", txnID)
 	}
 	if txnState == nil || !txnState.observedBegin || txnState.recoveryIncomplete {
 		if message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil {
-			return nil, status.NewPartialUpdateRetryable(
+			return status.NewPartialUpdateRetryable(
 				"partial update transaction %d has no complete runtime write set in the current WAL lifecycle",
 				txnID,
 			)
 		}
-		return nil, status.NewTransactionExpired(
+		return status.NewTransactionExpired(
 			"transaction %d has no complete runtime write set in the current WAL lifecycle; replay the full transaction",
 			txnID,
 		)
 	}
-	return txnState, nil
+	return nil
+}
+
+// admitTxnBody counts a transaction body from the lock interceptor until its
+// append returns. Bodies record their PKs downstream of TimeTick, so CommitTxn
+// must not lock its write set while a body is still in flight.
+func (s *partialUpdateState) admitTxnBody(txnID message.TxnID) (func(), error) {
+	s.txnMu.Lock()
+	defer s.txnMu.Unlock()
+	// A live session always has a record, created at Begin or recovery. Do not
+	// create one here: a late body of a cleaned-up transaction is rejected by
+	// TimeTick and would otherwise leave a record that no cleanup removes.
+	txnState := s.txns[txnID]
+	if txnState == nil {
+		return func() {}, nil
+	}
+	if txnState.commitAdmitted {
+		return nil, status.NewTransactionExpired(
+			"transaction %d received a body after its CommitTxn took row locks; replay the full transaction",
+			txnID,
+		)
+	}
+	txnState.inFlightBodies++
+	return func() {
+		s.txnMu.Lock()
+		defer s.txnMu.Unlock()
+		txnState.inFlightBodies--
+	}, nil
+}
+
+// admitTxnCommit validates that the transaction has a complete write set, then
+// freezes it and returns the PKs to lock. Producers send CommitTxn only after
+// every body append has returned; a body still in flight means that contract
+// was broken, so the commit is rejected rather than locking a partial set.
+func (s *partialUpdateState) admitTxnCommit(msg message.MutableMessage, txnID message.TxnID) (primarykey.Keys, error) {
+	// Check, freeze and snapshot the live record in one critical section so
+	// that no body can be admitted between the check and the freeze.
+	s.txnMu.Lock()
+	defer s.txnMu.Unlock()
+	txnState := s.txns[txnID]
+	if err := checkTxnWriteSetComplete(msg, txnID, txnState); err != nil {
+		return primarykey.Keys{}, err
+	}
+	if txnState.inFlightBodies > 0 {
+		if message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil {
+			return primarykey.Keys{}, status.NewPartialUpdateRetryable(
+				"partial update transaction %d has a body append in flight at commit admission", txnID)
+		}
+		return primarykey.Keys{}, status.NewTransactionExpired(
+			"transaction %d has a body append in flight at commit admission; replay the full transaction", txnID)
+	}
+	txnState.commitAdmitted = true
+	return txnState.pks.Clone(), nil
 }
 
 // validateCommit snapshots a completed transaction and validates local CAS
@@ -210,6 +269,11 @@ type pendingTxn struct {
 	recovered          bool
 	recoveryIncomplete bool
 	cleanupRegistered  bool
+	// inFlightBodies counts bodies between the lock interceptor and the end
+	// of their append. commitAdmitted is set once CommitTxn has taken its row
+	// locks; later bodies are rejected so the locked write set cannot grow.
+	inFlightBodies int
+	commitAdmitted bool
 }
 
 func (s *partialUpdateState) txnLocked(txnID message.TxnID) *pendingTxn {

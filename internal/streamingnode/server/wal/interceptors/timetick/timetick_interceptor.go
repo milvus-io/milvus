@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -27,8 +26,6 @@ var (
 type timeTickAppendInterceptor struct {
 	operator   *timeTickSyncOperator
 	txnManager *txn.TxnManager
-	// Builders run in chain order; a later builder can install the row-lock hook.
-	buildParam *interceptors.InterceptorBuildParam
 }
 
 func (impl *timeTickAppendInterceptor) Name() string {
@@ -37,12 +34,6 @@ func (impl *timeTickAppendInterceptor) Name() string {
 
 // Do implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
-	var releaseRowLock func()
-	defer func() {
-		if releaseRowLock != nil {
-			releaseRowLock()
-		}
-	}()
 	cm := impl.operator.MVCCManager()
 	defer func() {
 		if err == nil {
@@ -54,75 +45,17 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	ackManager := impl.operator.AckManager()
 	var txnSession *txn.TxnSession
 	var immutableMsg message.ImmutableMessage
-	var provisionalAcker *ack.Acker
-	var acker *ack.Acker
-	// Keep a provisional commit timestamp outstanding while freezing and draining
-	// transaction bodies, so cleanup cannot overtake their preparation. Once the
-	// body is drained, row-lock waits may expire the session; the final timestamp's
-	// lease check rejects those commits before WAL append.
-	defer func() {
-		if provisionalAcker != nil {
-			provisionalAcker.Ack(ack.OptSync())
-		}
-	}()
-	defer func() {
-		if acker == nil {
-			return
-		}
-		if err != nil {
-			acker.Ack(ack.OptError(err))
-			return
-		}
-		acker.Ack(ack.OptImmutableMessage(immutableMsg), ack.OptTxnSession(txnSession))
-	}()
-
-	var rowLock interceptors.MessageRowLock
-	if impl.buildParam != nil {
-		rowLock = impl.buildParam.RowLock
-	}
-	preparedCommit := false
-	if rowLock != nil && msg.MessageType() == message.MessageTypeCommitTxn {
-		if provisionalAcker, err = allocateMessageAcker(ctx, ackManager, msg); err != nil {
-			return nil, err
-		}
-		msg = msg.WithTimeTick(provisionalAcker.Timestamp())
-		if txnSession, err = impl.handleCommit(ctx, msg); err != nil {
-			return nil, err
-		}
-		preparedCommit = true
-		defer func() {
-			if txn.IsCommitAdmissionRejected(err) {
-				txnSession.RejectCommit()
-				return
-			}
-			txnSession.CommitDone()
-		}()
-		// A prepared commit has no more body appends to protect. Waiting for its
-		// row locks must not hold back confirmation for the entire PChannel.
-		provisionalAcker.Ack(ack.OptSync())
-		provisionalAcker = nil
-	}
-	if rowLock != nil {
-		ctx, releaseRowLock, err = rowLock.Acquire(ctx, msg)
-		if err != nil {
-			if preparedCommit {
-				err = txn.MarkCommitAdmissionRejected(err)
-			}
-			return nil, err
-		}
-	}
 	if msg.MessageType() != message.MessageTypeTimeTick {
 		// Allocate new timestamp acker for message.
-		if acker, err = allocateMessageAcker(ctx, ackManager, msg); err != nil {
-			if preparedCommit {
-				// The prepared session is rolled back, so retrying this CommitTxn
-				// cannot succeed. Report a terminal transaction error so that the
-				// producer replays the whole transaction instead.
-				err = txn.MarkCommitAdmissionRejected(status.NewTransactionExpired(
-					"prepared commit of txn %d failed to allocate its final timestamp: %v",
-					txnSession.TxnContext().TxnID, err))
+		var acker *ack.Acker
+		if msg.BarrierTimeTick() == 0 {
+			if acker, err = ackManager.Allocate(ctx); err != nil {
+				return nil, errors.Wrap(err, "allocate timestamp failed")
 			}
-			return nil, err
+		} else {
+			if acker, err = ackManager.AllocateWithBarrier(ctx, msg.BarrierTimeTick()); err != nil {
+				return nil, errors.Wrap(err, "allocate timestamp with barrier failed")
+			}
 		}
 
 		// Assign timestamp to message and call the append method.
@@ -130,12 +63,16 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			WithTimeTick(acker.Timestamp()).                  // message assigned with these timetick.
 			WithLastConfirmed(acker.LastConfirmedMessageID()) // start consuming from these message id, the message which timetick greater than current timetick will never be lost.
 
-		if preparedCommit {
-			if err = txnSession.ValidateCommitTimeTick(msg.TimeTick()); err != nil {
-				err = txn.MarkCommitAdmissionRejected(err)
-				return nil, err
+		defer func() {
+			if err != nil {
+				acker.Ack(ack.OptError(err))
+				return
 			}
-		}
+			acker.Ack(
+				ack.OptImmutableMessage(immutableMsg),
+				ack.OptTxnSession(txnSession),
+			)
+		}()
 	}
 
 	switch msg.MessageType() {
@@ -144,9 +81,6 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			return nil, err
 		}
 	case message.MessageTypeCommitTxn:
-		if preparedCommit {
-			break
-		}
 		if txnSession, err = impl.handleCommit(ctx, msg); err != nil {
 			return nil, err
 		}
@@ -193,17 +127,6 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 		return nil, err
 	}
 	return immutableMsg.MessageID(), nil
-}
-
-// allocateMessageAcker respects the caller's timestamp barrier for both the
-// provisional commit lifetime and the final write visibility timestamp.
-func allocateMessageAcker(ctx context.Context, manager *ack.AckManager, msg message.MutableMessage) (*ack.Acker, error) {
-	if msg.BarrierTimeTick() == 0 {
-		acker, err := manager.Allocate(ctx)
-		return acker, errors.Wrap(err, "allocate timestamp failed")
-	}
-	acker, err := manager.AllocateWithBarrier(ctx, msg.BarrierTimeTick())
-	return acker, errors.Wrap(err, "allocate timestamp with barrier failed")
 }
 
 // GracefulClose implements InterceptorWithGracefulClose.

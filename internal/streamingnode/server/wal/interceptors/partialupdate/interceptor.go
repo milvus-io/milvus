@@ -52,8 +52,8 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		pkDescriptorGetter: pkDescriptorGetter,
 	}
 	interceptor.recoverTransactions(param)
-	// Builders share this per-WAL parameter. TimeTick acquires the row lock at
-	// append time, after every builder has completed, before assigning writeTS.
+	// Builders share this per-WAL parameter. The lock interceptor reads the
+	// hook at append time, after every builder has completed.
 	param.RowLock = interceptor
 	return interceptor
 }

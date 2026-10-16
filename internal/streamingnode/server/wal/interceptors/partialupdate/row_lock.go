@@ -65,8 +65,11 @@ func (g *rowLockManager) unpin(vchannel string, table *rowLockTable) {
 	g.mu.Unlock()
 }
 
-// Mix the PK type into the hash. Hash collisions, including across types, are
-// deliberately allowed; the PK version index still compares exact values.
+// Int64 and VarChar PKs use different hash functions. Both are independent of
+// the murmur3/CRC32 PK-to-vchannel routing hashes, so the PKs of one vchannel
+// spread over all stripes. Collisions, including across types, are allowed:
+// they only serialize unrelated writes, and the PK version index still compares
+// exact values.
 func int64RowLockStripe(value int64) uint16 {
 	hash := uint64(value) + 0x9e3779b97f4a7c15
 	hash = (hash ^ (hash >> 30)) * 0xbf58476d1ce4e5b9
@@ -75,15 +78,15 @@ func int64RowLockStripe(value int64) uint16 {
 }
 
 func stringRowLockStripe(value string) uint16 {
-	return uint16((xxhash.Sum64String(value) ^ 0xd6e8feb86659fd93) & (rowLockStripeCount - 1))
+	return uint16(xxhash.Sum64String(value) & (rowLockStripeCount - 1))
 }
 
 func (g *rowLockManager) acquire(ctx context.Context, vchannel string, pks primarykey.Keys, exclusive bool) (func(), error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	if pks.Len() == 0 {
 		return func() {}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	// Avoid allocating the batch bitmap for the common single-row write.
 	if pks.Len() == 1 {
@@ -176,27 +179,34 @@ type ordinaryWriteSet struct {
 
 type ordinaryWriteSetContextKey struct{}
 
-// Acquire runs after a CommitTxn has frozen and drained its body, but before
-// its final timestamp is allocated. The TimeTick interceptor retains row locks
-// until PK/fence publication, transaction completion, and acknowledgment finish.
+// Acquire runs in the lock interceptor under the shard lifecycle lock, before
+// TimeTick allocates the write timestamp. The lock interceptor keeps the row
+// locks until the downstream append returns: after PK/fence publication,
+// transaction completion, acknowledgement and MVCC update. Replicated messages
+// are serialized by the replicate interceptor and never reach Acquire.
 func (i *appendInterceptor) Acquire(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
-	if msg.MessageType() == message.MessageTypeCommitTxn {
+	switch msg.MessageType() {
+	case message.MessageTypeCommitTxn:
 		txnContext := msg.TxnContext()
 		if txnContext == nil {
 			return ctx, nil, status.NewUnrecoverableError("partial update commit transaction context is missing")
 		}
-		state, err := i.state.completeTxnWriteSet(msg, txnContext.TxnID)
+		pks, err := i.state.admitTxnCommit(msg, txnContext.TxnID)
 		if err != nil {
 			return ctx, nil, err
 		}
 		localCAS := message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil
-		release, err := i.state.rowLocks.acquire(ctx, msg.VChannel(), state.pks, localCAS)
+		release, err := i.state.rowLocks.acquire(ctx, msg.VChannel(), pks, localCAS)
 		return ctx, release, err
-	}
-	// Transaction bodies only stage writes. Their CommitTxn acquires the union
-	// of all durable body PKs, so a CAS waiter never blocks its own body.
-	if msg.TxnContext() != nil {
+	case message.MessageTypeBeginTxn, message.MessageTypeRollbackTxn, message.MessageTypeTimeTick:
+		// These messages carry no row writes.
 		return ctx, func() {}, nil
+	}
+	// Transaction bodies only stage writes. Their CommitTxn locks the union of
+	// all body PKs, so a CAS waiter never blocks its own body.
+	if txnContext := msg.TxnContext(); txnContext != nil {
+		release, err := i.state.admitTxnBody(txnContext.TxnID)
+		return ctx, release, err
 	}
 	if message.HasPartialUpdateCAS(msg) {
 		return ctx, nil, status.NewUnrecoverableError("partial update CAS message must be transactional")

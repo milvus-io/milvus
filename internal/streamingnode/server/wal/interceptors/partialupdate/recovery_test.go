@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -57,9 +58,15 @@ func TestPartialUpdateRecoveryReplicatedCASKeepsCommittedSourceWrites(t *testing
 	readTS := env.allocateReadTS(t)
 	commit := newCASCommitTxnMessage(t, "v1", 1, 0).WithReplicateHeader(newChainTestReplicateHeader(13, 13))
 	_, err = env.append(commit, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		// Replicated messages are serialized by the replicate interceptor and
+		// take no row locks.
 		for _, pk := range []int64{10, 20} {
 			key := pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: pk}
-			require.False(t, testPKMutex(t, env.partial.state.rowLocks, key).TryLock())
+			mutex := testPKMutex(t, env.partial.state.rowLocks, key)
+			if !mutex.TryLock() {
+				return nil, errors.Errorf("replicated commit took the row lock of PK %d", pk)
+			}
+			mutex.Unlock()
 		}
 		return env.nextMessageID(), nil
 	})
@@ -96,9 +103,13 @@ func TestPartialUpdateRecoveryUnsupportedBodyOnlyRejectsItsTransaction(t *testin
 	})
 	requireTransactionExpired(t, err)
 	require.False(t, called, "a new-format body with missing PKs must not commit unguarded")
+	// Commit admission rejects txn 1 before TimeTick: its session stays InFlight
+	// until its lease ends, and the rejection does not affect txn 2.
+	session, err := env.txnManager.GetSessionOfTxn(1)
+	require.NoError(t, err)
+	require.Equal(t, message.TxnStateInFlight, session.State())
 	_, err = env.append(newCommitTxnMessage("v1", 2, 0), nil)
 	require.NoError(t, err)
-	require.Nil(t, env.partial.state.getTxn(1))
 	require.Nil(t, env.partial.state.getTxn(2))
 }
 

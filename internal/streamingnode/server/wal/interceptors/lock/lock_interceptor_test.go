@@ -6,14 +6,17 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
@@ -330,4 +333,96 @@ func newLockTestCASCommit(t *testing.T, vchannel string) message.MutableMessage 
 		MustBuildMutable()
 	require.NoError(t, message.MarkPartialUpdateCASCommit(msg))
 	return msg
+}
+
+type testRowLock func(context.Context, message.MutableMessage) (context.Context, func(), error)
+
+func (f testRowLock) Acquire(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+	return f(ctx, msg)
+}
+
+type rowLockTestKey struct{}
+
+func newRowLockTestInterceptor(rowLock interceptors.MessageRowLock) *lockAppendInterceptor {
+	interceptor := newTestInterceptor()
+	interceptor.buildParam = &interceptors.InterceptorBuildParam{RowLock: rowLock}
+	return interceptor
+}
+
+func TestRowLockIsHeldUnderShardLockAcrossAppend(t *testing.T) {
+	var interceptor *lockAppendInterceptor
+	acquired, released := false, false
+	interceptor = newRowLockTestInterceptor(testRowLock(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+		// The shard lifecycle lock is already held in shared mode.
+		require.False(t, interceptor.vchannelLocker.TryLock(testVChannel))
+		acquired = true
+		return context.WithValue(ctx, rowLockTestKey{}, true), func() {
+			released = true
+			require.False(t, interceptor.vchannelLocker.TryLock(testVChannel), "row lock released after the shard lock")
+		}, nil
+	}))
+	_, err := interceptor.DoAppend(context.Background(), newLockTestInsertMessage(testVChannel), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		require.True(t, acquired)
+		require.False(t, released, "row lock released before the downstream append returned")
+		require.Equal(t, true, ctx.Value(rowLockTestKey{}), "row-lock context did not reach downstream interceptors")
+		return nil, nil
+	})
+	require.NoError(t, err)
+	require.True(t, released)
+	require.True(t, interceptor.vchannelLocker.TryLock(testVChannel))
+	interceptor.vchannelLocker.Unlock(testVChannel)
+}
+
+func TestRowLockFailureSkipsAppendAndReleasesShardLock(t *testing.T) {
+	expected := errors.New("row lock admission failed")
+	interceptor := newRowLockTestInterceptor(testRowLock(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+		return ctx, nil, expected
+	}))
+	_, err := interceptor.DoAppend(context.Background(), newLockTestCASCommit(t, testVChannel), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("rejected message reached the downstream append")
+		return nil, nil
+	})
+	require.ErrorIs(t, err, expected)
+	require.True(t, interceptor.vchannelLocker.TryLock(testVChannel))
+	interceptor.vchannelLocker.Unlock(testVChannel)
+}
+
+// Replicated messages are serialized by the replicate interceptor, which also
+// deduplicates them; they must reach it before any partial-update admission.
+func TestRowLockSkipsReplicatedMessages(t *testing.T) {
+	interceptor := newRowLockTestInterceptor(testRowLock(func(context.Context, message.MutableMessage) (context.Context, func(), error) {
+		t.Fatal("replicated message took a row lock")
+		return nil, nil, nil
+	}))
+	sourceID := walimplstest.NewTestMessageID(1)
+	msg := newLockTestCASCommit(t, testVChannel).WithReplicateHeader(&message.ReplicateHeader{
+		ClusterID:              "source",
+		MessageID:              sourceID,
+		LastConfirmedMessageID: sourceID,
+		VChannel:               testVChannel,
+	})
+	appended := false
+	_, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return nil, nil
+	})
+	require.NoError(t, err)
+	require.True(t, appended)
+}
+
+// The partial-update builder runs after the lock builder and installs the hook
+// on the shared build parameter, so the hook must be read at append time.
+func TestRowLockHookIsReadAtAppendTime(t *testing.T) {
+	param := &interceptors.InterceptorBuildParam{ChannelInfo: types.PChannelInfo{Name: testPChannelName}, TxnManager: new(txn.TxnManager)}
+	interceptor := NewInterceptorBuilder().Build(param).(*lockAppendInterceptor)
+	called := false
+	param.RowLock = testRowLock(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+		called = true
+		return ctx, func() {}, nil
+	})
+	_, err := interceptor.DoAppend(context.Background(), newLockTestInsertMessage(testVChannel), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return nil, nil
+	})
+	require.NoError(t, err)
+	require.True(t, called)
 }

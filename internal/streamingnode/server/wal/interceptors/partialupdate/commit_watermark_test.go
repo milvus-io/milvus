@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	streamingtimetick "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -28,8 +27,9 @@ func (g observedCommitGuard) Acquire(ctx context.Context, msg message.MutableMes
 	return g(ctx, msg)
 }
 
-// Err is first checked by rowLocks.acquire, after Acquire has captured the
-// transaction's write set. This observes real lock admission without sleeps.
+// Err is first checked by rowLocks.acquire, after Acquire has frozen the
+// transaction's write set and right before it waits on a stripe. This observes
+// real lock admission without sleeps.
 type commitGuardContext struct {
 	context.Context
 	once    sync.Once
@@ -77,7 +77,7 @@ func TestPartialUpdateQueuedCommitsDoNotHoldConfirmedTimeTick(t *testing.T) {
 		t.Run(fmt.Sprintf("N%d", depth), func(t *testing.T) {
 			env := newPartialUpdateChainTestEnv(t)
 			require.False(t, exerciseCommitWatermarkQueue(t, env, depth),
-				"queued provisional timestamps blocked confirmation of a disjoint ordinary write")
+				"commits queued on a PK lock blocked confirmation of a disjoint ordinary write")
 		})
 	}
 }
@@ -96,7 +96,7 @@ func exerciseCommitWatermarkQueue(
 	}
 	atWAL := make(chan uint64, 1)
 	releaseWAL, releasePK := make(chan struct{}), make(chan struct{})
-	acknowledged, waiting := make(chan struct{}), make(chan uint64, depth)
+	acknowledged, waiting := make(chan struct{}), make(chan struct{}, depth)
 	var walOnce, pkOnce sync.Once
 	defer walOnce.Do(func() { close(releaseWAL) })
 	defer pkOnce.Do(func() { close(releasePK) })
@@ -105,7 +105,7 @@ func exerciseCommitWatermarkQueue(
 			return env.partial.Acquire(ctx, msg)
 		}
 		if msg.TxnContext().TxnID != first.TxnID {
-			ctx = &commitGuardContext{Context: ctx, entered: func() { waiting <- msg.TimeTick() }}
+			ctx = &commitGuardContext{Context: ctx, entered: func() { waiting <- struct{}{} }}
 			return env.partial.Acquire(ctx, msg)
 		}
 		guardCtx, release, err := env.partial.Acquire(ctx, msg)
@@ -113,9 +113,10 @@ func exerciseCommitWatermarkQueue(
 			return guardCtx, release, err
 		}
 		return guardCtx, func() {
-			// TimeTick releases the guard after final acknowledgement and MVCC
-			// publication. Hold the real PK lock here to isolate queue obstruction
-			// from a legitimately unacknowledged WAL operation.
+			// The lock interceptor releases the row lock after the downstream
+			// append returns, i.e. after acknowledgement and MVCC publication.
+			// Hold the real PK lock here to isolate queue obstruction from a
+			// legitimately unacknowledged WAL operation.
 			close(acknowledged)
 			<-releasePK
 			release()
@@ -138,8 +139,9 @@ func exerciseCommitWatermarkQueue(
 			done <- err
 		}(commit)
 	}
+	// Queued commits wait in the lock interceptor and hold no timestamp.
 	for range waiters {
-		require.Greater(t, receiveCommitValue(t, waiting), finalTS)
+		receiveCommitValue(t, waiting)
 	}
 	manager := commitAckManager(t, env)
 	// The active WAL append must still hold back the watermark.
@@ -174,20 +176,21 @@ func exerciseCommitWatermarkQueue(
 	return obstructed
 }
 
+// A commit waiting on a row lock still holds an InFlight session and no
+// timestamp. If its lease expires meanwhile, TimeTick cleanup removes the
+// session and the commit is rejected without touching the WAL.
 func TestPartialUpdateCommitExpiresDuringRealGuardWait(t *testing.T) {
 	for _, cleanupFirst := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cleanup_before_snapshot_%t", cleanupFirst), func(t *testing.T) {
 			env := newPartialUpdateChainTestEnv(t)
 			cas := env.prepareCASTxn(t, env.allocateReadTS(t), 10)
-			session, err := env.txnManager.GetSessionOfTxn(cas.TxnID)
-			require.NoError(t, err)
 			guards := env.partial.state.rowLocks
 			key := pkLockKey{vchannel: "v1", kind: primarykey.KindInt64, int64Value: 10}
 			testPKMutex(t, guards, key).Lock()
 			unlock := func() { testPKMutex(t, guards, key).Unlock() }
 			var once sync.Once
 			defer once.Do(unlock)
-			waiting := make(chan uint64, 1)
+			waiting := make(chan struct{}, 1)
 			resumeSnapshot := make(chan struct{})
 			var snapshotOnce sync.Once
 			defer snapshotOnce.Do(func() { close(resumeSnapshot) })
@@ -196,11 +199,11 @@ func TestPartialUpdateCommitExpiresDuringRealGuardWait(t *testing.T) {
 					return env.partial.Acquire(ctx, msg)
 				}
 				if cleanupFirst {
-					waiting <- msg.TimeTick()
+					waiting <- struct{}{}
 					<-resumeSnapshot
 					return env.partial.Acquire(ctx, msg)
 				}
-				ctx = &commitGuardContext{Context: ctx, entered: func() { waiting <- msg.TimeTick() }}
+				ctx = &commitGuardContext{Context: ctx, entered: func() { waiting <- struct{}{} }}
 				return env.partial.Acquire(ctx, msg)
 			})
 			done, wal := make(chan error, 1), make(chan struct{}, 1)
@@ -211,9 +214,9 @@ func TestPartialUpdateCommitExpiresDuringRealGuardWait(t *testing.T) {
 				})
 				done <- err
 			}()
-			preparedTS := receiveCommitValue(t, waiting)
-			expiredTS := tsoutil.AddPhysicalDurationOnTs(preparedTS, cas.Keepalive+time.Second)
-			// Advance final timestamp deterministically, without sleeping for the
+			receiveCommitValue(t, waiting)
+			expiredTS := tsoutil.AddPhysicalDurationOnTs(env.allocateReadTS(t), cas.Keepalive+time.Second)
+			// Advance timestamps deterministically, without sleeping for the
 			// transaction lease. Cleanup itself follows the real TimeTick path.
 			var nextTS atomic.Uint64
 			nextTS.Store(expiredTS)
@@ -222,27 +225,25 @@ func TestPartialUpdateCommitExpiresDuringRealGuardWait(t *testing.T) {
 			}).Build()
 			defer patch.UnPatch()
 			confirmedTS := confirmedCommitTimestamp(t, commitAckManager(t, env))
-			require.GreaterOrEqual(t, confirmedTS, expiredTS, "waiting commit held back its own expiry watermark")
+			require.GreaterOrEqual(t, confirmedTS, expiredTS, "waiting commit held back the confirmation watermark")
 			tick := streamingtimetick.NewTimeTickMsg(confirmedTS, env.nextMessageID(), 0, true)
-			_, err = env.append(tick, nil)
+			_, err := env.append(tick, nil)
 			require.NoError(t, err)
 			require.Nil(t, env.partial.state.getTxn(cas.TxnID))
 			_, err = env.txnManager.GetSessionOfTxn(cas.TxnID)
 			require.True(t, status.AsStreamingError(err).IsTxnExpired(), "cleaned session lookup returned: %v", err)
-			allocationsBeforeResume := patch.MockTimes()
 			snapshotOnce.Do(func() { close(resumeSnapshot) })
 			once.Do(unlock)
 			err = receiveCommitValue(t, done)
-			require.True(t, txn.IsCommitAdmissionRejected(err))
 			if cleanupFirst {
-				// Missing proof state is rejected by Acquire before a final
-				// timestamp is allocated. The WAL must still remain untouched.
+				// Missing proof state is rejected at commit admission, before
+				// any row lock or timestamp is taken.
 				require.True(t, status.AsStreamingError(err).IsPartialUpdateRetryableCAS(), "guarded commit returned: %v", err)
 			} else {
-				require.Greater(t, patch.MockTimes(), allocationsBeforeResume, "final timestamp allocation bypassed the expiry injection")
+				// The commit reaches TimeTick after the lock is released and
+				// finds its session gone.
 				require.True(t, status.AsStreamingError(err).IsTxnExpired(), "guarded commit returned: %v", err)
 			}
-			require.Equal(t, message.TxnStateRollbacked, session.State())
 			require.Empty(t, wal)
 			requireTestRowLocksAvailable(t, guards, "v1", 10)
 		})

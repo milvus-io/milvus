@@ -53,7 +53,10 @@ func (i *appendInterceptor) recoverTransactions(param *interceptors.InterceptorB
 		txnState := i.state.txnLocked(txnID)
 		txnState.observedBegin = !txnState.recoveryIncomplete
 		i.state.txnMu.Unlock()
-		if session, err := param.TxnManager.GetSessionOfTxn(txnID); err == nil {
+		// RegisterCleanup panics on an expired or finished session. The manager
+		// restores the lease from the same durable bodies, so this only guards
+		// against a lease that ended before its last durable body.
+		if session, err := param.TxnManager.GetSessionOfTxn(txnID); err == nil && !session.IsExpiredOrDone(lastBodyTS) {
 			// Registering at the recovered activity timestamp does not renew
 			// the lease or reject a session merely because startup took time.
 			i.state.registerTxnCleanup(session, lastBodyTS)

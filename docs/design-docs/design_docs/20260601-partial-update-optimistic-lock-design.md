@@ -34,10 +34,12 @@ resolve all touched PChannel terms
 ```
 
 StreamingNode maintains an in-memory, per-WAL-term index of recent primary-key
-writes. CommitTxn freezes and drains its body, maps its PKs to a fixed stripe
-table for its vchannel, acquires shared stripes for ordinary writes or exclusive
-stripes for local CAS, and then allocates its final timestamp. CAS validates the
-term, read snapshot, and exact PK versions before persisting CommitTxn. Locks
+writes. Before TimeTick allocates the write timestamp, the lock interceptor maps
+each write's PKs to a fixed stripe table for its vchannel and acquires shared
+stripes for ordinary writes or exclusive stripes for local CAS. A CommitTxn is
+admitted only when no body append is in flight, and admission freezes the body
+PK union that the commit locks. CAS validates the term, read snapshot, and exact
+PK versions before persisting CommitTxn. Locks
 remain held through version publication, transaction completion, acknowledgement,
 and MVCC publication. Different vchannels use separate tables. Disjoint stripes
 can proceed concurrently; different PKs that hash to one stripe contend. The
@@ -185,11 +187,13 @@ The design depends on seven invariants:
 2. **Exact query snapshot:** every CAS `readTS` is the nonzero snapshot
    reported by that channel's successful Strong query.
 3. **Atomic admission boundary:** local CAS validation, CommitTxn append, write
-   publication, transaction transition, final acknowledgement, and MVCC
-   publication retain the same exclusive PK locks. Every ordinary or replicated logical
-   write with recoverable PKs participates through shared locks on the same PK
-   keys. Schema-less legacy Inserts retain their original acceptance and are
-   explicitly exempt from row-lock CAS protection.
+   publication, transaction transition, acknowledgement, and MVCC publication
+   retain the same exclusive PK locks. Every ordinary local logical write with
+   recoverable PKs participates through shared locks on the same PK keys.
+   Replicated writes take no row lock: the replicate interceptor serializes and
+   deduplicates them, and local CAS is rejected on a secondary. Schema-less
+   legacy Inserts retain their original acceptance and are explicitly exempt
+   from row-lock CAS protection.
 4. **Complete write coverage:** every supported WAL write that changes logical
    row data updates either exact PK versions or a conservative fence.
 5. **Fail closed:** missing history, malformed proof, or incomplete local CAS
@@ -197,12 +201,12 @@ The design depends on seven invariants:
 6. **Authoritative write identity:** a CAS Insert derives its collection and
    schema version from the Insert header and its PK field from ShardManager;
    attempt proof never supplies a competing collection or PK identity.
-7. **Timestamp order:** writers acquire their row locks before
-   allocating the final visibility timestamp. A CommitTxn freezes and drains
-   its body before selecting the complete PK write set. Its provisional
-   acker prevents cleanup from overtaking body preparation and is acknowledged
-   before waiting for row locks. Only the final timestamp is persisted, after
-   a lease recheck that rejects transactions expired during the wait.
+7. **Timestamp order:** writers acquire their row locks before TimeTick
+   allocates their single visibility timestamp, so a later row-lock holder
+   always receives a later timestamp. A CommitTxn locks its complete PK write
+   set: admission rejects it while any body append is in flight and freezes
+   the set before locking. A session that expires during the lock wait fails
+   the existing commit lease check before WAL append.
 
 ### Architecture and state ownership
 
@@ -213,9 +217,11 @@ flowchart LR
     Proxy -->|query at readTS| QueryNode[QueryNode]
     Proxy -->|Delete + CAS Insert| Producer[Streaming producer]
     Producer -->|BeginTxn / body / CommitTxn| Lock[lock interceptor]
-    Lock --> TimeTick[TimeTick interceptor]
-    TimeTick --> Guard[PK row locks]
-    Guard --> Shard[shard interceptor]
+    Lock -->|non-replicated| Guard[PK row locks]
+    Lock -->|replicated| Replicate[replicate interceptor]
+    Guard --> Replicate
+    Replicate --> TimeTick[TimeTick interceptor]
+    TimeTick --> Shard[shard interceptor]
     Shard --> CAS[partial-update interceptor]
     CAS --> WAL[WAL backend]
     CAS --- Index[per-WAL PK state / node-wide byte budget]
@@ -226,8 +232,8 @@ flowchart LR
 | Original partial payload, attempt `readTS`, and vchannel term snapshot | Proxy `upsertTask` | One client request; rebuilt per retry | None |
 | Local transaction packaging and empty `_puc` commit marker | Producer | One vchannel message group | Standard WAL properties |
 | PChannel global lock and keyed vchannel RW locks | Lock interceptor | One WAL instance | None |
-| Shared ordinary-write and exclusive CAS locks on per-vchannel stripes | StreamingNode process-wide row-lock manager, acquired by TimeTick through `RowLock` | Entries live until their last acquiring or admitted operation releases them | None |
-| `pendingTxn`, PK versions, and collection fences | Partial-update interceptor | One PChannel WAL term | None |
+| Shared ordinary-write and exclusive CAS locks on per-vchannel stripes | StreamingNode process-wide row-lock manager, acquired by the lock interceptor through `InterceptorBuildParam.RowLock` | Entries live until their last acquiring or admitted operation releases them | None |
+| `pendingTxn` (write set, in-flight body count, commit freeze), PK versions, and collection fences | Partial-update interceptor | One PChannel WAL term | None |
 | PK-version byte budget and aggregate used/limit/missed-write metrics | Partial-update interceptor builder | One StreamingNode process | None |
 | Live and recovered transaction sessions | TxnManager | Transaction and WAL recovery lifecycle | Existing TxnBuffer recovery |
 | Collection schema and immutable PK descriptor | ShardManager | Collection lifecycle in one WAL | Existing recovery snapshot |
@@ -262,12 +268,11 @@ sequenceDiagram
     P->>R: AppendMessages with CAS metadata
     R->>S: BeginTxn
     R->>S: Delete / CAS Insert body
-    R->>S: CommitTxn with empty _puc marker
+    R->>S: CommitTxn with empty _puc marker after all body appends return
     S->>S: Retain shared shard lifecycle lock
-    S->>S: Reserve provisional acker; freeze and drain transaction body
-    S->>S: Ack provisional timestamp before row-lock admission
-    S->>S: Acquire sorted, deduplicated exclusive stripes
-    S->>S: Allocate final commitTS; recheck transaction lease
+    S->>S: Admit commit with complete write set and no body in flight
+    S->>S: Freeze write set and acquire sorted, deduplicated exclusive stripes
+    S->>S: Allocate commitTS, check lease, OnCommit, drain body
     S->>S: Validate term / window / fences / PKs
     alt deterministic admission reject
         S-->>R: PARTIAL_UPDATE_RETRYABLE
@@ -275,9 +280,9 @@ sequenceDiagram
         P->>P: Rebuild the full REPLACE attempt
     else commit accepted
         S->>W: Append CommitTxn
-        S->>S: Publish PK / fence state; finish transaction
-        S->>S: Ack final commit; publish MVCC
-        S->>S: Release PK row locks and shard lifecycle lock
+        S->>S: Publish PK / fence state, finish transaction
+        S->>S: Ack commit, publish MVCC
+        S->>S: Release PK row locks, then shard lifecycle lock
         S-->>R: commitTS
         R-->>P: Append response
     end
@@ -289,19 +294,19 @@ make a multi-vchannel request atomic.
 
 Transaction-body append records the union of durable Insert and Delete PKs,
 including duplicates, without publishing committed versions or acquiring PK
-guards. Commit preparation prevents new body admission and waits for all
-already admitted bodies before taking a snapshot of this union. A single local
-CAS Insert still uses this transaction path. After CommitTxn is durable, normal
-consumer transaction assembly delivers the complete Delete/Insert transaction
-to downstream consumers; QueryNode visibility continues to follow the existing
-commit and TimeTick contract.
+locks. Commit admission rejects a commit while any body append is in flight,
+then freezes this union so that later bodies are rejected and snapshots it. A
+single local CAS Insert still uses this transaction path. After CommitTxn is
+durable, normal consumer transaction assembly delivers the complete
+Delete/Insert transaction to downstream consumers; QueryNode visibility
+continues to follow the existing commit and TimeTick contract.
 
 On deterministic admission rejection, StreamingNode rejects the transaction
-without appending CommitTxn or publishing its writes, then acknowledges any
-remaining reserved timestamp and releases its guards. Proxy rebuilds a replacement
-attempt with a new Strong query and newly reported per-channel snapshots.
-Relative operations and unknown append outcomes retain the no-replay rules
-described below.
+without appending CommitTxn or publishing its writes, acknowledges the commit
+timestamp if one was allocated, and releases its row locks. Proxy rebuilds a
+replacement attempt with a new Strong query and newly reported per-channel
+snapshots. Relative operations and unknown append outcomes retain the no-replay
+rules described below.
 
 ### Proxy attempt construction
 
@@ -511,10 +516,11 @@ transaction-level idempotency.
 The append chain is:
 
 ```text
-redo -> lock -> replicate -> timetick -> shard -> partialupdate -> WAL
+[idempotency ->] redo -> lock -> replicate -> timetick -> shard -> partialupdate -> WAL
 ```
 
-The lock interceptor retains the existing outer lifecycle boundary:
+The bracketed idempotency interceptor exists only on master. The lock
+interceptor retains the existing outer lifecycle boundary:
 
 | Message | Lock |
 |---|---|
@@ -524,6 +530,19 @@ The lock interceptor retains the existing outer lifecycle boundary:
 
 All non-PChannel-exclusive paths acquire the PChannel lock first and then the
 vchannel lock. They release in reverse order.
+
+Under that lifecycle lock, the lock interceptor calls
+`InterceptorBuildParam.RowLock.Acquire` for every message without a
+`ReplicateHeader`, before TimeTick allocates the single write timestamp. It
+releases the row locks after the downstream append returns, that is, after CAS
+validation, WAL append, PK/fence publication, transaction completion
+(`CommitDone` or `RejectCommit`), acknowledgement, and MVCC update, and before
+it releases the lifecycle lock.
+
+Replicated messages skip the row-lock hook entirely. The replicate interceptor
+already serializes and deduplicates them, and local CAS is rejected on a
+secondary. The partial-update interceptor's `validateCommit` still checks
+their write-set completeness before append, after replicate deduplication.
 
 A local CAS commit uses the same shared lifecycle locks as ordinary writes.
 It does not call `FailTxnAtVChannel`; that cleanup remains associated with the
@@ -536,11 +555,13 @@ wait or WAL I/O holds it. There is no vchannel admission lock.
 | Logical write | PK locks |
 |---|---|
 | Ordinary nontransactional Insert/Delete with exact PKs | Shared locks on the write set |
-| Ordinary or replicated CommitTxn with reconstructed write set | Shared locks on the known prefix and suffix PK union |
+| Ordinary CommitTxn with reconstructed write set | Shared locks on the known prefix and suffix PK union |
 | Local CAS CommitTxn with complete runtime proof | Exclusive locks on the complete PK union |
 | Legacy Insert without schema version and without an available PK schema | None; preserve its original acceptance |
+| Replicated message (`ReplicateHeader` set) | None; the replicate interceptor serializes it |
 | TruncateCollection and exclusive DDL | Existing outer lifecycle lock only |
-| BeginTxn, transaction body, RollbackTxn | None |
+| Transaction body | None; counted as in flight until its append returns |
+| BeginTxn, RollbackTxn | None |
 
 Only a version-less Insert with SchemaNotFound is exempt. Other schema errors,
 missing descriptor getters, and malformed modern PKs retain their errors.
@@ -548,6 +569,21 @@ Legacy writes publish a collection timestamp fence after successful append,
 but that record alone does not promise atomic CAS protection against legacy
 writes. Mixed transactions lock their known PKs and publish both known PK
 versions and any legacy fence. DDL retains its existing transaction cleanup.
+
+For CommitTxn, `admitTxnCommit` first validates that the write set is complete.
+A missing or incomplete write set, or a recovered local CAS, is rejected with
+`PartialUpdateRetryable` for local CAS and `TRANSACTION_EXPIRED` otherwise.
+Admission applies the same rejection while any body is still in flight. It then
+sets `commitAdmitted`, snapshots the PK union, and acquires exclusive stripes
+for local CAS or shared stripes for ordinary commits. A body that arrives after
+`commitAdmitted` is rejected with `TRANSACTION_EXPIRED`, so the locked set
+cannot grow.
+
+Producers send CommitTxn only after every body append has returned:
+`ProduceGuard` waits for all body appends before it sends CommitTxn. The
+in-flight body count and the commit freeze are the server-side fail-closed
+guard for that contract. A client that violates it gets a retry or a replay,
+never an unlocked write.
 
 Int64 and VarChar PKs use type-aware hash functions to select stripe IDs.
 A fixed bitmap sorts and deduplicates those IDs before either lock mode acquires
@@ -569,69 +605,66 @@ releases the acquired prefix and table reference. Close/Drop never reset active
 tables.
 
 The append chain keeps shard validation ahead of write tracking. During WAL
-construction, `partialupdate.Build` registers its `MessageRowLock` through
-the shared `InterceptorBuildParam.RowLock`. The earlier TimeTick builder
-retains the shared parameter and reads this field when an append executes,
-after all builders have completed. It therefore invokes the guard before final
-timestamp allocation without moving the partial-update append interceptor
-ahead of shard validation. The guard caches nontransactional write extraction
-in the returned context so the tracking interceptor can reuse it after shard
-validation; ordinary DML does not need to decode its payload twice.
+construction, `partialupdate.Build` installs its `MessageRowLock` hook on the
+shared `InterceptorBuildParam.RowLock`. The lock builder runs earlier in chain
+order, so the lock interceptor retains the shared parameter and reads this
+field when an append executes, after all builders have completed. It therefore
+takes row locks before timestamp allocation without moving the partial-update
+append interceptor ahead of shard validation. `Acquire` caches nontransactional
+write extraction in the returned context so the tracking interceptor can reuse
+it after shard validation; ordinary DML does not need to decode its payload
+twice.
 
 The local CAS critical region is:
 
 ```text
 acquire glock.RLock + vchannel.RLock
-  -> replicate validation
-  -> reserve provisional timestamp acker
-  -> RequestCommitAndWait using provisional timestamp: freeze and drain body
-  -> acknowledge provisional acker as sync
-  -> snapshot complete durable write set
+  -> admit commit: complete write set, no body in flight
+  -> set commitAdmitted and snapshot the PK union
   -> hash PKs and acquire sorted, deduplicated exclusive stripes
-  -> allocate final commitTS, respecting any timestamp barrier
-  -> recheck transaction lease at final commitTS
+  -> replicate validation
+  -> allocate commitTS, respecting any timestamp barrier
+  -> RequestCommitAndWait: lease check, OnCommit, drain body
   -> validate marker and runtime state
   -> validate term, read window, fences, and PK versions
   -> append CommitTxn
   -> publish PK / fence state
   -> CommitDone or RejectCommit
-  -> acknowledge final message
+  -> acknowledge commit message
   -> publish successful MVCC advancement
   -> release PK locks
 release vchannel.RLock + glock.RUnlock
 ```
 
-The provisional acker remains outstanding while a transaction freezes and drains
-its bodies. Once preparation finishes, it is acknowledged before row-lock
-admission so waiting commits do not pin the PChannel confirmation watermark.
-TimeTick cleanup may expire a prepared transaction before or during lock
-acquisition. The final timestamp lease check rejects it before WAL append,
-even if row-lock acquisition has already copied its write set. Only the final timestamp
-is assigned to the persisted CommitTxn. An error in guard acquisition, final
-allocation, or the final lease check deterministically rejects a prepared
-commit. Because the session is rolled back, a final allocation failure is
-reported as `TRANSACTION_EXPIRED` so the producer replays the transaction
-instead of retrying a commit that can no longer succeed. Ambiguous WAL append failures retain their existing transaction
-outcome handling.
+Row-lock waits happen before any timestamp is allocated, so a waiting write or
+commit holds no acker and does not hold back the PChannel confirmation
+watermark. Each write receives exactly one timestamp and one acknowledgement.
+TimeTick then runs its existing commit flow unchanged: it allocates the commit
+timestamp, and `handleCommit` calls `RequestCommitAndWait`, which performs the
+existing lease and expiry check, moves the session to OnCommit, and drains
+in-flight bodies.
 
-Acknowledging the provisional timestamp is a sync-only acknowledgement: it
-neither persists CommitTxn nor marks the transaction committed. Consumer
-TxnBuffer still waits for the real commit, and LastConfirmedMessageID continues
-to retain the WAL prefix needed by unresolved transactions. The eventual commit
-receives a fresh timestamp after row-lock admission.
+If TimeTick cleanup removes the InFlight session while the commit waits for
+row locks, `handleCommit` fails with `TRANSACTION_EXPIRED`; the producer
+replays the transaction, or returns the CAS retry signal to Proxy for local
+CAS. If cleanup removes the partial-update state before admission, admission
+rejects the commit, as retryable for local CAS. A TSO failure happens before
+`handleCommit`, so the session stays InFlight and the client can retry the
+same CommitTxn. Ambiguous WAL append failures retain their existing
+transaction outcome handling.
 
 Ordinary nontransactional writes acquire shared locks for their exact PK set
-before allocating the write timestamp and retain them through WAL append and
-PK/fence publication. Ordinary and replicated transactions freeze and drain
-their bodies before acquiring shared locks for the complete body PK union and
-allocating commitTS. Local CAS commits acquire exclusive locks for that union.
-Replicated CAS skips local proof revalidation but still participates in guard
-and publication ordering. Therefore:
+before the write timestamp is allocated and retain them through WAL append and
+PK/fence publication. Ordinary transaction commits acquire shared locks for the
+frozen body PK union before commitTS is allocated. Local CAS commits acquire
+exclusive locks for that union. Replicated writes take no row locks, and
+replicated CAS skips local proof revalidation; both still follow the
+partial-update publication path. Therefore:
 
 - a same-PK ordinary write admitted first completes publication before CAS
-  obtains its exclusive guard and checks the snapshot;
+  obtains its exclusive locks and checks the snapshot;
 - a later same-PK write waits for CAS publication and receives its visibility
-  timestamp after CAS releases its guard;
+  timestamp after CAS releases its locks;
 - local CAS commits with overlapping stripes serialize; disjoint stripes in
   the same vchannel remain concurrent;
 - ordinary writes to the same PK can proceed concurrently while no CAS writer
@@ -642,16 +675,16 @@ and publication ordering. Therefore:
 - different vchannels remain independent.
 
 Acquiring PK locks only around `validateCommit -> WAL append -> publishCommit`
-would be too late: the old TimeTick flow allocated commitTS before draining the
-body and before entering the partial-update interceptor. A write could receive
-an earlier timestamp, wait behind a later CAS, and escape that CAS's version
-check. Acquiring the guard before the final timestamp prevents this inversion.
+would be too late: TimeTick allocates commitTS before the partial-update
+interceptor runs. A write could receive an earlier timestamp, wait behind a
+later CAS, and escape that CAS's version check. Taking row locks in the lock
+interceptor, before TimeTick allocates the timestamp, prevents this inversion.
 
 Proxy query and merge and transaction-body append remain outside PK exclusion.
-Body messages stage writes and acquire no PK guards; only their complete commit
-does. Otherwise a commit waiting for bodies could block a body needed to finish
-its own write set. Guards remain held through publication, transaction
-transition, acknowledgement, and successful MVCC advancement.
+Body messages stage writes and acquire no PK locks; only their complete commit
+does, so a CAS waiter never blocks its own body. Row locks remain held through
+publication, transaction transition, acknowledgement, and successful MVCC
+advancement, and are released before the shard lifecycle lock.
 
 ### Transaction state and atomic publication
 
@@ -668,8 +701,10 @@ body message:
   from Insert and Delete, and an optional collection-wide fence.
 
 Transaction bodies may append concurrently, so `pendingTxn` is protected by a
-mutex. `RequestCommitAndWait` guarantees that no body remains in flight before
-the pre-timestamp guard snapshots the write set and before commit validation.
+mutex. It also holds `inFlightBodies`, which counts bodies from the lock
+interceptor until their append returns, and `commitAdmitted`. Commit admission
+snapshots the write set only when no body is in flight, and
+`RequestCommitAndWait` still drains bodies before commit validation.
 
 Marker validation is fail closed:
 
@@ -692,7 +727,8 @@ admission reject is marked separately from a WAL append error:
   not persisted.
 
 This distinction changes only the in-process transaction transition. It does
-not provide an exactly-once client outcome.
+not provide an exactly-once client outcome. A rejection in row-lock admission
+happens before TimeTick handles the commit and leaves the session InFlight.
 
 ### Per-term PK version index
 
@@ -754,14 +790,15 @@ the attempt; only eligible replacement updates are automatically retried.
 TxnManager preserves existing TxnID, transaction recovery, and keepalive
 behavior. During construction, partialupdate reads InitialRecoverSnapshot.TxnBuffer
 and reconstructs the PKs of every durable transaction body. Later appends extend
-this prefix. Commit freezes and drains the session before locking the union.
+this prefix. Commit admission freezes the write set, once no body is in flight,
+before locking the union.
 
 | Recovered path | Commit behavior |
 |---|---|
 | Ordinary transaction with reconstructable prefix | Continue old TxnID and lease; lock known PKs and publish versions/fences |
 | Modern write set cannot be reconstructed | Existing TransactionExpired full producer replay; no new commit publication |
 | Local CAS from an older WAL lifecycle | PartialUpdateRetryable; Proxy rebuilds the attempt |
-| Replicated transaction with reconstructed prefix/proof | Preserve source-proof bypass; shared PK locks and publication |
+| Replicated transaction with reconstructed prefix/proof | Preserve source-proof bypass; no row locks; publish versions/fences |
 | Already committed transaction | Preserve committed recovery and existing duplicate-result behavior |
 
 Recovered pending state registers cleanup at the original last durable activity
@@ -776,12 +813,15 @@ buffered insert result is unavailable; this change adds no result-buffer restore
 ### Replication
 
 The primary already validated CAS. Replicated Commit does not revalidate source
-term/readTS; it reconstructs the durable prefix, merges later body writes, takes
-shared PK locks, and publishes versions. Unsupported modern prefixes request
-existing full replay. Legacy schema-less writes retain the same explicit exemption.
+term/readTS; it reconstructs the durable prefix, merges later body writes, and
+publishes versions. Replicated messages take no row locks: the replicate
+interceptor already serializes and deduplicates them, and local CAS is rejected
+on a secondary. `validateCommit` still checks the replicated write set for
+completeness before append. Unsupported modern prefixes request existing full
+replay. Legacy schema-less writes retain the same explicit exemption.
 A full CDC replay can reuse the source TxnID after an earlier Commit failed
-before TimeTick acquired its transaction session, for example during the first
-TSO allocation. Begin on the new session installs a fresh pending record before
+before TimeTick acquired its transaction session, for example during TSO
+allocation. Begin on the new session installs a fresh pending record before
 registering cleanup: old PKs, CAS proof, recovery flags, and cleanup registration
 cannot survive into this replay. Cleanup callbacks capture the record identity,
 so a late callback from the superseded session cannot remove the new record.
@@ -796,6 +836,7 @@ Promotion creates a new term and a new empty per-term version index.
 |---|---|---|
 | Term mismatch, PK conflict, collection fence, TTL expiry, or budget-incomplete history | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Rebuild `REPLACE`; project relative update to non-retriable conflict |
 | Recovered local CAS without complete proof | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
+| Local CAS commit with an incomplete write set or a body append still in flight | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
 | Local CAS transaction expires before commit | Producer converts to `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
 | Malformed marker, proof, Insert schema scope, PK write set, or internal invariant | `STREAMING_CODE_UNRECOVERABLE` | Fail without CAS retry |
 | Shard schema version mismatch | `STREAMING_CODE_SCHEMA_VERSION_MISMATCH` | `ErrCollectionSchemaMismatch` |
@@ -848,8 +889,8 @@ The design adds the following costs:
   per write: shared for ordinary writes, exclusive for local CAS;
 - contention between overlapping stripe sets, including hash collisions;
 - PK locks retained across WAL I/O and acknowledgement/MVCC publication;
-- a provisional acker and second timestamp allocation for each guarded
-  CommitTxn, including ordinary and replicated transactions;
+- in-flight accounting for each transaction body and a PK-union snapshot at
+  each CommitTxn admission;
 - decoding the durable prefix of pending transactions during WAL recovery;
 - a final-envelope size check and possible CAS Insert repacking.
 
@@ -859,14 +900,18 @@ each other, including writes to the same PK when no CAS writer is waiting. Query
 commit blocks overlapping CAS/ordinary writes. Legacy unknown-PK writes have
 no PK lock and do not introduce a whole-vchannel admission barrier. The existing shared shard
 lifecycle lock remains held throughout append, so existing exclusive DDL
-continues to wait for active writes.
+continues to wait for active writes. A DML waiting for a row lock still holds
+the glock and vchannel read locks, so a queued PChannel-exclusive message (Go's
+RWMutex is writer-preferring) can delay later appends, including TimeTick
+messages, until the appends admitted before it finish; this already happened
+when CAS held the vchannel lock exclusively.
 
-Prepared commits waiting for row locks hold no outstanding provisional acker.
-Unrelated acknowledged writes can advance the PChannel confirmation watermark
-during that wait. An actual in-flight WAL append still holds its final acker and
-can delay confirmation and consumer visibility across the PChannel. Benchmarks
-should distinguish lock-queue delay from this WAL persistence delay and measure
-both alongside write throughput and tail latency.
+Writes and commits waiting for row locks have not allocated a timestamp and
+hold no acker. Unrelated acknowledged writes can advance the PChannel
+confirmation watermark during that wait. An actual in-flight WAL append still
+holds its acker and can delay confirmation and consumer visibility across the
+PChannel. Benchmarks should distinguish lock-queue delay from this WAL
+persistence delay and measure both alongside write throughput and tail latency.
 
 The required PK-index budget is approximately:
 
@@ -888,7 +933,8 @@ Production-scale benchmarks are still required for:
 - many disjoint PKs in one vchannel, including ordinary-write tail latency;
 - high-conflict traffic on one PK or overlapping multi-PK batches;
 - slow WAL append with disjoint and overlapping PK sets;
-- transaction timestamp-allocation and provisional-acker overhead;
+- row-lock queueing before timestamp allocation, including its effect on
+  queued PChannel-exclusive messages and TimeTick appends;
 - shared PK lock acquisition and sorting overhead for ordinary writes without
   CAS, plus writer contention under mixed ordinary/CAS traffic;
 - recovered ordinary transactions and legacy schema-less writes during ordinary/CAS load;
@@ -910,29 +956,36 @@ Focused tests must verify ordering and observable concurrency, including:
 - both modes sort and deduplicate stripe IDs, including hash collisions while a
   CAS writer is waiting; cancellation observed after lock acquisition releases
   all partially acquired PK locks;
-- a writer waiting behind a same-PK CAS receives its final timestamp only after
-  acquiring the guard; commitTS allocated for provisional lifetime protection
-  is replaced before persistence;
-- CommitTxn guard selection occurs after all admitted body messages finish,
-  uses the Insert/Delete union, and tolerates duplicate PKs and overlapping
-  multi-PK requests with different input orders;
+- a writer waiting behind a same-PK CAS is allocated its timestamp only after
+  acquiring its row locks, so it receives a later timestamp than the CAS;
+- CommitTxn lock selection uses the frozen Insert/Delete union and tolerates
+  duplicate PKs and overlapping multi-PK requests with different input orders;
+- a CommitTxn arriving while a body append is in flight is rejected
+  (`PartialUpdateRetryable` for local CAS, `TRANSACTION_EXPIRED` otherwise),
+  and a body arriving after commit admission is rejected with
+  `TRANSACTION_EXPIRED`, so the locked write set cannot grow;
 - Int64 and VarChar keys hash consistently; deliberate same-type and mixed-type
   collisions serialize safely, while exact PK version checks remain unchanged;
 - recovered transactions lock prefix plus suffix without renewing the lease;
   schema-less legacy Inserts remain accepted without a row lock;
-- a replicated write participates in the same stripes while retaining the
-  source-proof bypass; an early TSO failure followed by same-TxnID full replay
-  resets recovery state and PKs, and only the current record owns cleanup;
-- the provisional acker protects body preparation, then is acknowledged before
-  row-lock admission; queued commits at depths 1, 8, and 32 do not block
-  confirmation of a disjoint acknowledged write once the active WAL append has
-  completed;
-- TimeTick cleanup can expire a prepared commit before its write-set snapshot
-  or during a PK-lock wait; final timestamp lease validation rejects it
-  before WAL append and releases its locks;
-- guard failures reject prepared commits; successful guard release occurs only
-  after transaction transition, final acknowledgement, and MVCC
-  publication; ambiguous WAL errors keep their existing classification;
+- a replicated message skips the row-lock hook and retains the source-proof
+  bypass, while `validateCommit` still checks its write-set completeness after
+  replicate deduplication; an early TSO failure followed by same-TxnID full
+  replay resets recovery state and PKs, and only the current record owns
+  cleanup;
+- commits queued on row locks at depths 1, 8, and 32 hold no timestamp and do
+  not block confirmation of a disjoint acknowledged write once the active WAL
+  append has completed;
+- TimeTick cleanup can expire a session while its commit waits for row locks;
+  `handleCommit` rejects it with `TRANSACTION_EXPIRED` before WAL append and
+  its row locks are released; cleanup before admission makes admission reject
+  the commit; a TSO failure leaves the session InFlight so the same CommitTxn
+  can be retried;
+- a commit rejected at admission or row-lock acquisition returns before
+  timestamp allocation and leaves the session InFlight; row-lock release
+  occurs only after transaction transition, acknowledgement, and MVCC
+  publication, and before the shard lifecycle lock is released; ambiguous WAL
+  errors keep their existing classification;
 - exclusive DDL still excludes writes and performs its existing transaction
   cleanup, while local CAS never calls that cleanup path.
 
