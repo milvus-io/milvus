@@ -351,26 +351,53 @@ KnowhereMmapSupported(const IndexType& index_type) {
         index_type, knowhere::feature::MMAP);
 }
 
-bool
-ConfigureMRL(KnowhereEngine& engine,
-             int64_t source_dim,
-             const Config& params,
-             knowhere::ViewDataScopeOp view_data_scope) {
-    const auto mrl_dim = GetValueFromConfig<int64_t>(params, MRL_DIM_KEY);
-    const auto with_refine =
-        GetValueFromConfig<bool>(params, WITH_MRL_REFINE_KEY).value_or(false);
-    if (!mrl_dim.has_value() || *mrl_dim == -1) {
-        AssertInfo(!with_refine,
+MRLParams
+ParseMRLParams(const Config& params) {
+    return {
+        .mrl_dim =
+            GetValueFromConfig<int64_t>(params, MRL_DIM_KEY).value_or(-1),
+        .with_refine = GetValueFromConfig<bool>(params, WITH_MRL_REFINE_KEY)
+                           .value_or(false),
+    };
+}
+
+MRLConfig
+ResolveMRLConfig(const MRLParams& params, std::optional<int64_t> source_dim) {
+    if (params.mrl_dim == -1) {
+        AssertInfo(!params.with_refine,
                    "{} requires a valid {}",
                    WITH_MRL_REFINE_KEY,
                    MRL_DIM_KEY);
-        return false;
+        return {};
     }
-    AssertInfo(*mrl_dim > 0 && *mrl_dim < source_dim,
+    AssertInfo(
+        source_dim.has_value(), "{} requires a source dimension", MRL_DIM_KEY);
+    AssertInfo(params.mrl_dim > 0 && params.mrl_dim < *source_dim,
                "{} must satisfy 0 < {} < source dimension {}",
                MRL_DIM_KEY,
                MRL_DIM_KEY,
-               source_dim);
+               *source_dim);
+    return {
+        .enabled = true,
+        .mrl_dim = params.mrl_dim,
+        .with_refine = params.with_refine,
+    };
+}
+
+MRLConfig
+ResolveMRLConfig(const Config& params, std::optional<int64_t> source_dim) {
+    return ResolveMRLConfig(ParseMRLParams(params), source_dim);
+}
+
+bool
+ConfigureMRL(KnowhereEngine& engine,
+             std::optional<int64_t> source_dim,
+             const Config& params,
+             knowhere::ViewDataScopeOp view_data_scope) {
+    const auto mrl = ResolveMRLConfig(params, source_dim);
+    if (!mrl.enabled) {
+        return false;
+    }
 
     knowhere::DataFormatEnum data_type;
     switch (engine.PhysicalType()) {
@@ -390,12 +417,12 @@ ConfigureMRL(KnowhereEngine& engine,
     }
     engine.native_index =
         knowhere::CreateMRLIndex(std::move(engine.native_index),
-                                 source_dim,
-                                 *mrl_dim,
+                                 *source_dim,
+                                 mrl.mrl_dim,
                                  data_type,
-                                 with_refine,
+                                 mrl.with_refine,
                                  std::move(view_data_scope));
-    engine.SetDim(source_dim);
+    engine.SetDim(*source_dim);
     return true;
 }
 

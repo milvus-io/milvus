@@ -283,18 +283,14 @@ struct OpenedMemState {
                  params.index_type,
                  params.metric_type,
                  params.version) {
-        if (params.knowhere_config.contains(MRL_DIM_KEY)) {
-            AssertInfo(params.runtime_dim.has_value(),
-                       "MRL memory vector load requires runtime dim");
-            engine.SetDim(*params.runtime_dim);
-            ConfigureMRL(engine,
-                         *params.runtime_dim,
-                         params.knowhere_config,
-                         opts.vector_data_view_scope);
-        }
+        mrl_enabled = ConfigureMRL(engine,
+                                   params.runtime_dim,
+                                   params.knowhere_config,
+                                   opts.vector_data_view_scope);
     }
 
     KnowhereEngine engine;
+    bool mrl_enabled{false};
 };
 
 // Populate a per-load engine from legacy entries; native deserialization
@@ -402,7 +398,7 @@ PopulateState(bool use_async,
                                 LoadBackend::Memory);
     } else {
         const bool mmap =
-            opts.enable_mmap && !params.knowhere_config.contains(MRL_DIM_KEY) &&
+            opts.enable_mmap && !state.mrl_enabled &&
             KnowhereMmapSupported(state.engine.KnowhereIndexType());
         if (mmap) {
             std::string directory;

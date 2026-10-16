@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -175,12 +176,34 @@ PrepareVectorSearchParams(const VectorSearchParams& params);
 bool
 KnowhereMmapSupported(const IndexType& index_type);
 
+struct MRLParams {
+    int64_t mrl_dim{-1};
+    bool with_refine{false};
+};
+
+struct MRLConfig {
+    bool enabled{false};
+    int64_t mrl_dim{-1};
+    bool with_refine{false};
+};
+
+MRLParams
+ParseMRLParams(const Config& params);
+
+// Resolve the MRL parameters once for index construction, load planning, and
+// non-indexed search paths.
+MRLConfig
+ResolveMRLConfig(const MRLParams& params, std::optional<int64_t> source_dim);
+
+MRLConfig
+ResolveMRLConfig(const Config& params, std::optional<int64_t> source_dim);
+
 // Wrap a dense vector engine with MRL when the runtime parameters contain a
 // valid mrl_dim. The engine keeps source_dim as its public query dimension;
 // the wrapper applies the prefix dimension internally.
 bool
 ConfigureMRL(KnowhereEngine& engine,
-             int64_t source_dim,
+             std::optional<int64_t> source_dim,
              const Config& params,
              knowhere::ViewDataScopeOp view_data_scope = {});
 

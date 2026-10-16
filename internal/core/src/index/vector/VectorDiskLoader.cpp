@@ -362,15 +362,10 @@ MakeEngine(const RuntimeParams& params,
                           handle,
                           pack,
                           true);
-    if (params.knowhere_config.contains(MRL_DIM_KEY)) {
-        AssertInfo(params.runtime_dim.has_value(),
-                   "MRL disk vector load requires runtime dim");
-        engine.SetDim(*params.runtime_dim);
-        ConfigureMRL(engine,
-                     *params.runtime_dim,
-                     params.knowhere_config,
-                     opts.vector_data_view_scope);
-    }
+    ConfigureMRL(engine,
+                 params.runtime_dim,
+                 params.knowhere_config,
+                 opts.vector_data_view_scope);
     return engine;
 }
 

@@ -501,6 +501,24 @@ TEST(VectorFamilyEdgeTest, SparseExplicitAndImplicitEmptyRows) {
     }
 }
 
+TEST(VectorFamilyEdgeTest, ResolveMRLConfig) {
+    const auto disabled = ResolveMRLConfig(Config{}, kDim);
+    EXPECT_FALSE(disabled.enabled);
+
+    Config explicitly_disabled{{MRL_DIM_KEY, -1}};
+    EXPECT_FALSE(ResolveMRLConfig(explicitly_disabled, kDim).enabled);
+
+    Config enabled{{MRL_DIM_KEY, 2}, {WITH_MRL_REFINE_KEY, true}};
+    const auto resolved = ResolveMRLConfig(enabled, kDim);
+    EXPECT_TRUE(resolved.enabled);
+    EXPECT_EQ(resolved.mrl_dim, 2);
+    EXPECT_TRUE(resolved.with_refine);
+
+    Config refine_without_mrl{{WITH_MRL_REFINE_KEY, true}};
+    EXPECT_ANY_THROW(ResolveMRLConfig(refine_without_mrl, kDim));
+    EXPECT_ANY_THROW(ResolveMRLConfig(enabled, std::nullopt));
+}
+
 TEST(VectorFamilyEdgeTest, MRLRefinesWithSourceRowsAfterReload) {
     constexpr int64_t rows = 3;
     constexpr int64_t mrl_dim = 2;

@@ -36,6 +36,8 @@
 #include "knowhere/dataset.h"
 #include "knowhere/index/index_node.h"
 #include "knowhere/sparse_utils.h"
+#include "index/ParamUtils.h"
+#include "index/vector/KnowhereEngine.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "query/helper.h"
@@ -150,13 +152,10 @@ PopulateBruteForceIndexParams(SearchInfo& search_info,
     const auto& index_params = field_index_meta.GetIndexParams();
     auto& params = search_info.brute_force_index_params_;
 
-    if (auto it = index_params.find(MRL_DIM_KEY); it != index_params.end()) {
-        params.mrl_dim_ = std::stoll(it->second);
-    }
-    if (auto it = index_params.find(WITH_MRL_REFINE_KEY);
-        it != index_params.end()) {
-        params.with_mrl_refine_ = it->second == "true";
-    }
+    const auto mrl =
+        index::ParseMRLParams(index::ParseConfigFromIndexParams(index_params));
+    params.mrl_dim_ = mrl.mrl_dim;
+    params.with_mrl_refine_ = mrl.with_refine;
 
     if (search_info.metric_type_ == knowhere::metric::BM25) {
         auto it = index_params.find(knowhere::meta::BM25_K1);
@@ -243,9 +242,11 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
     std::unique_ptr<uint8_t[]> prefix_query;
     std::unique_ptr<uint8_t[]> prefix_raw;
     const auto& mrl_params = search_info.brute_force_index_params_;
-    const bool mrl_enabled =
-        mrl_params.mrl_dim_ > 0 && mrl_params.mrl_dim_ < raw_ds.dim;
-    const bool use_prefix = mrl_enabled && !mrl_params.with_mrl_refine_;
+    const auto mrl = index::ResolveMRLConfig(
+        index::MRLParams{.mrl_dim = mrl_params.mrl_dim_,
+                         .with_refine = mrl_params.with_mrl_refine_},
+        raw_ds.dim);
+    const bool use_prefix = mrl.enabled && !mrl.with_refine;
     if (use_prefix) {
         AssertInfo(data_type == DataType::VECTOR_FLOAT ||
                        data_type == DataType::VECTOR_FLOAT16 ||
@@ -257,7 +258,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                                         ? sizeof(float)
                                         : sizeof(float16);
         const size_t source_row_size = raw_ds.dim * element_size;
-        const size_t prefix_row_size = mrl_params.mrl_dim_ * element_size;
+        const size_t prefix_row_size = mrl.mrl_dim * element_size;
         prefix_query =
             std::make_unique<uint8_t[]>(query_ds.num_queries * prefix_row_size);
         prefix_raw =
@@ -276,16 +277,16 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                     row * source_row_size,
                 prefix_row_size);
         }
-        effective_query.dim = mrl_params.mrl_dim_;
+        effective_query.dim = mrl.mrl_dim;
         effective_query.query_data = prefix_query.get();
-        effective_raw.dim = mrl_params.mrl_dim_;
+        effective_raw.dim = mrl.mrl_dim;
         effective_raw.raw_data = prefix_raw.get();
     }
     auto [query_dataset, base_dataset] =
         PrepareBFDataSet(effective_query, effective_raw, data_type);
     auto search_cfg = PrepareBFSearchParams(search_info, index_info);
 
-    if (mrl_enabled && search_cfg.contains(RADIUS)) {
+    if (mrl.enabled && search_cfg.contains(RADIUS)) {
         ThrowInfo(Unsupported, "MRL range search is not supported");
     }
     // `range_search_k` is only used as one of the conditions for iterator early termination.
@@ -468,7 +469,11 @@ GetBruteForceSearchIterators(
     const BitsetView& bitset,
     DataType data_type) {
     const auto& mrl_params = search_info.brute_force_index_params_;
-    if (mrl_params.mrl_dim_ > 0 && mrl_params.mrl_dim_ < raw_ds.dim) {
+    const auto mrl = index::ResolveMRLConfig(
+        index::MRLParams{.mrl_dim = mrl_params.mrl_dim_,
+                         .with_refine = mrl_params.with_mrl_refine_},
+        raw_ds.dim);
+    if (mrl.enabled) {
         return knowhere::
             expected<std::vector<knowhere::IndexNode::IteratorPtr>>::Err(
                 knowhere::Status::not_implemented,

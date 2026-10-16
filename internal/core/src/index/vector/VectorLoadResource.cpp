@@ -25,6 +25,7 @@
 #include "index/ParamUtils.h"
 #include "index/ResourceUsageUtils.h"
 #include "index/Meta.h"
+#include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/VectorLoadParamUtils.h"
 #include "index/vector/VectorTypeUtils.h"
@@ -107,13 +108,10 @@ VecIndexLoadResource(DataType field_type,
                      int64_t num_rows,
                      int64_t dim) {
     auto config = ParseConfigFromIndexParams(index_params);
-    bool mrl_enabled = false;
-    if (const auto mrl_dim =
-            GetValueFromConfig<int64_t>(config, MRL_DIM_KEY);
-        mrl_dim.has_value() && *mrl_dim > 0 && *mrl_dim < dim) {
-        dim = *mrl_dim;
+    const auto mrl = ResolveMRLConfig(config, dim);
+    if (mrl.enabled) {
+        dim = mrl.mrl_dim;
         mmap_enable = false;
-        mrl_enabled = true;
     }
     auto type = index_params.find(INDEX_TYPE);
     AssertInfo(type != index_params.end(), "index type is empty");
@@ -172,7 +170,7 @@ VecIndexLoadResource(DataType field_type,
     const auto& estimated = resource.value();
     LoadResourceRequest request{};
     request.has_raw_data =
-        !mrl_enabled && CanUseIndexRawDataForField(field_type, has_raw_data);
+        !mrl.enabled && CanUseIndexRawDataForField(field_type, has_raw_data);
     request.final_disk_cost = estimated.diskCost;
     request.final_memory_cost = estimated.memoryCost;
     if (VectorUsesDiskLoad(index_type, index_version) || mmaped) {
