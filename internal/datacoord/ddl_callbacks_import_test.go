@@ -681,7 +681,7 @@ func TestBroadcastImport_RejectsChangedCanonicalSnapshot(t *testing.T) {
 	}, nil).Once()
 
 	server := &Server{broker: mockBroker}
-	_, _, err := server.broadcastImport(ctx, 100, nil, nil, nil, 1000, []string{"v1"}, "", "", false)
+	_, _, err := server.broadcastImport(ctx, 100, nil, nil, nil, 1000, []string{"v1"}, "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	assert.Nil(t, api.capturedMsg)
