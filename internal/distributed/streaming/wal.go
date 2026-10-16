@@ -207,3 +207,7 @@ func (s errScanner) Close() {
 func (w *walAccesserImpl) AnalyzerClient() AnalyzerClient {
 	return w.handlerClient
 }
+
+func (w *walAccesserImpl) SchemaClient() SchemaClient {
+	return w.handlerClient
+}

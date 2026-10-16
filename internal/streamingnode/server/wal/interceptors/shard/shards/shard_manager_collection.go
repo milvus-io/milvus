@@ -255,6 +255,21 @@ func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion
 	return proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema), nil
 }
 
+// GetWriteSchema captures the same schema used by insert admission. Recovery's
+// observer may still be behind this write-path state after an ALTER append.
+func (m *shardManagerImpl) GetWriteSchema(collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	collection, ok := m.collections[collectionID]
+	if !ok || collection.VChannel != vchannel {
+		return nil, status.NewUnrecoverableError("collection %d is not present on vchannel %s", collectionID, vchannel)
+	}
+	if collection.Schema.GetSchema() == nil {
+		return nil, status.NewInner("write schema for collection %d is not ready", collectionID)
+	}
+	return proto.Clone(collection.Schema).(*streamingpb.CollectionSchemaOfVChannel), nil
+}
+
 // GetPrimaryKeyDescriptor returns immutable PK schema data without cloning the
 // complete collection schema.
 func (m *shardManagerImpl) GetPrimaryKeyDescriptor(collectionID int64, schemaVersion int32) (PrimaryKeyDescriptor, error) {

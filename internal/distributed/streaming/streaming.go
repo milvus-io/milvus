@@ -116,6 +116,11 @@ type AnalyzerClient interface {
 	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
 }
 
+// SchemaClient resolves write or exact historical schemas through WAL ownership.
+type SchemaClient interface {
+	GetCollectionSchema(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error)
+}
+
 // Scanner is the interface for reading records from the wal.
 type Scanner interface {
 	// Done returns a channel which will be closed when scanner is finished or closed.
@@ -181,6 +186,9 @@ type Balancer interface {
 type WALAccesser interface {
 	// AnalyzerClient returns the analyzer domain client backed by streaming discovery.
 	AnalyzerClient() AnalyzerClient
+
+	// SchemaClient returns schema access backed by streaming discovery.
+	SchemaClient() SchemaClient
 
 	// ForwardService returns the forward service of the wal.
 	ForwardService() ForwardService

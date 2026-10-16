@@ -28,6 +28,7 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 		mu:                   sync.Mutex{},
 		taskMetricsGuard:     m,
 		msg:                  msg,
+		schemaCollectionID:   schemaTargetCollectionID(msg),
 		task:                 proto,
 		dirty:                false, // the task is recovered from the recovery info, so it's persisted.
 		ackCallbackScheduler: ackCallbackScheduler,
@@ -67,10 +68,11 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 	m := metrics.NewBroadcastTask(msg.MessageType(), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, msg.BroadcastHeader().ResourceKeys.Collect())
 	header := msg.BroadcastHeader()
 	bt := &broadcastTask{
-		Binder:           mlog.Binder{},
-		taskMetricsGuard: m,
-		mu:               sync.Mutex{},
-		msg:              msg,
+		Binder:             mlog.Binder{},
+		taskMetricsGuard:   m,
+		mu:                 sync.Mutex{},
+		msg:                msg,
+		schemaCollectionID: schemaTargetCollectionID(msg),
 		task: &streamingpb.BroadcastTask{
 			Message:             msg.IntoMessageProto(),
 			State:               streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
@@ -101,6 +103,10 @@ type broadcastTask struct {
 	mlog.Binder
 	*taskMetricsGuard
 
+	// Immutable collection index key; zero for tasks without schema intent.
+	schemaCollectionID int64
+	// Process-local admission; recovery must re-enter the ordered callback.
+	schemaTargetEligible     bool
 	mu                       sync.Mutex
 	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
 	task                     *streamingpb.BroadcastTask
@@ -531,7 +537,13 @@ func ackedCount(task *streamingpb.BroadcastTask) int {
 // MarkAckCallbackDone marks the ack callback is done.
 func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	defer func() {
+		b.mu.Unlock()
+		if b.schemaCollectionID != 0 {
+			// Release the task lock before taking the manager lock.
+			b.ackCallbackScheduler.bm.removeSchemaTask(b.Header().BroadcastID, b.schemaCollectionID)
+		}
+	}()
 	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
 		close(b.done)
