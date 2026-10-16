@@ -44,6 +44,7 @@ using namespace milvus::segcore::storagev2translator;
 class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
+        milvus_storage::FileRowGroupReader::CleanFooterMetadataCache();
         fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
         schema_ = CreateTestSchema();

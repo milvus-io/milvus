@@ -33,6 +33,7 @@
 #include "common/Consts.h"
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/common/constants.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
@@ -73,6 +74,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
  protected:
     void
     SetUp() override {
+        milvus_storage::FileRowGroupReader::CleanFooterMetadataCache();
         schema_ = GenVectorArrayTestSchema();
         segment_ = segcore::CreateSealedSegment(
             schema_,
