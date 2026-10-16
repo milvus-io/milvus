@@ -431,6 +431,14 @@ var (
 			Help:      "latency of import v3 reshard phases",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName, "stage"})
+
+	DataNodePKIndexCompactionRunning = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "pkindex_compaction_running",
+			Help:      "number of primary key index compaction tasks running on the node",
+		}, []string{nodeIDLabelName})
 )
 
 // DataNode pool metric descriptors (used by dataNodePoolMetricsCollector).
@@ -547,6 +555,7 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeImportV3ReshardBytes)
 	registry.MustRegister(DataNodeImportV3ReshardRows)
 	registry.MustRegister(DataNodeImportV3ReshardStageLatency)
+	registry.MustRegister(DataNodePKIndexCompactionRunning)
 	registry.MustRegister(&dataNodePoolMetricsCollector{})
 	// DataNode runs the C++ core (index build / analyze via cgo), so it produces
 	// segcore errors too; register the cgo metrics here so UnmappedSegcoreCodeTotal
