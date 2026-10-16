@@ -182,8 +182,7 @@ the primary key index:
   `Manager.New` (the pchannel, the watermark seed, the WAL tail, `OnFatal`),
   creates the index of every existing collection with `CreateCollection`,
   recovers them (claim, manifest lookups, install, replay), calls `Start`, and
-  closes it with the WAL. That recovery is a later change (see
-  [Readiness](#readiness)); in this change nothing calls `Manager.New`.
+  closes it with the WAL (see [recovery.md](recovery.md)).
 - The interceptor only borrows the index: `Build` takes it from
   `Manager.Get(pchannel)`, and passes the messages through when there is none.
   It registers the translation of every existing collection and calls
@@ -387,8 +386,8 @@ Who marks an `Index` ready:
   items), and then marks an `Index` without a manifest ready right away, and
   an `Index` with a manifest after it downloaded and installed the committed
   set. It replays the WAL from the checkpoints and calls
-  `PChannelIndexManager.Start` when it is done. The recovery is a later
-  change; this change has no caller of `MarkReady` outside the tests.
+  `PChannelIndexManager.Start` when it is done (see
+  [recovery.md](recovery.md)).
 - The `PChannelIndexManager`, for a collection created after `Start`. Its
   vchannel name holds the new collection ID, so no manifest can exist for it,
   and `CreateCollection` marks it ready at once. A collection created before
@@ -413,9 +412,9 @@ Why the index before its install can not hand over:
   after a successful commit and before the install loses it. The vchannel
   then has a manifest, and the install brings its tables back.
 
-So an open removes the local files from before (the engine directory and
-`committed/`, a file in only one of them counts too), and the `Index` starts
-empty; the recovery brings the committed set back.
+So an open removes the engine directory from before, and the `Index` starts
+with an empty engine. The committed directory is kept, and the recovery
+checks it against the manifest (see [recovery.md](recovery.md)).
 
 While an `Index` is not ready, its `Authority` is degraded
 (`authority.Config.Degraded`): a decision does not probe the engine and
@@ -691,12 +690,7 @@ Common patterns:
   with large vectors, and a check in the integration suite that a handover
   ran.
 
-- **Recovery of a pchannel.** The claim, the manifest lookups, the install of
-  the committed sets, the WAL replay and `Start`, and the `Manager.New` call
-  that creates the index of a pchannel at WAL open. Nothing creates one in
-  this change, so the interceptor passes the messages through. Until the
-  recovery exists, an index after a restart starts empty and is never marked
-  ready (see [Readiness](#readiness)).
+- **Recovery of a pchannel.** Done in [recovery.md](recovery.md).
 - **`LastAcked` for WAL truncation.** `PChannelIndexManager.LastAcked` exists, but the WAL
   recovery storage does not use it. It goes in with recovery, because the
   bound only matters with replay.
