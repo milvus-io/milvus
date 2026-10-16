@@ -35,8 +35,6 @@ type DropCollectionReq struct {
 type QueryReq struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" validate:"required"`
-	RlsPrincipal   string   `json:"rlsPrincipal"`
-	SkipRls        bool     `json:"skipRls"`
 	OutputFields   []string `json:"outputFields"`
 	Filter         string   `json:"filter" validate:"required"`
 	Limit          int32    `json:"limit"`
@@ -46,8 +44,6 @@ type QueryReq struct {
 type GetReq struct {
 	DbName         string      `json:"dbName"`
 	CollectionName string      `json:"collectionName" validate:"required"`
-	RlsPrincipal   string      `json:"rlsPrincipal"`
-	SkipRls        bool        `json:"skipRls"`
 	OutputFields   []string    `json:"outputFields"`
 	ID             interface{} `json:"id" validate:"required"`
 }
@@ -55,8 +51,6 @@ type GetReq struct {
 type DeleteReq struct {
 	DbName         string      `json:"dbName"`
 	CollectionName string      `json:"collectionName" validate:"required"`
-	RlsPrincipal   string      `json:"rlsPrincipal"`
-	SkipRls        bool        `json:"skipRls"`
 	ID             interface{} `json:"id"`
 	Filter         string      `json:"filter"`
 }
@@ -64,24 +58,18 @@ type DeleteReq struct {
 type InsertReq struct {
 	DbName         string                   `json:"dbName"`
 	CollectionName string                   `json:"collectionName" validate:"required"`
-	RlsPrincipal   string                   `json:"rlsPrincipal"`
-	SkipRls        bool                     `json:"skipRls"`
 	Data           []map[string]interface{} `json:"data" validate:"required"`
 }
 
 type SingleInsertReq struct {
 	DbName         string                 `json:"dbName"`
 	CollectionName string                 `json:"collectionName" validate:"required"`
-	RlsPrincipal   string                 `json:"rlsPrincipal"`
-	SkipRls        bool                   `json:"skipRls"`
 	Data           map[string]interface{} `json:"data" validate:"required"`
 }
 
 type UpsertReq struct {
 	DbName         string                    `json:"dbName"`
 	CollectionName string                    `json:"collectionName" validate:"required"`
-	RlsPrincipal   string                    `json:"rlsPrincipal"`
-	SkipRls        bool                      `json:"skipRls"`
 	Data           []map[string]interface{}  `json:"data" validate:"required"`
 	PartialUpdate  bool                      `json:"partialUpdate"`
 	FieldOps       []FieldPartialUpdateOpReq `json:"fieldOps"`
@@ -90,8 +78,6 @@ type UpsertReq struct {
 type SingleUpsertReq struct {
 	DbName         string                    `json:"dbName"`
 	CollectionName string                    `json:"collectionName" validate:"required"`
-	RlsPrincipal   string                    `json:"rlsPrincipal"`
-	SkipRls        bool                      `json:"skipRls"`
 	Data           map[string]interface{}    `json:"data" validate:"required"`
 	PartialUpdate  bool                      `json:"partialUpdate"`
 	FieldOps       []FieldPartialUpdateOpReq `json:"fieldOps"`
@@ -100,8 +86,6 @@ type SingleUpsertReq struct {
 type SearchReq struct {
 	DbName         string             `json:"dbName"`
 	CollectionName string             `json:"collectionName" validate:"required"`
-	RlsPrincipal   string             `json:"rlsPrincipal"`
-	SkipRls        bool               `json:"skipRls"`
 	Filter         string             `json:"filter"`
 	Limit          int32              `json:"limit"`
 	Offset         int32              `json:"offset"`

@@ -40,9 +40,7 @@ import (
 )
 
 type ExpireCacheConfig struct {
-	msgType       commonpb.MsgType
-	properties    map[string]string
-	targetProxyID int64
+	msgType commonpb.MsgType
 }
 
 func (c ExpireCacheConfig) Apply(req *proxypb.InvalidateCollMetaCacheRequest) {
@@ -50,14 +48,6 @@ func (c ExpireCacheConfig) Apply(req *proxypb.InvalidateCollMetaCacheRequest) {
 		req.Base = commonpbutil.NewMsgBase()
 	}
 	req.Base.MsgType = c.msgType
-	if len(c.properties) > 0 {
-		if req.Base.Properties == nil {
-			req.Base.Properties = make(map[string]string, len(c.properties))
-		}
-		for key, value := range c.properties {
-			req.Base.Properties[key] = value
-		}
-	}
 }
 
 func DefaultExpireCacheConfig() ExpireCacheConfig {
@@ -69,21 +59,6 @@ type ExpireCacheOpt func(c *ExpireCacheConfig)
 func SetMsgType(msgType commonpb.MsgType) ExpireCacheOpt {
 	return func(c *ExpireCacheConfig) {
 		c.msgType = msgType
-	}
-}
-
-func SetMsgProperty(key, value string) ExpireCacheOpt {
-	return func(c *ExpireCacheConfig) {
-		if c.properties == nil {
-			c.properties = make(map[string]string)
-		}
-		c.properties[key] = value
-	}
-}
-
-func SetTargetProxyID(proxyID int64) ExpireCacheOpt {
-	return func(c *ExpireCacheConfig) {
-		c.targetProxyID = proxyID
 	}
 }
 
@@ -235,14 +210,6 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 			return merr.Wrapf(merr.Error(sta), "InvalidateCollectionMetaCache failed, proxyID = %d", proxyID)
 		}
 		return nil
-	}
-
-	if c.targetProxyID != 0 {
-		client, ok := p.proxyClient.Get(c.targetProxyID)
-		if !ok {
-			return merr.WrapErrNodeNotFound(c.targetProxyID, "proxy client is unavailable")
-		}
-		return invalidate(c.targetProxyID, client)
 	}
 
 	if p.proxyClient.Len() == 0 {

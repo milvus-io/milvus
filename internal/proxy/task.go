@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -458,9 +457,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	// validate row level security
-	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
-		return err
-	}
 
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.GetProperties())
@@ -1444,46 +1440,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		t.CollectionID = collectionID
 		return nil
 	}
-	requiresManageRLS := false
-	for _, property := range t.GetProperties() {
-		if property.GetKey() == common.RLSEnabledKey || property.GetKey() == common.RLSForceKey {
-			requiresManageRLS = true
-			break
-		}
-	}
-	if !requiresManageRLS {
-		for _, key := range t.GetDeleteKeys() {
-			if key == common.RLSEnabledKey || key == common.RLSForceKey {
-				requiresManageRLS = true
-				break
-			}
-		}
-	}
-	if requiresManageRLS {
-		if err := resolveCollectionInfo(); err != nil {
-			return err
-		}
-		canonicalDBName := collInfo.dbName
-		if canonicalDBName == "" {
-			canonicalDBName = t.GetDbName()
-		}
-		if err := checkManageRLSPrivilege(ctx, t.AlterCollectionRequest,
-			canonicalDBName, collInfo.schema.GetName()); err != nil {
-			return err
-		}
-	}
-
-	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
-		return err
-	}
-	for _, key := range t.GetDeleteKeys() {
-		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
-			if strings.EqualFold(key, expected) && key != expected {
-				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
-			}
-		}
-	}
-
 	if err := resolveCollectionInfo(); err != nil {
 		return err
 	}

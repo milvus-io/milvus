@@ -17,12 +17,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -73,15 +71,13 @@ type queryTask struct {
 
 	resultBuf *typeutil.ConcurrentSet[*internalpb.RetrieveResults]
 
-	plan              *planpb.PlanNode
-	partitionKeyMode  bool
-	shardclientMgr    shardclient.ShardClientMgr
-	lb                shardclient.LBPolicy
-	channelsMvcc      map[string]Timestamp
-	preferredNodes    map[string]int64
-	fastSkip          bool
-	skipRuntimeRLS    bool
-	preserveRawFields bool
+	plan             *planpb.PlanNode
+	partitionKeyMode bool
+	shardclientMgr   shardclient.ShardClientMgr
+	lb               shardclient.LBPolicy
+	channelsMvcc     map[string]Timestamp
+	preferredNodes   map[string]int64
+	fastSkip         bool
 
 	reQuery              bool
 	allQueryCnt          int64
@@ -90,16 +86,6 @@ type queryTask struct {
 	resolvedTimezoneStr  string
 
 	storageCost segcore.StorageCost
-}
-
-// SetSkipRuntimeRLS prevents an internal query from resolving a second policy.
-func (t *queryTask) SetSkipRuntimeRLS(skip bool) {
-	t.skipRuntimeRLS = skip
-}
-
-// SetPreserveRawFields keeps internal query results suitable for local policy evaluation.
-func (t *queryTask) SetPreserveRawFields(preserve bool) {
-	t.preserveRawFields = preserve
 }
 
 func (t *queryTask) getQueryLabel() string {
@@ -427,27 +413,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
-	canonicalDBName := colInfo.dbName
-	if canonicalDBName == "" {
-		canonicalDBName = t.request.GetDbName()
-	}
-	var principalName string
-	var enforceRLS bool
-	if !t.skipRuntimeRLS {
-		rlsEnabled := colInfo.rlsEnabled
-		if rlsEnabled && t.request.GetSkipRls() {
-			rlsEnabled, err = resolveRLSEnforcement(ctx, rlsEnabled, colInfo.rlsForce, true,
-				canonicalDBName, colInfo.schema.GetName(), "query")
-			if err != nil {
-				return err
-			}
-		}
-		principalName, enforceRLS, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
-		if err != nil {
-			return err
-		}
-	}
-
 	schema := colInfo.schema
 	t.schema = schema
 	t.partitionKeyMode = schema.IsPartitionKeyCollection()
@@ -511,15 +476,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	userPlanAlwaysTrue := planparserv2.IsAlwaysTruePlan(t.plan)
-	if enforceRLS {
-		predicate, err := rls.ResolveUsingPredicate(ctx, t.CollectionID, principalName, rls.QueryAction(t.queryParams.isIterator), t.schema.schemaHelper)
-		if err != nil {
-			return err
-		}
-		if err := rls.MergeNormalizedPredicateToPlan(t.plan, predicate); err != nil {
-			return err
-		}
-	}
 	t.plan.GetQuery().Limit = t.Limit
 
 	if userPlanAlwaysTrue && t.Limit == typeutil.Unlimited {
@@ -732,7 +688,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 }
 
 func (t *queryTask) formatTimeFields(ctx context.Context) error {
-	if t.reQuery || t.preserveRawFields {
+	if t.reQuery {
 		return nil
 	}
 	if len(t.queryParams.extractTimeFields) > 0 {
