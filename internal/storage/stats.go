@@ -61,6 +61,7 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	}
 
 	stats.PkType = int64(schemapb.DataType_Int64)
+	pkTypePresent := false
 	if value, ok := messageMap["pkType"]; ok && value != nil {
 		var typeValue int64
 		err = json.Unmarshal(*value, &typeValue)
@@ -70,6 +71,22 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		// valid pkType
 		if typeValue > 0 {
 			stats.PkType = typeValue
+			pkTypePresent = true
+		}
+	}
+	if !pkTypePresent {
+		// No pkType in persisted stats: try to infer UUID vs VarChar from maxPk string content,
+		// otherwise keep Int64 for legacy compatibility. If inference fails and no legacy int field,
+		// the subsequent switch will return Invalid PK error (fail-loud).
+		if maxPkMsg, ok := messageMap["maxPk"]; ok && maxPkMsg != nil && len(*maxPkMsg) > 0 {
+			var strVal string
+			if err := json.Unmarshal(*maxPkMsg, &strVal); err == nil {
+				if _, err := typeutil.ParseUUID(strVal); err == nil {
+					stats.PkType = int64(schemapb.DataType_UUID)
+				} else if len(strVal) > 0 {
+					stats.PkType = int64(schemapb.DataType_VarChar)
+				}
+			}
 		}
 	}
 
@@ -99,6 +116,9 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	case schemapb.DataType_VarChar:
 		stats.MaxPk = &VarCharPrimaryKey{}
 		stats.MinPk = &VarCharPrimaryKey{}
+	case schemapb.DataType_UUID:
+		stats.MaxPk = &UUIDPrimaryKey{}
+		stats.MinPk = &UUIDPrimaryKey{}
 	default:
 		return merr.WrapErrServiceInternalMsg("Invalid PK Data Type")
 	}
@@ -166,6 +186,21 @@ func (stats *PrimaryKeyStats) UpdateByMsgs(msgs FieldData) {
 			stats.UpdateMinMax(pk)
 			stats.BF.AddString(str)
 		}
+	case schemapb.DataType_UUID:
+		if uuidFd, ok := msgs.(*UUIDFieldData); ok {
+			for _, u := range uuidFd.Data {
+				pk := &UUIDPrimaryKey{Value: u}
+				stats.UpdateMinMax(pk)
+				stats.BF.Add(u[:])
+			}
+		} else if strFd, ok := msgs.(*StringFieldData); ok {
+			for _, str := range strFd.Data {
+				if pk, err := NewUUIDPrimaryKeyFromString(str); err == nil {
+					stats.UpdateMinMax(pk)
+					stats.BF.Add(pk.Value[:])
+				}
+			}
+		}
 	default:
 		// TODO::
 	}
@@ -182,6 +217,16 @@ func (stats *PrimaryKeyStats) Update(pk PrimaryKey) {
 	case schemapb.DataType_VarChar:
 		data := pk.GetValue().(string)
 		stats.BF.AddString(data)
+	case schemapb.DataType_UUID:
+		if uuidPk, ok := pk.(*UUIDPrimaryKey); ok {
+			stats.BF.Add(uuidPk.Value[:])
+		} else if str, ok := pk.GetValue().(string); ok {
+			if u, err := typeutil.ParseUUID(str); err == nil {
+				stats.BF.Add(u[:])
+			}
+		} else if b, ok := pk.GetValue().([16]byte); ok {
+			stats.BF.Add(b[:])
+		}
 	default:
 		mlog.Warn(context.TODO(), "Update pk stats with invalid data type")
 	}

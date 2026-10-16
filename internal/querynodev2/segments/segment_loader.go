@@ -1335,6 +1335,16 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 					pk = storage.NewInt64PrimaryKey(dl.Column(0).(*array.Int64).Value(i))
 				case schemapb.DataType_VarChar:
 					pk = storage.NewVarCharPrimaryKey(dl.Column(0).(*array.String).Value(i))
+				case schemapb.DataType_UUID:
+					col := dl.Column(0)
+					if fsb, ok := col.(*array.FixedSizeBinary); ok {
+						pk, err = storage.NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+						if err != nil {
+							return err
+						}
+					} else {
+						return merr.WrapErrParameterInvalidMsg("UUID PK delta log must be FixedSizeBinary(16), got %T — strict 16B enforcement (no string UUID path)", col)
+					}
 				}
 				ts := typeutil.Timestamp(dl.Column(1).(*array.Int64).Value(i))
 				err = deltaData.Append(pk, ts)

@@ -36,6 +36,19 @@ func CheckVarcharLength(str string, maxLength int64, field *schemapb.FieldSchema
 	return nil
 }
 
+// ValidateAndNormalizeUUID validates s as a UUID string and returns its canonical
+// lowercase form (uuid.UUID.String()). Milvus stores UUIDs in canonical lowercase;
+// upper-case or malformed values are rejected with an error naming the field, the
+// row number, and the offending value.
+func ValidateAndNormalizeUUID(fieldName string, row int64, s string) (string, error) {
+	normalized, err := typeutil.NormalizeUUID(s)
+	if err != nil {
+		return "", merr.WrapErrImportFailedMsg(
+			"invalid UUID format for field '%s' at row %d, value='%s'", fieldName, row, s)
+	}
+	return normalized, nil
+}
+
 func CheckArrayCapacity(arrLength int, maxCapacity int64, field *schemapb.FieldSchema) error {
 	if (int64)(arrLength) > maxCapacity {
 		return merr.WrapErrParameterInvalidMsg("array capacity(%d) for field %s exceeds max_capacity(%d)", arrLength, field.GetName(), maxCapacity)

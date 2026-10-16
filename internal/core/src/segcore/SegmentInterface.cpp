@@ -485,6 +485,12 @@ SegmentInternalInterface::FillOrderByResult(
                 for (int i = 0; i < src.data_size(); ++i) {
                     *(str_ids->mutable_data()->Add()) = src.data(i);
                 }
+            } else if (pk_type == DataType::UUID) {
+                auto uuid_ids = ids->mutable_uuid_id();
+                auto& src = pk_data.scalars().bytes_data();
+                for (int i = 0; i < src.data_size(); ++i) {
+                    *(uuid_ids->mutable_data()->Add()) = src.data(i);
+                }
             }
         }
     }
@@ -612,6 +618,14 @@ SegmentInternalInterface::FillTargetEntry(
                     auto& src_data = col_data->scalars().string_data();
                     for (auto i = 0; i < src_data.data_size(); ++i) {
                         *(str_ids->mutable_data()->Add()) = src_data.data(i);
+                    }
+                    break;
+                }
+                case DataType::UUID: {
+                    auto uuid_ids = ids->mutable_uuid_id();
+                    auto& src_data = col_data->scalars().bytes_data();
+                    for (auto i = 0; i < src_data.data_size(); ++i) {
+                        *(uuid_ids->mutable_data()->Add()) = src_data.data(i);
                     }
                     break;
                 }
@@ -916,6 +930,16 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
 
                 for (int64_t i = 0; i < count; ++i) {
                     data_ptr->at(i) = field_meta.default_value()->string_data();
+                }
+                break;
+            }
+            case DataType::UUID: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_bytes_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr->at(i) = field_meta.default_value()->bytes_data();
                 }
                 break;
             }

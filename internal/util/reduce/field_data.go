@@ -98,7 +98,10 @@ func WriteGroupByFieldValues(
 			}
 			builder.Add(iter(int(row.RowIdx)))
 		}
-		fd := builder.Build()
+		fd, err := builder.Build()
+		if err != nil {
+			return err
+		}
 		fd.FieldId = fid
 		fd.FieldName = template.GetFieldName()
 		ret.GroupByFieldValues = append(ret.GroupByFieldValues, fd)

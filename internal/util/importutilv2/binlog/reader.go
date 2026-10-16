@@ -236,6 +236,17 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 					pk = rec.Column(0).(*array.Int64).Value(i)
 				case schemapb.DataType_VarChar:
 					pk = strings.Clone(rec.Column(0).(*array.String).Value(i))
+				case schemapb.DataType_UUID:
+					col := rec.Column(0)
+					if fsb, ok := col.(*array.FixedSizeBinary); ok {
+						pk = string(fsb.Value(i))
+					} else if strArr, ok := col.(*array.String); ok {
+						if u, err := typeutil.ParseUUID(strArr.Value(i)); err == nil {
+							pk = string(u[:])
+						} else {
+							pk = strings.Clone(strArr.Value(i))
+						}
+					}
 				}
 				if tsExisting, ok := tempData[pk]; ok && tsExisting > ts {
 					// skip if existing entry is newer

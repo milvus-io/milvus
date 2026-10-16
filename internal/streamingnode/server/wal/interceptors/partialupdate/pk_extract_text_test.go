@@ -54,7 +54,7 @@ func TestExtractPKsErrorText(t *testing.T) {
 		}(), "decode insert body failed"},
 		{"insert missing field", fromInsert(), "insert primary key field 100 is missing"},
 		{"insert duplicated field", fromInsert(int64PKFieldData(1), int64PKFieldData(2)), "insert primary key field 100 is duplicated"},
-		{"insert unsupported field", fromInsert(vectorField), "insert primary key field 100 must be int64 or varchar"},
+		{"insert unsupported field", fromInsert(vectorField), "insert primary key field 100 must be int64, varchar or uuid"},
 		{"cas field type mismatch", func() error {
 			_, _, err := extractPKsFromCASInsert(newInsertMessage([]*schemapb.FieldData{int64PKFieldData(1)}), varcharDescriptor)
 			return err

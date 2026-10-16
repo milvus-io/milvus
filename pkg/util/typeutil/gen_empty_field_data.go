@@ -89,6 +89,20 @@ func genEmptyVarCharFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	}
 }
 
+func genEmptyUUIDFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: nil}},
+			},
+		},
+		FieldId:   field.GetFieldID(),
+		IsDynamic: field.GetIsDynamic(),
+	}
+}
+
 func genEmptyArrayFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      field.GetDataType(),
@@ -303,6 +317,8 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 		return genEmptyLongFieldData(field), nil
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return genEmptyVarCharFieldData(field), nil
+	case schemapb.DataType_UUID:
+		return genEmptyUUIDFieldData(field), nil
 	case schemapb.DataType_Array:
 		return genEmptyArrayFieldData(field), nil
 	case schemapb.DataType_JSON:

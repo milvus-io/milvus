@@ -358,6 +358,16 @@ class Array {
                 }
                 break;
             }
+            case DataType::UUID: {
+                data_array.mutable_bytes_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<UUID>(j);
+                    data_array.mutable_bytes_data()->add_data(
+                        reinterpret_cast<const char*>(element.data.data()), 16);
+                }
+                break;
+            }
             default: {
                 // empty array
             }
@@ -491,6 +501,20 @@ class Array {
                 }
                 return true;
             }
+            case DataType::UUID: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_raw_data<UUID>(i);
+                    auto proto_uuid =
+                        UUID::FromString(arr2.array(i).string_val());
+                    if (val != proto_uuid) {
+                        return false;
+                    }
+                }
+                return true;
+            }
             default:
                 return false;
         }
@@ -530,6 +554,16 @@ class Array {
                 case DataType::DOUBLE:
                     return static_cast<T>(
                         reinterpret_cast<double*>(data_.get())[index]);
+                default:
+                    ThrowInfo(Unsupported,
+                              "unsupported element type for array");
+            }
+        }
+        if constexpr (std::is_same_v<T, milvus::UUID>) {
+            switch (element_type_) {
+                case DataType::UUID:
+                    return *reinterpret_cast<const UUID*>(data_.get() +
+                                                          index * sizeof(UUID));
                 default:
                     ThrowInfo(Unsupported,
                               "unsupported element type for array");
@@ -775,6 +809,16 @@ class ArrayView {
                 }
                 break;
             }
+            case DataType::UUID: {
+                data_array.mutable_bytes_data()->mutable_data()->Reserve(
+                    length_);
+                for (int j = 0; j < length_; ++j) {
+                    auto element = get_raw_data<UUID>(j);
+                    data_array.mutable_bytes_data()->add_data(
+                        reinterpret_cast<const char*>(element.data.data()), 16);
+                }
+                break;
+            }
             default: {
                 // empty array
             }
@@ -911,6 +955,20 @@ class ArrayView {
                 }
                 return true;
             }
+            case DataType::UUID: {
+                for (int i = 0; i < length_; i++) {
+                    if (arr2.array(i).val_case() != expected_val_case) {
+                        return false;
+                    }
+                    auto val = get_raw_data<UUID>(i);
+                    auto proto_uuid =
+                        UUID::FromString(arr2.array(i).string_val());
+                    if (val != proto_uuid) {
+                        return false;
+                    }
+                }
+                return true;
+            }
             default:
                 return length_ == 0;
         }
@@ -951,6 +1009,16 @@ class ArrayView {
                 case DataType::DOUBLE:
                     return static_cast<T>(
                         reinterpret_cast<double*>(data_)[index]);
+                default:
+                    ThrowInfo(Unsupported,
+                              "unsupported element type for array");
+            }
+        }
+        if constexpr (std::is_same_v<T, milvus::UUID>) {
+            switch (element_type_) {
+                case DataType::UUID:
+                    return *reinterpret_cast<const UUID*>(data_ +
+                                                          index * sizeof(UUID));
                 default:
                     ThrowInfo(Unsupported,
                               "unsupported element type for array");

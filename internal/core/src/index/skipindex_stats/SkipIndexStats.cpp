@@ -17,7 +17,9 @@
 #include "index/skipindex_stats/SkipIndexStats.h"
 
 #include <cstdint>
+#include <cstring>
 
+#include "arrow/array/array_binary.h"
 #include "arrow/array/array_primitive.h"
 #include "common/Span.h"
 #include "parquet/types.h"
@@ -179,7 +181,9 @@ SkipIndexStatsBuilder::Build(
                 info->min_, info->max_);
             break;
         }
-        case milvus::DataType::VARCHAR: {
+        case milvus::DataType::VARCHAR:
+        case milvus::DataType::STRING:
+        case milvus::DataType::TEXT: {
             auto info =
                 ProcessFieldMetrics<parquet::ByteArrayType, std::string>(
                     statistic);
@@ -191,6 +195,24 @@ SkipIndexStatsBuilder::Build(
                 std::string(info->max_),
                 nullptr,
                 nullptr);
+            break;
+        }
+        case milvus::DataType::UUID: {
+            // UUID is 16B FixedLenByteArray, store binary in variant.
+            auto typed_statistics = std::dynamic_pointer_cast<
+                parquet::TypedStatistics<parquet::FLBAType>>(statistic);
+            if (typed_statistics == nullptr) {
+                chunk_metrics = std::make_unique<NoneFieldChunkMetrics>();
+                break;
+            }
+            parquet::FixedLenByteArray min_flba = typed_statistics->min();
+            parquet::FixedLenByteArray max_flba = typed_statistics->max();
+            milvus::UUID min_uuid{}, max_uuid{};
+            std::memcpy(min_uuid.data.data(), min_flba.ptr, 16);
+            std::memcpy(max_uuid.data.data(), max_flba.ptr, 16);
+            chunk_metrics =
+                std::make_unique<IntFieldChunkMetrics<milvus::UUID>>(
+                    min_uuid, max_uuid, nullptr);
             break;
         }
         default: {
@@ -258,6 +280,56 @@ SkipIndexStatsBuilder::Build(
             const metricsInfo<std::string>& info =
                 ProcessStringFieldMetrics(batches, col_idx);
             return LoadMetrics<std::string>(info);
+        }
+        case arrow::Type::FIXED_SIZE_BINARY: {
+            // UUID: 16B fixed_size_binary(16), min/max via memcmp 16B
+            // (same as UUID::operator<). Bloom via 16B bytes.
+            int64_t total_rows = 0;
+            int64_t null_count = 0;
+            milvus::UUID min{};
+            milvus::UUID max{};
+            ankerl::unordered_dense::set<milvus::UUID> unique_values;
+            bool has_first_valid = false;
+            for (const auto& batch : batches) {
+                auto arr = batch->column(col_idx);
+                auto array =
+                    std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
+                for (int64_t i = 0; i < array->length(); ++i) {
+                    if (array->IsNull(i)) {
+                        null_count++;
+                        continue;
+                    }
+                    auto view = array->GetView(i);
+                    milvus::UUID val{};
+                    std::memcpy(val.data.data(), view.data(), 16);
+                    if (!has_first_valid) {
+                        min = val;
+                        max = val;
+                        has_first_valid = true;
+                    } else {
+                        if (std::memcmp(val.data.data(), min.data.data(), 16) <
+                            0) {
+                            min = val;
+                        }
+                        if (std::memcmp(val.data.data(), max.data.data(), 16) >
+                            0) {
+                            max = val;
+                        }
+                    }
+                    if (enable_bloom_filter_) {
+                        unique_values.insert(val);
+                    }
+                }
+                total_rows += array->length();
+            }
+            metricsInfo<milvus::UUID> info{total_rows,
+                                           null_count,
+                                           min,
+                                           max,
+                                           false,
+                                           false,
+                                           std::move(unique_values)};
+            return LoadMetrics<milvus::UUID>(info);
         }
         default:
             break;

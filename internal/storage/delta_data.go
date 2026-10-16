@@ -56,6 +56,8 @@ func (dd *DeltaData) initPkType(pkType schemapb.DataType) error {
 			dd.deletePks = NewInt64PrimaryKeys(dd.initCap)
 		case schemapb.DataType_VarChar:
 			dd.deletePks = NewVarcharPrimaryKeys(dd.initCap)
+		case schemapb.DataType_UUID:
+			dd.deletePks = NewUUIDPrimaryKeys(dd.initCap)
 		default:
 			err = merr.WrapErrServiceInternal("unsupported pk type", pkType.String())
 		}
@@ -180,6 +182,15 @@ func (dl *DeleteLog) Parse(val string) error {
 				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is VarChar but pk is not a string in %s", val)
 			}
 			dl.Pk = &VarCharPrimaryKey{Value: pkRes.String()}
+		case int64(schemapb.DataType_UUID):
+			if pkRes.Type != gjson.String {
+				return merr.WrapErrDataIntegrityMsg("invalid delete log: pkType is UUID but pk is not a string in %s", val)
+			}
+			pk, err := NewUUIDPrimaryKeyFromString(pkRes.String())
+			if err != nil {
+				return err
+			}
+			dl.Pk = pk
 		default:
 			return merr.WrapErrDataIntegrityMsg("invalid delete log: unsupported pkType %d in %s", dl.PkType, val)
 		}
@@ -223,6 +234,8 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 		dl.Pk = &Int64PrimaryKey{}
 	case schemapb.DataType_VarChar:
 		dl.Pk = &VarCharPrimaryKey{}
+	case schemapb.DataType_UUID:
+		dl.Pk = &UUIDPrimaryKey{}
 	default:
 		return merr.WrapErrDataIntegrityMsg("unsupported primary key type: %v", schemapb.DataType(dl.PkType))
 	}
@@ -317,6 +330,14 @@ func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (r Record, tsFrom uint
 		defer builder.Release()
 		for _, pk := range pks {
 			builder.Append(pk.(*VarCharPrimaryKey).Value)
+		}
+		pkArray = builder.NewArray()
+	case *UUIDPrimaryKey:
+		builder := array.NewFixedSizeBinaryBuilder(allocator, &arrow.FixedSizeBinaryType{ByteWidth: 16})
+		defer builder.Release()
+		for _, pk := range pks {
+			u := pk.(*UUIDPrimaryKey).Value
+			builder.Append(u[:])
 		}
 		pkArray = builder.NewArray()
 	default:

@@ -132,6 +132,21 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 					pk = storage.NewInt64PrimaryKey(rec.Column(0).(*array.Int64).Value(i))
 				case schemapb.DataType_VarChar:
 					pk = storage.NewVarCharPrimaryKey(rec.Column(0).(*array.String).Value(i))
+				case schemapb.DataType_UUID:
+					col := rec.Column(0)
+					if fsb, ok := col.(*array.FixedSizeBinary); ok {
+						var err error
+						pk, err = storage.NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+						if err != nil {
+							return nil, err
+						}
+					} else if strArr, ok := col.(*array.String); ok {
+						var err error
+						pk, err = storage.NewUUIDPrimaryKeyFromString(strArr.Value(i))
+						if err != nil {
+							return nil, err
+						}
+					}
 				}
 				ts := typeutil.Timestamp(rec.Column(1).(*array.Int64).Value(i))
 				dl := storage.NewDeleteLog(pk, ts)

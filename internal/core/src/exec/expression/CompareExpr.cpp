@@ -105,6 +105,9 @@ PhyCompareFilterExpr::GatherValues(
         case DataType::TEXT:
             gather.template operator()<std::string_view>();
             break;
+        case DataType::UUID:
+            gather.template operator()<UUID>();
+            break;
         default:
             ThrowInfo(UnexpectedError,
                       "unsupported value lookup data type {}",
@@ -594,6 +597,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
             return ExecCompareLeftType<float>(context);
         case DataType::DOUBLE:
             return ExecCompareLeftType<double>(context);
+        case DataType::UUID:
+            return ExecCompareLeftType<UUID>(context);
         case DataType::STRING:
         case DataType::VARCHAR:
             return ExecCompareLeftType<std::string_view>(context);
@@ -644,6 +649,11 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
         case DataType::DOUBLE:
             if constexpr (!IsCompareStringViewType<T>) {
                 return ExecCompareRightType<T, double>(context);
+            }
+            break;
+        case DataType::UUID:
+            if constexpr (!IsCompareStringViewType<T>) {
+                return ExecCompareRightType<T, UUID>(context);
             }
             break;
         case DataType::STRING:

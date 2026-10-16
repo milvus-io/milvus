@@ -79,6 +79,8 @@ class FieldMeta {
           external_field_mapping_(std::move(external_field_mapping)),
           local_format_(std::move(local_format)) {
         Assert(IsStringDataType(type_));
+        // IsUuidDataType(UUID)==true implies fixed width 16B: IsStringDataType(UUID)==false, IsFixedWidth true
+        Assert(!IsUuidDataType(type_));
     }
 
     FieldMeta(FieldName name,
@@ -106,6 +108,7 @@ class FieldMeta {
           external_field_mapping_(std::move(external_field_mapping)),
           local_format_(std::move(local_format)) {
         Assert(IsStringDataType(type_));
+        Assert(!IsUuidDataType(type_));
     }
 
     FieldMeta(FieldName name,
@@ -229,6 +232,7 @@ class FieldMeta {
     int64_t
     get_max_len() const {
         Assert(IsStringDataType(type_));
+        Assert(!IsUuidDataType(type_));
         Assert(string_info_.has_value());
         return string_info_->max_length;
     }
@@ -302,6 +306,11 @@ class FieldMeta {
     }
 
     bool
+    is_uuid() const {
+        return IsUuidDataType(type_);
+    }
+
+    bool
     is_nullable() const {
         return nullable_;
     }
@@ -363,6 +372,10 @@ class FieldMeta {
         static const size_t JSON_SIZE = 512;
         // assume float vector with dim 512, array length 10
         static const size_t VECTOR_ARRAY_SIZE = 512 * 10 * 4;
+        // IsUuidDataType(UUID)==true: fixed 16B, IsFixedWidth true, GetDataTypeSize(UUID)==16, no string conversion
+        if (IsUuidDataType(type_)) {
+            return GetDataTypeSize(type_);
+        }
         if (type_ == DataType::VECTOR_ARRAY) {
             return VECTOR_ARRAY_SIZE;
         } else if (is_vector()) {

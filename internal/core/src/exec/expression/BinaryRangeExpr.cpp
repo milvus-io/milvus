@@ -104,6 +104,10 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             }
             break;
         }
+        case DataType::UUID: {
+            result = ExecRangeVisitorImpl<UUID>(context);
+            break;
+        }
         case DataType::JSON: {
             span.SetAttribute("json_filter_expr_type", "binary_range");
             auto lower_type = expr_->lower_val_.val_case();
@@ -332,6 +336,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
     if (!has_offset_input_ && exec_path_ == ExprExecPath::PkIndex) {
         if (pk_type_ == DataType::VARCHAR) {
             return ExecRangeVisitorImplForPk<std::string_view>(context);
+        } else if (pk_type_ == DataType::UUID) {
+            return ExecRangeVisitorImplForPk<UUID>(context);
         } else {
             return ExecRangeVisitorImplForPk<int64_t>(context);
         }

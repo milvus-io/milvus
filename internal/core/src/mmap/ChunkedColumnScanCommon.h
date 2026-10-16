@@ -56,6 +56,7 @@ enum class TargetType {
     ArrayView,
     ArrayValueView,
     VectorArrayView,
+    UUID,
 };
 
 namespace detail {
@@ -88,6 +89,8 @@ TargetTypeOfOrNone() {
         return TargetType::ArrayValueView;
     } else if constexpr (std::is_same_v<ValueType, VectorArrayView>) {
         return TargetType::VectorArrayView;
+    } else if constexpr (std::is_same_v<ValueType, milvus::UUID>) {
+        return TargetType::UUID;
     } else {
         return TargetType::None;
     }
@@ -113,7 +116,7 @@ IsFixedWidthTargetType(TargetType target_type) {
            target_type == TargetType::Int32 ||
            target_type == TargetType::Int64 ||
            target_type == TargetType::Float ||
-           target_type == TargetType::Double;
+           target_type == TargetType::Double || target_type == TargetType::UUID;
 }
 
 inline bool
@@ -146,6 +149,8 @@ CanReadAsTargetType(DataType data_type, TargetType target_type) {
                    target_type == TargetType::ArrayValueView;
         case DataType::VECTOR_ARRAY:
             return target_type == TargetType::VectorArrayView;
+        case DataType::UUID:
+            return target_type == TargetType::UUID;
         default:
             return false;
     }

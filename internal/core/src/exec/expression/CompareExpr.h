@@ -59,7 +59,14 @@ inline constexpr bool IsCompareStringViewType =
 template <typename T, typename U, proto::plan::OpType op>
 inline bool
 CompareColumnValues(const T& left, const U& right) {
-    if constexpr (op == proto::plan::OpType::Equal) {
+    if constexpr (std::is_same_v<T, milvus::UUID> !=
+                  std::is_same_v<U, milvus::UUID>) {
+        if constexpr (op == proto::plan::OpType::NotEqual) {
+            return true;
+        } else {
+            return false;
+        }
+    } else if constexpr (op == proto::plan::OpType::Equal) {
         return left == right;
     } else if constexpr (op == proto::plan::OpType::NotEqual) {
         return left != right;
@@ -121,7 +128,9 @@ struct CompareElementFunc {
         }
 
         if constexpr (IsCompareStringViewType<T> ||
-                      IsCompareStringViewType<U>) {
+                      IsCompareStringViewType<U> ||
+                      std::is_same_v<T, milvus::UUID> ||
+                      std::is_same_v<U, milvus::UUID>) {
             for (int i = 0; i < size; ++i) {
                 res[i] = CompareColumnValues<T, U, op>(left[i], right[i]);
             }

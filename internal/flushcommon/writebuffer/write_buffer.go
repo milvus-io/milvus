@@ -1241,8 +1241,9 @@ type InsertData struct {
 	tsField []*storage.Int64FieldData
 	rowNum  int64
 
-	intPKTs map[int64]int64
-	strPKTs map[string]int64
+	intPKTs  map[int64]int64
+	strPKTs  map[string]int64
+	uuidPKTs map[[16]byte]int64
 }
 
 func NewInsertData(segmentID, partitionID int64, cap int, pkType schemapb.DataType) *InsertData {
@@ -1259,6 +1260,8 @@ func NewInsertData(segmentID, partitionID int64, cap int, pkType schemapb.DataTy
 		data.intPKTs = make(map[int64]int64)
 	case schemapb.DataType_VarChar:
 		data.strPKTs = make(map[string]int64)
+	case schemapb.DataType_UUID:
+		data.uuidPKTs = make(map[[16]byte]int64)
 	}
 
 	return data
@@ -1288,6 +1291,25 @@ func (id *InsertData) Append(data *storage.InsertData, pkFieldData storage.Field
 				id.strPKTs[pk] = timestamps[idx]
 			}
 		}
+	case schemapb.DataType_UUID:
+		switch pks := pkFieldData.GetDataRows().(type) {
+		case [][16]byte:
+			for idx, pk := range pks {
+				ts, ok := id.uuidPKTs[pk]
+				if !ok || timestamps[idx] < ts {
+					id.uuidPKTs[pk] = timestamps[idx]
+				}
+			}
+		case []string:
+			for idx, pk := range pks {
+				if u, err := typeutil.ParseUUID(pk); err == nil {
+					ts, ok := id.uuidPKTs[u]
+					if !ok || timestamps[idx] < ts {
+						id.uuidPKTs[u] = timestamps[idx]
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -1315,6 +1337,15 @@ func (id *InsertData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
 		minTs, ok = id.intPKTs[pk.GetValue().(int64)]
 	case schemapb.DataType_VarChar:
 		minTs, ok = id.strPKTs[pk.GetValue().(string)]
+	case schemapb.DataType_UUID:
+		switch v := pk.GetValue().(type) {
+		case [16]byte:
+			minTs, ok = id.uuidPKTs[v]
+		case string:
+			if u, err := typeutil.ParseUUID(v); err == nil {
+				minTs, ok = id.uuidPKTs[u]
+			}
+		}
 	}
 
 	return ok && ts > uint64(minTs)
@@ -1339,6 +1370,21 @@ func (id *InsertData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits
 			if !hits[i] {
 				minTs, ok := id.strPKTs[pks[i].GetValue().(string)]
 				hits[i] = ok && tss[i] > uint64(minTs)
+			}
+		}
+	case schemapb.DataType_UUID:
+		for i := range pks {
+			if !hits[i] {
+				switch v := pks[i].GetValue().(type) {
+				case [16]byte:
+					minTs, ok := id.uuidPKTs[v]
+					hits[i] = ok && tss[i] > uint64(minTs)
+				case string:
+					if u, err := typeutil.ParseUUID(v); err == nil {
+						minTs, ok := id.uuidPKTs[u]
+						hits[i] = ok && tss[i] > uint64(minTs)
+					}
+				}
 			}
 		}
 	}
@@ -1723,6 +1769,8 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 			inData.intPKTs = make(map[int64]int64)
 		case schemapb.DataType_VarChar:
 			inData.strPKTs = make(map[string]int64)
+		case schemapb.DataType_UUID:
+			inData.uuidPKTs = make(map[[16]byte]int64)
 		}
 
 		for _, msg := range msgs {
@@ -1774,6 +1822,25 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 					ts, ok := inData.strPKTs[pk]
 					if !ok || timestamps[idx] < ts {
 						inData.strPKTs[pk] = timestamps[idx]
+					}
+				}
+			case schemapb.DataType_UUID:
+				switch pks := pkFieldData.GetDataRows().(type) {
+				case [][16]byte:
+					for idx, pk := range pks {
+						ts, ok := inData.uuidPKTs[pk]
+						if !ok || timestamps[idx] < ts {
+							inData.uuidPKTs[pk] = timestamps[idx]
+						}
+					}
+				case []string:
+					for idx, pk := range pks {
+						if u, err := typeutil.ParseUUID(pk); err == nil {
+							ts, ok := inData.uuidPKTs[u]
+							if !ok || timestamps[idx] < ts {
+								inData.uuidPKTs[u] = timestamps[idx]
+							}
+						}
 					}
 				}
 			}

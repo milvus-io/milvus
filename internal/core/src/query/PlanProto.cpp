@@ -1451,6 +1451,7 @@ ProtoParser::ParseBloomFilterExprs(
         case DataType::INT64:
         case DataType::VARCHAR:
         case DataType::JSON:
+        case DataType::UUID:
             break;
         default:
             ThrowInfo(ExprInvalid,

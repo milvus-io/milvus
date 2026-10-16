@@ -137,25 +137,27 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     int64_t& current_chunk_pos,
     int64_t scan_batch_size,
     ColumnScanState* scan_state) const {
-    if (scan_state != nullptr && scan_state->state_ != nullptr) {
-        return GetMultipleChunkScanDataAccessor<T>(field_id,
-                                                   current_chunk_id,
-                                                   current_chunk_pos,
-                                                   scan_batch_size,
-                                                   scan_state,
-                                                   nullptr);
-    }
-    if (segment_->type() == SegmentType::Sealed) {
-        auto column = GetColumn(field_id);
-        if (column != nullptr &&
-            column->GetLocalFormat() ==
-                ChunkedColumnInterface::LocalFormat::Vortex) {
+    if constexpr (!std::is_same_v<T, UUID>) {
+        if (scan_state != nullptr && scan_state->state_ != nullptr) {
             return GetMultipleChunkScanDataAccessor<T>(field_id,
                                                        current_chunk_id,
                                                        current_chunk_pos,
                                                        scan_batch_size,
                                                        scan_state,
-                                                       std::move(column));
+                                                       nullptr);
+        }
+        if (segment_->type() == SegmentType::Sealed) {
+            auto column = GetColumn(field_id);
+            if (column != nullptr &&
+                column->GetLocalFormat() ==
+                    ChunkedColumnInterface::LocalFormat::Vortex) {
+                return GetMultipleChunkScanDataAccessor<T>(field_id,
+                                                           current_chunk_id,
+                                                           current_chunk_pos,
+                                                           scan_batch_size,
+                                                           scan_state,
+                                                           std::move(column));
+            }
         }
     }
     auto num_chunks = NumChunkData(field_id);
@@ -356,6 +358,13 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
                                                       scan_batch_size,
                                                       scan_state);
         }
+        case DataType::UUID: {
+            return GetMultipleChunkDataAccessor<UUID>(field_id,
+                                                      current_chunk_id,
+                                                      current_chunk_pos,
+                                                      scan_batch_size,
+                                                      scan_state);
+        }
         default:
             ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
     }
@@ -520,6 +529,9 @@ SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
         case DataType::VARCHAR:
         case DataType::TEXT: {
             return GetChunkDataAccessor<std::string>(field_id, chunk_id);
+        }
+        case DataType::UUID: {
+            return GetChunkDataAccessor<UUID>(field_id, chunk_id);
         }
         default:
             ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);

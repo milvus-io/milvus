@@ -47,6 +47,22 @@ func varcharField(values ...string) *schemapb.FieldData {
 	}
 }
 
+func uuidField(values ...[16]byte) *schemapb.FieldData {
+	byteSlices := make([][]byte, len(values))
+	for i, v := range values {
+		byteSlices[i] = v[:]
+	}
+	return &schemapb.FieldData{
+		Type:    schemapb.DataType_UUID,
+		FieldId: 100,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: byteSlices}},
+			},
+		},
+	}
+}
+
 func TestKeysOfInsert(t *testing.T) {
 	keys, err := KeysOfInsert(insertBody(int64Field(10, 20)), 100, schemapb.DataType_Int64)
 	require.NoError(t, err)
@@ -55,6 +71,11 @@ func TestKeysOfInsert(t *testing.T) {
 	keys, err = KeysOfInsert(insertBody(varcharField("a", "b")), 100, schemapb.DataType_VarChar)
 	require.NoError(t, err)
 	require.Equal(t, Keys{Kind: KindString, StringValues: []string{"a", "b"}}, keys)
+
+	u1 := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	keys, err = KeysOfInsert(insertBody(uuidField(u1)), 100, schemapb.DataType_UUID)
+	require.NoError(t, err)
+	require.Equal(t, Keys{Kind: KindString, StringValues: []string{"01020304-0506-0708-090a-0b0c0d0e0f10"}}, keys)
 
 	// the declared type of the field data is not checked, only the payload is.
 	undeclared := int64Field(7)
@@ -109,7 +130,7 @@ func TestKeysOfInsertField(t *testing.T) {
 	vector := int64Field(1)
 	vector.Field = &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{}}
 	_, err = KeysOfInsertField(insertBody(vector), 100)
-	requireUnrecoverable(t, err, "insert primary key field 100 must be int64 or varchar")
+	requireUnrecoverable(t, err, "insert primary key field 100 must be int64, varchar or uuid")
 
 	_, err = KeysOfInsertField(insertBody(int64Field()), 100)
 	requireUnrecoverable(t, err, "primary keys are empty")

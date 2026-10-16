@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // KeysOfInsert returns the values of the primary key field fieldID of an insert
@@ -99,8 +100,15 @@ func keysOfFieldData(field *schemapb.FieldData, fieldID int64) (Keys, error) {
 		return keysOfIDs(&schemapb.IDs{
 			IdField: &schemapb.IDs_StrId{StrId: values.StringData},
 		})
+	case *schemapb.ScalarField_BytesData:
+		if values == nil {
+			return Keys{}, status.NewUnrecoverableError("uuid primary keys are nil")
+		}
+		return keysOfIDs(&schemapb.IDs{
+			IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: values.BytesData.GetData()}},
+		})
 	default:
-		return Keys{}, status.NewUnrecoverableError("insert primary key field %d must be int64 or varchar", fieldID)
+		return Keys{}, status.NewUnrecoverableError("insert primary key field %d must be int64, varchar or uuid", fieldID)
 	}
 }
 
@@ -132,6 +140,25 @@ func keysOfIDs(ids *schemapb.IDs) (Keys, error) {
 			Kind:         KindString,
 			StringValues: values.StrId.GetData(),
 		}, nil
+	case *schemapb.IDs_UuidId:
+		if values == nil || values.UuidId == nil {
+			return Keys{}, status.NewUnrecoverableError("uuid primary keys are nil")
+		}
+		if len(values.UuidId.GetData()) == 0 {
+			return Keys{}, status.NewUnrecoverableError("primary keys are empty")
+		}
+		stringValues := make([]string, 0, len(values.UuidId.GetData()))
+		for _, b := range values.UuidId.GetData() {
+			u, err := typeutil.BytesToUUID(b)
+			if err != nil {
+				return Keys{}, status.NewUnrecoverableError("uuid primary key is invalid: %v", err)
+			}
+			stringValues = append(stringValues, typeutil.UUIDToString(u))
+		}
+		return Keys{
+			Kind:         KindString,
+			StringValues: stringValues,
+		}, nil
 	default:
 		return Keys{}, status.NewUnrecoverableError("unsupported primary key ids type %T", values)
 	}
@@ -143,6 +170,10 @@ func validateScalarType(keys Keys, dataType schemapb.DataType) error {
 	case schemapb.DataType_Int64:
 		expected = KindInt64
 	case schemapb.DataType_VarChar:
+		expected = KindString
+	case schemapb.DataType_UUID:
+		// UUID PKs are tracked by canonical string form (see UuidId
+		// conversion in keysOfIDs).
 		expected = KindString
 	default:
 		return status.NewUnrecoverableError("primary key has unsupported data type %s", dataType.String())
