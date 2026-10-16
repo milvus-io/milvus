@@ -21,6 +21,8 @@
 namespace milvus::grep {
 using namespace milvus::segcore;
 namespace {
+constexpr size_t kCancellationCheckInterval = 1024;
+
 void
 CheckArrow(const arrow::Status& status) {
     if (!status.ok()) {
@@ -46,13 +48,262 @@ Charge(uint64_t amount, uint64_t& remaining, uint64_t limit) {
     remaining -= amount;
 }
 
+// Owns the Arrow output and its byte budget across all input batches.
+class GrepResultBuilder {
+ public:
+    explicit GrepResultBuilder(uint64_t limit)
+        : limit_(limit), remaining_(limit) {
+        auto span_type =
+            arrow::struct_({arrow::field("start", arrow::uint64(), false),
+                            arrow::field("end", arrow::uint64(), false)});
+        auto spans_type = arrow::list(arrow::field("item", span_type, false));
+        auto line_type =
+            arrow::struct_({arrow::field("content", arrow::utf8(), false),
+                            arrow::field("spans", spans_type, false)});
+        details_type_ = arrow::list(arrow::field("item", line_type, false));
+        starts_ = std::make_shared<arrow::UInt64Builder>();
+        ends_ = std::make_shared<arrow::UInt64Builder>();
+        span_ = std::make_shared<arrow::StructBuilder>(
+            span_type,
+            arrow::default_memory_pool(),
+            std::vector<std::shared_ptr<arrow::ArrayBuilder>>{starts_, ends_});
+        spans_ = std::make_shared<arrow::ListBuilder>(
+            arrow::default_memory_pool(), span_, spans_type);
+        content_ = std::make_shared<arrow::StringBuilder>();
+        lines_ = std::make_shared<arrow::StructBuilder>(
+            line_type,
+            arrow::default_memory_pool(),
+            std::vector<std::shared_ptr<arrow::ArrayBuilder>>{content_,
+                                                              spans_});
+        details_ = std::make_unique<arrow::ListBuilder>(
+            arrow::default_memory_pool(), lines_, details_type_);
+        // Includes fixed offsets for empty lists; all later arithmetic is subtractive.
+        Charge(16, remaining_, limit_);
+    }
+
+    int64_t
+    Count() const {
+        return positions_.length();
+    }
+
+    uint64_t
+    RemainingBytes() const {
+        return remaining_;
+    }
+
+    template <typename CheckCancelled>
+    void
+    Append(const Result& result,
+           const std::vector<int64_t>& input_positions,
+           const CheckCancelled& check) {
+        size_t processed = 0;
+        // Share the interval across rows, lines and spans so deeply nested
+        // results remain cancellable without checking every element.
+        auto check_periodically = [&] {
+            if (processed++ % kCancellationCheckInterval == 0) {
+                check();
+            }
+        };
+        for (size_t i = 0; i < input_positions.size(); ++i) {
+            check_periodically();
+            if (!result.Selected(i))
+                continue;
+            Charge(16,
+                   remaining_,
+                   limit_);  // position, row list offset and validity
+            CheckArrow(positions_.Append(input_positions[i]));
+            CheckArrow(details_->Append());
+            for (size_t j = 0; j < result.LineCount(i); ++j) {
+                check_periodically();
+                auto text = result.Content(i, j);
+                const auto span_count = result.SpanCount(i, j);
+                ChargeLine(text.size(), span_count);
+                CheckArrow(lines_->Append());
+                CheckArrow(content_->Append(text));
+                CheckArrow(spans_->Append());
+                for (size_t k = 0; k < span_count; ++k) {
+                    check_periodically();
+                    auto hit = result.GetSpan(i, j, k);
+                    CheckArrow(span_->Append());
+                    CheckArrow(starts_->Append(hit.start));
+                    CheckArrow(ends_->Append(hit.end));
+                }
+            }
+        }
+    }
+
+    std::shared_ptr<arrow::RecordBatch>
+    Finish() {
+        std::shared_ptr<arrow::Array> positions_array, details_array;
+        CheckArrow(positions_.Finish(&positions_array));
+        CheckArrow(details_->Finish(&details_array));
+        return arrow::RecordBatch::Make(
+            arrow::schema({arrow::field("positions", arrow::int64(), false),
+                           arrow::field("details", details_type_, false)}),
+            positions_array->length(),
+            {positions_array, details_array});
+    }
+
+ private:
+    void
+    ChargeLine(uint64_t text_bytes, uint64_t span_count) {
+        constexpr uint64_t line_overhead = 16;
+        constexpr uint64_t span_bytes = 17;
+        // Check by subtraction/division before adding or multiplying sizes.
+        if (remaining_ < line_overhead ||
+            text_bytes > remaining_ - line_overhead ||
+            span_count >
+                (remaining_ - line_overhead - text_bytes) / span_bytes) {
+            ThrowInfo(
+                OutOfRange,
+                fmt::format("grep result budget exceeded "
+                            "(quotaAndLimits.limits.maxOutputSize={} bytes): "
+                            "remaining={} bytes, line overhead={} bytes, "
+                            "text={} bytes, spans={} ({} bytes each)",
+                            limit_,
+                            remaining_,
+                            line_overhead,
+                            text_bytes,
+                            span_count,
+                            span_bytes));
+        }
+        remaining_ -= line_overhead + text_bytes + span_count * span_bytes;
+    }
+
+    const uint64_t limit_;
+    uint64_t remaining_;
+    std::shared_ptr<arrow::DataType> details_type_;
+    std::shared_ptr<arrow::UInt64Builder> starts_, ends_;
+    std::shared_ptr<arrow::StructBuilder> span_, lines_;
+    std::shared_ptr<arrow::ListBuilder> spans_;
+    std::shared_ptr<arrow::StringBuilder> content_;
+    std::unique_ptr<arrow::ListBuilder> details_;
+    arrow::Int64Builder positions_;
+};
+
+// Keeps either borrowed chunk views pinned or bulk-read strings owned until
+// matching and result copying for this read batch have finished.
+struct GrepInputBatch {
+    using Views =
+        PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>;
+    int64_t count = 0;
+    std::optional<Views> pinned;
+    std::unique_ptr<DataArray> owned;
+
+    std::optional<std::string_view>
+    Text(int64_t index) const {
+        if (pinned) {
+            const auto& [views, validity] = pinned->get();
+            if (!validity.empty() && !validity[index]) {
+                return std::nullopt;
+            }
+            return views[index];
+        }
+        const auto& validity = GetFieldDataRowValidData(*owned);
+        if (!validity.empty() && !validity[index]) {
+            return std::nullopt;
+        }
+        return owned->scalars().string_data().data(index);
+    }
+};
+
+GrepInputBatch
+ReadGrepBatch(const SegmentInternalInterface* segment,
+              const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+              milvus::OpContext* op_ctx,
+              const FieldMeta& meta,
+              const int64_t* offsets,
+              int64_t max_rows,
+              int64_t rows,
+              bool use_views) {
+    const auto field = meta.get_id();
+    GrepInputBatch batch;
+    AssertInfo(offsets[0] >= 0 && offsets[0] < rows,
+               "grep offset out of range");
+    const auto chunk =
+        use_views ? segment->get_chunk_by_offset(field, offsets[0]).first : 0;
+    auto& count = batch.count;
+    count = 1;
+    // Read ahead independently of the remaining match quota. TEXT uses
+    // the LOB-aware bulk reader, which can group references by file.
+    while (count < max_rows) {
+        auto off = offsets[count];
+        AssertInfo(off >= 0 && off < rows, "grep offset out of range");
+        if (use_views &&
+            segment->get_chunk_by_offset(field, off).first != chunk)
+            break;
+        ++count;
+    }
+    if (use_views) {
+        FixedVector<int32_t> local_offsets(count);
+        for (int64_t i = 0; i < count; ++i) {
+            auto relative =
+                segment->get_chunk_by_offset(field, offsets[i]).second;
+            AssertInfo(relative <= std::numeric_limits<int32_t>::max(),
+                       "grep chunk offset exceeds int32");
+            local_offsets[i] = relative;
+        }
+        batch.pinned.emplace(segment->chunk_views_by_offsets<std::string_view>(
+            op_ctx, field, chunk, local_offsets));
+    } else {
+        batch.owned = BulkSubscriptWithSnapshot(
+            segment, snapshot, op_ctx, field, meta, offsets, count);
+    }
+    return batch;
+}
+
+template <typename CheckCancelled>
+void
+MatchGrepBatch(const GrepInputBatch& batch,
+               int64_t begin,
+               Session& session,
+               const CGrepScanOptions& opt,
+               GrepResultBuilder& output,
+               const CheckCancelled& check) {
+    std::vector<std::string_view> texts;
+    std::vector<int64_t> input_positions;
+    int64_t consumed = 0;
+    while (consumed < batch.count && output.Count() < opt.limit) {
+        texts.clear();
+        input_positions.clear();
+        const auto quota = opt.limit - output.Count();
+        // Matching groups are bounded by the read batch and remaining quota.
+        // Prefetched rows stay owned/pinned until this read batch ends.
+        while (consumed < batch.count &&
+               static_cast<int64_t>(texts.size()) < quota) {
+            if (consumed % kCancellationCheckInterval == 0) {
+                check();
+            }
+            auto text = batch.Text(consumed++);
+            if (!text) {
+                continue;
+            }
+            texts.push_back(*text);
+            input_positions.push_back(begin + consumed - 1);
+        }
+        if (texts.empty())
+            continue;
+        check();
+        if (output.RemainingBytes() == 0)
+            ThrowInfo(
+                OutOfRange,
+                fmt::format("grep result budget exceeded "
+                            "(quotaAndLimits.limits.maxOutputSize={} bytes): "
+                            "remaining=0 bytes",
+                            opt.max_result_bytes));
+        // The request cancellation token is the only execution deadline.
+        auto result = session.ExecuteBatch(texts, {output.RemainingBytes()});
+        output.Append(result, input_positions, check);
+    }
+}
+
 std::shared_ptr<arrow::RecordBatch>
-ScanSegment(const SegmentInternalInterface* segment,
-            const int64_t* offsets,
-            int64_t size,
-            const CGrepScanOptions& opt,
-            const std::vector<std::string_view>& patterns,
-            const folly::CancellationToken& cancel_token) {
+ExecuteGrepScan(const SegmentInternalInterface* segment,
+                const int64_t* offsets,
+                int64_t size,
+                const CGrepScanOptions& opt,
+                const std::vector<std::string_view>& patterns,
+                const folly::CancellationToken& cancel_token) {
     AssertInfo(size >= 0 && (size == 0 || offsets), "invalid grep offsets");
     AssertInfo(opt.batch_size > 0 && opt.limit > 0 && opt.max_regex_bytes > 0 &&
                    opt.max_dfa_cache_bytes > 0 && opt.max_result_bytes > 0,
@@ -84,7 +335,6 @@ ScanSegment(const SegmentInternalInterface* segment,
                              static_cast<grep::CaseMode>(opt.case_mode),
                              static_cast<grep::Boundary>(opt.boundary)},
                             {opt.max_regex_bytes, opt.max_dfa_cache_bytes});
-    check();
     auto session = plan.CreateSession();
     folly::CancellationCallback cancel(
         cancel_token,
@@ -96,166 +346,22 @@ ScanSegment(const SegmentInternalInterface* segment,
                            segment->HasFieldData(field) &&
                            (!snapshot || snapshot->GetColumn(field) != nullptr);
 
-    auto span_type =
-        arrow::struct_({arrow::field("start", arrow::uint64(), false),
-                        arrow::field("end", arrow::uint64(), false)});
-    auto spans_type = arrow::list(arrow::field("item", span_type, false));
-    auto line_type =
-        arrow::struct_({arrow::field("content", arrow::utf8(), false),
-                        arrow::field("spans", spans_type, false)});
-    auto details_type = arrow::list(arrow::field("item", line_type, false));
-    auto starts = std::make_shared<arrow::UInt64Builder>();
-    auto ends = std::make_shared<arrow::UInt64Builder>();
-    auto span = std::make_shared<arrow::StructBuilder>(
-        span_type,
-        arrow::default_memory_pool(),
-        std::vector<std::shared_ptr<arrow::ArrayBuilder>>{starts, ends});
-    auto spans = std::make_shared<arrow::ListBuilder>(
-        arrow::default_memory_pool(), span, spans_type);
-    auto content = std::make_shared<arrow::StringBuilder>();
-    auto lines = std::make_shared<arrow::StructBuilder>(
-        line_type,
-        arrow::default_memory_pool(),
-        std::vector<std::shared_ptr<arrow::ArrayBuilder>>{content, spans});
-    arrow::ListBuilder details(
-        arrow::default_memory_pool(), lines, details_type);
-    arrow::Int64Builder positions;
-    uint64_t remaining = opt.max_result_bytes;
-    // Includes fixed offsets for empty lists; all later arithmetic is subtractive.
-    Charge(16, remaining, opt.max_result_bytes);
-    for (int64_t begin = 0; begin < size && positions.length() < opt.limit;) {
+    GrepResultBuilder output(opt.max_result_bytes);
+    for (int64_t begin = 0; begin < size && output.Count() < opt.limit;) {
         check();
-        AssertInfo(offsets[begin] >= 0 && offsets[begin] < rows,
-                   "grep offset out of range");
-        const auto chunk =
-            use_views
-                ? segment->get_chunk_by_offset(field, offsets[begin]).first
-                : 0;
-        const auto max_rows = std::min<int64_t>(opt.batch_size, size - begin);
-        int64_t count = 1;
-        // Read ahead independently of the remaining match quota. TEXT uses
-        // the LOB-aware bulk reader, which can group references by file.
-        while (count < max_rows) {
-            auto off = offsets[begin + count];
-            AssertInfo(off >= 0 && off < rows, "grep offset out of range");
-            if (use_views &&
-                segment->get_chunk_by_offset(field, off).first != chunk)
-                break;
-            ++count;
-        }
-        using Views = PinWrapper<
-            std::pair<std::vector<std::string_view>, FixedVector<bool>>>;
-        std::optional<Views> pinned;
-        std::unique_ptr<DataArray> owned;
-        std::vector<std::string_view> texts;
-        std::vector<int64_t> input_positions;
-        if (use_views) {
-            FixedVector<int32_t> local_offsets(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto relative =
-                    segment->get_chunk_by_offset(field, offsets[begin + i])
-                        .second;
-                AssertInfo(relative <= std::numeric_limits<int32_t>::max(),
-                           "grep chunk offset exceeds int32");
-                local_offsets[i] = relative;
-            }
-            pinned.emplace(segment->chunk_views_by_offsets<std::string_view>(
-                &op_ctx, field, chunk, local_offsets));
-        } else {
-            owned = BulkSubscriptWithSnapshot(segment,
-                                              snapshot,
-                                              &op_ctx,
-                                              field,
-                                              meta,
-                                              offsets + begin,
-                                              count);
-        }
-        int64_t consumed = 0;
-        while (consumed < count && positions.length() < opt.limit) {
-            texts.clear();
-            input_positions.clear();
-            const auto quota = opt.limit - positions.length();
-            // Matching groups are bounded by the read batch and remaining quota.
-            // Prefetched rows stay owned/pinned until this read batch ends.
-            while (consumed < count &&
-                   static_cast<int64_t>(texts.size()) < quota) {
-                check();
-                bool valid;
-                std::string_view text;
-                if (pinned) {
-                    const auto& [views, validity] = pinned->get();
-                    valid = validity.empty() || validity[consumed];
-                    text = views[consumed];
-                } else {
-                    const auto& validity = GetFieldDataRowValidData(*owned);
-                    valid = validity.empty() || validity[consumed];
-                    if (valid)
-                        text = owned->scalars().string_data().data(consumed);
-                }
-                if (!valid) {
-                    ++consumed;
-                    continue;
-                }
-                texts.push_back(text);
-                input_positions.push_back(begin + consumed);
-                ++consumed;
-            }
-            if (texts.empty())
-                continue;
-            check();
-            if (remaining == 0)
-                ThrowInfo(OutOfRange,
-                          fmt::format(
-                              "grep result budget exceeded "
-                              "(quotaAndLimits.limits.maxOutputSize={} bytes): "
-                              "remaining=0 bytes",
-                              opt.max_result_bytes));
-            // The request cancellation token is the only execution deadline.
-            auto result = session.ExecuteBatch(texts, {remaining});
-            for (size_t i = 0; i < texts.size(); ++i) {
-                check();
-                if (!result.Selected(i))
-                    continue;
-                Charge(
-                    16,
-                    remaining,
-                    opt.max_result_bytes);  // position, row list offset and validity
-                CheckArrow(positions.Append(input_positions[i]));
-                CheckArrow(details.Append());
-                for (size_t j = 0; j < result.LineCount(i); ++j) {
-                    check();
-                    auto text = result.Content(i, j);
-                    Charge(
-                        16,
-                        remaining,
-                        opt.max_result_bytes);  // line/string/list offsets and validity
-                    Charge(text.size(), remaining, opt.max_result_bytes);
-                    CheckArrow(lines->Append());
-                    CheckArrow(content->Append(text));
-                    CheckArrow(spans->Append());
-                    for (size_t k = 0; k < result.SpanCount(i, j); ++k) {
-                        if (k % 1024 == 0)
-                            check();
-                        Charge(17, remaining, opt.max_result_bytes);
-                        auto hit = result.GetSpan(i, j, k);
-                        CheckArrow(span->Append());
-                        CheckArrow(starts->Append(hit.start));
-                        CheckArrow(ends->Append(hit.end));
-                    }
-                }
-            }
-        }
-        begin += count;
+        auto batch =
+            ReadGrepBatch(segment,
+                          snapshot,
+                          &op_ctx,
+                          meta,
+                          offsets + begin,
+                          std::min<int64_t>(opt.batch_size, size - begin),
+                          rows,
+                          use_views);
+        MatchGrepBatch(batch, begin, session, opt, output, check);
+        begin += batch.count;
     }
-    check();
-    std::shared_ptr<arrow::Array> positions_array, details_array;
-    CheckArrow(positions.Finish(&positions_array));
-    CheckArrow(details.Finish(&details_array));
-    return arrow::RecordBatch::Make(
-        arrow::schema({arrow::field("positions", arrow::int64(), false),
-                       arrow::field("details", details_type, false)}),
-        positions_array->length(),
-        {positions_array, details_array});
+    return output.Finish();
 }
 }  // namespace
 }  // namespace milvus::grep
@@ -304,9 +410,9 @@ ScanGrepByOffsets(void* segment,
                 ? static_cast<folly::CancellationSource*>(cancellation_source)
                       ->getToken()
                 : folly::CancellationToken{};
-        std::shared_ptr<arrow::RecordBatch> batch;
+        std::shared_ptr<arrow::RecordBatch> scan_result;
         try {
-            batch = milvus::grep::ScanSegment(
+            scan_result = milvus::grep::ExecuteGrepScan(
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment),
                 offsets,
@@ -361,7 +467,8 @@ ScanGrepByOffsets(void* segment,
             // the added context through Grep's bounded 512-byte error buffer.
             throw SegcoreError(code, reason);
         }
-        auto status = arrow::ExportRecordBatch(*batch, out_array, out_schema);
+        auto status =
+            arrow::ExportRecordBatch(*scan_result, out_array, out_schema);
         if (!status.ok())
             return milvus::segcore::ArrowExportFailure(status);
         cleanup.dismiss();
