@@ -313,6 +313,10 @@ Physical ReadStates retain immutable resource generations: columns, indexes,
 readers, row-domain metadata and independently owned descriptions of the required
 physical fields/groups. Manifest discovery may keep lightweight storage-name
 mappings for unselected columns; it does not copy their full field descriptions.
+Physical layout also retains each column's alias IDs and combined local-format
+choice. All aliases participate in Vortex eligibility, including aliases outside
+the View's load scope. These compact values are independently owned and do not
+retain a logical Schema.
 PublishedSegmentState and stored SegmentLoadInfo do not retain a borrowed logical
 Schema, directly or through an alias. Reopen consumes the borrowed schema and
 scope to prepare a successor and publishes only its physical resources and

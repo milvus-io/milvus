@@ -247,7 +247,7 @@ GetStorageColumnNames(const SealedFieldLayoutPtr& schema_snapshot,
 }
 
 std::unordered_map<std::string, std::vector<FieldId>>
-GetStorageColumnFieldIds(const SchemaPtr& schema_snapshot,
+GetStorageColumnFieldIds(const SealedFieldLayoutPtr& schema_snapshot,
                          const std::vector<FieldId>& field_ids) {
     std::unordered_map<std::string, std::vector<FieldId>> result;
     for (const auto field_id : field_ids) {
@@ -7406,7 +7406,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_from_state(
     const int64_t* seg_offsets,
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
-    const auto& field_meta = snapshot->schema->operator[](field_id);
+    const auto& field_meta = snapshot->fields->operator[](field_id);
     Assert(!dynamic_field_names.empty());
     if (count == 0) {
         return CreateEmptyScalarDataArray(0, field_meta);
@@ -9640,7 +9640,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
 std::vector<VortexColumnGroupLocalFormat>
 ChunkedSegmentSealedImpl::ResolveVortexColumnGroupLocalFormats(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const SchemaPtr& schema_snapshot) const {
+    const SealedFieldLayoutPtr& schema_snapshot) const {
     const auto primary_field_id = schema_snapshot->get_primary_field_id();
     const auto primary_column =
         primary_field_id.has_value()
@@ -9648,8 +9648,6 @@ ChunkedSegmentSealedImpl::ResolveVortexColumnGroupLocalFormats(
             : std::string{};
     std::vector<VortexColumnGroupLocalFormat> local_formats(
         column_groups->size(), VortexColumnGroupLocalFormat::Default);
-    std::unordered_map<std::string, bool> physical_column_is_vortex;
-    bool schema_mapped = false;
     for (size_t i = 0; i < column_groups->size(); ++i) {
         const auto& column_group = column_groups->at(i);
         if (primary_field_id.has_value() &&
@@ -9664,32 +9662,10 @@ ChunkedSegmentSealedImpl::ResolveVortexColumnGroupLocalFormats(
             column_group->columns.empty()) {
             continue;
         }
-        if (!schema_mapped) {
-            // Use the complete captured schema, not an eager/lazy projection.
-            // Build once per load; every alias must agree on Vortex intent.
-            physical_column_is_vortex.reserve(
-                schema_snapshot->get_field_ids().size());
-            for (const auto field_id : schema_snapshot->get_field_ids()) {
-                const auto column_name =
-                    schema_snapshot->get_storage_column_name(field_id);
-                const auto is_vortex =
-                    (*schema_snapshot)[field_id].get_local_format() ==
-                    LOCAL_FORMAT_VORTEX;
-                auto [entry, inserted] =
-                    physical_column_is_vortex.emplace(column_name, is_vortex);
-                if (!inserted) {
-                    entry->second = entry->second && is_vortex;
-                }
-            }
-            schema_mapped = true;
-        }
         if (std::all_of(column_group->columns.begin(),
                         column_group->columns.end(),
                         [&](const std::string& column_name) {
-                            const auto column =
-                                physical_column_is_vortex.find(column_name);
-                            return column != physical_column_is_vortex.end() &&
-                                   column->second;
+                            return schema_snapshot->IsVortexColumn(column_name);
                         })) {
             local_formats[i] = VortexColumnGroupLocalFormat::Vortex;
         }
@@ -9705,7 +9681,7 @@ ChunkedSegmentSealedImpl::LoadVortexColumnGroup(
     const std::vector<FieldId>& milvus_field_ids,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     const SegmentLoadInfo& segment_load_info,
-    const SchemaPtr& schema_snapshot,
+    const SealedFieldLayoutPtr& schema_snapshot,
     bool eager_load,
     const std::string& aggregated_warmup_policy,
     milvus::OpContext* op_ctx,

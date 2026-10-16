@@ -47,14 +47,22 @@ class SealedFieldLayout {
             warmup_default_[i] =
                 schema->CollectionWarmupPolicy(i >= 2, i % 2 != 0);
         }
+        std::unordered_set<std::string> seen_external_columns;
         for (auto id : schema->get_field_ids()) {
             const auto& meta = (*schema)[id];
             auto storage_name = schema->GetPhysicalColumnName(id);
             // Manifest discovery can encounter unselected columns. Retain
             // only their storage-name mapping, not their field descriptions.
             storage_names_.emplace(id, storage_name);
+            const bool is_vortex =
+                meta.get_local_format() == LOCAL_FORMAT_VORTEX;
+            auto [format, inserted] =
+                vortex_columns_.emplace(storage_name, is_vortex);
+            if (!inserted) {
+                format->second = format->second && is_vortex;
+            }
             if (meta.is_external_field()) {
-                external_names_.emplace(meta.get_external_field(), id);
+                external_names_[meta.get_external_field()].push_back(id);
             }
             if (scope_.IsExplicit() && !scope_.Requires(id)) {
                 continue;
@@ -66,7 +74,9 @@ class SealedFieldLayout {
             }
             if (schema->IsExternalManifestStoredField(id)) {
                 manifest_fields_.emplace(id);
-                external_columns_->push_back(storage_name);
+                if (seen_external_columns.emplace(storage_name).second) {
+                    external_columns_->push_back(storage_name);
+                }
             }
             mmap_.emplace(id, schema->MmapEnabled(id));
             auto& policies = warmup_[id];
@@ -224,10 +234,15 @@ class SealedFieldLayout {
 
     FieldId
     ResolveColumnFieldId(const std::string& name) const {
+        return ResolveColumnFieldIds(name).front();
+    }
+
+    std::vector<FieldId>
+    ResolveColumnFieldIds(const std::string& name) const {
         auto parsed = ParseFieldIdColumnName(name);
         if (external_) {
             if (milvus_table_ && parsed && storage_names_.count(*parsed)) {
-                return *parsed;
+                return {*parsed};
             }
             if (auto it = external_names_.find(name);
                 it != external_names_.end()) {
@@ -235,9 +250,17 @@ class SealedFieldLayout {
             }
         }
         if (parsed) {
-            return *parsed;
+            return {*parsed};
         }
         ThrowInfo(DataFormatBroken, "invalid physical column name: {}", name);
+    }
+
+    // Local format is a physical-column property. All aliases participate,
+    // including fields outside this load scope, without retaining their Schema.
+    bool
+    IsVortexColumn(const std::string& name) const {
+        auto it = vortex_columns_.find(name);
+        return it != vortex_columns_.end() && it->second;
     }
 
     std::shared_ptr<std::vector<std::string>>
@@ -304,7 +327,8 @@ class SealedFieldLayout {
     std::string external_spec_;
     bool source_insert_timestamps_;
     std::unordered_map<FieldId, std::string> storage_names_;
-    std::unordered_map<std::string, FieldId> external_names_;
+    std::unordered_map<std::string, std::vector<FieldId>> external_names_;
+    std::unordered_map<std::string, bool> vortex_columns_;
     std::unordered_set<FieldId> external_fields_;
     std::unordered_set<FieldId> manifest_fields_;
     mutable ArrowSchemaPtr loon_lob_schema_;

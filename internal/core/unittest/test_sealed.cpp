@@ -5269,6 +5269,19 @@ TEST(SealedSegmentCowState, ResolvesCompleteVortexGroupsPerSchemaSnapshot) {
         next_expected);
     EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, schema),
               expected);
+
+    // Physical layout keeps alias/format metadata even outside a View scope,
+    // and remains valid after its preparing Schema is destroyed.
+    auto layout = std::make_shared<const SealedFieldLayout>(
+        next_schema.get(), LoadScope({101}));
+    next_schema.reset();
+    EXPECT_FALSE(layout->has_field(FieldId(102)));
+    EXPECT_EQ(layout->ResolveColumnFieldIds("shared"),
+              (std::vector<FieldId>{FieldId(101), FieldId(102)}));
+    EXPECT_FALSE(layout->IsVortexColumn("shared"));
+    EXPECT_TRUE(layout->IsVortexColumn("direct"));
+    EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, layout),
+              next_expected);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
