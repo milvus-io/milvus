@@ -4,6 +4,8 @@ package session
 
 import (
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	pkindexpb "github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	workerpb "github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -256,6 +258,54 @@ func (_c *MockCluster_CreateIndex_Call) Return(_a0 error) *MockCluster_CreateInd
 }
 
 func (_c *MockCluster_CreateIndex_Call) RunAndReturn(run func(int64, *workerpb.CreateJobRequest) error) *MockCluster_CreateIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreatePKIndexCompaction provides a mock function with given fields: nodeID, in, slot
+func (_m *MockCluster) CreatePKIndexCompaction(nodeID int64, in *pkindexpb.CompactionRequest, slot int64) error {
+	ret := _m.Called(nodeID, in, slot)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreatePKIndexCompaction")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *pkindexpb.CompactionRequest, int64) error); ok {
+		r0 = rf(nodeID, in, slot)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_CreatePKIndexCompaction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePKIndexCompaction'
+type MockCluster_CreatePKIndexCompaction_Call struct {
+	*mock.Call
+}
+
+// CreatePKIndexCompaction is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *pkindexpb.CompactionRequest
+//   - slot int64
+func (_e *MockCluster_Expecter) CreatePKIndexCompaction(nodeID interface{}, in interface{}, slot interface{}) *MockCluster_CreatePKIndexCompaction_Call {
+	return &MockCluster_CreatePKIndexCompaction_Call{Call: _e.mock.On("CreatePKIndexCompaction", nodeID, in, slot)}
+}
+
+func (_c *MockCluster_CreatePKIndexCompaction_Call) Run(run func(nodeID int64, in *pkindexpb.CompactionRequest, slot int64)) *MockCluster_CreatePKIndexCompaction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*pkindexpb.CompactionRequest), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_CreatePKIndexCompaction_Call) Return(_a0 error) *MockCluster_CreatePKIndexCompaction_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_CreatePKIndexCompaction_Call) RunAndReturn(run func(int64, *pkindexpb.CompactionRequest, int64) error) *MockCluster_CreatePKIndexCompaction_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -633,6 +683,53 @@ func (_c *MockCluster_DropIndex_Call) Return(_a0 error) *MockCluster_DropIndex_C
 }
 
 func (_c *MockCluster_DropIndex_Call) RunAndReturn(run func(int64, int64) error) *MockCluster_DropIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropPKIndexCompaction provides a mock function with given fields: nodeID, taskID
+func (_m *MockCluster) DropPKIndexCompaction(nodeID int64, taskID int64) error {
+	ret := _m.Called(nodeID, taskID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropPKIndexCompaction")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, int64) error); ok {
+		r0 = rf(nodeID, taskID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_DropPKIndexCompaction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPKIndexCompaction'
+type MockCluster_DropPKIndexCompaction_Call struct {
+	*mock.Call
+}
+
+// DropPKIndexCompaction is a helper method to define mock.On call
+//   - nodeID int64
+//   - taskID int64
+func (_e *MockCluster_Expecter) DropPKIndexCompaction(nodeID interface{}, taskID interface{}) *MockCluster_DropPKIndexCompaction_Call {
+	return &MockCluster_DropPKIndexCompaction_Call{Call: _e.mock.On("DropPKIndexCompaction", nodeID, taskID)}
+}
+
+func (_c *MockCluster_DropPKIndexCompaction_Call) Run(run func(nodeID int64, taskID int64)) *MockCluster_DropPKIndexCompaction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_DropPKIndexCompaction_Call) Return(_a0 error) *MockCluster_DropPKIndexCompaction_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_DropPKIndexCompaction_Call) RunAndReturn(run func(int64, int64) error) *MockCluster_DropPKIndexCompaction_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1022,6 +1119,79 @@ func (_c *MockCluster_QueryIndex_Call) Return(_a0 *workerpb.IndexJobResults, _a1
 }
 
 func (_c *MockCluster_QueryIndex_Call) RunAndReturn(run func(int64, *workerpb.QueryJobsRequest) (*workerpb.IndexJobResults, error)) *MockCluster_QueryIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryPKIndexCompaction provides a mock function with given fields: nodeID, taskID
+func (_m *MockCluster) QueryPKIndexCompaction(nodeID int64, taskID int64) (*pkindexpb.CompactionResult, indexpb.JobState, string, error) {
+	ret := _m.Called(nodeID, taskID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryPKIndexCompaction")
+	}
+
+	var r0 *pkindexpb.CompactionResult
+	var r1 indexpb.JobState
+	var r2 string
+	var r3 error
+	if rf, ok := ret.Get(0).(func(int64, int64) (*pkindexpb.CompactionResult, indexpb.JobState, string, error)); ok {
+		return rf(nodeID, taskID)
+	}
+	if rf, ok := ret.Get(0).(func(int64, int64) *pkindexpb.CompactionResult); ok {
+		r0 = rf(nodeID, taskID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*pkindexpb.CompactionResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, int64) indexpb.JobState); ok {
+		r1 = rf(nodeID, taskID)
+	} else {
+		r1 = ret.Get(1).(indexpb.JobState)
+	}
+
+	if rf, ok := ret.Get(2).(func(int64, int64) string); ok {
+		r2 = rf(nodeID, taskID)
+	} else {
+		r2 = ret.Get(2).(string)
+	}
+
+	if rf, ok := ret.Get(3).(func(int64, int64) error); ok {
+		r3 = rf(nodeID, taskID)
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
+}
+
+// MockCluster_QueryPKIndexCompaction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryPKIndexCompaction'
+type MockCluster_QueryPKIndexCompaction_Call struct {
+	*mock.Call
+}
+
+// QueryPKIndexCompaction is a helper method to define mock.On call
+//   - nodeID int64
+//   - taskID int64
+func (_e *MockCluster_Expecter) QueryPKIndexCompaction(nodeID interface{}, taskID interface{}) *MockCluster_QueryPKIndexCompaction_Call {
+	return &MockCluster_QueryPKIndexCompaction_Call{Call: _e.mock.On("QueryPKIndexCompaction", nodeID, taskID)}
+}
+
+func (_c *MockCluster_QueryPKIndexCompaction_Call) Run(run func(nodeID int64, taskID int64)) *MockCluster_QueryPKIndexCompaction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_QueryPKIndexCompaction_Call) Return(_a0 *pkindexpb.CompactionResult, _a1 indexpb.JobState, _a2 string, _a3 error) *MockCluster_QueryPKIndexCompaction_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3)
+	return _c
+}
+
+func (_c *MockCluster_QueryPKIndexCompaction_Call) RunAndReturn(run func(int64, int64) (*pkindexpb.CompactionResult, indexpb.JobState, string, error)) *MockCluster_QueryPKIndexCompaction_Call {
 	_c.Call.Return(run)
 	return _c
 }

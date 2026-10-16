@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -98,6 +99,19 @@ type Cluster interface {
 	QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)
 	// DropCopySegment drops a copy segment task
 	DropCopySegment(nodeID int64, taskID int64) error
+	// CreatePKIndexCompaction creates a primary key index compaction task.
+	// A non-nil error is a transport failure, or a node that cannot be reached (merr.ErrNodeNotFound).
+	CreatePKIndexCompaction(nodeID int64, in *pkindexpb.CompactionRequest, slot int64) error
+	// QueryPKIndexCompaction queries a primary key index compaction task.
+	// A non-nil error is a transport failure, or a node that cannot be reached (merr.ErrNodeNotFound).
+	// State taskcommon.None with a nil error means the node does not know the task
+	// (it restarted, or it deleted a finished task that nobody queried in time); the caller treats the task as lost.
+	// The result status is always Success, because the DataNode turns a non-success payload status into an RPC error.
+	// A failed task carries its class in result.retriable and its text in the returned reason.
+	QueryPKIndexCompaction(nodeID int64, taskID int64) (*pkindexpb.CompactionResult, taskcommon.State, string, error)
+	// DropPKIndexCompaction drops a primary key index compaction task.
+	// A non-nil error is a transport failure, or a node that cannot be reached (merr.ErrNodeNotFound).
+	DropPKIndexCompaction(nodeID int64, taskID int64) error
 }
 
 var _ Cluster = (*cluster)(nil)
@@ -820,4 +834,48 @@ func (c *cluster) DropCopySegment(nodeID int64, taskID int64) error {
 	properties.AppendTaskID(taskID)
 	properties.AppendType(taskcommon.CopySegment)
 	return c.dropTask(nodeID, properties)
+}
+
+func pkindexCompactionProperties(taskID int64) taskcommon.Properties {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(taskID)
+	properties.AppendType(taskcommon.PKIndexCompaction)
+	return properties
+}
+
+func (c *cluster) CreatePKIndexCompaction(nodeID int64, in *pkindexpb.CompactionRequest, slot int64) error {
+	properties := pkindexCompactionProperties(in.GetTaskId())
+	properties.AppendTaskSlot(slot)
+	if err := c.createTask(nodeID, in, properties); err != nil {
+		return merr.Wrapf(err, "create pkindex compaction %d on node %d", in.GetTaskId(), nodeID)
+	}
+	return nil
+}
+
+func (c *cluster) QueryPKIndexCompaction(nodeID int64, taskID int64) (*pkindexpb.CompactionResult, taskcommon.State, string, error) {
+	resp, err := c.queryTask(nodeID, pkindexCompactionProperties(taskID))
+	if err != nil {
+		return nil, taskcommon.None, "", merr.Wrapf(err, "query pkindex compaction %d on node %d", taskID, nodeID)
+	}
+	resProperties := taskcommon.NewProperties(resp.GetProperties())
+	state, err := resProperties.GetTaskState()
+	if err != nil {
+		return nil, taskcommon.None, "", merr.Wrapf(err, "query pkindex compaction %d on node %d", taskID, nodeID)
+	}
+	if (state == taskcommon.Finished || state == taskcommon.Failed) && len(resp.GetPayload()) == 0 {
+		return nil, taskcommon.None, "", merr.WrapErrServiceInternalMsg("pkindex compaction %d on node %d: %s state without payload", taskID, nodeID, state.String())
+	}
+	result := &pkindexpb.CompactionResult{}
+	if err := proto.Unmarshal(resp.GetPayload(), result); err != nil {
+		return nil, taskcommon.None, "", merr.WrapErrServiceInternalErr(err, "unmarshal the result of pkindex compaction %d on node %d", taskID, nodeID)
+	}
+	return result, state, resProperties.GetTaskReason(), nil
+}
+
+func (c *cluster) DropPKIndexCompaction(nodeID int64, taskID int64) error {
+	if err := c.dropTask(nodeID, pkindexCompactionProperties(taskID)); err != nil {
+		return merr.Wrapf(err, "drop pkindex compaction %d on node %d", taskID, nodeID)
+	}
+	return nil
 }
