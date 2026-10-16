@@ -2,13 +2,17 @@ package datacoord
 
 import (
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/blang/semver/v4"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -836,4 +840,256 @@ func Test_IndexEngineVersionManager_SessionVersionCleanupOnStartup(t *testing.T)
 	vm := m.(*versionManagerImpl)
 	_, exists := vm.sessionVersion[2]
 	assert.False(t, exists, "offline node should be removed from sessionVersion map")
+}
+
+// installForm turns this test's binary into a form, and turns it back into a
+// stock binary when the test ends.
+func installForm(t *testing.T) {
+	t.Helper()
+	ext.ResetForTest()
+	t.Cleanup(ext.ResetForTest)
+	ext.SetForm()
+}
+
+// A stock binary with no QueryNode session answers exactly what master does:
+// version 0, no upper bound, and an operator override written through. The
+// current version is the MIN over every QueryNode's; with none registered
+// there is nothing to take it over, and a coordinator that came up first in a
+// rolling upgrade must not build indexes an older QueryNode cannot load.
+func TestAStockBinaryAnswersZeroWithNoSession(t *testing.T) {
+	paramtable.Init()
+	ext.ResetForTest()
+	t.Cleanup(ext.ResetForTest)
+	m := newIndexEngineVersionManager()
+
+	assert.Zero(t, m.GetCurrentIndexEngineVersion())
+	assert.Zero(t, m.GetCurrentScalarIndexEngineVersion())
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumIndexEngineVersion())
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
+
+	// With no upper bound, an override above what this image can load is
+	// written through - master's behavior, kept on a stock binary.
+	p := paramtable.Get()
+	compiledInVec := segcore.GetIndexEngineInfo().CurrentIndexVersion
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, strconv.Itoa(int(compiledInVec)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
+	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key,
+		strconv.Itoa(int(common.CurrentScalarIndexEngineVersion)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+	assert.Equal(t, compiledInVec+5, m.ResolveVecIndexVersion(),
+		"with no session a stock binary writes an override through, as it always has")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion+5, m.ResolveScalarIndexVersion())
+}
+
+// With a form installed, an empty session set is the resting state and the
+// versions come from this process's own engine - the same values the absent
+// query nodes, running this same image, would have reported. Version zero here
+// is what misroutes disk indexes in knowhere, so the assertion pins non-zero
+// as well as source equality. The store-path gate keeps its native reading
+// regardless: no session means no evidence any reader is on an older layout,
+// but the coordinator's own engine version is not that evidence either.
+func TestEmptySessionSetComesFromThisBinary(t *testing.T) {
+	installForm(t)
+	m := newIndexEngineVersionManager()
+
+	vec := m.GetCurrentIndexEngineVersion()
+	assert.Equal(t, segcore.GetIndexEngineInfo().CurrentIndexVersion, vec,
+		"the fallback must be this binary's own knowhere version")
+	assert.NotZero(t, vec, "version zero is the misrouting answer the fallback exists to avoid")
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetCurrentScalarIndexEngineVersion())
+
+	// The lower bound comes from this binary too. The assumption that a
+	// QueryNode started later runs this image covers the floor the same way
+	// it covers the ceiling: an override below what this image's segcore can
+	// load would build an index this same image cannot read.
+	assert.Equal(t, segcore.GetIndexEngineInfo().MinIndexVersion, m.GetMinimalIndexEngineVersion())
+
+	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
+	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		m.GetClusterMinIndexStorePathVersion())
+}
+
+// A query node that IS reporting always wins over the no-session fallback:
+// the fallback is about an empty set, never about overriding a session that
+// exists.
+func TestAReportingQueryNodeWinsOverTheFallback(t *testing.T) {
+	installForm(t)
+	m := newIndexEngineVersionManager()
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 1,
+			IndexEngineVersion:       sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 1},
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 1},
+		}},
+	})
+
+	assert.Equal(t, int32(1), m.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(1), m.GetCurrentScalarIndexEngineVersion())
+}
+
+// TestEmptySessionSetBoundsAnOverrideByThisBinary is the other half of the
+// form's no-session fallback. The clamp at the end of the resolve functions is
+// what stops dataCoord.targetVecIndexVersion from asking for an index nothing
+// in the cluster can load; with no QueryNode session the upper bound is
+// MaxInt32 on a stock binary, so the clamp does nothing and the override is
+// written through whatever it says. The bound with no session is the same
+// assumption the form's current version makes: a QueryNode started later runs
+// this image.
+func TestEmptySessionSetBoundsAnOverrideByThisBinary(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	p := paramtable.Get()
+	m := newIndexEngineVersionManager()
+
+	info := segcore.GetIndexEngineInfo()
+	loadableVec := max(info.CurrentIndexVersion, info.MaxIndexVersion)
+	// On 3.0 the scalar engine builds at CurrentScalarIndexEngineVersion but
+	// can load up to MaximumScalarIndexEngineVersion, which is higher; the
+	// ceiling is what the image can load, not what it builds at.
+	loadableScalar := max(common.CurrentScalarIndexEngineVersion, common.MaximumScalarIndexEngineVersion)
+	assert.Equal(t, loadableVec, m.GetMaximumIndexEngineVersion(),
+		"with no session the ceiling is the highest version this image can load")
+	assert.Equal(t, loadableScalar, m.GetMaximumScalarIndexEngineVersion())
+
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, strconv.Itoa(int(loadableVec)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
+	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key,
+		strconv.Itoa(int(loadableScalar)+5))
+	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+
+	assert.Equal(t, loadableVec, m.ResolveVecIndexVersion(),
+		"an override above what this image can load must be clamped to it")
+	assert.Equal(t, loadableScalar, m.ResolveScalarIndexVersion())
+}
+
+// An override BELOW the bound is untouched: the clamp is a ceiling, not a
+// rewrite, and asking for an older index version is a legitimate thing to do.
+func TestEmptySessionSetLeavesAnOverrideBelowThisBinaryAlone(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	p := paramtable.Get()
+	m := newIndexEngineVersionManager()
+
+	p.Save(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key, "true")
+	defer p.Reset(Params.DataCoordCfg.ForceRebuildSegmentIndex.Key)
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, "1")
+	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
+	p.Save(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key, "true")
+	defer p.Reset(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key)
+	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key, "0")
+	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+
+	assert.EqualValues(t, 1, m.ResolveVecIndexVersion())
+	assert.EqualValues(t, 0, m.ResolveScalarIndexVersion())
+}
+
+// The bound with no session must be the same figure a registered QueryNode
+// running this image would give: every session is read as max(Current,
+// Maximum), so answering with the current version alone would bound an
+// operator's target lower during a restart than a moment later, and clamp
+// index builds to a version this very image can read past. The fallback is
+// also still only about an EMPTY set: one session replaces it.
+func TestTheNoSessionBoundIsWhatThisImageCanLoad(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	m := newIndexEngineVersionManager()
+
+	info := segcore.GetIndexEngineInfo()
+	loadable := max(info.CurrentIndexVersion, info.MaxIndexVersion)
+	assert.Equal(t, loadable, m.GetMaximumIndexEngineVersion())
+	assert.GreaterOrEqual(t, loadable, info.CurrentIndexVersion,
+		"what an image can load is never below what it builds at")
+
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {SessionRaw: sessionutil.SessionRaw{
+			ServerID: 1,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{
+				CurrentIndexVersion: 3, MaximumIndexVersion: 4,
+			},
+		}},
+	})
+	assert.EqualValues(t, 4, m.GetMaximumIndexEngineVersion(),
+		"a session that exists is read the same way, and replaces the fallback")
+}
+
+// The scalar side of TestTheNoSessionBoundIsWhatThisImageCanLoad: with no
+// query node session the bound is what this image can load, read the same
+// way a registered node's scalar triple is. Both constants are equal today,
+// so this pins the shape rather than a difference.
+func TestTheNoSessionScalarBoundIsWhatThisImageCanLoad(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	m := newIndexEngineVersionManager()
+
+	loadable := max(common.CurrentScalarIndexEngineVersion, common.MaximumScalarIndexEngineVersion)
+	assert.Equal(t, loadable, m.GetMaximumScalarIndexEngineVersion())
+	assert.GreaterOrEqual(t, loadable, common.CurrentScalarIndexEngineVersion,
+		"what an image can load is never below what it builds at")
+
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {SessionRaw: sessionutil.SessionRaw{
+			ServerID: 1,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+				CurrentIndexVersion: 3, MaximumIndexVersion: 4,
+			},
+		}},
+	})
+	assert.EqualValues(t, 4, m.GetMaximumScalarIndexEngineVersion(),
+		"a session that exists is read the same way, and replaces the fallback")
+}
+
+// The compiled-in version is read only when it is the answer: a form installed
+// and no QueryNode session. Reading it is three cgo calls under the manager's
+// lock, and GetMaximumIndexEngineVersion is asked for every segment index a
+// compaction checks, so it must not be read when the sessions answer, or on a
+// stock binary, which never uses it.
+func TestTheCompiledInVersionIsReadOnlyWhenItIsTheAnswer(t *testing.T) {
+	paramtable.Init()
+	reads := 0
+	var origin func() segcore.IndexEngineInfo
+	counting := mockey.Mock(segcore.GetIndexEngineInfo).To(func() segcore.IndexEngineInfo {
+		reads++
+		return origin()
+	}).Origin(&origin).Build()
+	defer counting.UnPatch()
+
+	withSession := func(m IndexEngineVersionManager) {
+		m.Startup(map[string]*sessionutil.Session{
+			"qn1": {SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 3, MaximumIndexVersion: 4},
+			}},
+		})
+	}
+
+	t.Run("stock binary, no session", func(t *testing.T) {
+		ext.ResetForTest()
+		t.Cleanup(ext.ResetForTest)
+		m := newIndexEngineVersionManager()
+		reads = 0
+		m.GetMaximumIndexEngineVersion()
+		m.GetCurrentIndexEngineVersion()
+		assert.Zero(t, reads, "a stock binary answers without this image's version")
+	})
+
+	t.Run("form installed, a session registered", func(t *testing.T) {
+		installForm(t)
+		m := newIndexEngineVersionManager()
+		withSession(m)
+		reads = 0
+		assert.EqualValues(t, 4, m.GetMaximumIndexEngineVersion())
+		assert.EqualValues(t, 3, m.GetCurrentIndexEngineVersion())
+		assert.Zero(t, reads, "the sessions answer, so this image's version is not read")
+	})
+
+	t.Run("form installed, no session", func(t *testing.T) {
+		installForm(t)
+		m := newIndexEngineVersionManager()
+		reads = 0
+		m.GetMaximumIndexEngineVersion()
+		assert.Equal(t, 1, reads, "with nothing registered, this image's version is the answer")
+		m.GetCurrentIndexEngineVersion()
+		assert.Equal(t, 2, reads)
+	})
 }
