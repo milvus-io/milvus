@@ -26,7 +26,9 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 	switch source := req.GetSource().(type) {
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer:
 		if err := fileresource.Prepare(ctx); err != nil {
-			return nil, analyzerPreparationError(err)
+			return &streamingpb.StreamingNodeRunAnalyzerResponse{
+				Status: merr.Status(merr.Wrap(err, "prepare analyzer file resources")),
+			}, nil
 		}
 		results, err := analyzer.Run(ctx, source.InlineAnalyzer.GetAnalyzerParams(), req.GetPlaceholder(), req.GetWithDetail(), req.GetWithHash())
 		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err), Results: results}, nil
