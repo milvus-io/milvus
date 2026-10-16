@@ -59,6 +59,14 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     if (is_sparse) {
         const auto& index_params = index_meta_.GetIndexParams();
 
+        // This allowlist is intentional: inherit only the algorithm and BM25
+        // scorer parameters, keeping interim tuning independent of the
+        // persistent index. Do not forward quant_type, inverted_index_codec,
+        // sindi_window_size or block_max_block_size. Growing and unindexed
+        // sealed segments use Knowhere defaults for these settings, which may
+        // depend on the target index version. Quantization and scores can
+        // therefore differ from a persisted fp32/u32 index; the interim
+        // algorithm override does not guarantee matching its precision.
         if (auto algo_it =
                 index_params.find(knowhere::indexparam::INVERTED_INDEX_ALGO);
             algo_it != index_params.end()) {
