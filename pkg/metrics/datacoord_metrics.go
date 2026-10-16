@@ -270,6 +270,30 @@ var (
 			statusLabelName,
 		})
 
+	DataCoordPKIndexCompactionTaskNum = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "pkindex_compaction_task_num",
+			Help:      "number of primary key index compaction tasks in flight",
+		})
+
+	DataCoordPKIndexCompactionTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "pkindex_compaction_total",
+			Help:      "number of primary key index compactions that ended, by rule and result",
+		}, []string{"rule", "result"})
+
+	DataCoordPKIndexCompactionBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "pkindex_compaction_bytes_total",
+			Help:      "bytes of primary key index tables that compactions read (in) and wrote (out)",
+		}, []string{"direction"})
+
 	DataCoordCompactionLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -558,6 +582,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordCompactedSegmentSize)
 	registry.MustRegister(DataCoordCompactionTaskNum)
 	registry.MustRegister(DataCoordCompactionLatency)
+	registry.MustRegister(DataCoordPKIndexCompactionTaskNum)
+	registry.MustRegister(DataCoordPKIndexCompactionTotal)
+	registry.MustRegister(DataCoordPKIndexCompactionBytes)
 	registry.MustRegister(ImportJobLatency)
 	registry.MustRegister(ImportTaskLatency)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)
