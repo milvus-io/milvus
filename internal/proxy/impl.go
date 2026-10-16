@@ -153,8 +153,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		}
 	}
 
-	switch msgType {
-	}
 
 	if globalMetaCache != nil {
 		switch msgType {
@@ -3134,8 +3132,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	)
 
 	err = qt.WaitToFinish()
-	if ctx.Err() == nil {
-	}
 	if err != nil {
 		log.Warn(
 			rpcFailedToWaitToFinish(method),
@@ -3379,8 +3375,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	)
 
 	waitErr := qt.WaitToFinish()
-	if ctx.Err() == nil {
-	}
 	if waitErr != nil {
 		log.Warn(
 			rpcFailedToWaitToFinish(method),

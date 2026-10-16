@@ -64,8 +64,6 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 			break
 		}
 	}
-	if propertiesChanged {
-	}
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err

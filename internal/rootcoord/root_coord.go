@@ -172,8 +172,6 @@ func (c *Core) GetQuotaCenter() *QuotaCenter {
 
 func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
 	c.proxyClientManager.SetProxyClients(sessions)
-	if len(sessions) > 0 {
-	}
 }
 
 func (c *Core) addProxyClient(session *sessionutil.Session) {
