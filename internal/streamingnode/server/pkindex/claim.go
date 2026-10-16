@@ -37,11 +37,11 @@ var recoveryBatch = MaxRecoveryManifests
 // CreateCollection, does not look up: its collection is new. No Index hands
 // over before the claim and the lookups are done.
 //
-// Without a Committer the Channel does not claim, and no Index hands over.
+// Without a Committer the PChannelIndexManager does not claim, and no Index hands over.
 //
 // TODO: a later change injects the Committer that the manifest service
 // client implements.
-func (c *Channel) StartClaim() {
+func (c *PChannelIndexManager) StartClaim() {
 	if c.m.cfg.Committer == nil {
 		return
 	}
@@ -67,7 +67,7 @@ func (c *Channel) StartClaim() {
 
 // claim claims the pchannel for its term once, looks up the manifests of the
 // recovered indexes, and then makes the other indexes ready.
-func (c *Channel) claim(recovered []*index.Index) {
+func (c *PChannelIndexManager) claim(recovered []*index.Index) {
 	defer c.lifetime.Done()
 	ctx := c.ctx
 	committer := c.m.cfg.Committer
@@ -106,7 +106,7 @@ func (c *Channel) claim(recovered []*index.Index) {
 // recoveryBatch refs, and marks each Index ready with its answer. It retries
 // only the items that failed. It returns an error when ctx ends or a failure
 // is fatal.
-func (c *Channel) lookupRecovered(ctx context.Context, idxs []*index.Index) error {
+func (c *PChannelIndexManager) lookupRecovered(ctx context.Context, idxs []*index.Index) error {
 	committer := c.m.cfg.Committer
 	pending := idxs
 	return retry.Do(ctx, func() error {
@@ -150,7 +150,7 @@ func (c *Channel) lookupRecovered(ctx context.Context, idxs []*index.Index) erro
 
 // retryOptions retries a claim or a lookup until it succeeds, a failure is
 // fatal or ctx ends. The wait doubles from the backoff base up to the max.
-func (c *Channel) retryOptions() []retry.Option {
+func (c *PChannelIndexManager) retryOptions() []retry.Option {
 	params := c.m.cfg.Params()
 	return []retry.Option{
 		retry.AttemptAlways(),
@@ -163,7 +163,7 @@ func (c *Channel) retryOptions() []retry.Option {
 
 // retryable handles the result of a claim or lookup call. A fatal error stops
 // the retry. Another error is logged and retried.
-func (c *Channel) retryable(ctx context.Context, step string, items int, err error) error {
+func (c *PChannelIndexManager) retryable(ctx context.Context, step string, items int, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -177,7 +177,7 @@ func (c *Channel) retryable(ctx context.Context, step string, items int, err err
 
 // stopClaim reports a claim or lookup that stopped. A fatal error goes to
 // OnFatal. It ignores the error of a ctx that ended.
-func (c *Channel) stopClaim(ctx context.Context, step string, err error) {
+func (c *PChannelIndexManager) stopClaim(ctx context.Context, step string, err error) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -187,7 +187,7 @@ func (c *Channel) stopClaim(ctx context.Context, step string, err error) {
 
 // newBackoff returns the handover backoff of an Index with the current
 // params.
-func (c *Channel) newBackoff() *typeutil.BackoffWithInstant {
+func (c *PChannelIndexManager) newBackoff() *typeutil.BackoffWithInstant {
 	params := c.m.cfg.Params()
 	return typeutil.NewBackoffWithInstant(typeutil.BackoffTimerConfig{
 		Backoff: typeutil.BackoffConfig{

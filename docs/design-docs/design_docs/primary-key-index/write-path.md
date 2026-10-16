@@ -113,7 +113,10 @@ internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin
         │ translates WAL messages into DecideRequests, appends what the Authority asks for
         ▼
 internal/streamingnode/server/pkindex                    the index of the streaming node
-        │ Index: the index of one vchannel; it owns the engine and the Authority on it
+        │ PChannelIndexManager: the vchannels of one pchannel, Authority(vchannel)
+        ▼
+internal/streamingnode/server/pkindex/index              the index of one vchannel
+        │ Index: it owns the engine and the Authority on it
         ▼
 internal/pkindex/authority                               the write path decision
         │ Authority: the probe, the striped locks and the pending writes of
@@ -123,7 +126,7 @@ Engine                                                   the storage behind it
                                                          (in-memory in this step)
 ```
 
-The packages `internal/streamingnode/server/pkindex` and
+The packages `internal/streamingnode/server/pkindex`, its `index` and
 `internal/pkindex/authority` hold the index logic and do not depend on the WAL.
 The interceptor is the only place that knows both sides.
 

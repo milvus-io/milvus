@@ -36,8 +36,8 @@ import (
 // The tests in this file call prepare and commit of a ready Index directly,
 // without the driver, to check the steps of one handover.
 
-// handoverIndex returns a ready Index of v0 on a Channel without the driver.
-func handoverIndex(t *testing.T) (*testEnv, *Channel, *index.Index) {
+// handoverIndex returns a ready Index of v0 on a PChannelIndexManager without the driver.
+func handoverIndex(t *testing.T) (*testEnv, *PChannelIndexManager, *index.Index) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	return env, ch, env.add(ch, "v0")
@@ -72,7 +72,7 @@ func TestHandoverNormal(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	insert(t, idx, 10, 1, 2, 3)
-	ch.Tick(50)
+	ch.ObserveTimeTick(50)
 
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestHandoverNothingToPublish(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	idx.SetLastCommittedForTest(10)
-	ch.Tick(20)
+	ch.ObserveTimeTick(20)
 
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	insert(t, idx, 10, 1, 2, 3)
-	ch.Tick(50)
+	ch.ObserveTimeTick(50)
 
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestHandoverRejectsAManifestThatWentBack(t *testing.T) {
 			env, ch, idx := handoverIndex(t)
 			env.client.set(func(c *fakeClient) { c.rewrite = tc.rewrite })
 			insert(t, idx, 10, 1)
-			ch.Tick(50)
+			ch.ObserveTimeTick(50)
 			idx.SetInstalledVersionForTest(tc.installed)
 
 			p, err := idx.PrepareForTest(ctx)
@@ -227,7 +227,7 @@ func TestHandoverAcceptsTheSameVersion(t *testing.T) {
 	ctx := context.Background()
 	_, ch, idx := handoverIndex(t)
 	insert(t, idx, 10, 1)
-	ch.Tick(50)
+	ch.ObserveTimeTick(50)
 	idx.SetInstalledVersionForTest(1)
 
 	p, err := idx.PrepareForTest(ctx)
@@ -243,7 +243,7 @@ func TestHandoverAcceptsTheSameVersion(t *testing.T) {
 func TestHandoverWatermarkDidNotMove(t *testing.T) {
 	env, ch, idx := handoverIndex(t)
 	insert(t, idx, 10, 1, 2)
-	ch.Tick(30)
+	ch.ObserveTimeTick(30)
 	idx.SetLastCommittedForTest(30)
 
 	p, err := idx.PrepareForTest(context.Background())
@@ -261,7 +261,7 @@ func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	insert(t, idx, 10, 1)
-	ch.Tick(50)
+	ch.ObserveTimeTick(50)
 
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)

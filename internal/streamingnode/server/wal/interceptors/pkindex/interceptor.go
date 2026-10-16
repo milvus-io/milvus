@@ -47,7 +47,7 @@ type txnSessions interface {
 // appendInterceptor translates WAL messages into primary key index requests and
 // appends what the index asks for. It holds no index logic of its own.
 type appendInterceptor struct {
-	ch       *snpkindex.Channel
+	ch       *snpkindex.PChannelIndexManager
 	registry *registry
 	sessions txnSessions
 	metrics  *pkindexMetrics
@@ -71,7 +71,7 @@ func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMes
 		// failed append does not tick.
 		id, err := appendOp(ctx, msg)
 		if err == nil {
-			i.ch.Tick(msg.TimeTick())
+			i.ch.ObserveTimeTick(msg.TimeTick())
 			i.dropPendingOfEndedTxns()
 		}
 		return id, err
@@ -307,7 +307,13 @@ func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg m
 // decide calls the index and classifies its error for the WAL.
 func (i *appendInterceptor) decide(ctx context.Context, t *target, req authority.DecideRequest) (*authority.WriteGuard, error) {
 	start := time.Now()
-	guard, err := t.idx.Authority().Decide(ctx, req)
+	a := i.ch.Authority(req.VChannel)
+	if a == nil {
+		// The index closed between the lookup of the target and this call:
+		// the WAL closes, or a DropCollection raced with the write.
+		return nil, decideError(errors.Wrapf(engine.ErrClosed, "primary key index of vchannel %s is closed", req.VChannel))
+	}
+	guard, err := a.Decide(ctx, req)
 	if err != nil {
 		if errors.Is(err, pkroot.ErrCorrupted) {
 			// The index of this vchannel is wrong, and every later decision
@@ -360,10 +366,14 @@ func (i *appendInterceptor) dropPendingOfEndedTxns() {
 	if i.sessions == nil {
 		return
 	}
-	i.registry.forEach(func(t *target) {
-		for _, txnID := range t.idx.Authority().PendingTxnIDs() {
+	i.registry.forEach(func(vchannel string, _ *target) {
+		a := i.ch.Authority(vchannel)
+		if a == nil {
+			return
+		}
+		for _, txnID := range a.PendingTxnIDs() {
 			if _, err := i.sessions.GetSessionOfTxn(message.TxnID(txnID)); err != nil {
-				t.idx.Authority().DropTxn(txnID)
+				a.DropTxn(txnID)
 			}
 		}
 	})

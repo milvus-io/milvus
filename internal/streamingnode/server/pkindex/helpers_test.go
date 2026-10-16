@@ -401,21 +401,21 @@ func (env *testEnv) setParams(f func(p *Params)) {
 	env.params.Store(&p)
 }
 
-// channel opens a Channel without the driver goroutine and starts its claim.
+// channel opens a PChannelIndexManager without the driver goroutine and starts its claim.
 // Every Index that a test adds to it is the Index of a new collection.
-func (env *testEnv) channel(seed uint64) *Channel {
+func (env *testEnv) channel(seed uint64) *PChannelIndexManager {
 	ch := env.openChannel(seed)
 	ch.StartClaim()
 	return ch
 }
 
-// recoveredChannel opens a Channel, adds the indexes of vchannels as the
+// recoveredChannel opens a PChannelIndexManager, adds the indexes of vchannels as the
 // indexes of existing collections, and starts the claim. It does not wait
 // for the claim.
-func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *Channel {
+func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *PChannelIndexManager {
 	ch := env.openChannel(seed)
 	for _, v := range vchannels {
-		_, created, err := ch.Add(context.Background(), v, testCollectionID, schemapb.DataType_Int64)
+		created, err := ch.CreateCollection(context.Background(), v, testCollectionID, schemapb.DataType_Int64)
 		require.NoError(env.t, err)
 		require.True(env.t, created)
 	}
@@ -423,9 +423,9 @@ func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *Channel 
 	return ch
 }
 
-func (env *testEnv) openChannel(seed uint64) *Channel {
+func (env *testEnv) openChannel(seed uint64) *PChannelIndexManager {
 	info := types.PChannelInfo{Name: "test-dml_0", Term: testTerm}
-	return env.mgr.openChannel(info, seed, env.walTail, env.onFatal, false)
+	return env.mgr.open(OpenParam{PChannel: info, Seed: seed, Tail: env.walTail, OnFatal: env.onFatal}, false)
 }
 
 func (env *testEnv) walTail() WALTail {
@@ -458,11 +458,11 @@ func (env *testEnv) waitFatal() error {
 }
 
 // add opens the Index of vchannel and waits until it is ready.
-func (env *testEnv) add(ch *Channel, vchannel string) *index.Index {
-	_, created, err := ch.Add(context.Background(), vchannel, testCollectionID, schemapb.DataType_Int64)
+func (env *testEnv) add(ch *PChannelIndexManager, vchannel string) *index.Index {
+	created, err := ch.CreateCollection(context.Background(), vchannel, testCollectionID, schemapb.DataType_Int64)
 	require.NoError(env.t, err)
 	require.True(env.t, created)
-	idx := ch.Get(vchannel)
+	idx := ch.get(vchannel)
 	require.NotNil(env.t, idx)
 	waitReady(env.t, idx)
 	return idx
@@ -513,6 +513,6 @@ func int64PKs(values ...int64) []authority.PK {
 }
 
 // slotOf returns the driver bookkeeping of idx.
-func slotOf(ch *Channel, idx *index.Index) *handoverSlot {
+func slotOf(ch *PChannelIndexManager, idx *index.Index) *handoverSlot {
 	return ch.slotOf(idx)
 }

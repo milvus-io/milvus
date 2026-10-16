@@ -14,11 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package pkindex is the primary key index of a streaming node. A Manager
-// holds a Channel for each pchannel, and a Channel holds an Index for each
-// vchannel. The Index owns the engine of its vchannel and the write path
-// authority on top of it (package internal/pkindex/authority), and hands its
-// tables over to object storage through a Committer.
+// Package pkindex is the primary key index of a streaming node, at the
+// pchannel level and above. A Manager holds a PChannelIndexManager for each
+// pchannel. A PChannelIndexManager keeps the member table of its vchannels,
+// observes the TimeTick messages, claims the pchannel, drives the handovers
+// and keeps the LastAcked bound. Each vchannel is an index.Index (package
+// index), which owns the engine of the vchannel and the write path authority
+// on top of it (package internal/pkindex/authority), and hands its tables
+// over to object storage through a Committer.
 package pkindex
 
 import (
@@ -94,7 +97,7 @@ type ManagerConfig struct {
 	// (ChunkManager.RootPath()). The SST base path of a vchannel is under it.
 	StorageRootPath string
 	// Committer claims the pchannels and reads and changes the manifests.
-	// When it is nil, a Channel does not claim and no Index hands over. The
+	// When it is nil, a PChannelIndexManager does not claim and no Index hands over. The
 	// indexes still serve the writes.
 	Committer Committer
 	// Sched runs the handovers of all pchannels of the node.
@@ -105,7 +108,7 @@ type ManagerConfig struct {
 }
 
 // Manager owns the primary key indexes of one streaming node. It opens one
-// Channel per pchannel.
+// PChannelIndexManager per pchannel.
 //
 // The Manager does not own ManagerConfig.Shared. The caller releases it after
 // Close returns.
@@ -114,7 +117,7 @@ type Manager struct {
 	lifetime *typeutil.Lifetime
 
 	mu       sync.Mutex
-	channels map[*Channel]struct{}
+	channels map[*PChannelIndexManager]struct{}
 }
 
 // NewManager creates a Manager.
@@ -122,28 +125,38 @@ func NewManager(cfg ManagerConfig) *Manager {
 	return &Manager{
 		cfg:      cfg,
 		lifetime: typeutil.NewLifetime(),
-		channels: make(map[*Channel]struct{}),
+		channels: make(map[*PChannelIndexManager]struct{}),
 	}
 }
 
-// OpenChannel opens the primary key index of a pchannel.
-//
-// seed is the initial lastAppliedTimeTick: the time tick of the last TimeTick
-// message when the WAL opens. tail returns the WAL recovery tail, zeros when
-// it is unknown. Zeros never start a handover. onFatal marks the WAL
-// unavailable. It must not block.
-//
-// The caller adds the indexes of the existing collections and then calls
-// Channel.StartClaim.
-//
-// After Close, OpenChannel returns a closed Channel: Add on it fails.
-func (m *Manager) OpenChannel(info types.PChannelInfo, seed uint64, tail func() WALTail, onFatal func(error)) *Channel {
-	return m.openChannel(info, seed, tail, onFatal, true)
+// OpenParam is what the WAL gives the primary key index of a pchannel.
+type OpenParam struct {
+	PChannel types.PChannelInfo
+	// Seed is the initial lastAppliedTimeTick: the time tick of the last
+	// TimeTick message when the WAL opens.
+	Seed uint64
+	// Tail returns the WAL recovery tail, zeros when it is unknown. Zeros
+	// never start a handover. Nil is allowed.
+	Tail func() WALTail
+	// OnFatal marks the WAL unavailable. It must not block.
+	OnFatal func(error)
 }
 
-// openChannel opens a Channel. Tests pass startDriver false and call step by hand.
-func (m *Manager) openChannel(info types.PChannelInfo, seed uint64, tail func() WALTail, onFatal func(error), startDriver bool) *Channel {
-	c := newChannel(m, info, seed, tail, onFatal)
+// Open opens the primary key index of a pchannel.
+//
+// The caller creates the indexes of the existing collections with
+// CreateCollection and then calls StartClaim.
+//
+// After Close, Open returns a closed PChannelIndexManager: CreateCollection
+// on it fails.
+func (m *Manager) Open(_ context.Context, p OpenParam) *PChannelIndexManager {
+	return m.open(p, true)
+}
+
+// open opens a PChannelIndexManager. Tests pass startDriver false and call
+// step by hand.
+func (m *Manager) open(p OpenParam, startDriver bool) *PChannelIndexManager {
+	c := newPChannelIndexManager(m, p.PChannel, p.Seed, p.Tail, p.OnFatal)
 	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
 		c.Close()
 		return c
@@ -158,20 +171,20 @@ func (m *Manager) openChannel(info types.PChannelInfo, seed uint64, tail func() 
 	return c
 }
 
-// forget removes a closed Channel from the Manager.
-func (m *Manager) forget(c *Channel) {
+// forget removes a closed PChannelIndexManager from the Manager.
+func (m *Manager) forget(c *PChannelIndexManager) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.channels, c)
 }
 
-// Close closes every open Channel. It does not release ManagerConfig.Shared.
+// Close closes every open PChannelIndexManager. It does not release ManagerConfig.Shared.
 func (m *Manager) Close() {
 	m.lifetime.SetState(typeutil.LifetimeStateStopped)
 	m.lifetime.Wait()
 
 	m.mu.Lock()
-	channels := make([]*Channel, 0, len(m.channels))
+	channels := make([]*PChannelIndexManager, 0, len(m.channels))
 	for c := range m.channels {
 		channels = append(channels, c)
 	}
@@ -180,3 +193,53 @@ func (m *Manager) Close() {
 		c.Close()
 	}
 }
+
+// VChannelRef names the manifest of a vchannel.
+type VChannelRef struct {
+	CollectionID int64
+	VChannel     string
+}
+
+// RecoveryManifest is the answer of GetRecoveryManifests for one vchannel.
+type RecoveryManifest struct {
+	// Found reports whether the vchannel has a manifest.
+	Found bool
+	// Version and BodyKey point to the manifest when Found is true. BodyKey
+	// is the object key of the manifest body.
+	Version int64
+	BodyKey string
+	// Err is the failure of this item. The other fields are not set when it
+	// is not nil.
+	Err error
+}
+
+// Claimer claims a pchannel and finds the manifests of its vchannels. The
+// PChannelIndexManager defines the part of the manifest service that it uses.
+//
+// The calls return an error that matches index.ErrFenced when a newer term
+// owns the pchannel, and index.ErrRejected when a retry cannot fix the error.
+type Claimer interface {
+	// ClaimPChannel claims the pchannel for term. A claim with the claimed
+	// term again succeeds.
+	ClaimPChannel(ctx context.Context, pchannel string, term int64) error
+	// GetRecoveryManifests returns one answer for each ref, in the order of
+	// refs. An item that fails has its own Err. The caller sends at most
+	// MaxRecoveryManifests refs in one call.
+	GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error)
+}
+
+// MaxRecoveryManifests is the largest number of refs in one
+// GetRecoveryManifests call.
+const MaxRecoveryManifests = 10000
+
+// Committer is what the primary key index of a streaming node needs from the
+// manifest service: the claim and the lookups of the PChannelIndexManager, and the flush
+// commits of the Index.
+type Committer interface {
+	Claimer
+	index.Committer
+}
+
+// TableStore moves SST files between local disk and object storage. See
+// index.TableStore.
+type TableStore = index.TableStore

@@ -55,7 +55,7 @@ type handoverSlot struct {
 const driveInterval = time.Second
 
 // startDriver starts the goroutine that runs step every driveInterval.
-func (c *Channel) startDriver() {
+func (c *PChannelIndexManager) startDriver() {
 	c.driverDone = make(chan struct{})
 	go func() {
 		defer close(c.driverDone)
@@ -73,7 +73,7 @@ func (c *Channel) startDriver() {
 }
 
 // step picks the indexes that hand over now and submits their handovers.
-func (c *Channel) step(now time.Time) {
+func (c *PChannelIndexManager) step(now time.Time) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
 	}
@@ -86,7 +86,7 @@ func (c *Channel) step(now time.Time) {
 // slotOf returns the handover slot of idx. Add creates the slot with the
 // Index, so that the first instant of its backoff is the open of the Index,
 // and detachLocked deletes it. A detached Index gets a slot that no step sees.
-func (c *Channel) slotOf(idx *index.Index) *handoverSlot {
+func (c *PChannelIndexManager) slotOf(idx *index.Index) *handoverSlot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if s, ok := c.slots[idx]; ok {
@@ -97,7 +97,7 @@ func (c *Channel) slotOf(idx *index.Index) *handoverSlot {
 
 // submitHandover submits one handover of idx to the node scheduler. Only the
 // driver step and the tests call it.
-func (c *Channel) submitHandover(idx *index.Index) {
+func (c *PChannelIndexManager) submitHandover(idx *index.Index) {
 	s := c.slotOf(idx)
 	s.running.Store(true)
 	s.handle = c.m.cfg.Sched.Submit(&handoverTask{c: c, idx: idx, slot: s})
@@ -106,7 +106,7 @@ func (c *Channel) submitHandover(idx *index.Index) {
 // reapHandover clears running when the scheduler finished the task without
 // running it, for example after the scheduler closed. Only the driver step
 // calls it.
-func (c *Channel) reapHandover(s *handoverSlot) {
+func (c *PChannelIndexManager) reapHandover(s *handoverSlot) {
 	if s.handle == nil || !s.running.Load() {
 		return
 	}
@@ -122,7 +122,7 @@ func (c *Channel) reapHandover(s *handoverSlot) {
 
 // handoverTask runs one handover of an Index on the node scheduler.
 type handoverTask struct {
-	c    *Channel
+	c    *PChannelIndexManager
 	idx  *index.Index
 	slot *handoverSlot
 }
@@ -137,7 +137,7 @@ func (t *handoverTask) Execute(ctx context.Context) error {
 // runHandover runs one handover step of idx and records its outcome in the
 // slot: a success resets the backoff, a retryable failure advances it, a
 // fatal error stops the handovers of the Index and marks the WAL unavailable.
-func (c *Channel) runHandover(ctx context.Context, idx *index.Index, s *handoverSlot) {
+func (c *PChannelIndexManager) runHandover(ctx context.Context, idx *index.Index, s *handoverSlot) {
 	defer s.running.Store(false)
 	committed, err := idx.Handover(ctx)
 	switch {
@@ -176,7 +176,7 @@ func (c *Channel) runHandover(ctx context.Context, idx *index.Index, s *handover
 // fresh Index: an Index with nothing to publish is never a candidate, and a
 // pending request counts as dirty. So a step costs the number of dirty
 // Indexes.
-func (c *Channel) pickHandovers(now time.Time) []*index.Index {
+func (c *PChannelIndexManager) pickHandovers(now time.Time) []*index.Index {
 	params := c.m.cfg.Params()
 	tail := c.tail()
 	var out []*index.Index

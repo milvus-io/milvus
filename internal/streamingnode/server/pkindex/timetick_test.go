@@ -20,6 +20,9 @@ import (
 	"context"
 	"math"
 	"math/rand"
+	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,6 +33,126 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 )
+
+func TestWatermarkWaitsForEarlierWriter(t *testing.T) {
+	w := newWatermark(0)
+	a := w.enter() // will get tt=100, applies late
+	b := w.enter() // will get tt=101, applies first
+	w.end(b)
+	w.tick(101) // TimeTick 101: every tt <= 101 is appended
+	assert.EqualValues(t, 0, w.lastApplied(), "writer a is still in flight")
+	w.end(a)
+	assert.EqualValues(t, 101, w.lastApplied())
+}
+
+func TestWatermarkLaterEpochDoesNotBlockEarlier(t *testing.T) {
+	w := newWatermark(5)
+	w.tick(10)
+	assert.EqualValues(t, 10, w.lastApplied())
+	c := w.enter() // enters after tick 10, so its tt > 10
+	w.tick(20)
+	assert.EqualValues(t, 10, w.lastApplied())
+	w.end(c)
+	assert.EqualValues(t, 20, w.lastApplied())
+}
+
+func TestWatermarkIsMonotonic(t *testing.T) {
+	w := newWatermark(50)
+	w.tick(40) // an old tick after a restart seed
+	assert.EqualValues(t, 50, w.lastApplied())
+}
+
+func TestWatermarkReleasesEpochs(t *testing.T) {
+	w := newWatermark(0)
+	for i := uint64(1); i <= 100; i++ {
+		tok := w.enter()
+		w.tick(i * 10)
+		w.end(tok)
+	}
+	assert.EqualValues(t, 1000, w.lastApplied())
+	assert.Empty(t, w.inflight)
+	assert.Empty(t, w.closeAt)
+}
+
+func TestWatermarkEndTwicePanics(t *testing.T) {
+	w := newWatermark(0)
+	tok := w.enter()
+	w.end(tok)
+	assert.Panics(t, func() { w.end(tok) })
+}
+
+func TestWatermarkConcurrent(t *testing.T) {
+	const writers = 8
+	const rounds = 200
+	w := newWatermark(0)
+
+	var writersWG sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		writersWG.Add(1)
+		go func(seed int64) {
+			defer writersWG.Done()
+			r := rand.New(rand.NewSource(seed))
+			for j := 0; j < rounds; j++ {
+				tok := w.enter()
+				if r.Intn(4) == 0 {
+					time.Sleep(time.Duration(r.Intn(50)) * time.Microsecond)
+				} else {
+					runtime.Gosched()
+				}
+				w.end(tok)
+			}
+		}(int64(i))
+	}
+
+	stop := make(chan struct{})
+	var lastTick atomic.Uint64
+	var bgWG sync.WaitGroup
+	bgWG.Add(2)
+	go func() {
+		defer bgWG.Done()
+		tt := uint64(0)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			tt++
+			w.tick(tt)
+			lastTick.Store(tt)
+			runtime.Gosched()
+		}
+	}()
+	go func() {
+		defer bgWG.Done()
+		prev := uint64(0)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			cur := w.lastApplied()
+			if cur < prev {
+				t.Errorf("lastApplied went back from %d to %d", prev, cur)
+				return
+			}
+			assert.LessOrEqual(t, cur, lastTick.Load()+1)
+			prev = cur
+			runtime.Gosched()
+		}
+	}()
+
+	writersWG.Wait()
+	close(stop)
+	bgWG.Wait()
+
+	final := lastTick.Load() + 1
+	w.tick(final)
+	assert.EqualValues(t, final, w.lastApplied())
+	assert.Empty(t, w.inflight)
+	assert.Empty(t, w.closeAt)
+}
 
 func insertRequest(idx *index.Index, pks ...int64) authority.DecideRequest {
 	return authority.DecideRequest{Kind: authority.KindInsert, VChannel: idx.VChannel(), PKs: int64PKs(pks...)}
@@ -43,7 +166,7 @@ func TestLateApplyHoldsTheWatermark(t *testing.T) {
 
 	intent, err := idx.Authority().Decide(ctx, insertRequest(idx, 1))
 	require.NoError(t, err)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	assert.EqualValues(t, 0, ch.wm.lastApplied(), "the writer is still in flight")
 	intent.Apply(ctx, authority.Applied{SegmentID: 5})
 	assert.EqualValues(t, 10, ch.wm.lastApplied())
@@ -62,7 +185,7 @@ func TestDiscardEndsTheWriter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, intent.Decision().CompanionDeletePKs)
 	assert.GreaterOrEqual(t, intent.LockWait(), time.Duration(0))
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	intent.Discard(ctx, errors.New("append failed"))
 	assert.EqualValues(t, 10, ch.wm.lastApplied())
 	assert.False(t, idx.Dirty(), "a discarded write does not touch the engine")
@@ -79,7 +202,7 @@ func TestDecideErrorEndsTheWriter(t *testing.T) {
 	require.NoError(t, idx.EngineForTest().Close())
 	_, err := idx.Authority().Decide(ctx, insertRequest(idx, 1))
 	require.Error(t, err)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	assert.EqualValues(t, 10, ch.wm.lastApplied())
 }
 
@@ -127,12 +250,12 @@ func TestLastAckedIgnoresIdleVChannels(t *testing.T) {
 
 	a := env.add(ch, "va")
 	b := env.add(ch, "vb")
-	ch.Tick(5)
+	ch.ObserveTimeTick(5)
 	assert.EqualValues(t, 5, ch.LastAcked(), "no Index is dirty")
 
 	insert(t, a, 1, 1)
 	insert(t, b, 1, 1)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	assert.EqualValues(t, 5, ch.LastAcked(), "a and b hold it at their commit")
 	ch.submitHandover(a)
 	ch.submitHandover(b)
@@ -140,10 +263,10 @@ func TestLastAckedIgnoresIdleVChannels(t *testing.T) {
 
 	// b stays idle and does not hold back the writes of a
 	insert(t, a, 2, 2)
-	ch.Tick(20)
+	ch.ObserveTimeTick(20)
 	assert.EqualValues(t, 10, ch.LastAcked())
 	ch.submitHandover(a)
-	ch.Tick(30)
+	ch.ObserveTimeTick(30)
 	assert.EqualValues(t, 30, ch.LastAcked())
 
 	// b becomes dirty again with an old commit, the value does not go down
@@ -153,14 +276,14 @@ func TestLastAckedIgnoresIdleVChannels(t *testing.T) {
 }
 
 // lastAckedRaw is LastAcked without the clamp.
-func (c *Channel) lastAckedRaw() uint64 {
+func (c *PChannelIndexManager) lastAckedRaw() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastAckedLocked()
 }
 
 // bruteLastAcked computes the raw LastAcked over every Index.
-func bruteLastAcked(c *Channel) uint64 {
+func bruteLastAcked(c *PChannelIndexManager) uint64 {
 	v := c.wm.lastApplied()
 	for _, idx := range c.list() {
 		if idx.Dirty() && idx.LastCommittedTimeTick() < v {
@@ -205,7 +328,7 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 			open = append(open[:k], open[k+1:]...)
 		case op < 18:
 			tt++
-			ch.Tick(tt)
+			ch.ObserveTimeTick(tt)
 		default:
 			if idx.Dirty() {
 				ch.submitHandover(idx)

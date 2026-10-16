@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -32,10 +33,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Channel is the primary key index of one pchannel. It owns the Index of every
+// PChannelIndexManager is the primary key index of one pchannel. It owns the Index of every
 // vchannel of the pchannel, the watermark that all of them share, and the
 // driver that starts their handovers.
-type Channel struct {
+type PChannelIndexManager struct {
 	m        *Manager
 	info     types.PChannelInfo
 	wm       *watermark
@@ -67,12 +68,12 @@ type Channel struct {
 	claimed      bool
 }
 
-func newChannel(m *Manager, info types.PChannelInfo, seed uint64, tail func() WALTail, onFatal func(error)) *Channel {
+func newPChannelIndexManager(m *Manager, info types.PChannelInfo, seed uint64, tail func() WALTail, onFatal func(error)) *PChannelIndexManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	if tail == nil {
 		tail = func() WALTail { return WALTail{} }
 	}
-	return &Channel{
+	return &PChannelIndexManager{
 		m:        m,
 		info:     info,
 		wm:       newWatermark(seed),
@@ -87,31 +88,31 @@ func newChannel(m *Manager, info types.PChannelInfo, seed uint64, tail func() WA
 	}
 }
 
-// errClosed reports a call on a closed Channel or Index. what names it, such
+// errClosed reports a call on a closed PChannelIndexManager or Index. what names it, such
 // as "pchannel <name>". It wraps engine.ErrClosed, so the caller handles it
 // like a closed engine.
 func errClosed(what string) error {
 	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of %s is closed", what), pkroot.ErrUnavailable)
 }
 
-// Add opens the Index of a vchannel and returns it, with whether this call
-// opened it. It returns the existing Index and false when the Index exists,
-// so a caller that rolls back after a failure removes only an Index that it
+// CreateCollection opens the Index of a vchannel and reports whether this
+// call opened it. It returns false and no error when the Index exists, so a
+// caller that rolls back after a failure removes only an Index that it
 // opened. It returns the error of the engine open.
-func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, pkDataType schemapb.DataType) (*index.Index, bool, error) {
+func (c *PChannelIndexManager) CreateCollection(ctx context.Context, vchannel string, collectionID int64, pkDataType schemapb.DataType) (created bool, err error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, false, errClosed("pchannel " + c.info.Name)
+		return false, errClosed("pchannel " + c.info.Name)
 	}
 	defer c.lifetime.Done()
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 
-	if idx := c.Get(vchannel); idx != nil {
-		return idx, false, nil
+	if c.get(vchannel) != nil {
+		return false, nil
 	}
 	idx, err := index.Open(ctx, c.indexConfig(vchannel, collectionID, pkDataType))
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 	c.mu.Lock()
 	c.indexes[vchannel] = idx
@@ -123,12 +124,14 @@ func (c *Channel) Add(ctx context.Context, vchannel string, collectionID int64, 
 		// vchannel name, so no manifest can exist for it.
 		idx.MarkReady(ctx, false)
 	}
-	return idx, true, nil
+	return true, nil
 }
 
-// Remove closes the Index of a vchannel. It waits for a running handover
-// and for every open WriteGuard of the vchannel. It keeps the local files.
-func (c *Channel) Remove(ctx context.Context, vchannel string) {
+// remove closes the Index of a vchannel. It waits for a running handover
+// and for every open WriteGuard of the vchannel. It keeps the local files,
+// like Close does for every vchannel. Only the tests call it, to replay the
+// restart of one vchannel.
+func (c *PChannelIndexManager) remove(ctx context.Context, vchannel string) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
 	}
@@ -138,11 +141,12 @@ func (c *Channel) Remove(ctx context.Context, vchannel string) {
 	c.closeIndex(ctx, vchannel)
 }
 
-// Drop closes the Index of a vchannel like Remove, then removes the local
+// DropCollection closes the Index of a vchannel, then removes the local
 // directory of the vchannel. It removes the directory also when no Index is
 // open. No open of the vchannel wipes the files later, because a vchannel name
-// embeds the id of its collection.
-func (c *Channel) Drop(ctx context.Context, vchannel string) error {
+// embeds the id of its collection. It is also the rollback of a
+// CreateCollection whose append failed.
+func (c *PChannelIndexManager) DropCollection(ctx context.Context, vchannel string) error {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return errClosed("pchannel " + c.info.Name)
 	}
@@ -159,7 +163,7 @@ func (c *Channel) Drop(ctx context.Context, vchannel string) error {
 
 // closeIndex detaches and closes the Index of a vchannel, if it is open. The
 // caller holds opMu.
-func (c *Channel) closeIndex(ctx context.Context, vchannel string) {
+func (c *PChannelIndexManager) closeIndex(ctx context.Context, vchannel string) {
 	c.mu.Lock()
 	idx, ok := c.indexes[vchannel]
 	if ok {
@@ -173,20 +177,20 @@ func (c *Channel) closeIndex(ctx context.Context, vchannel string) {
 
 // attachedLocked reports whether idx is the open Index of its vchannel. The
 // caller holds mu.
-func (c *Channel) attachedLocked(idx *index.Index) bool {
+func (c *PChannelIndexManager) attachedLocked(idx *index.Index) bool {
 	return c.indexes[idx.VChannel()] == idx
 }
 
 // detachLocked removes idx from the map, from the LastAcked heap and from the
 // driver slots. The caller holds mu.
-func (c *Channel) detachLocked(idx *index.Index) {
+func (c *PChannelIndexManager) detachLocked(idx *index.Index) {
 	delete(c.indexes, idx.VChannel())
 	c.acked.remove(idx)
 	delete(c.slots, idx)
 }
 
-// indexConfig is what an Index of this Channel needs, see index.Config.
-func (c *Channel) indexConfig(vchannel string, collectionID int64, pkDataType schemapb.DataType) index.Config {
+// indexConfig is what an Index of this PChannelIndexManager needs, see index.Config.
+func (c *PChannelIndexManager) indexConfig(vchannel string, collectionID int64, pkDataType schemapb.DataType) index.Config {
 	cfg := c.m.cfg
 	return index.Config{
 		VChannel:        vchannel,
@@ -212,20 +216,30 @@ func (c *Channel) indexConfig(vchannel string, collectionID int64, pkDataType sc
 	}
 }
 
-// Get returns the Index of a vchannel, nil when it does not exist.
-func (c *Channel) Get(vchannel string) *index.Index {
+// Authority returns the write path authority of a vchannel, nil when the
+// vchannel has no Index. The WAL interceptor decides every write through it.
+func (c *PChannelIndexManager) Authority(vchannel string) *authority.Authority {
+	idx := c.get(vchannel)
+	if idx == nil {
+		return nil
+	}
+	return idx.Authority()
+}
+
+// get returns the Index of a vchannel, nil when it does not exist.
+func (c *PChannelIndexManager) get(vchannel string) *index.Index {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.indexes[vchannel]
 }
 
-// Tick tells the Channel that the TimeTick message with tt is appended.
-func (c *Channel) Tick(tt uint64) {
+// ObserveTimeTick tells the PChannelIndexManager that the TimeTick message with tt is appended.
+func (c *PChannelIndexManager) ObserveTimeTick(tt uint64) {
 	c.wm.tick(tt)
 }
 
 // Close stops the driver and closes every Index. It keeps the local files.
-func (c *Channel) Close() {
+func (c *PChannelIndexManager) Close() {
 	c.lifetime.SetState(typeutil.LifetimeStateStopped)
 	c.cancel()
 	if c.driverDone != nil {
@@ -252,14 +266,14 @@ func (c *Channel) Close() {
 }
 
 // fatal reports an error that the WAL instance cannot recover from.
-func (c *Channel) fatal(err error) {
+func (c *PChannelIndexManager) fatal(err error) {
 	if c.onFatal != nil {
 		c.onFatal(err)
 	}
 }
 
 // list returns the open indexes.
-func (c *Channel) list() []*index.Index {
+func (c *PChannelIndexManager) list() []*index.Index {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := make([]*index.Index, 0, len(c.indexes))

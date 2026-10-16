@@ -44,7 +44,7 @@ func TestTwoHandoversInOneProcess(t *testing.T) {
 	idx := env.add(ch, "v0")
 
 	insert(t, idx, 10, 1, 2, 3)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	ch.step(farFuture)
 	first := env.client.manifest("v0")
 	require.EqualValues(t, 1, first.Version, "the first flush creates the manifest")
@@ -54,7 +54,7 @@ func TestTwoHandoversInOneProcess(t *testing.T) {
 	assert.Empty(t, idx.EngineForTest().FrozenGenerations())
 
 	insert(t, idx, 20, 4, 5)
-	ch.Tick(20)
+	ch.ObserveTimeTick(20)
 	ch.step(farFuture)
 	second := env.client.manifest("v0")
 	require.EqualValues(t, 2, second.Version)
@@ -77,7 +77,7 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 	idx := env.add(ch, "v0")
 
 	insert(t, idx, 10, 1, 2)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	env.client.set(func(c *fakeClient) { c.loseNext = true })
 	ch.step(farFuture)
 	require.NotNil(t, idx.PendingForTest())
@@ -86,7 +86,7 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 
 	// new writes and a new tick do not change the retried request
 	insert(t, idx, 20, 3)
-	ch.Tick(20)
+	ch.ObserveTimeTick(20)
 	ch.step(farFuture)
 	reqs := env.client.requestList()
 	require.Len(t, reqs, 2)
@@ -114,12 +114,12 @@ func TestReopenedIndexStartsEmptyAndDoesNotHandOver(t *testing.T) {
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
 	insert(t, idx, 10, 1, 2)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	// a frozen generation from a failed handover is left on disk too
 	env.client.set(func(c *fakeClient) { c.commitErrs = []error{merr.WrapErrServiceUnavailable("down")} })
 	ch.step(farFuture)
 	require.Len(t, idx.EngineForTest().FrozenGenerations(), 1)
-	ch.Remove(context.Background(), "v0")
+	ch.remove(context.Background(), "v0")
 	require.Empty(t, env.client.manifest("v0").Tables)
 
 	idx = env.add(ch, "v0")
@@ -129,7 +129,7 @@ func TestReopenedIndexStartsEmptyAndDoesNotHandOver(t *testing.T) {
 	assert.Zero(t, segmentOf(t, idx, 1), "the old key is gone")
 
 	insert(t, idx, 20, 3)
-	ch.Tick(20)
+	ch.ObserveTimeTick(20)
 	assert.EqualValues(t, 20, segmentOf(t, idx, 3))
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	ch.step(farFuture)
@@ -139,8 +139,8 @@ func TestReopenedIndexStartsEmptyAndDoesNotHandOver(t *testing.T) {
 	assert.Empty(t, env.fatalList())
 }
 
-// inHeap reports whether idx is in the LastAcked heap of its Channel.
-func inHeap(ch *Channel, idx *index.Index) bool {
+// inHeap reports whether idx is in the LastAcked heap of its PChannelIndexManager.
+func inHeap(ch *PChannelIndexManager, idx *index.Index) bool {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 	return ch.acked.contains(idx)
@@ -151,7 +151,7 @@ func TestFoundManifestStopsTheHandovers(t *testing.T) {
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
 	insert(t, idx, 10, 1)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	ch.step(farFuture)
 	require.NotEmpty(t, env.client.manifest("v0").Tables)
 
@@ -161,7 +161,7 @@ func TestFoundManifestStopsTheHandovers(t *testing.T) {
 	block := make(chan struct{})
 	env.client.set(func(c *fakeClient) { c.lookupBlock = block })
 	ch = env.recoveredChannel(0, "v0")
-	idx = ch.Get("v0")
+	idx = ch.get("v0")
 	assert.True(t, idx.Fresh(), "no local leftovers")
 	// a write before the lookup puts the Index into the heap
 	insert(t, idx, 20, 2)
@@ -173,7 +173,7 @@ func TestFoundManifestStopsTheHandovers(t *testing.T) {
 	assert.False(t, inHeap(ch, idx), "the lookup removes the Index from the heap")
 	assert.EqualValues(t, 20, segmentOf(t, idx, 2), "the lookup keeps the new writes")
 	insert(t, idx, 30, 3)
-	ch.Tick(30)
+	ch.ObserveTimeTick(30)
 	assert.False(t, inHeap(ch, idx))
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	ch.step(farFuture)
@@ -195,7 +195,7 @@ func TestCommittedLeftoverOnlyMakesTheIndexNotFresh(t *testing.T) {
 	assert.NoDirExists(t, committed)
 
 	insert(t, idx, 10, 1)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	assert.Empty(t, ch.pickHandovers(farFuture))
 	ch.step(farFuture)
 	assert.Empty(t, env.client.requestList())
@@ -216,12 +216,12 @@ func TestAnyManifestMakesTheIndexNotFresh(t *testing.T) {
 			env.client.seed("v0", view)
 
 			ch := env.recoveredChannel(0, "v0")
-			idx := ch.Get("v0")
+			idx := ch.get("v0")
 			waitReady(t, idx)
 			assert.False(t, idx.Fresh())
 
 			insert(t, idx, 10, 1)
-			ch.Tick(10)
+			ch.ObserveTimeTick(10)
 			assert.False(t, inHeap(ch, idx))
 			assert.Empty(t, ch.pickHandovers(farFuture))
 			ch.step(farFuture)
@@ -239,13 +239,13 @@ func TestAnyManifestMakesTheIndexNotFresh(t *testing.T) {
 func TestNoManifestAndNoLeftoverIsFresh(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.recoveredChannel(0, "v0")
-	idx := ch.Get("v0")
+	idx := ch.get("v0")
 	waitReady(t, idx)
 	assert.True(t, idx.Fresh())
 	assert.Equal(t, "root/pk_index/100/v0/sst", idx.SSTBasePathForTest())
 
 	insert(t, idx, 10, 1)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	ch.step(farFuture)
 	reqs := env.client.requestList()
 	require.Len(t, reqs, 1)
@@ -283,7 +283,7 @@ func TestDecideErrorsReachTheCallerAndReleaseTheWriter(t *testing.T) {
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 	assert.False(t, errors.Is(err, pkroot.ErrCorrupted))
 	// the failed Decide released the writer
-	ch.Tick(30)
+	ch.ObserveTimeTick(30)
 	assert.EqualValues(t, 30, ch.wm.lastApplied())
 }
 
@@ -292,7 +292,7 @@ func TestUploadFailuresKeepThePending(t *testing.T) {
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
 	insert(t, idx, 10, 1, 2)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	env.store.FailUploads(3)
 
 	ch.step(farFuture)
@@ -302,7 +302,7 @@ func TestUploadFailuresKeepThePending(t *testing.T) {
 	require.Len(t, gens, 1)
 	for i := 0; i < 2; i++ {
 		insert(t, idx, 20, int64(3+i))
-		ch.Tick(uint64(20 + i))
+		ch.ObserveTimeTick(uint64(20 + i))
 		ch.step(farFuture)
 		assert.Same(t, p, idx.PendingForTest())
 		assert.Equal(t, gens, idx.EngineForTest().FrozenGenerations(), "a failed upload does not rotate again")
@@ -327,7 +327,7 @@ func TestInstallDownloadsMissingTables(t *testing.T) {
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
 	insert(t, idx, 10, 1, 2)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	ch.step(farFuture)
 	first := env.client.manifest("v0")
 	require.NotEmpty(t, first.Tables)
@@ -335,7 +335,7 @@ func TestInstallDownloadsMissingTables(t *testing.T) {
 	// the next install needs the first tables, which are not on this node
 	dropCommittedFiles(t, idx)
 	insert(t, idx, 20, 3)
-	ch.Tick(20)
+	ch.ObserveTimeTick(20)
 	ch.step(farFuture)
 
 	assert.EqualValues(t, len(first.Tables), env.store.downloads.Load())
@@ -352,10 +352,10 @@ func TestInstallIfNewerIgnoresAnOlderVersion(t *testing.T) {
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
 	insert(t, idx, 10, 1)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	ch.step(farFuture)
 	insert(t, idx, 20, 2)
-	ch.Tick(20)
+	ch.ObserveTimeTick(20)
 	ch.step(farFuture)
 	require.EqualValues(t, 2, idx.InstalledVersionForTest())
 	paths := idx.InstalledPathsForTest()
@@ -379,7 +379,7 @@ func TestRetryReuploadsOldTables(t *testing.T) {
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
 	insert(t, idx, 10, 1, 2)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	env.client.set(func(c *fakeClient) {
 		c.commitErrs = []error{merr.WrapErrServiceUnavailable("down"), merr.WrapErrServiceUnavailable("down")}
 	})
@@ -425,17 +425,17 @@ func TestNoCommitterDedupsButNeverHandsOver(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	env.mgr.cfg.Committer = nil
 	ch := env.channel(0)
-	_, created, err := ch.Add(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	created, err := ch.CreateCollection(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
 	require.NoError(t, err)
 	require.True(t, created)
-	idx := ch.Get("v0")
+	idx := ch.get("v0")
 	require.NotNil(t, idx)
 
 	insert(t, idx, 10, 1, 2)
-	ch.Tick(10)
+	ch.ObserveTimeTick(10)
 	// the second insert of key 1 is a duplicate and moves it to segment 20
 	insert(t, idx, 20, 1)
-	ch.Tick(20)
+	ch.ObserveTimeTick(20)
 	assert.EqualValues(t, 20, segmentOf(t, idx, 1))
 	assert.EqualValues(t, 10, segmentOf(t, idx, 2))
 
@@ -449,6 +449,6 @@ func TestNoCommitterDedupsButNeverHandsOver(t *testing.T) {
 	assert.EqualValues(t, 20, ch.LastAcked(), "the Index does not hold LastAcked back")
 	assert.Empty(t, env.fatalList())
 
-	ch.Remove(context.Background(), "v0")
-	assert.Nil(t, ch.Get("v0"))
+	ch.remove(context.Background(), "v0")
+	assert.Nil(t, ch.get("v0"))
 }

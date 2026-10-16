@@ -68,7 +68,12 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		seed = param.LastTimeTickMessage.TimeTick()
 	}
 	onFatal := onFatalOf(param)
-	ch := mgr.OpenChannel(param.ChannelInfo, seed, tailOf(param.RecoveryStorage), onFatal)
+	ch := mgr.Open(ctx, snpkindex.OpenParam{
+		PChannel: param.ChannelInfo,
+		Seed:     seed,
+		Tail:     tailOf(param.RecoveryStorage),
+		OnFatal:  onFatal,
+	})
 	reg := newRegistry(ch)
 	if lister, ok := param.ShardManager.(collectionSchemaLister); ok {
 		for collectionID, info := range lister.GetAllCollectionSchemaInfos() {

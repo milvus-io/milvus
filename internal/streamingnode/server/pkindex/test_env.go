@@ -138,3 +138,14 @@ func NewFakeEnv(t *testing.T, root string) *FakeEnv {
 func NewManagerForTest(t *testing.T, root string) *Manager {
 	return NewFakeEnv(t, root).Manager
 }
+
+// IndexForTest returns the Index of a vchannel, nil when it does not exist.
+func (c *PChannelIndexManager) IndexForTest(vchannel string) *index.Index {
+	return c.get(vchannel)
+}
+
+// RemoveForTest closes the Index of a vchannel and keeps its local files, as
+// a restart of the vchannel would.
+func (c *PChannelIndexManager) RemoveForTest(ctx context.Context, vchannel string) {
+	c.remove(ctx, vchannel)
+}

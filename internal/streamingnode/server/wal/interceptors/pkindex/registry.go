@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -38,7 +37,6 @@ var errOpenIndex = errors.New("open the primary key index")
 
 // target is what the interceptor needs to translate the writes of one vchannel.
 type target struct {
-	idx          *index.Index
 	collectionID int64
 	pkFieldID    int64
 	pkDataType   schemapb.DataType
@@ -50,13 +48,13 @@ type target struct {
 // registry turns the collection events of the WAL into calls on the index
 // Channel, and maps vchannels to their targets.
 type registry struct {
-	ch *snpkindex.Channel
+	ch *snpkindex.PChannelIndexManager
 
 	mu      sync.RWMutex
 	targets map[string]*target
 }
 
-func newRegistry(ch *snpkindex.Channel) *registry {
+func newRegistry(ch *snpkindex.PChannelIndexManager) *registry {
 	return &registry{ch: ch, targets: make(map[string]*target)}
 }
 
@@ -67,11 +65,11 @@ func (r *registry) get(vchannel string) *target {
 }
 
 // forEach calls f for every target. f must not call back into the registry.
-func (r *registry) forEach(f func(t *target)) {
+func (r *registry) forEach(f func(vchannel string, t *target)) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for _, t := range r.targets {
-		f(t)
+	for vchannel, t := range r.targets {
+		f(vchannel, t)
 	}
 }
 
@@ -108,7 +106,7 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	}
 	// The engine open does disk IO, so it runs outside mu. Writes of other
 	// vchannels keep reading the registry meanwhile.
-	idx, created, err := r.ch.Add(ctx, vchannel, collectionID, pkField.GetDataType())
+	created, err := r.ch.CreateCollection(ctx, vchannel, collectionID, pkField.GetDataType())
 	if err != nil {
 		return false, errors.Mark(errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel), errOpenIndex)
 	}
@@ -121,7 +119,6 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	// because a schema change can neither drop the primary key field nor alter
 	// its id or its data type.
 	r.targets[vchannel] = &target{
-		idx:          idx,
 		collectionID: collectionID,
 		pkFieldID:    pkField.GetFieldID(),
 		pkDataType:   pkField.GetDataType(),
@@ -145,7 +142,7 @@ func (r *registry) drop(ctx context.Context, vchannel string) {
 	if !ok {
 		return
 	}
-	if err := r.ch.Drop(ctx, vchannel); err != nil {
+	if err := r.ch.DropCollection(ctx, vchannel); err != nil {
 		mlog.Warn(ctx, "failed to remove the local files of the primary key index",
 			mlog.FieldVChannel(vchannel), mlog.Err(err))
 	}

@@ -19,7 +19,7 @@ future bound for WAL truncation.
 
 This document covers the handover, the coverage watermarks, `LastAcked`, the
 triggers and the failure handling. It also describes the structure
-(`Manager`, `Channel`, `Index`) that runs them.
+(`Manager`, `PChannelIndexManager`, `Index`, `Authority`) that runs them.
 
 ## Motivation
 
@@ -36,38 +36,55 @@ problems stay:
 ## Components
 
 ```
-Manager                  one per streaming node: shared engine caches, config
- └─ Channel              one per pchannel: the claim, the manifest lookups,
-     │                   the handover driver, lastAppliedTimeTick, LastAcked
-     └─ Index            one per vchannel: engine, Authority, lastCommittedTimeTick
+Manager                     one per streaming node: shared engine caches, config
+ └─ PChannelIndexManager    one per pchannel: the member table, the claim, the manifest
+     │                      lookups, the handover driver, lastAppliedTimeTick, LastAcked
+     └─ Index               one per vchannel: engine, Authority, lastCommittedTimeTick
+          │  └─ Authority   the write path decision over the engine
           └─ handover ── upload ──▶ object storage   (TableStore)
                       ── commit ──▶ manifest service (Committer)
                       ── install ─▶ engine           (InstallCommitted)
+
+packages:  server/pkindex  ──▶  server/pkindex/index  ──▶  pkindex/authority  ──▶  pkindex/{codec, engine}
+           (Manager, PChannelIndexManager)   (Index, handover)      (Authority, WriteGuard)
 ```
 
-- `internal/streamingnode/server/pkindex` holds the primary key index of the
-  streaming node. A handover is a behavior
-  of the `Index`: its two phases, Prepare and Commit, are methods of the
-  `Index`, and the pending request is a field of it. The package also defines
-  the interfaces and types that the handover exchanges with object storage
-  and the manifest service. It does not depend on the WAL.
+- `internal/streamingnode/server/pkindex` is the pchannel level and above:
+  `Manager` opens a `PChannelIndexManager` per pchannel. The
+  `PChannelIndexManager` keeps the member table of its vchannels
+  (`CreateCollection`, `DropCollection`, `Authority(vchannel)`), observes the
+  TimeTick messages (`ObserveTimeTick`), claims the pchannel and looks up the
+  manifests (`StartClaim`), drives the handovers, and keeps `lastAppliedTimeTick`
+  and `LastAcked`. It defines `Claimer`, the part of the manifest service it
+  uses: `ClaimPChannel` and `GetRecoveryManifests`.
+- `internal/streamingnode/server/pkindex/index` is the vchannel level: the
+  `Index` owns the engine of a vchannel and its `Authority`, and the handover
+  is a behavior of it: its two phases, Prepare and Commit, are methods of the
+  `Index`, and the pending request is a field of it. The package defines the
+  interfaces and types that the handover exchanges with object storage and
+  the manifest service: `TableStore`, `Committer` (only `CommitFlush`),
+  `ManifestView`, `FlushArgs`, `ErrFenced`, `ErrRejected`. The `Index` does
+  not import the pchannel level: `index.Config` carries what it needs from
+  it, and four callbacks (`OnWriterBegin`, `LastApplied`, `OnDirtied`,
+  `OnRefresh`) that the `PChannelIndexManager` points at its watermark and
+  its `LastAcked` heap. Neither package depends on the WAL.
 - `internal/pkindex/authority` holds the write path decision (`Authority`,
   `WriteGuard`, the striped locks and the pending writes of transactions) over
   the `engine.RW` of a vchannel. The `Index` owns one `Authority` and the
-  interceptor decides every write through `Index.Authority()`. The package
-  knows neither the `Index` nor the WAL.
+  interceptor decides every write through `PChannelIndexManager.Authority(vchannel)`.
+  The package knows neither the `Index` nor the WAL.
 - `TableStore` has two methods, `UploadFile` and `DownloadFile`. The
   handover defines this interface for its own use. It does not use the
   object store interface of the manifest service.
-- `Committer` has three methods, `ClaimPChannel`,
-  `GetRecoveryManifests` and `CommitFlush`. The handover defines it with its
-  own types, so the handover code does not
-  import the manifest service, its client or its proto. See
-  [Committer](#committer).
+- The manifest service is used through two interfaces that the users define,
+  `Claimer` (pchannel level) and `Committer` (vchannel level); the root
+  package's `Committer` is the union of the two, which the one adapter of the
+  streaming node implements. Neither side imports the manifest service, its
+  client or its proto. See [Committer](#committer).
 
 ### Committer
 
-The handover owns the types that it exchanges with the manifest service:
+The index owns the types that it exchanges with the manifest service:
 
 | Type | Fields |
 |---|---|
@@ -78,9 +95,14 @@ The handover owns the types that it exchanges with the manifest service:
 | `FlushArgs` | `CollectionID`, `VChannel`, `PChannelTerm`, `PKDataType`, `AddTables`, `CheckpointTimeTick` |
 
 ```go
-type Committer interface {
+// package pkindex (pchannel level)
+type Claimer interface {
     ClaimPChannel(ctx context.Context, pchannel string, term int64) error
     GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error)
+}
+
+// package index (vchannel level)
+type Committer interface {
     CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error)
 }
 ```
@@ -127,7 +149,7 @@ format. `objpath.go` and the constant `common.PKIndexPath` are byte-identical to
 the copies in the manifest service change. The change that merges second
 drops its copy at the rebase.
 
-When the `Manager` has no `Committer`, no `Channel` claims, and no `Index`
+When the `Manager` has no `Committer`, no `PChannelIndexManager` claims, and no `Index`
 hands over. The indexes still deduplicate the writes, and they stay out of
 the `LastAcked` heap. This change does not inject a `Committer` (see
 [Wiring into the streaming node](#wiring-into-the-streaming-node)).
@@ -138,28 +160,32 @@ The pkindex interceptor is a thin shell. It translates WAL events into calls on
 the primary key index:
 
 - Before the downstream append, the interceptor calls
-  `Index.Authority().Decide`. The `Index` configured its `Authority` so that
-  `Decide` registers the writer with the watermark of the pchannel. `Decide`
-  returns a `WriteGuard`.
+  `PChannelIndexManager.Authority(vchannel).Decide`. The `Index` configured
+  its `Authority` so that `Decide` registers the writer with the watermark of
+  the pchannel. `Decide` returns a `WriteGuard`. A vchannel without an index
+  (it closed between the lookup of the target and the call) gives the
+  on-shutdown error of the streaming node.
 - After the append, the interceptor calls `WriteGuard.Apply` or
   `WriteGuard.Discard`. Both end the writer in the watermark.
 - A `Decide` that fails with `pkindex.ErrCorrupted` makes the interceptor call
   `OnFatal`: the index of the vchannel is wrong, and the WAL becomes
   unavailable.
 - After each TimeTick message returns from the append, the interceptor calls
-  `Channel.Tick(tt)`.
+  `PChannelIndexManager.ObserveTimeTick(tt)`.
 - The interceptor build param carries an `OnFatal` callback. The WAL opener
   fills it with the function that marks the WAL unavailable.
 - The pchannel reads the WAL recovery tail size from the recovery storage
   metrics (`RecoveryTailBytes`). The tail triggers use it.
 - A `Decide` on a closed index returns the on-shutdown error of the streaming
   node.
-- At WAL open, the interceptor opens the index of every existing collection.
+- At WAL open, the interceptor calls `Manager.Open` with the pchannel, the
+  watermark seed, the WAL tail and `OnFatal`, creates the index of every
+  existing collection with `CreateCollection`, and then calls `StartClaim`.
   An open that fails on the local disk goes to `OnFatal`: the WAL rejects all
   appends, and its next open tries again. A schema that the index rejects is
   a broken invariant for an existing collection, and it panics.
 - DropCollection and the rollback of a failed CreateCollection call
-  `Channel.Drop`. It closes the index and removes `<root>/<vchannel>/`. A
+  `PChannelIndexManager.DropCollection`. It closes the index and removes `<root>/<vchannel>/`. A
   vchannel name embeds the collection ID, so no later open of the vchannel
   would remove the files. A failed removal is only logged, because the
   append is done.
@@ -343,14 +369,14 @@ version check runs again under the lock.
 ### Claim
 
 The WAL open first adds the `Index` of each existing collection, and then
-calls `Channel.StartClaim`. When the `Manager` has a `Committer`, the
-`Channel` claims its pchannel once, in the background (see
+calls `PChannelIndexManager.StartClaim`. When the `Manager` has a `Committer`, the
+`PChannelIndexManager` claims its pchannel once, in the background (see
 [the manifest service](manifest.md)). The number of vchannels does not change
 the number of claims. A failed claim retries with backoff. A fenced claim and
 a rejected claim (see [Failure handling](#failure-handling)) mark the WAL
 unavailable.
 
-After the claim, the `Channel` looks up the manifests of the indexes of the
+After the claim, the `PChannelIndexManager` looks up the manifests of the indexes of the
 existing collections with `GetRecoveryManifests`, in calls of at most 10000
 items. It retries only the items that failed, with backoff. A fenced or
 rejected item, or a fenced or rejected call, marks the WAL unavailable. The
@@ -486,7 +512,7 @@ applies them again in WAL order with the same result.
 
 ### Per-pchannel watermark
 
-TimeTick messages are per pchannel, so `Channel` keeps one
+TimeTick messages are per pchannel, so `PChannelIndexManager` keeps one
 `lastAppliedTimeTick` for all its vchannels. A per-vchannel watermark would
 need a walk over all vchannels on every TimeTick. The shared value is never
 above the true value of any vchannel, so it is only more conservative.
@@ -510,7 +536,7 @@ generations, or a pending request.
   and of the manifest lookup updates or removes it. An `Index` that is not fresh never
   joins the heap. A pchannel with many vchannels
   does not compute a full minimum on each call.
-- The value is monotonic. `Channel` keeps the largest value that it returned
+- The value is monotonic. `PChannelIndexManager` keeps the largest value that it returned
   and never returns less. This clamp can report too much: an `Index` that
   joins the heap after a larger value was returned has an older
   `lastCommittedTimeTick`. Recovery must handle it before WAL truncation uses
@@ -669,7 +695,7 @@ Common patterns:
   adapter that implements `Committer`. It translates the proto
   types and the merr codes (see [Committer](#committer)), with a test for
   each error class, and the streaming node injects it into the `Manager`. It
-  also sets `ReuploadAfter`. Until then no `Channel` claims and no `Index`
+  also sets `ReuploadAfter`. Until then no `PChannelIndexManager` claims and no `Index`
   hands over.
 - **End-to-end tests of the handover.** They run in the wiring change: a
   handover with object storage, an object storage outage, sustained writes
@@ -682,7 +708,7 @@ Common patterns:
 - **A handover after a restart or a move.** A vchannel whose index is not
   fresh does not hand over until recovery exists (see
   [Only a fresh index hands over](#only-a-fresh-index-hands-over)).
-- **`LastAcked` for WAL truncation.** `Channel.LastAcked` exists, but the WAL
+- **`LastAcked` for WAL truncation.** `PChannelIndexManager.LastAcked` exists, but the WAL
   recovery storage does not use it. It goes in with recovery, because the
   bound only matters with replay.
 - **Compaction and the view sync after it.** Nothing merges committed tables.
@@ -726,7 +752,7 @@ Unit tests cover these cases:
   manifest of any version, also version 1 with no tables, gives an `Index`
   that is not fresh and never calls `CommitFlush`. An `Index` that is not fresh is not in
   the `LastAcked` heap.
-- Claim and lookup: one `ClaimPChannel` call for a `Channel` with many
+- Claim and lookup: one `ClaimPChannel` call for a `PChannelIndexManager` with many
   vchannels, and one `GetRecoveryManifests` call for the indexes of the
   existing collections. More than the batch size splits into several calls.
   A retry sends only the failed items. An `Index` of a new collection does
@@ -734,7 +760,7 @@ Unit tests cover these cases:
   the claim. No handover before the claim. A retryable claim or lookup
   error retries. A fenced claim, a rejected claim, a rejected call and a
   rejected item are fatal.
-- No `Committer`: the `Channel` does not claim, the `Index` does not hand over, stays out
+- No `Committer`: the `PChannelIndexManager` does not claim, the `Index` does not hand over, stays out
   of the `LastAcked` heap, and still deduplicates the writes.
 - Fatal errors: `ErrFenced`, `ErrRejected` and `ErrCorrupted` are fatal.
   Other errors are retryable, also a merr code that no adapter translated.
@@ -744,7 +770,7 @@ Unit tests cover these cases:
   remove the `Index` in use.
 - Drop: DropCollection and the rollback of a failed CreateCollection remove
   the local directory, and a new create of the vchannel sees none of the old
-  keys. A drop on a closed `Channel` fails and keeps the files.
+  keys. A drop on a closed `PChannelIndexManager` fails and keeps the files.
 - WAL open: a local disk error goes to `OnFatal` and does not panic. An
   existing collection with an unsupported primary key type panics.
 - Table store: remote failures are `ErrUnavailable`, local disk failures
