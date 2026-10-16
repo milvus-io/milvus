@@ -28,8 +28,14 @@ func TestScheduler(t *testing.T) {
 	t.Run("fifo", func(t *testing.T) {
 		testScheduler(t, newFIFOPolicy())
 	})
+	t.Run("requery-edf", func(t *testing.T) {
+		testScheduler(t, newRequeryEDFPolicy())
+	})
+	t.Run("requery-priority", func(t *testing.T) {
+		testScheduler(t, newRequeryPriorityPolicy())
+	})
 	t.Run("scheduler_not_working", func(t *testing.T) {
-		scheduler := newScheduler(newFIFOPolicy())
+		scheduler := newScheduler(schedulePolicyNameFIFO, newFIFOPolicy())
 
 		task := newMockTask(mockTaskConfig{
 			nq:          1,
@@ -53,7 +59,7 @@ func TestScheduler(t *testing.T) {
 
 func testScheduler(t *testing.T, policy schedulePolicy) {
 	// start a new scheduler
-	scheduler := newScheduler(policy)
+	scheduler := newScheduler("test", policy)
 	scheduler.Start()
 
 	var cnt atomic.Int32
@@ -110,6 +116,60 @@ func testScheduler(t *testing.T, policy schedulePolicy) {
 
 type SchedulerSuite struct {
 	suite.Suite
+}
+
+type servedTrackingPolicy struct {
+	schedulePolicy
+	served chan *queuedTask
+}
+
+func (p *servedTrackingPolicy) onTaskServed(task *queuedTask) {
+	p.served <- task
+}
+
+func newServedTrackingScheduler(t *testing.T, bufferedExec bool, receiveClosed bool) (*scheduler, *servedTrackingPolicy, Task) {
+	t.Helper()
+	base := newFIFOPolicy()
+	task := newMockTask(mockTaskConfig{})
+	queued := newQueuedTask(task, time.Now())
+	_, err := base.Push(queued)
+	assert.NoError(t, err)
+	policy := &servedTrackingPolicy{schedulePolicy: base, served: make(chan *queuedTask, 1)}
+	execChan := make(chan Task)
+	if bufferedExec {
+		execChan = make(chan Task, 1)
+	}
+	receiveChan := make(chan addTaskReq)
+	if receiveClosed {
+		close(receiveChan)
+	}
+	scheduler := &scheduler{policy: policy, receiveChan: receiveChan, execChan: execChan}
+	scheduler.updateWaitingTaskCounter(1, queued.NQ())
+	return scheduler, policy, task
+}
+
+func TestTaskServedObserverNormalHandoff(t *testing.T) {
+	scheduler, policy, task := newServedTrackingScheduler(t, true, false)
+	scheduler.wg.Add(1)
+	go scheduler.schedule()
+	assert.Same(t, task, (<-policy.served).Task)
+	close(scheduler.receiveChan)
+	scheduler.wg.Wait()
+}
+
+func TestTaskServedObserverBatchHandoff(t *testing.T) {
+	scheduler, policy, task := newServedTrackingScheduler(t, true, false)
+	assert.Nil(t, scheduler.produceExecChan(time.Now()))
+	assert.Same(t, task, (<-policy.served).Task)
+}
+
+func TestTaskServedObserverShutdownDrain(t *testing.T) {
+	scheduler, policy, task := newServedTrackingScheduler(t, false, true)
+	scheduler.wg.Add(1)
+	go scheduler.schedule()
+	assert.Same(t, task, <-scheduler.execChan)
+	assert.Same(t, task, (<-policy.served).Task)
+	scheduler.wg.Wait()
 }
 
 func (s *SchedulerSuite) TestConsumeRecvChan() {
@@ -175,6 +235,8 @@ func (s *SchedulerSuite) TestConsumeRecvChanUsesLoopTimestampForBatch() {
 }
 
 func (s *SchedulerSuite) TestHandleAddTaskRequestRejectsWhenWaitingQueueFull() {
+	old := paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue("1")
+	defer paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue(old)
 	scheduler := &scheduler{
 		policy:           newFIFOPolicy(),
 		schedulerCounter: schedulerCounter{},
@@ -184,7 +246,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestRejectsWhenWaitingQueueFull() {
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 1, time.Now())
+	}, time.Now())
 	s.False(keepConsuming)
 	s.NoError(<-errCh)
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
@@ -193,13 +255,15 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestRejectsWhenWaitingQueueFull() {
 	keepConsuming = scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 1, time.Now())
+	}, time.Now())
 	s.False(keepConsuming)
 	s.ErrorIs(<-errCh, merr.ErrServiceTooManyRequests)
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
 }
 
 func (s *SchedulerSuite) TestHandleAddTaskRequestCleansExpiredTasksBeforeQueueLimit() {
+	old := paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue("1")
+	defer paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue(old)
 	now := time.Now()
 	scheduler := &scheduler{
 		policy:           newFIFOPolicy(),
@@ -218,7 +282,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansExpiredTasksBeforeQueueLi
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 1, now)
+	}, now)
 
 	s.False(keepConsuming)
 	s.NoError(<-errCh)
@@ -227,6 +291,8 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansExpiredTasksBeforeQueueLi
 }
 
 func (s *SchedulerSuite) TestHandleAddTaskRequestSkipsCleanupBeforeQueueFull() {
+	old := paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue("2")
+	defer paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue(old)
 	now := time.Now()
 	scheduler := &scheduler{
 		policy:           newFIFOPolicy(),
@@ -245,7 +311,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestSkipsCleanupBeforeQueueFull() {
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 2, now)
+	}, now)
 
 	s.False(keepConsuming)
 	s.NoError(<-errCh)
@@ -255,6 +321,8 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestSkipsCleanupBeforeQueueFull() {
 
 func (s *SchedulerSuite) TestHandleAddTaskRequestCleansTasksNearDeadlineBeforeQueueLimit() {
 	paramtable.Init()
+	oldCapacity := paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue("1")
+	defer paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue(oldCapacity)
 	old := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue("50ms")
 	defer paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.SwapTempValue(old)
 
@@ -276,7 +344,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestCleansTasksNearDeadlineBeforeQu
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{nq: 1}),
 		err:  errCh,
-	}, 1, now)
+	}, now)
 
 	s.False(keepConsuming)
 	s.NoError(<-errCh)
@@ -301,6 +369,8 @@ func (s *SchedulerSuite) TestAddReturnsContextErrorWhenReceiveBlocks() {
 }
 
 func (s *SchedulerSuite) TestHandleAddTaskRequestDoesNotRejectByQueueDelayDeadline() {
+	old := paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue("0")
+	defer paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue(old)
 	now := time.Now()
 	scheduler := &scheduler{
 		policy:           newFIFOPolicy(),
@@ -319,7 +389,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestDoesNotRejectByQueueDelayDeadli
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{ctx: ctx, nq: 1}),
 		err:  errCh,
-	}, 0, now)
+	}, now)
 
 	s.True(keepConsuming)
 	s.NoError(<-errCh)
@@ -327,6 +397,8 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestDoesNotRejectByQueueDelayDeadli
 }
 
 func (s *SchedulerSuite) TestHandleAddTaskRequestAcceptsDeadlineWhenQueueEmpty() {
+	old := paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue("0")
+	defer paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.SwapTempValue(old)
 	now := time.Now()
 	scheduler := &scheduler{
 		policy:           newFIFOPolicy(),
@@ -340,7 +412,7 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestAcceptsDeadlineWhenQueueEmpty()
 	keepConsuming := scheduler.handleAddTaskRequest(addTaskReq{
 		task: newMockTask(mockTaskConfig{ctx: ctx, nq: 1}),
 		err:  errCh,
-	}, 0, now)
+	}, now)
 
 	s.True(keepConsuming)
 	s.NoError(<-errCh)
@@ -423,7 +495,7 @@ func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 	metrics.QueryNodeReadTaskExecuteDuration.Reset()
 	defer metrics.QueryNodeReadTaskExecuteDuration.Reset()
 
-	scheduler := newScheduler(newFIFOPolicy())
+	scheduler := newScheduler(schedulePolicyNameFIFO, newFIFOPolicy())
 	scheduler.Start()
 	defer scheduler.Stop()
 

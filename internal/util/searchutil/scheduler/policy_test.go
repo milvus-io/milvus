@@ -26,6 +26,7 @@ func TestPolicyCleanupExpiredTasks(t *testing.T) {
 	paramtable.Init()
 	for name, policy := range map[string]schedulePolicy{
 		"fifo":              newFIFOPolicy(),
+		"requery-priority":  newRequeryPriorityPolicy(),
 		"user-task-polling": newUserTaskPollingPolicy(),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -50,6 +51,7 @@ func TestPolicyCleanupCanceledTasks(t *testing.T) {
 	paramtable.Init()
 	for name, policy := range map[string]schedulePolicy{
 		"fifo":              newFIFOPolicy(),
+		"requery-priority":  newRequeryPriorityPolicy(),
 		"user-task-polling": newUserTaskPollingPolicy(),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -74,6 +76,7 @@ func TestPolicyRemove(t *testing.T) {
 	paramtable.Init()
 	for name, policy := range map[string]schedulePolicy{
 		"fifo":              newFIFOPolicy(),
+		"requery-priority":  newRequeryPriorityPolicy(),
 		"user-task-polling": newUserTaskPollingPolicy(),
 	} {
 		t.Run(name, func(t *testing.T) {

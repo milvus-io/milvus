@@ -122,6 +122,46 @@ func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T)
 	assert.EqualValues(t, 1, params.DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64())
 }
 
+func TestComponentParam_RequeryEDFCapacity(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
+	capacity := &params.QueryNodeCfg.RequeryUnsolvedQueueSize
+	assert.EqualValues(t, 1024, capacity.GetAsInt64())
+	assert.NoError(t, params.Save(capacity.Key, "2048"))
+	assert.EqualValues(t, 2048, capacity.GetAsInt64())
+	for _, invalid := range []string{"-1", "0", "1023", "invalid"} {
+		assert.NoError(t, params.Save(capacity.Key, invalid))
+		assert.EqualValues(t, 1024, capacity.GetAsInt64())
+	}
+	assert.Equal(t, "fifo", params.QueryNodeCfg.SchedulePolicyName.GetValue())
+}
+
+func TestRequeryPriorityBaseCredit(t *testing.T) {
+	t.Setenv("LOCALSTORAGE_PATH", t.TempDir())
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	credit := &params.QueryNodeCfg.RequeryPriorityBaseCredit
+	assert.EqualValues(t, 3, credit.GetAsInt64())
+	require.NoError(t, params.Save(credit.Key, "6"))
+	assert.EqualValues(t, 6, credit.GetAsInt64())
+	require.NoError(t, params.Save(credit.Key, "9223372036854775807"))
+	assert.EqualValues(t, int64(9223372036854775807), credit.GetAsInt64())
+	for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+		require.NoError(t, params.Save(credit.Key, invalid))
+		assert.EqualValues(t, 3, credit.GetAsInt64())
+	}
+}
+
+func TestComponentParamSchedulerDiagnostics(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
+	for _, item := range []*ParamItem{&params.QueryNodeCfg.SchedulerDiagnosticsEnabled, &params.QueryNodeCfg.SchedulerDiagnosticsLogEnabled} {
+		assert.False(t, item.GetAsBool())
+		assert.NoError(t, params.Save(item.Key, "true"))
+		assert.True(t, item.GetAsBool())
+	}
+}
+
 func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
 	Init()
 	params := Get()

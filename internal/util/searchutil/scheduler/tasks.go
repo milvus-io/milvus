@@ -9,6 +9,8 @@ import (
 
 const (
 	schedulePolicyNameFIFO            = "fifo"
+	schedulePolicyNameRequeryEDF      = "requery-edf"
+	schedulePolicyNameRequeryPriority = "requery-priority"
 	schedulePolicyNameUserTaskPolling = "user-task-polling"
 )
 
@@ -19,10 +21,16 @@ func NewScheduler(policyName string) Scheduler {
 		fallthrough
 	case schedulePolicyNameFIFO:
 		return newScheduler(
+			schedulePolicyNameFIFO,
 			newFIFOPolicy(),
 		)
+	case schedulePolicyNameRequeryEDF:
+		return newScheduler(schedulePolicyNameRequeryEDF, newRequeryEDFPolicy())
+	case schedulePolicyNameRequeryPriority:
+		return newScheduler(schedulePolicyNameRequeryPriority, newRequeryPriorityPolicy())
 	case schedulePolicyNameUserTaskPolling:
 		return newScheduler(
+			schedulePolicyNameUserTaskPolling,
 			newUserTaskPollingPolicy(),
 		)
 	default:
@@ -73,14 +81,19 @@ type ClearResult struct {
 
 // schedulePolicy is the policy of scheduler.
 type schedulePolicy interface {
-	// Cleanup removes queued tasks whose context deadline has been reached.
+	// CheckAdmission checks capacity for task without changing the queue.
+	// waitingTotal includes the scheduler's staged task; policies with independent
+	// lanes can use their own queue lengths instead.
+	CheckAdmission(task Task, waitingTotal int64) error
+
+	// Cleanup removes canceled or expired tasks, applying the policy's deadline advance.
 	// Removed tasks are returned to scheduler for error notification.
 	Cleanup(now time.Time) []*queuedTask
 
 	// Remove removes queued tasks matched by filter.
 	Remove(filter TaskFilter, now time.Time) []*queuedTask
 
-	// Push add a new task into scheduler.
+	// Push adds a task after CheckAdmission succeeds on the scheduling goroutine.
 	// Return the count of new task added (task may be chunked or merged)
 	// 0 and an error will be returned if scheduler reaches some limit.
 	Push(task *queuedTask) (int, error)
@@ -91,10 +104,28 @@ type schedulePolicy interface {
 	Len() int
 }
 
+// taskServedObserver is notified only after the scheduler successfully hands a
+// selected task to the executor. Policies may use it for handoff-based state.
+type taskServedObserver interface {
+	onTaskServed(task *queuedTask)
+}
+
 type queuedTask struct {
 	Task
 
 	enqueueTime time.Time
+	// schedulingDeadline is populated only by EDF and tracks the earliest
+	// merged request deadline; it does not change the task's cancellation context.
+	schedulingDeadline time.Time
+	diagnostics        *TaskDiagnostics
+}
+
+// Keep the original task identity on the diagnostics-off execution path.
+func (t *queuedTask) executionTask() Task {
+	if t.diagnostics != nil {
+		return t
+	}
+	return t.Task
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
