@@ -43,11 +43,16 @@ type Config struct {
 // ConfigFromParams reads the configuration from the param table.
 func ConfigFromParams() Config {
 	p := paramtable.Get()
-	return Config{
+	cfg := Config{
 		LocalRoot:       filepath.Join(p.LocalStorageCfg.Path.GetValue(), "pkindex_compaction"),
 		TerminalTaskTTL: p.DataNodeCfg.PKIndexCompactionTerminalTaskTTL.GetAsDuration(time.Second),
 		TaskSlot:        p.DataCoordCfg.PKIndexCompactionSlotUsage.GetAsInt64(),
 		Parallelism:     p.DataNodeCfg.PKIndexCompactionParallelism.GetAsInt(),
 		DiskMargin:      p.DataNodeCfg.PKIndexCompactionDiskMargin.GetAsInt64(),
 	}
+	// DataCoord raises a task slot below 1 to 1 in the same way, so both sides
+	// count the same slots for one task.
+	cfg.TaskSlot = max(cfg.TaskSlot, 1)
+	cfg.Parallelism = max(cfg.Parallelism, 1)
+	return cfg
 }

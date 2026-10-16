@@ -120,9 +120,9 @@ func pickMerge(gs []group, cfg Config) (choice, bool) {
 
 // pickSpaceAmp applies when at least two runs exist and the bytes outside the
 // oldest run reach SpaceAmpRatio times the oldest run. Every table is an
-// input and tombstones drop. This rule has no input cap (MaxInputBytes and
-// MaxInputTables apply to the other two rules only) because its purpose is to
-// rewrite everything.
+// input and tombstones drop. This rule has no input cap because its purpose
+// is to rewrite everything. MaxInputTables applies to the flushed-table rule
+// only, and MaxInputBytes to the flushed-table and merge rules.
 func pickSpaceAmp(gs []group, cfg Config) (choice, bool) {
 	l0 := l0Prefix(gs)
 	if len(gs)-l0 < 2 {

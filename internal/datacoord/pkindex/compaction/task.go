@@ -295,7 +295,7 @@ func (t *Task) commit(cluster session.Cluster, outputs []*pkindexpb.SSTRef) {
 		t.mu.Unlock()
 		mlog.Warn(t.ctx, "pkindex compaction commit is unavailable, will commit again", t.logFields(mlog.Duration("backoff", wait), mlog.Err(err))...)
 	case errors.Is(err, manifest.ErrStaleEdit) || errors.Is(err, manifest.ErrNoManifest):
-		// Expected: an active/standby race, or a dropped collection.
+		// Expected: an active/standby race.
 		mlog.Warn(t.ctx, "pkindex compaction commit was rejected", t.logFields(mlog.Err(err))...)
 		t.fail(err.Error())
 	default:
