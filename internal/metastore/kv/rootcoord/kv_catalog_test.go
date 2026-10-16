@@ -1355,12 +1355,6 @@ func withMockMultiSaveAndRemove(err error) mockSnapshotOpt {
 	}
 }
 
-func withMockRemoveWithPrefix(err error) mockSnapshotOpt {
-	return func(ss *mocks.TxnKV) {
-		ss.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(err)
-	}
-}
-
 func TestCatalog_CreateCollection(t *testing.T) {
 	t.Run("collection not creating", func(t *testing.T) {
 		kc := NewCatalog(nil)
@@ -1468,7 +1462,6 @@ func TestCatalog_CreateCollection(t *testing.T) {
 func TestCatalog_DropCollection(t *testing.T) {
 	t.Run("failed to remove", func(t *testing.T) {
 		mockSnapshot := newMockSnapshot(t,
-			withMockRemoveWithPrefix(nil),
 			withMockMultiSaveAndRemove(errors.New("error mock MultiSaveAndRemove")),
 		)
 		kc := NewCatalog(mockSnapshot)
@@ -1483,14 +1476,12 @@ func TestCatalog_DropCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("removes principal prefix before children and collection key", func(t *testing.T) {
+	t.Run("removes children and collection key", func(t *testing.T) {
 		mockSnapshot := newMockSnapshot(t)
 		var gotSaves map[string]string
 		var gotRemovals []string
-		prefixRemoved := false
 		mockSnapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
-				assert.True(t, prefixRemoved)
 				gotSaves = saves
 				gotRemovals = removals
 				assert.Empty(t, preds)
@@ -1512,16 +1503,8 @@ func TestCatalog_DropCollection(t *testing.T) {
 		assert.Contains(t, gotRemovals, BuildPartitionKey(coll.CollectionID, 10))
 	})
 
-	t.Run("principal prefix removal failure keeps collection metadata", func(t *testing.T) {
-		targetErr := errors.New("remove principal prefix")
-		mockSnapshot := newMockSnapshot(t, withMockRemoveWithPrefix(targetErr))
-		kc := NewCatalog(mockSnapshot)
-		err := kc.DropCollection(context.Background(), &model.Collection{CollectionID: 1}, 100)
-		require.ErrorIs(t, err, targetErr)
-	})
-
 	t.Run("normal case", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockRemoveWithPrefix(nil), withMockMultiSaveAndRemove(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1535,7 +1518,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 	})
 
 	t.Run("drop collection with function", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockRemoveWithPrefix(nil), withMockMultiSaveAndRemove(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
