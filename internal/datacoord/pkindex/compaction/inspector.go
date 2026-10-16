@@ -111,6 +111,15 @@ func (i *Inspector) InFlightOutputs(_ context.Context, collectionID int64, vchan
 	return i.table.inFlightOutputs(manifest.Target{CollectionID: collectionID, VChannel: vchannel}), nil
 }
 
+// Known reports whether the inspector holds a manifest summary of the
+// vchannel. It is for tests and diagnostics.
+func (i *Inspector) Known(collectionID int64, vchannel string) bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	_, ok := i.summaries[manifest.Target{CollectionID: collectionID, VChannel: vchannel}]
+	return ok
+}
+
 type candidate struct {
 	target  manifest.Target
 	score   float64
