@@ -32,7 +32,6 @@ import (
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -222,19 +221,6 @@ func (node *Proxy) TsoAllocator() taskmodel.TsoAllocator {
 	return node.tsoAllocator
 }
 
-// ResolveRLSEnforcement applies the proxy-owned SkipRLS authorization rules
-// for tasks implemented outside the root proxy package.
-func (node *Proxy) ResolveRLSEnforcement(ctx context.Context, cache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
-	return resolveRLSEnforcement(ctx, cache, rlsEnabled, rlsForce, skipRLS, dbName, collectionName, operation)
-}
-
-// CheckManageRLSPrivilege verifies the caller holds the ManageRLS privilege
-// before a content-driven RLS property mutation, via the root-owned
-// privilege machinery.
-func (node *Proxy) CheckManageRLSPrivilege(ctx context.Context, metaCache Cache, req *milvuspb.AlterCollectionRequest, dbName, collectionName string) error {
-	return checkManageRLSPrivilege(ctx, metaCache, req, dbName, collectionName)
-}
-
 // CheckClusterPrivilege authorizes a cluster-scoped privilege via the
 // root-owned casbin enforcement path.
 func (node *Proxy) CheckClusterPrivilege(ctx context.Context, req interface{}, fullMethod string, objectPrivilege string) error {
@@ -367,12 +353,6 @@ func (node *Proxy) Init() error {
 	node.enableComplexDeleteLimit = Params.QuotaConfig.ComplexDeleteLimitEnable.GetAsBool()
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	mlog.Debug(node.ctx, "create metrics cache manager done", mlog.String("role", typeutil.ProxyRole))
-
-	if err := rls.Init(node.ctx, node.mixCoord); err != nil {
-		mlog.Warn(node.ctx, "failed to init RLS metadata manager", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
-		return err
-	}
-	mlog.Debug(node.ctx, "init RLS metadata manager done", mlog.String("role", typeutil.ProxyRole))
 
 	node.managementRootVerifier = newManagementRootVerifier(node.mixCoord)
 	internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotProxy, node.managementRootVerifier.Verify)
