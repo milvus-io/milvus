@@ -24,6 +24,7 @@ import (
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 )
 
 // ReplayWrite is one write of the WAL replay in index terms. The recovery of
@@ -87,8 +88,11 @@ func (idx *Index) Replay(ctx context.Context, w ReplayWrite) error {
 // dir that the manifest does not list, reuses the listed files that have the
 // right size and downloads the rest. An Index without a recovered manifest
 // only becomes ready. The recovery runs it once after the replay; a failure
-// returns and the caller retries, so every step is idempotent.
+// returns and the caller retries, so every step is idempotent. It ends with
+// an error when ctx ends or the Index closes.
 func (idx *Index) Install(ctx context.Context) error {
+	ctx, cancel := contextutil.MergeContext(ctx, idx.ctx)
+	defer cancel()
 	idx.installMu.Lock()
 	view := idx.recovered
 	idx.installMu.Unlock()

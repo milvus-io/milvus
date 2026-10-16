@@ -38,10 +38,12 @@ import (
 // the manifests that SetManifest gives. A handover is not tested with it, so
 // CommitFlush always fails.
 type FakeCommitter struct {
-	mu        sync.Mutex
-	claimed   map[string]int64
-	claimErr  error
-	manifests map[string]*index.FakeManifest // by vchannel
+	mu       sync.Mutex
+	claimed  map[string]int64
+	claimErr error
+	// claimFailures is the number of next claims that fail with a transient error.
+	claimFailures int
+	manifests     map[string]*index.FakeManifest // by vchannel
 }
 
 // NewFakeCommitter creates a FakeCommitter with no claims and no manifests.
@@ -67,12 +69,26 @@ func (c *FakeCommitter) SetClaimErr(err error) {
 	c.claimErr = err
 }
 
+// SetClaimFailures makes the next n claims fail with a transient error.
+func (c *FakeCommitter) SetClaimFailures(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.claimFailures = n
+}
+
+// errFakeTransient is the transient failure that SetClaimFailures injects.
+var errFakeTransient = errors.New("injected transient failure")
+
 // ClaimPChannel implements Committer.
 func (c *FakeCommitter) ClaimPChannel(ctx context.Context, pchannel string, term int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.claimErr != nil {
 		return c.claimErr
+	}
+	if c.claimFailures > 0 {
+		c.claimFailures--
+		return errors.Wrapf(errFakeTransient, "claim pchannel %s", pchannel)
 	}
 	next, err := FakeClaimPChannel(pchannel, c.claimed[pchannel], term)
 	if err != nil {
@@ -182,3 +198,7 @@ func (c *PChannelIndexManager) RemoveForTest(ctx context.Context, vchannel strin
 
 // StoreForTest returns the TableStore of the Manager.
 func (m *Manager) StoreForTest() TableStore { return m.cfg.Store }
+
+// SetCommitterForTest replaces the Committer of the Manager, nil for a node
+// without one.
+func (m *Manager) SetCommitterForTest(c Committer) { m.cfg.Committer = c }

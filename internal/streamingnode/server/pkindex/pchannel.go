@@ -241,6 +241,9 @@ func (c *PChannelIndexManager) indexConfig(vchannel string, collectionID int64, 
 	}
 }
 
+// Info returns the pchannel of the PChannelIndexManager.
+func (c *PChannelIndexManager) Info() types.PChannelInfo { return c.info }
+
 // Authority returns the write path authority of a vchannel, nil when the
 // vchannel has no Index. The WAL interceptor decides every write through it.
 func (c *PChannelIndexManager) Authority(vchannel string) *authority.Authority {
