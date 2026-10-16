@@ -62,6 +62,26 @@ type streamingResponseWriter struct {
 	writeStopped chan struct{}
 }
 
+func newStreamingResponseWriter(realWriter gin.ResponseWriter, ctx context.Context) *streamingResponseWriter {
+	// Resolve wrappers on the serving goroutine; callbacks never access Gin.
+	// In particular, Flush must reach the transport's error-returning method.
+	var transport http.ResponseWriter = realWriter
+	for {
+		unwrapper, ok := transport.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			break
+		}
+		transport = unwrapper.Unwrap()
+	}
+	deadline, _ := ctx.Deadline()
+	return &streamingResponseWriter{
+		ResponseWriter: realWriter,
+		ctx:            ctx,
+		controller:     http.NewResponseController(transport),
+		deadline:       deadline,
+	}
+}
+
 func (w *streamingResponseWriter) requestError() error {
 	if err := w.ctx.Err(); err != nil {
 		return err
@@ -109,10 +129,6 @@ func (w *streamingResponseWriter) Write(data []byte) (int, error) {
 	return n, err
 }
 
-func (w *streamingResponseWriter) WriteString(data string) (int, error) {
-	return w.Write([]byte(data))
-}
-
 func (w *streamingResponseWriter) WriteHeaderNow() {
 	if err := w.prepare(); err != nil {
 		panic(http.ErrAbortHandler)
@@ -127,12 +143,6 @@ func (w *streamingResponseWriter) FlushError() error {
 	w.ResponseWriter.WriteHeaderNow()
 	w.failure = w.controller.Flush()
 	return w.failure
-}
-
-func (w *streamingResponseWriter) Flush() {
-	if err := w.FlushError(); err != nil {
-		panic(http.ErrAbortHandler)
-	}
 }
 
 func (w *streamingResponseWriter) joinWrite() {
@@ -183,113 +193,18 @@ func streamingTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
-		realWriter := c.Writer
-		// Resolve wrappers on the serving goroutine; callbacks never access Gin.
-		var transport http.ResponseWriter = realWriter
-		for {
-			unwrapper, ok := transport.(interface{ Unwrap() http.ResponseWriter })
-			if !ok {
-				break
-			}
-			transport = unwrapper.Unwrap()
-		}
-		deadline, _ := ctx.Deadline()
-		writer := &streamingResponseWriter{
-			ResponseWriter: realWriter,
-			ctx:            ctx,
-			controller:     http.NewResponseController(transport),
-			deadline:       deadline,
-		}
-		c.Writer = writer
-		var workerPanicStack []byte
+		writer := newStreamingResponseWriter(c.Writer, ctx)
+		var result streamingWorkerResult
 		var cleanupBodyRead func()
 		defer func() {
 			if cleanupBodyRead != nil {
 				cleanupBodyRead()
 			}
 		}()
-
-		// These actions run only after the deferred cleanup restores realWriter.
-		abortResponse := func() {
-			cancel()
-			c.Abort()
-			if state, ok := ctx.Value(streamingAbortKey{}).(*streamingAbortState); ok {
-				state.aborted = true
-				return
-			}
-			panic(http.ErrAbortHandler) // Caller must install StreamingHTTPHandler.
-		}
-		writeErrorResponse := func(status int, body gin.H) bool {
-			// The request may already be expired. Give the complete error envelope
-			// a bounded write window from server configuration, not Request-Timeout: 0.
-			budget := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
-			if err := writer.controller.SetWriteDeadline(time.Now().Add(budget)); err != nil {
-				abortResponse()
-				return false
-			}
-			HTTPAbortReturn(c, status, body)
-			if err := writer.controller.Flush(); err != nil {
-				abortResponse()
-				return false
-			}
-			_ = writer.controller.SetWriteDeadline(time.Time{})
-			return true
-		}
-
 		defer func() {
-			panicValue := recover()
-
-			// Finish pending output, then stop/join the deadline callback before
-			// restoring the writer or attempting an independent error response.
-			if panicValue == nil && writer.requestError() == nil && writer.failure == nil && writer.Written() {
-				_ = writer.FlushError() // Observe final buffered socket errors here.
-			}
-			writer.joinWrite()
-			c.Writer = realWriter
-
-			// An ordinary handler panic can become a complete 500 only before
-			// commitment. Afterwards, log it here and abort the partial response.
-			if panicValue != nil && panicValue != http.ErrAbortHandler {
-				if !writer.Written() {
-					if writeErrorResponse(http.StatusInternalServerError, gin.H{HTTPReturnCode: http.StatusInternalServerError}) {
-						panic(panicValue) // Let Gin Recovery log the original panic.
-					}
-					return
-				}
-				err := merr.WrapErrServiceInternalMsg("REST handler panicked after response commitment")
-				c.Set(HTTPReturnCode, merr.Code(err))
-				c.Set(HTTPReturnMessage, err.Error())
-				_ = c.Error(err).SetType(gin.ErrorTypePrivate)
-				if workerPanicStack == nil {
-					workerPanicStack = debug.Stack()
-				}
-				mlog.Error(ctx, "REST handler panicked after response commitment", mlog.Err(err), mlog.Any("panic", panicValue), mlog.String("panic_stack", string(workerPanicStack)))
-				abortResponse()
-				return
-			}
-
-			requestErr := writer.requestError()
-			if requestErr != nil {
-				c.Set(HTTPReturnCode, merr.TimeoutCode)
-				c.Set(HTTPReturnMessage, "request timeout")
-			}
-			switch {
-			case panicValue != nil || writer.failure != nil:
-				// An explicit abort or a failed transport cannot carry an error body.
-				abortResponse()
-			case requestErr != nil:
-				if writer.Written() {
-					abortResponse() // Already committed: never append an error document.
-				} else {
-					writeErrorResponse(http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
-				}
-			default:
-				// Successful response: do not leave its deadline on a reused connection.
-				if writer.stopWrite != nil {
-					_ = writer.controller.SetWriteDeadline(time.Time{})
-				}
-			}
+			writer.finish(c, cancel, recover(), result.stack)
 		}()
+
 		if c.Request.Body != nil && c.Request.Body != http.NoBody {
 			var err error
 			cleanupBodyRead, err = writer.protectBodyRead()
@@ -299,66 +214,91 @@ func streamingTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			}
 		}
 
-		// The worker owns a copied Gin context and detached I/O adapters. Only
-		// this goroutine writes the connection, so timeout can return without
-		// waiting for downstream computation that ignores cancellation.
-		exchange := &streamingExchange{ctx: ctx, calls: make(chan streamingIOCall)}
-		workerWriter := &streamingWorkerWriter{
-			exchange: exchange, header: realWriter.Header().Clone(),
-			status: realWriter.Status(), size: -1,
-		}
-		workerCtx := c.Copy()
-		workerCtx.Writer = workerWriter
-		workerCtx.Request = c.Request.Clone(ctx)
-		if c.Request.Body != nil && c.Request.Body != http.NoBody {
-			workerCtx.Request.Body = streamingWorkerBody{exchange: exchange}
-		}
-		type completion struct {
-			panicValue any
-			stack      []byte
-		}
-		finished := make(chan completion, 1)
-		go func() {
-			defer func() {
-				result := completion{panicValue: recover()}
-				if result.panicValue != nil {
-					result.stack = debug.Stack()
-				}
-				finished <- result // Never block a worker finishing after timeout.
-			}()
-			handler(workerCtx)
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case call := <-exchange.calls:
-				call.serve(writer, c.Request.Body)
-				if writer.failure != nil {
-					return
-				}
-			case result := <-finished:
-				// The completion send establishes exclusive access to worker state.
-				propagateTimeoutContextKeys(c, workerCtx)
-				c.Errors = append(c.Errors, workerCtx.Errors...)
-				if workerCtx.IsAborted() {
-					c.Abort()
-				}
-				if !writer.Written() {
-					copyStreamingHeader(realWriter.Header(), workerWriter.header)
-					realWriter.WriteHeader(workerWriter.status)
-				}
-				// Cancellation can make a late renderer fail before we select
-				// ctx.Done(). Preserve the precommit timeout envelope in that race.
-				if writer.requestError() == nil {
-					writer.failure = workerWriter.failure
-				}
-				if result.panicValue != nil && !(result.panicValue == http.ErrAbortHandler && writer.requestError() != nil) {
-					workerPanicStack = result.stack
-					panic(result.panicValue)
-				}
-				return
-			}
+		// Keep the real writer on c; only the detached worker context replaces it.
+		result = writer.serveWorker(c, handler)
+		if result.panicValue != nil {
+			panic(result.panicValue)
 		}
 	}
+}
+
+// finish runs only on the serving goroutine, before body-read cleanup and cancel.
+// Before commitment it can send an error envelope; afterwards it must abort.
+func (w *streamingResponseWriter) finish(c *gin.Context, cancel context.CancelFunc, panicValue any, workerPanicStack []byte) {
+	// Finish pending output, then stop/join the deadline callback before
+	// attempting an independent error response.
+	if panicValue == nil && w.requestError() == nil && w.failure == nil && w.Written() {
+		_ = w.FlushError() // Observe final buffered socket errors here.
+	}
+	w.joinWrite()
+
+	// An ordinary handler panic can become a complete 500 only before
+	// commitment. Afterwards, log it here and abort the partial response.
+	if panicValue != nil && panicValue != http.ErrAbortHandler {
+		if !w.Written() {
+			if w.writeErrorResponse(c, cancel, http.StatusInternalServerError, gin.H{HTTPReturnCode: http.StatusInternalServerError}) {
+				panic(panicValue) // Let Gin Recovery log the original panic.
+			}
+			return
+		}
+		err := merr.WrapErrServiceInternalMsg("REST handler panicked after response commitment")
+		c.Set(HTTPReturnCode, merr.Code(err))
+		c.Set(HTTPReturnMessage, err.Error())
+		_ = c.Error(err).SetType(gin.ErrorTypePrivate)
+		if workerPanicStack == nil {
+			workerPanicStack = debug.Stack()
+		}
+		mlog.Error(w.ctx, "REST handler panicked after response commitment", mlog.Err(err), mlog.Any("panic", panicValue), mlog.String("panic_stack", string(workerPanicStack)))
+		abortStreamingResponse(c, cancel)
+		return
+	}
+
+	requestErr := w.requestError()
+	if requestErr != nil {
+		c.Set(HTTPReturnCode, merr.TimeoutCode)
+		c.Set(HTTPReturnMessage, "request timeout")
+	}
+	switch {
+	case panicValue != nil || w.failure != nil:
+		// An explicit abort or a failed transport cannot carry an error body.
+		abortStreamingResponse(c, cancel)
+	case requestErr != nil:
+		if w.Written() {
+			abortStreamingResponse(c, cancel) // Already committed: never append an error document.
+		} else {
+			w.writeErrorResponse(c, cancel, http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
+		}
+	default:
+		// Successful response: do not leave its deadline on a reused connection.
+		if w.stopWrite != nil {
+			_ = w.controller.SetWriteDeadline(time.Time{})
+		}
+	}
+}
+
+func abortStreamingResponse(c *gin.Context, cancel context.CancelFunc) {
+	cancel()
+	c.Abort()
+	if state, ok := c.Request.Context().Value(streamingAbortKey{}).(*streamingAbortState); ok {
+		state.aborted = true
+		return
+	}
+	panic(http.ErrAbortHandler) // Caller must install StreamingHTTPHandler.
+}
+
+func (w *streamingResponseWriter) writeErrorResponse(c *gin.Context, cancel context.CancelFunc, status int, body gin.H) bool {
+	// The request may already be expired. Give the complete error envelope
+	// a bounded write window from server configuration, not Request-Timeout: 0.
+	budget := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
+	if err := w.controller.SetWriteDeadline(time.Now().Add(budget)); err != nil {
+		abortStreamingResponse(c, cancel)
+		return false
+	}
+	HTTPAbortReturn(c, status, body)
+	if err := w.controller.Flush(); err != nil {
+		abortStreamingResponse(c, cancel)
+		return false
+	}
+	_ = w.controller.SetWriteDeadline(time.Time{})
+	return true
 }

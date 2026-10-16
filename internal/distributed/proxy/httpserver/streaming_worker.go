@@ -22,6 +22,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime/debug"
+
+	"github.com/gin-gonic/gin"
 )
 
 type streamingIOKind uint8
@@ -194,3 +197,67 @@ func (w *streamingWorkerWriter) CloseNotify() <-chan bool {
 }
 
 func (w *streamingWorkerWriter) Pusher() http.Pusher { return nil }
+
+type streamingWorkerResult struct {
+	panicValue any
+	stack      []byte
+}
+
+// serveWorker keeps all real I/O on the HTTP goroutine. It stops accepting
+// worker calls on timeout without waiting for uncooperative computation.
+func (w *streamingResponseWriter) serveWorker(c *gin.Context, handler gin.HandlerFunc) streamingWorkerResult {
+	// The worker owns a copied Gin context and detached I/O adapters.
+	exchange := &streamingExchange{ctx: w.ctx, calls: make(chan streamingIOCall)}
+	workerWriter := &streamingWorkerWriter{
+		exchange: exchange, header: w.ResponseWriter.Header().Clone(),
+		status: w.ResponseWriter.Status(), size: -1,
+	}
+	workerCtx := c.Copy()
+	workerCtx.Writer = workerWriter
+	workerCtx.Request = c.Request.Clone(w.ctx)
+	if c.Request.Body != nil && c.Request.Body != http.NoBody {
+		workerCtx.Request.Body = streamingWorkerBody{exchange: exchange}
+	}
+	finished := make(chan streamingWorkerResult, 1)
+	go func() {
+		defer func() {
+			result := streamingWorkerResult{panicValue: recover()}
+			if result.panicValue != nil {
+				result.stack = debug.Stack()
+			}
+			finished <- result // Never block a worker finishing after timeout.
+		}()
+		handler(workerCtx)
+	}()
+	for {
+		select {
+		case <-w.ctx.Done():
+			return streamingWorkerResult{}
+		case call := <-exchange.calls:
+			call.serve(w, c.Request.Body)
+			if w.failure != nil {
+				return streamingWorkerResult{}
+			}
+		case result := <-finished:
+			// Completion establishes exclusive access to worker state.
+			propagateTimeoutContextKeys(c, workerCtx)
+			c.Errors = append(c.Errors, workerCtx.Errors...)
+			if workerCtx.IsAborted() {
+				c.Abort()
+			}
+			if !w.Written() {
+				copyStreamingHeader(w.ResponseWriter.Header(), workerWriter.header)
+				w.ResponseWriter.WriteHeader(workerWriter.status)
+			}
+			// Cancellation can make a late renderer fail before we select
+			// ctx.Done(). Preserve the precommit timeout envelope in that race.
+			if w.requestError() == nil {
+				w.failure = workerWriter.failure
+			}
+			if result.panicValue != nil && !(result.panicValue == http.ErrAbortHandler && w.requestError() != nil) {
+				return result
+			}
+			return streamingWorkerResult{}
+		}
+	}
+}
