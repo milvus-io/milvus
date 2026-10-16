@@ -853,6 +853,14 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				vectors.Vectors.Data = &schemapb.VectorField_Int8Vector{
 					Int8Vector: make([]byte, 0, topK*dim),
 				}
+			case *schemapb.VectorField_VectorArray:
+				vectors.Vectors.Data = &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Dim:         vectorField.GetVectorArray().GetDim(),
+						ElementType: vectorField.GetVectorArray().GetElementType(),
+						Data:        make([]*schemapb.VectorField, 0, topK),
+					},
+				}
 			}
 			fd.Field = vectors
 		case *schemapb.FieldData_StructArrays:
