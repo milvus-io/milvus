@@ -22,7 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/pkindex/dedup"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -150,8 +150,8 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 	}
 	i.rememberCipher(t, msg)
 
-	intent, err := i.decide(ctx, t, dedup.Request{
-		Kind:     dedup.KindInsert,
+	intent, err := i.decide(ctx, t, snpkindex.Request{
+		Kind:     snpkindex.KindInsert,
 		VChannel: msg.VChannel(),
 		PKs:      toPKs(keys),
 		TxnID:    txnIDOf(msg),
@@ -189,13 +189,13 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 
 // applyInsert reads the assigned segment back from the appended insert. The shard
 // interceptor rewrites the header downstream, so it must be decoded again here.
-func (i *appendInterceptor) applyInsert(ctx context.Context, intent *dedup.Intent, appended message.ImmutableMessage, timeTick uint64) {
+func (i *appendInterceptor) applyInsert(ctx context.Context, intent *snpkindex.Intent, appended message.ImmutableMessage, timeTick uint64) {
 	header := message.MustAsImmutableInsertMessageV1(appended).Header()
 	var segmentID int64
 	if partitions := header.GetPartitions(); len(partitions) > 0 {
 		segmentID = partitions[0].GetSegmentAssignment().GetSegmentId()
 	}
-	intent.Apply(ctx, dedup.Applied{SegmentID: segmentID, TimeTick: timeTick})
+	intent.Apply(ctx, snpkindex.Applied{SegmentID: segmentID, TimeTick: timeTick})
 }
 
 func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
@@ -214,8 +214,8 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	}
 	i.rememberCipher(t, msg)
 
-	intent, err := i.decide(ctx, t, dedup.Request{
-		Kind:     dedup.KindDelete,
+	intent, err := i.decide(ctx, t, snpkindex.Request{
+		Kind:     snpkindex.KindDelete,
 		VChannel: msg.VChannel(),
 		PKs:      toPKs(keys),
 		TxnID:    txnIDOf(msg),
@@ -235,13 +235,13 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 		intent.Discard(ctx, err)
 		return id, err
 	}
-	intent.Apply(ctx, dedup.Applied{TimeTick: msg.TimeTick()})
+	intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
 	return id, nil
 }
 
 func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	intent, err := i.decide(ctx, t, dedup.Request{
-		Kind:     dedup.KindCommitTxn,
+	intent, err := i.decide(ctx, t, snpkindex.Request{
+		Kind:     snpkindex.KindCommitTxn,
 		VChannel: msg.VChannel(),
 		TxnID:    txnIDOf(msg),
 	})
@@ -272,13 +272,13 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 		return nil, err
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
-	intent.Apply(ctx, dedup.Applied{TimeTick: result.Commit.TimeTick()})
+	intent.Apply(ctx, snpkindex.Applied{TimeTick: result.Commit.TimeTick()})
 	return result.Commit.MessageID(), nil
 }
 
 func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	intent, err := i.decide(ctx, t, dedup.Request{
-		Kind:     dedup.KindRollbackTxn,
+	intent, err := i.decide(ctx, t, snpkindex.Request{
+		Kind:     snpkindex.KindRollbackTxn,
 		VChannel: msg.VChannel(),
 		TxnID:    txnIDOf(msg),
 	})
@@ -291,12 +291,12 @@ func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg m
 		intent.Discard(ctx, err)
 		return id, err
 	}
-	intent.Apply(ctx, dedup.Applied{TimeTick: msg.TimeTick()})
+	intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
 	return id, nil
 }
 
 // decide calls the decider and classifies its error for the WAL.
-func (i *appendInterceptor) decide(ctx context.Context, t *target, req dedup.Request) (*dedup.Intent, error) {
+func (i *appendInterceptor) decide(ctx context.Context, t *target, req snpkindex.Request) (*snpkindex.Intent, error) {
 	start := time.Now()
 	intent, err := t.decider.Decide(ctx, req)
 	if err != nil {
@@ -307,17 +307,17 @@ func (i *appendInterceptor) decide(ctx context.Context, t *target, req dedup.Req
 		return nil, status.NewInner("primary key index lookup failed: %v", err)
 	}
 	switch {
-	case req.Kind == dedup.KindCommitTxn:
+	case req.Kind == snpkindex.KindCommitTxn:
 		// A commit probes the pending writes of its transaction, and the decider
 		// does not expose how many keys that is. Without that number the hit and
 		// miss counters can not both be fed, and feeding only the hits would make
 		// the ratio of the two wrong. Only the duration and the lock wait are
 		// observed until the decider reports the size of the pending snapshot.
 		i.metrics.observeCommitDecide(time.Since(start), intent.LockWait())
-	case req.TxnID == 0 && (req.Kind == dedup.KindInsert || req.Kind == dedup.KindDelete):
+	case req.TxnID == 0 && (req.Kind == snpkindex.KindInsert || req.Kind == snpkindex.KindDelete):
 		d := intent.Decision()
 		hit := len(d.CompanionDeletePKs)
-		if req.Kind == dedup.KindDelete {
+		if req.Kind == snpkindex.KindDelete {
 			hit = len(d.PresentPKs)
 		}
 		i.metrics.observeDecide(time.Since(start), intent.LockWait(), len(req.PKs), hit)
