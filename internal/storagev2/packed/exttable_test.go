@@ -831,6 +831,7 @@ func TestManifestPathKey(t *testing.T) {
 	assert.Equal(t, canonical, ManifestPathKey(canonical))
 	assert.Equal(t, canonical, ManifestPathKey(reordered))
 	assert.Equal(t, canonical, ManifestPathKey(extended))
+	assert.Equal(t, canonical, ManifestPathKey(" \n\t"+reordered))
 	assert.True(t, SameManifestPath(reordered, extended))
 
 	assert.False(t, SameManifestPath(canonical, MarshalManifestPath("files/insert_log/1/2/3", 8)))

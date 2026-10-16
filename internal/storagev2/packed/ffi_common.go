@@ -454,7 +454,8 @@ func CompareManifestPath(a, b string) (int, error) {
 // by their text. A value that is not a manifest path, such as an external
 // table file path, is returned unchanged.
 func ManifestPathKey(path string) string {
-	if !strings.HasPrefix(path, "{") {
+	// UnmarshalManifestPath accepts leading whitespace too.
+	if !strings.HasPrefix(strings.TrimSpace(path), "{") {
 		return path
 	}
 	basePath, version, err := UnmarshalManifestPath(path)
