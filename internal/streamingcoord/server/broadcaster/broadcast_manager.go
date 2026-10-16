@@ -365,7 +365,9 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 	return nil
 }
 
-// Close closes the broadcast task manager.
+// Close cancels in-flight requests before waiting for them to exit. An ACK
+// callback whose result was not persisted can run again after recovery, so
+// callbacks must tolerate retries even when they already produced side effects.
 func (bm *broadcastTaskManager) Close() {
 	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
 	bm.cancel()
