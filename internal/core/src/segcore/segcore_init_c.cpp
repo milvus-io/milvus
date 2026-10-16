@@ -194,6 +194,17 @@ SegcoreSetDenseVectorInterminIndexType(const char* value) {
 }
 
 extern "C" CStatus
+SegcoreSetSparseInterimIndexAlgorithms(const char* ip_algo,
+                                       const char* bm25_algo) {
+    try {
+        SegcoreConfig::default_config().set_sparse_interim_index_algos(
+            ip_algo, bm25_algo);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+extern "C" CStatus
 SegcoreSetDenseVectorInterminIndexRefineQuantType(const char* value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
