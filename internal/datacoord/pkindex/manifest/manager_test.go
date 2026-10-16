@@ -260,17 +260,17 @@ func TestFlushWithStaleCachedClaim(t *testing.T) {
 func TestCommitCompaction(t *testing.T) {
 	m, _, _ := claimed(t, 1)
 	ctx := context.Background()
-	_, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{1}, Outputs: []*pkindexpb.SSTRef{{Id: 2}}})
+	_, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{1}, Outputs: runOut(5, 2)})
 	assert.True(t, errors.Is(err, ErrNoManifest), "no manifest before the first flush")
 
 	_, err = m.CommitFlush(ctx, flush(1, 10, 3, 2, 1))
 	require.NoError(t, err)
-	got, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{2, 1}, Outputs: []*pkindexpb.SSTRef{{Id: 10}}})
+	got, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{2, 1}, Outputs: runOut(6, 10)})
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, got.GetVersion())
 	assert.Equal(t, []int64{3, 10}, sstIDs(got))
 
-	_, err = m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{2, 1}, Outputs: []*pkindexpb.SSTRef{{Id: 11}}})
+	_, err = m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{2, 1}, Outputs: runOut(7, 11)})
 	assert.True(t, errors.Is(err, ErrStaleEdit))
 }
 
@@ -566,13 +566,19 @@ func TestConcurrentEdits(t *testing.T) {
 	}
 	_, err := m.CommitFlush(ctx, flush(1, 10, base...))
 	require.NoError(t, err)
+	// the L0 tables are compacted oldest first into one run each; the
+	// concurrent compactions then replace these runs
+	for i := 1; i <= compacts; i++ {
+		_, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{int64(i)}, Outputs: runOut(int64(100+i), int64(500+i))})
+		require.NoError(t, err)
+	}
 
 	var wg sync.WaitGroup
 	for i := 1; i <= compacts; i++ {
 		wg.Add(1)
 		go func(id int64) {
 			defer wg.Done()
-			_, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{id}, Outputs: []*pkindexpb.SSTRef{{Id: 1000 + id}}})
+			_, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{500 + id}, Outputs: runOut(300+id, 1000+id)})
 			assert.NoError(t, err)
 		}(int64(i))
 	}
@@ -591,7 +597,7 @@ func TestConcurrentEdits(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	// the first flush, then every concurrent edit
-	assert.EqualValues(t, 1+compacts+flushes, got.GetVersion())
+	assert.EqualValues(t, 1+2*compacts+flushes, got.GetVersion())
 	assert.EqualValues(t, 10+flushes, got.GetCheckpointTimeTick())
 	want := []int64{}
 	for j := flushes; j >= 1; j-- {
@@ -796,6 +802,17 @@ func applyEditFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest) 
 	return applyFlush(cur, req, "b")
 }
 
+// runOut returns the outputs of one compaction: tables with the given IDs,
+// all in run runID, with ascending disjoint key ranges.
+func runOut(runID int64, ids ...int64) []*pkindexpb.SSTRef {
+	out := make([]*pkindexpb.SSTRef, 0, len(ids))
+	for i, id := range ids {
+		k := fmt.Sprintf("k%03d", i)
+		out = append(out, sstRef(id, runID, k, k))
+	}
+	return out
+}
+
 func ssts(ids ...int64) []*pkindexpb.SSTRef {
 	out := make([]*pkindexpb.SSTRef, 0, len(ids))
 	for _, id := range ids {
@@ -887,7 +904,7 @@ func TestFlush(t *testing.T) {
 func TestFlushRetryAfterCompaction(t *testing.T) {
 	m, err := applyEditFlush(nil, editFlush(5, 100, 2, 1))
 	require.NoError(t, err)
-	c, err := applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(10)})
+	c, err := applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: runOut(5, 10)})
 	require.NoError(t, err)
 
 	again, err := applyEditFlush(c, editFlush(5, 100, 2, 1))
@@ -934,7 +951,7 @@ func TestCompaction(t *testing.T) {
 	m, err := applyEditFlush(nil, editFlush(1, 10, 4, 3, 2, 1))
 	require.NoError(t, err)
 
-	c, err := applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(10)})
+	c, err := applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: runOut(5, 10)})
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 	assert.Equal(t, []int64{4, 3, 10}, sstIDs(c))
@@ -943,12 +960,12 @@ func TestCompaction(t *testing.T) {
 	assert.Equal(t, []int64{4, 3, 2, 1}, sstIDs(m), "input must not change")
 
 	for _, in := range [][]int64{{3, 1}, {1, 2}, {5}, {}} {
-		_, err := applyCompaction(m, Compaction{Inputs: in, Outputs: ssts(10)})
+		_, err := applyCompaction(m, Compaction{Inputs: in, Outputs: runOut(5, 10)})
 		assert.True(t, errors.Is(err, ErrStaleEdit), "%v", in)
 	}
-	_, err = applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(4)})
+	_, err = applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: runOut(5, 4)})
 	assert.True(t, errors.Is(err, ErrDuplicateSST))
-	_, err = applyCompaction(nil, Compaction{Inputs: []int64{1}, Outputs: ssts(10)})
+	_, err = applyCompaction(nil, Compaction{Inputs: []int64{1}, Outputs: runOut(5, 10)})
 	assert.True(t, errors.Is(err, ErrNoManifest))
 }
 
@@ -957,7 +974,7 @@ func TestCompaction(t *testing.T) {
 func TestCompactionRetryOfApplied(t *testing.T) {
 	m, err := applyEditFlush(nil, editFlush(1, 10, 4, 3, 2, 1))
 	require.NoError(t, err)
-	edit := Compaction{Inputs: []int64{2, 1}, Outputs: ssts(11, 10)}
+	edit := Compaction{Inputs: []int64{2, 1}, Outputs: runOut(5, 11, 10)}
 	c, err := applyCompaction(m, edit)
 	require.NoError(t, err)
 	require.NotNil(t, c)
@@ -979,7 +996,7 @@ func TestCompactionMixedIsStale(t *testing.T) {
 	m, err := applyEditFlush(nil, editFlush(1, 10, 4, 3, 2, 1))
 	require.NoError(t, err)
 	// list after this compaction: 4 3 11 10
-	c, err := applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(11, 10)})
+	c, err := applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: runOut(5, 11, 10)})
 	require.NoError(t, err)
 
 	cases := map[string]Compaction{
@@ -999,7 +1016,7 @@ func TestCompactionMixedIsStale(t *testing.T) {
 func TestCompactionDuplicateInsideOutputs(t *testing.T) {
 	m, err := applyEditFlush(nil, editFlush(1, 10, 2, 1))
 	require.NoError(t, err)
-	_, err = applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: ssts(10, 10)})
+	_, err = applyCompaction(m, Compaction{Inputs: []int64{2, 1}, Outputs: runOut(5, 10, 10)})
 	assert.True(t, errors.Is(err, ErrDuplicateSST))
 }
 
@@ -1016,15 +1033,22 @@ func TestFlushAndCompactCommute(t *testing.T) {
 		}
 		start, err := applyEditFlush(nil, editFlush(1, 10, base...))
 		require.NoError(t, err)
+		// the oldest tables are single-table runs, the others are L0 tables
+		l0 := r.Intn(n + 1)
+		start = proto.Clone(start).(*pkindexpb.Manifest)
+		for i := l0; i < n; i++ {
+			start.Ssts[i].RunId = 500 + start.Ssts[i].GetId()
+		}
 
-		nextID := int64(1000)
+		nextID, nextRun := int64(1000), int64(1000)
 		fresh := func(count int) []*pkindexpb.SSTRef {
-			out := make([]*pkindexpb.SSTRef, 0, count)
+			ids := make([]int64, 0, count)
 			for i := 0; i < count; i++ {
-				out = append(out, &pkindexpb.SSTRef{Id: nextID})
+				ids = append(ids, nextID)
 				nextID++
 			}
-			return out
+			nextRun++
+			return runOut(nextRun, ids...)
 		}
 
 		flushes := make([]*pkindexpb.CommitFlushRequest, 1+r.Intn(4))
@@ -1033,9 +1057,14 @@ func TestFlushAndCompactCommute(t *testing.T) {
 			flushes[i].AddSsts = fresh(r.Intn(3))
 		}
 
-		// compactions take disjoint contiguous runs of the base list
+		// compactions take disjoint contiguous ranges of the base list: the
+		// range of the L0 tables ends at the last L0 table, the others are
+		// among the runs
 		var compacts []Compaction
-		for pos, want := 0, 1+r.Intn(3); pos < n && len(compacts) < want; {
+		if l0 > 0 && r.Intn(2) == 0 {
+			compacts = append(compacts, Compaction{Inputs: base[r.Intn(l0):l0], Outputs: fresh(1 + r.Intn(2))})
+		}
+		for pos, want := l0, 1+r.Intn(3); pos < n && len(compacts) < want; {
 			from := pos + r.Intn(n-pos)
 			to := from + 1 + r.Intn(n-from)
 			compacts = append(compacts, Compaction{Inputs: base[from:to], Outputs: fresh(1 + r.Intn(2))})
@@ -1147,4 +1176,87 @@ func TestStoreFailureClassification(t *testing.T) {
 			assert.Equal(t, c.unavailable, merr.IsRetryableErr(got), "%v", got)
 		})
 	}
+}
+
+func sstRef(id, runID int64, minKey, maxKey string) *pkindexpb.SSTRef {
+	return &pkindexpb.SSTRef{Id: id, RunId: runID, Size: 10, MinKey: []byte(minKey), MaxKey: []byte(maxKey)}
+}
+
+func manifestWith(ssts ...*pkindexpb.SSTRef) *pkindexpb.Manifest {
+	return &pkindexpb.Manifest{CollectionId: 1, Vchannel: vch, Version: 3, Ssts: ssts}
+}
+
+func TestApplyCompactionRunRules(t *testing.T) {
+	// list (newest first): L0 9, L0 8, run 5 {7, 6}, run 4 {3}
+	cur := manifestWith(sstRef(9, 0, "a", "z"), sstRef(8, 0, "a", "z"), sstRef(7, 5, "a", "m"), sstRef(6, 5, "n", "z"), sstRef(3, 4, "a", "z"))
+	out := func(runID int64) []*pkindexpb.SSTRef {
+		return []*pkindexpb.SSTRef{sstRef(20, runID, "a", "k"), sstRef(21, runID, "l", "z")}
+	}
+
+	t.Run("l0 to run keeps the l0 prefix", func(t *testing.T) {
+		next, err := applyCompaction(cur, Compaction{Inputs: []int64{9, 8}, Outputs: out(6)})
+		require.NoError(t, err)
+		require.Equal(t, []int64{20, 21, 7, 6, 3}, sstIDs(next))
+	})
+	t.Run("inputs are exactly one run", func(t *testing.T) {
+		next, err := applyCompaction(cur, Compaction{Inputs: []int64{7, 6}, Outputs: out(6)})
+		require.NoError(t, err)
+		require.Equal(t, []int64{9, 8, 20, 21, 3}, sstIDs(next))
+	})
+	t.Run("l0 tables plus a whole run", func(t *testing.T) {
+		next, err := applyCompaction(cur, Compaction{Inputs: []int64{8, 7, 6}, Outputs: out(6)})
+		require.NoError(t, err)
+		require.Equal(t, []int64{9, 20, 21, 3}, sstIDs(next))
+	})
+	t.Run("inputs must not split a run at the start edge", func(t *testing.T) {
+		_, err := applyCompaction(cur, Compaction{Inputs: []int64{6, 3}, Outputs: out(6)})
+		require.ErrorIs(t, err, ErrStaleEdit)
+	})
+	t.Run("all inputs may vanish", func(t *testing.T) {
+		next, err := applyCompaction(cur, Compaction{Inputs: []int64{7, 6}, Outputs: nil})
+		require.NoError(t, err)
+		require.Equal(t, []int64{9, 8, 3}, sstIDs(next))
+		next, err = applyCompaction(cur, Compaction{Inputs: []int64{3}, Outputs: nil})
+		require.NoError(t, err)
+		require.Equal(t, []int64{9, 8, 7, 6}, sstIDs(next))
+	})
+	t.Run("inputs must not split a run", func(t *testing.T) {
+		_, err := applyCompaction(cur, Compaction{Inputs: []int64{8, 7}, Outputs: out(6)})
+		require.ErrorIs(t, err, ErrStaleEdit)
+	})
+	t.Run("outputs need one new run id", func(t *testing.T) {
+		_, err := applyCompaction(cur, Compaction{Inputs: []int64{9, 8}, Outputs: out(0)})
+		require.ErrorIs(t, err, ErrStaleEdit)
+		_, err = applyCompaction(cur, Compaction{Inputs: []int64{9, 8}, Outputs: out(5)})
+		require.ErrorIs(t, err, ErrStaleEdit)
+		mixed := out(6)
+		mixed[1].RunId = 7
+		_, err = applyCompaction(cur, Compaction{Inputs: []int64{9, 8}, Outputs: mixed})
+		require.ErrorIs(t, err, ErrStaleEdit)
+	})
+	t.Run("outputs must be ascending and disjoint", func(t *testing.T) {
+		overlap := []*pkindexpb.SSTRef{sstRef(20, 6, "a", "m"), sstRef(21, 6, "m", "z")}
+		_, err := applyCompaction(cur, Compaction{Inputs: []int64{9, 8}, Outputs: overlap})
+		require.ErrorIs(t, err, ErrStaleEdit)
+	})
+	t.Run("an output needs min key not above max key", func(t *testing.T) {
+		inverted := []*pkindexpb.SSTRef{sstRef(20, 6, "k", "a")}
+		_, err := applyCompaction(cur, Compaction{Inputs: []int64{9, 8}, Outputs: inverted})
+		require.ErrorIs(t, err, ErrStaleEdit)
+	})
+	t.Run("an l0 table must not end up behind a run", func(t *testing.T) {
+		_, err := applyCompaction(cur, Compaction{Inputs: []int64{9}, Outputs: []*pkindexpb.SSTRef{sstRef(20, 6, "a", "z")}})
+		require.ErrorIs(t, err, ErrStaleEdit)
+		single := manifestWith(sstRef(9, 0, "a", "z"), sstRef(8, 0, "a", "z"), sstRef(7, 0, "a", "z"))
+		_, err = applyCompaction(single, Compaction{Inputs: []int64{8}, Outputs: []*pkindexpb.SSTRef{sstRef(20, 6, "a", "z")}})
+		require.ErrorIs(t, err, ErrStaleEdit)
+	})
+}
+
+func TestApplyFlushClearsRunID(t *testing.T) {
+	req := &pkindexpb.CommitFlushRequest{CollectionId: 1, Vchannel: "v1", PchannelTerm: 1, CheckpointTimeTick: 10,
+		AddSsts: []*pkindexpb.SSTRef{sstRef(1, 99, "a", "z")}}
+	next, err := applyFlush(nil, req, "base")
+	require.NoError(t, err)
+	require.Zero(t, next.GetSsts()[0].GetRunId())
 }
