@@ -2526,20 +2526,6 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 			task.partitionKeyMode = partitionKeyMode
 			task.upsertMsg.DeleteMsg.PartitionName = "_default"
 			beginTS := task.BeginTs()
-			var setSkipRuntimeRLS func(*queryTask, bool)
-			skipRuntimeRLSPatch := mockey.Mock((*queryTask).SetSkipRuntimeRLS).
-				To(func(task *queryTask, skip bool) {
-					require.True(t, skip)
-					setSkipRuntimeRLS(task, skip)
-				}).Origin(&setSkipRuntimeRLS).Build()
-			defer skipRuntimeRLSPatch.UnPatch()
-			var setPreserveRawFields func(*queryTask, bool)
-			preserveRawFieldsPatch := mockey.Mock((*queryTask).SetPreserveRawFields).
-				To(func(task *queryTask, preserve bool) {
-					require.False(t, preserve)
-					setPreserveRawFields(task, preserve)
-				}).Origin(&setPreserveRawFields).Build()
-			defer preserveRawFieldsPatch.UnPatch()
 			fakeWAL := newPartialUpdateCASTestWAL(t, 9)
 			oldWAL := streaming.WAL()
 			streaming.SetWALForTest(fakeWAL)
@@ -2576,8 +2562,6 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 
 			result, _, err := retrieveByPKs(context.Background(), task, partialUpdateCASIDs([]int64{10, 20}), []string{"*"})
 			require.NoError(t, err)
-			require.Equal(t, 1, skipRuntimeRLSPatch.Times())
-			require.Equal(t, 1, preserveRawFieldsPatch.Times())
 			require.Len(t, result.GetFieldsData(), 1)
 			require.Equal(t, beginTS, task.BeginTs())
 			for _, meta := range task.partialUpdateCASGroups {
@@ -2590,13 +2574,6 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
 	const beginTS = uint64(200)
 	var captured *queryTask
-	var setSkipRuntimeRLS func(*queryTask, bool)
-	skipRuntimeRLSPatch := mockey.Mock((*queryTask).SetSkipRuntimeRLS).
-		To(func(task *queryTask, skip bool) {
-			require.True(t, skip)
-			setSkipRuntimeRLS(task, skip)
-		}).Origin(&setSkipRuntimeRLS).Build()
-	defer skipRuntimeRLSPatch.UnPatch()
 
 	m := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, task *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 		captured = task
@@ -2632,7 +2609,6 @@ func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
 	require.Zero(t, captured.GetGuaranteeTimestamp())
 	require.Zero(t, captured.Request().GetBase().GetTimestamp())
 	require.False(t, captured.CanSkipAllocTimestamp(), "the Query must obtain its own Strong-read timestamp")
-	require.Equal(t, 1, skipRuntimeRLSPatch.Times())
 	require.Equal(t, []string{"id"}, captured.Request().GetOutputFields())
 	require.Zero(t, captured.GetMvccTimestamp())
 	require.False(t, captured.HasRecordedChannelMvcc())

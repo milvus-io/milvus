@@ -183,9 +183,6 @@ func (n *namespaceRequeryMockNode) LBPolicy() shardclient.LBPolicy       { retur
 func (n *namespaceRequeryMockNode) ShardMgr() shardclient.ShardClientMgr { return nil }
 func (n *namespaceRequeryMockNode) ChMgr() channelmgr.ChannelsMgr        { return nil }
 func (n *namespaceRequeryMockNode) TsoAllocator() taskmodel.TsoAllocator { return &mockTsoAllocator{} }
-func (n *namespaceRequeryMockNode) ResolveRLSEnforcement(_ context.Context, _ metacache.Cache, rlsEnabled, _, _ bool, _, _, _ string) (bool, error) {
-	return rlsEnabled, nil
-}
 
 func (n *namespaceRequeryMockNode) ExecuteQuery(ctx context.Context, qt taskmodel.Task, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	panic("ExecuteQuery must be patched by mockey")

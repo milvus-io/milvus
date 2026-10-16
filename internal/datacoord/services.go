@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -1978,8 +1977,6 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		jobID,
 		in.GetChannelNames(),
 		interceptor.IdempotencyKeyFromContext(ctx),
-		in.GetRlsPrincipal(),
-		in.GetSkipRls(),
 	)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast import message", mlog.Err(err))
@@ -2045,15 +2042,10 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
-	var rlsPredicate *planpb.Expr
-	var rlsErr error
-	if !l0ImportDisabled {
-		rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, in)
-	}
 
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
-	if isBackup && !l0ImportDisabled && rlsErr == nil {
+	if isBackup && !l0ImportDisabled {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2092,22 +2084,21 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	createTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:             jobID,
-			CollectionID:      in.GetCollectionID(),
-			CollectionName:    in.GetCollectionName(),
-			PartitionIDs:      in.GetPartitionIDs(),
-			Vchannels:         importCollectionInfo.VChannelNames,
-			Schema:            in.GetSchema(),
-			TimeoutTs:         timeoutTs,
-			CleanupTs:         math.MaxUint64,
-			State:             internalpb.ImportJobState_Pending,
-			Files:             files,
-			Options:           in.GetOptions(),
-			CreateTime:        createTime.Format("2006-01-02T15:04:05Z07:00"),
-			ReadyVchannels:    in.GetChannelNames(),
-			DataTs:            in.GetDataTimestamp(),
-			AutoCommit:        importutilv2.IsAutoCommit(in.GetOptions()),
-			RlsCheckPredicate: rlsPredicate,
+			JobID:          jobID,
+			CollectionID:   in.GetCollectionID(),
+			CollectionName: in.GetCollectionName(),
+			PartitionIDs:   in.GetPartitionIDs(),
+			Vchannels:      importCollectionInfo.VChannelNames,
+			Schema:         in.GetSchema(),
+			TimeoutTs:      timeoutTs,
+			CleanupTs:      math.MaxUint64,
+			State:          internalpb.ImportJobState_Pending,
+			Files:          files,
+			Options:        in.GetOptions(),
+			CreateTime:     createTime.Format("2006-01-02T15:04:05Z07:00"),
+			ReadyVchannels: in.GetChannelNames(),
+			DataTs:         in.GetDataTimestamp(),
+			AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
@@ -2118,11 +2109,6 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
 			"into data segment deltalogs before restore, or set the config to true on this cluster " +
 			"to re-enable the legacy L0 import")(job)
-	} else if rlsErr != nil {
-		mlog.Warn(ctx, "RLS import check could not be prepared, creating the job in Failed state",
-			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()), mlog.Err(rlsErr))
-		UpdateJobState(internalpb.ImportJobState_Failed)(job)
-		UpdateJobReason(rlsErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {
