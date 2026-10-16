@@ -37,8 +37,8 @@ Out of scope (future work):
 
 - The streaming node side that uploads SSTs and commits flushes (snapshot).
 - The streaming node recovery that claims a pchannel and replays the WAL.
-- Compaction of SSTs. The edit rule and the GC input exist, but no task uses
-  them.
+- The compaction task that plans, runs and commits a compaction. See
+  [compaction.md](compaction.md).
 - Cleanup of all primary key index objects after a collection drop.
 - Snapshot protection of SST files.
 
@@ -65,6 +65,7 @@ message SSTRef {
   bytes min_key = 4;
   bytes max_key = 5;
   int64 num_entries = 6;
+  int64 run_id = 7;        // 0: a flushed table; otherwise the run of a compaction
 }
 
 message ManifestPointer {
@@ -201,37 +202,53 @@ Notes:
 
 ### Compaction
 
-A compaction replaces a run of SSTs (inputs) with merged SSTs (outputs).
+A compaction replaces a contiguous range of SSTs (inputs) with merged SSTs
+(outputs). A **run** is a set of SSTs whose key ranges do not overlap. A
+flushed SST has `run_id` 0 and is a run of its own. All outputs of one
+compaction share one nonzero `run_id`. The flushed SSTs are always a prefix of
+the list. See [compaction.md](compaction.md).
 
 | Condition | Result |
 |---|---|
 | No manifest | `ErrNoManifest` |
 | Inputs are not empty, no input is in the list, and all outputs are in the list | No write. Return the current version |
-| Inputs are empty, or are not a contiguous run of the list in the same order | `ErrStaleEdit` |
+| Inputs are empty, or are not a contiguous range of the list in the same order | `ErrStaleEdit` |
 | An output ID is in the manifest, or is twice in the outputs | `ErrDuplicateSST` |
+| The inputs split a run: the SST before the first input or after the last input has the same nonzero `run_id` as that input | `ErrStaleEdit` |
+| The outputs are not one new run: an output has `run_id` 0, the outputs have different run ids, or the run id is already in the manifest | `ErrStaleEdit` |
+| An output has a min key above its max key | `ErrStaleEdit` |
+| The key ranges of the outputs overlap or are not in ascending order | `ErrStaleEdit` |
+| After the edit, a flushed SST (`run_id` 0) is behind a run | `ErrStaleEdit` |
 | Otherwise | New version: outputs take the place of the inputs. Checkpoint and `last_flush_term` do not change |
 
 The second row makes a compaction commit idempotent. If the pointer write of
 a compaction took effect but the caller got an error, the caller sends the same
 edit again. The outputs have new global IDs, and no other edit can add them to
-the list. Thus "no input in the list and all outputs in the list" occurs only
-when this compaction took effect. Every other mismatch, for example some inputs
-in the list or only some outputs in the list, gets `ErrStaleEdit`.
+the list. Thus, for non-empty outputs, "no input in the list and all outputs in
+the list" occurs only when this compaction took effect. For empty outputs, the
+check reduces to "no input in the list", which another compaction of the same
+inputs also satisfies. Every other mismatch, for example some inputs in the
+list or only some outputs in the list, gets `ErrStaleEdit`.
 
-Compaction is in-process only. `Manager.CommitCompaction` exists, but the gRPC
-service has no compaction method yet.
+The duplicate check runs before the run checks. When `applyCompaction` returns
+`ErrStaleEdit`, the manager deletes the cache entry of the vchannel.
+
+Compaction is in-process only. The compaction task in DataCoord calls
+`Manager.CommitCompaction`. The gRPC service has no compaction method.
 
 ### Flush and compaction commute
 
 A flush only adds SSTs at the front of the list. A compaction only replaces a
-run that is already in the list. The two edits give the same result in either
+contiguous range that is already in the list. The two edits give the same result in either
 order. Thus a flush and a compaction do not make each other retry.
 
 This is true only when compaction follows this contract:
 
-1. The inputs are a contiguous run of the current SST list.
+1. The inputs are a contiguous range of the current SST list. The range starts
+   and ends at run boundaries, so it does not split a run.
 2. The outputs take the position of the inputs.
 3. The outputs have new SST IDs.
+4. The flushed SSTs stay a prefix of the list.
 
 ## Commit Steps and Crash Windows
 
@@ -243,6 +260,8 @@ time. Different vchannels commit at the same time.
 Manager (holds the vchannel lock)
   1. Load the current version: from the cache, or from the pointer and its body.
   2. Apply the edit. If nothing changes, return the current version.
+     If a compaction gets ErrStaleEdit, forget the cache entry of the
+     vchannel and return the error.
   3. Write the new body to <manifest dir>/<version>-<uuid>.pb.
   4. Write the pointer in one meta kv transaction:
        first version: on the condition KeyNotExist(pointer key)
@@ -254,7 +273,8 @@ Manager (holds the vchannel lock)
        It names the new body: the commit took effect.
        Otherwise: forget the cache entries of the vchannel and of the
        pchannel, and return a retryable error.
-  6. Put the new version in the cache and return it.
+  6. Put the new version in the cache, call the observer
+     (ManifestChanged), and return the new version.
 ```
 
 The read-back in step 5 does not use the context of the caller. A timeout is
@@ -308,6 +328,8 @@ Cache rules:
   its first use. DataCoord does not load all pointers at start.
 - The manager forgets the entries after a failed write. The next edit reads
   them again.
+- The manager forgets the entry of a vchannel after a compaction that gets
+  `ErrStaleEdit`. The next edit reads the pointer and the body again.
 - A flush whose term is above the cached claim term reads the claim record
   again before it returns `ErrNotClaimed`, because a claim through another
   DataCoord can have raised it. A cached term can only be at or below the
@@ -497,8 +519,11 @@ GC deletes an SST, or a body above the current version, that stays
 uncommitted longer than `grace`. GC rejects a `grace` below `MinGrace`
 (10 minutes). DataCoord then logs an error and does not start GC. The unit of
 the parameter is seconds. A duration string such as `"1h"` reads as 0, so GC
-does not start. Compaction outputs do not depend on `grace`, because they are in
-the in-flight set until their commit takes effect.
+does not start. `Inspector.InFlightOutputs` of the compaction task is the
+in-flight source. A task registers the output range of its current attempt
+when the dispatch succeeds. After that, the range is protected until the task
+ends. `grace` covers the moment before the registration. The ranges of
+earlier attempts are not protected.
 
 ### Layout mismatch
 
@@ -535,12 +560,11 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
 
 ## Known Limits and Follow-ups
 
-- **Streaming node side.** The snapshot side (SST upload, flush commit, handoff)
+- **Streaming node side.** The snapshot side (SST upload, flush commit, handover)
   and recovery (pchannel claim, `GetRecoveryManifests`, WAL replay from the checkpoint)
   are not in this work.
-- **Compaction.** No compaction task exists. DataCoord passes no in-flight
-  output source to GC yet. A compaction task must add one before it uploads
-  outputs.
+- **Compaction.** [compaction.md](compaction.md) describes the compaction
+  task. `Inspector.InFlightOutputs` is the in-flight output source of GC.
 - **Collection drop.** Nothing deletes the `pk_index/<collectionID>` prefix after
   a collection drop.
 - **Vchannel without a pointer.** GC finds a vchannel only through its manifest
