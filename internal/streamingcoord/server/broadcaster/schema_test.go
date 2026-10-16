@@ -116,7 +116,7 @@ func TestSchemaTargetPersistenceBoundary(t *testing.T) {
 		require.Empty(t, first.TimeTicks, "initial persistence needs neither WAL append nor ACK")
 		require.False(t, task.dirty)
 		cachedSchema := task.schemaForTarget
-		require.NotSame(t, cachedSchema, first.Schema, "public snapshots must own their schema")
+		require.Same(t, cachedSchema, first.Schema, "readers share the immutable schema")
 
 		// Failed ACK persistence must not leak its checkpoint into the snapshot.
 		mockey.Mock(registry.CallMessageAckOnceCallbacks).Return(nil).Build()
@@ -131,10 +131,10 @@ func TestSchemaTargetPersistenceBoundary(t *testing.T) {
 		require.Same(t, cachedSchema, bm.schemaTasks.collections[100].head.Schema, "index updates must not clone the cached schema")
 		snapshot := requireSchemaTarget(t, bm, 100, 1)
 		require.Equal(t, map[string]uint64{"v1": 10}, snapshot.TimeTicks)
-		snapshot.Schema.Name = "mutated"
+		require.Same(t, cachedSchema, snapshot.Schema)
 		snapshot.TimeTicks["v1"] = 900
 		again := requireSchemaTarget(t, bm, 100, 1)
-		require.Empty(t, again.Schema.Name)
+		require.Same(t, cachedSchema, again.Schema)
 		require.EqualValues(t, 10, again.TimeTicks["v1"])
 		require.Empty(t, first.TimeTicks, "older snapshots remain immutable")
 		save.UnPatch()
@@ -335,7 +335,7 @@ func TestSchemaTargetRecoveredCallbackOrder(t *testing.T) {
 					require.NoError(t, err)
 					if snapshot != nil {
 						require.Contains(t, []uint64{100, 200}, snapshot.BroadcastID)
-						snapshot.Schema.Name = "owned"
+						require.EqualValues(t, 2, snapshot.Schema.Version)
 						snapshot.TimeTicks["v1"] = 900
 					}
 				}

@@ -107,7 +107,7 @@ type broadcastTask struct {
 	// Immutable collection index key; zero for tasks without schema intent.
 	schemaCollectionID       int64
 	schemaTasks              *schemaTaskIndex           // set by the manager before publication; contains durable snapshots only.
-	schemaForTarget          *schemapb.CollectionSchema // lazily decoded, owned and immutable; protected by mu.
+	schemaForTarget          *schemapb.CollectionSchema // lazily decoded and immutable; protected by mu.
 	mu                       sync.Mutex
 	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
 	task                     *streamingpb.BroadcastTask

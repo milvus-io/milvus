@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/google/btree"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -14,14 +13,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
-// SchemaTarget is an owned snapshot of the earliest unfinished durable schema
+// SchemaTarget is a snapshot of the earliest unfinished durable schema
 // ALTER for a collection. It is readable after task persistence, before WAL
 // append or ACK completion. This does not authorize publication or prove that
 // any channel has applied the schema. Completion of its callback retires it.
 type SchemaTarget struct {
 	CollectionID int64
 	BroadcastID  uint64
-	Schema       *schemapb.CollectionSchema
+	// Schema is shared and immutable; callers must not modify it.
+	Schema *schemapb.CollectionSchema
 	// TimeTicks contains only persisted, known business-channel ACK checkpoints.
 	// Missing entries are unknown; the initial snapshot may have none.
 	TimeTicks map[string]uint64
@@ -108,9 +108,9 @@ func (b *broadcastTask) pendingSchemaTarget() *SchemaTarget {
 		if schema == nil {
 			return nil
 		}
-		// A schema ALTER's body never changes. Own it once and share it across
+		// A schema ALTER's body never changes. Decode it once and share it across
 		// immutable index snapshots; only the ACK checkpoints change on save.
-		b.schemaForTarget = proto.Clone(schema).(*schemapb.CollectionSchema)
+		b.schemaForTarget = schema
 	}
 	snapshot := &SchemaTarget{
 		CollectionID: b.schemaCollectionID,
@@ -140,7 +140,7 @@ func (bm *broadcastTaskManager) GetPendingSchemaTarget(collectionID int64) (*Sch
 	return &SchemaTarget{
 		CollectionID: snapshot.CollectionID,
 		BroadcastID:  snapshot.BroadcastID,
-		Schema:       proto.Clone(snapshot.Schema).(*schemapb.CollectionSchema),
+		Schema:       snapshot.Schema,
 		TimeTicks:    maps.Clone(snapshot.TimeTicks),
 	}, nil
 }
