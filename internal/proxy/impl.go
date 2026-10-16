@@ -3541,8 +3541,6 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
 
 	// Search by primary keys uses an internal Query to fetch the input vectors.
-	// Apply the top-level Search policy pinned by the preflight, then prevent
-	// queryTask from applying a Query policy to the same internal retrieval.
 
 	// Build query request to fetch data by IDs
 	// For BM25: fetch text field; for vector search: fetch vector field
