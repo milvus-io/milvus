@@ -814,8 +814,32 @@ Reported in Section 3.1 and Section 4.
   each key against a few neighbours instead of 25 probes; `LoadDeletedRecord`
   replays through the same function and gains equally. The delete record
   insert (skip list, bitmap) is under 2 % and can additionally be split by
-  offset range across threads. With the merge, `maxRows` can be raised or
-  removed.
+  offset range across threads.
+
+  A prototype of exactly this (sort the batch by `(pk, ts)`, batch minimum
+  timestamp for the snapshot gate, key-major merge with a chunk cursor and
+  an in-chunk galloping cursor, the import-segment `commit_ts` path routed
+  through `search_batch_pks`, `LoadDeletedRecord` sorted the same way) was
+  measured on the x86 machine as a strict A/B: fresh import, identical key
+  ranges and order, same 44 M-row single segment, master `179225cd09`:
+
+  | Operation | `int64` key: today → prototype | `varchar` key: today → prototype |
+  |-----------|-------------------------------:|---------------------------------:|
+  | Delete 440 k keys, one request | 5.4 s → 0.2 s | 22.5 s → 0.3 s |
+  | Delete 1.5 M keys, one request | 18.2 s → 0.6 s | 76.6 s → 1.1 s |
+  | Delete 4.4 M keys, 44 requests (apply / tsafe stall) | 51.9 s / 43.6 s → 1.5 s / 0.25 s | 222.6 s / 209.8 s → 2.6 s / 0.08 s |
+  | Load with 6.34 M deleted keys to replay | 92.9 s → 9.9 s | 380.9 s → 10.9 s |
+
+  Row counts after every delete matched the expected values and spot
+  queries of deleted and neighbouring keys returned the expected rows.
+  Two intermediate variants explain where the gain comes from: changing only
+  the sort key gave about 20 % (monotonic offsets), adding an in-chunk cursor
+  but keeping the chunk-major loop gave 3–4×, and the key-major merge gave
+  the rest, because the sorted primary-key column holds many chunks and the
+  chunk-major loop scanned every key once per chunk. With the merge, the per
+  key cost no longer depends on memory latency and `maxRows` can be raised
+  or removed; the prototype branch is `proto/delete-merge-cursor` in the
+  author's tree and will be submitted as its own PR.
 - Loader estimate: add a per-row constant for fixed-width columns (measured
   gap ~80 B per row on `int64 + int32`), not for variable-length columns
   (already covered by the 2× factor).
