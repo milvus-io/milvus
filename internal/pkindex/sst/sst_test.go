@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/codec"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 )
 
 const fixtureID = ID(4242)
@@ -117,7 +117,7 @@ func TestOpenReaderExpectSize(t *testing.T) {
 
 	_, err = OpenReader(path, nil, ExpectSize(info.Size+1))
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted), "got %v", err)
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "got %v", err)
 }
 
 // Describing a table must not read its data. Corrupting a block in the middle
@@ -147,5 +147,5 @@ func TestReadInfoSkipsDataBlocks(t *testing.T) {
 	defer r.Close()
 	err = r.Iter(func(key, value []byte) error { return nil })
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted), "got %v", err)
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "got %v", err)
 }

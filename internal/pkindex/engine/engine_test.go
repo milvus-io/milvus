@@ -30,8 +30,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/codec"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 )
 
 // A retirement interrupted after its rename must not bring the generation
@@ -344,7 +344,7 @@ func TestClosedEngineRejects(t *testing.T) {
 		t.Helper()
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrClosed), "want ErrClosed, got %v", err)
-		assert.True(t, errors.Is(err, pkerr.ErrUnavailable), "want the unavailable category, got %v", err)
+		assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "want the unavailable category, got %v", err)
 	}
 	requireClosed(t, e.Write(ctx, []Mutation{{Key: pk(1), Value: entry(1)}}))
 	_, err = e.MultiGet(ctx, [][]byte{pk(1)})
@@ -364,9 +364,9 @@ func TestOpenWithoutSharedResourcesIsCallerBug(t *testing.T) {
 	_, err := Open(context.Background(), Config{Dir: t.TempDir(), VChannel: "test-vchannel-v0"})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errNoSharedResources), "got %v", err)
-	assert.False(t, errors.Is(err, pkerr.ErrUnavailable))
-	assert.False(t, errors.Is(err, pkerr.ErrIO))
-	assert.False(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.False(t, errors.Is(err, pkindex.ErrUnavailable))
+	assert.False(t, errors.Is(err, pkindex.ErrIO))
+	assert.False(t, errors.Is(err, pkindex.ErrCorrupted))
 }
 
 // An ID allocator is not optional: without one a flush could not name its
@@ -377,6 +377,6 @@ func TestOpenWithoutAllocIDIsCallerBug(t *testing.T) {
 	_, err := Open(context.Background(), Config{Dir: t.TempDir(), VChannel: "vc", Shared: shared})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errNoAllocID), "got %v", err)
-	assert.False(t, errors.Is(err, pkerr.ErrUnavailable))
-	assert.False(t, errors.Is(err, pkerr.ErrIO))
+	assert.False(t, errors.Is(err, pkindex.ErrUnavailable))
+	assert.False(t, errors.Is(err, pkindex.ErrIO))
 }

@@ -2,7 +2,7 @@
 
 - **Created:** 2026-09-17
 - **Status:** Draft
-- **Component:** `internal/pkindex/core`
+- **Component:** `internal/pkindex`
 - **Related work:** LSM-based Primary Key Index, issue #52305
 
 ## Summary
@@ -10,14 +10,15 @@
 The LSM-based primary key index (#52305) keeps, per vchannel, a map from
 primary key to the segment holding the live row, and consults it on the write
 path to deduplicate inserts. This document covers only the storage library
-underneath that feature: three packages with no dependency on any node, RPC, or
-WAL code.
+underneath that feature: the package `internal/pkindex` and its three
+subpackages, with no dependency on any node, RPC, or WAL code.
 
 | Package | Responsibility |
 |---|---|
-| `core/codec` | Order-preserving primary key encoding, value encoding, the tombstone value |
-| `core/sst` | SST write, read, iteration, content-addressed naming, checksum verification |
-| `core/engine` | Per-vchannel engine: generations of writes plus a read-only committed SST set, the cycle that hands one over to the other, node-level shared caches |
+| `pkindex` | Error categories shared by every role, and their translation into `merr` |
+| `codec` | Order-preserving primary key encoding, value encoding, the tombstone value |
+| `sst` | SST write, read, iteration, content-addressed naming, checksum verification |
+| `engine` | Per-vchannel engine: generations of writes plus a read-only committed SST set, the cycle that hands one over to the other, node-level shared caches |
 
 The library provides mechanism only. When to rotate, flush, upload, install or
 drop is decided by its callers, which are not part of this change. Nothing in
@@ -47,7 +48,7 @@ The feature design in #52305 fixes the constraints this library works under:
 - Handing a generation's data over to the committed set without pausing writes
   and without a window in which acknowledged state is unreachable.
 - SST files that are interchangeable between the producer on the streaming node
-  (memtable flush) and any other producer using `core/sst`.
+  (memtable flush) and any other producer using `sst`.
 - Resuming an interrupted hand-over after a crash without leaking directories.
 
 ## Non-goals
@@ -109,7 +110,7 @@ SSTs use Pebble's sstable format with `pebble.DefaultComparer` and a whole-key
 bloom filter of 10 bits per key. The format major version is pinned to a named
 version rather than to whatever Pebble considers newest, and the table format
 is derived from it; raising it is a rolling upgrade, readers first, because the
-files are read by other nodes. One Pebble options template in `core/sst`
+files are read by other nodes. One Pebble options template in `sst`
 carries the version, the comparer and the filter, and the Writer, the Reader
 and the generations all build their options from it, so a memtable flush
 output and a Writer output cannot drift apart and a flush output can serve as a
@@ -442,8 +443,8 @@ the other is a caller mistake. Errors are therefore shaped in two layers:
 
 - A signal a caller branches on is a sentinel declared by the package that
   returns it: `engine.ErrClosed`, `engine.ErrNotFrozen`.
-- How a failure should be reported outward is a category from the leaf package
-  `pkerr`, attached with `errors.Mark` so the original error and the context
+- How a failure should be reported outward is a category from the package
+  `pkindex`, attached with `errors.Mark` so the original error and the context
   each call site added both survive: `ErrIO` for a local disk failure,
   `ErrCorrupted` for stored bytes that do not match the expected layout, and
   `ErrUnavailable` for a condition a retry may clear. A closed engine carries
@@ -452,8 +453,8 @@ the other is a caller mistake. Errors are therefore shaped in two layers:
   shared resources, a value equal to the reserved tombstone — carries no
   category at all, so nothing downstream retries it or reads it as bad data.
 
-Translation happens once, at the boundary that leaves the primary key index
-tree: `pkerr.ToMerr` for a coordinator's gRPC service or a worker's task
+Translation happens once, at the boundary that leaves the primary key index:
+`pkindex.ToMerr` for a coordinator's gRPC service or a worker's task
 result, and the streamingnode interceptor's own mapping to streaming status
 errors. `ToMerr` maps `ErrCorrupted` to `ErrDataIntegrity`, `ErrIO` to
 `ErrIoFailed`, `ErrUnavailable` to `ErrServiceUnavailable`, and anything
@@ -483,7 +484,7 @@ Unit tests, run with `-race`:
 - codec: order preservation over 1e5 random pairs for both key types plus the
   boundary values; round trips; the value kind byte; golden bytes for both key
   types and both value kinds.
-- pkerr: every category and an uncategorized error translate to the expected
+- pkindex: every category and an uncategorized error translate to the expected
   merr code with the call site's context still in the message; a merr passes
   through.
 - sst: round trip; the ID names the file; a flipped byte inside a data block

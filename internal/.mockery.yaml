@@ -17,7 +17,7 @@ packages:
   github.com/milvus-io/milvus/internal/rootcoord/tombstone:
     interfaces:
       TombstoneSweeper:
-  github.com/milvus-io/milvus/internal/pkindex/core/engine:
+  github.com/milvus-io/milvus/internal/pkindex/engine:
     interfaces:
       RW:
       Lifecycle:

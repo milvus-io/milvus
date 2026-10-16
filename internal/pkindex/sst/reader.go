@@ -23,7 +23,7 @@ import (
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/sstable"
 
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
 )
 
 // Reader reads one SST for point lookups and ordered iteration. It reads a
@@ -63,7 +63,7 @@ func OpenReader(path string, cache *pebble.Cache, opts ...ReaderOption) (*Reader
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, pkerr.MarkIO(err, "open sst %s", path)
+		return nil, pkindex.MarkIO(err, "open sst %s", path)
 	}
 	readable, err := sstable.NewSimpleReadable(f)
 	if err != nil {
@@ -75,7 +75,7 @@ func OpenReader(path string, cache *pebble.Cache, opts ...ReaderOption) (*Reader
 		readable.Close()
 		return nil, errors.Mark(
 			errors.Newf("sst %s is %d bytes, want %d", path, size, cfg.expectedSize),
-			pkerr.ErrCorrupted)
+			pkindex.ErrCorrupted)
 	}
 	ro := PebbleOptions().MakeReaderOptions()
 	ro.Cache = cache

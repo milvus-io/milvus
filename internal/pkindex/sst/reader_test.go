@@ -26,8 +26,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/codec"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 )
 
 func TestReaderGet(t *testing.T) {
@@ -139,7 +139,7 @@ func TestGetOnCorruptedDataBlock(t *testing.T) {
 		_, _, getErr = r.Get(codec.EncodeInt64PK(int64(i)))
 	}
 	require.Error(t, getErr, "a flipped byte in a data block must surface on the read path")
-	assert.True(t, errors.Is(getErr, pkerr.ErrCorrupted), "got %v", getErr)
+	assert.True(t, errors.Is(getErr, pkindex.ErrCorrupted), "got %v", getErr)
 }
 
 // Iteration ends on an unreadable block the same way it ends on the last
@@ -164,7 +164,7 @@ func TestIterOnCorruptedDataBlock(t *testing.T) {
 
 	err = r.Iter(func(key, value []byte) error { return nil })
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, pkerr.ErrCorrupted), "got %v", err)
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "got %v", err)
 }
 
 // A lookup on the write path runs while a lock is held, so the index and the

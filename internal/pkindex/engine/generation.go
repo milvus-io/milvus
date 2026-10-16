@@ -25,9 +25,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/pebble"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/codec"
-	"github.com/milvus-io/milvus/internal/pkindex/core/sst"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
+	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
 // generation is one container of writes, backed today by a pebble DB.
@@ -52,16 +52,16 @@ func (g *generation) retire() error {
 	// generation back, however far the deletion below gets: Open deletes
 	// retired directories instead of reopening them.
 	if err := os.Rename(g.dir, g.retiredDir); err != nil {
-		return pkerr.MarkIO(err, "retire generation %s", g.dir)
+		return pkindex.MarkIO(err, "retire generation %s", g.dir)
 	}
 	if err := syncDir(filepath.Dir(g.dir)); err != nil {
-		return pkerr.MarkIO(err, "sync engine dir after retiring %s", g.dir)
+		return pkindex.MarkIO(err, "sync engine dir after retiring %s", g.dir)
 	}
 	if err := os.RemoveAll(g.retiredDir); err != nil {
-		return pkerr.MarkIO(err, "remove retired generation %s", g.retiredDir)
+		return pkindex.MarkIO(err, "remove retired generation %s", g.retiredDir)
 	}
 	if err := os.RemoveAll(g.stagedDir); err != nil {
-		return pkerr.MarkIO(err, "remove staged tables %s", g.stagedDir)
+		return pkindex.MarkIO(err, "remove staged tables %s", g.stagedDir)
 	}
 	if closeErr != nil {
 		return sst.MarkPebbleErr(errors.Wrapf(closeErr, "close generation %s", g.dir))

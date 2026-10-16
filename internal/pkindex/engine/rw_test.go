@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/pkindex/core/codec"
-	"github.com/milvus-io/milvus/internal/pkindex/pkerr"
+	"github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 )
 
 func TestWriteAndRead(t *testing.T) {
@@ -65,9 +65,9 @@ func TestWriteRejectsReservedTombstoneValue(t *testing.T) {
 	assert.True(t, errors.Is(err, errReservedTombstoneValue), "got %v", err)
 	assert.Contains(t, err.Error(), "key ", "the offending key must be in the message")
 	// a caller bug, so it belongs to no category a retry or a boundary acts on
-	assert.False(t, errors.Is(err, pkerr.ErrUnavailable))
-	assert.False(t, errors.Is(err, pkerr.ErrIO))
-	assert.False(t, errors.Is(err, pkerr.ErrCorrupted))
+	assert.False(t, errors.Is(err, pkindex.ErrUnavailable))
+	assert.False(t, errors.Is(err, pkindex.ErrIO))
+	assert.False(t, errors.Is(err, pkindex.ErrCorrupted))
 
 	// the rejected batch leaves no trace
 	requireSegment(t, e, pk(1), 10)
