@@ -996,6 +996,17 @@ dataCoord:
       grace: 86400 # Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second. The minimum is 600 (10 minutes); a lower value disables the garbage collection of primary key index files.
       manifestRetainVersions: 8 # The number of the newest primary key index manifest versions that garbage collection keeps for each vchannel.
       manifestRetainDuration: 3600 # Garbage collection keeps every primary key index manifest version written within this time, unit: second.
+    compaction:
+      l0Trigger: 4 # Number of flushed (L0) tables of a vchannel that triggers their merge into a run.
+      minMergeRuns: 4 # Minimum number of consecutive runs of similar size that merge into one run.
+      sizeRatio: 4 # Runs merge together only when the largest is at most this many times the smallest.
+      spaceAmpRatio: 1 # All tables merge into one run when the bytes outside the oldest run reach this many times the oldest run.
+      maxInputBytes: 8589934592 # Maximum input bytes of one compaction of a flushed-table merge or a size-tiered merge, unit: byte.
+      maxInputTables: 64 # Maximum number of flushed tables in one compaction.
+      maxConcurrent: 16 # Maximum number of compaction tasks in flight across all vchannels.
+      inspectInterval: 10 # The interval at which the changed manifests are scored, unit: second.
+      failureCooldown: 600 # A vchannel whose compaction failed is not planned again for this time, unit: second.
+      targetFileSize: 134217728 # An output table is closed when its entries reach this many bytes, unit: byte.
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
@@ -1060,6 +1071,7 @@ dataCoord:
   slot:
     clusteringCompactionUsage: 65535 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
     mixCompactionUsage: 4 # slot usage of mix compaction task.
+    pkindexCompactionUsage: 4 # The slot usage of a primary key index compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     bumpSchemaVersionCompactionUsage: 1 # slot usage of schema bump compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
@@ -1078,6 +1090,11 @@ dataCoord:
     clientMaxRecvSize: 536870912 # The maximum size of each RPC request that the clients on dataCoord can receive, unit: byte
 
 dataNode:
+  pkindex:
+    compaction:
+      terminalTaskTTL: 600 # A finished or failed compaction task that no coordinator queried for this time is deleted, unit: second.
+      parallelism: 4 # Maximum number of compaction tasks that run at once on one node.
+      diskMargin: 1073741824 # A task is accepted only when the free local disk covers twice its input bytes plus this margin, unit: byte.
   dataSync:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
