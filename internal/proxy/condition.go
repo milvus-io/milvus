@@ -27,6 +27,7 @@ type Condition interface {
 	WaitToFinish() error
 	Notify(err error)
 	Ctx() context.Context
+	SetOnContextDone(handler func())
 }
 
 // make sure interface implementation
@@ -36,12 +37,17 @@ var _ Condition = (*TaskCondition)(nil)
 type TaskCondition struct {
 	done chan error
 	ctx  context.Context
+
+	onContextDone func()
 }
 
 // WaitToFinish waits until the TaskCondition is notified or context done or canceled
 func (tc *TaskCondition) WaitToFinish() error {
 	select {
 	case <-tc.ctx.Done():
+		if tc.onContextDone != nil {
+			tc.onContextDone()
+		}
 		return errors.Wrap(tc.ctx.Err(), "proxy TaskCondition context Done")
 	case err := <-tc.done:
 		return err
@@ -56,6 +62,12 @@ func (tc *TaskCondition) Notify(err error) {
 // Ctx returns internal context
 func (tc *TaskCondition) Ctx() context.Context {
 	return tc.ctx
+}
+
+// SetOnContextDone registers a handler invoked when WaitToFinish returns because its context is done.
+// Registration must complete before WaitToFinish begins, and the handler must not change after waiting starts.
+func (tc *TaskCondition) SetOnContextDone(handler func()) {
+	tc.onContextDone = handler
 }
 
 // NewTaskCondition creates a TaskCondition with provided context
