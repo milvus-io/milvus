@@ -55,16 +55,29 @@ var segmentsVersion = semver.Version{
 	Patch: 4,
 }
 
+// NodeFileResourceGate reports whether a query node holds the current analyzer
+// file resources. A nil gate is the native path: nothing is consulted and
+// every action runs as it always did.
+//
+// A node joins the executor, the distribution and its resource group before any
+// out-of-band file sync for it completes, and rejoins the same way after a
+// crash or a rolling replacement - through the checkers, with no load request
+// involved. Gating the action itself is therefore what makes "a node serving a
+// shard holds the files its analyzers need" an invariant rather than a
+// property of the load path.
+type NodeFileResourceGate func(nodeID int64) error
+
 type Executor struct {
-	nodeID    int64
-	doneCh    chan struct{}
-	wg        sync.WaitGroup
-	meta      *meta.Meta
-	dist      *meta.DistributionManager
-	broker    meta.Broker
-	targetMgr meta.TargetManagerInterface
-	cluster   session.Cluster
-	nodeMgr   *session.NodeManager
+	nodeID           int64
+	doneCh           chan struct{}
+	wg               sync.WaitGroup
+	meta             *meta.Meta
+	dist             *meta.DistributionManager
+	broker           meta.Broker
+	targetMgr        meta.TargetManagerInterface
+	cluster          session.Cluster
+	nodeMgr          *session.NodeManager
+	fileResourceGate NodeFileResourceGate
 
 	executingTasks    *typeutil.ConcurrentSet[string] // task index
 	channelTaskNum    atomic.Int32                    // channel task pool counter
@@ -143,12 +156,64 @@ func (ex *Executor) GetNonChannelTaskCap() int32 {
 	return nonChannelCap
 }
 
+// checkFileResourceReady reports whether the action may run on this node given
+// its analyzer file resource state.
+//
+// Only grow actions are gated, and only the two that put data on the node.
+// Reductions and leader updates must stay unblocked: a node that is behind
+// could otherwise never be drained, which would turn a lagging download into a
+// node that can neither serve nor be released.
+func (ex *Executor) checkFileResourceReady(action Action) error {
+	if ex.fileResourceGate == nil || action.Type() != ActionTypeGrow {
+		return nil
+	}
+	switch action.(type) {
+	case *SegmentAction, *ChannelAction:
+		return ex.fileResourceGate(ex.nodeID)
+	default:
+		return nil
+	}
+}
+
 // Execute executes the given action,
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
 func (ex *Executor) Execute(task Task, step int) bool {
 	exist := !ex.executingTasks.Insert(task.Index())
 	if exist {
+		return false
+	}
+
+	// Hold grow actions back until this node holds its analyzer file resources.
+	// Checked before the pool counters are taken so a held task does not occupy
+	// a slot; returning false leaves the task queued for the scheduler to retry,
+	// exactly like the pool-full paths below.
+	//
+	// Reported at info rather than debug: a deferral that never clears is
+	// invisible from the outside - the delegator is simply never built and the
+	// collection never becomes queryable - and the sync failure behind it is
+	// logged somewhere else entirely, on the observer. This is the only line
+	// that ties the two together. It is silent unless the deployment registers
+	// analyzer file resources at all, so it costs nothing to leave on.
+	if err := ex.checkFileResourceReady(task.Actions()[step]); err != nil {
+		ex.executingTasks.Remove(task.Index())
+		action := task.Actions()[step]
+		fields := []mlog.Field{
+			mlog.Int64("nodeID", ex.nodeID),
+			mlog.Int64("taskID", task.ID()),
+			mlog.Int64("collectionID", task.CollectionID()),
+			mlog.Err(err),
+		}
+		// Which action was held decides how bad this is: a channel is the
+		// shard's delegator, so the collection cannot be queried at all until
+		// it lands, while a segment leaves the rest of the shard serving.
+		switch a := action.(type) {
+		case *ChannelAction:
+			fields = append(fields, mlog.String("channel", a.ChannelName()))
+		case *SegmentAction:
+			fields = append(fields, mlog.Int64("segmentID", a.SegmentID))
+		}
+		mlog.RatedInfo(context.TODO(), 0.1, "task deferred: analyzer file resources not ready on node", fields...)
 		return false
 	}
 
