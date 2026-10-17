@@ -144,6 +144,59 @@ func TestGetSegmentSize(t *testing.T) {
 	assert.Equal(t, int64(3), segment.getFieldBinlogSize(2))
 }
 
+func TestGetFieldBinlogSizeFromLoadResource(t *testing.T) {
+	// StorageV3 manifest segments persist no FieldBinlog arrays; the writer
+	// ships per-column-group sizes inside Stats.LoadResource instead. This is
+	// the shape applyImportResults persists via UpdateSegmentStats.
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ManifestPath: "mock/manifest/path",
+		Stats: &datapb.Statistics{
+			InsertBinlogSize: 900,
+			StatsBinlogSize:  50,
+			LoadResource: &datapb.LoadResourceStatistics{
+				ColumnGroups: []*datapb.ColumnGroupStatistics{
+					// packed short-column group: members listed in FieldIds
+					{GroupId: 0, FieldIds: []int64{100, 101}, MemorySize: 150},
+					// single-field vector group: GroupId == fieldID
+					{GroupId: 102, MemorySize: 700},
+				},
+			},
+		},
+	})
+
+	assert.Equal(t, int64(700), segment.getFieldBinlogSize(102)) // group-id match
+	assert.Equal(t, int64(150), segment.getFieldBinlogSize(100)) // member-field match
+	assert.Equal(t, int64(150), segment.getFieldBinlogSize(101)) // member-field match
+	// field 103 has no group entry at all: whole-segment fallback
+	assert.Equal(t, int64(950), segment.getFieldBinlogSize(103))
+}
+
+func TestGetFieldBinlogSizePrefersBinlogArrays(t *testing.T) {
+	// When both sources exist (V2 and V3 flushed segments), the FieldBinlog
+	// arrays stay authoritative.
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		Binlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 102,
+				Binlogs: []*datapb.Binlog{
+					{LogID: 1, MemorySize: 5},
+					{LogID: 2, MemorySize: 6},
+				},
+			},
+		},
+		Stats: &datapb.Statistics{
+			InsertBinlogSize: 999,
+			LoadResource: &datapb.LoadResourceStatistics{
+				ColumnGroups: []*datapb.ColumnGroupStatistics{
+					{GroupId: 102, FieldIds: []int64{102}, MemorySize: 555},
+				},
+			},
+		},
+	})
+
+	assert.Equal(t, int64(11), segment.getFieldBinlogSize(102))
+}
+
 func TestIsDeltaLogExists(t *testing.T) {
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{

@@ -119,6 +119,8 @@ const (
 	ImportStageImport       = "import"
 	ImportStageStats        = "stats"
 	ImportStageBuildIndex   = "build_index"
+	ImportStageReshard      = "reshard"
+	ImportStagePlanning     = "planning"
 	ImportStageWaitL0Import = "wait_l0_import"
 
 	compactionTypeLabelName        = "compaction_type"
@@ -154,6 +156,7 @@ const (
 	dataSourceLabelName            = "data_source"
 	dataTypeLabelName              = "data_type"
 	importStageLabelName           = "import_stage"
+	jobVersionLabelName            = "job_version"
 	requestScope                   = "scope"
 	fullMethodLabelName            = "full_method"
 	reduceLevelName                = "reduce_level"

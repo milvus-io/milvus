@@ -1381,6 +1381,8 @@ func TestServer_GcConfirm(t *testing.T) {
 
 		m := &meta{}
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		m.catalog = catalog
 
 		catalog.On("GcConfirm",
@@ -2148,8 +2150,11 @@ func TestImportV2(t *testing.T) {
 
 		// alloc failed
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
@@ -2179,8 +2184,11 @@ func TestImportV2(t *testing.T) {
 
 		// job does not exist
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -2228,8 +2236,11 @@ func TestImportV2(t *testing.T) {
 
 		// normal case
 		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 		catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
@@ -6654,4 +6665,36 @@ func (r *recordingDataViewManager) Recompute(_ context.Context, collectionID int
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, collectionID)
 	return nil
+}
+
+func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing.T) {
+	ctx := context.Background()
+	const jobID int64 = 3003
+
+	completed := newImportTaskV3(&datapb.ImportTaskV3{
+		JobId: jobID, TaskId: 41, State: datapb.ImportTaskStateV2_Completed,
+		SegmentId: 101,
+	}, nil, nil, nil)
+	running := newImportTaskV3(&datapb.ImportTaskV3{
+		JobId: jobID, TaskId: 42, State: datapb.ImportTaskStateV2_InProgress,
+		SegmentId: 105,
+	}, nil, nil, nil)
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetTaskByJob(mock.Anything, mock.Anything, mock.Anything).
+		Return([]ImportTask{completed, running})
+
+	segments := NewSegmentsInfo()
+	for _, segment := range []*datapb.SegmentInfo{
+		{ID: 101, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
+		{ID: 102, InsertChannel: "vchan-0", State: commonpb.SegmentState_Importing, NumOfRows: 0, IsImporting: true},
+		{ID: 103, InsertChannel: "vchan-1", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
+		{ID: 104, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: false},
+		{ID: 105, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
+	} {
+		segments.SetSegment(segment.GetID(), &SegmentInfo{SegmentInfo: segment})
+	}
+
+	server := &Server{importMeta: importMetaMock, meta: &meta{segments: segments}}
+	segIDs := server.getImportSegmentIDsByVchannel(ctx, jobID, "vchan-0")
+	assert.Equal(t, []int64{101}, segIDs)
 }
