@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -221,7 +222,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
 	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil, 1*1024*1024*1024)
@@ -298,7 +299,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
 	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil, 1*1024*1024*1024)
@@ -378,7 +379,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true},
@@ -459,7 +460,7 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true},
@@ -547,7 +548,7 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
 	segments, err := AssignSegments(job, task, alloc, meta, 1024)
@@ -630,7 +631,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
 	job := &importJob{
@@ -825,7 +826,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
 	file1 := &internalpb.ImportFile{
@@ -1183,8 +1184,8 @@ func TestLogResultSegmentsInfo(t *testing.T) {
 	mockCatalog := mocks.NewDataCoordCatalog(t)
 	mockCatalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	meta := &meta{
-		segments: NewSegmentsInfo(),
-		catalog:  mockCatalog,
+		segments:  NewSegmentsInfo(metacache.NewMetaStore(mockCatalog)),
+		metaStore: metacache.NewMetaStore(mockCatalog),
 	}
 
 	// Create test segments
@@ -1570,7 +1571,7 @@ func TestImportUtil_AssembleRequestCarriesIDRange(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 	err = meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true}})
 	assert.NoError(t, err)
