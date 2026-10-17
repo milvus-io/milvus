@@ -262,10 +262,19 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	http2Server := &http2.Server{}
 	Params := &proxy.Params.HTTPCfg
 	s.httpServer = &http.Server{
-		Handler:           h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
+		// WrapWithBodyDeadline must be the OUTERMOST layer -- outside
+		// h2c.NewHandler, not inside it -- so it runs before h2c's own
+		// internal upgrade-handshake body read and before gin's routing
+		// (including gin's own trailing-slash redirect), neither of which
+		// a gin-registered middleware can ever reach. See its doc comment.
+		Handler: httpserver.WrapWithBodyDeadline(h2c.NewHandler(s.httpHandler(ginHandler), http2Server)),
+		// ReadTimeout/WriteTimeout are deliberately left unset (0 = disabled)
+		// here: in the default (shared-port) deployment this Server also
+		// carries external gRPC traffic (see httpHandler below), and Go's
+		// HTTP/2 implementation arms per-stream deadlines directly from
+		// these two fields, which would cut long-running gRPC RPCs. The
+		// REST-only equivalent is httpserver.WrapWithBodyDeadline above.
 		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
-		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
-		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),
 		IdleTimeout:       Params.IdleTimeout.GetAsDurationByParse(),
 		MaxHeaderBytes:    Params.MaxHeaderBytes.GetAsInt(),
 	}
