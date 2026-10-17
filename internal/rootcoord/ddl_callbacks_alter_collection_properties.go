@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -272,7 +273,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		return errIgnoredAlterCollection
 	}
 	if !targetValue {
-		if err := waitUntilSchemaDropReady(ctx); err != nil {
+		if err := waitUntilVersionFeatureReady(ctx, balancer.VersionFeatureSchemaDrop); err != nil {
 			return err
 		}
 	}
