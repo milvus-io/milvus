@@ -17,10 +17,23 @@
 package rootcoord
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// validateTextWithCMEK requires effective collection properties: inherited from
+// the database during creation, or read from collection metadata during alteration.
+func validateTextWithCMEK(schema *schemapb.CollectionSchema, properties []*commonpb.KeyValuePair) error {
+	if _, hasEZ := hookutil.ParseEzIDFromProperties(properties); hasEZ && typeutil.HasTextField(schema) {
+		return merr.WrapErrParameterInvalidMsg("TEXT fields are not supported with CMEK")
+	}
+	return nil
+}
 
 func validateSchemaEvolution(oldColl *model.Collection, newSchema *schemapb.CollectionSchema) error {
 	var oldSchema *schemapb.CollectionSchema

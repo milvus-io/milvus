@@ -16,6 +16,7 @@
 
 #include "storage/plugin/PluginInterface.h"
 
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -64,6 +65,8 @@ require(bool condition, const std::string& message) {
 int
 main() {
     try {
+        require(unsetenv("MILVUS_CMEK_FIXTURE_STRICT_CONTEXT") == 0,
+                "could not reset strict context fixture");
         const std::string edek =
             "v1:000102030405060708090a0b0c0d0e0f:"
             "d9cb9e34022d55b0e61b0c37e4561ad255400a285b27f74cbe31c2574dd10e4d";
@@ -108,6 +111,15 @@ main() {
         }
         require(wrong_key_rejected, "wrong imported EZK was accepted");
 
+        bool missing_context_rejected = false;
+        try {
+            static_cast<void>(first->GetEncryptor(17, 23));
+        } catch (const std::exception&) {
+            missing_context_rejected = true;
+        }
+        require(missing_context_rejected,
+                "writer accepted a missing collection context");
+
         const std::string expected_ezk =
             "quQBfSKoD9W+tUibjbO/ei3OZsOejiHyC8d0M6BU04c=";
         first->Update(17, 23, expected_ezk);
@@ -117,6 +129,37 @@ main() {
         auto second_edek = second->GetEncryptor(17, 23).second;
         require(first_edek != second_edek,
                 "independent plugin instances reused an EDEK");
+
+        first->Update(17, 23, "");
+        bool released_context_rejected = false;
+        try {
+            static_cast<void>(first->GetEncryptor(17, 23));
+        } catch (const std::exception&) {
+            released_context_rejected = true;
+        }
+        require(released_context_rejected,
+                "writer accepted a released collection context");
+
+        require(setenv("MILVUS_CMEK_FIXTURE_STRICT_CONTEXT", "true", 1) == 0,
+                "could not enable strict context fixture");
+        bool missing_reader_context_rejected = false;
+        try {
+            static_cast<void>(first->GetDecryptor(17, 23, edek));
+        } catch (const std::exception&) {
+            missing_reader_context_rejected = true;
+        }
+        require(missing_reader_context_rejected,
+                "strict reader accepted a released collection context");
+        require(hexEncode(second->GetDecryptor(17, 23, edek)->GetKey()) ==
+                    expected_dek,
+                "strict reader rejected another instance's registered context");
+        first->Update(17, 23, expected_ezk);
+        require(hexEncode(first->GetDecryptor(17, 23, edek)->GetKey()) ==
+                    expected_dek,
+                "strict reader rejected a newly registered context");
+        first->Update(17, 23, "");
+        require(unsetenv("MILVUS_CMEK_FIXTURE_STRICT_CONTEXT") == 0,
+                "could not disable strict context fixture");
     } catch (const std::exception& error) {
         std::cerr << error.what() << std::endl;
         return 1;

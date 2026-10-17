@@ -136,6 +136,9 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
+	if err := validateTextWithCMEK(schema, coll.Properties); err != nil {
+		return err
+	}
 
 	// Materialize the bound index meta for the new function output field BEFORE the
 	// broadcast, so the WAL message carries a complete, replay-deterministic index

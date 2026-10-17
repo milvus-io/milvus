@@ -196,6 +196,10 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
+	// Prepare has already replaced request EZ properties with the database's EZ.
+	if err := validateTextWithCMEK(schema, t.Req.GetProperties()); err != nil {
+		return err
+	}
 
 	// For external collections, validate the source URL scheme allowlist and
 	// the JSON spec structure (extfs allowlist + format whitelist) at the
