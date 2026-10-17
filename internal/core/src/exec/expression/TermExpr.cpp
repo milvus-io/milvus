@@ -152,7 +152,7 @@ PhyTermFilterExpr::CanSkipSegment() {
         bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
             if (!skip_index.CanSkipBinaryRange<T>(
-                    field_id_, i, min, max, true, true)) {
+                    op_ctx_, field_id_, i, min, max, true, true)) {
                 return false;
             } else {
                 res = true;
@@ -200,7 +200,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
     }
 
     cached_bits_.resize(active_count_, false);
-    segment_->search_ids(cached_bits_, *id_array);
+    segment_->search_ids(op_ctx_, cached_bits_, *id_array);
     cached_bits_inited_ = true;
 }
 
