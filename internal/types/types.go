@@ -340,6 +340,9 @@ type MixCoordComponent interface {
 
 	RegisterStreamingCoordGRPCService(server *grpc.Server)
 
+	// RegisterPKIndexCoordGRPCService registers the grpc service of the primary key index manifests.
+	RegisterPKIndexCoordGRPCService(server *grpc.Server)
+
 	GracefulStop()
 
 	SetMixCoordClient(client MixCoordClient)

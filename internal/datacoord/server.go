@@ -37,6 +37,8 @@ import (
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	pkindexgc "github.com/milvus-io/milvus/internal/datacoord/pkindex/gc"
+	pkindexservice "github.com/milvus-io/milvus/internal/datacoord/pkindex/service"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/dataview"
@@ -119,6 +121,8 @@ type Server struct {
 	mixCoord         types.MixCoord
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
+	pkindexService   *pkindexservice.Service
+	pkindexGC        *pkindexgc.GC
 	handler          Handler
 	importMeta       ImportMeta
 	importInspector  ImportInspector
@@ -219,6 +223,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		pkindexService:      pkindexservice.New(),
 	}
 
 	for _, opt := range opts {
@@ -348,6 +353,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	mlog.Info(s.ctx, "init segment manager done")
 
 	s.initGarbageCollection(storageCli)
+
+	s.initPKIndex(storageCli)
+	mlog.Info(s.ctx, "init primary key index manifest service done")
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
@@ -786,6 +794,9 @@ func (s *Server) startServerLoop() {
 	// construction (bounded by s.ctx); nothing to do here.
 
 	s.garbageCollector.start()
+	if s.pkindexGC != nil {
+		s.pkindexGC.Start(s.serverLoopCtx)
+	}
 
 	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
@@ -1104,6 +1115,10 @@ func (s *Server) Stop() error {
 	mlog.Info(s.ctx, "datacoord server shutdown")
 	s.garbageCollector.close()
 	mlog.Info(s.ctx, "datacoord garbage collector stopped")
+	if s.pkindexGC != nil {
+		s.pkindexGC.Close()
+		mlog.Info(s.ctx, "datacoord primary key index gc stopped")
+	}
 	if s.snapshotExportManager != nil {
 		s.snapshotExportManager.Close()
 		mlog.Info(s.ctx, "datacoord snapshot export manager stopped")
