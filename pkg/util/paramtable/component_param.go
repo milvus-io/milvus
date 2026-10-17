@@ -430,18 +430,19 @@ type commonConfig struct {
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
-	StoragePathPrefix                  ParamItem `refreshable:"false"`
-	StorageZstdConcurrency             ParamItem `refreshable:"false"`
-	StorageReadRetryAttempts           ParamItem `refreshable:"true"`
-	StorageIopsInitialRate             ParamItem `refreshable:"false"`
-	StorageIopsMaxRate                 ParamItem `refreshable:"false"`
-	StorageTalonMode                   ParamItem `refreshable:"false"`
-	StorageTalonEnableForExternalTable ParamItem `refreshable:"false"`
-	StorageTalonSmallReadThreshold     ParamItem `refreshable:"false"`
-	StorageTalonCoordinator            ParamItem `refreshable:"false"`
-	StorageTalonBlockSize              ParamItem `refreshable:"false"`
-	StorageTalonMaxIdlePerAddr         ParamItem `refreshable:"false"`
-	ExternalVectorPartialNullPolicy    ParamItem `refreshable:"false"`
+	StoragePathPrefix                   ParamItem `refreshable:"false"`
+	StorageZstdConcurrency              ParamItem `refreshable:"false"`
+	StorageReadRetryAttempts            ParamItem `refreshable:"true"`
+	StorageIopsInitialRate              ParamItem `refreshable:"false"`
+	StorageIopsMaxRate                  ParamItem `refreshable:"false"`
+	StorageTalonMode                    ParamItem `refreshable:"false"`
+	StorageTalonEnableForExternalTable  ParamItem `refreshable:"false"`
+	StorageTalonSmallReadThreshold      ParamItem `refreshable:"false"`
+	StorageTalonCoordinator             ParamItem `refreshable:"false"`
+	StorageTalonBlockSize               ParamItem `refreshable:"false"`
+	StorageTalonMaxIdlePerAddr          ParamItem `refreshable:"false"`
+	ExternalVectorPartialNullPolicy     ParamItem `refreshable:"false"`
+	ExternalSparseConversionMemoryLimit ParamItem `refreshable:"false"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
@@ -1496,6 +1497,15 @@ Rows whose child elements are all null are always promoted to row-level null for
 		Export: true,
 	}
 	p.ExternalVectorPartialNullPolicy.Init(base.mgr)
+
+	p.ExternalSparseConversionMemoryLimit = ParamItem{
+		Key:          "common.storage.externalSparseVector.conversionMemoryLimit",
+		Version:      "3.0.1",
+		DefaultValue: "268435456",
+		Doc:          "Positive byte budget for estimated additional buffers per external sparse-vector normalization call. Includes output, Arrow offsets/validity, sorting and encoding scratch; excludes source data, allocator overhead and other concurrent calls. Ordered Binary arrays reused without conversion are exempt. Requires a restart.",
+		Export:       true,
+	}
+	p.ExternalSparseConversionMemoryLimit.Init(base.mgr)
 
 	p.StorageTalonMode = ParamItem{
 		Key:          "common.storage.talon.mode",
