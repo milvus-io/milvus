@@ -599,7 +599,14 @@ test_run_unified(const std::string& storage_version, bool train_full = false) {
     int64_t index_build_id = 1000, index_version = 10000;
     int64_t dim = 32;
     int64_t nb = 10000;
-    std::string root_path = TestLocalPath;
+    // Isolate this test's writes under a dedicated subdirectory of the shared
+    // TestLocalPath. The MajorCompaction fixtures write segment data under
+    // "<root_path>/0/seg*", which creates a directory named "0". A bare
+    // TestLocalPath root would collide with other suites sharing the same
+    // process-global root (e.g. CPackedTest, which opens a *file* at
+    // "<TestLocalPath>/0"), turning an unrelated test's file-open into a
+    // StorageError + null-writer crash under gtest sharding.
+    std::string root_path = TestLocalPath + "clustering_compaction/";
 
     boost::filesystem::create_directories(root_path);
     auto storage_config = gen_local_storage_config(root_path);
@@ -1328,7 +1335,9 @@ TEST(MajorCompaction, NumClustersVariantsV3) {
     int64_t segment_id = 3, segment_id2 = 4;
     int64_t index_build_id = 1000, index_version = 10000;
     int64_t dim = 32, nb = 3000;
-    std::string root_path = TestLocalPath;
+    // Dedicated subdirectory; see note above in test_run_unified -- avoids the
+    // "<TestLocalPath>/0" directory colliding with other suites.
+    std::string root_path = TestLocalPath + "clustering_compaction/";
     boost::filesystem::create_directories(root_path);
     auto cm = storage::CreateChunkManager(gen_local_storage_config(root_path));
     // no need to generate data_gen here because prepare_storage_v2() already does it internally
@@ -1833,7 +1842,9 @@ TEST(KmeansClusteringTest, ReadFromManifestStorageV3) {
         "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
 
     // Writes real parquet + manifest under <root_path>/<base_path>.
-    const std::string root_path = TestLocalPath;
+    // Dedicated subdirectory; see note above in test_run_unified -- keeps this
+    // suite's writes isolated from other suites sharing TestLocalPath.
+    const std::string root_path = TestLocalPath + "clustering_compaction/";
     const std::string base_path = "kmeans_clustering_v3_manifest";
     milvus::test::V3SegmentTestData v3(
         schema, n_batch, per_batch, dim, root_path, base_path);
