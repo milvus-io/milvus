@@ -2626,6 +2626,114 @@ func (s *FieldDataSuite) TestPrepareFieldData() {
 		s.EqualValues(128, field.GetVectors().GetDim())
 		s.EqualValues(topK*128, cap(field.GetVectors().GetInt8Vector()))
 	})
+
+	s.Run("vector_array", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_ArrayOfVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 128,
+						Data: &schemapb.VectorField_VectorArray{
+							VectorArray: &schemapb.VectorArray{
+								Dim:         128,
+								ElementType: schemapb.DataType_FloatVector,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, topK)
+		s.Require().Len(fields, 1)
+		field := fields[0]
+		s.Equal(fieldID, field.GetFieldId())
+		s.Equal(fieldName, field.GetFieldName())
+		s.Equal(schemapb.DataType_ArrayOfVector, field.GetType())
+
+		s.EqualValues(128, field.GetVectors().GetDim())
+		vectorArray := field.GetVectors().GetVectorArray()
+		s.Require().NotNil(vectorArray)
+		s.EqualValues(128, vectorArray.GetDim())
+		s.Equal(schemapb.DataType_FloatVector, vectorArray.GetElementType())
+		s.EqualValues(topK, cap(vectorArray.GetData()))
+	})
+
+	// An empty page (e.g. offset past the last row) appends no rows, so the
+	// prepared struct sub-field must already carry a non-nil VectorArray.
+	s.Run("struct_array_with_vector_array_empty_page", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_ArrayOfStruct,
+				Field: &schemapb.FieldData_StructArrays{
+					StructArrays: &schemapb.StructArrayField{
+						Fields: []*schemapb.FieldData{
+							{
+								FieldId:   fieldID + 1,
+								FieldName: "embedding",
+								Type:      schemapb.DataType_ArrayOfVector,
+								Field: &schemapb.FieldData_Vectors{
+									Vectors: &schemapb.VectorField{
+										Dim: 128,
+										Data: &schemapb.VectorField_VectorArray{
+											VectorArray: &schemapb.VectorArray{
+												Dim:         128,
+												ElementType: schemapb.DataType_FloatVector,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, 0)
+		s.Require().Len(fields, 1)
+		subFields := fields[0].GetStructArrays().GetFields()
+		s.Require().Len(subFields, 1)
+		vectorArray := subFields[0].GetVectors().GetVectorArray()
+		s.Require().NotNil(vectorArray)
+		s.EqualValues(128, vectorArray.GetDim())
+		s.Equal(schemapb.DataType_FloatVector, vectorArray.GetElementType())
+		s.Empty(vectorArray.GetData())
+	})
+
+	// Sealed segments may only set the enclosing VectorField.dim.
+	s.Run("vector_array_falls_back_to_enclosing_dim", func() {
+		samples := []*schemapb.FieldData{
+			{
+				FieldId:   fieldID,
+				FieldName: fieldName,
+				Type:      schemapb.DataType_ArrayOfVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 128,
+						Data: &schemapb.VectorField_VectorArray{
+							VectorArray: &schemapb.VectorArray{
+								ElementType: schemapb.DataType_FloatVector,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		fields := PrepareResultFieldData(samples, 0)
+		s.Require().Len(fields, 1)
+		vectorArray := fields[0].GetVectors().GetVectorArray()
+		s.Require().NotNil(vectorArray)
+		s.EqualValues(128, vectorArray.GetDim())
+		s.Equal(schemapb.DataType_FloatVector, vectorArray.GetElementType())
+		s.Empty(vectorArray.GetData())
+	})
 }
 
 func TestFieldData(t *testing.T) {
