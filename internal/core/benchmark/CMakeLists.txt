@@ -24,3 +24,14 @@ install(TARGETS fastmem_benchmark DESTINATION benchmark)
 add_executable(sorted_int64_lookup_benchmark SortedInt64LookupBenchmark.cpp)
 target_include_directories(sorted_int64_lookup_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
 install(TARGETS sorted_int64_lookup_benchmark DESTINATION benchmark)
+
+# Int32 bit-sliced index kernel (#53831): build time, size and query latency
+# against the raw-column scan baseline. See src/index/scalar/bsi/README.md.
+add_executable(bit_sliced_index_benchmark BitSlicedIndexBenchmark.cpp)
+target_include_directories(bit_sliced_index_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
+target_link_libraries(bit_sliced_index_benchmark PRIVATE
+        milvus_core
+        milvus_conan_deps
+        knowhere
+        milvus-storage)
+install(TARGETS bit_sliced_index_benchmark DESTINATION benchmark)
