@@ -551,7 +551,11 @@ func (m *BM25Stats) MemSize() int64 {
 // Unlike Deserialize([]byte), this does not require knowing the total size upfront.
 func (m *BM25Stats) DeserializeFromReader(r io.Reader) error {
 	var header [20]byte
-	if _, err := io.ReadFull(r, header[:]); err != nil {
+	if n, err := io.ReadFull(r, header[:]); err != nil {
+		// Preserve the historical binary.Read EOF at complete field boundaries.
+		if err == io.ErrUnexpectedEOF && (n == 4 || n == 12) {
+			return io.EOF
+		}
 		return err
 	}
 
@@ -573,6 +577,10 @@ func (m *BM25Stats) DeserializeFromReader(r io.Reader) error {
 		remaining = copy(buf, buf[end:n])
 		if err != nil {
 			if err == io.EOF {
+				// The historical decoder returned EOF when the value was absent.
+				if remaining == 4 {
+					return io.EOF
+				}
 				if remaining != 0 {
 					return io.ErrUnexpectedEOF
 				}
