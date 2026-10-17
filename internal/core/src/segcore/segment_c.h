@@ -120,28 +120,23 @@ AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
 /**
  * @brief Async reopen segment using Future mechanism with built-in cancellation.
  *
- * Reopen applies a new SegmentLoadInfo and the latest collection schema.
- * schema_blob/schema_length are required so sealed segments compute LoadDiff
- * against the new schema and handle schema changes through the same load-diff
- * framework as manifest/binlog/index updates.
+ * Reopen applies a new SegmentLoadInfo using a collection schema snapshot,
+ * including its field warmup hints, just as on initial segment creation.
+ * The snapshot is retained before asynchronous loading begins.
  *
  * @param c_trace tracing context param
  * @param c_segment segment handle to reopen
+ * @param collection collection whose current schema and hints are used
  * @param load_info_blob serialized SegmentLoadInfo protobuf message
  * @param load_info_length length of load_info_blob in bytes
- * @param schema_blob serialized CollectionSchema protobuf message; must not be null
- * @param schema_length length of schema_blob in bytes; must be positive
- * @param schema_version schema version assigned to the parsed schema
  * @return CFuture* that resolves when reopen completes (result pointer is nullptr)
  */
 CFuture*
 AsyncReopenSegment(CTraceContext c_trace,
                    CSegmentInterface c_segment,
+                   CCollection collection,
                    const uint8_t* load_info_blob,
-                   const int64_t load_info_length,
-                   const void* schema_blob,
-                   const int64_t schema_length,
-                   const uint64_t schema_version);
+                   const int64_t load_info_length);
 
 void
 DeleteSegment(CSegmentInterface c_segment);

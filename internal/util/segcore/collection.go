@@ -55,20 +55,19 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 			return nil, err
 		}
 	}
-	if req.LoadFieldList != nil {
-		status = C.UpdateLoadFields(ptr, (*C.int64_t)(unsafe.Pointer(&req.LoadFieldList[0])),
-			C.int64_t(len(req.LoadFieldList)))
-		if err := ConsumeCStatusIntoError(&status); err != nil {
-			C.DeleteCollection(ptr)
-			return nil, err
-		}
-	}
-	return &CCollection{
+	collection := &CCollection{
 		collectionID: req.CollectionID,
 		ptr:          ptr,
 		schema:       req.Schema,
 		indexMeta:    req.IndexMeta,
-	}, nil
+	}
+	if req.LoadFieldList != nil {
+		if err := collection.UpdateLoadFields(req.LoadFieldList); err != nil {
+			C.DeleteCollection(ptr)
+			return nil, err
+		}
+	}
+	return collection, nil
 }
 
 // CCollection is just a wrapper of the underlying C-structure CCollection.
@@ -127,6 +126,17 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 	}
 
 	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), (C.uint64_t)(version))
+	return ConsumeCStatusIntoError(&status)
+}
+
+// UpdateLoadFields replaces the collection's field warmup hints. An empty list
+// restores the default of warming all fields.
+func (c *CCollection) UpdateLoadFields(fields []int64) error {
+	var fieldPtr *C.int64_t
+	if len(fields) > 0 {
+		fieldPtr = (*C.int64_t)(unsafe.Pointer(&fields[0]))
+	}
+	status := C.UpdateLoadFields(c.ptr, fieldPtr, C.int64_t(len(fields)))
 	return ConsumeCStatusIntoError(&status)
 }
 

@@ -5,6 +5,7 @@ package mock_segcore
 import (
 	context "context"
 
+	cgo "github.com/milvus-io/milvus/internal/util/cgo"
 	segcore "github.com/milvus-io/milvus/internal/util/segcore"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -505,21 +506,33 @@ func (_c *MockCSegment_Release_Call) RunAndReturn(run func()) *MockCSegment_Rele
 }
 
 // Reopen provides a mock function with given fields: ctx, request
-func (_m *MockCSegment) Reopen(ctx context.Context, request *segcore.ReopenRequest) error {
+func (_m *MockCSegment) Reopen(ctx context.Context, request *segcore.ReopenRequest) (cgo.Future, error) {
 	ret := _m.Called(ctx, request)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Reopen")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *segcore.ReopenRequest) error); ok {
+	var r0 cgo.Future
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.ReopenRequest) (cgo.Future, error)); ok {
+		return rf(ctx, request)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.ReopenRequest) cgo.Future); ok {
 		r0 = rf(ctx, request)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(cgo.Future)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, *segcore.ReopenRequest) error); ok {
+		r1 = rf(ctx, request)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockCSegment_Reopen_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Reopen'
@@ -541,12 +554,12 @@ func (_c *MockCSegment_Reopen_Call) Run(run func(ctx context.Context, request *s
 	return _c
 }
 
-func (_c *MockCSegment_Reopen_Call) Return(_a0 error) *MockCSegment_Reopen_Call {
-	_c.Call.Return(_a0)
+func (_c *MockCSegment_Reopen_Call) Return(_a0 cgo.Future, _a1 error) *MockCSegment_Reopen_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCSegment_Reopen_Call) RunAndReturn(run func(context.Context, *segcore.ReopenRequest) error) *MockCSegment_Reopen_Call {
+func (_c *MockCSegment_Reopen_Call) RunAndReturn(run func(context.Context, *segcore.ReopenRequest) (cgo.Future, error)) *MockCSegment_Reopen_Call {
 	_c.Call.Return(run)
 	return _c
 }

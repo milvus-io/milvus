@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <initializer_list>
 #include <iostream>
 #include <map>
@@ -54,6 +55,8 @@
 #include "query/PlanNode.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/Collection.h"
+#include "futures/Executor.h"
+#include <folly/ScopeGuard.h>
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -91,6 +94,229 @@ TEST(CApiTest, SegmentTest) {
     DeleteCollection(collection);
     DeleteSegment(segment);
     free((char*)status.error_msg);
+}
+
+namespace {
+
+class CApiReopenLoadFieldsTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        auto schema = std::make_shared<Schema>();
+        pk_ = schema->AddDebugField("pk", DataType::INT64);
+        payload_ = schema->AddDebugField("payload", DataType::INT64);
+        schema->set_primary_field_id(pk_);
+        schema_proto_ = schema->ToProto();
+        schema_proto_.set_version(1);
+        collection_ = std::make_unique<Collection>(&schema_proto_);
+        collection_->update_load_fields({pk_.get()});
+        schema_ = collection_->get_schema();
+
+        auto dataset = DataGen(schema_, 4);
+        segment_ = CreateSealedWithFieldDataLoaded(schema_, dataset);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment_.get());
+        ASSERT_NE(sealed, nullptr);
+        auto load_info = sealed->TestGetLoadInfoSnapshot()->GetProto();
+        load_info.set_num_of_rows(4);
+        load_blob_ = load_info.SerializeAsString();
+    }
+
+    CStatus
+    Wait(CFuture* future) {
+        auto guard = std::unique_ptr<CFuture, decltype(&future_destroy)>(
+            future, &future_destroy);
+        auto* impl =
+            static_cast<milvus::futures::IFuture*>(static_cast<void*>(future));
+        std::promise<void> ready;
+        auto wait = ready.get_future();
+        impl->registerReadyCallback(
+            [](CLockedGoMutex* value) {
+                reinterpret_cast<std::promise<void>*>(value)->set_value();
+            },
+            reinterpret_cast<CLockedGoMutex*>(&ready));
+        wait.get();
+        auto [result, status] = impl->leakyGet();
+        EXPECT_EQ(result, nullptr);
+        return status;
+    }
+
+    CFuture*
+    Reopen(CCollection collection) {
+        return AsyncReopenSegment(
+            {},
+            segment_.get(),
+            collection,
+            reinterpret_cast<const uint8_t*>(load_blob_.data()),
+            load_blob_.size());
+    }
+
+    CStatus
+    UpdateCollectionSchema(Collection* collection, uint64_t version) {
+        const auto schema_blob = schema_proto_.SerializeAsString();
+        return UpdateSchema(
+            collection, schema_blob.data(), schema_blob.size(), version);
+    }
+
+    std::unique_ptr<Collection> collection_;
+    SchemaPtr schema_;
+    std::unique_ptr<SegmentSealed> segment_;
+    FieldId pk_{100};
+    FieldId payload_{101};
+    std::string load_blob_;
+    milvus::proto::schema::CollectionSchema schema_proto_;
+};
+
+}  // namespace
+
+TEST_F(CApiReopenLoadFieldsTest, ReopenPreservesPartialHint) {
+    auto status = Wait(Reopen(collection_.get()));
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    auto current = segment_->get_schema_snapshot();
+    EXPECT_TRUE(current->ShouldLoadField(pk_));
+    EXPECT_FALSE(current->ShouldLoadField(payload_));
+    EXPECT_EQ(current, collection_->get_schema());
+    EXPECT_FALSE(schema_->ShouldLoadField(payload_));
+}
+
+TEST_F(CApiReopenLoadFieldsTest, ReopenUsesCurrentCollectionHint) {
+    collection_->update_load_fields({pk_.get(), payload_.get()});
+    auto future = Reopen(collection_.get());
+    auto status = Wait(future);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    auto current = segment_->get_schema_snapshot();
+    EXPECT_TRUE(current->ShouldLoadField(payload_));
+    EXPECT_FALSE(schema_->ShouldLoadField(payload_));
+
+    collection_->update_load_fields({pk_.get()});
+    status = Wait(Reopen(collection_.get()));
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_FALSE(segment_->get_schema_snapshot()->ShouldLoadField(payload_));
+    EXPECT_TRUE(current->ShouldLoadField(payload_));
+
+    collection_->update_load_fields({});
+    status = Wait(Reopen(collection_.get()));
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_TRUE(segment_->get_schema_snapshot()->load_fields().empty());
+    EXPECT_TRUE(segment_->get_schema_snapshot()->ShouldLoadField(payload_));
+}
+
+TEST_F(CApiReopenLoadFieldsTest,
+       ReopenCapturesSchemaBeforeCollectionUpdateOrRelease) {
+    // Hold the load executor so the collection changes before the queued
+    // reopen starts. Preflight must retain the same owning snapshot used on
+    // initial segment creation, without retaining the collection handle.
+    auto* executor = milvus::futures::getLoadCPUExecutor();
+    const auto thread_count = executor->numThreads();
+    executor->setNumThreads(1);
+    auto restore_threads =
+        folly::makeGuard([&] { executor->setNumThreads(thread_count); });
+    std::promise<void> entered;
+    std::promise<void> resume;
+    auto resume_future = resume.get_future().share();
+    executor->add([&entered, resume_future] {
+        entered.set_value();
+        resume_future.wait();
+    });
+    entered.get_future().wait();
+    auto unblock = folly::makeGuard([&] { resume.set_value(); });
+
+    auto captured = collection_->get_schema();
+    auto future = Reopen(collection_.get());
+    collection_->update_load_fields({pk_.get(), payload_.get()});
+    EXPECT_TRUE(collection_->get_schema()->ShouldLoadField(payload_));
+    collection_.reset();
+    resume.set_value();
+    unblock.dismiss();
+
+    auto status = Wait(future);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(segment_->get_schema_snapshot(), captured);
+    EXPECT_FALSE(captured->ShouldLoadField(payload_));
+}
+
+TEST_F(CApiReopenLoadFieldsTest, InitialNativeVersionAndSchemaUpdate) {
+    ASSERT_EQ(schema_proto_.version(), 1);
+    ASSERT_EQ(collection_->get_schema_version(), 0);
+    for (int i = 0; i < 2; ++i) {
+        auto status = Wait(Reopen(collection_.get()));
+        ASSERT_EQ(status.error_code, Success) << status.error_msg;
+        EXPECT_EQ(segment_->get_schema_snapshot()->get_schema_version(), 0);
+        EXPECT_FALSE(
+            segment_->get_schema_snapshot()->ShouldLoadField(payload_));
+    }
+
+    auto status = UpdateCollectionSchema(collection_.get(), 101);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    status = Wait(Reopen(collection_.get()));
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(segment_->get_schema_snapshot(), collection_->get_schema());
+    EXPECT_EQ(segment_->get_schema_snapshot()->get_schema_version(), 101);
+    EXPECT_FALSE(segment_->get_schema_snapshot()->ShouldLoadField(payload_));
+}
+
+TEST_F(CApiReopenLoadFieldsTest, DefaultHintSurvivesSchemaEvolution) {
+    collection_->update_load_fields({});
+    schema_proto_.set_version(2);
+    const auto added_field_id = FieldId(payload_.get() + 1);
+    auto* added_field = schema_proto_.add_fields();
+    added_field->set_name("added_field");
+    added_field->set_fieldid(added_field_id.get());
+    added_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    added_field->set_nullable(true);
+
+    auto status = UpdateCollectionSchema(collection_.get(), 101);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    status = Wait(Reopen(collection_.get()));
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    auto current = segment_->get_schema_snapshot();
+    EXPECT_TRUE(current->load_fields().empty());
+    EXPECT_TRUE(current->has_field(added_field_id));
+    EXPECT_TRUE(current->ShouldLoadField(added_field_id));
+}
+
+TEST_F(CApiReopenLoadFieldsTest,
+       InvalidRequestOrStaleSchemaKeepsPublishedHint) {
+    auto original = segment_->get_schema_snapshot();
+    const std::string malformed_load_info(1, '\xff');
+    for (auto* future :
+         {Reopen(nullptr),
+          AsyncReopenSegment(
+              {},
+              nullptr,
+              collection_.get(),
+              reinterpret_cast<const uint8_t*>(load_blob_.data()),
+              load_blob_.size()),
+          AsyncReopenSegment({}, segment_.get(), collection_.get(), nullptr, 0),
+          AsyncReopenSegment(
+              {},
+              segment_.get(),
+              collection_.get(),
+              reinterpret_cast<const uint8_t*>(malformed_load_info.data()),
+              malformed_load_info.size())}) {
+        auto status = Wait(future);
+        EXPECT_NE(status.error_code, Success);
+        if (status.error_code != Success) {
+            free(const_cast<char*>(status.error_msg));
+        }
+        EXPECT_EQ(segment_->get_schema_snapshot(), original);
+    }
+
+    auto status = UpdateCollectionSchema(collection_.get(), 101);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    status = Wait(Reopen(collection_.get()));
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    original = segment_->get_schema_snapshot();
+    auto stale_collection = std::make_unique<Collection>(&schema_proto_);
+    status = UpdateCollectionSchema(stale_collection.get(), 100);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    status = Wait(Reopen(stale_collection.get()));
+    // CollectionSchemaVersionNotReady is the stable segcore error code 2046.
+    EXPECT_EQ(status.error_code, 2046);
+    if (status.error_code != Success) {
+        free(const_cast<char*>(status.error_msg));
+    }
+    EXPECT_EQ(segment_->get_schema_snapshot(), original);
+    EXPECT_FALSE(original->ShouldLoadField(payload_));
 }
 
 TEST(CApiTest, InsertTest) {
