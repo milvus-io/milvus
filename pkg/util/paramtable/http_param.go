@@ -16,28 +16,39 @@
 
 package paramtable
 
+import (
+	"errors"
+	"strconv"
+	"time"
+
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
 type httpConfig struct {
-	Enabled               ParamItem `refreshable:"false"`
-	EnableV1              ParamItem `refreshable:"false"`
-	DebugMode             ParamItem `refreshable:"false"`
-	Port                  ParamItem `refreshable:"false"`
-	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
-	CompatibilityMode     ParamItem `refreshable:"true"`
-	MaxExprParamsDepth    ParamItem `refreshable:"true"`
-	NativeJSONResponse    ParamItem `refreshable:"true"`
-	LegacyArrayResponse   ParamItem `refreshable:"true"`
-	EnablePprof           ParamItem `refreshable:"false"`
-	RequestTimeoutMs      ParamItem `refreshable:"true"`
-	DQLAdmissionEnabled   ParamItem `refreshable:"true"`
-	ReadHeaderTimeout     ParamItem `refreshable:"false"`
-	ReadTimeout           ParamItem `refreshable:"false"`
-	WriteTimeout          ParamItem `refreshable:"false"`
-	IdleTimeout           ParamItem `refreshable:"false"`
-	MaxHeaderBytes        ParamItem `refreshable:"false"`
-	HSTSMaxAge            ParamItem `refreshable:"false"`
-	HSTSIncludeSubDomains ParamItem `refreshable:"false"`
-	EnableHSTS            ParamItem `refreshable:"false"`
-	EnableWebUI           ParamItem `refreshable:"false"`
+	Enabled                   ParamItem `refreshable:"false"`
+	EnableV1                  ParamItem `refreshable:"false"`
+	DebugMode                 ParamItem `refreshable:"false"`
+	Port                      ParamItem `refreshable:"false"`
+	AcceptTypeAllowInt64      ParamItem `refreshable:"true"`
+	CompatibilityMode         ParamItem `refreshable:"true"`
+	MaxExprParamsDepth        ParamItem `refreshable:"true"`
+	NativeJSONResponse        ParamItem `refreshable:"true"`
+	LegacyArrayResponse       ParamItem `refreshable:"true"`
+	EnablePprof               ParamItem `refreshable:"false"`
+	RequestTimeoutMs          ParamItem `refreshable:"true"`
+	DQLAdmissionEnabled       ParamItem `refreshable:"true"`
+	ReadHeaderTimeout         ParamItem `refreshable:"false"`
+	OverallTimeoutBudget      ParamItem `refreshable:"false"`
+	MaxConnectionIdleInterval ParamItem `refreshable:"false"`
+	ReadTimeout               ParamItem `refreshable:"false"`
+	WriteTimeout              ParamItem `refreshable:"false"`
+	IdleTimeout               ParamItem `refreshable:"false"`
+	MaxHeaderBytes            ParamItem `refreshable:"false"`
+	HSTSMaxAge                ParamItem `refreshable:"false"`
+	HSTSIncludeSubDomains     ParamItem `refreshable:"false"`
+	EnableHSTS                ParamItem `refreshable:"false"`
+	EnableWebUI               ParamItem `refreshable:"false"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
@@ -185,6 +196,21 @@ cost. Disabling restores the old always-decode behavior.`,
 	}
 	p.ReadHeaderTimeout.Init(base.mgr)
 
+	p.OverallTimeoutBudget = ParamItem{
+		Key:          "proxy.http.overallTimeoutBudget",
+		DefaultValue: "120s",
+		Doc:          "Server-side REST budget from completed request headers through response write. Clients may shorten but not extend it; header reading has a separate timeout.",
+		Export:       true,
+	}
+	p.OverallTimeoutBudget.Init(base.mgr)
+
+	p.MaxConnectionIdleInterval = ParamItem{
+		Key:    "proxy.http.maxConnectionIdleInterval",
+		Doc:    "Keep-alive idle interval; if absent, the deprecated idleTimeout setting applies.",
+		Export: true,
+	}
+	p.MaxConnectionIdleInterval.Init(base.mgr)
+
 	p.ReadTimeout = ParamItem{
 		Key:          "proxy.http.readTimeout",
 		DefaultValue: "0s",
@@ -259,4 +285,96 @@ cost. Disabling restores the old always-decode behavior.`,
 		Export:       true,
 	}
 	p.EnableWebUI.Init(base.mgr)
+}
+
+// HTTPRequestBudgetPolicy is a native-free snapshot of the REST timeout
+// policy. The HTTP server parses it at startup and passes it to the transport
+// adapter; parsing alone does not install any request deadlines.
+type HTTPRequestBudgetPolicy struct {
+	OverallTimeoutBudget      time.Duration
+	ReadHeaderTimeout         time.Duration
+	MaxConnectionIdleInterval time.Duration
+}
+
+// ParseRequestBudgetPolicy validates migration from the old independent
+// timeout settings to the REST request budget.
+func (p *httpConfig) ParseRequestBudgetPolicy() (HTTPRequestBudgetPolicy, error) {
+	var policy HTTPRequestBudgetPolicy
+	read := func(item *ParamItem) (time.Duration, bool, error) {
+		_, raw, err := item.manager.GetConfig(item.Key)
+		present := err == nil
+		if err != nil {
+			if !errors.Is(err, config.ErrKeyNotFound) {
+				return 0, false, merr.WrapErrServiceInternalErr(err, "cannot read %s", item.Key)
+			}
+			raw = item.DefaultValue
+		}
+		if raw == "" {
+			if present {
+				return 0, true, merr.WrapErrServiceInternalMsg("%s must not be empty; configure a duration such as 0s explicitly", item.Key)
+			}
+			return 0, false, nil
+		}
+		duration, parseErr := time.ParseDuration(raw)
+		if parseErr != nil {
+			return 0, present, merr.WrapErrServiceInternalErr(parseErr, "invalid %s duration %q", item.Key, raw)
+		}
+		return duration, present, nil
+	}
+	_, legacyRequestRaw, legacyRequestErr := p.RequestTimeoutMs.manager.GetConfig(p.RequestTimeoutMs.Key)
+	if legacyRequestErr != nil && !errors.Is(legacyRequestErr, config.ErrKeyNotFound) {
+		return policy, merr.WrapErrServiceInternalErr(legacyRequestErr, "cannot read %s", p.RequestTimeoutMs.Key)
+	}
+	if legacyRequestErr == nil {
+		legacyRequestMs, parseErr := strconv.ParseInt(legacyRequestRaw, 10, 64)
+		defaultRequestMs, _ := strconv.ParseInt(p.RequestTimeoutMs.DefaultValue, 10, 64)
+		if parseErr != nil || legacyRequestMs != defaultRequestMs {
+			return policy, merr.WrapErrServiceInternalMsg("%s is deprecated; remove its override and configure proxy.http.overallTimeoutBudget explicitly", p.RequestTimeoutMs.Key)
+		}
+	}
+
+	for _, legacy := range []*ParamItem{&p.ReadTimeout, &p.WriteTimeout} {
+		value, _, err := read(legacy)
+		if err != nil {
+			return policy, err
+		}
+		if value != 0 {
+			return policy, merr.WrapErrServiceInternalMsg("%s is a nonzero independent budget; clear it and configure proxy.http.overallTimeoutBudget explicitly", legacy.Key)
+		}
+	}
+
+	var err error
+	policy.OverallTimeoutBudget, _, err = read(&p.OverallTimeoutBudget)
+	if err != nil {
+		return policy, err
+	}
+	if policy.OverallTimeoutBudget <= 0 {
+		return policy, merr.WrapErrServiceInternalMsg("%s must be a positive duration", p.OverallTimeoutBudget.Key)
+	}
+	policy.ReadHeaderTimeout, _, err = read(&p.ReadHeaderTimeout)
+	if err != nil {
+		return policy, err
+	}
+	if policy.ReadHeaderTimeout <= 0 {
+		return policy, merr.WrapErrServiceInternalMsg("%s must be positive", p.ReadHeaderTimeout.Key)
+	}
+	legacyIdle, legacyPresent, err := read(&p.IdleTimeout)
+	if err != nil {
+		return policy, err
+	}
+	newIdle, newPresent, err := read(&p.MaxConnectionIdleInterval)
+	if err != nil {
+		return policy, err
+	}
+	if legacyIdle < 0 || newIdle < 0 {
+		return policy, merr.WrapErrServiceInternalMsg("%s and %s must be nonnegative", p.IdleTimeout.Key, p.MaxConnectionIdleInterval.Key)
+	}
+	if legacyPresent && newPresent && legacyIdle != newIdle {
+		return policy, merr.WrapErrServiceInternalMsg("%s conflicts with %s; remove the old idleTimeout setting or make both durations equivalent", p.IdleTimeout.Key, p.MaxConnectionIdleInterval.Key)
+	}
+	policy.MaxConnectionIdleInterval = legacyIdle
+	if newPresent {
+		policy.MaxConnectionIdleInterval = newIdle
+	}
+	return policy, nil
 }

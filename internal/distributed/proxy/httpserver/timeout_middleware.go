@@ -29,6 +29,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -238,6 +239,14 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	}
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
+		// The production HTTP entry already owns the deadline, socket I/O and
+		// response. Do not start a second timer, detached handler goroutine or
+		// full-response buffer for requests on that path. The old path remains
+		// temporarily for direct Gin callers until its tests are migrated.
+		if requestbudget.Active(gCtx.Request.Context()) {
+			handler(gCtx)
+			return
+		}
 		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
 		requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
 		if requestTimeout != "" {

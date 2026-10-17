@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -66,6 +67,9 @@ import (
 )
 
 func HTTPReturn(c *gin.Context, code int, result gin.H) {
+	if budgetedRequestExpired(c) {
+		return
+	}
 	c.Set(HTTPReturnCode, result[HTTPReturnCode])
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
 		c.Set(HTTPReturnMessage, errorMsg)
@@ -74,24 +78,45 @@ func HTTPReturn(c *gin.Context, code int, result gin.H) {
 	c.JSON(code, result)
 }
 
-// HTTPReturnStream uses custom jsonRender that encodes JSON data directly into the response writer.
-// Timeout-wrapped REST routes still buffer encoded bytes before committing them to the client.
+// HTTPReturnStream writes budgeted row responses one row at a time so timeout
+// cancellation can stop between bounded encoding calls.
 func HTTPReturnStream(c *gin.Context, code int, result gin.H) {
+	if budgetedRequestExpired(c) {
+		return
+	}
 	c.Set(HTTPReturnCode, result[HTTPReturnCode])
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
 	setTraceIDHeader(c)
+	if requestbudget.Active(c.Request.Context()) {
+		switch result[HTTPReturnData].(type) {
+		case []map[string]any, []gin.H:
+			c.Render(code, jsonRowsRender{Context: c.Request.Context(), Data: result})
+			return
+		}
+	}
 	c.Render(code, jsonRender{Data: result})
 }
 
 func HTTPAbortReturn(c *gin.Context, code int, result gin.H) {
+	if budgetedRequestExpired(c) {
+		return
+	}
 	c.Set(HTTPReturnCode, result[HTTPReturnCode])
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
 	setTraceIDHeader(c)
 	c.AbortWithStatusJSON(code, result)
+}
+
+func budgetedRequestExpired(c *gin.Context) bool {
+	if requestbudget.Active(c.Request.Context()) && c.Request.Context().Err() != nil {
+		c.Abort()
+		return true
+	}
+	return false
 }
 
 func TraceIDHandlerFunc(c *gin.Context) {
@@ -897,6 +922,10 @@ func nullElementIn(value gjson.Result) (int, bool) {
 }
 
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool, fieldOps ...*schemapb.FieldPartialUpdateOp) ([]map[string]interface{}, map[string][]bool, error) {
+	return checkAndSetDataRows(context.Background(), gjson.GetBytes(body, HTTPRequestData).Array(), collSchema, partialUpdate, fieldOps...)
+}
+
+func checkAndSetDataRows(ctx context.Context, dataResultArray []gjson.Result, collSchema *schemapb.CollectionSchema, partialUpdate bool, fieldOps ...*schemapb.FieldPartialUpdateOp) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
 	jsonPathFields := make(map[string]bool)
@@ -909,8 +938,6 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 	// Read once per request rather than per field.
 	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 	nativeJSONResponse := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
-	dataResult := gjson.GetBytes(body, HTTPRequestData)
-	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
 		return reallyDataArray, validDataMap, merr.ErrMissingRequiredParameters
 	}
@@ -927,6 +954,9 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 	}
 
 	for _, data := range dataResultArray {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		reallyData := map[string]interface{}{}
 		if data.Type == gjson.JSON {
 			for _, structField := range collSchema.StructArrayFields {
@@ -1484,6 +1514,10 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 // StructArray operand must contain all children for an element path or exactly
 // the selected child for a child path. The collection schema remains complete.
 func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSchema, fieldOps []*schemapb.FieldPartialUpdateOp) (*schemapb.CollectionSchema, error) {
+	return schemaForPathReplaceOperandsRows(context.Background(), gjson.GetBytes(body, HTTPRequestData).Array(), collSchema, fieldOps)
+}
+
+func schemaForPathReplaceOperandsRows(ctx context.Context, rows []gjson.Result, collSchema *schemapb.CollectionSchema, fieldOps []*schemapb.FieldPartialUpdateOp) (*schemapb.CollectionSchema, error) {
 	targets := make(map[string]string)
 	for _, fieldOp := range fieldOps {
 		if fieldOp.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
@@ -1494,7 +1528,6 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 		return collSchema, nil
 	}
 
-	rows := gjson.GetBytes(body, HTTPRequestData).Array()
 	if len(rows) == 0 {
 		return collSchema, nil
 	}
@@ -1506,6 +1539,9 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 			continue
 		}
 		for rowIndex, row := range rows {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			rawValue := gjson.Get(row.Raw, field.GetName())
 			if !rawValue.Exists() || rawValue.Type == gjson.Null {
 				continue
@@ -1528,6 +1564,9 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 		}
 		var expectedMask []string
 		for rowIndex, row := range rows {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			rawValue := gjson.Get(row.Raw, structSchema.GetName())
 			if !rawValue.Exists() || rawValue.Type == gjson.Null {
 				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must not be missing or null", rowIndex, structSchema.GetName())
@@ -2959,6 +2998,10 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 }
 
 func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool, partialUpdate bool) ([]*schemapb.FieldData, error) {
+	return anyToColumnsWithContext(context.Background(), rows, validDataMap, sch, inInsert, partialUpdate)
+}
+
+func anyToColumnsWithContext(ctx context.Context, rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool, partialUpdate bool) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []*schemapb.FieldData{}, merr.WrapErrParameterInvalidMsg("no row need to be convert to columns")
@@ -2977,6 +3020,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	// so we can skip absent function output fields with a map lookup instead of scanning rows.
 	presentFieldNames := make(map[string]struct{})
 	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		for name := range row {
 			presentFieldNames[name] = struct{}{}
 		}
@@ -3069,6 +3115,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 
 	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// collection schema name need not be same, since receiver could have other names
 		v := reflect.ValueOf(row)
 		set, err := reflectValueCandi(v)
@@ -3195,6 +3244,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	}
 	columns := make([]*schemapb.FieldData, 0, len(nameColumns))
 	for name, column := range nameColumns {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		validData, hasValidData := validDataMap[name]
 		if fieldLen[name] == 0 && name == pkFieldName && isAutoIDPK {
 			continue
@@ -3459,6 +3511,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		}
 		perRow := make([]structArrayRow, 0, rowsLen)
 		for rowIdx, row := range rows {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			val, ok := row[structField.GetName()]
 			if hasValidData && !validData[rowIdx] {
 				if ok {
@@ -4087,6 +4142,12 @@ func scalarFieldToRESTAny(field *schemapb.ScalarField, enableInt64 bool) (any, e
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
 ) ([]map[string]interface{}, error) {
+	return buildQueryRespWithContext(context.Background(), rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema)
+}
+
+func buildQueryRespWithContext(ctx context.Context, rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
+) ([]map[string]interface{}, error) {
 	nativeJSON := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
 	jsonFieldNames := make(map[string]struct{})
 	jsonAllValid := true
@@ -4146,6 +4207,9 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 		}
 	}
 	for i := int64(0); i < rowsNum; i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		row := map[string]interface{}{}
 		if columnNum > 0 {
 			for j := 0; j < columnNum; j++ {
@@ -4337,6 +4401,9 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	}
 
 	if nativeJSON && !jsonAllValid {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Rows written before the insert path was fixed can hold bytes that are
 		// not a JSON document. Embedding one of those natively makes the whole
 		// response fail to marshal, so a single legacy row would break every
