@@ -509,10 +509,9 @@ OpenIndex(bool use_async,
     // Size() dereferences the backing index without a null guard, so it must
     // not be called in those states (matches the native_index.Count() guard in
     // ValidateLoadedShape).
-    const auto mem_size =
-        plan.state == ArtifactState::Normal
-            ? static_cast<size_t>(engine.native_index.Size())
-            : size_t{0};
+    const auto mem_size = plan.state == ArtifactState::Normal
+                              ? static_cast<size_t>(engine.native_index.Size())
+                              : size_t{0};
     auto reader = std::make_unique<VectorIndexReader>(open_options.beamwidth,
                                                       std::move(engine));
     reader->SetMemSize(mem_size);
