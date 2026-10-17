@@ -31,6 +31,19 @@ type jsonRender struct {
 // Render writes data with custom ContentType.
 func (r jsonRender) Render(w http.ResponseWriter) error {
 	r.WriteContentType(w)
+	if recorder, ok := w.(*timeoutResponseRecorder); ok {
+		// Marshal returns owned bytes, unlike Encoder's temporary Write buffers.
+		data, err := json.Marshal(r.Data)
+		if err != nil {
+			return err
+		}
+		if _, err = recorder.WriteOwned(data); err != nil {
+			return err
+		}
+		// Keep Encoder's newline without growing/copying the encoded JSON slice.
+		_, err = recorder.Write([]byte{'\n'})
+		return err
+	}
 	encoder := json.NewEncoder(w)
 	return encoder.Encode(r.Data)
 }

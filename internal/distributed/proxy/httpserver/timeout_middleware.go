@@ -65,6 +65,7 @@ const timeoutRecorderNoWritten = -1
 
 type timeoutResponseRecorder struct {
 	body        *bytes.Buffer
+	ownedBody   []byte // Encoded JSON owned by this recorder; body holds any following writes.
 	headers     http.Header
 	mu          sync.Mutex
 	closed      bool
@@ -99,6 +100,22 @@ func (w *timeoutResponseRecorder) Write(data []byte) (int, error) {
 	n, err := w.body.Write(data)
 	w.size += n
 	return n, err
+}
+
+// WriteOwned accepts only the first response write and transfers ownership of
+// data on success. The caller must not modify or reuse it afterward.
+func (w *timeoutResponseRecorder) WriteOwned(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed || w.body == nil {
+		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
+	}
+	if w.written() {
+		return 0, merr.WrapErrServiceInternalMsg("response body already written")
+	}
+	w.ownedBody = data
+	w.size = len(data)
+	return len(data), nil
 }
 
 func (w *timeoutResponseRecorder) WriteString(s string) (int, error) {
@@ -182,6 +199,11 @@ func (w *timeoutResponseRecorder) CommitTo(realWriter gin.ResponseWriter) error 
 		dst[k] = append([]string(nil), vv...)
 	}
 	realWriter.WriteHeader(w.status)
+	if len(w.ownedBody) > 0 {
+		if _, err := realWriter.Write(w.ownedBody); err != nil {
+			return err
+		}
+	}
 	if w.body.Len() == 0 {
 		if w.written() || w.status != http.StatusOK {
 			realWriter.WriteHeaderNow()
@@ -195,6 +217,7 @@ func (w *timeoutResponseRecorder) CommitTo(realWriter gin.ResponseWriter) error 
 func (w *timeoutResponseRecorder) Close() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.ownedBody = nil
 	if w.body != nil {
 		w.body.Reset()
 		w.body = nil

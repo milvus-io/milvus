@@ -17,14 +17,251 @@
 package httpserver
 
 import (
+	"bytes"
+	"context"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestJSONRenderOwnedBody(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	recorder := newTimeoutResponseRecorder(buffer)
+	value := struct {
+		Text string `json:"text"`
+		ID   int64  `json:"id"`
+	}{Text: "<>&", ID: 9223372036854775807}
+	require.NoError(t, (jsonRender{Data: value}).Render(recorder))
+	// The existing buffer must hold only the encoder's newline, not a second
+	// copy of the JSON document. Replacing ownership transfer with Write fails.
+	require.Equal(t, "\n", buffer.String())
+	want := "{\"text\":\"\\u003c\\u003e\\u0026\",\"id\":9223372036854775807}\n"
+	require.Equal(t, len(want), recorder.Size())
+	output := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(output)
+	require.NoError(t, recorder.CommitTo(c.Writer))
+	require.Equal(t, want, output.Body.String())
+	require.Equal(t, "application/json; charset=utf-8", output.Header().Get("Content-Type"))
+	recorder.Close()
+
+	// Non-recorder callers retain the same JSON and trailing newline.
+	direct := httptest.NewRecorder()
+	require.NoError(t, (jsonRender{Data: value}).Render(direct))
+	require.Equal(t, want, direct.Body.String())
+}
+
+type ownedBodyCapture struct {
+	*httptest.ResponseRecorder
+	first []byte
+}
+
+func (w *ownedBodyCapture) Write(data []byte) (int, error) {
+	if w.first == nil {
+		w.first = data
+	}
+	return w.ResponseRecorder.Write(data)
+}
+
+func TestTimeoutRecorderOwnedBody(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	recorder := newTimeoutResponseRecorder(buffer)
+	data := []byte(`{"data":[1]}`)
+	n, err := recorder.WriteOwned(data)
+	require.NoError(t, err)
+	require.Equal(t, len(data), n)
+	n, err = recorder.WriteOwned([]byte(`{"data":[2]}`))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Zero(t, n)
+	require.Empty(t, buffer.Bytes())
+	borrowed := []byte("\n")
+	_, err = recorder.Write(borrowed)
+	require.NoError(t, err)
+	borrowed[0] = 'x' // Ordinary Write must not retain caller-owned bytes.
+	want := "{\"data\":[1]}\n"
+	require.Equal(t, len(want), recorder.Size())
+	output := &ownedBodyCapture{ResponseRecorder: httptest.NewRecorder()}
+	c, _ := gin.CreateTestContext(output)
+	require.NoError(t, recorder.CommitTo(c.Writer))
+	require.Equal(t, want, output.Body.String())
+	require.Same(t, &data[0], &output.first[0], "CommitTo must send the transferred slice without copying it")
+	recorder.CloseForTimeout()
+	require.Nil(t, recorder.ownedBody)
+	// Reusing the pooled buffer must not let a late worker modify it.
+	next := newTimeoutResponseRecorder(buffer)
+	_, err = next.WriteString("next request")
+	require.NoError(t, err)
+	n, err = recorder.WriteOwned([]byte("late result"))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Zero(t, n)
+	require.Equal(t, "next request", buffer.String())
+}
+
+func TestTimeoutRecorderOwnedBodyRejectsPriorWrite(t *testing.T) {
+	for _, prefix := range []string{"", "prefix:"} {
+		t.Run("prefix="+prefix, func(t *testing.T) {
+			recorder := newTimeoutResponseRecorder(&bytes.Buffer{})
+			_, err := recorder.WriteString(prefix)
+			require.NoError(t, err)
+			n, err := recorder.WriteOwned([]byte(`{"data":[1]}`))
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Zero(t, n)
+			require.Nil(t, recorder.ownedBody)
+			require.Equal(t, prefix, recorder.body.String())
+			require.Equal(t, len(prefix), recorder.Size())
+		})
+	}
+}
+
+type delayedJSON struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (v *delayedJSON) MarshalJSON() ([]byte, error) {
+	// Sonic's race instrumentation marshals the value a second time.
+	v.once.Do(func() { close(v.started) })
+	<-v.release
+	return []byte(`{"data":[1]}`), nil
+}
+
+func TestTimeoutRecorderLateJSON(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.RequestTimeoutMs.Key
+	require.NoError(t, paramtable.Get().Save(key, "50"))
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	for _, duringEncode := range []bool{true, false} {
+		name := "after_encoding"
+		if duringEncode {
+			name = "during_encoding"
+		}
+		t.Run(name, func(t *testing.T) {
+			started, release := make(chan struct{}), make(chan struct{})
+			done := make(chan error, 1)
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			t.Cleanup(unblock)
+			engine := gin.New()
+			engine.GET("/", timeoutMiddleware(func(c *gin.Context) {
+				if duringEncode {
+					done <- (jsonRender{Data: &delayedJSON{started: started, release: release}}).Render(c.Writer)
+					return
+				}
+				err := (jsonRender{Data: gin.H{"data": []int{1}}}).Render(c.Writer)
+				if err != nil {
+					done <- err
+					return
+				}
+				close(started)
+				<-release
+				done <- (jsonRender{Data: gin.H{"late": true}}).Render(c.Writer)
+			}))
+			response := httptest.NewRecorder()
+			returned := make(chan struct{})
+			go func() {
+				engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+				close(returned)
+			}()
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("encoding did not start")
+			}
+			select {
+			case <-returned:
+			case <-time.After(time.Second):
+				t.Fatal("timeout waited for the encoder or handler")
+			}
+			require.Equal(t, http.StatusRequestTimeout, response.Code)
+			require.JSONEq(t, `{"code":10001,"message":"request timeout"}`, response.Body.String())
+			before := response.Body.String()
+			// Let the worker finish only after the HTTP invocation returned.
+			unblock()
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+			case <-time.After(time.Second):
+				t.Fatal("late result was not rejected")
+			}
+			require.Equal(t, before, response.Body.String())
+		})
+	}
+}
+
+func TestJSONRenderEncodingError(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	recorder := newTimeoutResponseRecorder(buffer)
+	require.Error(t, (jsonRender{Data: math.NaN()}).Render(recorder))
+	require.False(t, recorder.Written())
+	require.Equal(t, -1, recorder.Size())
+	require.Empty(t, buffer.Bytes())
+}
+
+type delayedResponseWriter struct {
+	*httptest.ResponseRecorder
+	started chan struct{}
+	release chan struct{}
+	once    bool
+}
+
+func (w *delayedResponseWriter) Write(data []byte) (int, error) {
+	if !w.once {
+		w.once = true
+		close(w.started)
+		<-w.release
+	}
+	return w.ResponseRecorder.Write(data)
+}
+
+func TestTimeoutRecorderCompletedHandlerCanFinishSending(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.RequestTimeoutMs.Key
+	require.NoError(t, paramtable.Get().Save(key, "100"))
+	t.Cleanup(func() { paramtable.Get().Reset(key) })
+	ctxs := make(chan context.Context, 1)
+	engine := gin.New()
+	engine.GET("/", timeoutMiddleware(func(c *gin.Context) {
+		ctxs <- c.Request.Context()
+		HTTPReturnStream(c, http.StatusOK, gin.H{"code": 0, "data": []int{1}})
+	}))
+	response := &delayedResponseWriter{ResponseRecorder: httptest.NewRecorder(), started: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(func() { close(response.release) })
+	returned := make(chan struct{})
+	go func() {
+		engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+		close(returned)
+	}()
+	select {
+	case <-response.started:
+	case <-time.After(time.Second):
+		t.Fatal("completed response was not committed")
+	}
+	ctx := <-ctxs
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("request deadline did not expire")
+	}
+	response.release <- struct{}{}
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("response did not finish")
+	}
+	require.Equal(t, http.StatusOK, response.Code)
+	require.JSONEq(t, `{"code":0,"data":[1]}`, response.Body.String())
+}
 
 var testResult = gin.H{
 	"message": "This is a test message",
