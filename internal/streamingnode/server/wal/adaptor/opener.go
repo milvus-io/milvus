@@ -230,6 +230,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		return nil, errors.Wrap(err, "when recovering recovery storage")
 	}
 	param.RecoveryStorage = rs
+	param.OnFatal = roWAL.markUnavailable
 
 	// Handle alter WAL if found in snapshot.
 	// This flushes all remaining data and triggers WAL switch to the target implementation

@@ -38,6 +38,9 @@ type Server struct {
 
 	// basic component instances.
 	walManager walmanager.Manager
+
+	// pkindex is nil when the primary key index is off.
+	pkindex *pkindexComponents
 }
 
 // Init initializes the streamingnode server.
@@ -69,6 +72,9 @@ func (s *Server) Stop() {
 	mlog.Info(context.TODO(), "stopping streamingnode server...")
 	mlog.Info(context.TODO(), "close wal manager...")
 	s.walManager.Close()
+	// The WAL interceptors close their index channels when the WAL manager closes.
+	mlog.Info(context.TODO(), "close primary key index...")
+	s.pkindex.close()
 	mlog.Info(context.TODO(), "release streamingnode resources...")
 	resource.Release()
 	mlog.Info(context.TODO(), "streamingnode server stopped")

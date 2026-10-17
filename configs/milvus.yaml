@@ -1749,6 +1749,17 @@ streaming:
     # The threshold of slow log, 1s by default. 
     # If the wal implementation is woodpecker, the minimum threshold is 3s
     appendSlowThreshold: 1s
+  pkindex:
+    dataDir:  # The local directory of primary key index data. Empty means <localStorage.path>/pkindex.
+    blockCacheSize: 512m # The size of the block cache that all primary key indexes on one streaming node share.
+    maxOpenFiles: 4096 # The maximum number of open files in the table cache that all primary key indexes on one streaming node share.
+    memTableSize: 4m # The memtable size of the primary key index of one vchannel.
+    handover:
+      activeBytes: 64m # A vchannel hands over its primary key index writes to object storage after this many bytes of writes.
+      tailBytes: 2g # When the unpublished WAL tail reaches this size, the vchannel with the oldest committed primary key index hands over. Keep it below streaming.walRecovery.tail.lowWatermark.
+      maxBackoff: 60s # The maximum wait between two attempts of a failed primary key index handover.
+    recovery:
+      manifestReadConcurrency: 64 # The number of manifest bodies the primary key index reads in parallel when a WAL opens.
   flush:
     # The threshold of memory usage for one streaming node,
     # If the memory usage is higher than this threshold, the node will try to trigger flush action to decrease the total of growing segment until growingSegmentBytesLwmThreshold,

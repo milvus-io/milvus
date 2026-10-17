@@ -11,6 +11,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	pkrecovery "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -180,9 +182,14 @@ type recoveryStorageImpl struct {
 	recoverQueryViews       func(*vchannel.PChannelRecoveryManager)
 	vchannelManager         *vchannel.PChannelRecoveryManager
 	summaryManager          *walsummary.Manager
-	nodeScheduler           nodescheduler.Scheduler
-	taskScheduler           *scopedTaskScheduler
-	dirtyCounter            int // records the message count since last persist snapshot.
+	// pkindex is the recovery of the primary key index of the pchannel, nil
+	// when the node has no index manager. The recovery storage owns it: it
+	// creates it in initRecoveryModules, feeds it the replay, ends it at the
+	// barrier and closes it in closeRecoveryResources.
+	pkindex       *pkrecovery.Recovery
+	nodeScheduler nodescheduler.Scheduler
+	taskScheduler *scopedTaskScheduler
+	dirtyCounter  int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
 	onFatal                func(error)
 	persistNotifier        chan struct{}
@@ -299,7 +306,40 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 	if summaryManager != nil {
 		summaryManager.InitLastAcked(r.checkpoint.TimeTick)
 	}
+	if mgr := resource.Resource().PKIndexManager(); mgr != nil {
+		rec, err := pkrecovery.Recover(ctx, mgr, pkrecovery.Param{
+			Info:    r.channel,
+			Metas:   vchannels,
+			Seed:    r.checkpoint.TimeTick,
+			Tail:    r.pkindexTail,
+			OnFatal: r.fatalHandler("primary key index stopped"),
+			Sched:   r.nodeScheduler,
+
+			ManifestReadConcurrency: paramtable.Get().StreamingCfg.PKIndexRecoveryManifestReadConcurrency.GetAsInt(),
+		})
+		if err != nil {
+			return merr.Wrap(err, "recover the primary key index")
+		}
+		r.pkindex = rec
+	}
 	return nil
+}
+
+// pkindexTail reports the WAL recovery tail to the primary key index. The
+// handover driver of the index calls it outside the locks of the index.
+func (r *recoveryStorageImpl) pkindexTail() snpkindex.WALTail {
+	m := r.Metrics()
+	return snpkindex.WALTail{Bytes: m.RecoveryTailBytes, RecoveryTimeTick: m.RecoveryTimeTick}
+}
+
+// fatalHandler returns the fatal handler of a module: it forwards the error
+// to the WAL owner with what, unless the storage is already closing.
+func (r *recoveryStorageImpl) fatalHandler(what string) func(error) {
+	return func(err error) {
+		if r.backgroundTaskNotifier.Context().Err() == nil && r.onFatal != nil {
+			r.onFatal(merr.Wrap(err, what))
+		}
+	}
 }
 
 // newSummaryManager creates the pchannel-scoped WALSummary manager and wires
@@ -318,11 +358,7 @@ func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) *wals
 		CacheMaxBytes:     uint64(max(0, paramtable.Get().StreamingCfg.SummaryCacheBytesPerPChannel.GetAsSize())),
 		RetentionMaxBytes: uint64(paramtable.Get().StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize()),
 		Logger:            r.Logger(),
-		OnFatal: func(err error) {
-			if r.backgroundTaskNotifier.Context().Err() == nil && r.onFatal != nil {
-				r.onFatal(merr.Wrap(err, "WAL summary persistence stopped"))
-			}
-		},
+		OnFatal:           r.fatalHandler("WAL summary persistence stopped"),
 	})
 }
 
@@ -378,6 +414,9 @@ func (r *recoveryStorageImpl) closeRecoveryResources() {
 	}
 	if r.vchannelManager != nil {
 		r.vchannelManager.Close()
+	}
+	if r.pkindex != nil {
+		r.pkindex.Close(context.TODO())
 	}
 	if r.taskScheduler != nil {
 		r.taskScheduler.Close()
@@ -442,6 +481,10 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	summaryThrough := uint64(math.MaxUint64)
 	if r.summaryManager != nil {
 		summaryThrough = r.summaryManager.LastAcked()
+	}
+	if r.pkindex != nil {
+		// The index holds the checkpoint at the oldest write it did not commit.
+		summaryThrough = min(summaryThrough, r.pkindex.LastAcked())
 	}
 	completedPoint, completedLogicalOffset := r.ackTracker.CheckpointThrough(summaryThrough)
 
@@ -579,6 +622,10 @@ func (r *recoveryStorageImpl) observeModulesMessage(
 		r.summaryManager.ObserveMessage(ctx, retained.Message())
 	}
 	r.vchannelManager.ObserveMessage(ctx, retained)
+	if r.pkindex != nil {
+		// After Finish the call returns at once.
+		r.pkindex.Observe(ctx, retained.Message())
+	}
 }
 
 // startLiveScanner continues the same stream after its startup barrier.
@@ -614,7 +661,8 @@ func (r *recoveryStorageImpl) runLiveScanner(rs RecoveryStream) {
 }
 
 // updatePChannelControl applies pchannel-scoped recovery control effects. The
-// global WAL checkpoint is bounded by AckTracker completion and Summary confirmation.
+// global WAL checkpoint is bounded by AckTracker completion, Summary
+// confirmation and the primary key index.
 func (r *recoveryStorageImpl) updatePChannelControl(msg message.ImmutableMessage) {
 	if r.pchannelControl == nil {
 		r.installPChannelControl(nil)

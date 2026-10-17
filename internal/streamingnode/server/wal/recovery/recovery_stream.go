@@ -62,6 +62,11 @@ L:
 			}
 		}
 	}
+	if r.pkindex != nil {
+		if err := r.pkindex.Finish(ctx); err != nil {
+			return nil, merr.Wrap(err, "finish the primary key index recovery")
+		}
+	}
 	snapshot = r.buildInitialRecoverySnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
 	snapshot.SummarySnapshots, err = r.buildIdempotencySnapshots(ctx)
