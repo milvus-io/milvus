@@ -109,7 +109,8 @@ func (r *recoveryStorageImpl) buildInitialRecoverySnapshot() *RecoverySnapshot {
 // summary applies its retention policy to the chunk set -- and the window
 // applies its own byte cap when it loads them.
 //
-// A read failure fails the WAL open rather than yielding a partial window. A
+// Transient object reads retry in the shared load until recovery or cancellation.
+// A permanent read failure or cancellation fails WAL open, never yielding a partial window. A
 // window missing entries answers a retry of a write that DID land by appending
 // it again, which is a way to duplicate writes on a channel whose clients were
 // told they had idempotency.

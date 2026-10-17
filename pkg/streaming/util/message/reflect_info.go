@@ -76,6 +76,7 @@ const (
 	MessageTypeDropSnapshotsByCollection MessageType = MessageType(messagespb.MessageType_DropSnapshotsByCollection)
 	MessageTypeAlterWAL                  MessageType = MessageType(messagespb.MessageType_AlterWAL)
 	MessageTypeRecoveryBarrier           MessageType = MessageType(messagespb.MessageType_RecoveryBarrier)
+	MessageTypeMVCCBarrier               MessageType = MessageType(messagespb.MessageType_MVCCBarrier)
 	MessageTypeBatchUpdateManifest       MessageType = MessageType(messagespb.MessageType_BatchUpdateManifest)
 	MessageTypeRefreshExternalCollection MessageType = MessageType(messagespb.MessageType_RefreshExternalCollection)
 	MessageTypeAlterRLSMetadata          MessageType = MessageType(messagespb.MessageType_AlterRLSMetadata)
@@ -202,6 +203,8 @@ type (
 	AlterWALMessageBody                    = messagespb.AlterWALMessageBody
 	RecoveryBarrierMessageHeader           = messagespb.RecoveryBarrierMessageHeader
 	RecoveryBarrierMessageBody             = messagespb.RecoveryBarrierMessageBody
+	MVCCBarrierMessageHeader               = messagespb.MVCCBarrierMessageHeader
+	MVCCBarrierMessageBody                 = messagespb.MVCCBarrierMessageBody
 	BatchUpdateManifestMessageHeader       = messagespb.BatchUpdateManifestMessageHeader
 	BatchUpdateManifestMessageBody         = messagespb.BatchUpdateManifestMessageBody
 	RefreshExternalCollectionMessageHeader = messagespb.RefreshExternalCollectionMessageHeader
@@ -2785,6 +2788,56 @@ var MustAsBroadcastRecoveryBarrierMessageV2 = MustAsSpecializedBroadcastMessage[
 // NewRecoveryBarrierMessageBuilderV2 creates a new message builder for RecoveryBarrierMessageV2
 var NewRecoveryBarrierMessageBuilderV2 = newMutableMessageBuilder[*RecoveryBarrierMessageHeader, *RecoveryBarrierMessageBody]
 
+// Type aliases for MVCCBarrierMessageV2
+type (
+	MutableMVCCBarrierMessageV2           = specializedMutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+	ImmutableMVCCBarrierMessageV2         = SpecializedImmutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+	OwnedImmutableMVCCBarrierMessageV2    = SpecializedOwnedImmutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+	RetainedImmutableMVCCBarrierMessageV2 = SpecializedRetainedImmutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+	BroadcastMVCCBarrierMessageV2         = SpecializedBroadcastMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+	BroadcastResultMVCCBarrierMessageV2   = BroadcastResult[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+	AckResultMVCCBarrierMessageV2         = AckResult[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+)
+
+// MessageTypeWithVersion for MVCCBarrierMessageV2
+var MessageTypeMVCCBarrierV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeMVCCBarrier,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for MVCCBarrierMessageV2
+var SpecializedTypeMVCCBarrierV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*MVCCBarrierMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*MVCCBarrierMessageHeader)(nil)),
+}
+
+// AsMutableMVCCBarrierMessageV2 converts a BasicMessage to MutableMVCCBarrierMessageV2
+var AsMutableMVCCBarrierMessageV2 = asSpecializedMutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+
+// MustAsMutableMVCCBarrierMessageV2 converts a BasicMessage to MutableMVCCBarrierMessageV2, panics on error
+var MustAsMutableMVCCBarrierMessageV2 = mustAsSpecializedMutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+
+// AsImmutableMVCCBarrierMessageV2 converts an ImmutableMessage to ImmutableMVCCBarrierMessageV2
+var AsImmutableMVCCBarrierMessageV2 = asSpecializedImmutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+
+// MustAsImmutableMVCCBarrierMessageV2 converts an ImmutableMessage to ImmutableMVCCBarrierMessageV2, panics on error
+var MustAsImmutableMVCCBarrierMessageV2 = MustAsSpecializedImmutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+
+// MustAsOwnedImmutableMVCCBarrierMessageV2 converts an OwnedImmutableMessage to OwnedImmutableMVCCBarrierMessageV2, panics on error
+var MustAsOwnedImmutableMVCCBarrierMessageV2 = MustAsSpecializedOwnedImmutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+
+// MustAsRetainedImmutableMVCCBarrierMessageV2 converts a RetainedImmutableMessage to RetainedImmutableMVCCBarrierMessageV2, panics on error
+var MustAsRetainedImmutableMVCCBarrierMessageV2 = MustAsSpecializedRetainedImmutableMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+
+// AsBroadcastMVCCBarrierMessageV2 converts a BasicMessage to BroadcastMVCCBarrierMessageV2
+var AsBroadcastMVCCBarrierMessageV2 = asSpecializedBroadcastMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+
+// MustAsBroadcastMVCCBarrierMessageV2 converts a BasicMessage to BroadcastMVCCBarrierMessageV2, panics on error
+var MustAsBroadcastMVCCBarrierMessageV2 = MustAsSpecializedBroadcastMessage[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+
+// NewMVCCBarrierMessageBuilderV2 creates a new message builder for MVCCBarrierMessageV2
+var NewMVCCBarrierMessageBuilderV2 = newMutableMessageBuilder[*MVCCBarrierMessageHeader, *MVCCBarrierMessageBody]
+
 // Type aliases for BatchUpdateManifestMessageV2
 type (
 	MutableBatchUpdateManifestMessageV2           = specializedMutableMessage[*BatchUpdateManifestMessageHeader, *BatchUpdateManifestMessageBody]
@@ -3031,6 +3084,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.FlushMessageHeader{}):                     MessageTypeFlush,
 	reflect.TypeOf(&messagespb.ImportMessageHeader{}):                    MessageTypeImport,
 	reflect.TypeOf(&messagespb.InsertMessageHeader{}):                    MessageTypeInsert,
+	reflect.TypeOf(&messagespb.MVCCBarrierMessageHeader{}):               MessageTypeMVCCBarrier,
 	reflect.TypeOf(&messagespb.ManualFlushMessageHeader{}):               MessageTypeManualFlush,
 	reflect.TypeOf(&messagespb.RecoveryBarrierMessageHeader{}):           MessageTypeRecoveryBarrier,
 	reflect.TypeOf(&messagespb.RefreshExternalCollectionMessageHeader{}): MessageTypeRefreshExternalCollection,
@@ -3107,6 +3161,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeFlushV2:                     SpecializedTypeFlushV2,
 	MessageTypeImportV1:                    SpecializedTypeImportV1,
 	MessageTypeInsertV1:                    SpecializedTypeInsertV1,
+	MessageTypeMVCCBarrierV2:               SpecializedTypeMVCCBarrierV2,
 	MessageTypeManualFlushV2:               SpecializedTypeManualFlushV2,
 	MessageTypeRecoveryBarrierV2:           SpecializedTypeRecoveryBarrierV2,
 	MessageTypeRefreshExternalCollectionV2: SpecializedTypeRefreshExternalCollectionV2,
@@ -3167,6 +3222,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeFlushV2:                     MessageTypeFlushV2,
 	SpecializedTypeImportV1:                    MessageTypeImportV1,
 	SpecializedTypeInsertV1:                    MessageTypeInsertV1,
+	SpecializedTypeMVCCBarrierV2:               MessageTypeMVCCBarrierV2,
 	SpecializedTypeManualFlushV2:               MessageTypeManualFlushV2,
 	SpecializedTypeRecoveryBarrierV2:           MessageTypeRecoveryBarrierV2,
 	SpecializedTypeRefreshExternalCollectionV2: MessageTypeRefreshExternalCollectionV2,

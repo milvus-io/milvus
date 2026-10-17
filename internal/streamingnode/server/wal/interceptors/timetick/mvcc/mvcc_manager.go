@@ -48,8 +48,8 @@ func (cm *MVCCManager) GetMVCCOfVChannel(vchannel string) VChannelMVCC {
 func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	cm.query.UpdateMVCC(msg)
 	if !msg.IsPersisted() {
-		// A unpersisted message is always a time tick message that is used to sync up the system time.
-		// No data change should be made by this message so it should be ignored in the mvcc manager.
+		// Volatile confirmations do not change durable MVCC. Scoped query
+		// progress is handled separately by QueryMVCCManager.
 		return
 	}
 
@@ -64,7 +64,7 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 		return
 	}
 
-	if msgType == message.MessageTypeTimeTick {
+	if msgType == message.MessageTypeTimeTick || msgType == message.MessageTypeMVCCBarrier {
 		cm.sync(tt)
 		return
 	}

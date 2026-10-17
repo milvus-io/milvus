@@ -42,11 +42,23 @@ type TransformLogSubscriptionOption struct {
 	Handler            TransformLogEventHandler
 }
 
+// TransformLogEventHandler receives ordered callbacks. A handler must provide
+// an independent abort/context that releases any blocked Handle before the
+// caller waits for subscription or stream Close. Never call those blocking
+// Close methods synchronously from Handle. Remote subscriptions share a receive
+// loop: a blocked handler also delays other subscriptions on that RPC.
+// Close is a completion notification, not the mechanism for aborting Handle.
+// Subscription errors are delivered to the consumer. Resume checkpoints
+// advance only after Handle accepts Entry/SyncUp. A returned handler error
+// rejects delivery without itself permanently ending the logical subscription.
 type TransformLogEventHandler interface {
 	Handle(event TransformLogStreamEvent) error
 	Close()
 }
 
+// TransformLogSubscription owns resources until Close, including after a
+// bounded subscription delivers its EndTimeTick SyncUp. Close joins delivery;
+// unlike physical stream Close, it does not impose a timeout on the peer.
 type TransformLogSubscription interface {
 	ID() int64
 	VChannel() string
