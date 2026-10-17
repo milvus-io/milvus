@@ -1364,6 +1364,31 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.True(t, ok)
 		assert.NotNil(t, coll.Properties)
 	})
+
+	t.Run("published external source notifies index build", func(t *testing.T) {
+		spec := `{"format":"parquet"}`
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(100, &collectionInfo{ID: 100, Schema: externalRefreshIndexSchema("s3://bucket/a", spec)})
+		notifyIndexChan := make(chan UniqueID, 1)
+		s := &Server{meta: &meta{collections: collections}, notifyIndexChan: notifyIndexChan}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
+			CollectionID: 100,
+			Schema:       externalRefreshIndexSchema("s3://bucket/a", spec),
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.Empty(t, notifyIndexChan)
+
+		resp, err = s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
+			CollectionID: 100,
+			Schema:       externalRefreshIndexSchema("s3://bucket/b", spec),
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		require.Len(t, notifyIndexChan, 1)
+		assert.Equal(t, UniqueID(100), <-notifyIndexChan)
+	})
 }
 
 func TestServer_GcConfirm(t *testing.T) {
@@ -5398,6 +5423,8 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		ctx := context.Background()
 
 		registry.ResetRegistration()
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
 			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
@@ -5436,6 +5463,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
+		assertBuildIndexEvents(t, 1, 2)
 
 		recomputeManager.mu.Lock()
 		defer recomputeManager.mu.Unlock()
@@ -5476,6 +5504,8 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		ctx := context.Background()
 
 		registry.ResetRegistration()
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
 			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
@@ -5510,6 +5540,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.Error(t, err)
+		assertNoBuildIndexEvent(t)
 	})
 
 	t.Run("v2_column_groups_dispatches_operator", func(t *testing.T) {

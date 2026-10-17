@@ -720,7 +720,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
 		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli, s.notifyIndexChan)
 	}
 }
 
@@ -1014,16 +1014,14 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
 
-	if enableSortCompaction() {
+	collection := s.meta.GetCollection(segment.GetCollectionID())
+	if enableSortCompaction() && (collection == nil || !collection.IsExternal()) {
 		select {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:
 		}
 	} else {
-		select {
-		case getBuildIndexChSingleton() <- segmentID:
-		default:
-		}
+		notifySegmentIndexBuild(segmentID)
 	}
 
 	// Insert / delta counts come from Statistics. Stats array is iterated
