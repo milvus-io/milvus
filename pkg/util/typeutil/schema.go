@@ -613,7 +613,10 @@ func (helper *SchemaHelper) GetFunctionByOutputField(field *schemapb.FieldSchema
 	return nil, merr.WrapErrParameterInvalidMsg("function not exist")
 }
 
-// As of now, only BM25 function output field is not supported to retrieve raw field data
+// As of now, only BM25 function output field is not supported to retrieve raw field data.
+// Its value is a term-frequency sparse vector over hashed token ids that only serves
+// BM25 search, and segcore never loads it as raw field data (see Schema::ShouldLoadField
+// in internal/core/src/common/Schema.h), so sealed segments cannot return it.
 func (helper *SchemaHelper) CanRetrieveRawFieldData(field *schemapb.FieldSchema) bool {
 	if !field.IsFunctionOutput {
 		return true
