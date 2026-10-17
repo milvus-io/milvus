@@ -1090,3 +1090,45 @@ func newChannelID(name string) ChannelID {
 		Name: name,
 	}
 }
+
+// The role is recovered with the replicate configuration (a cluster that is
+// the target of a replication is a secondary) and is read without the manager
+// lock, which is held across etcd writes.
+func TestReplicateRoleRecoveredAndReadWithoutLock(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "ch1"}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}, Node: &streamingpb.StreamingNodeInfo{ServerId: 1}},
+	}, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(&streamingpb.ReplicateConfigurationMeta{
+		ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev", Pchannels: []string{"ch1"}},
+				{ClusterId: "by-dev2", Pchannels: []string{"ch2"}},
+			},
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{SourceClusterId: "by-dev2", TargetClusterId: "by-dev"},
+			},
+		},
+	}, nil)
+	m, err := RecoverChannelManager(context.Background())
+	require.NoError(t, err)
+
+	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
+	role := make(chan replicateutil.Role, 1)
+	go func() { role <- m.ReplicateRole() }()
+	select {
+	case r := <-role:
+		assert.Equal(t, replicateutil.RoleSecondary, r)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ReplicateRole waited for the channel manager lock")
+	}
+}
