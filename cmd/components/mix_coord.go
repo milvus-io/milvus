@@ -35,7 +35,7 @@ type MixCoord struct {
 	svr *mix.Server
 }
 
-// NewRootCoord creates a new RoorCoord
+// NewMixCoord creates a new MixCoord
 func NewMixCoord(ctx context.Context, factory dependency.Factory) (*MixCoord, error) {
 	svr, err := mix.NewServer(ctx, factory)
 	if err != nil {
@@ -67,7 +67,7 @@ func (rc *MixCoord) Stop() error {
 	return exitWhenStopTimeout(rc.svr.Stop, timeout)
 }
 
-// GetComponentStates returns RootCoord's states
+// Health returns MixCoord's current state code
 func (rc *MixCoord) Health(ctx context.Context) commonpb.StateCode {
 	resp, err := rc.svr.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	if err != nil {
