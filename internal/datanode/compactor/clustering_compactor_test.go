@@ -206,6 +206,23 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 	s.Equal(8, s.task.flushPool.Cap())
 }
 
+func (s *ClusteringCompactionTaskSuite) TestCompactionInitRejectsMissingPrimaryKey() {
+	for _, clusteringKey := range []int64{100, 103} {
+		s.Run(fmt.Sprint(clusteringKey), func() {
+			s.plan.Schema = genCollectionSchema()
+			s.plan.ClusteringKeyField = clusteringKey
+			for _, field := range s.plan.Schema.Fields {
+				field.IsPrimaryKey = false
+			}
+			defer s.task.cleanUp(context.Background())
+
+			err := s.task.init()
+			s.Require().ErrorIs(err, merr.ErrServiceInternal)
+			s.Require().ErrorContains(err, "no primary key field found")
+		})
+	}
+}
+
 func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	dblobs, err := getInt64DeltaBlobs(
 		1,
@@ -973,6 +990,64 @@ func TestClusteringMappingRejectsInvalidTimestamp(t *testing.T) {
 	}
 }
 
+func TestClusteringMappingRejectsMissingScalarColumn(t *testing.T) {
+	for _, missingField := range []int64{100, 101, 104} {
+		for _, wrapped := range []bool{false, true} {
+			t.Run(fmt.Sprintf("field_%d/wrapped_%t", missingField, wrapped), func(t *testing.T) {
+				schema := genCollectionSchema()
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 104, Name: "ttl", DataType: schemapb.DataType_Timestamptz,
+				})
+				malformed := proto.Clone(schema).(*schemapb.CollectionSchema)
+				for i, field := range malformed.Fields {
+					if field.FieldID == missingField {
+						malformed.Fields = append(malformed.Fields[:i], malformed.Fields[i+1:]...)
+						break
+					}
+				}
+				record := clusteringTestRecord(t, malformed, 0, 1)
+				defer record.Release()
+				readerRecord := record
+				segment := &datapb.CompactionSegmentBinlogs{CollectionID: CollectionID, SegmentID: 1}
+				if wrapped {
+					readerRecord = &materializedRecord{base: record}
+					segment.CommitTimestamp = 1
+				}
+				existingFields := make(map[int64]struct{}, len(malformed.Fields))
+				for _, field := range malformed.Fields {
+					existingFields[field.FieldID] = struct{}{}
+				}
+				patch := mockey.Mock(newTextDecodedCompactionSegmentRecordReader).
+					Return(&mockReader{records: []storage.Record{readerRecord}}, existingFields, nil).Build()
+				defer patch.UnPatch()
+				task := &clusteringCompactionTask{
+					plan:               &datapb.CompactionPlan{Schema: schema, SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{segment}},
+					binlogIO:           mock_util.NewMockBinlogIO(t),
+					primaryKeyField:    typeutil.GetField(schema, 100),
+					clusteringKeyField: typeutil.GetField(schema, 101),
+					ttlFieldID:         104,
+					compactionParams:   compaction.GenParams(),
+					writtenRowNum:      atomic.NewInt64(0),
+				}
+				var err error
+				require.NotPanics(t, func() { err = task.mappingSegment(context.Background(), segment) })
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.ErrorContains(t, err, fmt.Sprintf("field %d", missingField))
+				require.Zero(t, task.writtenRowNum.Load())
+			})
+		}
+	}
+}
+
+func TestClusteringScalarRejectsMissingColumn(t *testing.T) {
+	var err error
+	require.NotPanics(t, func() {
+		_, err = clusteringScalarValue(nil, &schemapb.FieldSchema{FieldID: 100}, 0)
+	})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, "field 100")
+}
+
 func TestClusterBufferV3BatchUsesWriterSchema(t *testing.T) {
 	schema := clusteringWideSchema()
 	schema.Fields[3].ExternalField = "source_field_101"
@@ -1164,10 +1239,13 @@ func TestClusterBufferAccountsForNullColumns(t *testing.T) {
 	record := clusteringTestRecord(t, schema, 0, 1)
 	defer record.Release()
 	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	original := memory.DefaultAllocator
-	memory.DefaultAllocator = checked
-	buffer.builder = storage.NewRecordBuilder(schema)
-	memory.DefaultAllocator = original
+	// Keep this test sequential, with no concurrent DefaultAllocator users.
+	func() {
+		original := memory.DefaultAllocator
+		defer func() { memory.DefaultAllocator = original }()
+		memory.DefaultAllocator = checked
+		buffer.builder = storage.NewRecordBuilder(schema)
+	}()
 	defer func() {
 		require.NoError(t, buffer.Close())
 		checked.AssertSize(t, 0)
@@ -1352,6 +1430,7 @@ func TestClusteringReleasesPendingBuildersOnFailure(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			// Keep this test sequential, with no concurrent DefaultAllocator users.
 			originalAllocator := memory.DefaultAllocator
 			memory.DefaultAllocator = checked
 			defer func() { memory.DefaultAllocator = originalAllocator }()
