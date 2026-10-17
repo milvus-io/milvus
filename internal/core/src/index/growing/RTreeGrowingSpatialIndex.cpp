@@ -16,11 +16,13 @@
 
 #include "index/growing/RTreeGrowingSpatialIndex.h"
 
+#include <algorithm>
 #include <iterator>
 #include <limits>
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "index/Families.h"
 #include "index/scalar/spatial/RTreeIndexReader.h"
 
 namespace milvus::index {
@@ -122,8 +124,11 @@ RTreeGrowingSpatialIndex::PublishPending() {
     AssertInfo(accepted_end_ > published_end_,
                "growing R-Tree has no pending rows to publish");
 
-    auto frozen_null_offsets =
-        std::make_shared<const std::vector<size_t>>(null_offsets_);
+    auto frozen_null_blocks = null_offset_blocks_;
+    if (!null_offsets_tail_.empty()) {
+        frozen_null_blocks.push_back(
+            std::make_shared<const std::vector<size_t>>(null_offsets_tail_));
+    }
     auto next_levels = levels_;
     auto next_window_count = value_window_count_;
 
@@ -172,7 +177,7 @@ RTreeGrowingSpatialIndex::PublishPending() {
         }
     }
     auto state = RTreeIndexState::CreateFromValidatedShards(
-        std::move(engines), std::move(frozen_null_offsets), accepted_end_);
+        std::move(engines), std::move(frozen_null_blocks), accepted_end_);
     auto reader = std::make_unique<RTreeIndexReader>(std::move(state));
     PublishSnapshot(std::move(reader), accepted_end_);
 
@@ -228,21 +233,60 @@ RTreeGrowingSpatialIndex::Append(int64_t row_begin,
     ValidateAcceptedBatch(
         row_begin, batch_end, batch_values, batch_null_offsets);
 
+    const auto null_count = null_offset_blocks_.size() * kNullOffsetBlockSize +
+                            null_offsets_tail_.size();
     if (batch_values.size() >
             std::numeric_limits<size_t>::max() - pending_values_.size() ||
         batch_null_offsets.size() >
-            std::numeric_limits<size_t>::max() - null_offsets_.size()) {
+            std::numeric_limits<size_t>::max() - null_count) {
         ThrowInfo(UnexpectedError,
                   "growing R-Tree pending state exceeds size_t domain");
     }
     pending_values_.reserve(pending_values_.size() + batch_values.size());
-    null_offsets_.reserve(null_offsets_.size() + batch_null_offsets.size());
+
+    const auto completed_block_count =
+        (null_offsets_tail_.size() + batch_null_offsets.size()) /
+        kNullOffsetBlockSize;
+    std::vector<std::shared_ptr<std::vector<size_t>>> completed_null_blocks;
+    completed_null_blocks.reserve(completed_block_count);
+    if (!batch_null_offsets.empty()) {
+        null_offsets_tail_.reserve(kNullOffsetBlockSize);
+    }
+    for (size_t i = 0; i < completed_block_count; ++i) {
+        auto block = std::make_shared<std::vector<size_t>>();
+        block->reserve(kNullOffsetBlockSize);
+        completed_null_blocks.push_back(std::move(block));
+    }
+    const auto required_blocks =
+        null_offset_blocks_.size() + completed_block_count;
+    if (required_blocks > null_offset_blocks_.capacity()) {
+        const auto grown_capacity =
+            null_offset_blocks_.capacity() <= null_offset_blocks_.max_size() / 2
+                ? null_offset_blocks_.capacity() * 2
+                : null_offset_blocks_.max_size();
+        null_offset_blocks_.reserve(std::max(required_blocks, grown_capacity));
+    }
+
+    // Prepare every allocation before accepting either values or NULLs. Each
+    // completed block swaps its empty buffer into the writer's next tail, so
+    // no historical offsets are copied and the acceptance step cannot allocate.
     pending_values_.insert(pending_values_.end(),
                            std::make_move_iterator(batch_values.begin()),
                            std::make_move_iterator(batch_values.end()));
-    null_offsets_.insert(null_offsets_.end(),
-                         batch_null_offsets.begin(),
-                         batch_null_offsets.end());
+    size_t batch_offset = 0;
+    for (auto& block : completed_null_blocks) {
+        const auto count = kNullOffsetBlockSize - null_offsets_tail_.size();
+        null_offsets_tail_.insert(
+            null_offsets_tail_.end(),
+            batch_null_offsets.begin() + batch_offset,
+            batch_null_offsets.begin() + batch_offset + count);
+        batch_offset += count;
+        null_offsets_tail_.swap(*block);
+        null_offset_blocks_.push_back(std::move(block));
+    }
+    null_offsets_tail_.insert(null_offsets_tail_.end(),
+                              batch_null_offsets.begin() + batch_offset,
+                              batch_null_offsets.end());
     accepted_end_ = batch_end;
 
     if (accepted_end_ - published_end_ >= publish_window_rows_) {
@@ -257,7 +301,7 @@ RTreeGrowingSpatialIndex::ValueType() const {
 
 std::string
 RTreeGrowingSpatialIndex::Family() const {
-    return "rtree";
+    return families::kRTree;
 }
 
 }  // namespace milvus::index

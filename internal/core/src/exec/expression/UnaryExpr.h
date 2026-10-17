@@ -986,7 +986,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     void
     ExecuteNgramPhase1(TargetBitmap& candidates);
 
-    // Execute ngram Phase2 (post-filter verification) on candidate bitset
+    // Refine ngram candidates unless the reader guarantees exact hits for this
+    // literal/operator (a complete InnerMatch gram). Shared with LIKE AND.
     // - segment_offset: starting position in segment
     // - batch_size: number of rows to process
     // - candidates: bitmap of size batch_size

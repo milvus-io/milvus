@@ -11,13 +11,22 @@
 
 #include <gtest/gtest.h>
 #include <atomic>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <system_error>
+#include <utility>
 
 #include "arrow/status.h"
 #include "common/EasyAssert.h"
+#include "index/Utils.h"
 #include "storage/BinlogReader.h"
 #include "storage/Util.h"
+#include "storage/artifact/LocalDirectory.h"
+#include "tantivy-wrapper.h"
 
 // A truncated / corrupt binlog must surface as DataFormatBroken (a permanent
 // data error) rather than the generic UnexpectedError, so the Go classifier
@@ -125,4 +134,111 @@ TEST(StorageErrorCode, UntypedCgoExceptionObserverFires) {
     free(const_cast<char*>(typed_status.error_msg));
 
     milvus::RegisterUntypedCgoExceptionObserver(nullptr);
+}
+
+namespace {
+
+// Keep the original metadata available while provoking real Tantivy errors,
+// and restore it before the live writer and its directory are destroyed.
+class TantivyMetadataFault {
+ public:
+    explicit TantivyMetadataFault(std::filesystem::path path)
+        : path_(std::move(path)), backup_(path_.string() + ".saved") {
+        std::filesystem::rename(path_, backup_);
+    }
+
+    ~TantivyMetadataFault() {
+        std::error_code ignored;
+        std::filesystem::remove(path_, ignored);
+        std::filesystem::rename(backup_, path_, ignored);
+    }
+
+ private:
+    std::filesystem::path path_;
+    std::filesystem::path backup_;
+};
+
+template <typename F>
+void
+ExpectTantivyBridgeError(F&& call,
+                         milvus::ErrorCode expected_code,
+                         const char* message) {
+    try {
+        call();
+        FAIL() << "expected a classified Tantivy bridge failure";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), expected_code);
+        EXPECT_NE(std::string(error.what()).find(message), std::string::npos);
+        auto status = milvus::FailureCStatus(&error);
+        EXPECT_EQ(status.error_code, expected_code);
+        free(const_cast<char*>(status.error_msg));
+    }
+}
+
+}  // namespace
+
+TEST(StorageErrorCode, TantivySnapshotCorruptMetadataPreservesDataCorruption) {
+    const auto directory = milvus::storage::LocalDirectory::CreateOwned(
+        std::filesystem::temp_directory_path().string(),
+        "tantivy-snapshot-error-XXXXXX",
+        "Tantivy snapshot error test");
+    milvus::tantivy::TantivyIndexWrapper writer("values",
+                                                TantivyDataType::I64,
+                                                directory->Path().c_str(),
+                                                7,
+                                                false,
+                                                true,
+                                                1,
+                                                15'000'000);
+    writer.commit();
+    const auto metadata = directory->Path() + "/meta.json";
+    ASSERT_TRUE(std::filesystem::is_regular_file(metadata));
+    TantivyMetadataFault fault(metadata);
+    {
+        std::ofstream corrupt(metadata, std::ios::binary);
+        corrupt << "{";
+        ASSERT_TRUE(corrupt.good());
+    }
+    // Inspect the real Rust result as well as the actual C++ wrapper call.
+    auto result = milvus::tantivy::RustResultWrapper(
+        tantivy_create_snapshot_reader_from_writer(
+            writer.get_writer(), milvus::index::SetBitsetGrowing));
+    ASSERT_FALSE(result.result_->success);
+    EXPECT_EQ(result.result_->error_code,
+              TantivyBindingErrorCode::DataCorruption);
+    ExpectTantivyBridgeError(
+        [&] { writer.create_snapshot_reader(milvus::index::SetBitsetGrowing); },
+        milvus::ErrorCode::DataFormatBroken,
+        "failed to create snapshot reader from writer");
+}
+
+TEST(StorageErrorCode, TantivyRollbackMissingMetadataPreservesIoAndPanicClass) {
+    for (const uint32_t version : {5, 7}) {
+        SCOPED_TRACE(version);
+        const auto directory = milvus::storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "tantivy-rollback-error-XXXXXX",
+            "Tantivy rollback error test");
+        milvus::tantivy::TantivyIndexWrapper writer("values",
+                                                    TantivyDataType::I64,
+                                                    directory->Path().c_str(),
+                                                    version,
+                                                    false,
+                                                    true,
+                                                    1,
+                                                    15'000'000);
+        writer.commit();
+        const auto metadata = directory->Path() + "/meta.json";
+        ASSERT_TRUE(std::filesystem::is_regular_file(metadata));
+        TantivyMetadataFault fault(metadata);
+        ExpectTantivyBridgeError([&] { writer.rollback(); },
+                                 milvus::ErrorCode::FileReadFailed,
+                                 "failed to rollback index");
+        // Failed writer reconstruction consumed the directory lock. A second
+        // rollback hits the dependency's lock invariant; catch_unwind must
+        // keep this panic in the Internal/System category.
+        ExpectTantivyBridgeError([&] { writer.rollback(); },
+                                 milvus::ErrorCode::UnexpectedError,
+                                 "panic while rolling back Tantivy writer");
+    }
 }

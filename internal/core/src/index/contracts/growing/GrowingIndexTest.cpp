@@ -33,6 +33,7 @@
 
 #include "common/Consts.h"
 #include "common/Utils.h"
+#include "index/Families.h"
 #include "index/contracts/growing/IGrowingIndex.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ISpatialReader.h"
@@ -268,6 +269,7 @@ TEST(GrowingIndexContractTest, AppendOwnsInputAndFlushPublishesCompletePrefix) {
                                   R"({"tokenizer":"standard"})",
                                   DataType::VARCHAR,
                                   1000000);
+    EXPECT_EQ(owner.Family(), families::kText);
     std::array<std::string, 3> storage{"alpha beta", "ignored", "beta gamma"};
     const std::array<std::string_view, 3> values{
         storage[0], storage[1], storage[2]};
@@ -367,6 +369,7 @@ TEST(GrowingIndexContractTest, EmptyStringAndNullRowsStayDistinct) {
 
 TEST(GrowingIndexContractTest, RTreeUsesValidityForEmptyPayload) {
     RTreeGrowingSpatialIndex owner(2);
+    EXPECT_EQ(owner.Family(), families::kRTree);
     const std::string point =
         Geometry(GetThreadLocalGEOSContext(), "POINT(1 1)").to_wkb_string();
     const std::array<std::string_view, 3> values{point, "", ""};

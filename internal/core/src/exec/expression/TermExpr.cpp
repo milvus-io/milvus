@@ -1289,7 +1289,15 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    if (data_type == DataType::JSON && !expr_->vals_.empty() &&
+    auto req = MakeIndexRequirement(RequiredReader::Predicate);
+    req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
+    SelectAndPinIndex(req);
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+
+    if (data_type == DataType::JSON && !PinnedJsonIndexIsFlat() &&
+        !expr_->vals_.empty() &&
         expr_->vals_[0].val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val) {
         const auto has_unsafe_literal = std::any_of(
@@ -1297,14 +1305,10 @@ PhyTermFilterExpr::DetermineExecPath() {
                 return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
             });
         if (has_unsafe_literal) {
+            ClearSelectedIndex();
             exec_path_ = ExprExecPath::RawData;
-            return;
         }
     }
-
-    auto req = MakeIndexRequirement(RequiredReader::Predicate);
-    req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
-    SelectAndPinIndex(req);
 }
 
 void

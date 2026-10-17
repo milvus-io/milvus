@@ -26,6 +26,7 @@
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
+#include "index/scalar/bitmap/BitmapIndexReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarReaderFactory.h"
 #include "index/test_utils/ScalarTestData.h"
@@ -100,6 +101,65 @@ TEST(BitmapIndexReaderTest, ProvidesVarcharQueries) {
                   reader.get()),
               nullptr);
     EXPECT_NE(dynamic_cast<const IPatternMatchReader*>(reader.get()), nullptr);
+}
+
+TEST(BitmapIndexReaderTest, SparseGatherFromSkewedRoaringPostings) {
+    constexpr size_t rows = 1000000;
+    ScalarTestData<int64_t> data(std::vector<int64_t>(rows, 0));
+    for (size_t i = 1; i <= 500; ++i) {
+        data.values[rows - i] = i;
+    }
+    data.validity.reset(7);
+    const ScalarTestInput<int64_t> input(data);
+    const std::array<int64_t, 6> offsets{0, rows - 1, 0, 7, rows - 500, 42};
+    const std::array<int64_t, 6> expected{0, 1, 0, 0, 500, 0};
+    for (const bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        const auto& backend = ScalarReaderBackends().Get<int64_t>(
+            mmap ? "BitmapInt64Mmap" : "BitmapInt64");
+        auto artifact = backend.Build(input.View(), {.row_count = rows});
+        auto reader =
+            OpenV3(backend, SerializeV3(*artifact), {.row_count = rows});
+        ASSERT_NE(reader, nullptr);
+        ASSERT_FALSE(reader->Caps().cheap_value_lookup);
+        const auto* values =
+            dynamic_cast<const IScalarValueReader<int64_t>*>(reader.get());
+        ASSERT_NE(values, nullptr);
+        size_t calls = 0;
+        values->Gather(offsets.data(),
+                       offsets.size(),
+                       [&](int64_t i, const int64_t* value, bool valid) {
+                           EXPECT_EQ(i, calls++);
+                           EXPECT_EQ(valid, i != 3);
+                           if (valid) {
+                               ASSERT_NE(value, nullptr);
+                               EXPECT_EQ(*value, expected[i]);
+                           }
+                       });
+        EXPECT_EQ(calls, offsets.size());
+    }
+}
+
+TEST(BitmapIndexReaderTest, RoaringGatherKeepsFirstMatchingKey) {
+    BitmapRoaringPostingMap<int64_t> postings;
+    postings[20].add(2);
+    postings[10].add(2);
+    auto reader = CreateBitmapIndexReader<int64_t>(
+        std::move(postings),
+        {.valid_bitset = TargetBitmap(3, true), .total_num_rows = 3});
+    const std::array<int64_t, 3> offsets{2, 1, 2};
+    size_t calls = 0;
+    reader->Gather(offsets.data(),
+                   offsets.size(),
+                   [&](int64_t i, const int64_t* value, bool valid) {
+                       EXPECT_EQ(i, calls++);
+                       EXPECT_EQ(valid, i != 1);
+                       if (valid) {
+                           ASSERT_NE(value, nullptr);
+                           EXPECT_EQ(*value, 10);
+                       }
+                   });
+    EXPECT_EQ(calls, offsets.size());
 }
 
 TEST(BitmapIndexReaderTest, NullablePackedWordBoundaryKeepsFinalAllocation) {

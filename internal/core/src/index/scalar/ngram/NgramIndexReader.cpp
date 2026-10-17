@@ -761,6 +761,18 @@ NgramIndexReader::CanHandle(std::string_view literal, PatternOp op) const {
     return false;
 }
 
+bool
+NgramIndexReader::CandidatesAreExact(std::string_view literal,
+                                     PatternOp op) const {
+    if (op != PatternOp::InnerMatch) {
+        return false;
+    }
+    // Both Rust candidate strategies query the complete, case-sensitive gram
+    // in this range. Count UTF-8 characters, matching the indexed tokenizer.
+    const auto length = Utf8CharCount(literal.data(), literal.size());
+    return length >= min_gram_ && length <= max_gram_;
+}
+
 void
 NgramIndexReader::Candidates(std::string_view literal,
                              PatternOp op,

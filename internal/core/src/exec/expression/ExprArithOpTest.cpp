@@ -2717,6 +2717,16 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
                                                   age_double_col.data(),
                                                   double_valid_data.data()));
 
+    // Arithmetic must read typed values and nulls from the selected index.
+    for (const auto field_id : {i8_nullable_fid,
+                                i16_nullable_fid,
+                                i32_nullable_fid,
+                                i64_nullable_fid,
+                                float_nullable_fid,
+                                double_nullable_fid}) {
+        seg->DropFieldData(field_id);
+    }
+
     auto seg_promote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     SetSchema(schema);

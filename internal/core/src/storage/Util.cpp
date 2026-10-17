@@ -1837,9 +1837,9 @@ VisitFieldDataFromStorageV2Paged(
             }
         }
 
-        // Preserve the source field's nullability while decoding each row
-        // group. The visitor intentionally trades the old all-row-group
-        // parallel window for a genuine row-group early-stop boundary.
+        // Preserve nullability while the bounded parallel loader reads the
+        // selected row groups. LoadWithStrategy publishes blocks in row-group
+        // order, regardless of the order in which its worker tasks finish.
         auto field_schema = reader->schema()->field(col_offset)->Copy();
         auto status = reader->Close();
         if (!status.ok()) {
@@ -1850,38 +1850,48 @@ VisitFieldDataFromStorageV2Paged(
                           " with error: " + status.ToString());
         }
 
-        for (const auto row_group : selected_row_groups) {
-            // One block produces one ArrowDataWrapper followed by the channel
-            // close marker. Capacity two lets the producer finish before this
-            // thread consumes either item, avoiding producer/consumer
-            // deadlock and ensuring no task outlives captured state.
-            auto channel = std::make_shared<ArrowReaderChannel>(2);
-            auto load_future = pool.Submit([channel,
-                                            column_group_file,
-                                            fs,
-                                            row_group]() mutable {
+        const auto parallel_degree =
+            uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
+        auto channel = std::make_shared<ArrowReaderChannel>(parallel_degree);
+        auto load_future = pool.Submit(
+            [channel,
+             column_group_file,
+             fs,
+             parallel_degree,
+             row_groups = std::move(selected_row_groups)]() mutable {
                 auto strategy =
-                    std::make_unique<segcore::ParallelDegreeSplitStrategy>(1);
-                LoadWithStrategy(std::vector<std::string>{column_group_file},
-                                 channel,
-                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                 std::move(strategy),
-                                 std::vector<std::vector<int64_t>>{{row_group}},
-                                 fs,
-                                 nullptr,
-                                 milvus::proto::common::LoadPriority::HIGH);
+                    std::make_unique<segcore::ParallelDegreeSplitStrategy>(
+                        parallel_degree);
+                LoadWithStrategy(
+                    std::vector<std::string>{column_group_file},
+                    channel,
+                    DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                    std::move(strategy),
+                    std::vector<std::vector<int64_t>>{std::move(row_groups)},
+                    fs,
+                    nullptr,
+                    milvus::proto::common::LoadPriority::HIGH);
             });
 
-            // LoadWithStrategy has published both the single wrapper and the
-            // close marker before get() returns. Any producer error is
-            // rethrown here before captured objects can leave scope.
-            load_future.get();
-
+        bool channel_exhausted = false;
+        auto drain = [&] {
+            // The producer can be blocked pushing into the bounded channel,
+            // including its close marker. Consume it before joining (#46958).
+            if (!channel_exhausted) {
+                std::shared_ptr<milvus::ArrowDataWrapper> pending;
+                while (channel->pop(pending)) {
+                }
+                channel_exhausted = true;
+            }
+            DrainFuture(load_future);
+        };
+        try {
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             while (channel->pop(r)) {
                 size_t num_rows = 0;
                 std::vector<std::shared_ptr<arrow::ChunkedArray>>
                     chunked_arrays;
+                chunked_arrays.reserve(r->arrow_tables.size());
                 for (const auto& table_info : r->arrow_tables) {
                     num_rows += table_info.table->num_rows();
                     chunked_arrays.push_back(
@@ -1897,20 +1907,24 @@ VisitFieldDataFromStorageV2Paged(
                     field_data->FillFieldData(chunked_array);
                 }
                 if (visitor(std::move(field_data)) == VisitControl::Stop) {
+                    drain();
                     return VisitOutcome::Stopped;
                 }
                 total_num_rows += num_rows;
                 if (max_rows > 0 && total_num_rows >= max_rows) {
-                    // The page is full. The load task for this row group has
-                    // already been joined above, so returning here leaves
-                    // nothing running behind us.
                     LOG_DEBUG(
                         "[StorageV2] max_rows: {} reached, total rows: {}",
                         max_rows,
                         total_num_rows);
+                    drain();
                     return VisitOutcome::Exhausted;
                 }
             }
+            channel_exhausted = true;
+            load_future.get();
+        } catch (...) {
+            drain();
+            throw;
         }
     }
     return VisitOutcome::Exhausted;

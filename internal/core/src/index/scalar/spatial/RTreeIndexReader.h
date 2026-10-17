@@ -35,6 +35,13 @@ namespace milvus::index {
 
 class RTreeGrowingSpatialIndex;
 
+namespace test {
+class RTreeGrowingSpatialIndexTest;
+}
+
+using RTreeNullOffsetBlocks =
+    std::vector<std::shared_ptr<const std::vector<size_t>>>;
+
 // Immutable, fully validated query state. Readers share this object so neither
 // the Boost shards nor row-sized NULL state is copied. The loader creates a
 // one-shard state; growing publication may compose several immutable shards.
@@ -48,8 +55,8 @@ class RTreeIndexState final {
     const std::vector<std::shared_ptr<const RTreeQueryEngine>>&
     Engines() const;
 
-    const std::vector<size_t>&
-    NullOffsets() const;
+    const RTreeNullOffsetBlocks&
+    NullOffsetBlocks() const;
 
     int64_t
     Count() const;
@@ -66,17 +73,19 @@ class RTreeIndexState final {
     static std::shared_ptr<const RTreeIndexState>
     CreateFromValidatedShards(
         std::vector<std::shared_ptr<const RTreeQueryEngine>> engines,
-        std::shared_ptr<const std::vector<size_t>> null_offsets,
+        RTreeNullOffsetBlocks null_offset_blocks,
         int64_t total_num_rows);
 
     RTreeIndexState(
         std::vector<std::shared_ptr<const RTreeQueryEngine>> engines,
-        std::shared_ptr<const std::vector<size_t>> null_offsets,
+        RTreeNullOffsetBlocks null_offset_blocks,
         int64_t total_num_rows,
         int64_t memory_usage);
 
     std::vector<std::shared_ptr<const RTreeQueryEngine>> engines_;
-    std::shared_ptr<const std::vector<size_t>> null_offsets_;
+    // Growing snapshots share full blocks and own a frozen partial tail. A
+    // sealed reader retains its already validated sidecar as a single block.
+    RTreeNullOffsetBlocks null_offset_blocks_;
     int64_t total_num_rows_{0};
     int64_t memory_usage_{0};
 };
@@ -127,6 +136,8 @@ class RTreeIndexReader final : public IIndexReaderBase,
     IsNotNull() const override;
 
  private:
+    friend class test::RTreeGrowingSpatialIndexTest;
+
     std::shared_ptr<const RTreeIndexState> state_;
 };
 

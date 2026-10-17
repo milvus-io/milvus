@@ -26,6 +26,7 @@
 #include "common/Types.h"
 #include "index/contracts/growing/IGrowingIndex.h"
 #include "index/scalar/spatial/RTreeEngine.h"
+#include "index/scalar/spatial/RTreeIndexReader.h"
 
 // Complete append windows become immutable query shards. Binary tier carry
 // bounds active query fanout without copying the full tree on every append.
@@ -56,6 +57,8 @@ class RTreeGrowingSpatialIndex final
     Family() const override;
 
  private:
+    static constexpr size_t kNullOffsetBlockSize = 65536;
+
     void
     PublishPending();
 
@@ -63,7 +66,10 @@ class RTreeGrowingSpatialIndex final
 
     std::mutex writer_mutex_;
     std::vector<rtree_detail::Value> pending_values_;
-    std::vector<size_t> null_offsets_;
+    // Full blocks are never mutated after leaving the writer's tail. Only the
+    // partial tail is copied when publishing an immutable reader generation.
+    RTreeNullOffsetBlocks null_offset_blocks_;
+    std::vector<size_t> null_offsets_tail_;
 
     // Each value-bearing publication has tier weight one. Binary carry keeps
     // at most one immutable shard per level, so active fanout is bounded by

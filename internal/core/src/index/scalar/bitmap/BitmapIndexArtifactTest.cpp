@@ -16,14 +16,18 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string_view>
 #include <utility>
 #include <vector>
 #include <roaring/roaring.hh>
+#include <roaring/memory.h>
 
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
 #include "index/Meta.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
@@ -174,6 +178,124 @@ TEST(BitmapIndexArtifactTest, TruncatedPostingPayloadIsRejected) {
 
     ExpectSegcoreError(ErrorCode::DataFormatBroken,
                        [&] { static_cast<void>(OpenV3(backend, persisted)); });
+}
+
+std::atomic<int> bitmap_allocations_before_failure{-1};
+
+void*
+BitmapFailingMalloc(size_t size) {
+    if (bitmap_allocations_before_failure.load(std::memory_order_relaxed) >=
+            0 &&
+        bitmap_allocations_before_failure.fetch_sub(
+            1, std::memory_order_relaxed) == 0) {
+        return nullptr;
+    }
+    return std::malloc(size);
+}
+
+void*
+BitmapAlignedMalloc(size_t alignment, size_t size) {
+    void* result = nullptr;
+    return posix_memalign(&result, alignment, size) == 0 ? result : nullptr;
+}
+
+class ScopedBitmapAllocationFailure {
+ public:
+    explicit ScopedBitmapAllocationFailure(int successful_allocations) {
+        roaring_init_memory_hook({BitmapFailingMalloc,
+                                  std::realloc,
+                                  std::calloc,
+                                  std::free,
+                                  BitmapAlignedMalloc,
+                                  std::free});
+        bitmap_allocations_before_failure.store(successful_allocations);
+    }
+    ~ScopedBitmapAllocationFailure() {
+        bitmap_allocations_before_failure.store(-1);
+        roaring_init_memory_hook({std::malloc,
+                                  std::realloc,
+                                  std::calloc,
+                                  std::free,
+                                  BitmapAlignedMalloc,
+                                  std::free});
+    }
+};
+
+TEST(BitmapIndexArtifactTest, PostingAllocationFailuresKeepSystemErrorCode) {
+    // 501 keys force both heap and mmap loaders through Roaring decoding.
+    ScalarTestData<int64_t> data(std::vector<int64_t>(501));
+    for (size_t i = 0; i < data.values.size(); ++i) {
+        data.values[i] = i;
+    }
+    data.validity_present = false;
+    const ScalarTestInput<int64_t> input(data);
+    for (const bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        const auto& backend = ScalarReaderBackends().Get<int64_t>(
+            mmap ? "BitmapInt64NonNullMmap" : "BitmapInt64NonNull");
+        auto artifact =
+            backend.Build(input.View(), {.row_count = data.values.size()});
+        const auto persisted = SerializeV3(*artifact);
+        ASSERT_NO_THROW(static_cast<void>(OpenV3(backend, persisted)));
+        // Bitmap, container array, array container and array payload mallocs.
+        for (const int successful_allocations : {0, 1, 2, 3}) {
+            SCOPED_TRACE(successful_allocations);
+            ErrorCode observed = ErrorCode::Success;
+            {
+                ScopedBitmapAllocationFailure failure(successful_allocations);
+                try {
+                    static_cast<void>(OpenV3(backend, persisted));
+                    ADD_FAILURE() << "posting allocation must fail";
+                } catch (const SegcoreError& error) {
+                    observed = error.get_error_code();
+                    auto status = FailureCStatus(&error);
+                    EXPECT_EQ(status.error_code,
+                              static_cast<int>(ErrorCode::MemAllocateFailed));
+                    std::free(const_cast<char*>(status.error_msg));
+                }
+            }
+            EXPECT_EQ(observed, ErrorCode::MemAllocateFailed);
+            EXPECT_NO_THROW(static_cast<void>(OpenV3(backend, persisted)));
+        }
+
+        auto corrupt = persisted;
+        const uint32_t bad_cookie = 0;
+        std::memcpy(
+            corrupt.entries.at(BITMAP_INDEX_DATA).data() + sizeof(int64_t),
+            &bad_cookie,
+            sizeof(bad_cookie));
+        // Invalid framing is rejected by the probe even when malloc refuses.
+        {
+            ScopedBitmapAllocationFailure failure(0);
+            ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+                static_cast<void>(OpenV3(backend, corrupt));
+            });
+        }
+        auto truncated = persisted;
+        truncated.entries.at(BITMAP_INDEX_DATA).resize(sizeof(int64_t) + 4);
+        ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+            static_cast<void>(OpenV3(backend, truncated));
+        });
+
+        // Two equal array-container values pass the size probe, but violate
+        // Roaring's internal sorted-and-unique invariant.
+        auto invalid = persisted;
+        roaring::Roaring posting;
+        posting.add(0);
+        posting.add(1);
+        auto& bytes = invalid.entries.at(BITMAP_INDEX_DATA);
+        bytes.resize(sizeof(int64_t) + posting.getSizeInBytes());
+        const int64_t key = 7;
+        std::memcpy(bytes.data(), &key, sizeof(key));
+        posting.write(reinterpret_cast<char*>(bytes.data() + sizeof(key)));
+        std::memcpy(bytes.data() + bytes.size() - sizeof(uint16_t),
+                    bytes.data() + bytes.size() - 2 * sizeof(uint16_t),
+                    sizeof(uint16_t));
+        // Keep the real 501-key metadata so mmap enters its decoding path.
+        ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+            static_cast<void>(OpenV3(backend, invalid));
+        });
+    }
 }
 
 TEST(BitmapIndexArtifactTest, MalformedPostingsWithValidPackedCrcAreRejected) {

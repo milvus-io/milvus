@@ -64,9 +64,9 @@ enum class RequiredReader {
     TextMatch,     // ITextMatchReader
     Ngram,         // INgramReader     — candidate family, caps.exact == false
     Spatial,       // ISpatialReader   — candidate family, caps.exact == false
-    Null,          // INullReader      — unconditional, carries no caps bit
-    ValueLookup,   // IScalarValueReader<T>
-    JsonPath,      // IJsonIndexReader
+    Null,  // INullReader      — checked after family-capability selection
+    ValueLookup,  // IScalarValueReader<T>
+    JsonPath,     // IJsonIndexReader
 };
 
 // Everything the decision needs from the EXPRESSION side. All of it is known at
@@ -172,6 +172,12 @@ ReaderMatches(const ExprIndexRequirement& req,
     const bool multi_path_router = req.is_json_field && caps.json_paths &&
                                    entry.value_type == DataType::JSON;
     if (multi_path_router) {
+        // Field-level JSON null checks cannot use a typed path view. The
+        // selector resolves views after pinning, and Resolve(JSON) is absent.
+        if (req.reader == RequiredReader::Null &&
+            req.value_type == DataType::JSON) {
+            return false;
+        }
         return req.reader == RequiredReader::Predicate ||
                req.reader == RequiredReader::PatternMatch ||
                req.reader == RequiredReader::Null ||
@@ -189,8 +195,8 @@ ReaderMatches(const ExprIndexRequirement& req,
         case RequiredReader::Spatial:
             return caps.spatial;
         case RequiredReader::Null:
-            return caps.predicate || caps.ngram_candidates || caps.spatial ||
-                   caps.json_paths;
+            return caps.predicate || caps.pattern_match ||
+                   caps.ngram_candidates || caps.spatial || caps.json_paths;
         case RequiredReader::ValueLookup:
             return caps.value_lookup;
         case RequiredReader::JsonPath:

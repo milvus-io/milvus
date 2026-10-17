@@ -210,6 +210,7 @@ TEST(VectorReaderContractTest, AllNullRowsRemainInLogicalValidityDomain) {
     EXPECT_EQ(reader->Count(), 0);
     EXPECT_TRUE(vectors->HasValidData());
     EXPECT_EQ(vectors->ValidCount(), 0);
+    EXPECT_TRUE(vectors->GetVector(GenIdsDataset(0, nullptr)).empty());
     for (int64_t row = 0; row < kLogicalRows; ++row) {
         EXPECT_FALSE(vectors->IsRowValid(row));
     }
@@ -379,6 +380,54 @@ TEST(VectorReaderContractTest, SparseRetrievalRespectsRuntimeCapability) {
         EXPECT_ANY_THROW(static_cast<void>(
             vectors->GetSparseVector(GenIdsDataset(2, ids.data()))));
     }
+}
+
+TEST(VectorReaderContractTest, AllNullSparseIndexAcceptsEmptyRetrieval) {
+    auto adapted = AdaptIndexType({
+        .index_type = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+        .field_type = DataType::VECTOR_SPARSE_U32_F32,
+        .element_type = DataType::NONE,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, "IP"}, {DIM_KEY, 8}},
+    });
+    adapted.params["nullable"] = true;
+    adapted.params[INDEX_NUM_ROWS_KEY] = kLogicalRows;
+    auto builder =
+        BuilderRegistry<VectorBuildInput<sparse_u32_f32>>::Instance().Create(
+            adapted.family, adapted.params);
+    ASSERT_NE(builder, nullptr);
+    const std::array<bool, kLogicalRows> valid{};
+    const VectorBuildInput<sparse_u32_f32> input{
+        .physical_values = {},
+        .logical_rows = kLogicalRows,
+        .physical_rows = 0,
+        .dim = 8,
+        .parent_validity = ValidityView::FromExpanded(valid.data()),
+    };
+    auto artifact = std::move(*builder).Build(input);
+    TestArtifactData persisted;
+    TestArtifactSink sink(persisted, storage::Generation::V1V2);
+    artifact->Serialize(sink);
+    sink.Finish();
+    auto source = std::make_shared<TestArtifactSource>(
+        persisted, storage::Generation::V1V2);
+    storage::LoadOptions options;
+    options.params = adapted.params;
+    auto reader =
+        LoaderRegistry::Instance()
+            .Lookup(adapted.family)
+            .Load(
+                {OpenedIndexSource{LegacyIndexSource{source, false}}, options});
+    ASSERT_NE(reader, nullptr);
+    const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
+    ASSERT_NE(vectors, nullptr);
+    EXPECT_TRUE(vectors->HasValidData());
+    EXPECT_EQ(vectors->ValidCount(), 0);
+    EXPECT_EQ(vectors->GetSparseVector(GenIdsDataset(0, nullptr)), nullptr);
+    const int64_t null_id = 0;
+    EXPECT_ANY_THROW(static_cast<void>(
+        vectors->GetSparseVector(GenIdsDataset(1, &null_id))));
 }
 
 }  // namespace
