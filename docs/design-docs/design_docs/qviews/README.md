@@ -93,11 +93,12 @@ publishes the read schema after complete target handoff. Proxy and workers resol
 exact schemas through `streaming.WAL().SchemaClient()`.
 
 QueryNode CCollection owns immutable Schema per CollectionID/SchemaVersion, with
-independent View LoadScope. SealedSegment operations borrow Schema under an
-operation-owned collection pin and use a pinned physical ReadState. Segment,
-Reopen and physical caches do not maintain a current logical Schema. ReadStates
-share compatible columns/readers while retaining physical generations through
-query completion. See [QN resource preparation](qnview/querynode_queryview_resource_preparation.md)
+independent View LoadScope. The Go View retains its CCollection until all queries
+and preparation operations finish; SealedSegment operations borrow that Schema
+without an additional Collection.Pin. Physical ReadStates retain their resource
+generations and independently owned field/column descriptors, not a current
+logical Schema. Compatible columns/readers remain shared through query completion.
+See [QN resource preparation](qnview/querynode_queryview_resource_preparation.md)
 for preparation, borrowing, asynchronous lifetime and compatibility. This native
 ownership refactor covers QN and SealedSegment; SN/GrowingSegment retain their
 separate resource model.

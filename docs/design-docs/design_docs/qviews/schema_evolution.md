@@ -368,9 +368,11 @@ For QN:
 
 - CCollection owns immutable Schema by `(CollectionID, SchemaVersion)`. A View
   owns independent immutable LoadScope; load fields never mutate that Schema.
-- Sealed Segment APIs borrow `const Schema*` from an operation that pins the
-  owning CCollection. Segment and physical ReadState do not retain a current
-  logical schema. The operation binds Schema, LoadScope, ReadState and MVCC.
+- Schema-dependent Sealed Segment operations borrow `const Schema*`. The Go View
+  retains its CCollection until its last query or preparation operation finishes;
+  no additional per-operation Collection.Pin is needed. Segment and physical
+  ReadState do not retain a current logical schema. The operation binds Schema,
+  LoadScope, ReadState and MVCC.
 - Preparation publishes immutable physical resource generations and independent
   field/group metadata. Reuse unchanged columns/readers; same-ID Manifest changes
   prepare affected resources before readiness. Queries do not perform lazy schema
@@ -381,7 +383,11 @@ For QN:
   asynchronous work, result reduction and field refill.
 - Readers, Translators and cached preparation results own physical metadata and
   cannot implicitly borrow a retired Schema. Supported default projections are
-  distinct from Function outputs requiring materialization.
+  distinct from Function outputs requiring materialization. PublishedSegmentState
+  may retain SealedFieldLayout for the fields and column mappings required by its
+  resources, including schema-less physical inspection, eviction and reload.
+  SegmentLoadInfo stores field selection and load metadata without retaining
+  another layout owner. Neither structure supplies a query's logical schema.
 - IndexID remains zero/latest-compatible, with execution-time resource pins.
   Durable object GC remains deferred to section 8.2. The complete QN ownership
   and execution contract is [QN resource preparation](qnview/querynode_queryview_resource_preparation.md).

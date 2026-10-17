@@ -268,7 +268,9 @@ content cannot change through another mutable alias. Equivalent derived caches
 may be initialized with synchronization. Current compatible index metadata is
 separate from immutable schema content; QueryView never binds an IndexID.
 
-Segment operations borrow `const Schema*` from their operation context. A sealed
+Schema-dependent Segment operations borrow `const Schema*` from their operation
+context. Physical operations such as HasRawData and DropFieldData use independently
+owned field descriptions and do not require a logical Schema argument. A sealed
 Segment does not store a current logical Schema, copy the complete collection
 Schema, or replace its Schema during Reopen. A query context binds:
 
@@ -311,25 +313,37 @@ available to Views. The Go View owns its Collection until all operations finish.
 
 
 Physical ReadStates retain immutable resource generations: columns, indexes,
-readers and row-domain metadata. They do not retain a collection-wide copy of
-FieldMeta, default values, analyzer parameters, storage-name mappings or loading
-policies under another name. PublishedSegmentState and stored SegmentLoadInfo
-must contain neither a logical Schema reference nor a substitute Schema object.
+readers and row-domain metadata. PublishedSegmentState also owns a
+SealedFieldLayout containing the independent descriptions needed by those
+resources. FieldMeta is retained only for the selected fields and their physical
+dependencies, including the type, default projection and encoding information
+needed for physical inspection, decoding and reload. An all-field scope can
+require all field descriptions; a narrower scope does not copy unrelated
+FieldMeta. This layout is not the authority for query SchemaVersion or semantics.
+Stored SegmentLoadInfo retains field selection and load metadata without owning
+another layout reference.
 
-Loading and Reopen borrow the caller's Schema and LoadScope for the entire
-operation. Manifest discovery resolves names, aliases and local-format choices
-from those inputs, including aliases outside the requested scope. The operation
-waits for all children that borrow these inputs before returning. It publishes
-only physical resources and their necessary independently owned metadata.
-Queries and output conversion use the operation's Plan Schema, not metadata
-reconstructed from a Segment. A retained successful preparation remains valid
-after its preparing View and operation have disappeared.
+Manifest discovery also needs storage-name, alias and local-format mappings.
+These compact mappings may include unselected fields: a column group can contain
+them, and external aliases can share one physical column. Dropping such aliases
+can change column-group decoding. They do not require retaining those fields'
+FieldMeta or a borrowed Schema. Layouts may retain the scope and resolved physical
+loading policies needed to prepare or reload their own resources; logical access
+remains bounded by the View's immutable LoadScope.
 
-Long-lived decoding resources may own the encoding and column-group descriptors
-they actually need for eviction and reload. Delete owns the physical primary-key
-description and does not depend on a query Schema. Neither case justifies a
-second collection-wide field table in the Segment. Loading policy and logical
-field authorization stay in the operation's LoadScope.
+Schema-dependent creation and Reopen borrow the caller's Schema and LoadScope
+and construct independently owned physical descriptions. The operation waits
+for all children that borrow these inputs before returning. Schema-less physical
+load, inspection and eviction use the retained layout. Queries and output
+conversion use the operation's Plan Schema, not a logical schema reconstructed
+from a Segment. A retained successful preparation remains valid after its
+preparing View and operation have disappeared.
+
+Long-lived decoding resources own the encoding and column-group descriptors they
+need for eviction and reload. Delete owns stable primary-key identity/type and
+does not depend on a query Schema. These physical descriptors neither retain a
+CCollection nor introduce a native Schema pin. Their lifetime follows the
+physical resources, independently of the View that first prepared them.
 
 For A requiring `{x, y}` and B requiring `{x, z}`, unchanged x can be shared,
 A retains y, and B prepares z. B becoming Ready does not wait for y to be removed.
