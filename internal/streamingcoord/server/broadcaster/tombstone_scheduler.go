@@ -3,6 +3,7 @@ package broadcaster
 import (
 	"context"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -26,7 +27,9 @@ type tombstoneScheduler struct {
 	mlog.Binder
 
 	notifier   *syncutil.AsyncTaskNotifier[struct{}]
-	pending    chan uint64
+	wakeup     chan struct{}
+	pendingMu  sync.Mutex
+	pending    []tombstoneItem // protected by pendingMu; never hold it during catalog I/O
 	bm         *broadcastTaskManager
 	tombstones []tombstoneItem
 }
@@ -35,7 +38,7 @@ type tombstoneScheduler struct {
 func newTombstoneScheduler(logger *mlog.Logger) *tombstoneScheduler {
 	ts := &tombstoneScheduler{
 		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
-		pending:  make(chan uint64),
+		wakeup:   make(chan struct{}, 1),
 	}
 	ts.SetLogger(logger)
 	return ts
@@ -57,18 +60,23 @@ func (s *tombstoneScheduler) Initialize(bm *broadcastTaskManager, tombstoneBroad
 	go s.background()
 }
 
-// AddPending adds a pending tombstone to the scheduler.
+// AddPending records a durable tombstone without waiting for catalog I/O.
 func (s *tombstoneScheduler) AddPending(broadcastID uint64) {
-	select {
-	case <-s.notifier.Context().Done():
-		// The scheduler is closing while an in-flight ack callback still tries to
-		// enqueue a tombstone. This is reachable under concurrent shutdown, so it
-		// must not panic. Dropping the in-memory enqueue is safe: the task state is
-		// already persisted as TOMBSTONE (MarkAckCallbackDone) before reaching here,
-		// and will be recovered into the GC list on the next startup.
-		s.Logger().Info(context.TODO(), "tombstone scheduler is closing, skip adding pending tombstone", mlog.FieldBroadcastID(broadcastID))
+	s.pendingMu.Lock()
+	if s.notifier.Context().Err() != nil {
+		s.pendingMu.Unlock()
+		// MarkAckCallbackDone already persisted TOMBSTONE. Recovery will enqueue
+		// it again if shutdown races with this handoff.
+		s.Logger().Info(s.notifier.Context(), "tombstone scheduler is closing, skip adding pending tombstone", mlog.Uint64("broadcastID", broadcastID))
 		return
-	case s.pending <- broadcastID:
+	}
+	s.pending = append(s.pending, tombstoneItem{broadcastID: broadcastID, createTime: time.Now()})
+	s.pendingMu.Unlock()
+
+	// Only notifications are coalesced; every ID remains in pending until drained.
+	select {
+	case s.wakeup <- struct{}{}:
+	default:
 	}
 }
 
@@ -90,16 +98,17 @@ func (s *tombstoneScheduler) background() {
 	ticker := time.NewTicker(tombstoneGCInterval)
 	defer ticker.Stop()
 
-	for {
+	for s.notifier.Context().Err() == nil {
+		s.pendingMu.Lock()
+		pending := s.pending
+		s.pending = nil
+		s.pendingMu.Unlock()
+		s.tombstones = append(s.tombstones, pending...)
 		s.triggerGCTombstone()
 		select {
 		case <-s.notifier.Context().Done():
 			return
-		case broadcastID := <-s.pending:
-			s.tombstones = append(s.tombstones, tombstoneItem{
-				broadcastID: broadcastID,
-				createTime:  time.Now(),
-			})
+		case <-s.wakeup:
 		case <-ticker.C:
 		}
 	}
@@ -107,31 +116,44 @@ func (s *tombstoneScheduler) background() {
 
 // triggerGCTombstone triggers the garbage collection of the tombstone.
 func (s *tombstoneScheduler) triggerGCTombstone() {
+	ctx := s.notifier.Context()
 	maxTombstoneLifetime := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse()
 	maxTombstoneCount := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.GetAsInt()
+	batchSize := max(1, paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt())
 
 	expiredTime := time.Now().Add(-maxTombstoneLifetime)
 	expiredOffset := 0
 	if len(s.tombstones) > maxTombstoneCount {
 		expiredOffset = len(s.tombstones) - maxTombstoneCount
 	}
-	s.Logger().Info(context.TODO(),
+	s.Logger().Info(ctx,
 		"triggerGCTombstone",
 		mlog.Int("tombstone count", len(s.tombstones)),
 		mlog.Int("expired offset", expiredOffset),
 		mlog.Time("expired time", expiredTime))
-	for idx, tombstone := range s.tombstones {
-		// drop tombstone until the expired time or until the expired offset.
-		if idx >= expiredOffset && tombstone.createTime.After(expiredTime) {
-			s.tombstones = s.tombstones[idx:]
+	ids := make([]uint64, 0, min(batchSize, len(s.tombstones)))
+	for len(s.tombstones) > 0 && ctx.Err() == nil {
+		ids = ids[:0]
+		for idx, tombstone := range s.tombstones[:min(batchSize, len(s.tombstones))] {
+			if idx >= expiredOffset && tombstone.createTime.After(expiredTime) {
+				break
+			}
+			ids = append(ids, tombstone.broadcastID)
+		}
+		if len(ids) == 0 {
 			return
 		}
-		if err := s.bm.DropTombstone(s.notifier.Context(), tombstone.broadcastID); err != nil {
-			s.Logger().Error(context.TODO(), "failed to drop tombstone", mlog.Err(err))
-			s.tombstones = s.tombstones[idx:]
+		if err := s.bm.DropTombstones(ctx, ids); err != nil {
+			s.Logger().Warn(ctx, "failed to drop tombstone batch", mlog.Int("batchSize", len(ids)), mlog.Err(err))
 			return
 		}
+		// Advance only after the whole batch succeeds. A failed batch remains
+		// queued for idempotent retry, while earlier successful batches stay gone.
+		clear(s.tombstones[:len(ids)])
+		s.tombstones = s.tombstones[len(ids):]
+		expiredOffset -= len(ids)
 	}
-	// all the tombstones are dropped, reset the tombstones.
-	s.tombstones = make([]tombstoneItem, 0)
+	if len(s.tombstones) == 0 {
+		s.tombstones = nil
+	}
 }

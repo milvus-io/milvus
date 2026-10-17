@@ -9,6 +9,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel/codes"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -49,7 +50,7 @@ type ackCallbackScheduler struct {
 	// so we may encounter following cases:
 	// 1. task A, B, C are competing with rkLocker, and we want the operation is executed in order of A -> B -> C.
 	// 2. A is on running, and B, C are waiting for the lock.
-	// 3. When triggerAckCallback, B is failed to acquire the lock, C is pending to call FastLock.
+	// 3. When triggerAckCallback, B is failed to acquire the lock, C is pending to call TryLock.
 	// 4. Then A is done, the lock is released, C acquires the lock and executes the ack callback, the order is broken as A -> C -> B.
 	// To avoid the order broken, we need to use a mutex to protect the batch lock operation.
 	rkLocker *resourceKeyLocker // it is used to lock the resource-key of ack operation.
@@ -105,7 +106,7 @@ func (s *ackCallbackScheduler) background() {
 	}()
 	s.Logger().Info(context.TODO(), "ack scheduler background start")
 
-	// it's weired to find that FastLock may be failure even if there's no resource-key locked,
+	// it's weired to find that TryLock may be failure even if there's no resource-key locked,
 	// also see: #45285
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -139,9 +140,11 @@ func (s *ackCallbackScheduler) addBroadcastTask(task *broadcastTask) error {
 // triggerAckCallback triggers the ack callback.
 func (s *ackCallbackScheduler) triggerAckCallback() {
 	s.rkLockerMu.Lock()
-	defer s.rkLockerMu.Unlock()
 
 	pendingTasks := make([]*broadcastTask, 0, len(s.pendingAckedTasks))
+	blockedTaskCount := 0
+	startedTaskCount := 0
+	var firstBlockedBroadcastID uint64
 	for _, task := range s.pendingAckedTasks {
 		if task.IsForcePromoteMessage() {
 			// Force promote: handle fix + ack callback entirely in background goroutine.
@@ -151,17 +154,33 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 			continue
 		}
 
-		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
-		if err != nil {
-			s.Logger().Warn(context.TODO(), "lock is occupied, delay the ack callback", mlog.FieldBroadcastID(task.Header().BroadcastID), mlog.Err(err))
+		g, ok := s.rkLocker.TryLock(task.Header().ResourceKeys.Collect()...)
+		if !ok {
+			if blockedTaskCount == 0 {
+				firstBlockedBroadcastID = task.Header().BroadcastID
+			}
+			blockedTaskCount++
 			pendingTasks = append(pendingTasks, task)
 			continue
 		}
 
 		// Execute the ack callback in background.
+		startedTaskCount++
 		go s.doAckCallback(task, g)
 	}
 	s.pendingAckedTasks = pendingTasks
+	s.rkLockerMu.Unlock()
+
+	if blockedTaskCount > 0 {
+		s.Logger().RatedWarn(
+			s.notifier.Context(),
+			rate.Every(time.Second),
+			"resource key locks are occupied, delay ack callbacks",
+			mlog.Int("blockedTaskCount", blockedTaskCount),
+			mlog.Int("startedTaskCount", startedTaskCount),
+			mlog.Uint64("firstBlockedBroadcastID", firstBlockedBroadcastID),
+		)
+	}
 }
 
 // doForcePromoteFixIncompleteBroadcasts handles the full force promote lifecycle:
@@ -245,25 +264,35 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 }
 
 // doAckCallback executes the ack callback.
-func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (err error) {
-	logger := s.Logger().With(mlog.FieldBroadcastID(bt.Header().BroadcastID))
+func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) error {
+	if err := s.executeAckCallback(bt, g); err != nil {
+		return err
+	}
+	// GC handoff must happen after the callback releases its resource keys.
+	s.tombstoneScheduler.AddPending(bt.Header().BroadcastID)
+	return nil
+}
+
+func (s *ackCallbackScheduler) executeAckCallback(bt *broadcastTask, g *lockGuards) (err error) {
+	ctx := s.notifier.Context()
+	logger := s.Logger().With(mlog.Uint64("broadcastID", bt.Header().BroadcastID))
 	defer func() {
 		s.rkLockerMu.Lock()
 		g.Unlock()
 		s.rkLockerMu.Unlock()
 
-		s.triggerChan <- struct{}{}
+		s.notifyResourceKeyReleased()
 		if err == nil {
-			logger.Info(context.TODO(), "execute ack callback done")
+			logger.Info(ctx, "execute ack callback done")
 		} else {
-			logger.Warn(context.TODO(), "execute ack callback failed", mlog.Err(err))
+			logger.Warn(ctx, "execute ack callback failed", mlog.Err(err))
 		}
 	}()
-	logger.Info(context.TODO(), "start to execute ack callback")
-	if err := bt.BlockUntilAllAck(s.notifier.Context()); err != nil {
+	logger.Info(ctx, "start to execute ack callback")
+	if err := bt.BlockUntilAllAck(ctx); err != nil {
 		return err
 	}
-	logger.Debug(context.TODO(), "all vchannels are acked")
+	logger.Debug(ctx, "all vchannels are acked")
 
 	msg, result := bt.BroadcastResult()
 	makeMap := make(map[string]*message.AppendResult, len(result))
@@ -276,20 +305,28 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 	}
 	// call the ack callback until done, under the persisted trace context.
 	bt.ObserveAckCallbackBegin()
-	if err := runAckCallbackWithTrace(s.notifier.Context(), msg, func(spanCtx context.Context) error {
+	if err := runAckCallbackWithTrace(ctx, msg, func(spanCtx context.Context) error {
 		return s.callMessageAckCallbackUntilDone(spanCtx, msg, makeMap)
 	}); err != nil {
 		return err
 	}
 	bt.ObserveAckCallbackDone()
 
-	logger.Debug(context.TODO(), "ack callback done")
-	if err := bt.MarkAckCallbackDone(s.notifier.Context()); err != nil {
+	logger.Debug(ctx, "ack callback done")
+	if err := bt.MarkAckCallbackDone(ctx); err != nil {
 		// The catalog is reliable to write, so we can mark the ack callback done without retrying.
 		return err
 	}
-	s.tombstoneScheduler.AddPending(bt.Header().BroadcastID)
 	return nil
+}
+
+// notifyResourceKeyReleased coalesces concurrent callback completions into one scheduler scan.
+// If a notification is already pending, the next scan will observe this unlock as well.
+func (s *ackCallbackScheduler) notifyResourceKeyReleased() {
+	select {
+	case s.triggerChan <- struct{}{}:
+	default:
+	}
 }
 
 // callMessageAckCallbackUntilDone calls the message ack callback until done.
