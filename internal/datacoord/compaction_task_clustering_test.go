@@ -685,6 +685,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcess() {
 
 func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 	task := s.generateBasicTask(false)
+	task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_failed,
@@ -693,17 +694,19 @@ func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 	s.Equal("compaction failed in datanode", task.GetTaskProto().GetFailReason())
 
+	task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_failed,
 	}, nil).Once()
 	task.QueryTaskOnWorker(cluster)
 	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 
+	task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_pipelining,
 	}, nil).Once()
 	task.QueryTaskOnWorker(cluster)
-	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_completed,
@@ -711,6 +714,7 @@ func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 	task.QueryTaskOnWorker(cluster)
 	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 
+	task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_completed,
 		Segments: []*datapb.CompactionSegment{
