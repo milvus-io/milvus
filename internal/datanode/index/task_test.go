@@ -69,6 +69,15 @@ func (*emptyIndex) UpLoad() (*cgopb.IndexStats, error) {
 	return &cgopb.IndexStats{}, nil
 }
 
+type indexWithStats struct {
+	emptyIndex
+	stats *cgopb.IndexStats
+}
+
+func (index *indexWithStats) UpLoad() (*cgopb.IndexStats, error) {
+	return index.stats, nil
+}
+
 func (suite *IndexBuildTaskSuite) SetupSuite() {
 	paramtable.Init()
 	suite.collectionID = 1000
@@ -265,6 +274,45 @@ func (suite *IndexBuildTaskSuite) TestPostExecuteAcceptsEmptyIndexStats() {
 	suite.Zero(info.MemSize)
 	suite.Equal(currentIndexVersion, info.CurrentIndexVersion)
 	suite.Equal(currentScalarIndexVersion, info.CurrentScalarIndexVersion)
+}
+
+func (suite *IndexBuildTaskSuite) TestPostExecutePreservesNonEmptyIndexStats() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const (
+		clusterID = "nonempty-index"
+		buildID   = int64(1)
+	)
+	manager := NewTaskManager(ctx)
+	manager.LoadOrStoreIndexTask(clusterID, buildID, &IndexTaskInfo{})
+	req := &workerpb.CreateJobRequest{ClusterID: clusterID, BuildID: buildID}
+	task := NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+	index := &indexWithStats{stats: &cgopb.IndexStats{
+		MemSize: 8192,
+		SerializedIndexInfos: []*cgopb.SerializedIndexFileInfo{
+			{FileName: "index/1/diskann.index", FileSize: 1024},
+			{FileName: "index/1/centroids", FileSize: 4096},
+		},
+	}}
+	task.index = index
+
+	suite.Require().NoError(task.PostExecute(ctx))
+	suite.True(index.deleted)
+	task.SetState(indexpb.JobState_JobStateFinished, "")
+
+	info := manager.GetIndexTaskInfo(clusterID, buildID)
+	suite.Require().NotNil(info)
+	suite.ElementsMatch([]string{"diskann.index", "centroids"}, info.FileKeys)
+	suite.Equal(uint64(5120), info.SerializedSize)
+	suite.Equal(uint64(8192), info.MemSize)
+
+	result := info.ToIndexTaskInfo(buildID)
+	suite.Equal(buildID, result.GetBuildID())
+	suite.Equal(commonpb.IndexState_Finished, result.GetState())
+	suite.ElementsMatch([]string{"diskann.index", "centroids"}, result.GetIndexFileKeys())
+	suite.Equal(uint64(5120), result.GetSerializedSize())
+	suite.Equal(uint64(8192), result.GetMemSize())
 }
 
 func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
