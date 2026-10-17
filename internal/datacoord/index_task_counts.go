@@ -17,10 +17,12 @@
 package datacoord
 
 import (
+	"strconv"
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
@@ -35,16 +37,33 @@ var indexTaskMetricStates = [...]indexpb.JobState{
 
 type indexTaskStateCounts [len(indexTaskMetricStates)]int64
 
+// indexTaskStats aggregates the task records of one (collection, index).
+type indexTaskStats struct {
+	counts indexTaskStateCounts
+	// size sums IndexSerializedSize over every task record, deleted tasks and
+	// all states included, which is what DataCoordStoredIndexFilesSize reports.
+	size int64
+}
+
 // indexTaskCounts uses a short, memory-only lock independent of fieldIndexLock.
 // Manifest installs can update it under segMu without waiting for index DDL
 // persistence. It adds no per-build objects or pointers.
-// Raw counts include orphaned/dropped field indexes, but exclude deleted
-// tasks. Keeping them allows index DDL to adjust totals without visiting builds.
+// Raw counts and sizes include orphaned/dropped field indexes; counts exclude
+// deleted tasks. Keeping them allows index DDL to adjust totals without visiting
+// builds.
 type indexTaskCounts struct {
 	mu      sync.RWMutex
 	active  map[[2]int64]bool
-	byIndex map[[2]int64]indexTaskStateCounts
+	byIndex map[[2]int64]indexTaskStats
 	total   indexTaskStateCounts
+	// activeSizes is the per-collection size of active indexes, the value of
+	// DataCoordStoredIndexFilesSize. Zero sums are not stored.
+	activeSizes map[int64]int64
+	// dirtySizes holds the collections whose stored size has not been
+	// published since it last changed; publication fills in their sizes.
+	dirtySizes map[int64]int64
+	// publishMu orders gauge writes; see publishStoredSizes.
+	publishMu sync.Mutex
 }
 
 func indexTaskStateSlot(state commonpb.IndexState) int {
@@ -67,34 +86,54 @@ func indexTaskStateSlot(state commonpb.IndexState) int {
 }
 
 func (c *indexTaskCounts) adjustTask(task *model.SegmentIndex, delta int64) {
-	if task == nil || task.IsDeleted {
+	if task == nil {
 		return
-	}
-	slot := indexTaskStateSlot(task.IndexState)
-	if slot < 0 {
-		return
-	}
-	if c.byIndex == nil {
-		c.byIndex = make(map[[2]int64]indexTaskStateCounts)
 	}
 	key := [2]int64{task.CollectionID, task.IndexID}
-	counts := c.byIndex[key]
-	counts[slot] += delta
-	if counts == (indexTaskStateCounts{}) {
+	active := c.active[key]
+	stats := c.byIndex[key]
+	if slot := indexTaskStateSlot(task.IndexState); slot >= 0 && !task.IsDeleted {
+		stats.counts[slot] += delta
+		if active {
+			c.total[slot] += delta
+		}
+	}
+	size := delta * int64(task.IndexSerializedSize)
+	stats.size += size
+	if stats == (indexTaskStats{}) {
 		delete(c.byIndex, key)
 	} else {
-		c.byIndex[key] = counts
+		if c.byIndex == nil {
+			c.byIndex = make(map[[2]int64]indexTaskStats)
+		}
+		c.byIndex[key] = stats
 	}
-	if c.active[key] {
-		c.total[slot] += delta
+	if active && size != 0 {
+		c.addActiveSize(task.CollectionID, size)
 	}
+}
+
+func (c *indexTaskCounts) addActiveSize(collectionID, delta int64) {
+	if c.activeSizes == nil {
+		c.activeSizes = make(map[int64]int64)
+	}
+	if size := c.activeSizes[collectionID] + delta; size == 0 {
+		delete(c.activeSizes, collectionID)
+	} else {
+		c.activeSizes[collectionID] = size
+	}
+	if c.dirtySizes == nil {
+		c.dirtySizes = make(map[int64]int64)
+	}
+	c.dirtySizes[collectionID] = 0
 }
 
 func (c *indexTaskCounts) replaceTask(old, current *model.SegmentIndex) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if old != nil && current != nil && old.CollectionID == current.CollectionID &&
-		old.IndexID == current.IndexID && old.IndexState == current.IndexState && old.IsDeleted == current.IsDeleted {
+		old.IndexID == current.IndexID && old.IndexState == current.IndexState &&
+		old.IsDeleted == current.IsDeleted && old.IndexSerializedSize == current.IndexSerializedSize {
 		return
 	}
 	c.adjustTask(old, -1)
@@ -120,9 +159,47 @@ func (c *indexTaskCounts) replaceIndex(old, current *model.Index) {
 		} else {
 			c.active[key] = true
 		}
-		counts := c.byIndex[key]
-		for state, count := range counts {
+		stats := c.byIndex[key]
+		for state, count := range stats.counts {
 			c.total[state] += count * change.delta
+		}
+		if stats.size != 0 {
+			c.addActiveSize(key[0], stats.size*change.delta)
+		}
+	}
+}
+
+// publishStoredSizes writes the current stored size of every dirty collection,
+// deleting the series of one that has none, so a series deleted by collection
+// cleanup is rebuilt correctly by the next change. Callers run it after
+// releasing segMu and fieldIndexLock: creating or deleting a series waits for an
+// in-flight scrape of the gauge vector. publishMu orders publications and each
+// reads the totals while holding it, so an older total never overwrites a newer
+// one.
+func (c *indexTaskCounts) publishStoredSizes() {
+	c.mu.RLock()
+	idle := len(c.dirtySizes) == 0
+	c.mu.RUnlock()
+	if idle {
+		// The publication that took this caller's change reads the total
+		// after it.
+		return
+	}
+	c.publishMu.Lock()
+	defer c.publishMu.Unlock()
+	c.mu.Lock()
+	sizes := c.dirtySizes
+	c.dirtySizes = nil
+	for collectionID := range sizes {
+		sizes[collectionID] = c.activeSizes[collectionID]
+	}
+	c.mu.Unlock()
+	for collectionID, size := range sizes {
+		label := strconv.FormatInt(collectionID, 10)
+		if size == 0 {
+			metrics.DataCoordStoredIndexFilesSize.DeleteLabelValues("", "", label)
+		} else {
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", label).Set(float64(size))
 		}
 	}
 }

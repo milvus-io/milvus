@@ -322,9 +322,12 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 				continue
 			}
 			m.indexMeta.updateSegmentIndex(segIdx)
-			m.indexMeta.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID, float64(segIdx.IndexSerializedSize))
 			installed++
 		}
+	}
+	if installed > 0 {
+		// Off the startup path, which must not wait for reloadFromKV's publication.
+		go m.indexMeta.taskCounts.publishStoredSizes()
 	}
 	if err := flushMarkers(emptyMarkers); err != nil {
 		return merr.Wrap(err, "persist empty manifest index markers")
