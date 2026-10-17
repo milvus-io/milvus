@@ -243,3 +243,48 @@ func TestResumableFactoryTerminalErrorAndClosedStream(t *testing.T) {
 	require.True(t, streamingstatus.AsStreamingError(err).IsInvalidArgument())
 	require.Error(t, stream.Close())
 }
+
+type terminalRPCHandler struct {
+	events chan wal.TransformLogStreamEvent
+	closed atomic.Int32
+}
+
+func (h *terminalRPCHandler) Handle(event wal.TransformLogStreamEvent) error {
+	h.events <- event
+	return nil
+}
+func (h *terminalRPCHandler) Close() { h.closed.Add(1) }
+
+func TestTransformRPCResumesRejectedDelivery(t *testing.T) {
+	client, _, _ := summaryRPC(t)
+	var rejected atomic.Bool
+	var original func(*terminalRPCHandler, wal.TransformLogStreamEvent) error
+	patch := mockey.Mock((*terminalRPCHandler).Handle).Origin(&original).To(func(h *terminalRPCHandler, event wal.TransformLogStreamEvent) error {
+		if event.Entry != nil && event.Entry.GetTimeTick() == 11 && rejected.CompareAndSwap(false, true) {
+			return streamingstatus.NewUnknownError("consumer rejected entry")
+		}
+		return original(h, event)
+	}).Build()
+	defer patch.UnPatch()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	var attempts atomic.Int32
+	stream := resumable.NewResumableStream(ctx, "p", func(ctx context.Context, _ string) (wal.TransformLogStream, error) {
+		attempts.Add(1)
+		return remote.CreateEventStream(ctx, rpcOptions(1), client)
+	})
+	defer stream.Close()
+	handler := &terminalRPCHandler{events: make(chan wal.TransformLogStreamEvent, 16)}
+	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", Handler: handler})
+	require.NoError(t, err)
+	defer sub.Close()
+	// The accepted first entry is not replayed; the rejected second entry is.
+	require.EqualValues(t, 10, recvStreamEvent(t, handler.events).Entry.GetTimeTick())
+	require.EqualValues(t, 11, recvStreamEvent(t, handler.events).Entry.GetTimeTick())
+	require.EqualValues(t, 20, recvStreamEvent(t, handler.events).SyncUp.TimeTick)
+	require.True(t, rejected.Load())
+	require.EqualValues(t, 2, attempts.Load())
+	require.Zero(t, handler.closed.Load(), "delivery rejection must not close the logical handler")
+	require.NoError(t, sub.Close())
+	require.EqualValues(t, 1, handler.closed.Load())
+}

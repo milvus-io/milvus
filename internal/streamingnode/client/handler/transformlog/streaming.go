@@ -94,7 +94,7 @@ func (s *EventStream) Subscribe(ctx context.Context, opt wal.TransformLogSubscri
 		if err := s.Error(); err != nil {
 			return nil, err
 		}
-		return nil, io.EOF
+		return nil, status.NewOnShutdownError("transform stream is closing")
 	}
 	if err := s.send(&streamingpb.TransformRequest{
 		Request: &streamingpb.TransformRequest_Create{
@@ -252,14 +252,14 @@ func (s *EventStream) send(req *streamingpb.TransformRequest) error {
 		if err := s.Error(); err != nil {
 			return err
 		}
-		return io.EOF
+		return status.NewOnShutdownError("transform stream is closing")
 	default:
 	}
 	s.mu.Lock()
 	closing := s.closing
 	s.mu.Unlock()
 	if closing {
-		return io.EOF
+		return status.NewOnShutdownError("transform stream is closing")
 	}
 	return s.stream.Send(req)
 }

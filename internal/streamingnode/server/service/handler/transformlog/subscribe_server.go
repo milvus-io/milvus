@@ -1,6 +1,7 @@
 package transformlog
 
 import (
+	"context"
 	"io"
 	"sync"
 
@@ -181,6 +182,11 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 }
 
 func (s *SubscribeServer) sendSubscriptionError(subscriptionID int64, vchannel string, err error) error {
+	// Classify cancellation before the wire projection drops the cause chain.
+	// These errors end an owner attempt, not the logical subscription.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		err = status.NewOnShutdownError("transform subscription owner stopped")
+	}
 	return s.send(&streamingpb.TransformResponse{
 		Response: &streamingpb.TransformResponse_SubscriptionError{
 			SubscriptionError: &streamingpb.TransformSubscriptionError{

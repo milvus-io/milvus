@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -50,6 +51,7 @@ type resumableStream struct {
 	wake       chan struct{}
 	closeOnce  sync.Once
 	finishOnce sync.Once
+	accepted   atomic.Bool
 }
 
 func (s *resumableStream) Subscribe(ctx context.Context, opt wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
@@ -163,6 +165,7 @@ func (s *resumableStream) resumeLoop() {
 		mlog.Debug(s.ctx, "resumable transform log stream acquired underlying stream",
 			mlog.FieldPChannel(s.pchannel),
 		)
+		s.accepted.Store(false)
 		s.setUnderlying(underlying)
 		err = s.subscribePending(ctx, cancel, underlying)
 		if err == nil {
@@ -175,6 +178,9 @@ func (s *resumableStream) resumeLoop() {
 		cancel()
 		_ = underlying.Close()
 		s.clearUnderlying(underlying)
+		if s.accepted.Load() {
+			retryBackoff.Reset()
+		}
 		if isTerminalStreamError(err) {
 			finalErr = err
 			return
@@ -239,7 +245,7 @@ func (s *resumableStream) subscriptionSnapshot() []*resumableSubscription {
 
 func (s *resumableStream) subscribeRemote(ctx context.Context, cancel context.CancelFunc, underlying wal.TransformLogStream, sub *resumableSubscription) error {
 	opt := sub.option()
-	opt.Handler = resumableEventHandler{TransformLogEventHandler: sub.handler, cancel: cancel}
+	opt.Handler = resumableEventHandler{TransformLogEventHandler: sub.handler, sub: sub, cancel: cancel}
 	mlog.Debug(s.ctx, "resumable transform log stream subscribing vchannel",
 		mlog.FieldPChannel(s.pchannel),
 		mlog.FieldVChannel(opt.VChannel),

@@ -382,3 +382,49 @@ func TestEventStreamCreationAndSendFailures(t *testing.T) {
 	require.ErrorIs(t, err, failure)
 	require.ErrorIs(t, stream.Close(), failure)
 }
+
+func TestEventStreamClassifiesClosing(t *testing.T) {
+	ctx := t.Context()
+	fake := newFakeSubscribeTransformClient(ctx)
+	client := streamingpb.NewStreamingNodeHandlerServiceClient(nil)
+	patch := mockey.Mock(mockey.GetMethod(client, "SubscribeTransform")).Return(fake, nil).Build()
+	defer patch.UnPatch()
+	stream, err := CreateEventStream(ctx, &EventStreamOptions{Assignment: testAssignment()}, client)
+	require.NoError(t, err)
+	defer stream.Close()
+	stream.markClosing()
+	_, err = stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v3", Handler: newRecordingHandler()})
+	require.True(t, streamingstatus.AsStreamingError(err).IsOnShutdown())
+}
+
+func TestEventSubscriptionAbortBeforeClose(t *testing.T) {
+	ctx := t.Context()
+	fake := newFakeSubscribeTransformClient(ctx)
+	client := streamingpb.NewStreamingNodeHandlerServiceClient(nil)
+	patch := mockey.Mock(mockey.GetMethod(client, "SubscribeTransform")).Return(fake, nil).Build()
+	defer patch.UnPatch()
+	stream, err := CreateEventStream(ctx, &EventStreamOptions{Assignment: testAssignment()}, client)
+	require.NoError(t, err)
+	defer stream.Close()
+	handler := newRecordingHandler()
+	entered, abort := make(chan struct{}), make(chan struct{})
+	var abortOnce sync.Once
+	unblock := func() { abortOnce.Do(func() { close(abort) }) }
+	defer unblock()
+	handlePatch := mockey.Mock((*recordingHandler).Handle).To(func(_ *recordingHandler, _ wal.TransformLogStreamEvent) error {
+		close(entered)
+		<-abort
+		return nil
+	}).Build()
+	defer handlePatch.UnPatch()
+	sub := subscribeEventForTest(t, ctx, stream, "v1", 0, handler, fake)
+	fake.recv(&streamingpb.TransformResponse{Response: &streamingpb.TransformResponse_SyncUp{SyncUp: &streamingpb.TransformSubscriptionSyncUp{SubscriptionId: sub.ID(), TimeTick: 10}}})
+	recvEvent(t, entered)
+	closed := make(chan error, 1)
+	go func() { closed <- sub.Close() }()
+	require.Equal(t, sub.ID(), fake.sent(t).GetCloseSubscription().GetSubscriptionId())
+	fake.recv(&streamingpb.TransformResponse{Response: &streamingpb.TransformResponse_CloseSubscription{CloseSubscription: &streamingpb.CloseTransformSubscriptionResponse{SubscriptionId: sub.ID()}}})
+	// The ack is queued behind Handle. An independent abort releases delivery.
+	unblock()
+	require.NoError(t, recvEvent(t, closed))
+}

@@ -122,15 +122,26 @@ func (s *resumableSubscription) setError(err error) {
 }
 
 type checkpointEventHandler struct {
-	sub   *resumableSubscription
-	inner wal.TransformLogEventHandler
+	mu     sync.Mutex
+	closed bool
+	sub    *resumableSubscription
+	inner  wal.TransformLogEventHandler
 }
 
 func (h *checkpointEventHandler) Handle(event wal.TransformLogStreamEvent) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.sub.Error(); err != nil {
+		return err
+	}
+	if h.closed {
+		return status.NewOnShutdownError("transform subscription is closed")
+	}
 	event.SubscriptionID = h.sub.ID()
 	event.VChannel = h.sub.VChannel()
 	err := h.inner.Handle(event)
 	if err != nil {
+		// A rejected delivery must remain replayable after owner recovery.
 		return err
 	}
 	if event.Entry != nil {
@@ -139,19 +150,35 @@ func (h *checkpointEventHandler) Handle(event wal.TransformLogStreamEvent) error
 	if event.SyncUp != nil {
 		h.sub.advance(event.SyncUp.TimeTick)
 	}
+	if event.Entry != nil || event.SyncUp != nil {
+		h.sub.stream.accepted.Store(true)
+	}
 	return nil
 }
 
 func (h *checkpointEventHandler) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closed = true
 	h.inner.Close()
 }
 
 type resumableEventHandler struct {
 	wal.TransformLogEventHandler
+	sub    *resumableSubscription
 	cancel context.CancelFunc
 }
 
 func (h resumableEventHandler) Handle(event wal.TransformLogStreamEvent) error {
+	h.sub.stream.mu.Lock()
+	active := h.sub.stream.subscriptions[h.sub.id] == h.sub
+	h.sub.stream.mu.Unlock()
+	if !active {
+		return nil
+	}
+	if err := h.sub.Error(); err != nil {
+		return err
+	}
 	if isRetryableSubscriptionError(event.Err) {
 		// Do not close the underlying stream inside its delivery callback:
 		// Close may wait for that callback. The resume loop owns cleanup.

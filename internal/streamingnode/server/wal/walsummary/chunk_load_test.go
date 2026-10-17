@@ -378,3 +378,22 @@ func TestChunkLoadSharedByIndependentStreams(t *testing.T) {
 	}
 	require.Equal(t, int64(1), calls.Load())
 }
+
+func TestChunkLoadRetriesInterruptedDownload(t *testing.T) {
+	index, chunk := newChunkIndex(0), &indexedChunk{}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var attempts atomic.Int32
+	payload := &chunkPayload{bytes: []byte("recovered download")}
+	patch := mockey.Mock((*Store).readChunkPayload).To(func(_ *Store, _ context.Context, _ *streamingpb.PChannelSummaryChunkIndexEntry, _ *chunkValidation) (*chunkPayload, error) {
+		if attempts.Add(1) == 1 {
+			return nil, merr.WrapErrIoUnexpectEOF("chunk", io.ErrUnexpectedEOF)
+		}
+		return payload, nil
+	}).Build()
+	defer patch.UnPatch()
+	got, err := index.cache.read(ctx, &Store{}, chunk)
+	require.NoError(t, err)
+	require.Same(t, payload, got)
+	require.EqualValues(t, 2, attempts.Load())
+}
