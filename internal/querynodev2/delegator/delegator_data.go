@@ -1275,8 +1275,30 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		sealed = lo.Map(req.GetSegmentIDs(), convertSealed)
 	}
 
-	signal := sd.distribution.RemoveDistributions(sealed, growing)
-	// wait cleared signal
+	// The release decision was made by QueryCoord from a leader view it pulled earlier; between
+	// that heartbeat and now the delegator may have been synced to a target version that pulls the
+	// segment back into its readable snapshot. Releasing it then drops loadedRatio below 1.0 and
+	// makes the shard unserviceable, so the holder refuses: the checker retries once the segment
+	// has genuinely left the readable set. The check and the removal from the distribution are one
+	// step under the distribution lock, so no sync can land between them. force releases
+	// (collection drop, node cleanup) bypass this -- there is no snapshot left to protect.
+	var signal chan struct{}
+	if !force && len(sealed) > 0 {
+		var stillServing []int64
+		stillServing, signal = sd.distribution.RemoveDistributionsIfNotServed(sealed, growing)
+		if len(stillServing) > 0 {
+			log.Info(ctx, "refusing to release segments the delegator still serves",
+				mlog.Int64s("stillServing", stillServing))
+			// Non-retriable on purpose: a retriable error makes the QueryCoord grpc
+			// client retry in place for ~53s, holding an executor slot and starving
+			// the loads the delegator needs before its readable set can advance.
+			// The segment checker regenerates the release task on its next round.
+			return merr.WrapErrServiceInternalMsg("segments %v are still in the delegator's readable set", stillServing)
+		}
+	} else {
+		signal = sd.distribution.RemoveDistributions(sealed, growing)
+	}
+	// wait for the reads on the snapshots that still contain the segments, outside the lock
 	<-signal
 
 	if len(growing) > 0 {

@@ -131,6 +131,10 @@ type distribution struct {
 	queryView   *channelQueryView
 
 	leaderViewUpdatedCallback func(channel string)
+
+	// afterServingCheckHook, when set, runs inside RemoveDistributionsIfNotServed after the
+	// serving check passed and before the removal, with the write lock held. Tests only.
+	afterServingCheckHook func()
 }
 
 // SegmentEntry stores the segment meta information.
@@ -308,6 +312,20 @@ func (d *distribution) getTargetVersion() int64 {
 // Serviceable returns wether current snapshot is serviceable.
 func (d *distribution) Serviceable() bool {
 	return d.queryView.Serviceable()
+}
+
+// servedFromNodeLocked reports whether a sealed segment is part of this delegator's readable
+// snapshot *and* is served from the given node. d.mut must be held.
+//
+// The node matters: a balance move loads the segment on its new node before releasing it on the
+// old one, and by then the distribution already points at the new node -- releasing the old copy of
+// a segment that is still readable is exactly what a move is.
+func (d *distribution) servedFromNodeLocked(segmentID int64, nodeID int64) bool {
+	if _, readable := d.queryView.sealedSegmentRowCount[segmentID]; !readable {
+		return false
+	}
+	entry, ok := d.sealedSegments[segmentID]
+	return ok && !entry.Offline && entry.NodeID == nodeID
 }
 
 // for now, delegator become serviceable only when watchDmChannel is done
@@ -547,9 +565,43 @@ func (d *distribution) GetQueryView() *channelQueryView {
 // The returned channel is closed when the snapshot that still contains the removed segments
 // is expired (i.e., all in-flight reads using that snapshot have finished).
 func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growingSegments []SegmentEntry) chan struct{} {
+	d.mut.Lock()
+	return d.removeDistributionsLocked(sealedSegments, growingSegments)
+}
+
+// RemoveDistributionsIfNotServed removes the given distributions unless one of the sealed entries
+// is still served: in the readable snapshot and served from the node the entry names. In that case
+// nothing is removed and the served segment IDs are returned, with a nil signal.
+//
+// The check and the removal run under one write lock. QueryCoord decides a release from a leader
+// view it pulled on an earlier heartbeat, and a SyncTargetVersion can pull the segment back into
+// the readable snapshot at any time; checking under a read lock and removing under a separate
+// write lock would let such a sync land in between and the removal would still drop a segment
+// the new snapshot serves. Waiting for the returned signal and releasing the segment on its worker
+// happen after the lock is released, as with RemoveDistributions.
+func (d *distribution) RemoveDistributionsIfNotServed(sealedSegments []SegmentEntry, growingSegments []SegmentEntry) ([]int64, chan struct{}) {
+	d.mut.Lock()
+	stillServing := make([]int64, 0)
+	for _, sealed := range sealedSegments {
+		if d.servedFromNodeLocked(sealed.SegmentID, sealed.NodeID) {
+			stillServing = append(stillServing, sealed.SegmentID)
+		}
+	}
+	if len(stillServing) > 0 {
+		d.mut.Unlock()
+		return stillServing, nil
+	}
+	if d.afterServingCheckHook != nil {
+		d.afterServingCheckHook()
+	}
+	return nil, d.removeDistributionsLocked(sealedSegments, growingSegments)
+}
+
+// removeDistributionsLocked removes the distributions; d.mut must be write-locked by the caller and
+// is released before it returns.
+func (d *distribution) removeDistributionsLocked(sealedSegments []SegmentEntry, growingSegments []SegmentEntry) chan struct{} {
 	var toRefund []pkoracle.Candidate
 
-	d.mut.Lock()
 	for _, sealed := range sealedSegments {
 		entry, ok := d.sealedSegments[sealed.SegmentID]
 		if !ok {
