@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "common/type_c.h"
@@ -78,6 +79,48 @@ std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<milvus_storage::api::Properties>& properties);
+
+struct LoonManifestPath {
+    std::string base_path;
+    int64_t version = 0;
+    // Byte size of the manifest object of this revision as the path records it,
+    // or a non-positive value when unknown. A known size lets the read skip
+    // asking storage for it and must match the object exactly. It is not part
+    // of the revision identity.
+    int64_t size = -1;
+};
+
+/**
+ * @brief Parse a manifest path JSON
+ *
+ * @return the revision the path names, or std::nullopt when path is not a JSON
+ *         object with a string "base_path" and an integer "ver". An optional
+ *         "size" that is not an integer is ignored.
+ */
+std::optional<LoonManifestPath>
+ParseLoonManifestPath(const std::string& path);
+
+/**
+ * @brief Read the manifest of the revision a manifest path names
+ *
+ * Opens the revision with the size the path records, so the read can skip
+ * asking storage for it. Error classification is left to the caller.
+ */
+LoonFFIResult
+ReadLoonManifest(const LoonManifestPath& manifest_path,
+                 const LoonProperties* properties,
+                 LoonManifest** out_manifest);
+
+/**
+ * @brief Check whether two manifest paths name the same manifest revision
+ *
+ * A manifest path is identified by its "base_path" and "ver"; JSON key order
+ * and optional fields do not change the revision. Values that are not
+ * manifest path JSON are compared as plain strings. Mirrors Go's
+ * packed.SameManifestPath.
+ */
+bool
+IsSameLoonManifestPath(const std::string& lhs, const std::string& rhs);
 
 /**
  * @brief Inject every external_spec-derived property for external collections.

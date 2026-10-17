@@ -192,6 +192,9 @@ type FlushConfig struct {
 	// Must be set to the last version acknowledged by DataCoord (via SaveBinlogPaths).
 	// Use ManifestEarliest for the first flush so retries never append to latest.
 	ReadVersion int64
+	// ReadManifestSize is the byte size of the ReadVersion manifest, or 0 when
+	// unknown; it lets the flush read that manifest without a size request.
+	ReadManifestSize int64
 	// WriterFormat is passed as writer.format. For incremental growing flushes,
 	// it may be resolved from the acknowledged manifest to keep appends
 	// compatible with existing column groups.

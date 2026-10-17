@@ -58,12 +58,26 @@ func addV3Segment(t *testing.T, meta *meta, segmentID int64, basePath string, ve
 	})))
 }
 
+// advanceManifest returns the revision n versions after baseManifest, the way a
+// mocked loon transaction publishes onto the base it was handed.
+func advanceManifest(baseManifest string, n int64) (string, error) {
+	base, version, err := packed.UnmarshalManifestPath(baseManifest)
+	if err != nil {
+		return "", err
+	}
+	return packed.MarshalManifestPath(base, version+n), nil
+}
+
 // bumpVersionMock mocks the loon transaction to return the next revision of the
 // base it was handed, so each segment advances independently and deterministically.
 func bumpVersionMock() *mockey.Mocker {
 	return mockey.Mock(packed.SubmitManifestUpdates).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
-			complete(mockManifestUpdateResult(packed.MarshalManifestPath(base, version+1), nil), nil)
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+			published, err := advanceManifest(baseManifest, 1)
+			if err != nil {
+				return err
+			}
+			complete(mockManifestUpdateResult(published, nil), nil)
 			return nil
 		},
 	).Build()
@@ -318,10 +332,11 @@ func TestCommitSegmentManifestsAbortsWhenPointerAdvancesDuringManifestIO(t *test
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
 	mock := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			entered <- struct{}{}
 			<-release
-			return mockManifestUpdateResult(packed.MarshalManifestPath(base, version+2), nil), nil
+			published, err := advanceManifest(baseManifest, 2)
+			return mockManifestUpdateResult(published, nil), err
 		},
 	).Build()
 	defer mock.UnPatch()
@@ -554,7 +569,7 @@ func TestCommitSegmentManifestsDrainsCallbacksBeforeUnlock(t *testing.T) {
 		complete func(packed.ManifestUpdateResult, error)
 	}
 	submitted := make(chan submission, len(commits))
-	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
 		submitted <- submission{ctx, complete}
 		return nil
 	}).Build()
@@ -612,7 +627,7 @@ func TestCommitSegmentManifestsSingleWorkerClearsIndexMarkers(t *testing.T) {
 	var commits []SegmentManifestCommit
 	for id := int64(1); id <= 3; id++ {
 		base := fmt.Sprintf("%s/segment-%d", cfg.RootPath, id)
-		manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{
+		manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{
 			Indexes: []packed.ManifestIndexInfo{{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}},
 		})
 		require.NoError(t, err)

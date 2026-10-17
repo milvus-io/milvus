@@ -49,7 +49,7 @@ func testOpenManifestCommit(io *ManifestIOContext, base string, config *indexpb.
 	if err := io.acquire(context.Background()); err != nil {
 		return nil, nil, err
 	}
-	txn, err := io.open(context.Background(), base, 0, config, C.LOON_TRANSACTION_RESOLVE_OVERWRITE)
+	txn, err := io.open(context.Background(), ManifestJSON{BasePath: base, ManifestVersion: ManifestEarliest}, config, C.LOON_TRANSACTION_RESOLVE_OVERWRITE)
 	if err != nil {
 		io.release()
 		return nil, nil, err
@@ -60,7 +60,8 @@ func testOpenManifestCommit(io *ManifestIOContext, base string, config *indexpb.
 				return -1, err
 			}
 			result := <-done
-			return result.finish(ctx)
+			version, _, err := result.finish(ctx)
+			return version, err
 		}, func() {
 			C.loon_transaction_destroy(txn)
 			io.release()
