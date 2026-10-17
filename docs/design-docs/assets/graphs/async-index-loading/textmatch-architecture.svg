@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="textmatch-architecture-title textmatch-architecture-desc">
+<title id="textmatch-architecture-title">TextMatch: reuse both scalar loading paths</title>
+<desc id="textmatch-architecture-desc">TextMatch selects packed or legacy transport, shares Tantivy restoration and registers the analyzer after loading.</desc>
+<defs>
+<marker id="textmatch-architecture-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
+<marker id="textmatch-architecture-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#397985"/></marker>
+<marker id="textmatch-architecture-link" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#557794"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#FCFDFE"/>
+<g font-family="Geist, Arial, sans-serif">
+<text x="40" y="56" font-size="28" fill="#25364A" text-anchor="start" font-weight="400">TextMatch: reuse both scalar loading paths</text>
+<text x="40" y="88" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Independent text-log loading forwards OpContext and reuses string Tantivy restoration.</text>
+<path d="M 360 248 L 456 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#textmatch-architecture-arrow)"/>
+<path d="M 200 320 L 200 420" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#textmatch-architecture-arrow)"/>
+<path d="M 776 248 L 872 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#textmatch-architecture-arrow)"/>
+<path d="M 360 492 L 456 492" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#textmatch-architecture-arrow)"/>
+<path d="M 616 420 L 616 376 Q 616 368 624 368 L 992 368 Q 1000 368 1000 360 L 1000 320" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#textmatch-architecture-arrow)"/>
+<path d="M 1032 320 L 1032 420" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#textmatch-architecture-arrow)"/>
+<g data-node="TextMatch translator"><rect x="40" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="60" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">TextMatch translator</text>
+<text x="60" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Pass context into Load</text>
+<text x="60" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Resolve legacy stats_base_path</text>
+</g>
+<g data-node="Packed .v3"><rect x="456" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="476" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Packed .v3</text>
+<text x="476" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Shared reader / materializer</text>
+<text x="476" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Tantivy files + null-offset entry</text>
+</g>
+<g data-node="Tantivy restoration"><rect x="872" y="176" width="320" height="144" rx="8" fill="#EFF7F5" stroke="#397985" stroke-width="1.2"/>
+<text x="892" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Tantivy restoration</text>
+<text x="892" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Open reader and build validity</text>
+<text x="892" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Shared async executor</text>
+</g>
+<g data-node="Legacy text-log objects"><rect x="40" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="60" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Legacy text-log objects</text>
+<text x="60" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Inherited LoadLegacyAsync</text>
+<text x="60" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Metadata + disk staging</text>
+</g>
+<g data-node="LocalFileIOPool"><rect x="456" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="476" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">LocalFileIOPool</text>
+<text x="476" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Prepare / write / close targets</text>
+<text x="476" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Heap cleanup or mmap retention</text>
+</g>
+<g data-node="Cache-load caller"><rect x="872" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="892" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Cache-load caller</text>
+<text x="892" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Load returned successfully</text>
+<text x="892" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">RegisterAnalyzer; publish</text>
+</g>
+<line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
+<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">The packed materializer also uses the local-file pool for its file phases.</text>
+<text x="40" y="700" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Both formats finish file operations before engine opening; analyzer registration stays on the caller.</text>
+</g></svg>
