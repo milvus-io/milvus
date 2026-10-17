@@ -47,6 +47,44 @@ func allTokensTF(vocab int32) []byte {
 	return typeutil.CreateAndSortSparseFloatRow(all)
 }
 
+// nonZeroCounts drops the zero counts BM25Stats keeps when a merge brings a token back to zero;
+// ConcurrentBM25Stats drops a token whenever its count reaches zero.
+func nonZeroCounts(rows map[uint32]int32) map[uint32]int32 {
+	out := make(map[uint32]int32, len(rows))
+	for token, count := range rows {
+		if count != 0 {
+			out[token] = count
+		}
+	}
+	return out
+}
+
+// Taking back everything that was merged must leave no tokens, on every write path.
+func TestConcurrentBM25StatsDropsZeroCounts(t *testing.T) {
+	r := rand.New(rand.NewSource(21))
+	// below and above the split threshold of the locked path
+	for _, rows := range []int{20, 2000} {
+		s := randomBM25Stats(r, rows, 20000)
+
+		c := NewConcurrentBM25Stats()
+		c.Merge(s)
+		c.Minus(s)
+		assert.Empty(t, c.Snapshot().rowsWithToken, "Minus, %d rows", rows)
+		assert.Zero(t, c.MemSize()-NewConcurrentBM25Stats().MemSize(), "Minus, %d rows", rows)
+
+		c.MergeUnlocked(s)
+		c.MinusUnlocked(s)
+		assert.Empty(t, c.Snapshot().rowsWithToken, "MinusUnlocked, %d rows", rows)
+
+		negative := NewConcurrentBM25Stats()
+		negative.Minus(s)
+		c.Merge(s)
+		c.MergeFrom(negative)
+		assert.Empty(t, c.Snapshot().rowsWithToken, "MergeFrom, %d rows", rows)
+		assert.Zero(t, c.NumRow())
+	}
+}
+
 func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
 	// both the per-token path (small stats) and the split path (large stats)
 	for _, tc := range []struct {
@@ -95,7 +133,7 @@ func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
 			got := c.Snapshot()
 			assert.Equal(t, expected.NumRow(), c.NumRow())
 			assert.Equal(t, expected.NumToken(), c.NumToken())
-			assert.Equal(t, expected.rowsWithToken, got.rowsWithToken)
+			assert.Equal(t, nonZeroCounts(expected.rowsWithToken), got.rowsWithToken)
 			assert.Equal(t, expected.GetAvgdl(), c.GetAvgdl())
 			tf := allTokensTF(tc.vocab)
 			assert.Equal(t, expected.BuildIDF(tf), c.BuildIDF(tf))
@@ -120,7 +158,7 @@ func TestConcurrentBM25StatsUnlockedMatchesSerial(t *testing.T) {
 		}
 		assert.Equal(t, expected.NumRow(), c.NumRow())
 		assert.Equal(t, expected.NumToken(), c.NumToken())
-		assert.Equal(t, expected.rowsWithToken, c.Snapshot().rowsWithToken)
+		assert.Equal(t, nonZeroCounts(expected.rowsWithToken), c.Snapshot().rowsWithToken)
 		tf := allTokensTF(20000)
 		assert.Equal(t, expected.BuildIDF(tf), c.BuildIDFUnlocked(tf))
 		assert.Equal(t, c.BuildIDF(tf), c.BuildIDFUnlocked(tf))
@@ -146,7 +184,7 @@ func TestConcurrentBM25StatsMergeFrom(t *testing.T) {
 	got := a.Snapshot()
 	assert.Equal(t, expected.NumRow(), a.NumRow())
 	assert.Equal(t, expected.NumToken(), a.NumToken())
-	assert.Equal(t, expected.rowsWithToken, got.rowsWithToken)
+	assert.Equal(t, nonZeroCounts(expected.rowsWithToken), got.rowsWithToken)
 }
 
 // A search during preload reads current while segments merge into it. It must never see a token in more
