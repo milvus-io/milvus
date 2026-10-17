@@ -382,7 +382,7 @@ func (s *SnapshotSuite) TestExportSnapshot() {
 func (s *SnapshotSuite) TestGetExportSnapshotState() {
 	ctx := context.Background()
 	fakeService := &snapshotServiceClientStub{}
-	client := &Client{service: fakeService}
+	client := &Client{connections: []*clientConn{{service: fakeService}}}
 
 	expected := &milvuspb.ExportSnapshotInfo{
 		JobId:               9001,
