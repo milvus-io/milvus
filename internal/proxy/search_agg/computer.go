@@ -2,6 +2,7 @@ package search_agg
 
 import (
 	"context"
+	"slices"
 	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -12,54 +13,125 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// SearchAggregationComputer runs hierarchical aggregation over a single
-// SearchResultData that has already been cross-shard-reduced upstream by
-// searchReduceOperator. Composite-key group reduce is NOT done here — the
-// pipeline is SearchReduce → SearchAgg so this stage is pure hierarchy walk
-// (grouping per level, metric accumulation, top_hits, sub-aggregation).
+// SearchAggregationComputer builds a hierarchy over the rows retained by
+// cross-shard group reduce. Row indices inside this computer refer to the
+// selection order, preserving stable ties even when sources are interleaved.
 type SearchAggregationComputer struct {
-	ctx  *SearchAggregationContext
-	data *schemapb.SearchResultData
-
-	// Scores have been restored to raw metric values by proxy reduce.
+	ctx                   *SearchAggregationContext
+	topks                 []int64
+	sources               []*schemapb.SearchResultData
+	selection             *ReducedRows
 	defaultScoreDirection string
-
-	// fieldsByID maps FieldID → FieldData, unioning fields_data (metric
-	// sources, top_hits sort, user output) with group_by_field_values
-	// (composite group-by key columns). Field IDs never overlap between the
-	// two channels, so a single map is unambiguous.
-	fieldsByID map[int64]*schemapb.FieldData
+	accessors             []map[int64]*fieldAccessor
+	metricSources         [][]metricSource
+	groupFieldPositions   [][]int
+	groupBuckets          [][]*bucketState
+	groupIDOffset         int
 }
 
-// NewSearchAggregationComputer wraps an already-reduced SearchResultData.
-// Upstream searchReduceOperator owns cross-shard merge + group-size /
-// topK enforcement; this computer only does per-NQ hierarchical aggregation.
-func NewSearchAggregationComputer(
-	data *schemapb.SearchResultData,
-	ctx *SearchAggregationContext,
-	metricType string,
-) *SearchAggregationComputer {
-	m := make(map[int64]*schemapb.FieldData, len(data.GetFieldsData())+len(data.GetGroupByFieldValues()))
-	for _, fd := range data.GetFieldsData() {
-		if fd != nil {
-			m[fd.GetFieldId()] = fd
-		}
-	}
-	for _, fd := range data.GetGroupByFieldValues() {
-		if fd != nil {
-			m[fd.GetFieldId()] = fd
-		}
-	}
+type fieldAccessor struct {
+	data *schemapb.FieldData
+	iter func(int) any
+}
+
+type metricSource struct {
+	fieldID int64
+	plans   []metricPlan
+}
+
+// NewSearchAggregationComputer accepts an already-materialized reduction.
+func NewSearchAggregationComputer(data *schemapb.SearchResultData, ctx *SearchAggregationContext, metricType string) *SearchAggregationComputer {
+	return newSearchAggregationComputer([]*schemapb.SearchResultData{data}, data.GetTopks(), nil, ctx, metricType)
+}
+
+// NewSearchAggregationComputerFromRows retains the original source columns;
+// only fields of the final hits are materialized by the response serializer.
+func NewSearchAggregationComputerFromRows(rows *ReducedRows, ctx *SearchAggregationContext, metricType string) *SearchAggregationComputer {
+	return newSearchAggregationComputer(rows.Sources, rows.Topks, rows, ctx, metricType)
+}
+
+func newSearchAggregationComputer(sources []*schemapb.SearchResultData, topks []int64, selection *ReducedRows, ctx *SearchAggregationContext, metricType string) *SearchAggregationComputer {
 	direction := "asc"
 	if metric.PositivelyRelated(metricType) {
 		direction = "desc"
 	}
-	return &SearchAggregationComputer{
-		ctx:                   ctx,
-		data:                  data,
-		fieldsByID:            m,
-		defaultScoreDirection: direction,
+	c := &SearchAggregationComputer{
+		ctx: ctx, sources: sources, topks: topks, selection: selection, defaultScoreDirection: direction,
+		accessors: make([]map[int64]*fieldAccessor, len(sources)),
 	}
+	for i, data := range sources {
+		fields := make(map[int64]*fieldAccessor, len(data.GetFieldsData())+len(data.GetGroupByFieldValues()))
+		for _, fd := range data.GetFieldsData() {
+			if fd != nil {
+				fields[fd.GetFieldId()] = &fieldAccessor{data: fd}
+			}
+		}
+		for _, fd := range data.GetGroupByFieldValues() {
+			if fd != nil {
+				fields[fd.GetFieldId()] = &fieldAccessor{data: fd}
+			}
+		}
+		if selection != nil {
+			for _, id := range selection.GroupFieldIDs {
+				if fd := reduce.FindGroupByFieldData(data, id, len(selection.GroupFieldIDs) == 1); fd != nil {
+					fields[id] = &fieldAccessor{data: fd}
+				}
+			}
+		}
+		c.accessors[i] = fields
+	}
+	if ctx == nil {
+		return c
+	}
+	c.metricSources = make([][]metricSource, len(ctx.Levels))
+	for i, level := range ctx.Levels {
+		byField := make(map[int64]int)
+		for _, plan := range level.metricPlans {
+			idx, exists := byField[plan.spec.FieldID]
+			if !exists {
+				idx = len(c.metricSources[i])
+				byField[plan.spec.FieldID] = idx
+				c.metricSources[i] = append(c.metricSources[i], metricSource{fieldID: plan.spec.FieldID})
+			}
+			c.metricSources[i][idx].plans = append(c.metricSources[i][idx].plans, plan)
+		}
+	}
+	if selection != nil {
+		positions := make(map[int64]int, len(selection.GroupFieldIDs))
+		for i, id := range selection.GroupFieldIDs {
+			positions[id] = i
+		}
+		c.groupFieldPositions = make([][]int, len(ctx.Levels))
+		for i, level := range ctx.Levels {
+			for _, id := range level.OwnFieldIDs {
+				c.groupFieldPositions[i] = append(c.groupFieldPositions[i], positions[id])
+			}
+		}
+	}
+	return c
+}
+
+// sourceRow resolves a logical selection index without copying source data.
+func (c *SearchAggregationComputer) sourceRow(row int64) (int, int64) {
+	if c.selection != nil {
+		ref := c.selection.Rows[row]
+		return ref.ResultIdx, ref.RowIdx
+	}
+	return 0, row
+}
+
+func (c *SearchAggregationComputer) score(row int64) float32 {
+	source, index := c.sourceRow(row)
+	score := c.sources[source].GetScores()[index]
+	if c.selection != nil && c.selection.NegateScores {
+		score = -score
+	}
+	return score
+}
+
+func (c *SearchAggregationComputer) primaryKey(row int64) any {
+	source, index := c.sourceRow(row)
+	return typeutil.GetPK(c.sources[source].GetIds(), index)
 }
 
 func (c *SearchAggregationComputer) Compute(ctx context.Context) ([][]*AggBucketResult, error) {
@@ -82,23 +154,40 @@ func (c *SearchAggregationComputer) Compute(ctx context.Context) ([][]*AggBucket
 }
 
 func (c *SearchAggregationComputer) computeForQi(ctx context.Context, qi int64) ([]*AggBucketResult, error) {
-	topks := c.data.GetTopks()
-	if qi < 0 || qi >= int64(len(topks)) {
-		return nil, merr.WrapErrServiceInternalMsg("invalid qi %d, topks length=%d", qi, len(topks))
+	if qi < 0 || qi >= int64(len(c.topks)) {
+		return nil, merr.WrapErrServiceInternalMsg("invalid qi %d, topks length=%d", qi, len(c.topks))
 	}
 	var start int64
 	for i := int64(0); i < qi; i++ {
-		start += topks[i]
+		start += c.topks[i]
 	}
-	count := topks[qi]
-	rows := make([]reduce.RowRef, count)
+	count := c.topks[qi]
+	rows := make([]int64, count)
+	groupCount := 0
+	if c.selection != nil && count > 0 {
+		// Reduce assigns contiguous group IDs per query in first-seen order.
+		c.groupIDOffset = c.selection.GroupIDs[start]
+	}
 	for i := int64(0); i < count; i++ {
-		rows[i] = reduce.RowRef{ResultIdx: 0, RowIdx: start + i}
+		rows[i] = start + i
+		if c.selection != nil {
+			groupCount = max(groupCount, c.selection.GroupIDs[rows[i]]-c.groupIDOffset+1)
+		}
 	}
-	return c.computeLevel(ctx, qi, 0, rows)
+	if c.selection != nil {
+		c.groupBuckets = make([][]*bucketState, len(c.ctx.Levels))
+		for i := range c.groupBuckets {
+			c.groupBuckets[i] = make([]*bucketState, groupCount)
+		}
+		defer func() {
+			c.groupBuckets = nil
+			c.groupIDOffset = 0
+		}()
+	}
+	return c.computeLevel(ctx, 0, rows)
 }
 
-func (c *SearchAggregationComputer) computeLevel(ctx context.Context, qi int64, levelIdx int, rows []reduce.RowRef) ([]*AggBucketResult, error) {
+func (c *SearchAggregationComputer) computeLevel(ctx context.Context, levelIdx int, rows []int64) ([]*AggBucketResult, error) {
 	if levelIdx < 0 || levelIdx >= len(c.ctx.Levels) {
 		return nil, merr.WrapErrServiceInternalMsg("invalid level index %d", levelIdx)
 	}
@@ -110,30 +199,69 @@ func (c *SearchAggregationComputer) computeLevel(ctx context.Context, qi int64, 
 	buckets := make(map[uint64][]*bucketState)
 	keyOrder := make([]*bucketState, 0)
 
-	for _, ref := range rows {
-		values, err := c.extractOwnValues(ref, level.OwnFieldIDs)
-		if err != nil {
-			return nil, err
-		}
-		h := reduce.HashGroupValues(values)
-
-		var bucket *bucketState
-		for _, cand := range buckets[h] {
-			if reduce.EqualGroupValues(cand.key, values) {
-				bucket = cand
-				break
+	var cached []*bucketState
+	var touched []int
+	if c.selection != nil {
+		cached = c.groupBuckets[levelIdx]
+		defer func() {
+			// A complete group belongs to one subtree; later siblings cannot
+			// reuse these states, including buckets discarded by size pruning.
+			for _, index := range touched {
+				cached[index] = nil
 			}
+		}()
+	}
+
+	for _, ref := range rows {
+		var bucket *bucketState
+		groupID := -1
+		if c.selection != nil {
+			groupID = c.selection.GroupIDs[ref]
+			bucket = cached[groupID-c.groupIDOffset]
 		}
 		if bucket == nil {
-			bucket = newBucketState(values, level.metricPlans)
-			buckets[h] = append(buckets[h], bucket)
-			keyOrder = append(keyOrder, bucket)
+			var values []any
+			if groupID >= 0 {
+				key := c.selection.GroupKeys[groupID]
+				if slices.Equal(level.OwnFieldIDs, c.selection.GroupFieldIDs) {
+					// A single full-key level can reuse the canonical key itself.
+					values = key
+				} else {
+					values = make([]any, len(level.OwnFieldIDs))
+					for i, pos := range c.groupFieldPositions[levelIdx] {
+						values[i] = key[pos]
+					}
+				}
+			} else {
+				var err error
+				values, err = c.extractOwnValues(ref, level.OwnFieldIDs)
+				if err != nil {
+					return nil, err
+				}
+			}
+			h := reduce.HashGroupValues(values)
+			for _, cand := range buckets[h] {
+				if reduce.EqualGroupValues(cand.key, values) {
+					bucket = cand
+					break
+				}
+			}
+			if bucket == nil {
+				bucket = newBucketState(values, level.metricPlans)
+				buckets[h] = append(buckets[h], bucket)
+				keyOrder = append(keyOrder, bucket)
+			}
+			if groupID >= 0 {
+				index := groupID - c.groupIDOffset
+				cached[index] = bucket
+				touched = append(touched, index)
+			}
 		}
 
 		bucket.count++
 		bucket.rows = append(bucket.rows, ref)
 
-		if err := c.updateMetrics(bucket, ref, level.metricPlans); err != nil {
+		if err := c.updateMetrics(bucket, ref, c.metricSources[levelIdx]); err != nil {
 			return nil, err
 		}
 	}
@@ -176,7 +304,7 @@ func (c *SearchAggregationComputer) computeLevel(ctx context.Context, qi int64, 
 			result.Hits = hits
 		}
 		if !isLeaf {
-			subBuckets, err := c.computeLevel(ctx, qi, levelIdx+1, bucket.rows)
+			subBuckets, err := c.computeLevel(ctx, levelIdx+1, bucket.rows)
 			if err != nil {
 				return nil, err
 			}
@@ -187,13 +315,12 @@ func (c *SearchAggregationComputer) computeLevel(ctx context.Context, qi int64, 
 	return output, nil
 }
 
-func (c *SearchAggregationComputer) buildTopHits(rows []reduce.RowRef, cfg *TopHitsConfig) ([]*HitResult, error) {
+func (c *SearchAggregationComputer) buildTopHits(rows []int64, cfg *TopHitsConfig) ([]*HitResult, error) {
 	if cfg == nil {
 		return nil, nil
 	}
 
-	sorted := make([]reduce.RowRef, len(rows))
-	copy(sorted, rows)
+	sorted := append([]int64(nil), rows...)
 	var sortErr error
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sortErr != nil {
@@ -210,11 +337,7 @@ func (c *SearchAggregationComputer) buildTopHits(rows []reduce.RowRef, cfg *TopH
 		return nil, sortErr
 	}
 
-	limit := int(normalizeAggregationSize(cfg.Size))
-	if limit > len(sorted) {
-		limit = len(sorted)
-	}
-
+	limit := min(int(normalizeAggregationSize(cfg.Size)), len(sorted))
 	hits := make([]*HitResult, 0, limit)
 	for i := 0; i < limit; i++ {
 		hit, err := c.buildHitResult(sorted[i])
@@ -226,7 +349,7 @@ func (c *SearchAggregationComputer) buildTopHits(rows []reduce.RowRef, cfg *TopH
 	return hits, nil
 }
 
-func (c *SearchAggregationComputer) compareRowsForTopHits(a, b reduce.RowRef, sortCriteria []SortCriterion) (int, error) {
+func (c *SearchAggregationComputer) compareRowsForTopHits(a, b int64, sortCriteria []SortCriterion) (int, error) {
 	for _, criterion := range sortCriteria {
 		av, _, err := c.readValueByFieldID(a, criterion.FieldID)
 		if err != nil {
@@ -262,8 +385,8 @@ func (c *SearchAggregationComputer) compareRowsForTopHits(a, b reduce.RowRef, so
 		return cmp, nil
 	}
 
-	scoreA := c.data.GetScores()[a.RowIdx]
-	scoreB := c.data.GetScores()[b.RowIdx]
+	scoreA := c.score(a)
+	scoreB := c.score(b)
 	if cmp := compareFloat64(float64(scoreA), float64(scoreB)); cmp != 0 {
 		if c.defaultScoreDirection == "desc" {
 			cmp = -cmp
@@ -271,8 +394,8 @@ func (c *SearchAggregationComputer) compareRowsForTopHits(a, b reduce.RowRef, so
 		return cmp, nil
 	}
 
-	pkA := typeutil.GetPK(c.data.GetIds(), a.RowIdx)
-	pkB := typeutil.GetPK(c.data.GetIds(), b.RowIdx)
+	pkA := c.primaryKey(a)
+	pkB := c.primaryKey(b)
 	if pkA != nil && pkB != nil && pkA != pkB {
 		if typeutil.ComparePK(pkA, pkB) {
 			return -1, nil
@@ -280,25 +403,19 @@ func (c *SearchAggregationComputer) compareRowsForTopHits(a, b reduce.RowRef, so
 		return 1, nil
 	}
 
-	if a.ResultIdx < b.ResultIdx {
+	if a < b {
 		return -1, nil
 	}
-	if a.ResultIdx > b.ResultIdx {
-		return 1, nil
-	}
-	if a.RowIdx < b.RowIdx {
-		return -1, nil
-	}
-	if a.RowIdx > b.RowIdx {
+	if a > b {
 		return 1, nil
 	}
 	return 0, nil
 }
 
-func (c *SearchAggregationComputer) buildHitResult(ref reduce.RowRef) (*HitResult, error) {
+func (c *SearchAggregationComputer) buildHitResult(ref int64) (*HitResult, error) {
 	hit := &HitResult{
-		PK:     typeutil.GetPK(c.data.GetIds(), ref.RowIdx),
-		Score:  c.data.GetScores()[ref.RowIdx],
+		PK:     c.primaryKey(ref),
+		Score:  c.score(ref),
 		Fields: make(map[int64]any, len(c.ctx.UserOutputFieldIDs)),
 	}
 
@@ -316,7 +433,7 @@ func (c *SearchAggregationComputer) buildHitResult(ref reduce.RowRef) (*HitResul
 // scalar types via reduce.NormalizeScalar so hashing and equality behave
 // consistently regardless of the raw Go type the iterator surface returns.
 // Null values pass through as nil so grouping treats null == null.
-func (c *SearchAggregationComputer) extractOwnValues(ref reduce.RowRef, ownFieldIDs []int64) ([]any, error) {
+func (c *SearchAggregationComputer) extractOwnValues(ref int64, ownFieldIDs []int64) ([]any, error) {
 	values := make([]any, len(ownFieldIDs))
 	for i, fieldID := range ownFieldIDs {
 		raw, isNull, err := c.readValueByFieldID(ref, fieldID)
@@ -347,75 +464,64 @@ func keyValuesToMap(values []any, ownFieldIDs []int64) map[int64]any {
 }
 
 // updateMetrics reads each metric source once and delegates state updates to internal/agg.
-func (c *SearchAggregationComputer) updateMetrics(bucket *bucketState, ref reduce.RowRef, plans []metricPlan) error {
-	if len(plans) == 0 {
-		return nil
-	}
-	for _, plan := range plans {
-		targets := bucket.metricStates[plan.alias]
-		if targets == nil {
-			return merr.WrapErrServiceInternalMsg("metric %q: missing bucket state", plan.alias)
-		}
-
-		var raw any
-		isNull := false
-		if plan.spec.FieldID == CountAllFieldID {
-			// count(*) uses a synthetic always-present int64(1) source.
-			raw = int64(1)
-		} else {
-			v, null, err := c.readValueByFieldID(ref, plan.spec.FieldID)
+func (c *SearchAggregationComputer) updateMetrics(bucket *bucketState, ref int64, sources []metricSource) error {
+	for _, source := range sources {
+		var raw any = int64(1) // count(*) is always present.
+		if source.fieldID != CountAllFieldID {
+			value, isNull, err := c.readValueByFieldID(ref, source.fieldID)
 			if err != nil {
 				return err
 			}
-			raw = v
-			isNull = null
+			if isNull {
+				continue
+			}
+			raw = value
 		}
-		if isNull {
-			// Skip null inputs: matches internal/agg semantics.
-			continue
-		}
-
-		if err := plan.aggregate.UpdateState(targets, agg.NewFieldValue(raw)); err != nil {
-			return merr.WrapErrServiceInternalMsg("metric %q update failed: %v", plan.alias, err)
+		input := agg.NewFieldValue(raw)
+		for _, plan := range source.plans {
+			targets := bucket.metricStates[plan.alias]
+			if targets == nil {
+				return merr.WrapErrServiceInternalMsg("metric %q: missing bucket state", plan.alias)
+			}
+			if err := plan.aggregate.UpdateState(targets, input); err != nil {
+				return merr.WrapErrServiceInternalMsg("metric %q update failed: %v", plan.alias, err)
+			}
 		}
 	}
 	return nil
 }
 
-func (c *SearchAggregationComputer) readValueByFieldID(ref reduce.RowRef, fieldID int64) (any, bool, error) {
-	if c.data == nil {
+func (c *SearchAggregationComputer) readValueByFieldID(ref int64, fieldID int64) (any, bool, error) {
+	source, index := c.sourceRow(ref)
+	data := c.sources[source]
+	if data == nil {
 		return nil, true, merr.WrapErrServiceInternalMsg("nil SearchResultData")
 	}
-
 	if fieldID == ScoreFieldID {
-		scores := c.data.GetScores()
-		if ref.RowIdx < 0 || ref.RowIdx >= int64(len(scores)) {
-			return nil, true, merr.WrapErrServiceInternalMsg("score index %d out of range", ref.RowIdx)
+		if index < 0 || index >= int64(len(data.GetScores())) {
+			return nil, true, merr.WrapErrServiceInternalMsg("score index %d out of range", index)
 		}
-		return scores[ref.RowIdx], false, nil
+		return c.score(ref), false, nil
 	}
-
-	fd := c.fieldsByID[fieldID]
-	if fd == nil {
+	accessor := c.accessors[source][fieldID]
+	if accessor == nil {
 		if c.ctx.IsGroupByField(fieldID) {
 			return nil, true, merr.WrapErrServiceInternalMsg("group-by field %d missing from group_by_field_values", fieldID)
 		}
 		return nil, true, merr.WrapErrServiceInternalMsg("field %d missing from fields_data", fieldID)
 	}
-
-	iter := typeutil.GetDataIterator(fd)
-	value := iter(int(ref.RowIdx))
-	if value == nil {
-		return nil, true, nil
+	if accessor.iter == nil {
+		accessor.iter = typeutil.GetDataIterator(accessor.data)
 	}
-	return value, false, nil
+	value := accessor.iter(int(index))
+	return value, value == nil, nil
 }
 
 type bucketState struct {
 	key          []any
 	count        int64
 	metricStates map[string][]*agg.FieldValue
-	rows         []reduce.RowRef
+	rows         []int64
 }
 
 func newBucketState(key []any, plans []metricPlan) *bucketState {

@@ -95,6 +95,10 @@ func reduceSearchResultDataWithGroupBy(
 	groupByFieldIDs []int64,
 	isSearchAggregation bool,
 ) (*milvuspb.SearchResults, error) {
+	return reduceGroupBy(ctx, subSearchResultData, nq, topk, metricType, pkType, offset, groupSize, groupByFieldIDs, isSearchAggregation, nil)
+}
+
+func reduceGroupBy(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, nq, topk int64, metricType string, pkType schemapb.DataType, offset, groupSize int64, groupByFieldIDs []int64, isSearchAggregation bool, selection *aggregationSelection) (*milvuspb.SearchResults, error) {
 	tr := timerecord.NewTimeRecorder("reduceSearchResultDataWithGroupBy")
 	defer func() { tr.CtxElapse(ctx, "done") }()
 
@@ -120,7 +124,11 @@ func reduceSearchResultDataWithGroupBy(
 		},
 	}
 	groupBound := groupSize * limit
-	if err := setupIdListForSearchResult(ret, pkType, groupBound); err != nil {
+	idCapacity := groupBound
+	if selection != nil {
+		idCapacity = 0
+	}
+	if err := setupIdListForSearchResult(ret, pkType, idCapacity); err != nil {
 		return ret, err
 	}
 	allSearchCount, hitNum, err := checkResultDatas(ctx, subSearchResultData, nq, topk)
@@ -131,7 +139,7 @@ func reduceSearchResultDataWithGroupBy(
 	ret.GetResults().AllSearchCount = allSearchCount
 
 	for _, result := range subSearchResultData {
-		if len(result.GetFieldsData()) > 0 {
+		if selection == nil && len(result.GetFieldsData()) > 0 {
 			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
 			break
 		}
@@ -157,7 +165,9 @@ func reduceSearchResultDataWithGroupBy(
 
 	idxComputers := make([]*typeutil.FieldDataIdxComputer, subSearchNum)
 	for i, srd := range subSearchResultData {
-		idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
+		if selection == nil {
+			idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
+		}
 	}
 
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
@@ -165,13 +175,18 @@ func reduceSearchResultDataWithGroupBy(
 	var acceptedRows []reduce.RowRef
 	if len(groupByFieldIDs) == 1 {
 		acceptedRows, err = runSingleFieldGroupByHotLoop(ctx, ret, subSearchResultData, subSearchNqOffset, idxComputers,
-			nq, offset, groupSize, limit, groupBound, groupByFieldIDs[0], maxOutputSize)
+			nq, offset, groupSize, limit, groupBound, groupByFieldIDs[0], maxOutputSize, selection)
 	} else {
 		acceptedRows, err = runMultiFieldGroupByHotLoop(ctx, ret, subSearchResultData, subSearchNqOffset, idxComputers,
-			nq, offset, groupSize, limit, groupBound, groupByFieldIDs, maxOutputSize, isSearchAggregation)
+			nq, offset, groupSize, limit, groupBound, groupByFieldIDs, maxOutputSize, isSearchAggregation, selection)
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	if selection != nil {
+		selection.rows.Rows = acceptedRows
+		return ret, nil
 	}
 
 	if err := reduce.WriteGroupByFieldValues(ret.Results, acceptedRows, subSearchResultData, groupByFieldIDs); err != nil {
@@ -199,6 +214,7 @@ func runSingleFieldGroupByHotLoop(
 	nq, offset, groupSize, limit, groupBound int64,
 	groupByFieldID int64,
 	maxOutputSize int64,
+	selection *aggregationSelection,
 ) ([]reduce.RowRef, error) {
 	subSearchNum := len(subSearchResultData)
 	subSearchGroupByValIterator := make([]func(int) any, subSearchNum)
@@ -247,7 +263,16 @@ func runSingleFieldGroupByHotLoop(
 		}
 
 		for _, key := range groupByValList {
+			var groupID int
+			if selection != nil {
+				groupID = selection.addGroup([]any{reduce.NormalizeScalar(key)})
+			}
 			for _, ref := range groupByValMap[key] {
+				if selection != nil {
+					retSize += selection.append(ref, groupID)
+					acceptedRows = append(acceptedRows, ref)
+					continue
+				}
 				subResData := subSearchResultData[ref.ResultIdx]
 				if len(ret.Results.FieldsData) > 0 {
 					fieldIdxs := idxComputers[ref.ResultIdx].Compute(ref.RowIdx)
@@ -292,6 +317,7 @@ func runMultiFieldGroupByHotLoop(
 	groupByFieldIDs []int64,
 	maxOutputSize int64,
 	isSearchAggregation bool,
+	selection *aggregationSelection,
 ) ([]reduce.RowRef, error) {
 	subSearchNum := len(subSearchResultData)
 	subSearchKeyExtractors := make([]multiGroupKeyExtractor, subSearchNum)
@@ -347,6 +373,9 @@ func runMultiFieldGroupByHotLoop(
 			default:
 				if isNewGroup {
 					entry = &multiGroupEntry{values: values}
+					if selection != nil {
+						entry.groupID = selection.addGroup(values)
+					}
 					groupBuckets[hash] = append(groupBuckets[hash], entry)
 					totalGroups++
 					if !isSearchAggregation {
@@ -357,6 +386,9 @@ func runMultiFieldGroupByHotLoop(
 				ref := reduce.RowRef{ResultIdx: subSearchIdx, RowIdx: resultDataIdx}
 				if isSearchAggregation {
 					perNqAccepted = append(perNqAccepted, ref)
+					if selection != nil {
+						selection.rows.GroupIDs = append(selection.rows.GroupIDs, entry.groupID)
+					}
 				} else {
 					entry.refs = append(entry.refs, ref)
 				}
@@ -372,6 +404,10 @@ func runMultiFieldGroupByHotLoop(
 		}
 
 		for _, ref := range perNqAccepted {
+			if selection != nil {
+				retSize += selection.sizes[ref.ResultIdx].size(int(ref.RowIdx))
+				continue
+			}
 			subResData := subSearchResultData[ref.ResultIdx]
 			if len(ret.Results.FieldsData) > 0 {
 				fieldIdxs := idxComputers[ref.ResultIdx].Compute(ref.RowIdx)
@@ -588,8 +624,9 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 type multiGroupKeyExtractor func(idx int) (uint64, []any)
 
 type multiGroupEntry struct {
-	values []any
-	count  int64
+	groupID int
+	values  []any
+	count   int64
 	// Non-agg only: rows accumulated for regroup-on-emit. Nil for agg and
 	// for skip-set entries.
 	refs []reduce.RowRef
