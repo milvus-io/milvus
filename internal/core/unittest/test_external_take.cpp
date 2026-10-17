@@ -20,6 +20,7 @@
 #include <arrow/table.h>
 #include <arrow/type.h>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <string>
@@ -41,6 +42,7 @@
 #include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/search_result_export_c.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
@@ -1603,6 +1605,74 @@ TEST(ExternalTakeTest, TryTakeForSearch_MultiTypes) {
     // Row 1: [4,5,6,7], Row 3: [12,13,14,15]
     EXPECT_FLOAT_EQ(vec_arr->vectors().float_vector().data(0), 4.0f);
     EXPECT_FLOAT_EQ(vec_arr->vectors().float_vector().data(4), 12.0f);
+}
+
+TEST(ExternalTakeTest,
+     OrderedSearchOutputKeepsBatchTakeForOneOrMultipleFields) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(
+        std::make_unique<MockTakeReader>(BuildTestArrowTable()));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {int64_id, varchar_id};
+    SearchResult result;
+    result.segment_ = segment;
+    result.read_lease_ = segment->AcquireReadLease(folly::CancellationToken());
+    result.read_snapshot_ = segment->CaptureReadSnapshot();
+    CSearchResult c_results[] = {reinterpret_cast<CSearchResult>(&result)};
+    int32_t segment_indices[] = {0, 0};
+    int64_t segment_offsets[] = {1, 3};
+    CProto c_proto{};
+    auto status = FillOutputFieldsOrdered(c_results,
+                                          1,
+                                          reinterpret_cast<CSearchPlan>(&plan),
+                                          segment_indices,
+                                          segment_offsets,
+                                          2,
+                                          &c_proto,
+                                          nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    milvus::proto::schema::SearchResultData output;
+    ASSERT_TRUE(output.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
+    ASSERT_EQ(output.fields_data_size(), 2);
+    EXPECT_EQ(output.fields_data(0).scalars().long_data().data(0), 10000);
+    EXPECT_EQ(output.fields_data(0).scalars().long_data().data(1), 30000);
+    EXPECT_EQ(output.fields_data(1).scalars().string_data().data(0), "row_1");
+    EXPECT_EQ(output.fields_data(1).scalars().string_data().data(1), "row_3");
+    free(const_cast<void*>(c_proto.proto_blob));
+
+    plan.target_entries_ = {int64_id};
+    CProto single_field_proto{};
+    status = FillOutputFieldsOrdered(c_results,
+                                     1,
+                                     reinterpret_cast<CSearchPlan>(&plan),
+                                     segment_indices,
+                                     segment_offsets,
+                                     2,
+                                     &single_field_proto,
+                                     nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    milvus::proto::schema::SearchResultData single_field_output;
+    ASSERT_TRUE(single_field_output.ParseFromArray(
+        single_field_proto.proto_blob, single_field_proto.proto_size));
+    ASSERT_EQ(single_field_output.fields_data_size(), 1);
+    EXPECT_EQ(single_field_output.fields_data(0).scalars().long_data().data(0),
+              10000);
+    EXPECT_EQ(single_field_output.fields_data(0).scalars().long_data().data(1),
+              30000);
+    free(const_cast<void*>(single_field_proto.proto_blob));
 }
 
 TEST(ExternalTakeTest, TryTakeForSearch_FunctionOutputStoredColumn) {

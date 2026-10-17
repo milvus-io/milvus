@@ -484,6 +484,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::shared_ptr<const PublishedSegmentState> snapshot = nullptr,
         milvus::OpContext* op_ctx = nullptr) const;
 
+    // Search late materialization prepares take() once per segment before
+    // dispatching the remaining fields independently.
+    bool
+    TryTakeForSearch(
+        const query::Plan* plan,
+        const int64_t* seg_offsets,
+        int64_t size,
+        SearchResult& results,
+        std::shared_ptr<const PublishedSegmentState> snapshot = nullptr,
+        milvus::OpContext* op_ctx = nullptr) const;
+
     // Result-fill reads through a request-pinned snapshot instead of
     // re-capturing the published state per field at this layer. The whole
     // per-field chain (index routing via HasFieldDataFromState /
@@ -714,15 +725,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     FillTargetEntry(const query::Plan* plan,
                     SearchResult& results,
                     milvus::OpContext* op_ctx = nullptr) const override;
-
-    bool
-    TryTakeForSearch(
-        const query::Plan* plan,
-        const int64_t* seg_offsets,
-        int64_t size,
-        SearchResult& results,
-        std::shared_ptr<const PublishedSegmentState> snapshot = nullptr,
-        milvus::OpContext* op_ctx = nullptr) const;
 
     // Shared helpers for TryTakeForRetrieve / TryTakeForSearch
     struct TakeContext {

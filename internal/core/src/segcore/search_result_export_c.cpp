@@ -45,6 +45,7 @@
 #include "prometheus/histogram.h"
 #include "pb/cgo_msg.pb.h"
 #include "query/PlanImpl.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentReadLease.h"
 #include "segcore/Utils.h"
@@ -1004,23 +1005,36 @@ struct OrderedSegmentFields {
     SearchResult* search_result;
     std::vector<int64_t> segment_offsets;
     std::vector<int64_t> result_positions;
+    std::shared_ptr<const milvus::segcore::SegmentReadSnapshot> read_snapshot;
     OrderedFieldMap fields;
     int64_t scanned_remote_bytes{0};
     int64_t scanned_total_bytes{0};
 };
 
-template <typename MaterializeSegmentFields>
+struct OrderedFieldTask {
+    OrderedSegmentFields* segment_fields;
+    milvus::FieldId field_id;
+    std::unique_ptr<milvus::DataArray> data;
+    int64_t scanned_remote_bytes{0};
+    int64_t scanned_total_bytes{0};
+};
+
+template <typename MaterializeSegmentFields,
+          typename PrepareSealedFields,
+          typename FetchSealedField>
 OrderedFieldMap
-MaterializeOrderedFields(
-    CSearchResult* search_results,
-    int64_t num_search_results,
-    milvus::query::Plan* plan,
-    const std::vector<milvus::FieldId>& field_ids,
-    const int32_t* result_seg_indices,
-    const int64_t* result_seg_offsets,
-    int64_t total_rows,
-    const folly::CancellationToken& cancel_token,
-    MaterializeSegmentFields&& materialize_segment_fields) {
+MaterializeOrderedFields(CSearchResult* search_results,
+                         int64_t num_search_results,
+                         milvus::query::Plan* plan,
+                         const std::vector<milvus::FieldId>& field_ids,
+                         const int32_t* result_seg_indices,
+                         const int64_t* result_seg_offsets,
+                         int64_t total_rows,
+                         const folly::CancellationToken& cancel_token,
+                         bool prepare_take,
+                         MaterializeSegmentFields&& materialize_segment_fields,
+                         PrepareSealedFields&& prepare_sealed_fields,
+                         FetchSealedField&& fetch_sealed_field) {
     OrderedFieldMap ordered_fields;
     if (total_rows == 0 || field_ids.empty()) {
         return ordered_fields;
@@ -1050,20 +1064,30 @@ MaterializeOrderedFields(
         it->second.segment_offsets.push_back(result_seg_offsets[position]);
     }
 
-    auto materialize_one = [&](OrderedSegmentFields& materialized) {
-        milvus::futures::throwIfCancelled(cancel_token);
+    auto get_segment = [](OrderedSegmentFields& materialized) {
         auto segment = static_cast<milvus::segcore::SegmentInternalInterface*>(
             materialized.search_result->segment_);
         AssertInfo(segment != nullptr, "search result has no segment");
-        materialize_segment_fields(segment, materialized);
+        return segment;
+    };
+    auto materialize_segment = [&](OrderedSegmentFields& materialized) {
+        milvus::futures::throwIfCancelled(cancel_token);
+        materialize_segment_fields(get_segment(materialized), materialized);
     };
 
-    if (segment_fields.size() > 1) {
+    // Growing keeps its existing segment-level lock scope. Sealed always uses
+    // field tasks, including when only one field is requested.
+    if (segment_fields.size() == 1 &&
+        get_segment(segment_fields.begin()->second)->type() ==
+            SegmentType::Growing) {
+        materialize_segment(segment_fields.begin()->second);
+    } else {
         auto& pool = milvus::ThreadPools::GetThreadPool(
             milvus::ThreadPoolPriority::MIDDLE);
-        std::vector<std::future<void>> futures;
-        futures.reserve(segment_fields.size());
-        auto futures_guard = folly::makeGuard([&futures]() {
+        std::vector<std::future<void>> prepare_futures;
+        std::vector<std::future<void>> work_futures;
+        std::vector<OrderedFieldTask> field_tasks;
+        auto drain = [](std::vector<std::future<void>>& futures) {
             for (auto& future : futures) {
                 if (future.valid()) {
                     try {
@@ -1072,18 +1096,94 @@ MaterializeOrderedFields(
                     }
                 }
             }
+        };
+        auto futures_guard = folly::makeGuard([&] {
+            drain(prepare_futures);
+            drain(work_futures);
         });
+        prepare_futures.reserve(segment_fields.size());
+        work_futures.reserve(segment_fields.size() * (field_ids.size() + 1));
+
         for (auto& entry : segment_fields) {
             auto* materialized = &entry.second;
-            futures.emplace_back(pool.Submit([&materialize_one, materialized] {
-                materialize_one(*materialized);
-            }));
+            auto* segment = get_segment(*materialized);
+            if (segment->type() == SegmentType::Growing) {
+                work_futures.emplace_back(
+                    pool.Submit([&materialize_segment, materialized] {
+                        materialize_segment(*materialized);
+                    }));
+            } else {
+                materialized->read_snapshot =
+                    materialized->search_result->read_snapshot_;
+                if (!materialized->read_snapshot) {
+                    materialized->read_snapshot =
+                        segment->CaptureReadSnapshot();
+                }
+                auto pinned =
+                    milvus::segcore::ChunkedSegmentSealedImpl::ToPublishedState(
+                        materialized->read_snapshot);
+                AssertInfo(pinned != nullptr,
+                           "sealed search output has no read snapshot");
+                // The batch take runs once per segment. When it is disabled,
+                // submit the field jobs directly without a preparation task.
+                if (prepare_take && plan->take_for_output_allowed_ &&
+                    pinned->use_take_for_output) {
+                    prepare_futures.emplace_back(
+                        pool.Submit([&, segment, materialized] {
+                            milvus::futures::throwIfCancelled(cancel_token);
+                            prepare_sealed_fields(segment, *materialized);
+                        }));
+                }
+            }
         }
-        for (auto& future : futures) {
+
+        for (auto& future : prepare_futures) {
             future.get();
         }
-    } else {
-        materialize_one(segment_fields.begin()->second);
+
+        // Build every (segment, field) job before submitting any of them so
+        // workers can safely write to distinct, stable result slots. Field-
+        // major order gives each segment a turn when the pool is saturated.
+        for (auto field_id : field_ids) {
+            for (auto& entry : segment_fields) {
+                auto& materialized = entry.second;
+                if (get_segment(materialized)->type() != SegmentType::Sealed) {
+                    continue;
+                }
+                if (materialized.fields.count(field_id) == 0) {
+                    field_tasks.push_back({&materialized, field_id});
+                }
+            }
+        }
+        for (auto& task : field_tasks) {
+            auto* field_task = &task;
+            work_futures.emplace_back(pool.Submit([&, field_task] {
+                auto* segment = get_segment(*field_task->segment_fields);
+                milvus::OpContext field_ctx(cancel_token);
+                milvus::segcore::CheckCancellation(&field_ctx,
+                                                   segment->get_segment_id(),
+                                                   field_task->field_id.get(),
+                                                   "FillSearchOutputFields");
+                field_task->data =
+                    fetch_sealed_field(segment,
+                                       *field_task->segment_fields,
+                                       field_task->field_id,
+                                       &field_ctx);
+                field_task->scanned_remote_bytes =
+                    field_ctx.storage_usage.scanned_cold_bytes.load();
+                field_task->scanned_total_bytes =
+                    field_ctx.storage_usage.scanned_total_bytes.load();
+            }));
+        }
+        for (auto& future : work_futures) {
+            future.get();
+        }
+        for (auto& task : field_tasks) {
+            auto& materialized = *task.segment_fields;
+            materialized.fields[task.field_id] = std::move(task.data);
+            materialized.scanned_remote_bytes += task.scanned_remote_bytes;
+            materialized.scanned_total_bytes += task.scanned_total_bytes;
+        }
     }
 
     std::vector<milvus::segcore::MergeBase> result_pairs(total_rows);
@@ -1297,6 +1397,7 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
             result_seg_offsets,
             total_rows,
             cancel_token,
+            /*prepare_take=*/true,
             [plan, &cancel_token](
                 milvus::segcore::SegmentInternalInterface* segment,
                 OrderedSegmentFields& materialized) {
@@ -1315,6 +1416,53 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                     temp_result.search_storage_cost_.scanned_remote_bytes;
                 materialized.scanned_total_bytes =
                     temp_result.search_storage_cost_.scanned_total_bytes;
+            },
+            [plan, &cancel_token](
+                milvus::segcore::SegmentInternalInterface* segment,
+                OrderedSegmentFields& materialized) {
+                auto* sealed =
+                    dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                        segment);
+                AssertInfo(sealed != nullptr,
+                           "sealed search result has no chunked segment");
+                auto snapshot =
+                    milvus::segcore::ChunkedSegmentSealedImpl::ToPublishedState(
+                        materialized.read_snapshot);
+                AssertInfo(snapshot != nullptr,
+                           "sealed search output has no read snapshot");
+                SearchResult taken;
+                milvus::OpContext op_ctx(cancel_token);
+                if (sealed->TryTakeForSearch(
+                        plan,
+                        materialized.segment_offsets.data(),
+                        materialized.segment_offsets.size(),
+                        taken,
+                        snapshot,
+                        &op_ctx)) {
+                    materialized.fields = std::move(taken.output_fields_data_);
+                }
+            },
+            [plan](milvus::segcore::SegmentInternalInterface* segment,
+                   OrderedSegmentFields& materialized,
+                   milvus::FieldId field_id,
+                   milvus::OpContext* field_ctx) {
+                auto& field_meta = plan->schema_->operator[](field_id);
+                auto dynamic_field_id = plan->schema_->get_dynamic_field_id();
+                const auto* dynamic_fields =
+                    dynamic_field_id.has_value() &&
+                            dynamic_field_id.value() == field_id &&
+                            !plan->target_dynamic_fields_.empty()
+                        ? &plan->target_dynamic_fields_
+                        : nullptr;
+                return milvus::segcore::BulkSubscriptWithSnapshot(
+                    segment,
+                    materialized.read_snapshot,
+                    field_ctx,
+                    field_id,
+                    field_meta,
+                    materialized.segment_offsets.data(),
+                    materialized.segment_offsets.size(),
+                    dynamic_fields);
             });
 
         auto result_data =
@@ -1435,6 +1583,7 @@ FillFieldsOrderedAsArrowRecordBatchImpl(
             result_seg_offsets,
             total_rows,
             cancel_token,
+            /*prepare_take=*/false,
             [plan, &requested_field_ids, &cancel_token](
                 milvus::segcore::SegmentInternalInterface* segment,
                 OrderedSegmentFields& materialized) {
@@ -1456,6 +1605,22 @@ FillFieldsOrderedAsArrowRecordBatchImpl(
                     op_ctx.storage_usage.scanned_cold_bytes.load();
                 materialized.scanned_total_bytes =
                     op_ctx.storage_usage.scanned_total_bytes.load();
+            },
+            [](milvus::segcore::SegmentInternalInterface*,
+               OrderedSegmentFields&) {},
+            [plan](milvus::segcore::SegmentInternalInterface* segment,
+                   OrderedSegmentFields& materialized,
+                   milvus::FieldId field_id,
+                   milvus::OpContext* field_ctx) {
+                auto& field_meta = plan->schema_->operator[](field_id);
+                return milvus::segcore::BulkSubscriptWithSnapshot(
+                    segment,
+                    materialized.read_snapshot,
+                    field_ctx,
+                    field_id,
+                    field_meta,
+                    materialized.segment_offsets.data(),
+                    materialized.segment_offsets.size());
             });
 
         auto batch_result = BuildExplicitFieldsBatch(
