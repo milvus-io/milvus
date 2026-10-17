@@ -659,6 +659,35 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 	sps.Equal(int64(3), sps.sealedSegments[1].Segments[0].SegmentID)
 }
 
+func (sps *SegmentPrunerSuite) TestCloneSnapshotItemsIsolatesInPlacePruning() {
+	sps.SetupForClustering("age")
+	paramtable.Init()
+
+	base := make([]SnapshotItem, len(sps.sealedSegments))
+	copy(base, sps.sealedSegments)
+	pruned := cloneSnapshotItems(base)
+
+	schemaHelper, err := typeutil.CreateSchemaHelper(sps.schema)
+	sps.NoError(err)
+	planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, "age==156", nil)
+	sps.NoError(err)
+	serializedPlan, err := proto.Marshal(planNode)
+	sps.NoError(err)
+	queryReq := &internalpb.RetrieveRequest{
+		QueryLabel:         "query",
+		SerializedExprPlan: serializedPlan,
+		PartitionIDs:       []UniqueID{sps.targetPartition},
+	}
+
+	PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, pruned,
+		PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+
+	sps.Equal(2, len(pruned[0].Segments))
+	sps.Equal(0, len(pruned[1].Segments))
+	sps.Equal(2, len(base[0].Segments))
+	sps.Equal(2, len(base[1].Segments))
+}
+
 func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 	paramtable.Init()
 	collectionName := "test_segment_prune"
