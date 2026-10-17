@@ -111,7 +111,17 @@ func (c *ConcurrentBM25Stats) MinusUnlocked(stats *BM25Stats) {
 
 func (c *ConcurrentBM25Stats) applyUnlocked(rows map[uint32]int32, sign int32) {
 	for token, count := range rows {
-		c.shards[shardOf(token)].rowsWithToken[token] += sign * count
+		addTokenCount(c.shards[shardOf(token)].rowsWithToken, token, sign*count)
+	}
+}
+
+// addTokenCount adds delta to the count of token and drops the token once its count is zero,
+// like BM25Stats.Minus, so tokens of removed segments do not stay in the table.
+func addTokenCount(rows map[uint32]int32, token uint32, delta int32) {
+	if count := rows[token] + delta; count != 0 {
+		rows[token] = count
+	} else {
+		delete(rows, token)
 	}
 }
 
@@ -120,7 +130,7 @@ func (c *ConcurrentBM25Stats) apply(rows map[uint32]int32, sign int32) {
 		for token, count := range rows {
 			shard := &c.shards[shardOf(token)]
 			shard.Lock()
-			shard.rowsWithToken[token] += sign * count
+			addTokenCount(shard.rowsWithToken, token, sign*count)
 			shard.Unlock()
 		}
 		return
@@ -148,7 +158,7 @@ func (c *ConcurrentBM25Stats) apply(rows map[uint32]int32, sign int32) {
 		shard := &c.shards[s]
 		shard.Lock()
 		for _, tc := range split[s] {
-			shard.rowsWithToken[tc.token] += sign * tc.count
+			addTokenCount(shard.rowsWithToken, tc.token, sign*tc.count)
 		}
 		shard.Unlock()
 	}
@@ -170,7 +180,7 @@ func (c *ConcurrentBM25Stats) MergeFrom(other *ConcurrentBM25Stats) {
 			src.RLock()
 			dst.Lock()
 			for token, count := range src.rowsWithToken {
-				dst.rowsWithToken[token] += count
+				addTokenCount(dst.rowsWithToken, token, count)
 			}
 			dst.Unlock()
 			src.RUnlock()
