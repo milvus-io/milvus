@@ -133,7 +133,7 @@ func newLocalPackedFixture(t *testing.T, displaced bool) *legacyLocalPackedFixtu
 	require.NoError(t, statsWriter.GenerateByData(100, schemapb.DataType_Int64, &storage.Int64FieldData{Data: pks}))
 	statsPath := filepath.Join(base, "_stats/bloom_filter.100/42")
 	require.NoError(t, packed.WriteFile(cfg, statsPath, statsWriter.GetBuffer()))
-	physicalManifest, err := packed.CommitManifestUpdates(base, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+	physicalManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 		NewFiles: output,
 		Stats:    []packed.StatEntry{{Key: "bloom_filter.100", Files: []string{statsPath}, Metadata: map[string]string{"memory_size": "24"}}},
 	})
@@ -401,7 +401,7 @@ func TestReloadLocalManifestCommitSegmentManifestCAS(t *testing.T) {
 				Mutation: ManifestMutation{Type: mutationType, Updates: updates},
 			}
 			if mutationType == ManifestMutationNoop {
-				actualPrepared, err := packed.CommitManifestUpdates(base, version, f.cfg, updates)
+				actualPrepared, err := packed.CommitManifestUpdates(f.physicalManifest, f.cfg, updates)
 				require.NoError(t, err)
 				require.Equal(t, prepared, actualPrepared)
 				commit.ExpectedManifest = f.physicalManifest

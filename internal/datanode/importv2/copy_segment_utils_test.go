@@ -3911,7 +3911,7 @@ func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInherited
 	var gotIndexes []packed.ManifestIndexInfo
 	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(_ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+		func(_ string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			commitCalls++
 			gotDrops = updates.DropIndexes
 			gotIndexes = updates.Indexes
@@ -3949,7 +3949,7 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 			sourceIndexPath := filepath.Join(cfg.GetRootPath(), "index_v1/1/2/3/6001/1")
 			relativePath, err := packed.ManifestIndexRelativePath(basePath, sourceIndexPath)
 			require.NoError(t, err)
-			copiedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg,
+			copiedManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg,
 				&packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{
 					ColumnName:            "vector",
 					IndexName:             "source_idx",
@@ -4089,9 +4089,7 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 	var captured bool
 	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
 	defer mockey.Mock(packed.CommitManifestUpdates).To(
-		func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig,
-			updates *packed.ManifestUpdates,
-		) (string, error) {
+		func(_ string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			gotDrops, gotIndexes, captured = updates.DropIndexes, updates.Indexes, true
 			return republished, nil
 		}).Build().UnPatch()
@@ -4154,9 +4152,7 @@ func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *tes
 	var captured bool
 	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
 	defer mockey.Mock(packed.CommitManifestUpdates).To(
-		func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig,
-			updates *packed.ManifestUpdates,
-		) (string, error) {
+		func(_ string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			gotDrops, gotIndexes, captured = updates.DropIndexes, updates.Indexes, true
 			return republished, nil
 		}).Build().UnPatch()

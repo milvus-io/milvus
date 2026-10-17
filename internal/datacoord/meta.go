@@ -1423,11 +1423,7 @@ func (u *l0ManifestUpdate) submitManifest(ctx context.Context, io *packed.Manife
 		complete(updateManifestPathIfNewer(u.segment, u.manifestPath))
 		return nil
 	}
-	base, version, err := packed.UnmarshalManifestPath(u.segment.GetManifestPath())
-	if err != nil {
-		return err
-	}
-	return packed.SubmitManifestUpdates(ctx, io, base, version, u.storageConfig,
+	return packed.SubmitManifestUpdates(ctx, io, u.segment.GetManifestPath(), u.storageConfig,
 		&packed.ManifestUpdates{DeltaLogs: u.entries}, func(result packed.ManifestUpdateResult, err error) {
 			if err == nil {
 				u.manifestPath = result.ManifestPath
@@ -1889,8 +1885,11 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 				mlog.Int64("segmentID", segmentID))
 			return false
 		}
-		// skip empty manifest update and same manifest
-		if manifestPath == "" || segment.ManifestPath == manifestPath {
+		// Skip an empty update and a re-report of the current revision. The
+		// revision decides, not the text: rewriting the pointer to another
+		// spelling of the same revision would look like a manifest change to
+		// every exact comparison downstream.
+		if manifestPath == "" || packed.SameManifestPath(segment.ManifestPath, manifestPath) {
 			return false
 		}
 		// Inline publication is used by single-writer manifest paths: the flush of
@@ -1935,7 +1934,7 @@ func UpdateManifestHasIndex(segmentID int64) UpdateOperator {
 func clearEmptyManifestIndexMarker(segmentID int64, expectedManifest string) UpdateOperator {
 	return func(pack *updateSegmentPack) bool {
 		segment := pack.Get(segmentID)
-		if segment == nil || segment.GetManifestPath() != expectedManifest || !segment.GetManifestHasIndex() {
+		if segment == nil || !packed.SameManifestPath(segment.GetManifestPath(), expectedManifest) || !segment.GetManifestHasIndex() {
 			return false
 		}
 		segment.ManifestHasIndex = false
@@ -3996,8 +3995,8 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	}
 	// Optimistic-concurrency CAS on the manifest pointer. Adopt the in-place
 	// result only when it is a valid successor of the current pointer:
-	//   - result == current: idempotent replay of an adoption whose task state
-	//     was lost to a crash after AlterSegments but before meta_saved.
+	//   - result is the current revision: idempotent replay of an adoption whose
+	//     task state was lost to a crash after AlterSegments but before meta_saved.
 	//   - base == current AND result strictly newer on the same base path: a
 	//     fresh forward commit built on the current pointer.
 	// Reject anything else — a stale base (a concurrent stats/index/bump commit
@@ -4010,8 +4009,9 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	if baseManifest == "" {
 		return nil, nil, merr.WrapErrIllegalCompactionPlan("schema bump result missing base manifest")
 	}
-	if resultManifest != currentManifest {
-		if baseManifest != currentManifest {
+	replay := packed.SameManifestPath(resultManifest, currentManifest)
+	if !replay {
+		if !packed.SameManifestPath(baseManifest, currentManifest) {
 			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result base manifest %s no longer matches current %s", baseManifest, currentManifest)
 		}
 		cmp, err := packed.CompareManifestPath(resultManifest, currentManifest)
@@ -4058,18 +4058,21 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	}
 
 	cloned.StorageVersion = resultSegment.GetStorageVersion()
-	cloned.ManifestPath = resultManifest
+	// A replay keeps the stored pointer text, so a differently spelled copy of
+	// the same revision neither rewrites it nor bumps DataVersion below.
+	if !replay {
+		cloned.ManifestPath = resultManifest
+	}
 	// Statistics semantics depend on the adoption path: this branch updates an
 	// existing SegmentInfo, so a non-nil result Stats is an INCREMENT to add
 	// onto the segment's current value. See CompactionSegment.stats.
 	//
-	// The gate is the exactly-once token. resultManifest != currentManifest is
-	// the forward-commit branch of the CAS above; result == current is a replay
-	// of an adoption that already persisted, and its increment is already in
-	// Stats. Loosening the CAS silently double-counts.
+	// The gate is the exactly-once token. !replay is the forward-commit branch
+	// of the CAS above; a replay is an adoption that already persisted, and its
+	// increment is already in Stats. Loosening the CAS silently double-counts.
 	//
 	// runSchemaVersionBumpOnly ships nil, which preserves oldSegment.Stats.
-	if resultManifest != currentManifest {
+	if !replay {
 		if delta := resultSegment.GetStats(); delta != nil {
 			cloned.Stats = addStatsDelta(m.ctx, segmentID, cloned.GetStats(), delta)
 			mlog.Info(m.ctx, "meta update: applied schema bump stats increment",
