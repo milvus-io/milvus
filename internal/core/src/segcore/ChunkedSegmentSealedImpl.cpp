@@ -6732,7 +6732,7 @@ ChunkedSegmentSealedImpl::BuildTextIndexFromFiles(
 
     auto translator = std::make_unique<
         milvus::segcore::storagev1translator::TextMatchIndexTranslator>(
-        load_info, file_ctx, config);
+        load_info, file_ctx, config, op_ctx);
     AssertInfo(info_proto->buildid() >= 0,
                "text index field {} has negative build id {}",
                info_proto->fieldid(),

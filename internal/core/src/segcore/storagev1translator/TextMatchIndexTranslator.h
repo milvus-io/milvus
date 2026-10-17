@@ -43,7 +43,8 @@ class TextMatchIndexTranslator : public IndexReaderTranslator {
     TextMatchIndexTranslator(
         TextMatchIndexLoadInfo load_info,
         milvus::storage::FileManagerContext file_manager_context,
-        milvus::Config config);
+        milvus::Config config,
+        milvus::OpContext* op_ctx = nullptr);
 
     ~TextMatchIndexTranslator() override = default;
 
@@ -78,7 +79,8 @@ class TextMatchIndexTranslator : public IndexReaderTranslator {
     milvus::Config config_;
     std::string key_;
     milvus::cachinglayer::Meta meta_;
-    std::optional<LoadResourceRequest> packed_load_resource_request_;
+    std::optional<LoadResourceRequest> file_load_resource_request_;
+    std::shared_ptr<storage::V1RemoteSource> prepared_source_;
 };
 
 }  // namespace milvus::segcore::storagev1translator
