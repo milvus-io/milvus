@@ -296,7 +296,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         config[DATA_TYPE_KEY] = milvus::DataType::VECTOR_FLOAT;
         config[DIM_KEY] = dim;
         config[index::METRIC_TYPE] = knowhere::metric::L2;
-        config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = std::to_string(2);
+        config["num_build_thread"] = std::to_string(2);
 
         IndexMeta index_meta = {segment_id,
                                 vec_field.get(),

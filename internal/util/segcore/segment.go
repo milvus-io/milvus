@@ -29,8 +29,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -428,6 +431,11 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) (*segcorepb.S
 		return nil, err
 	}
 
+	indexInfos, err := convertFieldIndexInfos(src.GetIndexInfos())
+	if err != nil {
+		return nil, err
+	}
+
 	return &segcorepb.SegmentLoadInfo{
 		SegmentID:            src.GetSegmentID(),
 		PartitionID:          src.GetPartitionID(),
@@ -439,7 +447,7 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) (*segcorepb.S
 		Statslogs:            convertFieldBinlogs(src.GetStatslogs()),
 		Deltalogs:            convertFieldBinlogs(src.GetDeltalogs()),
 		CompactionFrom:       src.GetCompactionFrom(),
-		IndexInfos:           convertFieldIndexInfos(src.GetIndexInfos()),
+		IndexInfos:           indexInfos,
 		SegmentSize:          src.GetSegmentSize(),
 		InsertChannel:        src.GetInsertChannel(),
 		ReadableVersion:      src.GetReadableVersion(),
@@ -553,9 +561,9 @@ func convertBinlogs(src []*datapb.Binlog) []*segcorepb.Binlog {
 }
 
 // convertFieldIndexInfos converts querypb.FieldIndexInfo to segcorepb.FieldIndexInfo.
-func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldIndexInfo {
+func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) ([]*segcorepb.FieldIndexInfo, error) {
 	if src == nil {
-		return nil
+		return nil, nil
 	}
 
 	result := make([]*segcorepb.FieldIndexInfo, 0, len(src))
@@ -564,13 +572,22 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 			continue
 		}
 
+		loadParams, err := indexparams.GetRuntimeLoadParams(paramtable.Get(), funcutil.KeyValuePair2Map(fii.GetIndexParams()))
+		if err != nil {
+			return nil, err
+		}
+		metadata := make([]*commonpb.KeyValuePair, 0, len(fii.GetIndexParams()))
+		for _, param := range fii.GetIndexParams() {
+			metadata = append(metadata, proto.Clone(param).(*commonpb.KeyValuePair))
+		}
 		result = append(result, &segcorepb.FieldIndexInfo{
 			FieldID:                   fii.GetFieldID(),
 			EnableIndex:               fii.GetEnableIndex(),
 			IndexName:                 fii.GetIndexName(),
 			IndexID:                   fii.GetIndexID(),
 			BuildID:                   fii.GetBuildID(),
-			IndexParams:               fii.GetIndexParams(),
+			IndexParams:               metadata,
+			LoadParams:                loadParams,
 			IndexFilePaths:            fii.GetIndexFilePaths(),
 			IndexSize:                 fii.GetIndexSize(),
 			IndexVersion:              fii.GetIndexVersion(),
@@ -580,7 +597,7 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 			IndexStorePathVersion:     fii.GetIndexStorePathVersion(),
 		})
 	}
-	return result
+	return result, nil
 }
 
 // convertTextIndexStats converts datapb.TextIndexStats to segcorepb.TextIndexStats.

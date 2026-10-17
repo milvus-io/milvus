@@ -112,6 +112,8 @@ message FieldIndexInfo {
   int64 index_store_version = 12 [deprecated = true];
   int32 current_scalar_index_version = 13;
   index.IndexStorePathVersion index_store_path_version = 14;
+  // Runtime load defaults only. index_params preserves the persisted index choices.
+  map<string, string> load_params = 15;
 }
 
 message SegmentLoadInfo {

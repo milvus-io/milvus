@@ -640,7 +640,7 @@ TEST(ArtifactBuilderInputTest, PreparedFilesRejectMissingAndEmptyPaths) {
     });
     ASSERT_EQ(adapted.family, families::kVectorDisk);
     adapted.params["local_dir"] = "/tmp";
-    adapted.params[DISK_ANN_BUILD_THREAD_NUM] = 1;
+    adapted.params["num_build_thread"] = 1;
     const auto create = [&] {
         return BuilderRegistry<PreparedVectorBuildFiles<float>>::Instance()
             .Create(adapted.family, adapted.params);
@@ -827,7 +827,6 @@ TEST_F(VectorSideInputFixture,
     options.params = adapted.params;
     options.params.erase(VEC_OPT_FIELDS);
     options.params.erase(VEC_OPT_FIELDS_PATH);
-    options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     auto reader =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)

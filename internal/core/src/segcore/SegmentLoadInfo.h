@@ -1193,7 +1193,8 @@ class SegmentLoadInfo {
                 load_index_info.index_params,
                 load_index_info.enable_mmap,
                 load_index_info.num_rows,
-                load_index_info.dim);
+                load_index_info.dim,
+                &load_index_info.GetMetadataIndexParams());
             if (!needs_file_context) {
                 load_index_info.load_resource_request = request;
             }

@@ -85,8 +85,13 @@ FillLoadIndexInfoFromProto(const milvus::proto::cgo::LoadIndexInfo& info_proto,
     load_index_info->index_version = info_proto.index_version();
     load_index_info->index_store_path_version =
         info_proto.index_store_path_version();
+    load_index_info->index_params.clear();
     for (const auto& [k, v] : info_proto.index_params()) {
         load_index_info->index_params[k] = v;
+    }
+    load_index_info->index_params_from_metadata = load_index_info->index_params;
+    for (const auto& [k, v] : info_proto.load_params()) {
+        load_index_info->index_params.try_emplace(k, v);
     }
     load_index_info->index_files.assign(info_proto.index_files().begin(),
                                         info_proto.index_files().end());
@@ -142,7 +147,8 @@ EstimateLoadIndexResourceFromLoadInfo(
         index_params,
         load_index_info->enable_mmap,
         load_index_info->num_rows,
-        load_index_info->dim);
+        load_index_info->dim,
+        &load_index_info->GetMetadataIndexParams());
 }
 
 }  // namespace

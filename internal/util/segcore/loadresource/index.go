@@ -118,26 +118,24 @@ func consumeCStatus(status *C.CStatus) error {
 
 func buildCLoadIndexInfo(field *schemapb.FieldSchema, segment *querypb.SegmentLoadInfo, index *querypb.FieldIndexInfo) (*cgopb.LoadIndexInfo, error) {
 	indexParams := funcutil.KeyValuePair2Map(index.GetIndexParams())
-	delete(indexParams, common.MmapEnabledKey)
-
-	indexType := indexParams[common.IndexTypeKey]
-	if indexType == "" {
+	if indexParams[common.IndexTypeKey] == "" {
 		return nil, merr.WrapErrServiceInternalMsg("index type is empty")
 	}
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, index.GetNumRows()); err != nil {
-			return nil, err
-		}
-	}
-	if indexType == indexparamcheck.IndexBitmap {
-		indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
-	}
-	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+	loadParams, err := indexparams.GetRuntimeLoadParams(paramtable.Get(), indexParams)
+	if err != nil {
 		return nil, err
 	}
-	if _, ok := indexParams[common.WarmupKey]; !ok {
-		if warmupPolicy := getIndexWarmupPolicy(field, index); warmupPolicy != "" {
-			indexParams[common.WarmupKey] = warmupPolicy
+	effective := make(map[string]string, len(indexParams)+len(loadParams))
+	for key, value := range loadParams {
+		effective[key] = value
+	}
+	for key, value := range indexParams {
+		effective[key] = value
+	}
+	executionIndex := &querypb.FieldIndexInfo{IndexParams: funcutil.Map2KeyValuePair(effective)}
+	if _, explicit := effective[common.WarmupKey]; !explicit {
+		if policy := getIndexWarmupPolicy(field, executionIndex); policy != "" {
+			loadParams[common.WarmupKey] = policy
 		}
 	}
 
@@ -146,11 +144,12 @@ func buildCLoadIndexInfo(field *schemapb.FieldSchema, segment *querypb.SegmentLo
 		PartitionID:               segment.GetPartitionID(),
 		SegmentID:                 segment.GetSegmentID(),
 		Field:                     field,
-		EnableMmap:                isIndexMmapEnable(field, index),
+		EnableMmap:                isIndexMmapEnable(field, executionIndex),
 		IndexID:                   index.GetIndexID(),
 		IndexBuildID:              index.GetBuildID(),
 		IndexVersion:              index.GetIndexVersion(),
 		IndexParams:               indexParams,
+		LoadParams:                loadParams,
 		IndexFiles:                index.GetIndexFilePaths(),
 		IndexEngineVersion:        index.GetCurrentIndexVersion(),
 		IndexFileSize:             index.GetIndexSize(),

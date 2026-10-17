@@ -35,31 +35,9 @@ func (p *knowhereConfig) init(base *BaseTable) {
 	p.IndexParam = ParamGroup{
 		KeyPrefix: "knowhere.",
 		Version:   "2.5.0",
-		Export:    true,
-		DocFunc: func(key string) string {
-			switch key {
-			case "DISKANN.build.max_degree":
-				return "Maximum degree of the Vamana graph"
-			case "DISKANN.build.pq_code_budget_gb_ratio":
-				return "Size limit on the PQ code (compared with raw data)"
-			case "DISKANN.build.search_cache_budget_gb_ratio":
-				return "Ratio of cached node numbers to raw data"
-			case "DISKANN.build.search_list_size":
-				return "Size of the candidate list during building graph"
-			case "DISKANN.search.beam_width_ratio":
-				return "Ratio between the maximum number of IO requests per search iteration and CPU number"
-			case "AISAQ.build.max_degree":
-				return "Maximum degree of the Vamana graph"
-			case "AISAQ.build.pq_code_budget_gb_ratio":
-				return "Size limit on the PQ code (compared with raw data)"
-			case "AISAQ.build.search_list_size":
-				return "Size of the candidate list during building graph"
-			case "AISAQ.search.beam_width_ratio":
-				return "Ratio between the maximum number of IO requests per search iteration and CPU number"
-			default:
-				return ""
-			}
-		},
+		// This open namespace contains optional deployment overrides; algorithm
+		// defaults belong to Knowhere and are not exported into the shipped YAML.
+		Export: false,
 	}
 	p.IndexParam.Init(base.mgr)
 
@@ -68,7 +46,7 @@ func (p *knowhereConfig) init(base *BaseTable) {
 		Version:      "2.5.0",
 		DefaultValue: "true",
 		Export:       true,
-		Doc:          "When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.",
+		Doc:          "Enable optional deployment overrides in the knowhere.<index>.<stage> namespace. Knowhere always owns algorithm defaults; runtime resource facts are supplied independently of this setting.",
 	}
 	p.Enable.Init(base.mgr)
 }
@@ -109,9 +87,19 @@ func (p *knowhereConfig) GetRuntimeParameter(stage string) (map[string]string, e
 
 func (p *knowhereConfig) UpdateIndexParams(indexType string, stage string, indexParams []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
 	defaultParams := p.getIndexParam(indexType, stage)
+	explicit := make(map[string]struct{}, len(indexParams))
+	positions := make(map[string]int, len(indexParams))
+	copied := make([]*commonpb.KeyValuePair, 0, len(indexParams))
+	for _, param := range indexParams {
+		explicit[param.GetKey()] = struct{}{}
+		positions[param.GetKey()] = len(copied)
+		copied = append(copied, &commonpb.KeyValuePair{Key: param.GetKey(), Value: param.GetValue()})
+	}
+	indexParams = copied
 
 	for key, val := range defaultParams {
-		if GetKeyFromSlice(indexParams, key) == "" {
+		if _, present := explicit[key]; !present {
+			positions[key] = len(indexParams)
 			indexParams = append(indexParams,
 				&commonpb.KeyValuePair{
 					Key:   key,
@@ -125,6 +113,14 @@ func (p *knowhereConfig) UpdateIndexParams(indexType string, stage string, index
 		overrideIndexParams := p.getIndexParam(overrideIndexType, stage)
 		mlog.Info(context.TODO(), "override index params", mlog.String("overrideIndexType", overrideIndexType), mlog.Any("overrideIndexParams", overrideIndexParams))
 		for key, val := range overrideIndexParams {
+			if _, present := explicit[key]; present {
+				continue
+			}
+			if i, present := positions[key]; present {
+				indexParams[i].Value = val
+				continue
+			}
+			positions[key] = len(indexParams)
 			indexParams = append(indexParams,
 				&commonpb.KeyValuePair{
 					Key:   key,

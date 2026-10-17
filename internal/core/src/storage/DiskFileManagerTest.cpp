@@ -237,7 +237,6 @@ DiskConsumerType(const storage::FileManagerContext& context,
     params[NUM_ROWS_KEY] = rows;
     params["nullable"] = schema.nullable();
     params["local_dir"] = TestLocalPath;
-    params[index::DISK_ANN_LOAD_THREAD_NUM] = "1";
     return index::AdaptIndexType(
         {.index_type = knowhere::IndexEnum::INDEX_DISKANN,
          .field_type = field_type,
@@ -1869,7 +1868,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
 
     milvus::Config config;
     config[DIM_KEY] = dim;
-    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+    config["num_build_thread"] = "1";
 
     auto published = PublishDiskResident(file_manager_context, data, config);
     EXPECT_EQ(PersistedVectorRowCount(published, file_manager_context),
@@ -1937,11 +1936,11 @@ TEST_F(DiskAnnFileManagerTest,
 
     milvus::Config config;
     config[DIM_KEY] = dim;
-    config[milvus::index::DISK_ANN_MAX_DEGREE] = std::to_string(24);
-    config[milvus::index::DISK_ANN_SEARCH_LIST_SIZE] = std::to_string(56);
-    config[milvus::index::DISK_ANN_PQ_CODE_BUDGET] = std::to_string(0.001);
-    config[milvus::index::DISK_ANN_BUILD_DRAM_BUDGET] = std::to_string(2);
-    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+    config["max_degree"] = std::to_string(24);
+    config["search_list_size"] = std::to_string(56);
+    config["pq_code_budget_gb"] = std::to_string(0.001);
+    config["build_dram_budget_gb"] = std::to_string(2);
+    config["num_build_thread"] = "1";
     config[milvus::index::ENABLE_MMAP_I2O_MAP] = true;
     config[milvus::index::ENABLE_MMAP_O2I_MAP] = true;
 
@@ -1978,7 +1977,6 @@ TEST_F(DiskAnnFileManagerTest,
 
     milvus::Config load_config;
     load_config[DIM_KEY] = dim;
-    load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
     load_config["index_files"] = files;
     load_config[milvus::index::ENABLE_MMAP_I2O_MAP] = true;
     load_config[milvus::index::ENABLE_MMAP_O2I_MAP] = true;
@@ -2040,7 +2038,7 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
         NullableDiskVectors(num_rows, dim, vec_data.data(), valid_data.get());
     milvus::Config config;
     config[DIM_KEY] = dim;
-    config[index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+    config["num_build_thread"] = "1";
     auto published = PublishDiskResident(file_manager_context, data, config);
     EXPECT_EQ(PersistedVectorRowCount(published, file_manager_context),
               num_rows);
@@ -2051,7 +2049,6 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
 
     milvus::Config load_config;
     load_config[DIM_KEY] = dim;
-    load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
     load_config["index_files"] = files;
 
     auto local_chunk_manager =
@@ -2165,7 +2162,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     milvus::Config config;
     config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
     config[DIM_KEY] = dim;
-    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+    config["num_build_thread"] = "1";
 
     auto adapted = DiskConsumerType(file_manager_context, num_rows, config);
     indexbuilder::BuildRequest request;

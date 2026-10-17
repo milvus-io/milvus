@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -593,14 +592,6 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		params, err = Params.KnowhereConfig.UpdateIndexParams(GetIndexType(params), paramtable.BuildStage, params)
 		if err != nil {
 			return nil, merr.WrapErrServiceInternalErr(err, "failed to update index build params")
-		}
-	}
-
-	if isDiskANNIndex(GetIndexType(params)) {
-		var err error
-		params, err = indexparams.UpdateDiskIndexBuildParams(Params, params)
-		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "failed to append index build params")
 		}
 	}
 

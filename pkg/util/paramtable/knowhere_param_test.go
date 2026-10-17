@@ -337,3 +337,52 @@ func TestKnowhereConfig_UpdateIndexParams_WithOverride(t *testing.T) {
 		})
 	}
 }
+
+func TestKnowhereConfig_UpdatePreservesExplicitEmpty(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+	bt.Save("knowhere.TEST_INDEX.build.empty", "default")
+	input := []*commonpb.KeyValuePair{{Key: "empty", Value: ""}}
+	result, err := cfg.UpdateIndexParams("TEST_INDEX", BuildStage, input)
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Empty(t, result[0].Value)
+}
+
+func TestKnowhereConfig_OverridePreservesExplicitValuesAndMetadata(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+	bt.Save("knowhere.ORIGINAL.build.shared", "original")
+	bt.Save("knowhere.TARGET.build.shared", "target")
+	bt.Save("knowhere.TARGET.build.empty", "default")
+	input := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "ORIGINAL"}, {Key: OverrideIndexTypeKey, Value: "TARGET"}, {Key: "empty", Value: ""}, {Key: "zero", Value: "0"}, {Key: "disabled", Value: "false"}}
+	result, err := cfg.UpdateIndexParams("ORIGINAL", BuildStage, input)
+	assert.NoError(t, err)
+	assert.Equal(t, "ORIGINAL", input[0].Value)
+	assert.Equal(t, "TARGET", GetKeyFromSlice(result, common.IndexTypeKey))
+	assert.Empty(t, GetKeyFromSlice(result, "empty"))
+	assert.Equal(t, "0", GetKeyFromSlice(result, "zero"))
+	assert.Equal(t, "false", GetKeyFromSlice(result, "disabled"))
+	sharedCount := 0
+	for _, kv := range result {
+		if kv.GetKey() == "shared" {
+			sharedCount++
+			assert.Equal(t, "target", kv.GetValue())
+		}
+	}
+	assert.Equal(t, 1, sharedCount)
+}
+
+func TestKnowhereConfig_SearchPreservesExplicitValues(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+	bt.Save("knowhere.TEST_INDEX.search.zero", "1")
+	bt.Save("knowhere.TEST_INDEX.search.disabled", "true")
+	bt.Save("knowhere.TEST_INDEX.search.empty", "default")
+	params := map[string]any{common.SearchParamKey: `{"zero":0,"disabled":false,"empty":""}`}
+	assert.NoError(t, cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, params))
+	assert.JSONEq(t, `{"zero":0,"disabled":false,"empty":""}`, params[common.SearchParamKey].(string))
+}

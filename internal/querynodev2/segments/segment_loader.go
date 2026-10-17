@@ -48,9 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
-	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -266,10 +264,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	for _, info := range infos {
 		loadInfo := info
-
-		if err := prepareIndexLoadParams(loadInfo.GetIndexInfos()); err != nil {
-			return nil, err
-		}
 
 		segment, err := NewSegment(
 			ctx,
@@ -1979,41 +1973,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		MmapFieldCount:     estimate.MmapFieldCount,
 		FieldGpuMemorySize: estimate.FieldGPUMemoryBytes,
 	}, nil
-}
-
-// prepareIndexLoadParams injects QueryNode-local index load parameters into each
-// index's IndexParams in place. These params (e.g. DISKANN num_load_thread) are
-// derived from local QueryNode resources/config and are never persisted in the
-// index metadata, so they must be re-injected on every load path before the load
-// info reaches segcore. Both full-load (Load) and Reopen call this; skipping it
-// on Reopen was the root cause of issue #51249 (segcore asserts
-// "param num_load_thread is empty" while loading a DISKANN index).
-func prepareIndexLoadParams(indexInfos []*querypb.FieldIndexInfo) error {
-	for _, indexInfo := range indexInfos {
-		if indexInfo == nil {
-			continue
-		}
-		indexParams := funcutil.KeyValuePair2Map(indexInfo.GetIndexParams())
-
-		// some build params also exist in indexParams, which are useless during loading process
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
-			if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
-				return err
-			}
-		}
-
-		// set whether enable offset cache for bitmap index
-		if indexParams["index_type"] == indexparamcheck.IndexBitmap {
-			indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
-		}
-
-		if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
-			return err
-		}
-
-		indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
-	}
-	return nil
 }
 
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,

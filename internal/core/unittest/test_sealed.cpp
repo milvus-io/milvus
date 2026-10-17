@@ -3693,11 +3693,11 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
     config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
     config[knowhere::meta::METRIC_TYPE] = metric_type;
     config[DIM_KEY] = dim;
-    config[index::DISK_ANN_MAX_DEGREE] = std::to_string(24);
-    config[index::DISK_ANN_SEARCH_LIST_SIZE] = std::to_string(56);
-    config[index::DISK_ANN_PQ_CODE_BUDGET] = std::to_string(0.001);
-    config[index::DISK_ANN_BUILD_DRAM_BUDGET] = std::to_string(2);
-    config[index::DISK_ANN_BUILD_THREAD_NUM] = std::to_string(2);
+    config["max_degree"] = std::to_string(24);
+    config["search_list_size"] = std::to_string(56);
+    config["pq_code_budget_gb"] = std::to_string(0.001);
+    config["build_dram_budget_gb"] = std::to_string(2);
+    config["num_build_thread"] = std::to_string(2);
     auto load_conf = generate_load_conf(knowhere::IndexEnum::INDEX_DISKANN,
                                         metric_type,
                                         dataset_size * emb_list_len);

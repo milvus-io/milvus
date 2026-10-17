@@ -66,13 +66,14 @@ EstimateVector(const IndexType& index_type,
                int64_t num_rows,
                int64_t dim,
                const Config& config,
+               const Config& capability_config,
                knowhere::expected<knowhere::Resource>& resource,
                bool& has_raw_data) {
     resource = knowhere::IndexStaticFaced<T>::EstimateLoadResource(
         index_type, index_version, index_size, num_rows, dim, config);
     if (resource.has_value()) {
         has_raw_data = knowhere::IndexStaticFaced<T>::HasRawData(
-            index_type, index_version, config);
+            index_type, index_version, capability_config);
     }
 }
 
@@ -98,15 +99,22 @@ VectorUsesDiskLoad(const IndexType& index_type, IndexVersion index_version) {
 }
 
 LoadResourceRequest
-VecIndexLoadResource(DataType field_type,
-                     DataType element_type,
-                     IndexVersion index_version,
-                     uint64_t index_size_in_bytes,
-                     const std::map<std::string, std::string>& index_params,
-                     bool mmap_enable,
-                     int64_t num_rows,
-                     int64_t dim) {
+VecIndexLoadResource(
+    DataType field_type,
+    DataType element_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim,
+    const std::map<std::string, std::string>* metadata_index_params) {
     auto config = ParseConfigFromIndexParams(index_params);
+    // Load defaults may affect resource use, but cannot change what vectors
+    // were stored by Build. Knowhere interprets both maps; Milvus keeps their
+    // provenance without recognizing any algorithm parameter names.
+    const auto capability_config = ParseConfigFromIndexParams(
+        metadata_index_params ? *metadata_index_params : index_params);
     auto type = index_params.find(INDEX_TYPE);
     AssertInfo(type != index_params.end(), "index type is empty");
     const auto& index_type = type->second;
@@ -132,6 +140,7 @@ VecIndexLoadResource(DataType field_type,
                                   num_rows,
                                   dim,
                                   config,
+                                  capability_config,
                                   resource,
                                   has_raw_data);
                 return true;
