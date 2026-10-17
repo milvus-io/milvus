@@ -18,6 +18,17 @@ func FindFieldDataByID(fieldsData []*schemapb.FieldData, fieldID int64) *schemap
 	return nil
 }
 
+// PresizeRows bounds the rows a reduce presizes its output for by both the
+// rows it may keep and the rows its inputs hold, so a large topK over few
+// hits does not reserve space that is never filled.
+func PresizeRows(results []*schemapb.SearchResultData, keepBound int64) int64 {
+	var inputRows int64
+	for _, result := range results {
+		inputRows += int64(typeutil.GetSizeOfIDs(result.GetIds()))
+	}
+	return max(min(keepBound, inputRows), 0)
+}
+
 func FindGroupByFieldData(data *schemapb.SearchResultData, fieldID int64, allowSingularFallback bool) *schemapb.FieldData {
 	if data == nil {
 		return nil

@@ -1691,6 +1691,125 @@ func (s *SearchPipelineSuite) TestHybridAssembleOpNullableVectorCompactData() {
 	s.Equal([]float32{30, 30, 40, 40, 20, 20}, field.GetVectors().GetFloatVector().GetData())
 }
 
+func (s *SearchPipelineSuite) TestPickFieldDataSizesColumnsByPickedRows() {
+	searchIDs := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{3, 1, 2}}}}
+	pkOffset := map[any]int{int64(1): 0, int64(2): 1, int64(3): 2, int64(4): 3}
+	queryFields := []*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64, FieldName: "pk", FieldId: 100,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}}},
+			}},
+		},
+		{
+			Type: schemapb.DataType_FloatVector, FieldName: "vec", FieldId: 101,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 1, 2, 2, 3, 3, 4, 4}}},
+			}},
+		},
+		{
+			Type: schemapb.DataType_FloatVector, FieldName: "nullable_vec", FieldId: 102,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:       2,
+				ValidData: []bool{false, true, false, true},
+				Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{2, 2, 4, 4}}},
+			}},
+		},
+		{
+			// Every row null: the schema marks it nullable and the source
+			// carries neither validity nor payload.
+			Type: schemapb.DataType_FloatVector, FieldName: "null_vec", FieldId: 103,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+			}},
+		},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 103, Name: "null_vec", DataType: schemapb.DataType_FloatVector, Nullable: true},
+	}}
+
+	result, err := PickFieldData(searchIDs, pkOffset, queryFields, schema, 12345)
+	s.Require().NoError(err)
+	s.Require().Len(result, 4)
+
+	pk := result[0].GetScalars().GetLongData().GetData()
+	s.Equal([]int64{3, 1, 2}, pk)
+	s.Equal(3, cap(pk))
+
+	vec := result[1].GetVectors().GetFloatVector().GetData()
+	s.Equal([]float32{3, 3, 1, 1, 2, 2}, vec)
+	s.Equal(6, cap(vec))
+
+	// The nullable payload is reserved for the valid share of its source,
+	// half of the 3 picked rows rounded up, not for every picked row.
+	nullableVec := result[2].GetVectors().GetFloatVector().GetData()
+	s.Equal([]float32{2, 2}, nullableVec)
+	s.Equal(4, cap(nullableVec))
+	validData := typeutil.GetFieldDataValidData(result[2])
+	s.Equal([]bool{false, false, true}, validData)
+	s.Equal(3, cap(validData))
+
+	nullVec := result[3].GetVectors().GetFloatVector()
+	s.Require().NotNil(nullVec)
+	s.Zero(cap(nullVec.GetData()))
+	s.Equal([]bool{false, false, false}, typeutil.GetFieldDataValidData(result[3]))
+}
+
+func (s *SearchPipelineSuite) TestHybridAssembleOpSizesColumnsByRerankedRows() {
+	sub := func(ids []int64, valid []bool, vectors []float32) *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       int64(len(ids)),
+			Topks:      []int64{int64(len(ids))},
+			Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+			Scores:     make([]float32, len(ids)),
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type: schemapb.DataType_Int64, FieldName: "pk", FieldId: 100,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}},
+					}},
+				},
+				{
+					Type: schemapb.DataType_FloatVector, FieldName: "nullable_vec", FieldId: 101,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:       2,
+						ValidData: valid,
+						Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectors}},
+					}},
+				},
+			},
+		}}
+	}
+	sub0 := sub([]int64{10, 20, 30}, []bool{false, true, false}, []float32{20, 20})
+	sub1 := sub([]int64{40, 50}, []bool{false, false}, nil)
+	rankResult := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       3,
+		Topks:      []int64{3},
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{50, 10, 30}}}},
+		Scores:     []float32{0.9, 0.8, 0.7},
+	}}
+
+	op := &hybridAssembleOperator{collectionID: 12345}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{sub0, sub1}, rankResult)
+	s.Require().NoError(err)
+	result := out[0].(*milvuspb.SearchResults).GetResults()
+	s.Require().Len(result.GetFieldsData(), 2)
+
+	pk := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+	s.Equal([]int64{50, 10, 30}, pk)
+	s.Equal(3, cap(pk))
+
+	// Every picked row is null: the vector payload stays unset, as when the
+	// columns were built from nil.
+	field := result.GetFieldsData()[1]
+	s.Equal([]bool{false, false, false}, typeutil.GetFieldDataValidData(field))
+	s.Nil(field.GetVectors().GetData())
+}
+
 func (s *SearchPipelineSuite) TestComputeFieldIdxsByOriginalOrderUsesAscendingRowsAndPreservesOutputOrder() {
 	rowIdxs := []int64{5, 1, 4, 2}
 	calls := make([]int64, 0, len(rowIdxs))
