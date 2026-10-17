@@ -69,7 +69,7 @@ func (p Properties) AppendTaskID(taskID int64) {
 
 func (p Properties) AppendType(t Type) {
 	switch t {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment, PKIndexCompaction:
 		p[TypeKey] = t
 	default:
 		p[TypeKey] = TypeNone
@@ -117,7 +117,7 @@ func (p Properties) GetTaskType() (Type, error) {
 		return "", WrapErrTaskPropertyLack(TypeKey, p[TaskIDKey])
 	}
 	switch p[TypeKey] {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment, PKIndexCompaction:
 		return p[TypeKey], nil
 	default:
 		// Task types are assigned by the coordinator. An unrecognized type means

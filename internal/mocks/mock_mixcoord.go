@@ -9223,6 +9223,39 @@ func (_c *MixCoord_Register_Call) RunAndReturn(run func() error) *MixCoord_Regis
 	return _c
 }
 
+// RegisterPKIndexCoordGRPCService provides a mock function with given fields: server
+func (_m *MixCoord) RegisterPKIndexCoordGRPCService(server *grpc.Server) {
+	_m.Called(server)
+}
+
+// MixCoord_RegisterPKIndexCoordGRPCService_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterPKIndexCoordGRPCService'
+type MixCoord_RegisterPKIndexCoordGRPCService_Call struct {
+	*mock.Call
+}
+
+// RegisterPKIndexCoordGRPCService is a helper method to define mock.On call
+//   - server *grpc.Server
+func (_e *MixCoord_Expecter) RegisterPKIndexCoordGRPCService(server interface{}) *MixCoord_RegisterPKIndexCoordGRPCService_Call {
+	return &MixCoord_RegisterPKIndexCoordGRPCService_Call{Call: _e.mock.On("RegisterPKIndexCoordGRPCService", server)}
+}
+
+func (_c *MixCoord_RegisterPKIndexCoordGRPCService_Call) Run(run func(server *grpc.Server)) *MixCoord_RegisterPKIndexCoordGRPCService_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*grpc.Server))
+	})
+	return _c
+}
+
+func (_c *MixCoord_RegisterPKIndexCoordGRPCService_Call) Return() *MixCoord_RegisterPKIndexCoordGRPCService_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MixCoord_RegisterPKIndexCoordGRPCService_Call) RunAndReturn(run func(*grpc.Server)) *MixCoord_RegisterPKIndexCoordGRPCService_Call {
+	_c.Run(run)
+	return _c
+}
+
 // RegisterStreamingCoordGRPCService provides a mock function with given fields: server
 func (_m *MixCoord) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	_m.Called(server)

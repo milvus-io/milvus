@@ -6453,8 +6453,23 @@ type dataCoordConfig struct {
 	LevelZeroCompactionForceSelectAll        ParamItem `refreshable:"true"`
 
 	// Garbage Collection
-	EnableGarbageCollection                ParamItem `refreshable:"false"`
-	GCInterval                             ParamItem `refreshable:"false"`
+	EnableGarbageCollection       ParamItem `refreshable:"false"`
+	GCInterval                    ParamItem `refreshable:"false"`
+	PKIndexGCInterval             ParamItem `refreshable:"false"`
+	PKIndexGCGrace                ParamItem `refreshable:"false"`
+	PKIndexManifestRetainVersions ParamItem `refreshable:"false"`
+	PKIndexManifestRetainDuration ParamItem `refreshable:"false"`
+
+	PKIndexCompactionL0Trigger             ParamItem `refreshable:"true"`
+	PKIndexCompactionMinMergeRuns          ParamItem `refreshable:"true"`
+	PKIndexCompactionSizeRatio             ParamItem `refreshable:"true"`
+	PKIndexCompactionSpaceAmpRatio         ParamItem `refreshable:"true"`
+	PKIndexCompactionMaxInputBytes         ParamItem `refreshable:"true"`
+	PKIndexCompactionMaxInputTables        ParamItem `refreshable:"true"`
+	PKIndexCompactionMaxConcurrent         ParamItem `refreshable:"true"`
+	PKIndexCompactionInspectInterval       ParamItem `refreshable:"false"`
+	PKIndexCompactionFailureCooldown       ParamItem `refreshable:"true"`
+	PKIndexCompactionTargetFileSize        ParamItem `refreshable:"true"`
 	GCMissingTolerance                     ParamItem `refreshable:"false"`
 	GCDropTolerance                        ParamItem `refreshable:"false"`
 	GCRemoveConcurrent                     ParamItem `refreshable:"false"`
@@ -6526,6 +6541,7 @@ type dataCoordConfig struct {
 
 	ClusteringCompactionSlotUsage        ParamItem `refreshable:"true"`
 	MixCompactionSlotUsage               ParamItem `refreshable:"true"`
+	PKIndexCompactionSlotUsage           ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage          ParamItem `refreshable:"true"`
 	BumpSchemaVersionCompactionSlotUsage ParamItem `refreshable:"true"`
 	IndexTaskSlotUsage                   ParamItem `refreshable:"true"`
@@ -7400,6 +7416,132 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 	}
 	p.GCInterval.Init(base.mgr)
 
+	p.PKIndexGCInterval = ParamItem{
+		Key:          "dataCoord.pkindex.gc.interval",
+		Version:      "3.1.0-beta",
+		DefaultValue: "3600",
+		Doc:          "The interval at which data coord runs garbage collection for primary key index files, unit: second.",
+		Export:       true,
+	}
+	p.PKIndexGCInterval.Init(base.mgr)
+
+	p.PKIndexGCGrace = ParamItem{
+		Key:          "dataCoord.pkindex.gc.grace",
+		Version:      "3.1.0-beta",
+		DefaultValue: "86400",
+		Doc:          "Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second. The minimum is 600 (10 minutes); a lower value disables the garbage collection of primary key index files.",
+		Export:       true,
+	}
+	p.PKIndexGCGrace.Init(base.mgr)
+
+	p.PKIndexManifestRetainVersions = ParamItem{
+		Key:          "dataCoord.pkindex.gc.manifestRetainVersions",
+		Version:      "3.1.0-beta",
+		DefaultValue: "8",
+		Doc:          "The number of the newest primary key index manifest versions that garbage collection keeps for each vchannel.",
+		Export:       true,
+	}
+	p.PKIndexManifestRetainVersions.Init(base.mgr)
+
+	p.PKIndexManifestRetainDuration = ParamItem{
+		Key:          "dataCoord.pkindex.gc.manifestRetainDuration",
+		Version:      "3.1.0-beta",
+		DefaultValue: "3600",
+		Doc:          "Garbage collection keeps every primary key index manifest version written within this time, unit: second.",
+		Export:       true,
+	}
+	p.PKIndexManifestRetainDuration.Init(base.mgr)
+
+	p.PKIndexCompactionL0Trigger = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.l0Trigger",
+		Version:      "3.1.0-beta",
+		DefaultValue: "4",
+		Doc:          "Number of flushed (L0) tables of a vchannel that triggers their merge into a run.",
+		Export:       true,
+	}
+	p.PKIndexCompactionL0Trigger.Init(base.mgr)
+
+	p.PKIndexCompactionMinMergeRuns = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.minMergeRuns",
+		Version:      "3.1.0-beta",
+		DefaultValue: "4",
+		Doc:          "Minimum number of consecutive runs of similar size that merge into one run.",
+		Export:       true,
+	}
+	p.PKIndexCompactionMinMergeRuns.Init(base.mgr)
+
+	p.PKIndexCompactionSizeRatio = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.sizeRatio",
+		Version:      "3.1.0-beta",
+		DefaultValue: "4.0",
+		Doc:          "Runs merge together only when the largest is at most this many times the smallest.",
+		Export:       true,
+	}
+	p.PKIndexCompactionSizeRatio.Init(base.mgr)
+
+	p.PKIndexCompactionSpaceAmpRatio = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.spaceAmpRatio",
+		Version:      "3.1.0-beta",
+		DefaultValue: "1.0",
+		Doc:          "All tables merge into one run when the bytes outside the oldest run reach this many times the oldest run.",
+		Export:       true,
+	}
+	p.PKIndexCompactionSpaceAmpRatio.Init(base.mgr)
+
+	p.PKIndexCompactionMaxInputBytes = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.maxInputBytes",
+		Version:      "3.1.0-beta",
+		DefaultValue: "8589934592",
+		Doc:          "Maximum input bytes of one compaction of a flushed-table merge or a size-tiered merge, unit: byte.",
+		Export:       true,
+	}
+	p.PKIndexCompactionMaxInputBytes.Init(base.mgr)
+
+	p.PKIndexCompactionMaxInputTables = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.maxInputTables",
+		Version:      "3.1.0-beta",
+		DefaultValue: "64",
+		Doc:          "Maximum number of flushed tables in one compaction.",
+		Export:       true,
+	}
+	p.PKIndexCompactionMaxInputTables.Init(base.mgr)
+
+	p.PKIndexCompactionMaxConcurrent = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.maxConcurrent",
+		Version:      "3.1.0-beta",
+		DefaultValue: "16",
+		Doc:          "Maximum number of compaction tasks in flight across all vchannels.",
+		Export:       true,
+	}
+	p.PKIndexCompactionMaxConcurrent.Init(base.mgr)
+
+	p.PKIndexCompactionInspectInterval = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.inspectInterval",
+		Version:      "3.1.0-beta",
+		DefaultValue: "10",
+		Doc:          "The interval at which the changed manifests are scored, unit: second.",
+		Export:       true,
+	}
+	p.PKIndexCompactionInspectInterval.Init(base.mgr)
+
+	p.PKIndexCompactionFailureCooldown = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.failureCooldown",
+		Version:      "3.1.0-beta",
+		DefaultValue: "600",
+		Doc:          "A vchannel whose compaction failed is not planned again for this time, unit: second.",
+		Export:       true,
+	}
+	p.PKIndexCompactionFailureCooldown.Init(base.mgr)
+
+	p.PKIndexCompactionTargetFileSize = ParamItem{
+		Key:          "dataCoord.pkindex.compaction.targetFileSize",
+		Version:      "3.1.0-beta",
+		DefaultValue: "134217728",
+		Doc:          "An output table is closed when its entries reach this many bytes, unit: byte.",
+		Export:       true,
+	}
+	p.PKIndexCompactionTargetFileSize.Init(base.mgr)
+
 	p.GCScanIntervalInHour = ParamItem{
 		Key:          "dataCoord.gc.scanInterval",
 		Version:      "2.4.0",
@@ -8154,6 +8296,15 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	}
 	p.MixCompactionSlotUsage.Init(base.mgr)
 
+	p.PKIndexCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.pkindexCompactionUsage",
+		Version:      "3.1.0-beta",
+		DefaultValue: "4",
+		Doc:          "The slot usage of a primary key index compaction task.",
+		Export:       true,
+	}
+	p.PKIndexCompactionSlotUsage.Init(base.mgr)
+
 	p.L0DeleteCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.l0DeleteCompactionUsage",
 		Version:      "2.4.6",
@@ -8352,6 +8503,10 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 // /////////////////////////////////////////////////////////////////////////////
 // --- datanode ---
 type dataNodeConfig struct {
+	PKIndexCompactionTerminalTaskTTL ParamItem `refreshable:"true"`
+	PKIndexCompactionParallelism     ParamItem `refreshable:"false"`
+	PKIndexCompactionDiskMargin      ParamItem `refreshable:"true"`
+
 	FlowGraphMaxQueueLength           ParamItem `refreshable:"false"`
 	FlowGraphMaxParallelism           ParamItem `refreshable:"false"`
 	MaxParallelSyncTaskNum            ParamItem `refreshable:"false"`
@@ -8452,6 +8607,33 @@ type dataNodeConfig struct {
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
+	p.PKIndexCompactionTerminalTaskTTL = ParamItem{
+		Key:          "dataNode.pkindex.compaction.terminalTaskTTL",
+		Version:      "3.1.0-beta",
+		DefaultValue: "600",
+		Doc:          "A finished or failed compaction task that no coordinator queried for this time is deleted, unit: second.",
+		Export:       true,
+	}
+	p.PKIndexCompactionTerminalTaskTTL.Init(base.mgr)
+
+	p.PKIndexCompactionParallelism = ParamItem{
+		Key:          "dataNode.pkindex.compaction.parallelism",
+		Version:      "3.1.0-beta",
+		DefaultValue: "4",
+		Doc:          "Maximum number of compaction tasks that run at once on one node.",
+		Export:       true,
+	}
+	p.PKIndexCompactionParallelism.Init(base.mgr)
+
+	p.PKIndexCompactionDiskMargin = ParamItem{
+		Key:          "dataNode.pkindex.compaction.diskMargin",
+		Version:      "3.1.0-beta",
+		DefaultValue: "1073741824",
+		Doc:          "A task is accepted only when the free local disk covers twice its input bytes plus this margin, unit: byte.",
+		Export:       true,
+	}
+	p.PKIndexCompactionDiskMargin.Init(base.mgr)
+
 	p.FlowGraphMaxQueueLength = ParamItem{
 		Key:          "dataNode.dataSync.flowGraph.maxQueueLength",
 		Version:      "2.0.0",
