@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Exercise the real WALSummary worker and gRPC shutdown: a subscription fake
@@ -137,4 +138,18 @@ func TestSubscribeServerCreateFailureUnblocksCallbacks(t *testing.T) {
 			require.ErrorIs(t, logStream.Error(), context.Canceled, "Execute must also close the acquired stream")
 		})
 	}
+}
+
+func TestSubscribeServerEncodesWrappedCancellation(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		wire := newFakeSubscribeTransformServer(t.Context())
+		server := &SubscribeServer{stream: wire}
+		require.NoError(t, server.sendSubscriptionError(1, "v", merr.Wrap(cause, "owner stopped")))
+		response := wire.sent(t).GetSubscriptionError()
+		require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, response.GetError().GetCode())
+	}
+	wire := newFakeSubscribeTransformServer(t.Context())
+	server := &SubscribeServer{stream: wire}
+	require.NoError(t, server.sendSubscriptionError(1, "v", walsummary.ErrStoreCorrupted))
+	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN, wire.sent(t).GetSubscriptionError().GetError().GetCode())
 }

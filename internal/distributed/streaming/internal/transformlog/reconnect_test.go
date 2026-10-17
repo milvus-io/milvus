@@ -2,10 +2,12 @@ package transformlog
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -169,5 +171,110 @@ func TestResumableStreamDoesNotResumePastRejectedEntry(t *testing.T) {
 		require.Equal(t, uint64(10), next.StartAfterTimeTick)
 	case <-ctx.Done():
 		t.Fatal("did not resume after cancellation")
+	}
+}
+
+func TestResumableStreamResetsBackoffAfterAcceptedProgress(t *testing.T) {
+	var resets atomic.Int32
+	var original func(*backoff.ExponentialBackOff)
+	patch := mockey.Mock((*backoff.ExponentialBackOff).Reset).Origin(&original).To(func(b *backoff.ExponentialBackOff) {
+		resets.Add(1)
+		original(b)
+	}).Build()
+	defer patch.UnPatch()
+	owners := make(chan *walsummary.Stream, 4)
+	var attempts atomic.Int32
+	stream := NewResumableStream(t.Context(), "p", func(context.Context, string) (wal.TransformLogStream, error) {
+		if attempts.Add(1) <= 2 {
+			return nil, status.NewOnShutdownError("owner migrating")
+		}
+		owner := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
+		owners <- owner
+		return owner, nil
+	})
+	defer stream.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	handler := newRecordingHandler()
+	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v", Handler: handler})
+	require.NoError(t, err)
+	defer sub.Close()
+	require.NotNil(t, recvStreamEvent(t, handler.events).SyncUp)
+	before := resets.Load()
+	require.NoError(t, (<-owners).Close())
+	require.NotNil(t, recvStreamEvent(t, handler.events).SyncUp)
+	require.Equal(t, before+1, resets.Load(), "successful delivery starts a fresh reconnect backoff")
+}
+
+func TestResumableStreamResumesLocalRejectedDelivery(t *testing.T) {
+	for _, reject := range []string{"entry", "sync_up"} {
+		t.Run(reject, func(t *testing.T) {
+			options := make(chan wal.TransformLogSubscriptionOption, 4)
+			var original func(*walsummary.Stream, context.Context, wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error)
+			capture := mockey.Mock((*walsummary.Stream).Subscribe).Origin(&original).To(func(s *walsummary.Stream, ctx context.Context, opt wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
+				sub, err := original(s, ctx, opt)
+				options <- opt
+				return sub, err
+			}).Build()
+			defer capture.UnPatch()
+			gate, changed := make(chan struct{}), make(chan struct{})
+			read := mockey.Mock((*walsummary.Manager).ReadTransform).To(func(_ *walsummary.Manager, ctx context.Context, _ string, after, _ uint64, _ walsummary.ReadLimits) (walsummary.TransformBatch, error) {
+				select {
+				case <-gate:
+				case <-ctx.Done():
+					return walsummary.TransformBatch{}, ctx.Err()
+				}
+				batch := walsummary.TransformBatch{CoveredThrough: 20, ReadableThrough: 20, Changed: changed, TransformChanged: changed}
+				if after < 20 {
+					batch.Entries = []*streamingpb.TransformLogEntry{{TimeTick: 20}}
+				}
+				return batch, nil
+			}).Build()
+			defer read.UnPatch()
+			rejected := status.NewUnknownError("consumer rejected delivery")
+			var once atomic.Bool
+			delivery := mockey.Mock((*recordingHandler).Handle).To(func(h *recordingHandler, event wal.TransformLogStreamEvent) error {
+				if ((reject == "entry" && event.Entry != nil) || (reject == "sync_up" && event.SyncUp != nil)) && once.CompareAndSwap(false, true) {
+					return rejected
+				}
+				h.events <- event
+				return nil
+			}).Build()
+			defer delivery.UnPatch()
+			owners := make(chan *walsummary.Stream, 4)
+			stream := NewResumableStream(t.Context(), "p", func(context.Context, string) (wal.TransformLogStream, error) {
+				owner := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
+				owners <- owner
+				return owner, nil
+			})
+			defer stream.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			handler := newRecordingHandler()
+			sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v", StartAfterTimeTick: 10, Handler: handler})
+			require.NoError(t, err)
+			defer sub.Close()
+			<-options
+			close(gate)
+			cursor := uint64(10)
+			if reject == "sync_up" {
+				require.EqualValues(t, 20, recvStreamEvent(t, handler.events).Entry.GetTimeTick())
+				cursor = 20
+			}
+			// The real Summary worker echoes the callback error as an Err event.
+			require.ErrorIs(t, recvStreamEvent(t, handler.events).Err, rejected)
+			require.NoError(t, (<-owners).Close())
+			select {
+			case next := <-options:
+				require.Equal(t, cursor, next.StartAfterTimeTick)
+			case <-ctx.Done():
+				t.Fatal("local handler rejection prevented owner recovery")
+			}
+			if reject == "entry" {
+				require.EqualValues(t, 20, recvStreamEvent(t, handler.events).Entry.GetTimeTick())
+			}
+			require.EqualValues(t, 20, recvStreamEvent(t, handler.events).SyncUp.TimeTick)
+			require.NoError(t, sub.(*resumableSubscription).Error())
+		})
 	}
 }

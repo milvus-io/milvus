@@ -247,12 +247,15 @@ subscription-level retries, the snapshot stays pinned during shared backoff;
 sustained failures can defer this Manager's physical garbage collection until
 reads recover or all waiters cancel. Download slots are released during backoff.
 
-Known corruption (`ErrStoreCorrupted`), data-integrity failures, truncated objects
-(`io.ErrUnexpectedEOF`), and permanent storage errors such as missing objects or
+Known corruption (`ErrStoreCorrupted`), data-integrity failures, raw
+`io.ErrUnexpectedEOF`, and permanent storage errors such as missing objects or
 permission failures terminate the shared load and fail every remaining waiter.
-Summary terminal-state errors, decoding failures and consumer-handler failures
-also keep the terminal notification path. No error becomes an empty history or
-a successful SyncUp.
+Summary terminal-state errors and decoding failures also keep the terminal
+notification path. Remote storage maps an interrupted
+object download to retryable `merr.ErrIoUnexpectEOF`; that transient transfer
+failure remains retryable. Bytes returned successfully still undergo framing,
+checksum and index validation, so a damaged object is a permanent failure.
+No error becomes an empty history or a successful SyncUp.
 
 Remote Provider integration must preserve this distinction: owner shutdown,
 migration and PChannel unavailability end the physical stream for PChannel-level
@@ -404,3 +407,26 @@ This transport does not implement QN TransformLogBuffer, DataView/QueryView
 replay-frontier or retention wiring, read-proof/CAS, or a query-path switch.
 Existing Delete/L0 behavior and the retained-history lower-bound contract stay
 in force. Remote subscription progress alone is not a retention guarantee.
+
+A closing physical stream reports a typed shutdown so new subscriptions can
+reacquire an owner without receiving a false terminal EOF. Subscription errors
+remain visible to the consumer; the resumable layer retains the logical
+subscription for subsequent owner recovery until the consumer closes it.
+An error returned by the consumer's Handle rejects that delivery without
+advancing its checkpoint or itself permanently failing the logical subscription;
+later owner recovery resumes from the last accepted cursor.
+The resume loop closes failed connection attempts outside receive callbacks. Reconnect
+backoff resets after accepted Entry/SyncUp progress, not merely after opening a
+possibly failing gRPC stream. Context cancellation errors carried by a
+SubscriptionError response use the existing shutdown code; exact legacy UNKNOWN
+cancellation causes remain accepted by clients. This response is distinct from
+canceling the RPC. A completed RPC is observed through the physical stream's
+Done signal; explicit logical stream Close stops resuming.
+
+Handlers must independently abort blocked delivery before their caller waits
+for subscription/stream Close; Close on a handler only signals completion.
+A blocked remote handler delays all subscriptions sharing that receive loop.
+Never synchronously close a subscription from its own Handle callback.
+EndTimeTick SyncUp signals bounded completion, but the caller must still Close
+the subscription. Only physical stream Close has the five-second timeout;
+per-subscription Close joins delivery without a peer timeout.
