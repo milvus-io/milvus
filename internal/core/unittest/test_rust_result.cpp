@@ -44,7 +44,8 @@ TEST(RustResultTest, AnalyzerMissingPathClassificationIsValidationOnly) {
         R"({"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":""}}]})";
     RustResultWrapper validation(tantivy_validate_analyzer(params, ""));
     ASSERT_FALSE(validation.result_->success);
-    EXPECT_EQ(validation.result_->error_code, TantivyBindingErrorCode::IoNotFound);
+    EXPECT_EQ(validation.result_->error_code,
+              TantivyBindingErrorCode::IoNotFound);
     EXPECT_EQ(milvus::tantivy::TantivyErrorToErrorCode(
                   validation.result_->error_code),
               milvus::ErrorCode::FileReadFailed);
@@ -60,10 +61,11 @@ TEST(RustResultTest, AnalyzerMissingPathClassificationIsValidationOnly) {
     // Runtime construction must retain the retriable I/O classification.
     RustResultWrapper creation(tantivy_create_analyzer(params, ""));
     ASSERT_FALSE(creation.result_->success);
-    EXPECT_EQ(creation.result_->error_code, TantivyBindingErrorCode::IoNotFound);
-    EXPECT_EQ(milvus::tantivy::TantivyErrorToErrorCode(
-                  creation.result_->error_code),
-              milvus::ErrorCode::FileReadFailed);
+    EXPECT_EQ(creation.result_->error_code,
+              TantivyBindingErrorCode::IoNotFound);
+    EXPECT_EQ(
+        milvus::tantivy::TantivyErrorToErrorCode(creation.result_->error_code),
+        milvus::ErrorCode::FileReadFailed);
 }
 
 static_assert(std::is_nothrow_constructible_v<RustResultWrapper, RustResult>);
