@@ -221,8 +221,8 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	_, exist := node.delegators.Get(channel.GetChannelName())
-	if exist {
+	staleDelegator, exist := node.delegators.Get(channel.GetChannelName())
+	if exist && staleDelegator.Serviceable() {
 		log.Info(ctx, "channel already subscribed")
 		return merr.Success(), nil
 	}
@@ -232,6 +232,17 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	if err != nil {
 		log.Warn(ctx, "failed to ref collection", mlog.Err(err))
 		return merr.Status(err), nil
+	}
+
+	if exist {
+		// A delegator that stopped serving keeps its entry here and nothing else
+		// removes it: it is skipped in the distribution report, so QueryCoord stops
+		// seeing the channel on this node and never sends a release for it either.
+		// Rebuild instead of reporting success over a shard that cannot answer.
+		// This runs after the ref above so the collection never drops to zero refs
+		// in between.
+		log.Info(ctx, "channel is held by an unserviceable delegator, releasing it before rebuilding")
+		node.releaseUnserviceableChannel(ctx, req.GetCollectionID(), channel.GetChannelName())
 	}
 	defer func() {
 		if !merr.Ok(status) {
@@ -369,6 +380,21 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
 	log.Info(ctx, "watch dml channel success")
 	return merr.Success(), nil
+}
+
+// releaseUnserviceableChannel drops what a delegator that stopped serving still
+// holds, so the channel can be watched again on this node. It skips the release
+// manual flush handshake UnsubDmChannel performs: that exists to hand growing
+// data over gracefully, and this delegator's stream is already gone.
+func (node *QueryNode) releaseUnserviceableChannel(ctx context.Context, collectionID int64, channel string) {
+	delegator, ok := node.delegators.GetAndRemove(channel)
+	if !ok {
+		return
+	}
+	node.pipelineManager.Remove(channel)
+	delegator.Close()
+	node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel), segments.WithType(segments.SegmentTypeGrowing))
+	node.manager.Collection.Unref(collectionID, 1)
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {

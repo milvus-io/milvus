@@ -15,10 +15,12 @@ var _ walimpls.ScannerImpls = (*scannerImpl)(nil)
 
 func newScanner(
 	scannerName string,
+	topic string,
 	reader pulsar.Reader,
 ) *scannerImpl {
 	s := &scannerImpl{
 		ScannerHelper: helper.NewScannerHelper(scannerName),
+		topic:         topic,
 		reader:        reader,
 		msgChannel:    make(chan message.ImmutableMessage, 1),
 	}
@@ -28,6 +30,7 @@ func newScanner(
 
 type scannerImpl struct {
 	*helper.ScannerHelper
+	topic      string
 	reader     pulsar.Reader
 	msgChannel chan message.ImmutableMessage
 }
@@ -59,7 +62,7 @@ func (s *scannerImpl) executeConsume() {
 				s.Finish(errors.Wrap(err, "pulsar readNext timeout"))
 				return
 			}
-			s.Finish(err)
+			s.Finish(convertPulsarReadError(err, s.topic))
 			return
 		}
 		newImmutableMessage := message.NewImmutableMesasge(
