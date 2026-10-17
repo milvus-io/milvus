@@ -45,6 +45,7 @@ const (
 	SegmentCategory               = "/segments/"
 	QuotaCenterCategory           = "/quotacenter/"
 	CommonCategory                = "/common/"
+	ServerCategory                = "/server/"
 
 	ListAction           = "list"
 	HasAction            = "has"
@@ -103,6 +104,8 @@ const (
 
 	CommitAction = "commit"
 	AbortAction  = "abort"
+
+	VersionAction = "version"
 )
 
 const (
@@ -110,6 +113,7 @@ const (
 	ContextResponse               = "response"
 	ContextUsername               = "username"
 	ContextToken                  = "token"
+	ContextMethodTag              = "methodTag"
 	VectorCollectionsPath         = "/vector/collections"
 	VectorCollectionsCreatePath   = "/vector/collections/create"
 	VectorCollectionsDescribePath = "/vector/collections/describe"

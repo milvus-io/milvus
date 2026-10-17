@@ -14,6 +14,7 @@ from api.milvus import (
     PartitionClient,
     Requests,
     RoleClient,
+    ServerClient,
     SnapshotClient,
     StorageClient,
     UserClient,
@@ -51,6 +52,7 @@ class Base:
     database_client = None
     file_resource_client = None
     snapshot_client = None
+    server_client = None
 
 
 class TestBase(Base):
@@ -122,6 +124,7 @@ class TestBase(Base):
         self.database_client = DatabaseClient(self.endpoint, self.api_key)
         self.file_resource_client = FileResourceClient(self.endpoint, self.api_key)
         self.snapshot_client = SnapshotClient(self.endpoint, self.api_key)
+        self.server_client = ServerClient(self.endpoint, self.api_key)
 
         if token is None:
             self.vector_client.api_key = None
