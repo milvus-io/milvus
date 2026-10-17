@@ -508,7 +508,7 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	// self-heals them. Segment-level validation still rejects schema-version
 	// rollback, but drop, rename, or type changes need a schema gate or lock
 	// before they are supported.
-	return applyExternalCollectionSegmentUpdateForBaseline(
+	if err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		m.mt,
 		job.GetCollectionId(),
@@ -516,7 +516,18 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		keptSegments,
 		updatedSegments,
 		mlog.FieldJobID(job.GetJobId()),
-	)
+	); err != nil {
+		return err
+	}
+	// A stats task reads the external source/spec at dispatch. While this
+	// refresh's are still being published, wait for that publish: its
+	// BroadcastAlteredCollection notifies the whole collection.
+	if externalRefreshSchemaVisible(m.mt, job) {
+		for _, segment := range updatedSegments {
+			notifySegmentStatsBuild(segment.GetID())
+		}
+	}
+	return nil
 }
 
 // wrapTask builds a scheduler-facing task wrapper around a persisted proto

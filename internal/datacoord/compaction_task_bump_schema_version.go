@@ -397,6 +397,7 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 		default:
 		}
 	}
+	notifySegmentStatsBuild(newSegmentIDs...)
 
 	// The SegmentMeta mutation is committed (schema bump rewrites manifests);
 	// schedule an asynchronous DataView snapshot reconciliation so consumers

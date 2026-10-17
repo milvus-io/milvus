@@ -252,6 +252,7 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 		default:
 		}
 	}
+	notifySegmentStatsBuild(newSegmentIDs...)
 
 	// The SegmentMeta mutation is committed (inputs dropped, outputs visible,
 	// manifest versions advanced); schedule an asynchronous DataView snapshot

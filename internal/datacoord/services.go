@@ -1911,6 +1911,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			VChannelNames:  req.GetVChannels(),
 		}
 		s.meta.AddCollection(collInfo)
+		notifyCollectionStatsBuild(s.notifyStatsChan, req.GetCollectionID())
 		return merr.Success(), nil
 	}
 
@@ -1918,6 +1919,9 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	// add field will change the schema
 	clonedColl.Schema = req.GetSchema()
 	s.meta.AddCollection(clonedColl)
+	// An added field may need text or JSON key stats on existing segments, and a
+	// published external source/spec makes refreshed segments ready for them.
+	notifyCollectionStatsBuild(s.notifyStatsChan, req.GetCollectionID())
 	return merr.Success(), nil
 }
 

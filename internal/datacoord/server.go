@@ -140,6 +140,7 @@ type Server struct {
 
 	flushCh         chan UniqueID
 	notifyIndexChan chan UniqueID
+	notifyStatsChan chan UniqueID
 	factory         dependency.Factory
 
 	session          sessionutil.SessionInterface
@@ -215,6 +216,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		factory:             factory,
 		flushCh:             make(chan UniqueID, 1024),
 		notifyIndexChan:     make(chan UniqueID, 1024),
+		notifyStatsChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
 		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
@@ -712,7 +714,7 @@ func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
 
 func (s *Server) initStatsInspector() {
 	if s.statsInspector == nil {
-		s.statsInspector = newStatsInspector(s.ctx, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
+		s.statsInspector = newStatsInspector(s.ctx, s.notifyStatsChan, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
 	}
 }
 

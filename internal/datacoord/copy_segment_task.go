@@ -1242,6 +1242,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			if meta.dataViewManager != nil {
 				meta.recomputeDataView(context.TODO(), task.GetCollectionId())
 			}
+			notifySegmentStatsBuild(result.GetSegmentId())
 
 			mlog.Info(context.TODO(), "update copy segment info done",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", result.GetSegmentId()),
