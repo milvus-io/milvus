@@ -113,6 +113,29 @@ var (
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
 
+	// ProxyResourceGroupFunctionCall counts the requests scoped to a resource
+	// group, by the group, with the labels ProxyFunctionCall carries. A family of
+	// its own for the reason ProxyResourceGroupSQLatency is one; only requests a
+	// deployment form pinned to a resource group are counted.
+	ProxyResourceGroupFunctionCall = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "resource_group_req_count",
+			Help:      "count of operation executed, per resource group",
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
+
+	// ProxyResourceGroupSearchVectors counts the vectors searched by requests
+	// scoped to a resource group, by the group: ProxySearchVectors per resource
+	// group, for the same reason as the two families above.
+	ProxyResourceGroupSearchVectors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "resource_group_search_vectors_count",
+			Help:      "counter of vectors successfully searched, per resource group",
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
+
 	// ProxyCollectionSQLatency record the latency of search successfully, per collection
 	// Deprecated, ProxySQLatency instead of it
 	ProxyCollectionSQLatency = prometheus.NewHistogramVec(
@@ -531,6 +554,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxySQLatency)
 	registry.MustRegister(ProxyResourceGroupSQLatency)
+	registry.MustRegister(ProxyResourceGroupFunctionCall)
+	registry.MustRegister(ProxyResourceGroupSearchVectors)
 	registry.MustRegister(ProxyCollectionSQLatency)
 	registry.MustRegister(ProxyMutationLatency)
 	registry.MustRegister(ProxyCollectionMutationLatency)
@@ -634,6 +659,8 @@ func proxyCollectionScopedMetrics() []partialMatchDeleter {
 		ProxyScannedRemoteMB,
 		ProxyScannedTotalMB,
 		ProxyResourceGroupSQLatency,
+		ProxyResourceGroupFunctionCall,
+		ProxyResourceGroupSearchVectors,
 	}
 }
 
