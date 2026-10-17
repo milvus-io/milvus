@@ -108,6 +108,7 @@ const (
 	RootCoord_PushClientCommand_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/PushClientCommand"
 	RootCoord_DeleteClientCommand_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/DeleteClientCommand"
 	RootCoord_ListClientCommands_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/ListClientCommands"
+	RootCoord_GetFileResourceSnapshot_FullMethodName       = "/milvus.proto.rootcoord.RootCoord/GetFileResourceSnapshot"
 )
 
 // RootCoordClient is the client API for RootCoord service.
@@ -277,6 +278,7 @@ type RootCoordClient interface {
 	PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error)
 	ListClientCommands(ctx context.Context, in *ListClientCommandsRequest, opts ...grpc.CallOption) (*ListClientCommandsResponse, error)
+	GetFileResourceSnapshot(ctx context.Context, in *GetFileResourceSnapshotRequest, opts ...grpc.CallOption) (*FileResourceSnapshot, error)
 }
 
 type rootCoordClient struct {
@@ -1052,6 +1054,15 @@ func (c *rootCoordClient) ListClientCommands(ctx context.Context, in *ListClient
 	return out, nil
 }
 
+func (c *rootCoordClient) GetFileResourceSnapshot(ctx context.Context, in *GetFileResourceSnapshotRequest, opts ...grpc.CallOption) (*FileResourceSnapshot, error) {
+	out := new(FileResourceSnapshot)
+	err := c.cc.Invoke(ctx, RootCoord_GetFileResourceSnapshot_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RootCoordServer is the server API for RootCoord service.
 // All implementations should embed UnimplementedRootCoordServer
 // for forward compatibility
@@ -1219,6 +1230,7 @@ type RootCoordServer interface {
 	PushClientCommand(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)
 	ListClientCommands(context.Context, *ListClientCommandsRequest) (*ListClientCommandsResponse, error)
+	GetFileResourceSnapshot(context.Context, *GetFileResourceSnapshotRequest) (*FileResourceSnapshot, error)
 }
 
 // UnimplementedRootCoordServer should be embedded to have forward compatible implementations.
@@ -1479,6 +1491,9 @@ func (UnimplementedRootCoordServer) DeleteClientCommand(context.Context, *milvus
 }
 func (UnimplementedRootCoordServer) ListClientCommands(context.Context, *ListClientCommandsRequest) (*ListClientCommandsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListClientCommands not implemented")
+}
+func (UnimplementedRootCoordServer) GetFileResourceSnapshot(context.Context, *GetFileResourceSnapshotRequest) (*FileResourceSnapshot, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetFileResourceSnapshot not implemented")
 }
 
 // UnsafeRootCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -3022,6 +3037,24 @@ func _RootCoord_ListClientCommands_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_GetFileResourceSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFileResourceSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).GetFileResourceSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_GetFileResourceSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).GetFileResourceSnapshot(ctx, req.(*GetFileResourceSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RootCoord_ServiceDesc is the grpc.ServiceDesc for RootCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3368,6 +3401,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListClientCommands",
 			Handler:    _RootCoord_ListClientCommands_Handler,
+		},
+		{
+			MethodName: "GetFileResourceSnapshot",
+			Handler:    _RootCoord_GetFileResourceSnapshot_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

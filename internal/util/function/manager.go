@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/bm25"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -359,7 +361,10 @@ func (e *functionRunnerEntry) ensureRunner(ctx context.Context) error {
 		return nil
 	}
 	if runInit {
-		go e.runInit(init)
+		// Initialization is shared by all waiters. Keep trace values, but do not
+		// let the electing request cancel another caller's initialization.
+		// Prepare bounds its coordinator fetch and each resource download.
+		go e.runInit(context.WithoutCancel(ctx), init)
 	}
 	return e.waitInit(ctx, init)
 }
@@ -392,8 +397,19 @@ func (e *functionRunnerEntry) waitInit(ctx context.Context, init *functionRunner
 	}
 }
 
-func (e *functionRunnerEntry) runInit(init *functionRunnerInit) {
-	runner, err := BuildEmbeddingRunner(e.schema, e.function)
+func (e *functionRunnerEntry) runInit(ctx context.Context, init *functionRunnerInit) {
+	var runner FunctionRunner
+	var err error
+	needsResources := len(e.schema.GetFileResourceIds()) > 0
+	for _, fieldID := range e.function.GetInputFieldIds() {
+		needsResources = needsResources || analyzerMayUseFileResources(typeutil.GetField(e.schema, fieldID))
+	}
+	if needsResources {
+		err = fileresource.Prepare(ctx)
+	}
+	if err == nil {
+		runner, err = BuildEmbeddingRunner(e.schema, e.function)
+	}
 	if err == nil && runner == nil {
 		err = errors.New("function runner is nil")
 	}
@@ -802,6 +818,7 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 		return true, run(analyzer)
 	}
 
+	needsResources := len(versionRunners.schema.GetFileResourceIds()) > 0
 	field := typeutil.GetField(versionRunners.schema, fieldID)
 	if field != nil {
 		field = proto.Clone(field).(*schemapb.FieldSchema)
@@ -814,6 +831,11 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 		return false, nil
 	}
 
+	if needsResources || analyzerMayUseFileResources(field) {
+		if err := fileresource.Prepare(ctx); err != nil {
+			return true, err
+		}
+	}
 	analyzer, err := NewAnalyzerRunner(field)
 	if err != nil {
 		return true, err
@@ -822,6 +844,18 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 		defer runner.Close()
 	}
 	return true, run(analyzer)
+}
+
+// analyzerMayUseFileResources is deliberately conservative for explicit config.
+// Empty resource IDs alone are insufficient for older schemas and MinHash,
+// whose tokenizer is constructed even without enable_analyzer. The default
+// analyzer has no external resources; leave all other parsing to native code.
+func analyzerMayUseFileResources(field *schemapb.FieldSchema) bool {
+	if _, ok := getMultiAnalyzerParams(field); ok {
+		return true
+	}
+	params := strings.TrimSpace(getAnalyzerParams(field))
+	return params != "" && params != "{}"
 }
 
 func (m *functionRunnerManager) getOrCreateEntry(collectionID int64) *functionRunnerCollectionEntry {

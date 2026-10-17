@@ -181,6 +181,7 @@ type IMetaTable interface {
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
 	HasFileResource(ctx context.Context) bool
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
+	ListFileResourceIfChanged(ctx context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64)
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 	IncFileResourceRefCnt(ids []int64) error
 	DecFileResourceRefCnt(ids []int64)
@@ -3415,6 +3416,19 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
+	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+// ListFileResourceIfChanged compares the version before materializing the list.
+// Comparison and snapshot capture share ddLock, so an unchanged reply cannot
+// accidentally acknowledge a version whose inventory was not returned.
+func (mt *MetaTable) ListFileResourceIfChanged(ctx context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	if knownVersion == mt.fileResourceVersion {
+		return nil, mt.fileResourceVersion
+	}
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
 }
 

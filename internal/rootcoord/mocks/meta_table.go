@@ -3729,6 +3729,65 @@ func (_c *IMetaTable_ListDatabases_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// ListFileResourceIfChanged provides a mock function with given fields: ctx, knownVersion
+func (_m *IMetaTable) ListFileResourceIfChanged(ctx context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64) {
+	ret := _m.Called(ctx, knownVersion)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListFileResourceIfChanged")
+	}
+
+	var r0 []*internalpb.FileResourceInfo
+	var r1 uint64
+	if rf, ok := ret.Get(0).(func(context.Context, uint64) ([]*internalpb.FileResourceInfo, uint64)); ok {
+		return rf(ctx, knownVersion)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, uint64) []*internalpb.FileResourceInfo); ok {
+		r0 = rf(ctx, knownVersion)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.FileResourceInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uint64) uint64); ok {
+		r1 = rf(ctx, knownVersion)
+	} else {
+		r1 = ret.Get(1).(uint64)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_ListFileResourceIfChanged_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListFileResourceIfChanged'
+type IMetaTable_ListFileResourceIfChanged_Call struct {
+	*mock.Call
+}
+
+// ListFileResourceIfChanged is a helper method to define mock.On call
+//   - ctx context.Context
+//   - knownVersion uint64
+func (_e *IMetaTable_Expecter) ListFileResourceIfChanged(ctx interface{}, knownVersion interface{}) *IMetaTable_ListFileResourceIfChanged_Call {
+	return &IMetaTable_ListFileResourceIfChanged_Call{Call: _e.mock.On("ListFileResourceIfChanged", ctx, knownVersion)}
+}
+
+func (_c *IMetaTable_ListFileResourceIfChanged_Call) Run(run func(ctx context.Context, knownVersion uint64)) *IMetaTable_ListFileResourceIfChanged_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListFileResourceIfChanged_Call) Return(_a0 []*internalpb.FileResourceInfo, _a1 uint64) *IMetaTable_ListFileResourceIfChanged_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_ListFileResourceIfChanged_Call) RunAndReturn(run func(context.Context, uint64) ([]*internalpb.FileResourceInfo, uint64)) *IMetaTable_ListFileResourceIfChanged_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListFileResource provides a mock function with given fields: ctx
 func (_m *IMetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
 	ret := _m.Called(ctx)

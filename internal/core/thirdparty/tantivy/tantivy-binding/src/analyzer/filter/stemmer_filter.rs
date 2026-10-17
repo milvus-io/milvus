@@ -85,14 +85,14 @@ impl FilterBuilder for Stemmer {
     ) -> Result<Self> {
         let value = params.get("language");
         if value.is_none() || !value.unwrap().is_string() {
-            return Err(TantivyBindingError::InternalError(
+            return Err(TantivyBindingError::InvalidArgument(
                 "stemmer language field should be string".to_string(),
             ));
         }
 
         match value.unwrap().as_str().unwrap().into_language() {
             Ok(language) => Ok(Stemmer::new(language)),
-            Err(e) => Err(TantivyBindingError::InternalError(format!(
+            Err(e) => Err(TantivyBindingError::InvalidArgument(format!(
                 "create stemmer failed : {}",
                 e.to_string()
             ))),
@@ -126,7 +126,7 @@ impl StemmerLanguageParser for &str {
             "swedish" => Ok(Algorithm::Swedish),
             "tamil" => Ok(Algorithm::Tamil),
             "turkish" => Ok(Algorithm::Turkish),
-            other => Err(TantivyBindingError::InternalError(format!(
+            other => Err(TantivyBindingError::InvalidArgument(format!(
                 "unsupport language: {}",
                 other
             ))),

@@ -361,6 +361,7 @@ message StreamingError {
 // write on that log node. Server: all log node. Running on every log node.
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
+    rpc ValidateAnalyzer(StreamingNodeValidateAnalyzerRequest) returns (StreamingNodeValidateAnalyzerResponse) {};
     rpc RunAnalyzer(StreamingNodeRunAnalyzerRequest) returns (StreamingNodeRunAnalyzerResponse) {};
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
     // from the correct position, ensuring no duplicate or missing messages.
@@ -1027,5 +1028,22 @@ message StreamingFieldAnalyzer {
 }
 message StreamingNodeRunAnalyzerResponse {
     repeated milvus.AnalyzerResult results = 1;
+    common.Status status = 2;
+}
+
+// Analyzer validation is collection-independent. Failures use native streaming
+// RPC errors; successful responses identify the resources to reserve before DDL.
+message StreamingAnalyzerInfo {
+    string params = 1;
+    string field = 2;
+    string name = 3;
+}
+
+message StreamingNodeValidateAnalyzerRequest {
+    repeated StreamingAnalyzerInfo analyzer_infos = 1;
+}
+
+message StreamingNodeValidateAnalyzerResponse {
+    repeated int64 resource_ids = 1;
     common.Status status = 2;
 }
