@@ -104,6 +104,7 @@ func DecodeTicket(ticket string) (string, string, error) {
 }
 
 func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	pauseSeconds := req.URL.Query().Get("pause_seconds")
 	// generate ticket for request
 	token := uuid.New().String()
@@ -119,23 +120,22 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
-	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{
+	resp, err := node.mixCoord.GcControl(ctx, &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Pause,
 		Params:  params,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to pause garbage collection, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to pause garbage collection, %s", err.Error()))
 		return
 	}
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to pause garbage collection, %s"}`, resp.GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to pause garbage collection, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"msg": "OK", "ticket": "%s"}`, ticket)
+	management.WriteJSONResponse(ctx, w, http.StatusOK, map[string]string{"msg": "OK", "ticket": ticket})
 }
 
 type commitBackfillSegmentStatusJSON struct {
@@ -167,36 +167,29 @@ func toCommitBackfillSegmentStatusesJSON(statuses []*datapb.CommitBackfillResult
 // path to DataCoord.CommitBackfillResult and returns the aggregated
 // per-segment commit status as JSON.
 func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request) {
-	writeJSON := func(status int, payload map[string]interface{}) {
-		w.WriteHeader(status)
-		bs, _ := json.Marshal(payload)
-		w.Write(bs)
-	}
-
+	ctx := req.Context()
 	resultPath := req.URL.Query().Get("result_path")
 	if resultPath == "" {
-		writeJSON(http.StatusBadRequest, map[string]interface{}{
-			"msg": "result_path query parameter is required",
-		})
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			"result_path query parameter is required")
 		return
 	}
 
-	resp, err := node.mixCoord.CommitBackfillResult(req.Context(), &datapb.CommitBackfillResultRequest{
+	resp, err := node.mixCoord.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 		Base:       commonpbutil.NewMsgBase(),
 		ResultPath: resultPath,
 	})
 	if err != nil {
 		// Use json.Marshal so an err.Error() containing quotes or control
 		// characters can't break the JSON response envelope.
-		writeJSON(http.StatusInternalServerError, map[string]interface{}{
-			"msg": fmt.Sprintf("failed to commit backfill result, %s", err.Error()),
-		})
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to commit backfill result, %s", err.Error()))
 		return
 	}
 	if !merr.Ok(resp.GetStatus()) {
 		// Even on failure we include the per-segment diagnostics so callers can
 		// see which segments tripped pre-validation.
-		writeJSON(http.StatusInternalServerError, map[string]interface{}{
+		management.WriteJSONResponse(ctx, w, http.StatusInternalServerError, map[string]interface{}{
 			"msg":                fmt.Sprintf("failed to commit backfill result, %s", resp.GetStatus().GetReason()),
 			"total_segments":     resp.GetTotalSegments(),
 			"committed_segments": resp.GetCommittedSegments(),
@@ -205,7 +198,7 @@ func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request
 		})
 		return
 	}
-	writeJSON(http.StatusOK, map[string]interface{}{
+	management.WriteJSONResponse(ctx, w, http.StatusOK, map[string]interface{}{
 		"msg":                "OK",
 		"total_segments":     resp.GetTotalSegments(),
 		"committed_segments": resp.GetCommittedSegments(),
@@ -215,6 +208,7 @@ func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request
 }
 
 func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	ticket := req.URL.Query().Get("ticket")
 	var collectionID string
 	var err error
@@ -222,8 +216,8 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	if ticket != "" {
 		_, collectionID, err = DecodeTicket(ticket)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to decode ticket, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+			management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+				fmt.Sprintf("failed to decode ticket, %s", err.Error()))
 			return
 		}
 	}
@@ -239,85 +233,77 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
-	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{
+	resp, err := node.mixCoord.GcControl(ctx, &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Resume,
 		Params:  params,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume garbage collection, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume garbage collection, %s", err.Error()))
 		return
 	}
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume garbage collection, %s"}`, resp.GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume garbage collection, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	management.WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) ListQueryNode(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.mixCoord.ListQueryNode(req.Context(), &querypb.ListQueryNodeRequest{
+	ctx := req.Context()
+	resp, err := node.mixCoord.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to list query node, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, resp.GetStatus().GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to list query node, %s", resp.GetStatus().GetReason()))
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
 	// skip marshal status to output
 	resp.Status = nil
-	bytes, err := json.Marshal(resp)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, err.Error())
-		return
-	}
-	w.Write(bytes)
+	management.WriteJSONResponse(ctx, w, http.StatusOK, resp)
 }
 
 func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
 	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to get query node distribution, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to get query node distribution, %s", err.Error()))
 		return
 	}
 
-	resp, err := node.mixCoord.GetQueryNodeDistribution(req.Context(), &querypb.GetQueryNodeDistributionRequest{
+	resp, err := node.mixCoord.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
 		Base:   commonpbutil.NewMsgBase(),
 		NodeID: nodeID,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to get query node distribution, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to get query node distribution, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to get query node distribution, %s"}`, resp.GetStatus().GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to get query node distribution, %s", resp.GetStatus().GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-
 	// Use string array for SealedSegmentIDs to prevent precision loss in JSON parsers.
 	// Large integers (int64) may be incorrectly rounded when parsed as double.
 	type distribution struct {
@@ -332,169 +318,161 @@ func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Req
 		}),
 	}
 
-	bytes, err := json.Marshal(dist)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to get query node distribution, %s"}`, err.Error())
-		return
-	}
-	w.Write(bytes)
+	management.WriteJSONResponse(ctx, w, http.StatusOK, dist)
 }
 
 func (node *Proxy) SuspendQueryCoordBalance(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.mixCoord.SuspendBalance(req.Context(), &querypb.SuspendBalanceRequest{
+	ctx := req.Context()
+	resp, err := node.mixCoord.SuspendBalance(ctx, &querypb.SuspendBalanceRequest{
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to suspend balance, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to suspend balance, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to suspend balance, %s"}`, resp.GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to suspend balance, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	management.WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) ResumeQueryCoordBalance(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.mixCoord.ResumeBalance(req.Context(), &querypb.ResumeBalanceRequest{
+	ctx := req.Context()
+	resp, err := node.mixCoord.ResumeBalance(ctx, &querypb.ResumeBalanceRequest{
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume balance, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume balance, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume balance, %s"}`, resp.GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume balance, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	management.WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) CheckQueryCoordBalanceStatus(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.mixCoord.CheckBalanceStatus(req.Context(), &querypb.CheckBalanceStatusRequest{
+	ctx := req.Context()
+	resp, err := node.mixCoord.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check balance status, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to check balance status, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check balance status, %s"}`, resp.GetStatus().GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to check balance status, %s", resp.GetStatus().GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
 	balanceStatus := "suspended"
 	if resp.IsActive {
 		balanceStatus = "active"
 	}
-	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
+	management.WriteJSONResponse(ctx, w, http.StatusOK, map[string]string{"msg": "OK", "status": balanceStatus})
 }
 
 func (node *Proxy) ClearReadTaskQueueManagement(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.mixCoord.ClearReadTaskQueue(req.Context(), &internalpb.ClearReadTaskQueueRequest{
+	ctx := req.Context()
+	resp, err := node.mixCoord.ClearReadTaskQueue(ctx, &internalpb.ClearReadTaskQueueRequest{
 		Base:     commonpbutil.NewMsgBase(),
 		TaskType: req.URL.Query().Get("task_type"),
 		Reason:   req.URL.Query().Get("reason"),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to clear read task queue, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to clear read task queue, %s", err.Error()))
 		return
 	}
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		bs, _ := json.Marshal(resp)
-		w.Write(bs)
+		management.WriteJSONResponse(ctx, w, http.StatusInternalServerError, resp)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	bs, _ := json.Marshal(resp)
-	w.Write(bs)
+	management.WriteJSONResponse(ctx, w, http.StatusOK, resp)
 }
 
 func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
 	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to suspend node, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to suspend node, %s", err.Error()))
 		return
 	}
-	resp, err := node.mixCoord.SuspendNode(req.Context(), &querypb.SuspendNodeRequest{
+	resp, err := node.mixCoord.SuspendNode(ctx, &querypb.SuspendNodeRequest{
 		Base:   commonpbutil.NewMsgBase(),
 		NodeID: nodeID,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to suspend node, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to suspend node, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to suspend node, %s"}`, resp.GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to suspend node, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	management.WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) ResumeQueryNode(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
 	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to resume node, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to resume node, %s", err.Error()))
 		return
 	}
-	resp, err := node.mixCoord.ResumeNode(req.Context(), &querypb.ResumeNodeRequest{
+	resp, err := node.mixCoord.ResumeNode(ctx, &querypb.ResumeNodeRequest{
 		Base:   commonpbutil.NewMsgBase(),
 		NodeID: nodeID,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume node, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume node, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume node, %s"}`, resp.GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume node, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	management.WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
@@ -504,8 +482,8 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 
 	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": failed to transfer segment", %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 	request.SourceNodeID = source
@@ -516,8 +494,8 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseInt(target, 10, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error())
+			management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 			return
 		}
 		request.TargetNodeID = value
@@ -529,8 +507,8 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseInt(segmentID, 10, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error())
+			management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 			return
 		}
 		request.SegmentID = value
@@ -542,34 +520,34 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+			management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 			return
 		}
 		request.CopyMode = value
 	}
 
-	resp, err := node.mixCoord.TransferSegment(req.Context(), request)
+	resp, err := node.mixCoord.TransferSegment(ctx, request)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, resp.GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to transfer segment, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	management.WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 		return
 	}
 
@@ -579,8 +557,8 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 
 	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": failed to transfer channel", %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 		return
 	}
 	request.SourceNodeID = source
@@ -591,8 +569,8 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseInt(target, 10, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error())
+			management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 			return
 		}
 		request.TargetNodeID = value
@@ -611,94 +589,92 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+			management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 			return
 		}
 		request.CopyMode = value
 	}
 
-	resp, err := node.mixCoord.TransferChannel(req.Context(), request)
+	resp, err := node.mixCoord.TransferChannel(ctx, request)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, resp.GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to transfer channel, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	management.WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", err.Error()))
 		return
 	}
 
 	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": failed to check whether query node has same distribution", %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", err.Error()))
 		return
 	}
 
 	target, err := strconv.ParseInt(req.FormValue("target_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", err.Error()))
 		return
 	}
-	resp, err := node.mixCoord.CheckQueryNodeDistribution(req.Context(), &querypb.CheckQueryNodeDistributionRequest{
+	resp, err := node.mixCoord.CheckQueryNodeDistribution(ctx, &querypb.CheckQueryNodeDistributionRequest{
 		Base:         commonpbutil.NewMsgBase(),
 		SourceNodeID: source,
 		TargetNodeID: target,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, resp.GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	management.WriteJSONWithMsg(ctx, w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) BackupEZ(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	dbName := req.URL.Query().Get("db_name")
 	if dbName == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"msg": "db_name parameter is required"}`))
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest, "db_name parameter is required")
 		return
 	}
 
-	resp, err := node.mixCoord.BackupEzk(req.Context(), &internalpb.BackupEzkRequest{
+	resp, err := node.mixCoord.BackupEzk(ctx, &internalpb.BackupEzkRequest{
 		Base:   commonpbutil.NewMsgBase(),
 		DbName: dbName,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to backup EZK, %s"}`, err.Error())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to backup EZK, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to backup EZK, %s"}`, resp.GetStatus().GetReason())
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to backup EZK, %s", resp.GetStatus().GetReason()))
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"msg": "OK", "ezk": "%s"}`, resp.Ezk)
+	management.WriteJSONResponse(ctx, w, http.StatusOK, map[string]string{"msg": "OK", "ezk": resp.Ezk})
 }
