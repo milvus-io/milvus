@@ -4233,24 +4233,26 @@ func TestClusteringKey(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("create collection not support more than one clustering key", func(t *testing.T) {
+	t.Run("create collection with timestamptz clustering key", func(t *testing.T) {
 		fieldName2Type := make(map[string]schemapb.DataType)
 		fieldName2Type["int64_field"] = schemapb.DataType_Int64
-		fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
 		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
-		fieldName2Type["cluster_key_field"] = schemapb.DataType_Int64
-		clusterKeyField := &schemapb.FieldSchema{
-			Name:            "cluster_key_field",
-			DataType:        schemapb.DataType_Int64,
-			IsClusteringKey: true,
-		}
-		schema.Fields = append(schema.Fields, clusterKeyField)
-		clusterKeyField2 := &schemapb.FieldSchema{
-			Name:            "cluster_key_field2",
-			DataType:        schemapb.DataType_Int64,
-			IsClusteringKey: true,
-		}
-		schema.Fields = append(schema.Fields, clusterKeyField2)
+		schema.Fields = append(schema.Fields,
+			&schemapb.FieldSchema{
+				Name:            "event_time",
+				DataType:        schemapb.DataType_Timestamptz,
+				IsClusteringKey: true,
+			},
+			&schemapb.FieldSchema{
+				Name:     "fvec_field",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(testVecDim),
+					},
+				},
+			})
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 
@@ -4272,7 +4274,110 @@ func TestClusteringKey(t *testing.T) {
 			schema:   nil,
 		}
 		err = CreateCollectionTask.PreExecute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
+	})
+
+	t.Run("create collection timestamptz does not allow a second clustering key", func(t *testing.T) {
+		fieldName2Type := make(map[string]schemapb.DataType)
+		fieldName2Type["int64_field"] = schemapb.DataType_Int64
+		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
+		schema.Fields = append(schema.Fields,
+			&schemapb.FieldSchema{
+				Name:            "event_time",
+				DataType:        schemapb.DataType_Timestamptz,
+				IsClusteringKey: true,
+			},
+			&schemapb.FieldSchema{
+				Name:            "cluster_key_field",
+				DataType:        schemapb.DataType_Int64,
+				IsClusteringKey: true,
+			},
+			&schemapb.FieldSchema{
+				Name:     "fvec_field",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(testVecDim),
+					},
+				},
+			})
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		CreateCollectionTask := &CreateCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
+		}
+		err = CreateCollectionTask.PreExecute(ctx)
+		// Rejected for the second key, not for the type.
+		assert.ErrorContains(t, err, "more than one clustering key")
+	})
+
+	t.Run("create collection not support more than one clustering key", func(t *testing.T) {
+		fieldName2Type := make(map[string]schemapb.DataType)
+		fieldName2Type["int64_field"] = schemapb.DataType_Int64
+		fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
+		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
+		fieldName2Type["cluster_key_field"] = schemapb.DataType_Int64
+		clusterKeyField := &schemapb.FieldSchema{
+			Name:            "cluster_key_field",
+			DataType:        schemapb.DataType_Int64,
+			IsClusteringKey: true,
+		}
+		schema.Fields = append(schema.Fields, clusterKeyField)
+		clusterKeyField2 := &schemapb.FieldSchema{
+			Name:            "cluster_key_field2",
+			DataType:        schemapb.DataType_Int64,
+			IsClusteringKey: true,
+		}
+		schema.Fields = append(schema.Fields, clusterKeyField2)
+		// Without a vector field PreExecute fails before reaching the clustering key check.
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:     "fvec_field",
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(testVecDim),
+				},
+			},
+		})
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		CreateCollectionTask := &CreateCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
+		}
+		err = CreateCollectionTask.PreExecute(ctx)
+		assert.ErrorContains(t, err, "more than one clustering key")
 	})
 
 	t.Run("create collection with vector clustering key", func(t *testing.T) {
@@ -6737,6 +6842,18 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("timestamptz clustering key", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:            "event_time",
+			DataType:        schemapb.DataType_Timestamptz,
+			Nullable:        true,
+			IsClusteringKey: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.NoError(t, err)
+	})
+
 	t.Run("clustering key when schema already has one", func(t *testing.T) {
 		schema := baseSchema()
 		// Mark an existing field as clustering key.
@@ -6749,6 +6866,21 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		err := validateAddFieldRequest(schema, newField)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("timestamptz clustering key when schema already has one", func(t *testing.T) {
+		schema := baseSchema()
+		schema.Fields[0].IsClusteringKey = true
+		newField := &schemapb.FieldSchema{
+			Name:            "event_time",
+			DataType:        schemapb.DataType_Timestamptz,
+			Nullable:        true,
+			IsClusteringKey: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		// Rejected for the second key, not for the type.
+		assert.ErrorContains(t, err, "already has another clustering key")
 	})
 
 	t.Run("vector type with max vector fields exceeded", func(t *testing.T) {

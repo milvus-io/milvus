@@ -7305,6 +7305,7 @@ func TestIsClusteringKeyType(t *testing.T) {
 	assert.True(t, IsClusteringKeyType(schemapb.DataType_Double))
 	assert.True(t, IsClusteringKeyType(schemapb.DataType_VarChar))
 	assert.True(t, IsClusteringKeyType(schemapb.DataType_String))
+	assert.True(t, IsClusteringKeyType(schemapb.DataType_Timestamptz))
 
 	// Supported vector types
 	assert.True(t, IsClusteringKeyType(schemapb.DataType_FloatVector))
@@ -7315,7 +7316,6 @@ func TestIsClusteringKeyType(t *testing.T) {
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Array))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Geometry))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Text))
-	assert.False(t, IsClusteringKeyType(schemapb.DataType_Timestamptz))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_BinaryVector))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_Float16Vector))
 	assert.False(t, IsClusteringKeyType(schemapb.DataType_BFloat16Vector))

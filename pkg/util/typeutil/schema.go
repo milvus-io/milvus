@@ -710,13 +710,15 @@ func NewEmptyArrayOfVectorRow(dim int64, elementType schemapb.DataType) (*schema
 }
 
 // IsClusteringKeyType returns true if the data type is supported as a clustering key.
-// Supported scalar types: Int8, Int16, Int32, Int64, Float, Double, VarChar, String, FloatVector.
+// Supported scalar types: Int8, Int16, Int32, Int64, Float, Double, VarChar, String, Timestamptz.
+// Supported vector types: FloatVector.
 func IsClusteringKeyType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16,
 		schemapb.DataType_Int32, schemapb.DataType_Int64,
 		schemapb.DataType_Float, schemapb.DataType_Double,
-		schemapb.DataType_VarChar, schemapb.DataType_String:
+		schemapb.DataType_VarChar, schemapb.DataType_String,
+		schemapb.DataType_Timestamptz:
 		return true
 	default:
 		return dataType == schemapb.DataType_FloatVector
