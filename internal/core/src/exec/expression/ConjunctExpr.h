@@ -35,10 +35,13 @@
 #include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/RegexPrefilterStats.h"
 #include "expr/ITypeExpr.h"
 
 namespace milvus {
 namespace exec {
+
+class PhyUnaryRangeFilterExpr;
 
 class PhyConjunctFilterExpr : public Expr {
  public:
@@ -143,6 +146,7 @@ class PhyConjunctFilterExpr : public Expr {
     void
     Reorder(const std::vector<size_t>& exprs_order) {
         input_order_ = exprs_order;
+        ResetRegexPrefix();
     }
 
     std::vector<size_t>
@@ -154,6 +158,7 @@ class PhyConjunctFilterExpr : public Expr {
     size_t
     AddInput(std::shared_ptr<Expr> expr) {
         inputs_.push_back(std::move(expr));
+        ResetRegexPrefix();
         return inputs_.size() - 1;
     }
 
@@ -162,6 +167,7 @@ class PhyConjunctFilterExpr : public Expr {
     void
     RebuildInputs(std::vector<std::shared_ptr<Expr>>&& inputs) {
         inputs_ = std::move(inputs);
+        ResetRegexPrefix();
     }
 
     // This conjunction feeds a null-rejecting consumer: one that treats an
@@ -202,6 +208,20 @@ class PhyConjunctFilterExpr : public Expr {
     }
 
  private:
+    void
+    ResetRegexPrefix() {
+        regex_prefix_checked_ = false;
+        numeric_prefix_ = nullptr;
+        regex_successor_ = nullptr;
+        numeric_prefix_truth_.reset();
+        numeric_prefix_stats_.reset();
+    }
+
+    bool regex_prefix_checked_ = false;
+    PhyUnaryRangeFilterExpr* numeric_prefix_ = nullptr;
+    PhyUnaryRangeFilterExpr* regex_successor_ = nullptr;
+    std::shared_ptr<const TargetBitmap> numeric_prefix_truth_;
+    std::optional<RegexPrefilterStats> numeric_prefix_stats_;
     // Build the bitmap of rows that still need the following expressions:
     // its count drives the batch-level early exit and the bitmap itself
     // becomes the row-level input of the next expression.

@@ -18,6 +18,7 @@
 #include <utility>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include "common/EasyAssert.h"
@@ -213,17 +214,35 @@ struct PartialRegexMatcher {
 
     // Bounded necessary AND/OR condition from RE2's public API, using original
     // bytes. No second parser, atom remapping or subset enumeration. Both
-    // getters share one lazy analysis, including on concurrent calls.
+    // getters share one lazy immutable preparation, including on concurrent
+    // calls. Fixed private options permit one bounded preparation per thread
+    // to be reused; every matcher still compiles and validates its own RE2.
     RegexLiteralCondition
     RequiredIndexCondition() const;
 
-    // One immutable preparation entry per thread; never cache segment counts
-    // or row IDs. Compile before publishing, including invalid-pattern errors.
+    // Uses the same immutable preparation entry as the canonical matcher;
+    // never cache segment counts or row IDs. Invalid patterns are not cached.
     static RegexLiteralCondition
     PrepareIndexCondition(const std::string& pattern);
 
  private:
-    const RE2::LiteralRequirements&
+    struct LiteralRequirements {
+        RE2::LiteralRequirements source;
+        mutable std::once_flag condition_once;
+        mutable RegexLiteralCondition condition;
+    };
+    struct PreparationEntry {
+        std::string pattern;
+        std::shared_ptr<const LiteralRequirements> requirements;
+    };
+
+    static std::optional<PreparationEntry>&
+    LastPreparation();
+
+    static RegexLiteralCondition
+    IndexCondition(const LiteralRequirements& requirements);
+
+    const LiteralRequirements&
     RequiredLiterals() const;
 
     bool
@@ -240,7 +259,7 @@ struct PartialRegexMatcher {
     static constexpr int kMaxProgramSize = 4096;
     std::unique_ptr<RE2> re2_;
     mutable std::once_flag requirements_once_;
-    mutable RE2::LiteralRequirements requirements_;
+    mutable std::shared_ptr<const LiteralRequirements> requirements_;
 };
 
 template <>

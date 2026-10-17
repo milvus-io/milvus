@@ -24,6 +24,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/RegexIndexPlan.h"
 #include "common/RegexQuery.h"
 #include "index/fmindex/FMIndex.h"
 
@@ -375,38 +376,57 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
             return candidates;
         }
         case PatternOp::RegexMatch: {
-            auto condition = PartialRegexMatcher::PrepareIndexCondition(
-                std::string(pattern));
-            double cost;
-            auto selected = condition.Select(
-                [&](const std::string& literal) {
-                    return storage_->Engine().Count(Bytes(literal),
-                                                    literal.size());
-                },
-                cost);
-            // Selected AND children may be omitted; every OR branch remains.
-            // These contains lookups are candidates for canonical RE2 recheck.
-            return selected.Evaluate(
-                [&](const std::string& literal) {
-                    TargetBitmap hits(static_cast<size_t>(storage_->Count()),
-                                      false);
-                    storage_->Engine().VisitMatchingDocs(
-                        Bytes(literal), literal.size(), [&](uint64_t row) {
-                            if (row <
-                                    static_cast<uint64_t>(storage_->Count()) &&
-                                !storage_->NullBitmap()[row]) {
-                                hits.set(static_cast<size_t>(row));
-                            }
-                        });
-                    return hits;
-                },
-                [&] { return IsNotNull(); });
+            const auto plan = PrepareRegexIndexPlan(
+                PartialRegexMatcher::PrepareIndexCondition(
+                    std::string(pattern)));
+            return ExecuteRegexIndexPlan(*plan);
         }
         default:
             ThrowInfo(UnexpectedError,
                       "invalid FM-index pattern operation {}",
                       static_cast<int>(op));
     }
+}
+
+RegexIndexCostModel
+FmIndexReader::GetRegexIndexCostModel() const {
+    return {.rows = static_cast<size_t>(storage_->Count()),
+            .text_bytes = static_cast<size_t>(storage_->TotalTokens()),
+            .sa_sample_rate = storage_->Engine().sa_sample_rate(),
+            .cost_ratio = cost_ratio_};
+}
+
+std::shared_ptr<const RegexIndexPlan>
+FmIndexReader::PrepareRegexIndexPlan(
+    const RegexLiteralCondition& requirements) const {
+    return std::make_shared<const RegexIndexPlan>(milvus::PrepareRegexIndexPlan(
+        requirements,
+        [&](const std::string& literal) {
+            return storage_->Engine().Count(Bytes(literal), literal.size());
+        },
+        GetRegexIndexCostModel()));
+}
+
+TargetBitmap
+FmIndexReader::ExecuteRegexIndexPlan(const RegexIndexPlan& plan) const {
+    if (plan.empty_result) {
+        return TargetBitmap(static_cast<size_t>(storage_->Count()), false);
+    }
+    // AND retains its cheapest Count child; every OR branch stays covered.
+    // The plan was prepared on this reader and needs no second Count/select.
+    return plan.condition.Evaluate(
+        [&](const std::string& literal) {
+            TargetBitmap hits(static_cast<size_t>(storage_->Count()), false);
+            storage_->Engine().VisitMatchingDocs(
+                Bytes(literal), literal.size(), [&](uint64_t row) {
+                    if (row < static_cast<uint64_t>(storage_->Count()) &&
+                        !storage_->NullBitmap()[row]) {
+                        hits.set(static_cast<size_t>(row));
+                    }
+                });
+            return hits;
+        },
+        [&] { return IsNotNull(); });
 }
 
 bool

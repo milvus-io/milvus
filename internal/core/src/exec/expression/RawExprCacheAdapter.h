@@ -27,9 +27,10 @@
 namespace milvus {
 namespace exec {
 
-// Composition wrapper for passively caching batched RawData expression
-// results. It is attached only while ExprResCacheManager is enabled, keeping
-// the disabled physical expression graph and execution path unchanged.
+// Composition wrapper for passively caching exact batched expression results.
+// RawData and explicitly opted-in deferred scan/index evaluators can share
+// these entries. It is attached only while ExprResCacheManager is enabled,
+// keeping the disabled expression graph and execution path unchanged.
 class RawExprCacheAdapter final : public Expr {
  public:
     RawExprCacheAdapter(std::shared_ptr<SegmentExpr> input,

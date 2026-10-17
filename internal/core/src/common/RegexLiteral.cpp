@@ -51,45 +51,69 @@ FromRE2(const RE2::LiteralCondition& source) {
 
 }  // namespace
 
-const RE2::LiteralRequirements&
+std::optional<PartialRegexMatcher::PreparationEntry>&
+PartialRegexMatcher::LastPreparation() {
+    // All canonical matchers use the same private UTF-8/dot_nl options and
+    // extraction budgets. If options become configurable they belong in this
+    // key too. The single key is at most 4096 bytes, the scan literal at most
+    // 4096 bytes, and the necessary condition at most 127 nodes of 64 bytes.
+    static thread_local std::optional<PreparationEntry> cache;
+    return cache;
+}
+
+const PartialRegexMatcher::LiteralRequirements&
 PartialRegexMatcher::RequiredLiterals() const {
     std::call_once(requirements_once_, [this] {
+        const auto& pattern = re2_->pattern();
+        auto& cache = LastPreparation();
+        if (cache.has_value() && cache->pattern == pattern) {
+            requirements_ = cache->requirements;
+            return;
+        }
+        auto requirements = std::make_shared<LiteralRequirements>();
         if (CanExtractLiteral()) {
-            requirements_ =
+            requirements->source =
                 re2_->RequiredLiterals(RegexLiteralCondition::kMaxNodes,
                                        RegexLiteralCondition::kMaxLiteralBytes,
                                        kMaxScanLiteralBytes,
                                        kMaxProgramSize);
         }
+        requirements_ = std::move(requirements);
+        if (pattern.size() <= kMaxProgramSize) {
+            cache.emplace(PreparationEntry{pattern, requirements_});
+        }
     });
-    return requirements_;
+    return *requirements_;
 }
 
 std::string
 PartialRegexMatcher::RequiredLiteral() const {
-    return RequiredLiterals().literal;
+    return RequiredLiterals().source.literal;
+}
+
+RegexLiteralCondition
+PartialRegexMatcher::IndexCondition(const LiteralRequirements& requirements) {
+    // Raw-only use needs just the public scan literal. Convert the bounded
+    // condition once only when an index consumer requests it; warm canonical
+    // and legacy preparation share the resulting immutable value too.
+    std::call_once(requirements.condition_once, [&requirements] {
+        requirements.condition = FromRE2(requirements.source.condition);
+    });
+    return requirements.condition;
 }
 
 RegexLiteralCondition
 PartialRegexMatcher::RequiredIndexCondition() const {
-    return FromRE2(RequiredLiterals().condition);
+    return IndexCondition(RequiredLiterals());
 }
 
 RegexLiteralCondition
 PartialRegexMatcher::PrepareIndexCondition(const std::string& pattern) {
-    struct Entry {
-        std::string pattern;
-        RegexLiteralCondition condition;
-    };
-    static thread_local std::optional<Entry> cache;
+    auto& cache = LastPreparation();
     if (cache.has_value() && cache->pattern == pattern) {
-        return cache->condition;
+        return IndexCondition(*cache->requirements);
     }
-    auto condition = PartialRegexMatcher(pattern).RequiredIndexCondition();
-    if (pattern.size() <= kMaxProgramSize) {
-        cache.emplace(Entry{pattern, condition});
-    }
-    return condition;
+    return PartialRegexMatcher(pattern).RequiredIndexCondition();
 }
 
 size_t

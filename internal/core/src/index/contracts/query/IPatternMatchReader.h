@@ -17,8 +17,16 @@
 #pragma once
 
 #include <string_view>
+#include <memory>
 
+#include "common/EasyAssert.h"
+#include "common/RegexIndexCostModel.h"
 #include "common/Types.h"
+
+namespace milvus {
+struct RegexIndexPlan;
+struct RegexLiteralCondition;
+}  // namespace milvus
 
 // String-pattern predicates. Pure mixin, independent of IIndexReaderBase
 // and point/range queries; implementations expose only supported interfaces.
@@ -51,6 +59,27 @@ class IPatternMatchReader {
     virtual bool
     ShouldUseForOp(PatternOp op, std::string_view pattern) const {
         return true;
+    }
+
+    // Optional prepared regex-candidate route. A zero row count means this
+    // reader does not provide it; ordinary pattern-reader behavior is unchanged.
+    // Preparation selects against this immutable reader's occurrence Counts.
+    // Consumers can then compare its cost with the current upstream work mask
+    // and execute the plan once without repeating Count or RE2 extraction.
+    virtual RegexIndexCostModel
+    GetRegexIndexCostModel() const {
+        return {};
+    }
+
+    virtual std::shared_ptr<const RegexIndexPlan>
+    PrepareRegexIndexPlan(const RegexLiteralCondition&) const {
+        return nullptr;
+    }
+
+    virtual TargetBitmap
+    ExecuteRegexIndexPlan(const RegexIndexPlan&) const {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "pattern reader does not provide prepared regex candidates");
     }
 
     // Whether PatternMatch(op) answers EXACTLY.

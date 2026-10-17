@@ -906,7 +906,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       false,
                       plan_options),
           expr_(expr),
-          enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
+          enable_sub_expr_cache_write_(enable_sub_expr_cache_write),
+          normal_scan_batch_size_(batch_size) {
         // Pre-warm the LIKE matcher for general Match: the FMINDEX Match
         // route (ExecFMPatternCandidates) rechecks every phase-1 candidate with it, and
         // building it on the query thread inside the first batch would put a
@@ -934,11 +935,81 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     bool
+    CanReadFromRawExprCache() const override {
+        if (SegmentExpr::CanReadFromRawExprCache()) {
+            return true;
+        }
+        // FM regex candidates are always canonically rechecked. A cached
+        // complete predicate bitmap can serve this deferred path before it
+        // prepares Counts or decides whether to Locate.
+        return fm_regex_deferred_ &&
+               expr_->op_type_ == proto::plan::OpType::RegexMatch &&
+               exec_path_ == ExprExecPath::ScalarIndex &&
+               segment_->type() == SegmentType::Sealed && num_data_chunk_ > 0 &&
+               !expr_->column_.element_level_ && PinnedIndexIsFMIndex();
+    }
+
+    bool
     SupportOffsetInput() override {
         if (IsTextIndexOpType(expr_->op_type_)) {
             return false;
         }
         return true;
+    }
+
+    bool
+    CanExecuteAllAtOnce() const override {
+        // A complete logical result may still use normal physical raw batches
+        // after a late routing rejection. It need not disable index one-shot.
+        return SegmentExpr::CanExecuteAllAtOnce();
+    }
+
+    void
+    MoveCursor() override {
+        if (execute_all_at_once_ && !has_offset_input_ &&
+            (fm_regex_deferred_ || CanUseFMPatternCandidates())) {
+            // Logical one-shot completion/parent skip still consumes its full
+            // row window. Candidate recheck uses Take and does not advance Scan.
+            AdvanceDataCursor(active_count_ - current_data_global_pos_);
+            current_index_chunk_pos_ = active_count_;
+            return;
+        }
+        SegmentExpr::MoveCursor();
+    }
+
+    bool
+    IsRegexPrefilterConsumer() const {
+        // Structural eligibility must not determine or pin a reader. Before
+        // first Eval, RawData is also the undetermined path's default; only
+        // the actual FM routing gate lazily requests these statistics.
+        return expr_->op_type_ == proto::plan::RegexMatch &&
+               (field_type_ == DataType::VARCHAR ||
+                field_type_ == DataType::TEXT) &&
+               !expr_->column_.element_level_;
+    }
+
+    // Optional already-computed scalar prefix. Never determine a path, pin an
+    // index, evaluate a predicate, or expose candidates/partial/element caches.
+    std::shared_ptr<const TargetBitmap>
+    GetComputedNumericPredicate() const {
+        if (segment_->type() != SegmentType::Sealed ||
+            exec_path_ != ExprExecPath::ScalarIndex || has_offset_input_ ||
+            execute_all_at_once_ || is_nullable_ ||
+            !IsCompareOp(expr_->op_type_) ||
+            !(IsIntegerDataType(field_type_) || IsFloatDataType(field_type_)) ||
+            expr_->column_.element_level_ || cached_is_nested_index_ ||
+            selected_element_level_result_ || selected_reader_ == nullptr ||
+            selected_reader_->CoordDomain() != index::Domain::Row ||
+            !selected_reader_->Caps().predicate ||
+            !selected_reader_->Caps().exact || cached_index_chunk_id_ != 0 ||
+            !cached_index_chunk_res_ || !cached_index_chunk_valid_res_ ||
+            cached_index_chunk_res_->size() !=
+                static_cast<size_t>(active_count_) ||
+            cached_index_chunk_valid_res_->size() !=
+                static_cast<size_t>(active_count_)) {
+            return nullptr;
+        }
+        return cached_index_chunk_res_;
     }
 
     std::string
@@ -1077,6 +1148,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::optional<VectorPtr>
     ExecFMPatternCandidates(EvalCtx& context);
 
+    VectorPtr
+    ExecFMRegexFallback(EvalCtx& context);
+
     static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
 
@@ -1100,6 +1174,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::unique_ptr<PartialRegexMatcher> cached_regex_matcher_;
     std::string cached_volnitsky_literal_;
     std::unique_ptr<VolnitskySearcher> cached_volnitsky_searcher_;
+
+    // Index-local Counts and the selected AND/OR condition are prepared once.
+    // A sparse batch may defer preparation or Locate; it does not prevent a
+    // later, denser batch from amortizing the full-segment candidate lookup.
+    RegexLiteralCondition fm_regex_requirements_;
+    std::shared_ptr<const RegexIndexPlan> fm_regex_plan_;
+    bool fm_regex_deferred_{false};
+    const int64_t normal_scan_batch_size_;
 
     void
     EnsureRegexCache() {

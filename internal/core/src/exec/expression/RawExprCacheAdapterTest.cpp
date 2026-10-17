@@ -90,7 +90,7 @@ class CountingCPUThreadPoolExecutor final
     std::atomic<size_t> submitted_tasks_{0};
 };
 
-class CountingRawExpr final : public SegmentExpr {
+class CountingRawExpr : public SegmentExpr {
  public:
     CountingRawExpr(const segcore::SegmentInternalInterface* segment,
                     FieldId field_id,
@@ -207,6 +207,32 @@ class CountingRawExpr final : public SegmentExpr {
     int64_t cursor_pos_{0};
 };
 
+// An index-eligible evaluator can still produce exact batched results and
+// defer its scan/index decision until it sees the upstream work bitmap.
+class CountingDeferredExpr final : public CountingRawExpr {
+ public:
+    CountingDeferredExpr(const segcore::SegmentInternalInterface* segment,
+                         FieldId field_id,
+                         std::string signature,
+                         bool allow_cache)
+        : CountingRawExpr(segment, field_id, std::move(signature)),
+          allow_cache_(allow_cache) {
+    }
+
+    void
+    DetermineExecPath() override {
+        exec_path_ = ExprExecPath::ScalarIndex;
+    }
+
+    bool
+    CanReadFromRawExprCache() const override {
+        return allow_cache_ || SegmentExpr::CanReadFromRawExprCache();
+    }
+
+ private:
+    const bool allow_cache_;
+};
+
 class RawExprCacheAdapterTest : public ::testing::Test {
  protected:
     void
@@ -281,6 +307,48 @@ class RawExprCacheAdapterTest : public ::testing::Test {
     FieldId field_id_;
     std::unique_ptr<segcore::SegmentSealed> segment_;
 };
+
+TEST_F(RawExprCacheAdapterTest,
+       DeferredExactResultsRequireExplicitCacheEligibility) {
+    QueryContext query_context(
+        "deferred_cache_test", segment_.get(), kActiveCount, MAX_TIMESTAMP);
+    ExecContext exec_context(&query_context);
+    EvalCtx eval_context(&exec_context);
+    auto& manager = ExprResCacheManager::Instance();
+
+    for (bool allow_cache : {false, true}) {
+        manager.Clear();
+        auto first_input = std::make_shared<CountingDeferredExpr>(
+            segment_.get(), field_id_, "deferred:exact", allow_cache);
+        auto first =
+            std::make_shared<RawExprCacheAdapter>(first_input, nullptr, true);
+        TargetBitmap first_data;
+        TargetBitmap first_valid;
+        EXPECT_EQ(
+            EvalSequential(first, eval_context, &first_data, &first_valid),
+            (std::vector<int64_t>{1024, 1024, 452}));
+        EXPECT_EQ(first_input->eval_count, 3);
+        EXPECT_EQ(manager.GetEntryCount(), allow_cache ? 1u : 0u);
+
+        auto second_input = std::make_shared<CountingDeferredExpr>(
+            segment_.get(), field_id_, "deferred:exact", allow_cache);
+        auto second =
+            std::make_shared<RawExprCacheAdapter>(second_input, nullptr, true);
+        TargetBitmap second_data;
+        TargetBitmap second_valid;
+        EXPECT_EQ(
+            EvalSequential(second, eval_context, &second_data, &second_valid),
+            (std::vector<int64_t>{1024, 1024, 452}));
+        EXPECT_EQ(second_input->eval_count, allow_cache ? 0 : 3);
+        EXPECT_EQ(second_input->move_count, 3);
+        EXPECT_TRUE(first_data == second_data);
+        EXPECT_TRUE(first_valid == second_valid);
+
+        VectorPtr exhausted;
+        second->Eval(eval_context, exhausted);
+        EXPECT_EQ(exhausted, nullptr);
+    }
+}
 
 TEST_F(RawExprCacheAdapterTest,
        SequentialCaptureUsesInternalCursorAndHitBypassesEval) {
