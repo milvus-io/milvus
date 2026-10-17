@@ -3270,6 +3270,17 @@ func Test_createCollectionTask_prepareSchema_validatesFunctions(t *testing.T) {
 		err := task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
 	})
+
+	t.Run("valid minhash TEXT input accepted", func(t *testing.T) {
+		useLoon := paramtable.Get().CommonCfg.UseLoonFFI.Key
+		paramtable.Get().Save(useLoon, "true")
+		defer paramtable.Get().Reset(useLoon)
+		task := buildTask("1")
+		task.body.CollectionSchema.Fields[1].DataType = schemapb.DataType_Text
+		task.body.CollectionSchema.Fields[1].TypeParams = nil
+		err := task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+	})
 }
 
 // External collections go through the direct-path function validation like any
