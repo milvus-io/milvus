@@ -119,12 +119,12 @@ func BenchmarkOptimizationComparison(b *testing.B) {
 	for _, tc := range optimizationBenchExprs {
 		b.Run(tc.name, func(b *testing.B) {
 			// Purge cache before each benchmark to measure raw parsing performance
-			exprCache.Purge()
+			getExprCache().Purge()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
 				// Purge cache on each iteration to prevent caching
-				exprCache.Purge()
+				getExprCache().Purge()
 				_, err := ParseExpr(schemaHelper, tc.expr, nil)
 				if err != nil {
 					b.Fatalf("failed to parse %s: %v", tc.expr, err)
@@ -254,14 +254,14 @@ func BenchmarkCacheEffect(b *testing.B) {
 
 	b.Run("without_cache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			exprCache.Purge()
+			getExprCache().Purge()
 			_, _ = ParseExpr(schemaHelper, expr, nil)
 		}
 	})
 
 	b.Run("with_cache", func(b *testing.B) {
 		// Warm up cache
-		exprCache.Purge()
+		getExprCache().Purge()
 		_, _ = ParseExpr(schemaHelper, expr, nil)
 		b.ResetTimer()
 
@@ -294,18 +294,18 @@ func BenchmarkKeywordCaseSensitivity(b *testing.B) {
 
 	for _, kw := range keywords {
 		b.Run(kw.name+"_lower", func(b *testing.B) {
-			exprCache.Purge()
+			getExprCache().Purge()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				exprCache.Purge()
+				getExprCache().Purge()
 				_, _ = ParseExpr(schemaHelper, kw.lower, nil)
 			}
 		})
 		b.Run(kw.name+"_upper", func(b *testing.B) {
-			exprCache.Purge()
+			getExprCache().Purge()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				exprCache.Purge()
+				getExprCache().Purge()
 				_, _ = ParseExpr(schemaHelper, kw.upper, nil)
 			}
 		})
@@ -324,11 +324,11 @@ func BenchmarkExpressionComplexity(b *testing.B) {
 				expr += fmt.Sprintf(" && Int64Field < %d", 1000+i)
 			}
 
-			exprCache.Purge()
+			getExprCache().Purge()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				exprCache.Purge()
+				getExprCache().Purge()
 				_, _ = ParseExpr(schemaHelper, expr, nil)
 			}
 		})
@@ -346,11 +346,11 @@ func BenchmarkExpressionComplexity(b *testing.B) {
 			}
 			expr += "]"
 
-			exprCache.Purge()
+			getExprCache().Purge()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				exprCache.Purge()
+				getExprCache().Purge()
 				_, _ = ParseExpr(schemaHelper, expr, nil)
 			}
 		})

@@ -446,6 +446,11 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
+  exprCache:
+    # Accounted retained bytes for cached expression trees and syntax errors.
+    # Both limits require a restart; non-positive or invalid values use the defaults.
+    maxBytes: 67108864 # Total budget, default 64 MiB; entry count (1,024) and TTL (10 minutes) also apply.
+    maxEntryBytes: 8388608 # Single-entry admission limit, default 8 MiB, clamped to maxBytes. Larger parses are returned uncached.
   # Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
   # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
   # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.

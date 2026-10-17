@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/antlr4-go/antlr/v4"
-	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -26,13 +24,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-var (
-	exprCache   = expirable.NewLRU[string, any](1024, nil, time.Minute*10)
-	trueLiteral = &ExprWithType{
-		dataType: schemapb.DataType_Bool,
-		expr:     alwaysTrueExpr(),
-	}
-)
+var trueLiteral = &ExprWithType{
+	dataType: schemapb.DataType_Bool,
+	expr:     alwaysTrueExpr(),
+}
 
 type ExprParams struct {
 	UseJSONStats bool
@@ -102,7 +97,8 @@ func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) pla
 }
 
 func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
-	val, ok := exprCache.Get(exprStr)
+	cache := getExprCache()
+	val, ok := cache.Get(exprStr)
 	if ok {
 		switch v := val.(type) {
 		case planparserv2.IExprContext:
@@ -117,7 +113,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	// Note that the errors will be cached, too.
 	defer func() {
 		if err != nil {
-			exprCache.Add(exprStr, err)
+			cache.Add(exprStr, err, errorCost(exprStr, err))
 		}
 	}()
 	exprNormal := convertHanToASCII(exprStr)
@@ -125,11 +121,16 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 
 	inputStream := antlr.NewInputStream(exprNormal)
 	lexer := getLexer(inputStream, listener)
+	// Returned on every path, errors included: a lexer or parser left out of
+	// the pool keeps the input it failed on, and a cached tree that points at
+	// it keeps that alive too (#53754).
+	defer putLexer(lexer)
 	if err = listener.Error(); err != nil {
 		return
 	}
 
 	parser := getParser(lexer, listener)
+	defer putParser(parser)
 	if err = listener.Error(); err != nil {
 		return
 	}
@@ -145,11 +146,15 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 		return
 	}
 
-	// lexer & parser won't be used by this thread, can be put into pool.
-	putLexer(lexer)
-	putParser(parser)
+	// The tree's retained size grows with its tokens, so count them while the
+	// parser still holds the stream. Should the stream ever be of another
+	// type, every token spans at least one character, plus EOF: an upper bound.
+	tokens := len(exprNormal) + 1
+	if stream, ok := parser.GetTokenStream().(*antlr.CommonTokenStream); ok {
+		tokens = stream.Size()
+	}
 
-	exprCache.Add(exprStr, ast)
+	cache.Add(exprStr, ast, treeCost(exprStr, exprNormal, tokens))
 	return
 }
 
