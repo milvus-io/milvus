@@ -547,8 +547,15 @@ VectorMemLoader::LoadLegacy(storage::FileSource& source,
     co_await PopulateState(use_async, state, source, opts, params, plan);
     // Report the native engine footprint for segment RAM accounting. Capture
     // before the engine is moved into the reader (knowhere Size() reflects the
-    // materialized index).
-    const auto mem_size = static_cast<size_t>(state.engine.native_index.Size());
+    // materialized index). Only a Normal artifact materializes an ANN index;
+    // AllNull / EmptyEmbeddingList loads carry no native index, and knowhere
+    // Size() dereferences the backing index without a null guard, so it must
+    // not be called in those states (matches the native_index.Count() guard in
+    // ValidateLoadedShape).
+    const auto mem_size =
+        plan.state == ArtifactState::Normal
+            ? static_cast<size_t>(state.engine.native_index.Size())
+            : size_t{0};
     auto reader = std::make_unique<VectorIndexReader>(std::move(state.engine));
     reader->SetMemSize(mem_size);
     co_return reader;
