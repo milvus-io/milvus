@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 func TestAnnParams(t *testing.T) {
@@ -40,6 +42,18 @@ func TestAnnParams(t *testing.T) {
 	v, ok = result[diskANNSearchListKey]
 	assert.True(t, ok)
 	assert.Equal(t, 10, v)
+
+	idxDiskAnn := NewDiskANNIndex(entity.L2)
+	assert.Equal(t, DISKANN, idxDiskAnn.IndexType())
+	diskAnnParams := idxDiskAnn.Params()
+	assert.Equal(t, string(DISKANN), diskAnnParams[IndexTypeKey])
+	assert.Equal(t, string(entity.L2), diskAnnParams[MetricTypeKey])
+
+	idxAisaq := NewAISAQIndex(entity.L2)
+	assert.Equal(t, AISAQ, idxAisaq.IndexType())
+	aisaqParams := idxAisaq.Params()
+	assert.Equal(t, string(AISAQ), aisaqParams[IndexTypeKey])
+	assert.Equal(t, string(entity.L2), aisaqParams[MetricTypeKey])
 
 	scannAP := NewSCANNAnnParam(32, 50)
 	result = scannAP.Params()
