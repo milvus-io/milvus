@@ -33,13 +33,16 @@ import (
 )
 
 // executeFilterStage executes the filter-only stage of two-stage search.
-// It sets FilterOnly=true on the request, executes search subtasks, and returns filter statistics.
+// It sets FilterOnly=true on the request, executes search subtasks, and returns
+// filter statistics together with the execution feature bits the stage
+// recorded (OR over the workers), which the caller carries into the final
+// results.
 func (sd *shardDelegator) executeFilterStage(
 	ctx context.Context,
 	req *querypb.SearchRequest,
 	sealed []SnapshotItem,
 	sealedRowCount map[int64]int64,
-) ([]int64, error) {
+) ([]int64, uint64, error) {
 	originalFilterOnly := req.FilterOnly
 	originalEnableExprCache := req.EnableExprCache
 	req.FilterOnly = true
@@ -57,7 +60,7 @@ func (sd *shardDelegator) executeFilterStage(
 	if err != nil {
 		log := sd.getLogger(ctx)
 		log.Warn(ctx, "Two-stage search: filter stage failed", mlog.Err(err))
-		return nil, err
+		return nil, 0, err
 	}
 
 	// NOTE: validCounts ordering is non-deterministic because filterResults
@@ -67,15 +70,17 @@ func (sd *shardDelegator) executeFilterStage(
 	// TODO: if a future consumer needs per-segment association, pair each
 	// count with its SegmentID before returning.
 	validCounts := make([]int64, 0, len(sealedRowCount))
+	var featureBits uint64
 	for _, result := range filterResults {
+		featureBits |= result.GetFeatureBits()
 		for _, vc := range result.GetFilterValidCounts() {
 			if vc < 0 {
-				return nil, merr.WrapErrServiceInternalMsg("filter stage returned negative valid_count %d, segment may not support filter-only search", vc)
+				return nil, 0, merr.WrapErrServiceInternalMsg("filter stage returned negative valid_count %d, segment may not support filter-only search", vc)
 			}
 			validCounts = append(validCounts, vc)
 		}
 	}
-	return validCounts, nil
+	return validCounts, featureBits, nil
 }
 
 // twoStageSearch implements the two-stage search flow:
@@ -84,16 +89,19 @@ func (sd *shardDelegator) executeFilterStage(
 // Note: Filter bitsets are cached via the process-level ExprResCacheManager
 // (Stage 1 writes, Stage 2 reads). Cross-query reuse comes for free when the
 // same predicate runs on the same sealed segment.
-// twoStageSearch returns (results, fallback, error). When fallback is true,
-// the caller should continue with the normal single-stage search path;
-// results will be nil in that case.
+// twoStageSearch returns (results, fallback, stage1Bits, error). When fallback
+// is true, the caller should continue with the normal single-stage search
+// path; results will be nil in that case. stage1Bits are the execution
+// feature bits the filter stage recorded; they are already OR-ed into results,
+// and on fallback the caller ORs them into the results it produces instead, so
+// a feature used only by the filter stage still reaches the Proxy.
 func (sd *shardDelegator) twoStageSearch(
 	ctx context.Context,
 	req *querypb.SearchRequest,
 	sealed []SnapshotItem,
 	growing []SegmentEntry,
 	sealedRowCount map[int64]int64,
-) ([]*internalpb.SearchResults, bool, error) {
+) ([]*internalpb.SearchResults, bool, uint64, error) {
 	log := sd.getLogger(ctx)
 
 	// ==================== STAGE 1: Filter Only (get statistics) ====================
@@ -101,11 +109,11 @@ func (sd *shardDelegator) twoStageSearch(
 	collectionID := fmt.Sprint(sd.collectionID)
 
 	stage1Start := time.Now()
-	validCounts, err := sd.executeFilterStage(ctx, req, sealed, sealedRowCount)
+	validCounts, stage1Bits, err := sd.executeFilterStage(ctx, req, sealed, sealedRowCount)
 	stage1Dur := float64(time.Since(stage1Start).Milliseconds())
 	metrics.QueryNodeTwoStageFilterLatency.WithLabelValues(nodeID, collectionID).Observe(stage1Dur)
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 
 	// In a mixed-version cluster, old workers may not populate
@@ -120,7 +128,7 @@ func (sd *shardDelegator) twoStageSearch(
 			mlog.Int("got", len(validCounts)),
 		)
 		metrics.QueryNodeTwoStageSearchFallbackCount.WithLabelValues(nodeID, collectionID, "incomplete_filter_counts").Inc()
-		return nil, true, nil
+		return nil, true, stage1Bits, nil
 	}
 
 	effectiveSegmentNum := optimizers.CalculateEffectiveSegmentNum(sd.queryHook, validCounts, req.GetReq().GetTopk())
@@ -137,7 +145,7 @@ func (sd *shardDelegator) twoStageSearch(
 	optimizedReq, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim, indexType)
 	if err != nil {
 		log.Warn(ctx, "Two-stage search: failed to optimize search params", mlog.Err(err))
-		return nil, false, err
+		return nil, false, 0, err
 	}
 
 	// ==================== STAGE 2: Normal Search with optimized params ====================
@@ -151,9 +159,22 @@ func (sd *shardDelegator) twoStageSearch(
 	metrics.QueryNodeTwoStageSearchLatency.WithLabelValues(nodeID, collectionID).Observe(stage2Dur)
 	if err != nil {
 		log.Warn(ctx, "Two-stage search: vector search stage failed", mlog.Err(err))
-		return nil, false, err
+		return nil, false, 0, err
 	}
+	orFeatureBits(results, stage1Bits)
 
 	log.Debug(ctx, "Two-stage search completed", mlog.Int("results", len(results)))
-	return results, false, nil
+	return results, false, stage1Bits, nil
+}
+
+// orFeatureBits adds bits to the execution feature bits of every result.
+func orFeatureBits(results []*internalpb.SearchResults, bits uint64) {
+	if bits == 0 {
+		return
+	}
+	for _, r := range results {
+		if r != nil {
+			r.FeatureBits |= bits
+		}
+	}
 }
