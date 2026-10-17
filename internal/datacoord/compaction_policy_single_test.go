@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -169,7 +170,7 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 		State:        datapb.CompactionTaskState_executing,
 	})
 
-	views, _, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
+	views, _, _, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
 	s.NoError(err)
 	s.Equal(2, len(views))
 }
@@ -216,9 +217,38 @@ func (s *SingleCompactionPolicySuite) TestSortCompaction() {
 		Type:         datapb.CompactionType_SortCompaction,
 	})
 
-	_, sortViews, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
+	_, invisibleSortViews, visibleSortViews, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
 	s.NoError(err)
-	s.Equal(3, len(sortViews))
+	s.Equal(3, len(invisibleSortViews)+len(visibleSortViews))
+}
+
+// TestTriggerSortsInvisibleSegmentsFirst checks that the sort sweep returns the
+// sorts of invisible segments, which a flush or a clustering compaction just
+// wrote, before the sorts of visible segments of any collection.
+func (s *SingleCompactionPolicySuite) TestTriggerSortsInvisibleSegmentsFirst() {
+	newSegment := func(id, collectionID int64, invisible bool) *SegmentInfo {
+		label := &CompactionGroupLabel{CollectionID: collectionID, PartitionID: 10, Channel: "ch-1"}
+		segment := genTestSegmentInfo(label, id, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
+		segment.IsInvisible = invisible
+		return segment
+	}
+	meta := &meta{segments: NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+	// Each collection has a visible and an invisible unsorted segment.
+	for _, segment := range []*SegmentInfo{newSegment(1, 100, false), newSegment(2, 100, true), newSegment(3, 200, false), newSegment(4, 200, true)} {
+		meta.segments.SetSegment(segment.GetID(), segment)
+	}
+	for _, collectionID := range []int64{100, 200} {
+		meta.collections.Insert(collectionID, &collectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{}})
+	}
+	s.singlePolicy.meta = meta
+
+	events, err := s.singlePolicy.Trigger(context.Background())
+	s.NoError(err)
+	sortedSegments := lo.Map(events[TriggerTypeSort], func(view CompactionView, _ int) int64 {
+		return view.GetSegmentsView()[0].ID
+	})
+	s.Require().Len(sortedSegments, 4)
+	s.ElementsMatch([]int64{2, 4}, sortedSegments[:2])
 }
 
 func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
@@ -294,9 +324,10 @@ func (s *SingleCompactionPolicySuite) TestTriggerOneCollectionSkipExternal() {
 	mockHandler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil)
 	policy := newSingleCompactionPolicy(s.singlePolicy.meta, s.mockAlloc, mockHandler)
 
-	views, sortViews, triggerID, err := policy.triggerOneCollection(context.Background(), collID, false)
+	views, invisibleSortViews, visibleSortViews, triggerID, err := policy.triggerOneCollection(context.Background(), collID, false)
 	s.NoError(err)
 	s.Nil(views)
-	s.Nil(sortViews)
+	s.Nil(invisibleSortViews)
+	s.Nil(visibleSortViews)
 	s.EqualValues(0, triggerID)
 }
