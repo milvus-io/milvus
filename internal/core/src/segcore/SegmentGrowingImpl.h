@@ -304,7 +304,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     int64_t
     get_deleted_count() const override {
-        return deleted_record_.size();
+        return deleted_record_.deleted_row_count();
     }
 
     int64_t
