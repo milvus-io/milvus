@@ -532,6 +532,43 @@ func (b *RecordBuilder) Append(rec Record, start, end int) error {
 	return nil
 }
 
+// appendColumns appends rows from source columns already resolved in builder
+// field order. MergeSort keeps these columns with each reader's current record
+// so the per-row output loop does not repeat Record.Column lookups.
+func (b *RecordBuilder) appendColumns(columns []arrow.Array, start, end int) error {
+	if err := b.prepareAppendDefaults(); err != nil {
+		return err
+	}
+	for offset := start; offset < end; offset++ {
+		for i, builder := range b.builders {
+			f := b.fields[i]
+			col := columns[i]
+			// Keep TEXT representation handling aligned with Append.
+			if f.GetDataType() == schemapb.DataType_Text &&
+				(col.DataType().ID() == arrow.STRING || col.DataType().ID() == arrow.BINARY) &&
+				col.DataType().ID() != builder.Type().ID() {
+				if builder.NullN() == builder.Len() {
+					nulls := builder.Len()
+					builder.Release()
+					builder = array.NewBuilder(b.allocator, col.DataType())
+					builder.AppendNulls(nulls)
+					b.builders[i] = builder
+				} else if col.IsNull(offset) {
+					builder.AppendNull()
+					continue
+				}
+			}
+			size, err := appendValueAt(builder, col, offset, f, b.defaults[i])
+			if err != nil {
+				return merr.Wrapf(err, "failed to append value at offset %d for field %s", offset, f.GetName())
+			}
+			b.size += size
+		}
+	}
+	b.nRows += (end - start)
+	return nil
+}
+
 func (b *RecordBuilder) GetRowNum() int {
 	return b.nRows
 }
