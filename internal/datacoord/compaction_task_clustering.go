@@ -854,10 +854,10 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 	}
 	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
 	if err != nil {
-		originNodeID := t.GetTaskProto().GetNodeID()
+		err = merr.Wrapf(err, "create clustering compaction on worker %d (planID=%d)", nodeID, t.GetTaskProto().GetPlanID())
 		mlog.Warn(context.TODO(), "Failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-			mlog.Int64("nodeID", originNodeID),
+			mlog.FieldNodeID(nodeID),
 			mlog.Err(err))
 		// Keep the NodeID: if the drop above failed and this create was to the
 		// same node (rejected as a duplicate), resetting to NullNodeID would
@@ -867,12 +867,10 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 		// leave the entry on the worker until restart. Keeping it costs
 		// nothing: the scheduler picks the next node from the slot heap and
 		// never reads it.
-		if metaErr := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining)); metaErr != nil {
-			mlog.Warn(context.TODO(), "updateAndSaveTaskMeta fail", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(metaErr))
-			return metaErr
+		if saveErr := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining)); saveErr != nil {
+			mlog.Warn(context.TODO(), "updateAndSaveTaskMeta fail", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(saveErr))
+			return merr.Combine(err, merr.Wrap(saveErr, "persist clustering compaction retry state"))
 		}
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
 		// Return the ORIGINAL submission error after rolling the metadata back
 		// to pipelining: falling through to executing would record the task as
 		// running on a node that rejected it, the next poll would synthesize a

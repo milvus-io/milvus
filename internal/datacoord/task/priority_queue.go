@@ -18,6 +18,7 @@ package task
 
 import (
 	"container/heap"
+	"slices"
 	"sync"
 )
 
@@ -31,6 +32,8 @@ type PriorityQueue interface {
 	TaskCount() int
 	TaskCountBy(filter func(Task) bool) int
 	TaskIDs() []int64
+	// TaskIDsByPriority returns a snapshot in Pop order without removing tasks.
+	TaskIDsByPriority() []int64
 }
 
 var _ PriorityQueue = &priorityQueuePolicy{}
@@ -130,6 +133,20 @@ func (pqp *priorityQueuePolicy) TaskIDs() []int64 {
 	taskIDs := make([]int64, 0, len(pqp.tasks))
 	for _, t := range *pqp.heap {
 		taskIDs = append(taskIDs, t.GetTaskID())
+	}
+	return taskIDs
+}
+
+func (pqp *priorityQueuePolicy) TaskIDsByPriority() []int64 {
+	pqp.lock.RLock()
+	snapshot := slices.Clone(*pqp.heap)
+	pqp.lock.RUnlock()
+
+	// Reuse the queue's comparator without holding its lock while ordering.
+	taskIDs := make([]int64, 0, snapshot.Len())
+	for snapshot.Len() > 0 {
+		task := heap.Pop(&snapshot).(Task)
+		taskIDs = append(taskIDs, task.GetTaskID())
 	}
 	return taskIDs
 }
