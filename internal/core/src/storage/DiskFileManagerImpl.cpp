@@ -372,7 +372,10 @@ DiskFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
     auto local_file_name = GetFileName(file_meta.file_path);
     auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
 
-    remote_paths_to_size_[remote_file_path] = file_meta.file_size;
+    auto& file_size = remote_paths_to_size_[remote_file_path];
+    added_total_file_size_ -= file_size;
+    file_size = file_meta.file_size;
+    added_total_file_size_ += file_size;
     return true;
 }
 
