@@ -6339,6 +6339,10 @@ user-task-polling:
 // /////////////////////////////////////////////////////////////////////////////
 // --- datacoord ---
 type dataCoordConfig struct {
+	TalonPrewarmEnabled   ParamItem `refreshable:"false"`
+	TalonPrewarmInterval  ParamItem `refreshable:"false"`
+	TalonPrewarmBatchSize ParamItem `refreshable:"false"`
+
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
 	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
@@ -6549,6 +6553,31 @@ type dataCoordConfig struct {
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
+	p.TalonPrewarmEnabled = ParamItem{
+		Key:          "dataCoord.talonPrewarm.enabled",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Export:       false,
+		Doc:          "Enable Talon prewarming, currently covering published manifests of all collections. Remote storage only. Requires a restart.",
+	}
+	p.TalonPrewarmEnabled.Init(base.mgr)
+	p.TalonPrewarmInterval = ParamItem{
+		Key:          "dataCoord.talonPrewarm.interval",
+		Version:      "3.0.1",
+		DefaultValue: "600",
+		Export:       false,
+		Doc:          "Seconds to wait after completing each Talon prewarm round. Valid range: [1, 86400]. Requires a restart.",
+	}
+	p.TalonPrewarmInterval.Init(base.mgr)
+	p.TalonPrewarmBatchSize = ParamItem{
+		Key:          "dataCoord.talonPrewarm.batchSize",
+		Version:      "3.0.1",
+		DefaultValue: "256",
+		Export:       false,
+		Doc:          "Maximum objects per Talon batch. Valid range: [1, 4096]. Requires a restart.",
+	}
+	p.TalonPrewarmBatchSize.Init(base.mgr)
+
 	p.WatchTimeoutInterval = ParamItem{
 		Key:          "dataCoord.channel.watchTimeoutInterval",
 		Version:      "2.2.3",
