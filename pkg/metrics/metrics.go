@@ -112,7 +112,11 @@ const (
 
 	Pending   = "pending"
 	Executing = "executing"
-	Done      = "done"
+
+	// outcome of the single compaction admission limiter for a candidate
+	SingleCompactionAdmitted = "admitted"
+	SingleCompactionDeferred = "deferred"
+	Done                     = "done"
 
 	ImportStagePending      = "pending"
 	ImportStagePreImport    = "preimport"
@@ -126,6 +130,7 @@ const (
 	segmentPruneLabelName          = "segment_prune_label"
 	stageLabelName                 = "compaction_stage"
 	nodeIDLabelName                = "node_id"
+	admissionSourceLabelName       = "source"
 	nodeHostLabelName              = "node_host"
 	statusLabelName                = "status"
 	causeLabelName                 = "cause"

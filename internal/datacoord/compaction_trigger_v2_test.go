@@ -926,6 +926,35 @@ func (s *CompactionTriggerManagerSuite) TestSubmitViewToSchedulerDefensiveReturn
 		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), makeMixView(), TriggerTypeSingle)
 	})
 
+	// Only a view that took an admission token gives one back when it fails
+	// before reaching the queue; a single view that bypassed admission (e.g.
+	// from the target reconciler) does not mint one.
+	s.Run("single early failure refunds only admitted views", func() {
+		s.SetupTest()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(nil, errors.New("get collection error")).Twice()
+		s.triggerManager.handler = handler
+
+		admitter := getSingleCompactionAdmitter()
+		admitter.mu.Lock()
+		admitter.tokens = 0
+		admitter.mu.Unlock()
+		tokens := func() float64 {
+			admitter.mu.Lock()
+			defer admitter.mu.Unlock()
+			return admitter.tokens
+		}
+
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), makeMixView(), TriggerTypeSingle)
+		s.Equal(0.0, tokens(), "a view that bypassed admission refunds nothing")
+
+		admitted := makeMixView()
+		admitted.admitted = true
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), admitted, TriggerTypeSingle)
+		s.Equal(1.0, tokens(), "an admitted view that failed early gives its token back")
+	})
+
 	s.Run("single AllocN error returns before enqueue", func() {
 		s.SetupTest()
 		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
@@ -1235,6 +1264,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		}
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		s.inspector.EXPECT().isFull().Return(true).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 
@@ -1248,6 +1278,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		// isFull() IS called now (step 2, before Trigger). Trigger() errors → no notify().
 		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 
@@ -1262,6 +1293,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		// isFull() IS called now (step 2 gate before Trigger). Trigger returns nil → no notify.
 		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 
@@ -1276,6 +1308,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		}
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// stubDispatchableView.Trigger() returns nil, so notify() short-circuits
 		// before reaching SubmitBumpSchemaVersionViewToScheduler. We only care here that
 		// isFull was consulted and the dispatch path was entered.

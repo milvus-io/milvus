@@ -56,6 +56,9 @@ type CompactionInspector interface {
 	enqueueCompaction(task *datapb.CompactionTask) error
 	// isFull return true if the task pool is full
 	isFull() bool
+	// getRemainingCapacity returns how many tasks can still be enqueued before
+	// the pool is full; a negative value means the pool is unbounded
+	getRemainingCapacity() int
 	// get compaction tasks by signal id
 	getCompactionTasksNumBySignalID(signalID int64) int
 	getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo
@@ -738,6 +741,16 @@ func (c *compactionInspector) cleanFailedTasks() {
 // isFull return true if the task pool is full
 func (c *compactionInspector) isFull() bool {
 	return c.queueTasks.Len() >= c.queueTasks.capacity
+}
+
+func (c *compactionInspector) getRemainingCapacity() int {
+	if c.queueTasks.capacity <= 0 {
+		return -1
+	}
+	if left := c.queueTasks.capacity - c.queueTasks.Len(); left > 0 {
+		return left
+	}
+	return 0
 }
 
 func (c *compactionInspector) checkDelay(t CompactionTask) {
