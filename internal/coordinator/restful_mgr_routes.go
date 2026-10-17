@@ -1367,6 +1367,12 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
+		if strings.HasPrefix(normalizedKey, pkgconfig.FormatKey("proxy.accessLog.")) {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify access log config")
+			writeJSONError(writer, fmt.Sprintf("access log configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+
 		// Check if the configuration is immutable - immutable keys cannot be modified
 		if paramMgr.IsImmutable(config.Key) {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify immutable config")
