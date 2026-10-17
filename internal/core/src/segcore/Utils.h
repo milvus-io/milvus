@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <functional>
 #include <memory>
 #include <cstdlib>
 #include <optional>
@@ -28,6 +30,7 @@
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/Meta.h"
 #include "segcore/SegmentInterface.h"
+#include "storage/artifact/LoadOptions.h"
 
 namespace milvus::segcore {
 
@@ -196,7 +199,8 @@ getCellDataType(bool is_vector, bool is_index);
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,
-              milvus::OpContext* op_ctx = nullptr);
+              milvus::OpContext* op_ctx = nullptr,
+              storage::VectorDataViewScope vector_data_view_scope = {});
 
 /**
  * Convert Milvus timestamp to physical time in milliseconds.

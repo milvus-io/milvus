@@ -99,11 +99,13 @@ SealedIndexTranslator::SealedIndexTranslator(
     const milvus::segcore::LoadIndexInfo* load_index_info,
     milvus::tracer::TraceContext ctx,
     milvus::storage::FileManagerContext file_manager_context,
-    Config config)
+    Config config,
+    storage::VectorDataViewScope vector_data_view_scope)
     : index_type_(ReadIndexType(config)),
       ctx_(ctx),
       file_manager_context_(std::move(file_manager_context)),
       config_(std::move(config)),
+      vector_data_view_scope_(std::move(vector_data_view_scope)),
       index_key_(fmt::format("seg_{}_si_{}",
                              load_index_info->segment_id,
                              load_index_info->field_id)),
@@ -315,6 +317,7 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     storage::LoadOptions options;
     options.enable_mmap = index_load_info_.enable_mmap;
     options.estimated_bytes = index_load_info_.index_size;
+    options.vector_data_view_scope = vector_data_view_scope_;
     IndexLoadContext load_ctx(
         ctx,
         index::GetValueFromConfig<int32_t>(config_, "load_priority")

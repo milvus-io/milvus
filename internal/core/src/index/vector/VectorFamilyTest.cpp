@@ -501,6 +501,92 @@ TEST(VectorFamilyEdgeTest, SparseExplicitAndImplicitEmptyRows) {
     }
 }
 
+TEST(VectorFamilyEdgeTest, ResolveMRLConfig) {
+    const auto disabled = ResolveMRLConfig(Config{}, kDim);
+    EXPECT_FALSE(disabled.enabled);
+
+    Config explicitly_disabled{{MRL_DIM_KEY, -1}};
+    EXPECT_FALSE(ResolveMRLConfig(explicitly_disabled, kDim).enabled);
+
+    Config enabled{{MRL_DIM_KEY, 2}, {WITH_MRL_REFINE_KEY, true}};
+    const auto resolved = ResolveMRLConfig(enabled, kDim);
+    EXPECT_TRUE(resolved.enabled);
+    EXPECT_EQ(resolved.mrl_dim, 2);
+    EXPECT_TRUE(resolved.with_refine);
+
+    Config refine_without_mrl{{WITH_MRL_REFINE_KEY, true}};
+    EXPECT_ANY_THROW(ResolveMRLConfig(refine_without_mrl, kDim));
+    EXPECT_ANY_THROW(ResolveMRLConfig(enabled, std::nullopt));
+}
+
+TEST(VectorFamilyEdgeTest, MRLRefinesWithSourceRowsAfterReload) {
+    constexpr int64_t rows = 3;
+    constexpr int64_t mrl_dim = 2;
+    std::array<float, rows * kDim> values{};
+    values[kDim + 2] = 10.0F;
+    values[2 * kDim] = 1.0F;
+    values[2 * kDim + 1] = 1.0F;
+    values[2 * kDim + 2] = 10.0F;
+    Profile profile{"MRLIdMap",
+                    knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                    "L2",
+                    DataType::VECTOR_FLOAT,
+                    kDim,
+                    {},
+                    {}};
+    auto adapted = Adapt(profile, rows);
+    adapted.params[MRL_DIM_KEY] = mrl_dim;
+    adapted.params[WITH_MRL_REFINE_KEY] = true;
+
+    auto builder = BuilderRegistry<VectorBuildInput<float>>::Instance().Create(
+        adapted.family, adapted.params);
+    ASSERT_NE(builder, nullptr);
+    auto artifact = std::move(*builder).Build(VectorBuildInput<float>{
+        .physical_values = values,
+        .logical_rows = rows,
+        .physical_rows = rows,
+        .dim = kDim,
+    });
+    TestArtifactData persisted;
+    TestArtifactSink sink(persisted, storage::Generation::V1V2);
+    artifact->Serialize(sink);
+    sink.Finish();
+
+    auto source = std::make_shared<TestArtifactSource>(
+        persisted, storage::Generation::V1V2);
+    storage::LoadOptions options;
+    options.params = adapted.params;
+    options.vector_data_view_scope = [&values](milvus::OpContext*) {
+        return [&values](size_t id) {
+            return static_cast<const void*>(values.data() + id * kDim);
+        };
+    };
+    auto base = LoaderRegistry::Instance()
+                    .Lookup(adapted.family)
+                    .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+                           options});
+    ASSERT_NE(base, nullptr);
+    const auto* reader = dynamic_cast<const IVectorReader*>(base.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->Dim(), kDim);
+    EXPECT_FALSE(reader->HasRawData());
+
+    VectorSearchParams search{
+        .search_params_ = {{METRIC_TYPE, profile.metric}},
+        .metric_type_ = profile.metric,
+        .topk_ = 2,
+    };
+    SearchResult result;
+    reader->Search(GenDataset(1, kDim, values.data() + kDim),
+                   search,
+                   BitsetView{},
+                   nullptr,
+                   result);
+    ASSERT_EQ(result.seg_offsets_.size(), 2);
+    EXPECT_EQ(result.seg_offsets_[0], 1);
+    EXPECT_FLOAT_EQ(result.distances_[0], 0.0F);
+}
+
 TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
     auto values = FloatData();
     Profile profile{"InterimIVFPQ",
