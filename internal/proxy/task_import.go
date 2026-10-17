@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -52,8 +51,6 @@ type importTask struct {
 	partitionIDs []int64
 	collectionID UniqueID
 	schema       *schemaInfo
-	rlsPrincipal string
-	skipRLS      bool // set only after the request-scoped bypass is authorized
 	resp         *internalpb.ImportResponse
 }
 
@@ -103,10 +100,6 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	if err := importutilv2.ValidateNoDuplicateKeys(req.GetOptions()); err != nil {
 		return err
 	}
-	rlsPrincipal, requestedSkipRLS, err := importutilv2.GetRLSOptions(req.GetOptions())
-	if err != nil {
-		return err
-	}
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -127,25 +120,6 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	canonicalCollectionName := colInfo.schema.GetName()
 	req.DbName = canonicalDBName
 	req.CollectionName = canonicalCollectionName
-
-	rlsEnabled := colInfo.rlsEnabled
-	// Keep this before skip authorization: an old DataCoord cannot re-check a
-	// concurrent rls.force transition before it creates the import job.
-	if rlsEnabled && !Params.ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
-		return merr.WrapErrServiceUnavailable("RLS import enforcement is unavailable until the cluster upgrade completes")
-	}
-	if rlsEnabled && requestedSkipRLS {
-		rlsEnabled, err = resolveRLSEnforcement(ctx, rlsEnabled, colInfo.rlsForce, requestedSkipRLS,
-			canonicalDBName, canonicalCollectionName, "import")
-		if err != nil {
-			return err
-		}
-		it.skipRLS = !rlsEnabled
-	}
-	it.rlsPrincipal, _, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, rlsPrincipal, "import")
-	if err != nil {
-		return err
-	}
 
 	schema := colInfo.schema
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
@@ -288,8 +262,6 @@ func (it *importTask) Execute(ctx context.Context) error {
 		Options:        it.req.GetOptions(),
 		DataTimestamp:  0, // DO NOT set - used to differentiate proxy call from ack callback
 		JobID:          0, // Let DataCoord allocate
-		RlsPrincipal:   it.rlsPrincipal,
-		SkipRls:        it.skipRLS,
 	}
 
 	resp, err := it.mixCoord.ImportV2(ctx, importReq)

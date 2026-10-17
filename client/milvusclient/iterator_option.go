@@ -67,16 +67,6 @@ func (opt *searchIteratorOption) WithPartitions(partitionNames ...string) *searc
 	return opt
 }
 
-func (opt *searchIteratorOption) WithRLSPrincipal(principal string) *searchIteratorOption {
-	opt.searchOption.WithRLSPrincipal(principal)
-	return opt
-}
-
-func (opt *searchIteratorOption) WithSkipRLS(skip bool) *searchIteratorOption {
-	opt.searchOption.WithSkipRLS(skip)
-	return opt
-}
-
 func (opt *searchIteratorOption) WithFilter(expr string) *searchIteratorOption {
 	opt.annRequest.WithFilter(expr)
 	return opt
@@ -173,8 +163,6 @@ type QueryIteratorOption interface {
 type queryIteratorOption struct {
 	collectionName             string
 	partitionNames             []string
-	rlsPrincipal               string
-	skipRLS                    bool
 	outputFields               []string
 	expr                       string
 	batchSize                  int
@@ -187,8 +175,6 @@ func (opt *queryIteratorOption) Request() (*milvuspb.QueryRequest, error) {
 	return &milvuspb.QueryRequest{
 		CollectionName:        opt.collectionName,
 		PartitionNames:        opt.partitionNames,
-		RlsPrincipal:          opt.rlsPrincipal,
-		SkipRls:               opt.skipRLS,
 		OutputFields:          opt.outputFields,
 		Expr:                  opt.expr,
 		ConsistencyLevel:      opt.consistencyLevel.CommonConsistencyLevel(),
@@ -219,16 +205,6 @@ func (opt *queryIteratorOption) WithBatchSize(batchSize int) *queryIteratorOptio
 
 func (opt *queryIteratorOption) WithPartitions(partitionNames ...string) *queryIteratorOption {
 	opt.partitionNames = partitionNames
-	return opt
-}
-
-func (opt *queryIteratorOption) WithRLSPrincipal(principal string) *queryIteratorOption {
-	opt.rlsPrincipal = principal
-	return opt
-}
-
-func (opt *queryIteratorOption) WithSkipRLS(skip bool) *queryIteratorOption {
-	opt.skipRLS = skip
 	return opt
 }
 

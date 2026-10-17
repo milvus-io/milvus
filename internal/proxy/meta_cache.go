@@ -108,8 +108,6 @@ type collectionInfo struct {
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
 	queryMode             string
-	rlsEnabled            bool
-	rlsForce              bool
 	replicateID           string
 	updateTimestamp       uint64
 	collectionTTL         uint64
@@ -514,14 +512,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 	queryMode := common.GetQueryMode(collection.Properties...)
-	rlsEnabled, err := common.IsRLSEnabled(collection.Properties...)
-	if err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.GetCollectionID())
-	}
-	rlsForce, err := common.IsRLSForce(collection.Properties...)
-	if err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.GetCollectionID())
-	}
 	canonicalDBName := collection.GetDbName()
 	if canonicalDBName == "" {
 		canonicalDBName = database
@@ -541,8 +531,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
 			queryMode:             queryMode,
-			rlsEnabled:            rlsEnabled,
-			rlsForce:              rlsForce,
 			replicateID:           replicateID,
 			updateTimestamp:       collection.UpdateTimestamp,
 			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
@@ -573,8 +561,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
 			queryMode:             queryMode,
-			rlsEnabled:            rlsEnabled,
-			rlsForce:              rlsForce,
 			updateTimestamp:       collection.UpdateTimestamp,
 			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
 			vChannels:             collection.VirtualChannelNames,
@@ -610,8 +596,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
 		queryMode:             queryMode,
-		rlsEnabled:            rlsEnabled,
-		rlsForce:              rlsForce,
 		replicateID:           replicateID,
 		updateTimestamp:       collection.UpdateTimestamp,
 		collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),

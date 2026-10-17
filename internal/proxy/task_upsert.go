@@ -30,16 +30,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -57,22 +54,19 @@ type upsertTask struct {
 
 	ctx context.Context
 
-	timestamps        []uint64
-	rowIDs            []int64
-	result            *milvuspb.MutationResult
-	idAllocator       *allocator.IDAllocator
-	collectionName    string
-	collectionID      UniqueID
-	chMgr             channelsMgr
-	chTicker          channelsTimeTicker
-	vChannels         []vChan
-	pChannels         []pChan
-	schema            *schemaInfo
-	rlsEnabled        bool
-	rlsUsingPredicate *planpb.Expr
-	rlsCheckPredicate *planpb.Expr
-	partitionKeyMode  bool
-	partitionKeys     *schemapb.FieldData
+	timestamps       []uint64
+	rowIDs           []int64
+	result           *milvuspb.MutationResult
+	idAllocator      *allocator.IDAllocator
+	collectionName   string
+	collectionID     UniqueID
+	chMgr            channelsMgr
+	chTicker         channelsTimeTicker
+	vChannels        []vChan
+	pChannels        []pChan
+	schema           *schemaInfo
+	partitionKeyMode bool
+	partitionKeys    *schemapb.FieldData
 	// automatic generate pk as new pk wehen autoID == true
 	// delete task need use the oldIDs
 	oldIDs          *schemapb.IDs
@@ -231,9 +225,6 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		lb:             t.node.(*Proxy).lbPolicy,
 		shardclientMgr: t.node.(*Proxy).shardMgr,
 	}
-	qt.SetSkipRuntimeRLS(true)
-	qt.SetPreserveRawFields(t.rlsEnabled && t.rlsUsingPredicate != nil)
-
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
 	defer func() {
 		sp.End()
@@ -280,22 +271,12 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		log.Info("old records not found, just do insert")
 		return nil
 	}
-	if it.rlsEnabled && !partialUpdate && it.rlsUsingPredicate == nil {
-		// An always-true USING predicate needs neither row classification nor
-		// old row data, so retain the normal full-upsert delete-and-insert path.
-		if err := generateFunctions(); err != nil {
-			return err
-		}
-		it.deletePKs = upsertIDs
-		it.insertFieldData = it.upsertMsg.InsertMsg.GetFieldsData()
-		return nil
-	}
 
 	tr := timerecord.NewTimeRecorder("Proxy-Upsert-retrieveByPKs")
 	// retrieve by primary key to get original field data
-	outputFields, err := upsertRetrieveOutputFields(it.schema.schemaHelper, primaryFieldSchema, it.rlsUsingPredicate, partialUpdate)
-	if err != nil {
-		return err
+	outputFields := []string{primaryFieldSchema.GetName()}
+	if partialUpdate {
+		outputFields = []string{"*"}
 	}
 	resp, storageCost, err := retrieveByPKs(ctx, it, upsertIDs, outputFields)
 	if err != nil {
@@ -325,21 +306,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Info("parse primary field data to ids failed", zap.Error(err))
 		return err
-	}
-	if existRowNum := typeutil.GetSizeOfIDs(existIDs); existRowNum > 0 && it.rlsEnabled {
-		// Authorize the PK-deduplicated read snapshot, including partition-key collections.
-		if err := rlsutil.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, it.rlsUsingPredicate, "upsert", "using"); err != nil {
-			log.Warn("RLS using expression validation failed for upsert", zap.Error(err))
-			return err
-		}
-		if partialUpdate && it.rlsUsingPredicate != nil {
-			// Internal RLS evaluation keeps TIMESTAMPTZ values in their raw int64
-			// representation. Partial merge must restore the normal Query result
-			// representation before inherited fields enter the write pipeline.
-			if err := timestamptzUTC2IsoStr(existFieldData, it.schema.schemaHelper.GetTimezone()); err != nil {
-				return err
-			}
-		}
 	}
 	if err := generateFunctions(); err != nil {
 		return err
@@ -706,42 +672,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	return nil
 }
 
-func upsertRetrieveOutputFields(schemaHelper *typeutil.SchemaHelper, primaryField *schemapb.FieldSchema, usingExpr *planpb.Expr, partialUpdate bool) ([]string, error) {
-	if partialUpdate {
-		return []string{"*"}, nil
-	}
-	if schemaHelper == nil || primaryField == nil {
-		return nil, merr.WrapErrServiceInternalMsg("failed to resolve upsert retrieve fields without schema metadata")
-	}
-
-	outputFields := []string{primaryField.GetName()}
-	seen := map[int64]struct{}{primaryField.GetFieldID(): {}}
-	for _, fieldID := range rlsutil.ReferencedFieldIDs(usingExpr) {
-		if _, ok := seen[fieldID]; ok {
-			continue
-		}
-		field, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			return nil, merr.Wrapf(err, "failed to resolve RLS upsert field %d", fieldID)
-		}
-		seen[fieldID] = struct{}{}
-		outputFields = append(outputFields, field.GetName())
-	}
-	return outputFields, nil
-}
-
-// prepareUpsert authorizes existing rows before function output generation and
-// leaves insertPreExecute to validate the final row image against the
-// request-local CHECK predicate.
+// prepareUpsert merges old fields for partial updates before generating function outputs.
 func (it *upsertTask) prepareUpsert(ctx context.Context) error {
-	if it.rlsEnabled {
-		if err := rlsutil.ValidateStaticCheckPredicate(it.rlsCheckPredicate, "upsert"); err != nil {
-			return err
-		}
-	}
 
-	needsRead := it.req.GetPartialUpdate() || it.rlsEnabled
-	if needsRead {
+	if it.req.GetPartialUpdate() {
 		if err := it.queryPreExecute(ctx); err != nil {
 			return err
 		}
@@ -1562,14 +1496,6 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if it.rlsEnabled {
-		if err := rlsutil.ValidateRowsByPredicate(ctx, it.upsertMsg.InsertMsg.GetFieldsData(), int(it.upsertMsg.InsertMsg.NRows()),
-			it.rlsCheckPredicate, "upsert", "check"); err != nil {
-			log.Warn("RLS check expression validation failed for upsert", zap.Error(err))
-			return err
-		}
-	}
-
 	log.Debug("Proxy Upsert insertPreExecute done")
 
 	return nil
@@ -1660,20 +1586,9 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.collectionName = colInfo.schema.GetName()
-	it.rlsEnabled = colInfo.rlsEnabled
 	canonicalDBName := colInfo.dbName
 	if canonicalDBName == "" {
 		canonicalDBName = it.req.GetDbName()
-	}
-	if it.rlsEnabled && it.req.GetSkipRls() {
-		it.rlsEnabled, err = resolveRLSEnforcement(ctx, it.rlsEnabled, colInfo.rlsForce, true,
-			canonicalDBName, colInfo.schema.GetName(), "upsert")
-		if err != nil {
-			return err
-		}
-	}
-	if _, _, err := rlsutil.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert"); err != nil {
-		return err
 	}
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.updateTimestamp {
@@ -1772,17 +1687,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	if it.req.NumRows <= 0 {
 		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
 	}
-	it.rlsUsingPredicate = nil
-	it.rlsCheckPredicate = nil
-	if it.rlsEnabled {
-		it.rlsUsingPredicate, it.rlsCheckPredicate, err = rls.ResolveUpsertPredicates(
-			ctx, it.collectionID, it.req.GetRlsPrincipal(), it.schema.schemaHelper,
-		)
-		if err != nil {
-			return err
-		}
-	}
-
 	if err := it.prepareUpsert(ctx); err != nil {
 		log.Warn("Fail to prepare upsert", zap.Error(err))
 		return err
