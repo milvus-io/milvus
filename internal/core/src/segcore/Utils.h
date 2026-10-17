@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "common/FieldData.h"
@@ -232,6 +233,27 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
  * @param operation Description of the operation being performed
  * @throws SegcoreError with ErrorCode::FollyCancel if cancellation was requested
  */
+/**
+ * @brief Check if an operation has been cancelled and throw if so.
+ *
+ * For hot paths that have no segment or field id at hand, such as the
+ * brute-force scan loops. `operation` is a string_view so that a literal at a
+ * call site inside a loop costs nothing, and the message is only built on the
+ * throwing path.
+ *
+ * @param op_ctx The operation context containing the cancellation token (can be nullptr)
+ * @param operation Description of the operation being performed
+ * @throws SegcoreError with ErrorCode::FollyCancel if cancellation was requested
+ */
+inline void
+CheckCancellation(milvus::OpContext* op_ctx, std::string_view operation) {
+    if (op_ctx != nullptr &&
+        op_ctx->cancellation_token.isCancellationRequested()) [[unlikely]] {
+        throw SegcoreError(ErrorCode::FollyCancel,
+                           fmt::format("{} cancelled", operation));
+    }
+}
+
 inline void
 CheckCancellation(milvus::OpContext* op_ctx,
                   int64_t segment_id,

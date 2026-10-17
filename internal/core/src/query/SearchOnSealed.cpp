@@ -41,6 +41,7 @@
 #include "query/SubSearchResult.h"
 #include "query/Utils.h"
 #include "query/helper.h"
+#include "segcore/Utils.h"
 
 namespace milvus::query {
 
@@ -301,6 +302,11 @@ SearchOnSealedColumn(const Schema& schema,
     auto vector_chunks = column->GetAllChunks(op_context);
     auto num_chunk = column->num_chunks();
     for (int i = 0; i < num_chunk; ++i) {
+        // A brute-force scan crosses no operator or segment boundary, so
+        // without this the whole column is scanned even after the caller
+        // cancelled. One relaxed atomic read per chunk bounds the work a
+        // cancelled request can still cost.
+        segcore::CheckCancellation(op_context, "brute-force search");
         const auto& pw = vector_chunks[i];
         auto vec_data = pw.get()->Data();
         auto chunk_size = column->chunk_row_nums(i);

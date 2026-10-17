@@ -50,6 +50,7 @@
 #include "query/SubSearchResult.h"
 #include "query/Utils.h"
 #include "query/helper.h"
+#include "segcore/Utils.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -358,6 +359,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
     std::vector<size_t> offsets;
     for (int chunk_id = current_chunk_id; chunk_id < max_chunk; ++chunk_id) {
+        // See SearchOnSealedColumn: a brute-force scan is otherwise
+        // uninterruptible once it starts.
+        segcore::CheckCancellation(op_context, "brute-force search");
         auto chunk_data = vec_ptr->get_chunk_data(chunks, chunk_id);
 
         auto row_begin = chunk_id * vec_size_per_chunk;
