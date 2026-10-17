@@ -17,6 +17,7 @@
 package querynodev2
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -29,14 +30,17 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -167,6 +171,163 @@ func TestStreamingQuotaMetrics(t *testing.T) {
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(nil, errors.New("test"))
 	m = getStreamingQuotaMetrics()
 	assert.Nil(t, m)
+}
+
+func setEntityMetricsModeForTest(t *testing.T, mode string) {
+	t.Helper()
+	previousMode := metrics.CollectionLevelMetricsMode()
+	metrics.SetCollectionLevelMetricsMode(mode)
+	metrics.QueryNodeEntitiesSize.Reset()
+	metrics.QueryNodeNumEntities.Reset()
+	t.Cleanup(func() {
+		metrics.SetCollectionLevelMetricsMode(previousMode)
+		metrics.QueryNodeEntitiesSize.Reset()
+		metrics.QueryNodeNumEntities.Reset()
+	})
+}
+
+func entitiesSizeSeries(t *testing.T) map[string]float64 {
+	return testutils.GaugeSeries(t, metrics.QueryNodeEntitiesSize, "node_id", "collection_id", "segment_state")
+}
+
+func numEntitiesSeries(t *testing.T) map[string]float64 {
+	return testutils.GaugeSeries(t, metrics.QueryNodeNumEntities,
+		"db_name", "collection_name", "node_id", "collection_id", "segment_state")
+}
+
+// newEntityMetricsTestNode returns QueryNode 7 with collections 1 and 2 in
+// db-a and collection 3 in db-b. Its growing segments hold 100/10 (collection
+// 1) and 200/20 (collection 2) bytes/rows, its sealed segments 300/30
+// (collection 1) and 400/40 (collection 3). afterSealedScan runs once the
+// sealed segments have been visited.
+func newEntityMetricsTestNode(t *testing.T, afterSealedScan func()) *QueryNode {
+	t.Helper()
+	collectionManager := segments.NewMockCollectionManager(t)
+	collectionManager.EXPECT().List().Return([]int64{1, 2, 3}).Once()
+	for collectionID, dbName := range map[int64]string{1: "db-a", 2: "db-a", 3: "db-b"} {
+		schema := mock_segcore.GenTestCollectionSchema(
+			fmt.Sprintf("collection-%d", collectionID), schemapb.DataType_Int64, true)
+		collection, err := segments.NewCollection(collectionID, schema, nil, &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+			DbName:   dbName,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			segments.DeleteCollection(collection)
+		})
+		collectionManager.EXPECT().Get(collectionID).Return(collection).Times(2)
+	}
+
+	newSegment := func(collectionID, memSize, rows int64) segments.Segment {
+		segment := segments.NewMockSegment(t)
+		segment.EXPECT().Collection().Return(collectionID).Once()
+		segment.EXPECT().MemSize().Return(memSize).Once()
+		segment.EXPECT().RowNum().Return(rows).Once()
+		return segment
+	}
+	growing := []segments.Segment{newSegment(1, 100, 10), newSegment(2, 200, 20)}
+	sealed := []segments.Segment{newSegment(1, 300, 30), newSegment(3, 400, 40)}
+	segmentManager := segments.NewMockSegmentManager(t)
+	growingScan := segmentManager.EXPECT().RangeBy(mock.Anything, mock.Anything).
+		Run(func(visitor segments.SegmentVisitor, _ ...segments.SegmentFilter) {
+			for _, segment := range growing {
+				visitor(segment)
+			}
+		}).Once()
+	sealedScan := segmentManager.EXPECT().RangeBy(mock.Anything, mock.Anything).
+		Run(func(visitor segments.SegmentVisitor, _ ...segments.SegmentFilter) {
+			for _, segment := range sealed {
+				visitor(segment)
+			}
+			afterSealedScan()
+		}).Once()
+	mock.InOrder(growingScan, sealedScan)
+	segmentManager.EXPECT().GetLoadedBinlogSize().Return(int64(0)).Once()
+
+	wal := mock_streaming.NewMockWALAccesser(t)
+	local := mock_streaming.NewMockLocal(t)
+	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(nil, errors.New("not local")).Once()
+	wal.EXPECT().Local().Return(local).Once()
+	previousWAL := streaming.WAL()
+	streaming.SetWALForTest(wal)
+	t.Cleanup(func() {
+		streaming.SetWALForTest(previousWAL)
+	})
+
+	manager := &segments.Manager{
+		Collection: collectionManager,
+		Segment:    segmentManager,
+	}
+	delegators := typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
+	return &QueryNode{
+		manager:         manager,
+		pipelineManager: pipeline.NewManager(manager, nil, delegators),
+		delegators:      delegators,
+		serverID:        7,
+	}
+}
+
+func TestGetQuotaMetricsPublishesCollectionGauges(t *testing.T) {
+	paramtable.Init()
+	setEntityMetricsModeForTest(t, metrics.CollectionLevelMetricsModeFull)
+
+	quotaMetrics, err := getQuotaMetrics(newEntityMetricsTestNode(t, func() {}))
+	require.NoError(t, err)
+	assert.Equal(t, int64(300), quotaMetrics.GrowingSegmentsSize)
+	assert.Equal(t, map[string]float64{
+		"7|1|Growing": 100,
+		"7|2|Growing": 200,
+		"7|3|Growing": 0,
+		"7|1|Sealed":  300,
+		"7|2|Sealed":  0,
+		"7|3|Sealed":  400,
+	}, entitiesSizeSeries(t))
+	assert.Equal(t, map[string]float64{
+		"db-a|collection-1|7|1|Growing": 10,
+		"db-a|collection-2|7|2|Growing": 20,
+		"db-b|collection-3|7|3|Growing": 0,
+		"db-a|collection-1|7|1|Sealed":  30,
+		"db-a|collection-2|7|2|Sealed":  0,
+		"db-b|collection-3|7|3|Sealed":  40,
+	}, numEntitiesSeries(t))
+}
+
+func TestGetQuotaMetricsAggregatesCollectionGauges(t *testing.T) {
+	paramtable.Init()
+	setEntityMetricsModeForTest(t, metrics.CollectionLevelMetricsModeAggregate)
+
+	// Series of an earlier refresh of node 7, including a database without
+	// loaded collections anymore, and of another QueryNode in this process.
+	growing, sealed := segments.SegmentTypeGrowing.String(), segments.SegmentTypeSealed.String()
+	metrics.QueryNodeEntitiesSize.WithLabelValues("7", metrics.AllLabel, growing).Set(1)
+	metrics.QueryNodeEntitiesSize.WithLabelValues("7", metrics.AllLabel, sealed).Set(2)
+	metrics.QueryNodeEntitiesSize.WithLabelValues("8", metrics.AllLabel, growing).Set(999)
+	metrics.QueryNodeNumEntities.WithLabelValues("db-a", metrics.AllLabel, "7", metrics.AllLabel, growing).Set(3)
+	metrics.QueryNodeNumEntities.WithLabelValues("stale-db", metrics.AllLabel, "7", metrics.AllLabel, sealed).Set(4)
+	metrics.QueryNodeNumEntities.WithLabelValues("db-c", metrics.AllLabel, "8", metrics.AllLabel, growing).Set(999)
+	previousSizes, previousRows := entitiesSizeSeries(t), numEntitiesSeries(t)
+
+	node := newEntityMetricsTestNode(t, func() {
+		// Every MemSize and RowNum call is done, and scrapes still see the
+		// previous refresh instead of missing or partially rebuilt series.
+		assert.Equal(t, previousSizes, entitiesSizeSeries(t))
+		assert.Equal(t, previousRows, numEntitiesSeries(t))
+	})
+	quotaMetrics, err := getQuotaMetrics(node)
+	require.NoError(t, err)
+	assert.Equal(t, int64(300), quotaMetrics.GrowingSegmentsSize)
+	assert.Equal(t, map[string]float64{
+		"7|all|Growing": 300,
+		"7|all|Sealed":  700,
+		"8|all|Growing": 999,
+	}, entitiesSizeSeries(t))
+	assert.Equal(t, map[string]float64{
+		"db-a|all|7|all|Growing": 30,
+		"db-b|all|7|all|Growing": 0,
+		"db-a|all|7|all|Sealed":  30,
+		"db-b|all|7|all|Sealed":  40,
+		"db-c|all|8|all|Growing": 999,
+	}, numEntitiesSeries(t))
 }
 
 func TestGetLocalStorageMetrics(t *testing.T) {

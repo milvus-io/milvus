@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	ProxyReceivedNQ = prometheus.NewCounterVec(
+	ProxyReceivedNQ = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -34,7 +34,7 @@ var (
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxySearchVectors record the number of vectors search successfully.
-	ProxySearchVectors = prometheus.NewCounterVec(
+	ProxySearchVectors = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -43,7 +43,7 @@ var (
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
 	// ProxyInsertVectors record the number of vectors insert successfully.
-	ProxyInsertVectors = prometheus.NewCounterVec(
+	ProxyInsertVectors = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -52,7 +52,7 @@ var (
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
 	// ProxyUpsertVectors record the number of vectors upsert successfully.
-	ProxyUpsertVectors = prometheus.NewCounterVec(
+	ProxyUpsertVectors = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -60,7 +60,7 @@ var (
 			Help:      "counter of vectors successfully upserted",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
-	ProxyDeleteVectors = prometheus.NewCounterVec(
+	ProxyDeleteVectors = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -68,7 +68,7 @@ var (
 			Help:      "counter of vectors successfully deleted",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
-	ProxyPathReplaceParentOperations = prometheus.NewCounterVec(
+	ProxyPathReplaceParentOperations = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -76,7 +76,7 @@ var (
 			Help:      "number of successfully resolved positional partial-update parent operations by category",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName, "parent_type"})
 
-	ProxyPathReplaceMergeLatency = prometheus.NewHistogramVec(
+	ProxyPathReplaceMergeLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -86,7 +86,7 @@ var (
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
 	// ProxySQLatency record the latency of search successfully.
-	ProxySQLatency = prometheus.NewHistogramVec(
+	ProxySQLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -104,7 +104,7 @@ var (
 	// every stock milvus an extra, permanently empty dimension on a metric its
 	// dashboards and recording rules already read. Nothing scopes a query in a
 	// binary with no provider installed, so it exposes no series here at all.
-	ProxyResourceGroupSQLatency = prometheus.NewHistogramVec(
+	ProxyResourceGroupSQLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -115,7 +115,7 @@ var (
 
 	// ProxyCollectionSQLatency record the latency of search successfully, per collection
 	// Deprecated, ProxySQLatency instead of it
-	ProxyCollectionSQLatency = prometheus.NewHistogramVec(
+	ProxyCollectionSQLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -125,7 +125,7 @@ var (
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxyMutationLatency record the latency that mutate successfully.
-	ProxyMutationLatency = prometheus.NewHistogramVec(
+	ProxyMutationLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -136,7 +136,7 @@ var (
 
 	// ProxyCollectionMutationLatency record the latency that mutate successfully, per collection
 	// Deprecated, ProxyMutationLatency instead of it
-	ProxyCollectionMutationLatency = prometheus.NewHistogramVec(
+	ProxyCollectionMutationLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -253,7 +253,7 @@ var (
 		}, []string{nodeIDLabelName})
 
 	// ProxyFunctionCall records the number of times the function of the DDL operation was executed, like `CreateCollection`.
-	ProxyFunctionCall = prometheus.NewCounterVec(
+	ProxyFunctionCall = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -282,7 +282,7 @@ var (
 		}, []string{nodeIDLabelName, functionLabelName})
 
 	// ProxyReceiveBytes record the received bytes of messages in Proxy
-	ProxyReceiveBytes = prometheus.NewCounterVec(
+	ProxyReceiveBytes = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -346,13 +346,13 @@ var (
 		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, usernameLabelName})
 
 	// ProxyLimiterRate records rates of rateLimiter in Proxy.
-	ProxyLimiterRate = prometheus.NewGaugeVec(
+	ProxyLimiterRate = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
 			Name:      "limiter_rate",
 			Help:      "",
-		}, []string{nodeIDLabelName, collectionIDLabelName, msgTypeLabelName})
+		}, []string{nodeIDLabelName, collectionIDLabelName, msgTypeLabelName}, collectionGaugeAggregateDisabled)
 
 	ProxyHookFunc = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -438,7 +438,7 @@ var (
 		}, []string{"node_id", "scope"})
 
 	// ProxyRetrySearchCount records the retry search count when result count does not meet limit and topk reduce is on
-	ProxyRetrySearchCount = prometheus.NewCounterVec(
+	ProxyRetrySearchCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -448,7 +448,7 @@ var (
 
 	// ProxyRetrySearchResultInsufficientCount records the retry search without reducing topk that still not meet result limit
 	// there are more likely some non-index-related reasons like we do not have enough entities for very big k, duplicate pks, etc
-	ProxyRetrySearchResultInsufficientCount = prometheus.NewCounterVec(
+	ProxyRetrySearchResultInsufficientCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -457,7 +457,7 @@ var (
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxyRecallSearchCount records the counter that users issue recall evaluation requests, which are cpu-intensive
-	ProxyRecallSearchCount = prometheus.NewCounterVec(
+	ProxyRecallSearchCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -466,7 +466,7 @@ var (
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxySearchSparseNumNonZeros records the estimated number of non-zeros in each sparse search task
-	ProxySearchSparseNumNonZeros = prometheus.NewHistogramVec(
+	ProxySearchSparseNumNonZeros = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -493,7 +493,7 @@ var (
 			Buckets:   subMsBuckets,
 		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
 	// ProxyFunctionlatency records the latency of function
-	ProxyFunctionlatency = prometheus.NewHistogramVec(
+	ProxyFunctionlatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -502,7 +502,7 @@ var (
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName, functionTypeName, functionProvider, functionLabelName})
 
-	ProxyScannedRemoteMB = prometheus.NewCounterVec(
+	ProxyScannedRemoteMB = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -510,7 +510,7 @@ var (
 			Help:      "the scanned remote megabytes",
 		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
 
-	ProxyScannedTotalMB = prometheus.NewCounterVec(
+	ProxyScannedTotalMB = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
