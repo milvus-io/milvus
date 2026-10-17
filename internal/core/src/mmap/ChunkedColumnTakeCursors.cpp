@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -55,6 +56,19 @@ struct RawTakeLocation {
     size_t cell_offset = 0;
 };
 
+struct RawTakeBatch {
+    struct Row {
+        size_t cell_index;
+        size_t cell_offset;
+    };
+    struct Cell {
+        int64_t cell_id;
+        Chunk* chunk = nullptr;
+    };
+    std::vector<Row> rows;
+    std::vector<Cell> cells;
+};
+
 std::optional<ChunkedColumnInterface::TargetType>
 ValidateTakeTargetType(DataType data_type,
                        ChunkedColumnInterface::TargetType requested) {
@@ -72,22 +86,18 @@ ValidateTakeTargetType(DataType data_type,
 
 class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
  public:
-    RawTakeResult(RawTakeCellPin pin_cell,
-                  std::shared_ptr<const ColumnPlanner> planner,
+    RawTakeResult(std::shared_ptr<const ColumnPlanner> planner,
                   OffsetView offsets,
                   ColumnFilterPtr filter,
                   DataType data_type,
                   ChunkedColumnInterface::TargetType target_type,
                   bool nullable)
-        : pin_cell_(std::move(pin_cell)),
-          planner_(std::move(planner)),
+        : planner_(std::move(planner)),
           data_type_(data_type),
           target_type_(target_type),
           nullable_(nullable),
           offsets_(offsets),
           filter_(std::move(filter)) {
-        AssertInfo(static_cast<bool>(pin_cell_),
-                   "raw take cell accessor is null");
         AssertInfo(planner_ != nullptr, "raw take planner is null");
     }
 
@@ -106,6 +116,64 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         return data_type_;
     }
 
+    std::vector<int64_t>
+    PlanBatch() {
+        auto& batch = batch_.emplace();
+        batch.rows.reserve(Size());
+        std::vector<int64_t> cell_ids;
+        std::unordered_map<int64_t, size_t> cell_indices;
+        const auto max_cells = std::min(Size(), planner_->NumCells());
+        cell_ids.reserve(max_cells);
+        batch.cells.reserve(max_cells);
+        cell_indices.reserve(max_cells);
+        int64_t last_cell = -1;
+        size_t cell_index = 0;
+        for (int64_t i = 0; i < Size(); ++i) {
+            // TODO(local-format): restore backend-specific batch lookup in Planner.
+            const auto location = planner_->Locate(offsets_.AtUnchecked(i));
+            if (last_cell != location.cell_id) {
+                const auto [it, inserted] = cell_indices.try_emplace(
+                    location.cell_id, batch.cells.size());
+                last_cell = location.cell_id;
+                cell_index = it->second;
+                if (inserted) {
+                    batch.cells.push_back({location.cell_id});
+                    const auto skipped =
+                        !nullable_ && filter_ != nullptr &&
+                        filter_->Source() ==
+                            ColumnFilter::MetricsSource::PreloadedStatistics &&
+                        ShouldSkipFilteredCell(location.cell_id);
+                    if (!skipped) {
+                        cell_ids.push_back(location.cell_id);
+                    }
+                }
+            }
+            batch.rows.push_back(
+                {cell_index, static_cast<size_t>(location.cell_offset)});
+        }
+        return cell_ids;
+    }
+
+    void
+    SetCellPin(RawTakeCellPin pin_cell) {
+        pin_cell_ = std::move(pin_cell);
+        if (!batch_.has_value()) {
+            return;
+        }
+        for (auto& cell : batch_->cells) {
+            if (!nullable_ && filter_ != nullptr &&
+                filter_->Source() ==
+                    ColumnFilter::MetricsSource::PreloadedStatistics &&
+                ShouldSkipFilteredCell(cell.cell_id)) {
+                continue;
+            }
+            cell.chunk = pin_cell_(cell.cell_id).get();
+            AssertInfo(cell.chunk != nullptr,
+                       "raw batch take pinned null cell {}",
+                       cell.cell_id);
+        }
+    }
+
  protected:
     ChunkedColumnInterface::TakeItemState
     PrepareItem(int64_t index, bool read_data) const override {
@@ -113,6 +181,11 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             return {!owned_data_.validity || owned_data_.validity[index],
                     read_data && owned_data_.data_skipped &&
                         owned_data_.data_skipped[index]};
+        }
+        if (!nullable_ && read_data && filter_ == nullptr) {
+            // The value read resolves the position; IsValid still validates
+            // lazy offsets without pinning.
+            return {true, false};
         }
         const auto& location = ResolveLocation(index);
         if (!nullable_ && !read_data) {
@@ -127,8 +200,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             (!nullable_ || !filter_->SkippedValidityRequired())) {
             return {true, true};
         }
-        auto* chunk = PinCell(location.source_cell_id);
-        const auto valid = !nullable_ || chunk->isValid(location.cell_offset);
+        const auto [chunk, cell_offset] = ResolveBorrowed(index);
+        const auto valid = !nullable_ || chunk->isValid(cell_offset);
         if (!read_data || filter_ == nullptr) {
             return {valid, false};
         }
@@ -373,7 +446,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     Json
     JsonAt(int64_t index) const override {
         if (owned_ != nullptr) {
-            return owned_data_.values.data_as<Json>()[index];
+            return Json(owned_data_.values.data_as<Json>()[index].data());
         }
         return Json(StringViewAt(index));
     }
@@ -409,7 +482,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
 
     Chunk*
     PinCell(int64_t cell_id) const {
-        if (current_pin_.has_value() && current_cell_id_ == cell_id) {
+        if (current_chunk_ != nullptr && current_cell_id_ == cell_id) {
             return current_chunk_;
         }
         ResetBorrowedPin();
@@ -424,6 +497,10 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
 
     std::pair<Chunk*, size_t>
     ResolveBorrowed(int64_t index) const {
+        if (batch_.has_value()) {
+            const auto& row = batch_->rows[index];
+            return {batch_->cells[row.cell_index].chunk, row.cell_offset};
+        }
         const auto& location = ResolveLocation(index);
         return {PinCell(location.source_cell_id), location.cell_offset};
     }
@@ -433,9 +510,15 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         if (cached_location_index_ == index) {
             return cached_location_;
         }
-        const auto location = planner_->Locate(offsets_.AtUnchecked(index));
-        cached_location_ = RawTakeLocation{
-            location.cell_id, static_cast<size_t>(location.cell_offset)};
+        if (batch_.has_value()) {
+            const auto& row = batch_->rows[index];
+            cached_location_ = {batch_->cells[row.cell_index].cell_id,
+                                row.cell_offset};
+        } else {
+            const auto location = planner_->Locate(offsets_.AtUnchecked(index));
+            cached_location_ = {location.cell_id,
+                                static_cast<size_t>(location.cell_offset)};
+        }
         cached_location_index_ = index;
         return cached_location_;
     }
@@ -443,7 +526,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     bool
     ShouldSkipFilteredCell(int64_t cell_id) const {
         AssertInfo(filter_ != nullptr, "raw take filter is null");
-        if (filter_->Source() == ColumnFilter::MetricsSource::LoadedPayload) {
+        if (!batch_.has_value() &&
+            filter_->Source() == ColumnFilter::MetricsSource::LoadedPayload) {
             AssertInfo(current_cell_id_ == cell_id && current_chunk_ != nullptr,
                        "loaded-payload filter Cell {} is not pinned",
                        cell_id);
@@ -464,6 +548,12 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     template <typename Fn>
     void
     VisitGrouped(Fn&& fn) const {
+        if (batch_.has_value()) {
+            for (int64_t position = 0; position < Size(); ++position) {
+                fn(position);
+            }
+            return;
+        }
         std::vector<CellGroup> cell_groups;
         std::unordered_map<int64_t, size_t> cell_to_group;
         const auto max_groups =
@@ -506,6 +596,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     mutable std::optional<bool> current_filter_skip_;
     mutable int64_t cached_location_index_{-1};
     mutable RawTakeLocation cached_location_;
+    std::optional<RawTakeBatch> batch_;
     mutable std::optional<PinWrapper<Chunk*>> current_pin_;
     mutable int64_t current_cell_id_{-1};
     mutable Chunk* current_chunk_{nullptr};
@@ -533,18 +624,26 @@ ChunkedColumnInterface::Take(milvus::OpContext* op_ctx,
     if (!target_type.has_value()) {
         return nullptr;
     }
-    auto pin_cell = MakeTakeCellPin(op_ctx);
+    auto planner = PlannerHandle();
+    auto result =
+        std::make_unique<detail::RawTakeResult>(std::move(planner),
+                                                options.offsets,
+                                                std::move(options.filter),
+                                                *data_type,
+                                                *target_type,
+                                                IsNullable());
+    std::optional<std::vector<int64_t>> batch_cell_ids;
+    if (options.pin_policy == TakePinPolicy::Batch) {
+        batch_cell_ids.emplace(result->PlanBatch());
+    }
+    // The accessor retains the generation even for empty/fully pruned requests.
+    auto pin_cell =
+        MakeTakeCellPin(op_ctx, batch_cell_ids ? &*batch_cell_ids : nullptr);
     if (!pin_cell) {
         return nullptr;
     }
-    auto planner = PlannerHandle();
-    return std::make_unique<detail::RawTakeResult>(std::move(pin_cell),
-                                                   std::move(planner),
-                                                   options.offsets,
-                                                   std::move(options.filter),
-                                                   *data_type,
-                                                   *target_type,
-                                                   IsNullable());
+    result->SetCellPin(std::move(pin_cell));
+    return result;
 }
 
 }  // namespace milvus

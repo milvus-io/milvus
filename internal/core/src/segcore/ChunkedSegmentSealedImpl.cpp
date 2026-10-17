@@ -292,25 +292,28 @@ TakeTargetType(const FieldMeta& field_meta) {
     }
 }
 
-[[nodiscard]] ChunkedColumnInterface::OwnedTakeData
-TakeOwnedColumnData(milvus::OpContext* op_ctx,
-                    const ChunkedColumnInterface* column,
-                    const FieldMeta& field_meta,
-                    const int64_t* offsets,
-                    int64_t count) {
+[[nodiscard]] ChunkedColumnInterface::TakeResultPtr
+TakeColumnData(milvus::OpContext* op_ctx,
+               const ChunkedColumnInterface* column,
+               ChunkedColumnInterface::TargetType target_type,
+               const int64_t* offsets,
+               int64_t count,
+               TakePinPolicy pin_policy = TakePinPolicy::CurrentCell) {
     auto result = column->Take(
         op_ctx,
         ChunkedColumnInterface::TakeOptions{
             ChunkedColumnInterface::OffsetView::From(offsets, count),
-            TakeTargetType(field_meta)});
+            target_type,
+            nullptr,
+            pin_policy});
     AssertInfo(result != nullptr,
-               "column Take is unsupported for data type {}",
-               field_meta.get_data_type());
+               "column Take is unsupported for target {}",
+               static_cast<int>(target_type));
     AssertInfo(result->Size() == count,
                "column Take returned {} rows, expected {}",
                result->Size(),
                count);
-    return result->GetOwn();
+    return result;
 }
 
 [[nodiscard]] bool
@@ -5747,23 +5750,27 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                field_id.get());
     std::optional<ChunkedColumnInterface::OwnedTakeData> taken_data;
     const bool use_owned_take =
-        column->IsNullable() &&
+        data_type != DataType::JSON && column->IsNullable() &&
         column->GetLocalFormat() == ChunkedColumnInterface::LocalFormat::Vortex;
     if (use_owned_take) {
         // Take owns the requested values and their aligned validity. Reusing
         // one result avoids decoding Vortex data again after BulkIsValid.
-        taken_data.emplace(TakeOwnedColumnData(
-            op_ctx, column.get(), field_meta, seg_offsets, count));
+        taken_data.emplace(TakeColumnData(op_ctx,
+                                          column.get(),
+                                          TakeTargetType(field_meta),
+                                          seg_offsets,
+                                          count)
+                               ->GetOwn());
         for (int64_t i = 0; i < count; ++i) {
             valid_map.set(i, TakeRowIsValid(*taken_data, i));
         }
-    } else if (column->IsNullable()) {
+    } else if (column->IsNullable() && data_type != DataType::JSON) {
         column->BulkIsValid(
             op_ctx,
             [&valid_map](bool valid, size_t i) { valid_map.set(i, valid); },
             seg_offsets,
             count);
-    } else {
+    } else if (!column->IsNullable()) {
         valid_map.set();
     }
     const auto* taken = taken_data.has_value() ? &*taken_data : nullptr;
@@ -5877,14 +5884,13 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::JSON: {
-            // dst must have at least count elements; the callback's offset
-            // parameter is guaranteed to be in [0, count)
             bulk_subscript_ptr_impl<Json>(op_ctx,
                                           column.get(),
                                           seg_offsets,
                                           count,
                                           static_cast<Json*>(data),
-                                          taken);
+                                          taken,
+                                          &valid_map);
             break;
         }
         case DataType::GEOMETRY: {
@@ -5993,44 +5999,44 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst,
-    const ChunkedColumnInterface::OwnedTakeData* taken_data) {
-    if (taken_data != nullptr) {
-        if constexpr (std::is_same_v<S, Json>) {
-            const auto* values = taken_data->values.data_as<Json>();
-            for (int64_t i = 0; i < count; ++i) {
-                if (TakeRowIsValid(*taken_data, i)) {
-                    dst->at(i) = std::string(values[i].data());
-                }
+    const ChunkedColumnInterface::OwnedTakeData* taken_data,
+    bool* validity) {
+    static_assert(std::is_same_v<S, Json> || std::is_same_v<S, std::string>);
+    if constexpr (std::is_same_v<S, Json>) {
+        auto take = TakeColumnData(op_ctx,
+                                   column,
+                                   TargetType::Json,
+                                   seg_offsets,
+                                   count,
+                                   TakePinPolicy::Batch);
+        const auto items = take->Access<Json>();
+        for (int64_t i = 0; i < count; ++i) {
+            const auto item = items[i];
+            if (validity != nullptr) {
+                validity[i] = item.is_valid;
             }
-        } else {
-            static_assert(std::is_same_v<S, std::string>);
-            const auto* values = taken_data->values.data_as<std::string_view>();
-            for (int64_t i = 0; i < count; ++i) {
-                if (TakeRowIsValid(*taken_data, i)) {
-                    dst->at(i) = values[i];
-                }
+            if (item.is_valid) {
+                dst->at(i).assign(item.value->data());
             }
         }
         return;
     }
-    if constexpr (std::is_same_v<S, Json>) {
-        column->BulkRawJsonAt(
-            op_ctx,
-            [&](Json json, size_t offset, bool is_valid) {
-                dst->at(offset) = std::string(json.data());
-            },
-            seg_offsets,
-            count);
-    } else {
-        static_assert(std::is_same_v<S, std::string>);
-        column->BulkRawStringAt(
-            op_ctx,
-            [dst](std::string_view value, size_t offset, bool is_valid) {
-                dst->at(offset) = std::string(value);
-            },
-            seg_offsets,
-            count);
+    if (taken_data != nullptr) {
+        const auto* values = taken_data->values.data_as<std::string_view>();
+        for (int64_t i = 0; i < count; ++i) {
+            if (TakeRowIsValid(*taken_data, i)) {
+                dst->at(i) = values[i];
+            }
+        }
+        return;
     }
+    column->BulkRawStringAt(
+        op_ctx,
+        [dst](std::string_view value, size_t offset, bool is_valid) {
+            dst->at(offset) = std::string(value);
+        },
+        seg_offsets,
+        count);
 }
 
 template <typename S, typename T>
@@ -6041,36 +6047,47 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
     const int64_t* seg_offsets,
     int64_t count,
     T* dst,
-    const ChunkedColumnInterface::OwnedTakeData* taken_data) {
-    if (taken_data != nullptr) {
-        if constexpr (std::is_same_v<S, Json>) {
-            const auto* values = taken_data->values.data_as<Json>();
-            for (int64_t i = 0; i < count; ++i) {
-                if (TakeRowIsValid(*taken_data, i)) {
-                    dst[i] = T(values[i]);
-                }
+    const ChunkedColumnInterface::OwnedTakeData* taken_data,
+    TargetBitmap* validity) {
+    static_assert(std::is_same_v<S, Json> || std::is_same_v<S, std::string>);
+    if constexpr (std::is_same_v<S, Json>) {
+        auto take = TakeColumnData(op_ctx,
+                                   column,
+                                   TargetType::Json,
+                                   seg_offsets,
+                                   count,
+                                   TakePinPolicy::Batch);
+        const auto items = take->Access<Json>();
+        for (int64_t i = 0; i < count; ++i) {
+            const auto item = items[i];
+            if (validity != nullptr) {
+                validity->set(i, item.is_valid);
             }
-        } else {
-            static_assert(std::is_same_v<S, std::string>);
-            const auto* values = taken_data->values.data_as<std::string_view>();
-            for (int64_t i = 0; i < count; ++i) {
-                if (TakeRowIsValid(*taken_data, i)) {
-                    dst[i] = T(values[i]);
-                }
+            if (!item.is_valid) {
+                dst[i] = Json{};
+                continue;
+            }
+            // Legacy Json* output cannot retain the TakeResult's owner.
+            const auto value = item.value->data();
+            simdjson::padded_string padded(value.data(), value.size());
+            if (padded.data() == nullptr) {
+                ThrowInfo(ErrorCode::MemAllocateFailed,
+                          "failed to allocate JSON output value");
+            }
+            dst[i] = Json(std::move(padded));
+        }
+        return;
+    }
+    if (taken_data != nullptr) {
+        const auto* values = taken_data->values.data_as<std::string_view>();
+        for (int64_t i = 0; i < count; ++i) {
+            if (TakeRowIsValid(*taken_data, i)) {
+                dst[i] = T(values[i]);
             }
         }
         return;
     }
-    if constexpr (std::is_same_v<S, Json>) {
-        column->BulkRawJsonAt(
-            op_ctx,
-            [&](Json json, size_t offset, bool is_valid) {
-                dst[offset] = std::move(T(json));
-            },
-            seg_offsets,
-            count);
-    } else {
-        static_assert(std::is_same_v<S, std::string>);
+    if constexpr (std::is_same_v<S, std::string>) {
         column->BulkRawStringAt(
             op_ctx,
             [&](std::string_view value, size_t offset, bool is_valid) {
@@ -6955,16 +6972,23 @@ ChunkedSegmentSealedImpl::get_raw_data_from_state(
 
     std::optional<ChunkedColumnInterface::OwnedTakeData> taken_data;
     const bool use_owned_take =
-        !field_meta.is_vector() && column->IsNullable() &&
+        !field_meta.is_vector() &&
+        field_meta.get_data_type() != DataType::JSON && column->IsNullable() &&
         column->GetLocalFormat() == ChunkedColumnInterface::LocalFormat::Vortex;
     if (use_owned_take) {
-        taken_data.emplace(TakeOwnedColumnData(
-            op_ctx, column.get(), field_meta, seg_offsets, count));
+        taken_data.emplace(TakeColumnData(op_ctx,
+                                          column.get(),
+                                          TakeTargetType(field_meta),
+                                          seg_offsets,
+                                          count)
+                               ->GetOwn());
         auto dst = MutableFieldDataRowValidData(ret.get())->mutable_data();
         for (int64_t i = 0; i < count; ++i) {
             dst[i] = TakeRowIsValid(*taken_data, i);
         }
-    } else if (!field_meta.is_vector() && column->IsNullable()) {
+    } else if (!field_meta.is_vector() &&
+               field_meta.get_data_type() != DataType::JSON &&
+               column->IsNullable()) {
         auto dst = MutableFieldDataRowValidData(ret.get())->mutable_data();
         column->BulkIsValid(
             op_ctx,
@@ -7021,7 +7045,10 @@ ChunkedSegmentSealedImpl::get_raw_data_from_state(
                 seg_offsets,
                 count,
                 ret->mutable_scalars()->mutable_json_data()->mutable_data(),
-                taken);
+                taken,
+                column->IsNullable()
+                    ? MutableFieldDataRowValidData(ret.get())->mutable_data()
+                    : nullptr);
             break;
         }
 
@@ -7448,41 +7475,65 @@ ChunkedSegmentSealedImpl::bulk_subscript_from_state(
                field_id.get());
     auto ret = CreateEmptyScalarDataArray(count, field_meta);
     auto dst = ret->mutable_scalars()->mutable_json_data()->mutable_data();
-    if (column->IsNullable() &&
-        column->GetLocalFormat() ==
-            ChunkedColumnInterface::LocalFormat::Vortex) {
-        auto taken_data = TakeOwnedColumnData(
-            op_ctx, column.get(), field_meta, seg_offsets, count);
-        auto* validity =
-            MutableFieldDataRowValidData(ret.get())->mutable_data();
-        const auto* values = taken_data.values.data_as<Json>();
-        for (int64_t i = 0; i < count; ++i) {
-            validity[i] = TakeRowIsValid(taken_data, i);
-            if (validity[i]) {
-                dst->at(i) =
-                    ExtractSubJson(values[i].data(), dynamic_field_names);
-            }
-        }
-        return ret;
-    }
     auto* validity =
         column->IsNullable()
             ? MutableFieldDataRowValidData(ret.get())->mutable_data()
             : nullptr;
-    column->BulkRawJsonAt(
-        op_ctx,
-        [&](Json json, size_t offset, bool is_valid) {
-            if (validity != nullptr) {
-                validity[offset] = is_valid;
-            }
-            if (is_valid) {
-                dst->at(offset) =
-                    ExtractSubJson(json.data(), dynamic_field_names);
-            }
-        },
-        seg_offsets,
-        count);
+    auto take = TakeColumnData(op_ctx,
+                               column.get(),
+                               TargetType::Json,
+                               seg_offsets,
+                               count,
+                               TakePinPolicy::Batch);
+    const auto items = take->Access<Json>();
+    for (int64_t i = 0; i < count; ++i) {
+        const auto item = items[i];
+        if (validity != nullptr) {
+            validity[i] = item.is_valid;
+        }
+        if (item.is_valid) {
+            dst->at(i) =
+                ExtractSubJson(item.value->data(), dynamic_field_names);
+        }
+    }
     return ret;
+}
+
+void
+ChunkedSegmentSealedImpl::BulkGetJsonData(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const std::function<void(milvus::Json, size_t, bool)>& fn,
+    const int64_t* offsets,
+    int64_t count) const {
+    auto column = get_column(field_id);
+    AssertInfo(column != nullptr,
+               "json field {} must exist when bulk reading raw data",
+               field_id.get());
+    if (count == 0) {
+        return;
+    }
+    auto take = TakeColumnData(op_ctx,
+                               column.get(),
+                               TargetType::Json,
+                               offsets,
+                               count,
+                               TakePinPolicy::Batch);
+    if (take->IsOwned()) {
+        // Preserve the legacy callback's owning JSON values on reader backends.
+        const auto owned = take->GetOwn();
+        const auto* values = owned.values.data_as<Json>();
+        for (int64_t i = 0; i < count; ++i) {
+            const auto valid = TakeRowIsValid(owned, i);
+            fn(valid ? values[i] : Json{}, i, valid);
+        }
+        return;
+    }
+    const auto items = take->Access<Json>();
+    for (int64_t i = 0; i < count; ++i) {
+        auto item = items[i];
+        fn(item.is_valid ? std::move(*item.value) : Json{}, i, item.is_valid);
+    }
 }
 
 bool

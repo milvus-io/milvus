@@ -198,8 +198,9 @@ Raw remains the compatibility and default path:
 - variable-width access returns views whose lifetime is protected by the
   corresponding pin;
 - Raw Scan stops at a chunk boundary so it can return a zero-copy batch;
-- Raw Take resolves input offsets lazily and reuses the current chunk pin while
-  consecutive accesses remain in that chunk;
+- Raw Take defaults to lazy offset resolution and reuses the current chunk pin
+  while consecutive accesses remain in that chunk. Batch-pin callers instead
+  resolve the request once and pin its required Cells together;
 - statistics that require loaded Raw payload remain an execution-time filter.
   They may skip comparison/value construction, but are not used to avoid the
   preceding load or pin.
@@ -333,8 +334,22 @@ A caller that needs both values and validity obtains both from the same
 `TakeResult`; it must not issue a separate validity read. `BulkIsValid` remains
 for paths that need validity alone.
 
-Raw keeps at most the currently accessed Cell pinned and copies only when owned
-output is requested. Vortex may sort, group, and deduplicate offsets internally
+`TakeOptions.pin_policy` selects the borrowed-storage pin strategy:
+
+- `CurrentCell` (default) lazily pins the currently accessed Cell and releases
+  it before accessing another Cell. Existing expression callers keep this mode.
+- `Batch` resolves the requested offsets once, pins the required Cells together,
+  and retains their pins until `TakeResult` destruction, including across
+  `GetOwn()`. It does not pin unrelated Cells or materialize payloads. JSON bulk
+  output selects this mode to preserve its previous batch-pin behavior.
+
+Both modes preserve input order, duplicates, and filter/validity semantics.
+Preloaded filters can omit non-nullable skipped Cells from a batch pin;
+nullable Cells remain pinned for authoritative validity. Raw copies payload
+only when owned output is requested. Vortex already owns its decoded Take
+output and retains its existing per-file decode pin flow under either option;
+the batch option does not force it to pin all files together. Vortex may sort,
+group, and deduplicate offsets internally
 to reduce decode work, then restores input order in its already-owned result.
 Neither backend exposes Cell ids, chunk ids, or file-local offsets to callers.
 

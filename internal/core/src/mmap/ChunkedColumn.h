@@ -390,8 +390,16 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     }
 
     TakeCellPin
-    MakeTakeCellPin(milvus::OpContext* op_ctx) const override {
+    MakeTakeCellPin(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
         auto slot = slot_;
+        if (batch_cell_ids != nullptr && !batch_cell_ids->empty()) {
+            auto ca = SemiInlineGet(slot->PinCells(op_ctx, *batch_cell_ids));
+            return [slot = std::move(slot), ca = std::move(ca)](int64_t id) {
+                return PinWrapper<Chunk*>(ca, ca->get_cell_of(id));
+            };
+        }
         return [slot = std::move(slot), op_ctx](int64_t chunk_id) {
             auto ca = SemiInlineGet(slot->PinCells(op_ctx, {chunk_id}));
             auto* chunk = ca->get_cell_of(chunk_id);
@@ -646,30 +654,6 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
                    i,
                    valid);
             }
-        }
-    }
-
-    void
-    BulkRawJsonAt(milvus::OpContext* op_ctx,
-                  std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets,
-                  int64_t count) const override {
-        if constexpr (!std::is_same_v<T, Json>) {
-            ThrowInfo(
-                ErrorCode::Unsupported,
-                "RawJsonAt only supported for ChunkedVariableColumn<Json>");
-        }
-        if (count == 0) {
-            return;
-        }
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
-        for (int64_t i = 0; i < count; i++) {
-            auto chunk = ca->get_cell_of(cids[i]);
-            auto valid = nullable_ ? chunk->isValid(offsets_in_chunk[i]) : true;
-            auto str_view = static_cast<StringChunk*>(chunk)->operator[](
-                offsets_in_chunk[i]);
-            fn(Json(str_view.data(), str_view.size()), i, valid);
         }
     }
 

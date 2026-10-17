@@ -1053,35 +1053,42 @@ CheckOrderedTake(VortexColumn& column, DataType type) {
 
     if (type == DataType::JSON) {
         size_t visited_rows = 0;
-        column.BulkRawJsonAt(
-            nullptr,
-            [&](Json value, size_t row, bool valid) {
+        auto json_scan =
+            column.Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::Json));
+        ASSERT_NE(json_scan, nullptr);
+        ChunkedColumnInterface::ScanBatch batch;
+        while (json_scan->Next(
+            3, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch)) {
+            const auto* values = batch.values.data_as<Json>();
+            for (int64_t i = 0; i < batch.size; ++i) {
+                const auto row = batch.row_id_start + i;
                 EXPECT_EQ(row, visited_rows++);
+                const auto valid = !batch.validity || batch.validity[i];
                 EXPECT_EQ(valid, ExpectedValid(row));
                 if (valid) {
-                    EXPECT_EQ(std::string_view(value),
+                    EXPECT_EQ(std::string_view(values[i]),
                               ExpectedString(type, row));
-                    EXPECT_NO_THROW((void)value.doc());
+                    EXPECT_NO_THROW((void)values[i].doc());
                 }
-            },
-            nullptr,
-            kNullableRows);
+            }
+        }
         EXPECT_EQ(visited_rows, kNullableRows);
-        std::vector<Json> bulk_values(offsets.size());
-        std::vector<bool> bulk_valid(offsets.size());
-        column.BulkRawJsonAt(
-            nullptr,
-            [&](Json value, size_t index, bool valid) {
-                bulk_valid[index] = valid;
-                if (valid) {
-                    bulk_values[index] = std::move(value);
-                }
-            },
-            offsets.data(),
-            offsets.size());
+        auto json_take =
+            column.Take(nullptr,
+                        ChunkedColumnInterface::TakeOptions{
+                            ChunkedColumnInterface::OffsetView::From(
+                                offsets.data(), offsets.size()),
+                            ChunkedColumnInterface::TargetType::Json});
+        ASSERT_NE(json_take, nullptr);
+        const auto owned_json = json_take->GetOwn();
+        json_take.reset();
+        const auto* bulk_values = owned_json.values.data_as<Json>();
         for (size_t i = 0; i < offsets.size(); ++i) {
-            EXPECT_EQ(bulk_valid[i], ExpectedValid(offsets[i]));
-            if (bulk_valid[i]) {
+            const auto valid = !owned_json.validity || owned_json.validity[i];
+            EXPECT_EQ(valid, ExpectedValid(offsets[i]));
+            if (valid) {
                 EXPECT_NO_THROW((void)bulk_values[i].doc());
                 EXPECT_EQ(std::string_view(bulk_values[i]),
                           ExpectedString(type, offsets[i]));

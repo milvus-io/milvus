@@ -251,13 +251,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     FieldId field_id,
                     const std::function<void(milvus::Json, size_t, bool)>& fn,
                     const int64_t* offsets,
-                    int64_t count) const override {
-        auto column = get_column(field_id);
-        AssertInfo(column != nullptr,
-                   "json field {} must exist when bulk reading raw data",
-                   field_id.get());
-        column->BulkRawJsonAt(op_ctx, fn, offsets, count);
-    }
+                    int64_t count) const override;
 
     void
     Reopen(SchemaPtr sch) override;
@@ -1273,7 +1267,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const int64_t* seg_offsets,
         int64_t count,
         google::protobuf::RepeatedPtrField<std::string>* dst_raw,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
+        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr,
+        bool* validity = nullptr);
 
     template <typename S, typename T = S>
     static void
@@ -1283,7 +1278,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const int64_t* seg_offsets,
         int64_t count,
         T* dst,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
+        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr,
+        TargetBitmap* validity = nullptr);
 
     template <typename T>
     static void

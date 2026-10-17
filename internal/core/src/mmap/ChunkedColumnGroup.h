@@ -731,9 +731,23 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     TakeCellPin
-    MakeTakeCellPin(milvus::OpContext* op_ctx) const override {
+    MakeTakeCellPin(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
         auto group = group_;
         const auto field_id = field_id_;
+        if (batch_cell_ids != nullptr && !batch_cell_ids->empty()) {
+            auto ca = group->GetGroupChunks(op_ctx, *batch_cell_ids);
+            return [group = std::move(group), ca = std::move(ca), field_id](
+                       int64_t id) {
+                auto* chunk = ca->get_cell_of(id)->GetChunkRaw(field_id);
+                AssertInfo(chunk != nullptr,
+                           "field {} is missing from group chunk {}",
+                           field_id.get(),
+                           id);
+                return PinWrapper<Chunk*>(ca, chunk);
+            };
+        }
         return [group = std::move(group), field_id, op_ctx](int64_t chunk_id) {
             auto group_chunk = group->GetGroupChunk(op_ctx, chunk_id);
             auto* chunk = group_chunk.get()->GetChunkRaw(field_id);
@@ -934,32 +948,6 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     fn(value, i, valid);
                 });
         }
-    }
-
-    // TODO(tiered storage 2): replace with Bulk version
-    void
-    BulkRawJsonAt(milvus::OpContext* op_ctx,
-                  std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets,
-                  int64_t count) const override {
-        if (data_type_ != DataType::JSON) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "[StorageV2] RawJsonAt only supported for "
-                      "ProxyChunkColumn of Json type");
-        }
-        if (count == 0) {
-            return;
-        }
-        ForEachResolvedRow(
-            op_ctx,
-            offsets,
-            count,
-            [&fn](Chunk* chunk, int64_t offset_in_chunk, int64_t i) {
-                auto valid = chunk->isValid(offset_in_chunk);
-                auto str_view = static_cast<StringChunk*>(chunk)->operator[](
-                    offset_in_chunk);
-                fn(Json(str_view.data(), str_view.size()), i, valid);
-            });
     }
 
     void

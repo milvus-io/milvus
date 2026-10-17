@@ -307,13 +307,14 @@ struct TakeItemState {
 // Ordered positional access over one finite offset set. The input offsets must
 // outlive the result; callers do not manage backend Cell lifetimes.
 // Reader-backed results may already contain one dense owned value array. Raw
-// results pin only the Cell used by the current borrowed access; a borrowed
-// string/JSON/array view remains valid until the next access that switches
-// Cells, GetOwn(), or result destruction. Raw borrowed access and GetOwn() must
-// complete while the OpContext passed to Take() remains alive. TakeResult is
+// CurrentCell results pin only the Cell used by the current borrowed access;
+// a view remains valid until switching Cells, GetOwn(), or result destruction.
+// Batch results retain all requested pins until result destruction, including
+// across GetOwn(). Raw borrowed access and GetOwn() must complete while the
+// OpContext passed to Take() remains alive. TakeResult is
 // not thread-safe.
 // TODO(local-format): Phase 2 will guarantee borrowed values until result
-// destruction on every backend. Reconcile Raw's Cell-switch invalidation before
+// destruction on every backend. Reconcile CurrentCell invalidation before
 // promising that lifetime; escaping values require GetOwn and its retained owner.
 class TakeResult {
  public:
@@ -467,12 +468,22 @@ class TakeResult {
     }
 };
 
+enum class TakePinPolicy {
+    // Reuse the current Cell pin, releasing it before accessing another Cell.
+    CurrentCell,
+    // Pin the requested Cells together and retain their pins in TakeResult.
+    Batch,
+};
+
 struct TakeOptions {
     OffsetView offsets;
     TargetType target_type = TargetType::None;
     // Backend-neutral filter binding. Physical Cell/file planning and skip
     // decisions remain inside the Column implementation.
     detail::ColumnFilterPtr filter;
+    // Applies to borrowed storage. Owned reader results can release their
+    // source pins after decoding under either policy.
+    TakePinPolicy pin_policy = TakePinPolicy::CurrentCell;
 };
 
 enum class ScanReadMode {

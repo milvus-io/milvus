@@ -62,6 +62,7 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
     using TakeItem = milvus::TakeItem<T>;
     using TakeItemState = milvus::TakeItemState;
     using TakeOptions = milvus::TakeOptions;
+    using TakePinPolicy = milvus::TakePinPolicy;
     using TakeResult = milvus::TakeResult;
     using TakeResultPtr = milvus::TakeResultPtr;
 
@@ -386,19 +387,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                   "variable length type");
     }
 
-    // TODO(local-format): Replace this JSON-only adapter with Column.Take;
-    // use Get/Access for immediate reads and GetOwn for escaping results.
-    // Preserve legacy Raw behavior until migration; Vortex is a temporary bridge.
-    virtual void
-    BulkRawJsonAt(milvus::OpContext* op_ctx,
-                  std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets,
-                  int64_t count) const {
-        ThrowInfo(
-            ErrorCode::Unsupported,
-            "RawJsonAt only supported for ChunkColumnInterface of Json type");
-    }
-
     virtual void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
@@ -465,13 +453,13 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
  protected:
     using TakeCellPin = std::function<PinWrapper<Chunk*>(int64_t)>;
 
-    // Return a generation-stable accessor used by the default Raw Take
-    // implementation to pin one Cell at a time after Take() returns. The
-    // accessor must own the cache resources it needs; it must not capture a
-    // bare column pointer. The caller keeps op_ctx alive until borrowed access
-    // and any GetOwn() materialization are complete.
+    // The Raw Take accessor owns its generation, never a bare Column pointer.
+    // Batch requests pin the supplied Cells once and retain them in the accessor;
+    // otherwise each access pins one Cell. op_ctx must outlive borrowed reads.
     virtual TakeCellPin
-    MakeTakeCellPin(milvus::OpContext* op_ctx) const {
+    MakeTakeCellPin(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const {
         return {};
     }
 
