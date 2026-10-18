@@ -65,6 +65,13 @@ func (m *broadcastAckModule) Accept(
 		owner:        owner,
 		resourceKeys: normalizeBroadcastAckResourceKeys(owner.Message().BroadcastHeader().ResourceKeys.Collect()),
 	}
+	msg := owner.Message()
+	if msg.MessageType() == message.MessageTypeDropCollection {
+		task.droppedVChannel = msg.VChannel()
+	} else if msg.MessageType() == message.MessageTypeManualFlush && msg.IsUnreplicable() &&
+		msg.ReplicateHeader() == nil && !funcutil.IsControlChannel(msg.VChannel()) {
+		task.localFlushVChannel = msg.VChannel()
+	}
 	m.ackTaskMu.Lock()
 	m.ackTasks = append(m.ackTasks, task)
 	m.ackTaskMu.Unlock()
@@ -188,10 +195,14 @@ type broadcastAckTask struct {
 	module       *broadcastAckModule
 	owner        message.OwnedImmutableMessage
 	resourceKeys []message.ResourceKey
-	exclusive    atomic.Bool
-	poisoned     bool // Published by exclusive.Store after the last consumer releases.
-	inFlight     bool
-	completed    bool
+	// Cache lifecycle dependencies before a poisoned Owner releases its payload.
+	// VChannel identity survives a rename; collection-name ResourceKeys do not.
+	droppedVChannel    string
+	localFlushVChannel string
+	exclusive          atomic.Bool
+	poisoned           bool // Published by exclusive.Store after the last consumer releases.
+	inFlight           bool
+	completed          bool
 }
 
 func (t *broadcastAckTask) Execute(ctx context.Context) error {
@@ -222,6 +233,12 @@ func normalizeBroadcastAckResourceKeys(keys []message.ResourceKey) []message.Res
 
 func hasEarlierBroadcastAckConflict(earlier []*broadcastAckTask, task *broadcastAckTask) bool {
 	for _, candidate := range earlier {
+		// An admitted local flush may follow a replicated Rename and Drop and
+		// therefore carry a stale name key. Its empty WAL record must still wait
+		// for that Drop's persistence and ACK on the same business VChannel.
+		if task.localFlushVChannel != "" && task.localFlushVChannel == candidate.droppedVChannel {
+			return true
+		}
 		if broadcastAckResourceKeysConflict(candidate.resourceKeys, task.resourceKeys) {
 			return true
 		}

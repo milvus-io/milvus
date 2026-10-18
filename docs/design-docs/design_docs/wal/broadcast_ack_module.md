@@ -54,7 +54,11 @@ AND task is not in flight
 AND no earlier unfinished task conflicts
 ```
 
-Conflicting tasks preserve WAL observation order. Independent tasks may Ack
+Conflicting tasks preserve WAL observation order. A local unreplicable ManualFlush
+also waits for earlier DropCollection tasks on its business VChannel: replicated
+renames can make its admitted collection-name key differ from the subsequent
+Drop key. This lifecycle dependency survives poisoned payload release and keeps
+an empty post-Drop Flush behind the Drop's persistence. Independent tasks may Ack
 concurrently.
 
 ## 4. Ack And Retry

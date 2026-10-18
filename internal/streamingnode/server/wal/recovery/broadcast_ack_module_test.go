@@ -433,11 +433,13 @@ func TestLocalFlushNoopAckWaitsForPrecedingDrop(t *testing.T) {
 	drop := newBroadcastAckMessageWith(t, message.NewDropCollectionMessageBuilderV1().WithBroadcast([]string{"v1"}).
 		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).WithBody(&message.DropCollectionRequest{}), 1, 10, key)
 	flush := newBroadcastAckMessageWith(t, message.NewManualFlushMessageBuilderV2().WithUnreplicable().WithBroadcast([]string{"v1"}, message.OptBuildBroadcastAckSyncUp()).
-		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).WithBody(&message.ManualFlushMessageBody{}), 2, 20, key)
+		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).WithBody(&message.ManualFlushMessageBody{}), 2, 20,
+		message.NewExclusiveCollectionNameResourceKey("db", "before-rename"))
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	dropOwner := tracker.Track(drop)
 	// Drop holds the consumer handle through its L1/L0 persistence work. The
 	// later empty Flush has no data consumer, but cannot ACK ahead of Drop.
+	// Its admission preceded a replicated Rename, so its name key is stale.
 	persistence := dropOwner.Clone()
 	module.Accept(dropOwner)
 	module.Accept(tracker.Track(flush))

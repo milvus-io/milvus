@@ -26,8 +26,10 @@ permanent dropped-collection tombstones in the write path.
 Only an unreplicable, locally originated ManualFlush treats the shard manager's
 ErrCollectionNotFound as an empty flush. It still appends a real WAL record with
 empty SegmentIds and AckSyncUp. Recovery's BroadcastAck preserves conflicting
-resource-key order, so this flush cannot ACK before the preceding Drop's L1/L0
-persistence and ACK. Other errors and historical/replicated flushes retain their
+resource-key order and explicitly orders a local ManualFlush after earlier Drops
+on its business VChannel. The latter survives replicated renames that change the
+name resource key after Flush admission. Thus the empty flush cannot ACK before
+the preceding Drop's L1/L0 persistence and ACK. Other errors and historical/replicated flushes retain their
 existing behavior. Replicated DDL does not acquire the local API resource locks;
 those locks alone cannot prevent this race. No ACK is synthesized outside WAL.
 
