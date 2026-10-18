@@ -19,7 +19,7 @@ type replicateAppendOrder struct {
 	closed  bool
 	busy    bool // A replicated append or local flush is admitted.
 	current *replicatedTxn
-	flushes []chan struct{} // FIFO registration tokens.
+	flushes int // Waiting flushes take precedence over the next replicated txn.
 }
 
 type replicatedTxn struct {
@@ -64,20 +64,13 @@ func (o *replicateAppendOrder) acquire(ctx context.Context, msg message.MutableM
 
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	var waiter chan struct{}
 	if flush {
-		waiter = make(chan struct{})
-		o.flushes = append(o.flushes, waiter)
+		o.flushes++
 		defer func() {
-			// Cancellation removes only this append attempt. A persisted
-			// broadcast remains retryable and registers a new waiter on retry.
-			for i, pending := range o.flushes {
-				if pending == waiter {
-					o.flushes = append(o.flushes[:i], o.flushes[i+1:]...)
-					o.notifyLocked()
-					break
-				}
-			}
+			// Admission reserves busy before unregistering; cancellation only
+			// removes this attempt. Persisted broadcasts remain retryable.
+			o.flushes--
+			o.notifyLocked()
 		}()
 	}
 	for {
@@ -89,8 +82,8 @@ func (o *replicateAppendOrder) acquire(ctx context.Context, msg message.MutableM
 		}
 		ready := !o.busy
 		if flush {
-			ready = ready && o.current == nil && o.flushes[0] == waiter
-		} else if len(o.flushes) > 0 {
+			ready = ready && o.current == nil
+		} else if o.flushes > 0 {
 			// All messages in the current source txn share its commit timestamp.
 			// Older replay traffic is deduplicated by the replicate interceptor.
 			ready = ready && o.current != nil && rh.ClusterID == o.current.clusterID &&
@@ -121,7 +114,9 @@ func (o *replicateAppendOrder) acquire(ctx context.Context, msg message.MutableM
 func (o *replicateAppendOrder) finish(msg message.MutableMessage, begun *replicatedTxn, err error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if begun != nil && err != nil && o.current == begun {
+	// busy prevents another Begin until this completion; promotion can only
+	// clear current, so a failed new Begin cannot erase a different transaction.
+	if begun != nil && err != nil {
 		o.current = nil
 	} else if err == nil && msg.MessageType() == message.MessageTypeCommitTxn && o.current != nil &&
 		msg.ReplicateHeader().ClusterID == o.current.clusterID && msg.TxnContext().TxnID == o.current.id {

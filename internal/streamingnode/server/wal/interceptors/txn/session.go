@@ -146,6 +146,11 @@ func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64) 
 
 	select {
 	case <-ctx.Done():
+		// getDoneChan succeeded, so this attempt owns the OnCommit transition.
+		// Replication serializes appends; the next attempt must reuse this session.
+		if s.replicated {
+			s.RetryCommit()
+		}
 		return ctx.Err()
 	case <-waitCh:
 		return nil
@@ -166,13 +171,14 @@ func (s *TxnSession) CommitDone() {
 }
 
 // RetryCommit preserves the transaction and its segment references after a failed
-// replicated commit. The replication append path serializes commit attempts.
+// replicated commit. Call only after this attempt transitioned to OnCommit;
+// replication serializes appends and the WAL lock excludes ForcePromote.
 func (s *TxnSession) RetryCommit() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.state != message.TxnStateOnCommit {
-		return
+		panic("invalid state for commit retry")
 	}
 	s.state = message.TxnStateInFlight
 	s.doneWait = nil

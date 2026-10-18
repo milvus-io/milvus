@@ -39,7 +39,7 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	// Persisted lock ownership must depend on the message, not the entrance,
 	// so recovery can reconstruct exactly the same promotion admission.
 	if msg.IsUnreplicable() && guards.admission != nil {
-		guards.admission.Unlock()
+		guards.admission()
 		guards.admission = nil
 	}
 

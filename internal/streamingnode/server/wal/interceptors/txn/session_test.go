@@ -600,3 +600,22 @@ func TestExclusiveWritePreservesRecoveredReplicatedTxn(t *testing.T) {
 		t.Fatal("promotion must resolve recovered transactions")
 	}
 }
+
+func TestReplicatedCommitPreparationCancellation(t *testing.T) {
+	metrics := metricsutil.NewTxnMetrics("replicated-prepare-cancel")
+	defer metrics.Close()
+	session := newTxnSession("v1", message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}, 1, metrics.BeginTxn())
+	session.replicated = true
+	// Force the generic wait branch to observe cancellation after transition.
+	require.NoError(t, session.AddNewMessage(context.Background(), 2))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, session.RequestCommitAndWait(ctx, 3), context.Canceled)
+	require.Equal(t, message.TxnStateInFlight, session.State())
+	session.AddNewMessageDoneAndKeepalive(2)
+	require.NoError(t, session.RequestCommitAndWait(context.Background(), 4))
+	// A failed prepare must not undo a transition owned by another attempt.
+	require.Error(t, session.RequestCommitAndWait(context.Background(), 5))
+	require.Equal(t, message.TxnStateOnCommit, session.State())
+	session.CommitDone()
+}

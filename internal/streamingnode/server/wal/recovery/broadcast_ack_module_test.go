@@ -419,3 +419,34 @@ func TestBroadcastAckCloseCancelsPendingRetry(t *testing.T) {
 	assert.Zero(t, tracker.CompletedPoint().TimeTick)
 	assert.Same(t, msg, owner.Message())
 }
+
+func TestLocalFlushNoopAckWaitsForPrecedingDrop(t *testing.T) {
+	scheduler := &recordingAckTaskScheduler{}
+	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
+	defer module.Close()
+	var acked []message.MessageType
+	module.ack = func(_ context.Context, msg message.ImmutableMessage) error {
+		acked = append(acked, msg.MessageType())
+		return nil
+	}
+	key := message.NewExclusiveCollectionNameResourceKey("db", "c")
+	drop := newBroadcastAckMessageWith(t, message.NewDropCollectionMessageBuilderV1().WithBroadcast([]string{"v1"}).
+		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).WithBody(&message.DropCollectionRequest{}), 1, 10, key)
+	flush := newBroadcastAckMessageWith(t, message.NewManualFlushMessageBuilderV2().WithUnreplicable().WithBroadcast([]string{"v1"}, message.OptBuildBroadcastAckSyncUp()).
+		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).WithBody(&message.ManualFlushMessageBody{}), 2, 20, key)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	dropOwner := tracker.Track(drop)
+	// Drop holds the consumer handle through its L1/L0 persistence work. The
+	// later empty Flush has no data consumer, but cannot ACK ahead of Drop.
+	persistence := dropOwner.Clone()
+	module.Accept(dropOwner)
+	module.Accept(tracker.Track(flush))
+	module.dispatchReadyTasks()
+	require.Empty(t, scheduler.snapshot())
+	persistence.Release()
+	require.NoError(t, scheduler.waitTask(t).Execute(context.Background()))
+	require.Equal(t, []message.MessageType{message.MessageTypeDropCollection}, acked)
+	require.NoError(t, scheduler.waitTaskAfter(t, 1).Execute(context.Background()))
+	require.Equal(t, []message.MessageType{message.MessageTypeDropCollection, message.MessageTypeManualFlush}, acked)
+	require.EqualValues(t, 20, tracker.CompletedPoint().TimeTick)
+}

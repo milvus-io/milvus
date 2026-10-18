@@ -73,7 +73,7 @@ func orderWaitFlushes(t *testing.T, order *replicateAppendOrder, count int) {
 	require.Eventually(t, func() bool {
 		order.mu.Lock()
 		defer order.mu.Unlock()
-		return len(order.flushes) == count
+		return order.flushes == count
 	}, 5*time.Second, time.Millisecond)
 }
 
@@ -121,7 +121,7 @@ func TestLocalFlushBetweenReplicatedTransactions(t *testing.T) {
 	orderReceive(t, next)(nil)
 }
 
-func TestLocalFlushCancellationAndFIFO(t *testing.T) {
+func TestLocalFlushCancellationAndPendingPriority(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	order := newReplicateAppendOrder(nil)
@@ -137,16 +137,37 @@ func TestLocalFlushCancellationAndFIFO(t *testing.T) {
 	cancelFirst()
 	require.ErrorIs(t, (<-first).err, context.Canceled)
 	orderWaitFlushes(t, order, 2)
+	next := orderAcquireAsync(ctx, order, orderTxnMessage(message.MessageTypeBeginTxn, 2, 20))
 	// Failed Begin has no admitted transaction left to drain.
 	begin(context.Canceled)
-	finishSecond := orderReceive(t, second)
+	var finishFirst func(error)
+	var remaining <-chan orderAdmission
 	select {
-	case <-third:
-		t.Fatal("later Flush overtook earlier Flush append")
+	case admitted := <-second:
+		require.NoError(t, admitted.err)
+		finishFirst, remaining = admitted.finish, third
+	case admitted := <-third:
+		require.NoError(t, admitted.err)
+		finishFirst, remaining = admitted.finish, second
+	case <-ctx.Done():
+		t.Fatal("neither pending Flush was admitted")
+	}
+	select {
+	case <-remaining:
+		t.Fatal("two Flush appends admitted concurrently")
+	case <-next:
+		t.Fatal("new transaction overtook pending Flushes")
 	default:
 	}
-	finishSecond(nil)
-	orderReceive(t, third)(nil)
+	finishFirst(nil)
+	finishRemaining := orderReceive(t, remaining)
+	select {
+	case <-next:
+		t.Fatal("new transaction overtook last Flush append")
+	default:
+	}
+	finishRemaining(nil)
+	orderReceive(t, next)(nil)
 }
 
 func TestLocalFlushPromotionAndShutdown(t *testing.T) {

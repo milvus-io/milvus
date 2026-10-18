@@ -2,6 +2,7 @@ package broadcaster
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,7 +37,7 @@ func TestForcePromoteAdmissionDuringLocalFlush(t *testing.T) {
 	patchSecondary := mockey.Mock((*broadcastTaskManager).checkClusterRoleSecondary).Return(nil).Build()
 	defer patchSecondary.UnPatch()
 	bm := &broadcastTaskManager{
-		resourceKeyLocker: newResourceKeyLocker(), promotionLocker: newResourceKeyLocker(), metrics: newBroadcasterMetrics(),
+		resourceKeyLocker: newResourceKeyLocker(), promotionLocker: &sync.RWMutex{}, metrics: newBroadcasterMetrics(),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -58,8 +59,7 @@ func TestForcePromoteAdmissionDuringLocalFlush(t *testing.T) {
 	case promotion := <-promoted:
 		require.NotNil(t, promotion)
 		require.Equal(t, []message.ResourceKey{message.NewExclusiveClusterResourceKey()}, promotion.(*broadcasterWithRK).guards.ResourceKeys())
-		_, err = bm.promotionLocker.FastLock(message.NewSharedClusterResourceKey())
-		require.ErrorIs(t, err, errFastLockFailed, "ordinary broadcasts remain excluded during promotion")
+		require.False(t, bm.promotionLocker.TryRLock(), "ordinary broadcasts remain excluded during promotion")
 		promotion.Close()
 	case <-ctx.Done():
 		t.Fatal("ForcePromote blocked behind local Flush resource locks")
@@ -67,19 +67,19 @@ func TestForcePromoteAdmissionDuringLocalFlush(t *testing.T) {
 }
 
 func TestUnreplicableTaskReleasesTemporaryPromotionAdmission(t *testing.T) {
-	locker, admission := newResourceKeyLocker(), newResourceKeyLocker()
+	locker, admission := newResourceKeyLocker(), &sync.RWMutex{}
 	key := message.NewExclusiveCollectionNameResourceKey("db", "coll")
 	guards := locker.Lock(key)
-	guards.admission = admission.Lock(message.NewSharedClusterResourceKey())
+	admission.RLock()
+	guards.admission = admission.RUnlock
 	defer guards.Unlock()
 	patch := mockey.Mock((*broadcastTaskManager).broadcast).To(func(_ *broadcastTaskManager, _ context.Context,
 		msg message.BroadcastMutableMessage, _ uint64, held *lockGuards,
 	) (*types.BroadcastAppendResult, error) {
 		require.Nil(t, held.admission)
-		g, err := admission.FastLock(message.NewExclusiveClusterResourceKey())
-		require.NoError(t, err)
-		g.Unlock()
-		_, err = locker.FastLock(key)
+		require.True(t, admission.TryLock())
+		admission.Unlock()
+		_, err := locker.FastLock(key)
 		require.ErrorIs(t, err, errFastLockFailed, "task must keep its normal resource key")
 		require.Equal(t, []message.ResourceKey{key}, msg.BroadcastHeader().ResourceKeys.Collect())
 		return &types.BroadcastAppendResult{}, nil

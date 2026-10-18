@@ -14,6 +14,23 @@ L1 and required L0 output has completed locally. The collection CChannel copy ha
 no data to flush. Flush responses and flush-state RPCs retain their contracts.
 No timestamp comparison across PChannels or clusters is used.
 
+## Concurrent collection drop
+
+DataCoord validates the collection before persisting a local ManualFlush. RootCoord
+publishes collection metadata only after CreateCollection has ACKed on all business
+VChannels, and collection IDs are never reused. Therefore a validated local flush
+whose shard is absent on append has been overtaken by DropCollection, possibly
+before a retry or WAL handoff. This precondition avoids maintaining another set of
+permanent dropped-collection tombstones in the write path.
+
+Only an unreplicable, locally originated ManualFlush treats the shard manager's
+ErrCollectionNotFound as an empty flush. It still appends a real WAL record with
+empty SegmentIds and AckSyncUp. Recovery's BroadcastAck preserves conflicting
+resource-key order, so this flush cannot ACK before the preceding Drop's L1/L0
+persistence and ACK. Other errors and historical/replicated flushes retain their
+existing behavior. Replicated DDL does not acquire the local API resource locks;
+those locks alone cannot prevent this race. No ACK is synthesized outside WAL.
+
 ## Ordering against replication
 
 A PChannel admission gate in the Lock interceptor precedes WAL locks and TimeTick
@@ -31,7 +48,9 @@ current transaction even while its WAL append is in flight.
    for consuming ACKs; replication does not wait for L1/L0 completion.
 
 The local order is `current replicated Txn → local Flush → next Txn`. Registered
-flushes are admitted FIFO. ManualFlush's CChannel copy does not enter the gate;
+flushes take precedence over the next transaction; independent flushes have no
+FIFO contract. A pending count and an append reservation (`busy`) preserve this
+priority until each admitted flush finishes appending. ManualFlush's CChannel copy does not enter the gate;
 FlushAll gates every PChannel. The gate is PChannel-wide, matching the existing
 single replicated transaction per PChannel. A collection flush may therefore wait
 for the current transaction of another VChannel on that PChannel. This is not a
@@ -40,7 +59,12 @@ global transaction cut across PChannels.
 Ordinary exclusive writes only force-fail locally originated transactions.
 Replicated transactions retain their source ID, infinite lease and segment
 references. A failed replicated Commit append restores its session to InFlight
-and leaves the replication helper's current transaction intact. Receiving Commit
+and leaves the replication helper's current transaction intact. The replication
+manager serializes the entire append through its acker, so Commit attempts cannot
+race each other. Preparation owns its state transition and restores it on wait
+failure; append completion handles failures after preparation. Ordinary request
+cancellation is removed by the WAL adaptor, and backend errors normally retry
+inside it; RetryCommit is not an RPC-timeout retry mechanism. Receiving Commit
 or entering OnCommit does not release the flush. Successful retry releases it;
 reconnect duplicates keep the existing replication deduplication behavior.
 
@@ -58,7 +82,7 @@ and commit. ForcePromote bypasses the gate, takes the PChannel exclusive WAL loc
 and only after successful append rolls back unfinished transactions and clears
 the gate's current transaction. An unsuccessful promotion does not release Flush.
 
-ForcePromote uses a separate promotion admission lock to avoid waiting behind a
+ForcePromote uses a fixed RW promotion admission lock to avoid waiting behind a
 local Flush's resource locks. Ordinary replicable broadcasts hold the shared
 admission lock in addition to normal resource keys; ForcePromote takes the
 exclusive admission lock. Unreplicable broadcasts retain normal resource locks
@@ -69,6 +93,22 @@ broadcast header for callback ordering and incomplete-broadcast repair. Recovery
 reconstructs both lock domains from persisted message properties and headers.
 Ordinary broadcasts acquire normal resource keys before admission, so requests
 blocked behind a local Flush cannot prevent promotion.
+
+Admission alone does not guarantee progress: a local Flush waiting for a source
+transaction occupies a broadcaster worker. ForcePromote appends through a dedicated
+worker and a separate pending queue. New tasks, recovered tasks and backoff retries
+all route by the persisted ForcePromote header, so a saturated ordinary pool cannot
+prevent promotion from rolling back the transaction. Callback ordering still uses
+the existing resource-key scheduler. Other local `_ur` controls (including resource
+group operations) may append concurrently with promotion; their conflicting ACKs
+and callbacks remain ordered by the header keys.
+
+## Operational behavior
+
+Flushing the primary no longer flushes a secondary. Before a backup or other
+operation that requires local persisted data on a secondary, call Flush/FlushAll
+on that secondary explicitly. This does not wait for source replication catch-up;
+replication progress must be checked separately when that is required.
 
 ## Compatibility boundary
 

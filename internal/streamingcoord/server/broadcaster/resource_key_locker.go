@@ -2,6 +2,7 @@ package broadcaster
 
 import (
 	"sort"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 
@@ -46,7 +47,7 @@ type resourceKeyLocker struct {
 // lockGuards is the guards for multiple resource keys.
 type lockGuards struct {
 	guards    []*lockGuard
-	admission *lockGuards // Additional promotion admission; not part of the broadcast header.
+	admission func() // Additional promotion admission; not part of the broadcast header.
 }
 
 // ResourceKeys returns the resource keys.
@@ -66,7 +67,7 @@ func (l *lockGuards) append(guard *lockGuard) {
 // Unlock unlocks the resource keys.
 func (l *lockGuards) Unlock() {
 	if l.admission != nil {
-		l.admission.Unlock()
+		l.admission()
 		l.admission = nil
 	}
 	// release the locks in reverse order to avoid deadlock.
@@ -78,13 +79,13 @@ func (l *lockGuards) Unlock() {
 
 // lockGuard is the guard for the resource key.
 type lockGuard struct {
-	locker *resourceKeyLocker
+	unlock func()
 	key    message.ResourceKey
 }
 
 // Unlock unlocks the resource key.
 func (l *lockGuard) Unlock() {
-	l.locker.unlockWithKey(l.key)
+	l.unlock()
 }
 
 // FastLock locks the resource keys without waiting.
@@ -101,7 +102,7 @@ func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, 
 			locked = r.inner.TryLock(newResourceLockKey(key))
 		}
 		if locked {
-			g.append(&lockGuard{locker: r, key: key})
+			g.append(&lockGuard{unlock: func() { r.unlockWithKey(key) }, key: key})
 			continue
 		}
 		g.Unlock()
@@ -122,7 +123,7 @@ func (r *resourceKeyLocker) Lock(keys ...message.ResourceKey) *lockGuards {
 		} else {
 			r.inner.Lock(newResourceLockKey(key))
 		}
-		g.append(&lockGuard{locker: r, key: key})
+		g.append(&lockGuard{unlock: func() { r.unlockWithKey(key) }, key: key})
 	}
 	return g
 }
@@ -146,4 +147,12 @@ func uniqueSortResourceKeys(keys []message.ResourceKey) []message.ResourceKey {
 		return keys[i].Key < keys[j].Key
 	})
 	return keys
+}
+
+// newPromotionLockGuards records the header key independently of normal resource
+// locking. The caller already holds the fixed promotion admission exclusively.
+func newPromotionLockGuards(locker *sync.RWMutex) *lockGuards {
+	return &lockGuards{guards: []*lockGuard{{
+		key: message.NewExclusiveClusterResourceKey(), unlock: locker.Unlock,
+	}}}
 }
