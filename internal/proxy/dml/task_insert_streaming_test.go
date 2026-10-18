@@ -17,6 +17,7 @@ package dml
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	streamingmessage "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -300,4 +302,53 @@ func TestRepackInsertDataByPartitionForStreamingServiceSwitchesChunkOwner(t *tes
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
+}
+
+// A partial update of one large row must pass the same single-row size policy
+// as a plain insert of that row. The cross-WAL packing threshold
+// (pulsar.maxMessageSize) is a split target, not a cap: only a backend with a
+// hard per-record limit may reject a row that cannot be split any further.
+// See https://github.com/milvus-io/milvus/issues/54374.
+func TestRepackInsertDataAtProxyForStreamingServiceSinglePartialUpdateRowFollowsWALLimit(t *testing.T) {
+	const threshold = 1024 * 1024
+	oldMaxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(strconv.Itoa(threshold))
+	t.Cleanup(func() { paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize) })
+	require.Equal(t, threshold, paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt())
+
+	// One row that alone is larger than the packing threshold but far below
+	// Kafka's default hard limit.
+	source := newInt64VarCharInsertMsgForRepackTest(100, strings.Repeat("x", threshold+64*1024))
+	cas := &messagespb.PartialUpdateCAS{ReadTs: 100, ObservedPchannelTerm: 1}
+	repack := func(walName streamingmessage.WALName, partialUpdateCAS *messagespb.PartialUpdateCAS) ([]streamingmessage.MutableMessage, error) {
+		return repackInsertDataAtProxyForStreamingService(
+			context.Background(), 200, "target-partition", []int{0}, "vchannel-1", source, nil, 7,
+			partialUpdateCAS, walName, nil,
+		)
+	}
+
+	for _, walName := range []streamingmessage.WALName{
+		streamingmessage.WALNameRocksmq,
+		streamingmessage.WALNameWoodpecker,
+		streamingmessage.WALNameKafka,
+	} {
+		t.Run(walName.String(), func(t *testing.T) {
+			plain, err := repack(walName, nil)
+			require.NoError(t, err)
+			require.Len(t, plain, 1)
+
+			partial, err := repack(walName, cas)
+			require.NoError(t, err)
+			require.Len(t, partial, 1)
+			require.True(t, streamingmessage.HasPartialUpdateCAS(partial[0]))
+			require.Greater(t, partial[0].EstimateSize(), threshold)
+			require.Equal(t, uint64(1), streamingmessage.MustAsMutableInsertMessageV1(partial[0]).Header().GetPartitions()[0].GetRows())
+		})
+	}
+
+	// Pulsar's hard limit is the same value, so the row is still rejected
+	// there, for a plain insert and a partial update alike.
+	_, err := repack(streamingmessage.WALNamePulsar, nil)
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	_, err = repack(streamingmessage.WALNamePulsar, cas)
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 }

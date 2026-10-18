@@ -44,7 +44,11 @@ func GetActiveWALName() message.WALName {
 	return streamingutil.MustSelectWALName()
 }
 
-func getMaxSingleRowSize(walName message.WALName) (int, bool) {
+// GetMaxSingleRowSize returns the backend's hard limit on one WAL record, which
+// bounds a row that cannot be split any further. ok is false when the backend
+// has no such limit. This is distinct from the cross-WAL packing threshold
+// (pulsar.maxMessageSize), which is only a split target.
+func GetMaxSingleRowSize(walName message.WALName) (limit int, ok bool) {
 	switch walName {
 	case message.WALNamePulsar:
 		limit := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
@@ -79,7 +83,7 @@ func GenInsertMsgsByPartition(ctx context.Context,
 	// Keep the existing cross-WAL packing threshold separate from the
 	// backend-specific hard limit for a row that cannot be split further.
 	splitThreshold := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
-	singleRowLimit, hasSingleRowLimit := getMaxSingleRowSize(walName)
+	singleRowLimit, hasSingleRowLimit := GetMaxSingleRowSize(walName)
 
 	// create empty insert message
 	createInsertMsg := func(segmentID typeutil.UniqueID, channelName string) *msgstream.InsertMsg {

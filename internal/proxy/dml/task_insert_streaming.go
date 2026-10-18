@@ -421,7 +421,6 @@ func repackInsertDataAtProxyForStreamingService(
 		insertMsg  *msgstream.InsertMsg
 	}
 
-	maxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
 	messages := make([]message.MutableMessage, 0)
 	pending := []pendingInsertPack{{rowOffsets: rowOffsets}}
 	for len(pending) > 0 {
@@ -490,15 +489,26 @@ func repackInsertDataAtProxyForStreamingService(
 		// Rejecting instead would make any insert large enough to be split fail
 		// deterministically the moment idempotency is enabled, while the identical
 		// batch succeeds with it off.
+		//
+		// A single row cannot be split, so it is held only to the backend's hard
+		// per-record limit, exactly like a plain insert row. Holding it to the
+		// packing threshold instead would reject, on a backend without such a
+		// limit (RocksMQ, Woodpecker), a partial update of a row that insert and
+		// full upsert both accept (#54374).
 		carriesUnbudgetedMetadata := partialUpdateCAS != nil || idempotency.enabled()
-		if maxMessageSize <= 0 || !carriesUnbudgetedMetadata || msg.EstimateSize() <= maxMessageSize {
+		if !carriesUnbudgetedMetadata {
+			messages = append(messages, msg)
+			continue
+		}
+		sizeLimit, bounded := insertMessageSizeLimit(len(pack.rowOffsets), walName)
+		if !bounded || msg.EstimateSize() <= sizeLimit {
 			messages = append(messages, msg)
 			continue
 		}
 		if len(pack.rowOffsets) == 1 {
 			return nil, merr.WrapErrParameterTooLarge(fmt.Sprintf(
 				"a single insert row does not fit in one WAL message: size=%d bytes, limit=%d bytes",
-				msg.EstimateSize(), maxMessageSize,
+				msg.EstimateSize(), sizeLimit,
 			))
 		}
 
@@ -509,6 +519,21 @@ func repackInsertDataAtProxyForStreamingService(
 		}, pending...)
 	}
 	return messages, nil
+}
+
+// insertMessageSizeLimit returns how large a built insert message carrying
+// rowCount rows may be before it has to be split or refused. A message with
+// several rows is held to the cross-WAL packing threshold
+// (pulsar.maxMessageSize) because it can still be split. A single row cannot,
+// so it is bounded only by the backend's hard per-record limit, the same limit
+// channelmgr.GenInsertMsgsByPartition applies to a plain insert row. ok is
+// false when nothing bounds the message.
+func insertMessageSizeLimit(rowCount int, walName message.WALName) (limit int, ok bool) {
+	if rowCount <= 1 {
+		return channelmgr.GetMaxSingleRowSize(walName)
+	}
+	limit = paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
+	return limit, limit > 0
 }
 
 func buildInsertMessageForStreamingService(

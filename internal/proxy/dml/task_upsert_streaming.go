@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -299,14 +300,16 @@ func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 			return merr.WrapErrServiceInternalMsg("partial update insert is missing CAS metadata for vchannel %s", vchannel)
 		}
 		if paramtable.Get().ProxyCfg.SplitChunkProxy.GetAsBool() {
-			maxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
+			// Re-check the packer's invariant with the same backend-aware limit
+			// the packer used, so a single row it accepted is not refused here.
 			messageSize := msg.EstimateSize()
-			if messageSize > maxMessageSize {
+			sizeLimit, bounded := insertMessageSizeLimit(insertMessageRowCount(msg), channelmgr.GetActiveWALName())
+			if bounded && messageSize > sizeLimit {
 				return merr.WrapErrServiceInternalMsg(
 					"partial update insert packer emitted oversized message for vchannel %s: size=%d, max=%d",
 					vchannel,
 					messageSize,
-					maxMessageSize,
+					sizeLimit,
 				)
 			}
 		}
@@ -318,6 +321,16 @@ func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 		}
 	}
 	return nil
+}
+
+// insertMessageRowCount returns the number of rows an insert message carries,
+// as recorded in its header.
+func insertMessageRowCount(msg message.MutableMessage) int {
+	rows := 0
+	for _, partition := range message.MustAsMutableInsertMessageV1(msg).Header().GetPartitions() {
+		rows += int(partition.GetRows())
+	}
+	return rows
 }
 
 // preparePartialUpdateCASGroups resolves all possible write PChannel terms before

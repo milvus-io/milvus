@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -7301,4 +7302,40 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			require.Zero(t, fakeWAL.appendCalls)
 		})
 	}
+}
+
+// The final CAS attach check must apply the same backend-aware size policy as
+// the packer: a single partial-update row that the packer accepted on a WAL
+// without a hard per-record limit must not be refused afterwards against the
+// packing threshold. See https://github.com/milvus-io/milvus/issues/54374.
+func TestAttachPartialUpdateCASAcceptsOversizedSingleRowOnUnboundedWAL(t *testing.T) {
+	const threshold = 1024 * 1024
+	oldMaxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(strconv.Itoa(threshold))
+	t.Cleanup(func() { paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize) })
+	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("true")
+	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
+
+	const vchannel = "vchannel-1"
+	cas := &messagespb.PartialUpdateCAS{ReadTs: 100, ObservedPchannelTerm: 1}
+	source := newInt64VarCharInsertMsgForRepackTest(100, strings.Repeat("x", threshold+64*1024))
+	msgs, err := repackInsertDataAtProxyForStreamingService(
+		context.Background(), 200, "_default", []int{0}, vchannel, source, nil, 7,
+		cas, streamingmessage.WALNameRocksmq, nil,
+	)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	require.Greater(t, msgs[0].EstimateSize(), threshold)
+
+	task := &UpsertTask{partialUpdateCASGroups: map[string]*messagespb.PartialUpdateCAS{vchannel: cas}}
+
+	walPatch := mockey.Mock(channelmgr.GetActiveWALName).Return(streamingmessage.WALNameRocksmq).Build()
+	require.NoError(t, task.attachPartialUpdateCAS(msgs))
+	walPatch.UnPatch()
+
+	// A bounded backend still refuses an insert message over its hard limit.
+	walPatch = mockey.Mock(channelmgr.GetActiveWALName).Return(streamingmessage.WALNamePulsar).Build()
+	defer walPatch.UnPatch()
+	err = task.attachPartialUpdateCAS(msgs)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Contains(t, err.Error(), "oversized message")
 }
