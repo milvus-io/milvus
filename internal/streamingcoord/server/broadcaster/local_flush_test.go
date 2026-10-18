@@ -15,8 +15,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
-type localFlushWAL struct{ streaming.WALAccesser }
-type localFlushAllocator struct{ idalloc.Allocator }
+type (
+	localFlushWAL       struct{ streaming.WALAccesser }
+	localFlushAllocator struct{ idalloc.Allocator }
+)
 
 func TestForcePromoteAdmissionDuringLocalFlush(t *testing.T) {
 	resource.InitForTest()

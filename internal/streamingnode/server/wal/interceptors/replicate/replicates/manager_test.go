@@ -331,7 +331,7 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	}
 }
 
-func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *testing.T) {
+func TestSecondaryReplicateManagerRecoveredTxnCommitFailurePreservesDeduplication(t *testing.T) {
 	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	recovered := newReplicateTxnMessage("test1", "test2", 2)
 	for _, msg := range []message.MutableMessage{recovered[0], recovered[2]} {
@@ -363,7 +363,7 @@ func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *t
 		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
 		if msg.MessageType() == message.MessageTypeCommitTxn && acker != nil {
 			require.NoError(t, appendErr)
-			acker.Ack(status.NewTransactionExpired("recovered transaction"))
+			acker.Ack(context.DeadlineExceeded)
 			continue
 		}
 		require.Nil(t, acker)
@@ -384,11 +384,9 @@ func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *t
 		accepted = append(accepted, msg.MessageType())
 		acker.Ack(nil)
 	}
-	require.Equal(t, []message.MessageType{
-		message.MessageTypeBeginTxn,
-		message.MessageTypeCreateDatabase,
-		message.MessageTypeCommitTxn,
-	}, accepted)
+	// A failed local Commit retains the recovered transaction and its body.
+	// Reconnection must deduplicate Begin/body and retry only Commit.
+	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, accepted)
 	checkpoint, err = rm.GetReplicateCheckpoint()
 	require.NoError(t, err)
 	require.EqualValues(t, 2, checkpoint.TimeTick)
