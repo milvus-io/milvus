@@ -8000,6 +8000,27 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 // Client Telemetry RPC Handlers
 // =============================================================================
 
+// checkTelemetryAdmin restricts telemetry administration to root when auth is enabled.
+func checkTelemetryAdmin(ctx context.Context, method string) error {
+	if username, ok := http.AuthenticatedAdminFromContext(ctx); ok {
+		if username == util.UserRoot {
+			return nil
+		}
+		return merr.WrapErrPrivilegeNotPermitted("telemetry %s requires root user", method)
+	}
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	username, err := GetCurUserFromContext(ctx)
+	if err != nil {
+		return merr.WrapErrPrivilegeNotAuthenticated("telemetry %s requires authenticated root user", method)
+	}
+	if username != util.UserRoot {
+		return merr.WrapErrPrivilegeNotPermitted("telemetry %s requires root user", method)
+	}
+	return nil
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests.
 // Forwards the heartbeat to rootcoord for storage and command management.
 func (node *Proxy) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
@@ -8014,6 +8035,9 @@ func (node *Proxy) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHear
 // GetClientTelemetry retrieves client telemetry data from rootcoord.
 func (node *Proxy) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.GetClientTelemetryResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkTelemetryAdmin(ctx, "GetClientTelemetry"); err != nil {
 		return &milvuspb.GetClientTelemetryResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -8031,6 +8055,9 @@ func (node *Proxy) PushClientCommand(ctx context.Context, req *milvuspb.PushClie
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.PushClientCommandResponse{Status: merr.Status(err)}, nil
 	}
+	if err := checkTelemetryAdmin(ctx, "PushClientCommand"); err != nil {
+		return &milvuspb.PushClientCommandResponse{Status: merr.Status(err)}, nil
+	}
 
 	// Forward to rootcoord
 	return node.mixCoord.PushClientCommand(ctx, req)
@@ -8039,6 +8066,9 @@ func (node *Proxy) PushClientCommand(ctx context.Context, req *milvuspb.PushClie
 // DeleteClientCommand deletes a client command at rootcoord.
 func (node *Proxy) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.DeleteClientCommandResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkTelemetryAdmin(ctx, "DeleteClientCommand"); err != nil {
 		return &milvuspb.DeleteClientCommandResponse{Status: merr.Status(err)}, nil
 	}
 	// Forward to rootcoord
