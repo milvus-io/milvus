@@ -352,10 +352,18 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	if !field.GetElementNullable() {
 		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", originalName, parent.Name)
 	}
+	if err := schemautil.FillAddedStructSubFieldMaxCapacity(model.MarshalStructArrayFieldModel(parent), field); err != nil {
+		return err
+	}
 	if err := validateAddedStructSubFieldProperties(originalName, field); err != nil {
 		return err
 	}
 	if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {
+		return err
+	}
+	// Only the added sub-field: stored siblings may carry these params from an
+	// earlier version, so the merged struct below is not checked for them.
+	if err := schemautil.RejectStructSubFieldTextMatch(field); err != nil {
 		return err
 	}
 	// Segments written before this add have no column for the new sub-field;

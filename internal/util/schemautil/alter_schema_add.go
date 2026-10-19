@@ -17,11 +17,15 @@
 package schemautil
 
 import (
+	"strconv"
 	"strings"
+
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -215,6 +219,106 @@ func CheckNoFunctionCascade(existingFunctions []*schemapb.FunctionSchema, newFun
 			return merr.WrapErrParameterInvalidMsg(
 				"function %s input field %s is the output of another function; function cascade is not supported",
 				newFunction.GetName(), input)
+		}
+	}
+	return nil
+}
+
+// subFieldMaxCapacityParams returns the type params holding a struct
+// sub-field's max_capacity: the root of type_schema for a nested Array, the
+// field's own type params otherwise.
+func subFieldMaxCapacityParams(field *schemapb.FieldSchema) []*commonpb.KeyValuePair {
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return field.GetTypeSchema().GetTypeParams()
+	}
+	return field.GetTypeParams()
+}
+
+// FillAddedStructSubFieldMaxCapacity sets max_capacity on a sub-field being
+// added to parent. All sub-fields of a struct share one max_capacity, so the
+// value comes from the existing sub-fields. A value given in the request must
+// equal it. A nested Array may also mirror it in its own type params.
+func FillAddedStructSubFieldMaxCapacity(parent *schemapb.StructArrayFieldSchema, field *schemapb.FieldSchema) error {
+	var structCapacity string
+	for _, sibling := range parent.GetFields() {
+		if value, ok := common.GetStringValue(subFieldMaxCapacityParams(sibling), common.MaxCapacityKey); ok {
+			structCapacity = value
+			break
+		}
+	}
+	if structCapacity == "" {
+		return nil
+	}
+
+	given := [][]*commonpb.KeyValuePair{subFieldMaxCapacityParams(field)}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		given = append(given, field.GetTypeParams())
+	}
+	for _, params := range given {
+		value, ok := common.GetStringValue(params, common.MaxCapacityKey)
+		if ok && !sameCapacity(value, structCapacity) {
+			return merr.WrapErrParameterInvalidMsg(
+				"max_capacity of added sub-field %s is %s, but struct field %s uses %s; omit it to use the struct's value",
+				field.GetName(), value, parent.GetName(), structCapacity)
+		}
+	}
+
+	if _, ok := common.GetStringValue(subFieldMaxCapacityParams(field), common.MaxCapacityKey); ok {
+		return nil
+	}
+	param := &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: structCapacity}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		field.TypeSchema.TypeParams = append(field.TypeSchema.TypeParams, param)
+	} else {
+		field.TypeParams = append(field.TypeParams, param)
+	}
+	return nil
+}
+
+func sameCapacity(a, b string) bool {
+	x, errA := strconv.ParseInt(a, 10, 64)
+	y, errB := strconv.ParseInt(b, 10, 64)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return x == y
+}
+
+// StructFieldAlterableKeys lists the properties alter_collection_field accepts
+// on a struct field or a struct sub-field. max_capacity is shared by all
+// sub-fields of a struct, and sub-fields get no text index, so max_capacity,
+// max_length and the analyzer params are not alterable there. The
+// warmup.scalarField-style keys are only read from collection properties, so
+// a field only takes warmup.
+var StructFieldAlterableKeys = []string{
+	common.MmapEnabledKey,
+	common.FieldDescriptionKey,
+	common.WarmupKey,
+}
+
+// StructAlterTarget reports whether name is a struct field or a struct
+// sub-field of schema, as "struct field" or "struct sub-field". It returns ""
+// for anything else.
+func StructAlterTarget(schema *schemapb.CollectionSchema, name string) string {
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetName() == name {
+			return "struct field"
+		}
+		for _, sub := range structField.GetFields() {
+			if sub.GetName() == name {
+				return "struct sub-field"
+			}
+		}
+	}
+	return ""
+}
+
+// ValidateStructFieldAlterKeys rejects properties that alter_collection_field
+// cannot change on a struct field or a struct sub-field.
+func ValidateStructFieldAlterKeys(target, name string, keys []string) error {
+	for _, key := range keys {
+		if !lo.Contains(StructFieldAlterableKeys, key) {
+			return merr.WrapErrParameterInvalidMsg("%s can not be altered on %s %s", key, target, name)
 		}
 	}
 	return nil

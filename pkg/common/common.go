@@ -385,6 +385,7 @@ const (
 const (
 	EnableAnalyzerKey = `enable_analyzer`
 	AnalyzerParamKey  = `analyzer_params`
+	EnableMatchKey    = `enable_match`
 )
 
 //  Collection properties key

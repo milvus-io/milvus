@@ -2032,7 +2032,13 @@ func TestPrepareAlterSchemaAddStructSubFieldRejectsInvalid(t *testing.T) {
 				&commonpb.KeyValuePair{Key: common.DimKey, Value: "4"},
 				&commonpb.KeyValuePair{Key: common.LocalFormatKey, Value: common.LocalFormatVortex})
 		}},
-		{"capacity mismatch", "items", "same max_capacity", func(f *schemapb.FieldSchema) { f.TypeParams[0].Value = "8" }},
+		{"capacity mismatch", "items", "but struct field items uses 16", func(f *schemapb.FieldSchema) { f.TypeParams[0].Value = "8" }},
+		{"enable_match", "items", "enable_match is not supported on struct sub-field", func(f *schemapb.FieldSchema) {
+			f.TypeParams = append(f.TypeParams, &commonpb.KeyValuePair{Key: common.EnableMatchKey, Value: "true"})
+		}},
+		{"enable_analyzer", "items", "enable_analyzer is not supported on struct sub-field", func(f *schemapb.FieldSchema) {
+			f.TypeParams = append(f.TypeParams, &commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			field := validField()
@@ -2042,6 +2048,77 @@ func TestPrepareAlterSchemaAddStructSubFieldRejectsInvalid(t *testing.T) {
 			plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: tc.path, Field: field}
 			err := prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(false), plan)
 			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestPrepareAlterSchemaAddStructSubFieldFillsMaxCapacity(t *testing.T) {
+	t.Run("single level", func(t *testing.T) {
+		field := &schemapb.FieldSchema{Name: "added", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}
+		plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+		require.NoError(t, prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(false), plan))
+		value, ok := common.GetStringValue(field.GetTypeParams(), common.MaxCapacityKey)
+		require.True(t, ok)
+		require.Equal(t, "16", value)
+	})
+
+	newNested := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name: "nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, ElementNullable: true,
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "8"}},
+					Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+					}},
+				}},
+			},
+		}
+	}
+	t.Run("nested fills the type_schema root only", func(t *testing.T) {
+		field := newNested()
+		plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+		require.NoError(t, prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(false), plan))
+		value, ok := common.GetStringValue(field.GetTypeSchema().GetTypeParams(), common.MaxCapacityKey)
+		require.True(t, ok)
+		require.Equal(t, "16", value)
+		inner, _ := common.GetStringValue(field.GetTypeSchema().GetArrayElement().GetTypeParams(), common.MaxCapacityKey)
+		require.Equal(t, "8", inner)
+	})
+	t.Run("nested mirror must match", func(t *testing.T) {
+		field := newNested()
+		field.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+		plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+		require.ErrorContains(t, prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(false), plan), "but struct field items uses 16")
+	})
+}
+
+// An existing sub-field may carry enable_match or enable_analyzer: earlier
+// versions accepted them. Adding a sub-field to its struct must still succeed;
+// the params are only rejected on the added sub-field.
+func TestPrepareAlterSchemaAddStructSubFieldAllowsStoredTextMatch(t *testing.T) {
+	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
+		t.Run(key, func(t *testing.T) {
+			coll := rootStructSubFieldTestCollection(false)
+			coll.StructArrayFields[0].Fields[0].TypeParams = append(coll.StructArrayFields[0].Fields[0].TypeParams,
+				&commonpb.KeyValuePair{Key: key, Value: "true"})
+			newField := func(params ...*commonpb.KeyValuePair) *schemapb.FieldSchema {
+				return &schemapb.FieldSchema{
+					Name: "added", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true,
+					TypeParams: append([]*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}, params...),
+				}
+			}
+
+			plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: newField()}
+			require.NoError(t, prepareAlterSchemaAddStructSubField(coll, plan))
+
+			plan = &schemautil.AlterSchemaAddPlan{
+				Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items",
+				Field: newField(&commonpb.KeyValuePair{Key: key, Value: "true"}),
+			}
+			err := prepareAlterSchemaAddStructSubField(coll, plan)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, key+" is not supported on struct sub-field")
 		})
 	}
 }

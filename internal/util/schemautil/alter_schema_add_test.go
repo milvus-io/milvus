@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 func TestParseAlterSchemaAddStructSubField(t *testing.T) {
@@ -119,4 +120,44 @@ func TestCheckNoFunctionCascade(t *testing.T) {
 	t.Run("nil function -> ok", func(t *testing.T) {
 		assert.NoError(t, CheckNoFunctionCascade(existing, nil))
 	})
+}
+
+func TestFillAddedStructSubFieldMaxCapacity(t *testing.T) {
+	parent := &schemapb.StructArrayFieldSchema{Name: "s", Fields: []*schemapb.FieldSchema{{
+		Name: "s[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	}}}
+	newField := func(params ...*commonpb.KeyValuePair) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{Name: "b", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, TypeParams: params}
+	}
+
+	field := newField()
+	require.NoError(t, FillAddedStructSubFieldMaxCapacity(parent, field))
+	value, ok := common.GetStringValue(field.GetTypeParams(), common.MaxCapacityKey)
+	require.True(t, ok)
+	require.Equal(t, "16", value)
+
+	field = newField(&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "016"})
+	require.NoError(t, FillAddedStructSubFieldMaxCapacity(parent, field))
+	require.Len(t, field.GetTypeParams(), 1)
+
+	field = newField(&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "8"})
+	require.ErrorContains(t, FillAddedStructSubFieldMaxCapacity(parent, field), "max_capacity of added sub-field b is 8, but struct field s uses 16")
+}
+
+func TestStructFieldAlterKeys(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields:            []*schemapb.FieldSchema{{Name: "pk"}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "s", Fields: []*schemapb.FieldSchema{{Name: "s[a]"}}}},
+	}
+	assert.Equal(t, "struct field", StructAlterTarget(schema, "s"))
+	assert.Equal(t, "struct sub-field", StructAlterTarget(schema, "s[a]"))
+	assert.Equal(t, "", StructAlterTarget(schema, "pk"))
+	assert.Equal(t, "", StructAlterTarget(schema, "missing"))
+
+	require.NoError(t, ValidateStructFieldAlterKeys("struct field", "s", []string{common.MmapEnabledKey, common.FieldDescriptionKey, common.WarmupKey}))
+	require.ErrorContains(t, ValidateStructFieldAlterKeys("struct sub-field", "s[a]", []string{common.MaxLengthKey}),
+		"max_length can not be altered on struct sub-field s[a]")
+	require.ErrorContains(t, ValidateStructFieldAlterKeys("struct field", "s", []string{common.WarmupVectorIndexKey}),
+		"warmup.vectorIndex can not be altered on struct field s")
 }
