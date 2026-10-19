@@ -251,6 +251,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	idempotencyKey string,
 	rlsPrincipal string,
 	skipRLS bool,
+	version internalpb.ImportVersion,
 ) (duplicatedJobID int64, duplicated bool, err error) {
 	if err := importutilv2.ValidateSnapshotSourceRequest(options); err != nil {
 		return 0, false, err
@@ -268,6 +269,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
+	// No per-file ID range is frozen here: the two-phase flow allocates exact ranges
+	// after preimport (Import V2 via PreImportTask, Import V3 via PreImportV3) and
+	// ships them in the UpdateImport WAL message.
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
@@ -344,6 +348,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Files:          msgFiles,
 			Schema:         schema,
 			JobID:          jobID,
+			Version:        int64(version),
 		}).
 		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
 		// Scoped to the collection by ID, so the same client key stays a distinct
@@ -502,7 +507,7 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		c.meta.recomputeDataView(ctx, job.GetCollectionID())
 	}
 
-	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
+	completeTime := time.Now().Format(time.RFC3339)
 	if err := c.importMeta.UpdateJob(ctx, jobID,
 		UpdateJobState(internalpb.ImportJobState_Completed),
 		UpdateJobCompleteTime(completeTime),
@@ -510,7 +515,7 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		return err
 	}
 	totalDuration := job.GetTR().ElapseSpan()
-	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
+	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel, job.GetVersion().String()).Observe(float64(totalDuration.Milliseconds()))
 	mlog.Info(ctx, "import job committed to Completed",
 		mlog.FieldJobID(jobID),
 		mlog.Duration("jobTimeCost/total", totalDuration))
