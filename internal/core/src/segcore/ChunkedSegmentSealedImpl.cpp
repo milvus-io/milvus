@@ -8662,38 +8662,33 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                 target.emplace_back(cg_index, std::move(all_fields));
             }
 
-            if (!column_groups_to_load.empty()) {
+            // New fields are either eager or lazy, never both (the Vortex
+            // regrouping above keeps each Vortex group in exactly one list),
+            // so one batch opens all of them instead of a second serial round
+            // for lazy fields.
+            if (!column_groups_to_load.empty() ||
+                !column_groups_to_lazyload.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
                                  column_groups_to_load,
-                                 local_formats,
-                                 segment_load_info,
-                                 schema_snapshot,
-                                 true,
-                                 op_ctx,
-                                 false,
-                                 committer);
-            }
-            if (!column_groups_to_lazyload.empty()) {
-                LoadColumnGroups(column_groups,
-                                 properties,
                                  column_groups_to_lazyload,
                                  local_formats,
                                  segment_load_info,
                                  schema_snapshot,
-                                 false,
                                  op_ctx,
                                  false,
                                  committer);
             }
+            // Replace batches stay ordered: ComputeDiffReloadFields and
+            // ComputeDiffColumnGroups may both emit the same field.
             if (!column_groups_to_replace.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
                                  column_groups_to_replace,
+                                 /*lazy_cg_field_ids=*/{},
                                  local_formats,
                                  segment_load_info,
                                  schema_snapshot,
-                                 true,
                                  op_ctx,
                                  true,
                                  committer);
@@ -8701,11 +8696,11 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
             if (!column_groups_to_lazyreplace.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
+                                 /*eager_cg_field_ids=*/{},
                                  column_groups_to_lazyreplace,
                                  local_formats,
                                  segment_load_info,
                                  schema_snapshot,
-                                 false,
                                  op_ctx,
                                  true,
                                  committer);
@@ -9557,20 +9552,24 @@ void
 ChunkedSegmentSealedImpl::LoadColumnGroups(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
-    const std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
+    const std::vector<std::pair<int, std::vector<FieldId>>>& eager_cg_field_ids,
+    const std::vector<std::pair<int, std::vector<FieldId>>>& lazy_cg_field_ids,
     const std::vector<VortexColumnGroupLocalFormat>& local_formats,
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
-    bool eager_load,
     milvus::OpContext* op_ctx,
     bool is_replace,
     StagedStateCommitter& committer) {
     const auto reader = committer.runtime()->reader;
     std::vector<ManifestLoadTask> tasks;
-    tasks.reserve(cg_field_ids.size());
+    const auto task_count =
+        eager_cg_field_ids.size() + lazy_cg_field_ids.size();
+    tasks.reserve(task_count);
     std::vector<ManifestLoadTask> vortex_tasks;
-    vortex_tasks.reserve(cg_field_ids.size());
-    for (const auto& [cg_index, field_ids] : cg_field_ids) {
+    vortex_tasks.reserve(task_count);
+    auto add_task = [&](int cg_index,
+                        const std::vector<FieldId>& field_ids,
+                        bool eager_load) {
         const bool use_vortex =
             local_formats.at(cg_index) == VortexColumnGroupLocalFormat::Vortex;
         auto task = ManifestLoadTask{
@@ -9580,6 +9579,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         } else {
             tasks.emplace_back(std::move(task));
         }
+    };
+    for (const auto& [cg_index, field_ids] : eager_cg_field_ids) {
+        add_task(cg_index, field_ids, /*eager_load=*/true);
+    }
+    for (const auto& [cg_index, field_ids] : lazy_cg_field_ids) {
+        add_task(cg_index, field_ids, /*eager_load=*/false);
     }
     const bool enable_async_load =
         storagev2translator::StorageV2AsyncLoadEnabled();
