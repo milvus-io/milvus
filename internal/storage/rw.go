@@ -83,6 +83,7 @@ type rwOptions struct {
 	externalReader    packed.ExternalReaderContext
 	writerFormat      string
 	presentFields     map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
+	pkStatsConfig     *PkStatsConfig
 }
 
 func (o *rwOptions) validate() error {
@@ -249,6 +250,12 @@ func WithWriterFormat(format string) RwOption {
 	}
 }
 
+func WithPkStatsConfig(config PkStatsConfig) RwOption {
+	return func(options *rwOptions) {
+		options.pkStatsConfig = &config
+	}
+}
+
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
 	if len(binlogs) == 0 {
 		return func() ([]*Blob, error) {
@@ -330,7 +337,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	}
 
 	binlogReaderOpts := []BinlogReaderOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
+	pluginContext := rwOptions.pluginContext
 	if hookutil.IsClusterEncryptionEnabled() {
 		// Reader pluginContext from import tasks
 		if rwOptions.pluginContext != nil {
@@ -603,7 +610,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	}
 
 	opts := []StreamWriterOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
+	pluginContext := rwOptions.pluginContext
 	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
 		if ez != nil {
@@ -614,7 +621,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			opts = append(opts, GetEncryptionOptions(ez.EzID, edek, encryptor)...)
 
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
+			if pluginContext == nil && len(unsafe) > 0 {
 				pluginContext = &indexcgopb.StoragePluginContext{
 					EncryptionZoneId: ez.EzID,
 					CollectionId:     ez.CollectionID,
@@ -623,7 +630,6 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			}
 		}
 	}
-
 	switch rwOptions.version {
 	case StorageV1:
 		rootPath := rwOptions.storageConfig.GetRootPath()
@@ -636,6 +642,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.storageConfig,
 			pluginContext,
 			rwOptions.writerFormat,
+			rwOptions.pkStatsConfig,
 		)
 	case StorageV3:
 		// if TEXT column configs are provided, use the text writer with TEXT column support
@@ -645,7 +652,9 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 				rwOptions.storageConfig,
 				rwOptions.textColumnConfigs,
+				pluginContext,
 				rwOptions.writerFormat,
+				rwOptions.pkStatsConfig,
 			)
 		}
 		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
@@ -655,6 +664,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			pluginContext,
 			rwOptions.textRefsAsBinary,
 			rwOptions.writerFormat,
+			rwOptions.pkStatsConfig,
 		)
 	}
 	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)

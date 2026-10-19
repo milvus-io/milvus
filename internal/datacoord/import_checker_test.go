@@ -60,7 +60,10 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
@@ -915,6 +918,16 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 	s.Equal(internalpb.ImportJobState_Failed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
 
+func (s *ImportCheckerSuite) TestCheckCollectionDoesNotFailCommittingJob() {
+	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+	broker := s.checker.broker.(*broker2.MockBroker)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
+
+	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
+
+	s.Equal(internalpb.ImportJobState_Committing, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
 func TestImportChecker(t *testing.T) {
 	suite.Run(t, new(ImportCheckerSuite))
 }
@@ -929,8 +942,11 @@ func TestImportCheckerCompaction(t *testing.T) {
 	// prepare objects
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
@@ -961,7 +977,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 		getReplicationRole: func(context.Context) (replicateutil.Role, bool, error) {
 			return replicateutil.RolePrimary, false, nil
 		},
-		assignUpdateImport: func(ctx context.Context, job ImportJob, fileRows []int64) error {
+		assignImportIDRange: func(ctx context.Context, job ImportJob, fileRows []int64) error {
 			// Mirror the production wiring: the primary allocates one exact range per file
 			// and applies it to the job, which is what lets the range gate proceed.
 			ranges := make([]*commonpb.IDRange, len(fileRows))
@@ -1386,7 +1402,10 @@ func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitTrue() 
 func newCapturingImportMeta(t *testing.T, saved *[]*datapb.ImportJob) ImportMeta {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(
 		func(_ context.Context, job *datapb.ImportJob) error {
@@ -1580,7 +1599,7 @@ func TestJobIDRangesSet_NilCheckNotEmptyCheck(t *testing.T) {
 
 // Preimport done, no ranges, primary role (or non-replicating, or role hook
 // disabled): the first tick moves the job PreImporting → AssigningIDRange without
-// broadcasting; later ticks in AssigningIDRange invoke assignUpdateImport with the
+// broadcasting; later ticks in AssigningIDRange invoke assignImportIDRange with the
 // exact per-file row counts aligned to job.GetFiles() order -- including a zero-row
 // file -- under a bounded ctx, and the job stays in AssigningIDRange until the ranges
 // are applied.
@@ -1592,7 +1611,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryAssignsWithAlignedFileRows()
 	var gotJobID int64
 	var gotFileRows []int64
 	var deadlineOK bool
-	s.checker.hooks.assignUpdateImport = func(ctx context.Context, job ImportJob, fileRows []int64) error {
+	s.checker.hooks.assignImportIDRange = func(ctx context.Context, job ImportJob, fileRows []int64) error {
 		calls++
 		gotJobID = job.GetJobID()
 		gotFileRows = fileRows
@@ -1667,7 +1686,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_SecondaryWaitsThenProceeds() {
 		roleCalls++
 		return replicateutil.RoleSecondary, true, nil
 	}
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
@@ -1745,7 +1764,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_IndeterminateRoleWaits() {
 	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, false, errors.New("balancer not ready")
 	}
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
@@ -1773,7 +1792,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_AssignErrorsAreTransient() {
 
 	calls := 0
 	hookErr := error(nil)
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		calls++
 		return hookErr
 	}
@@ -1810,7 +1829,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PermanentAssignErrorFailsJob() {
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 100, 2: 0, 3: 200})
 
 	calls := 0
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		calls++
 		return merr.WrapErrParameterInvalidMsg(
 			"import file 0 holds 5000000000 rows, more than one allocation batch can reserve (max 4294967295); split the file")
@@ -1845,7 +1864,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_ExcludedJobsProceedWithoutHook() {
 		roleCalls++
 		return replicateutil.RolePrimary, false, nil
 	}
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
@@ -1908,7 +1927,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_VersionGateOffUsesLegacyPath() {
 		roleCalls++
 		return replicateutil.RolePrimary, false, nil
 	}
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
@@ -1940,7 +1959,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_ZeroRowsStillTakesTheRangeGate() {
 	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, false, nil
 	}
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
@@ -2026,7 +2045,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_RowCountDivergenceFailsJob() {
 	})))
 
 	assignCalls := 0
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
@@ -2073,7 +2092,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_MissingStatWaits() {
 	s.NoError(s.importMeta.AddTask(context.TODO(), task))
 
 	assignCalls := 0
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
@@ -2109,7 +2128,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryFullTransition() {
 		return replicateutil.RolePrimary, false, nil
 	}
 	assignCalls := 0
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
@@ -2189,7 +2208,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_RestartRecovery() {
 	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RoleSecondary, true, nil
 	}
-	s.checker.hooks.assignUpdateImport = func(context.Context, ImportJob, []int64) error {
+	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}

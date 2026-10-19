@@ -282,6 +282,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	idempotencyKey string,
 	rlsPrincipal string,
 	skipRLS bool,
+	version internalpb.ImportVersion,
 ) (duplicatedJobID int64, duplicated bool, err error) {
 	if err := importutilv2.ValidateSnapshotSourceRequest(options); err != nil {
 		return 0, false, err
@@ -401,6 +402,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Files:          msgFiles,
 			Schema:         schema,
 			JobID:          jobID,
+			Version:        int64(version),
 		}).
 		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
 		// Scoped to the collection by ID, so the same client key stays a distinct
