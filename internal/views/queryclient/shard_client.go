@@ -149,6 +149,9 @@ func (s *shardViewQueryClient) SearchStream(
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
+		return nil, nil, err
+	}
 
 	shardID := qviews.FromProtoShardID(plan.ShardId)
 	workNodes := workNodesFromPlan(plan)
@@ -264,6 +267,9 @@ func (s *shardViewQueryClient) QueryStream(
 		barrierMVCC:      req.BarrierMVCC,
 	})
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
 		return nil, nil, err
 	}
 

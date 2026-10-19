@@ -160,8 +160,13 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	leftNode := qviews.NewQueryNode(11)
 	rightNode := qviews.NewQueryNode(12)
 	request := newTestSearchRequest(3)
+	request.PlaceholderGroup = []byte("vectors")
+	request.SerializedExprPlan = []byte("filter plan")
 	plan := newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{})
 	plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: proto.Clone(request).(*internalpb.SearchRequest)}
+	qviews.OmitUnchangedQueryPayloads(plan, &viewpb.GetQueryPlanRequest{
+		Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: request},
+	})
 	plan.WorkNodes = []*viewpb.QueryPlanWorkNode{
 		{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: leftNode.ID}}},
 		{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: rightNode.ID}}},
@@ -193,6 +198,8 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	require.Equal(t, []int64{101}, planClient.planReq.GetRequiredFieldIds())
 	require.Equal(t, uint64(123), planClient.planReq.GetBarrierMvcc())
 	require.Equal(t, int64(20), queryService.searchReq.GetStreamChunkBytes())
+	require.Equal(t, request.GetPlaceholderGroup(), queryService.searchReq.GetLegacyReq().GetPlaceholderGroup())
+	require.Equal(t, request.GetSerializedExprPlan(), queryService.searchReq.GetLegacyReq().GetSerializedExprPlan())
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2}, chunk.GetResultData().GetIds().GetIntId().GetData())
@@ -212,7 +219,7 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	leftNode := qviews.NewQueryNode(11)
 	rightNode := qviews.NewQueryNode(12)
-	request := &internalpb.RetrieveRequest{CollectionID: 100, IsIterator: true, Limit: 3}
+	request := &internalpb.RetrieveRequest{CollectionID: 100, IsIterator: true, Limit: 3, SerializedExprPlan: []byte("filter plan")}
 	plan := &viewpb.QueryPlan{
 		ShardId: shardID.IntoProto(),
 		Version: &viewpb.QueryViewVersion{QueryVersion: 1},
@@ -225,6 +232,9 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 			{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: rightNode.ID}}},
 		},
 	}
+	qviews.OmitUnchangedQueryPayloads(plan, &viewpb.GetQueryPlanRequest{
+		Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: request},
+	})
 	leftStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: newTestQueryChunk([]int64{1, 3})}}}
 	rightStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: newTestQueryChunk([]int64{2, 4})}}}
 	queryService := &fakeViewQueryServiceClient{
@@ -251,6 +261,7 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	require.Equal(t, uint64(456), planClient.planReq.GetReadProofAfter())
 	require.Equal(t, uint64(123), planClient.planReq.GetBarrierMvcc())
 	require.Equal(t, int64(32), queryService.queryReq.GetStreamChunkBytes())
+	require.Equal(t, request.GetSerializedExprPlan(), queryService.queryReq.GetLegacyReq().GetSerializedExprPlan())
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2}, chunk.GetIds().GetIntId().GetData())
@@ -411,6 +422,7 @@ func (f *fakeViewQueryServiceClient) QueryOnViewStream(ctx context.Context, node
 	}
 	return &fakeQueryStream{}, nil
 }
+
 type fakeSearchResultReducer struct{}
 
 func (fakeSearchResultReducer) Add(qviews.ShardID, *viewpb.SearchOnViewResponse) error {
