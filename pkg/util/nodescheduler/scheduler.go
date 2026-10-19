@@ -163,7 +163,11 @@ func (s *nodeScheduler) resize(concurrency int) {
 		for i := 0; i < additional; i++ {
 			go s.runWorker()
 		}
+		return
 	}
+	// Shrinking: wake the excess workers so they observe workerCount > concurrency
+	// and exit from dequeue. Broadcasting is required since an arbitrary number of
+	// workers may need to wake and terminate.
 	s.cond.Broadcast()
 }
 
@@ -214,7 +218,7 @@ func (s *nodeScheduler) Close() {
 
 func (s *nodeScheduler) wakeup() {
 	s.mu.Lock()
-	s.cond.Broadcast()
+	s.cond.Signal()
 	s.mu.Unlock()
 }
 

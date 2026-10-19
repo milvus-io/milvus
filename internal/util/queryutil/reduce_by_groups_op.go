@@ -41,7 +41,7 @@ import (
 // in PostExecute skips FieldId=0 (not in schema map).
 //
 // Unlike proxy's version, this does NOT reorganize output fields (no outputMap).
-// groupLimit: -1 for unlimited (when ORDER BY will do topK downstream),
+// groupLimit: -1 for unlimited (when groups need a later cross-source merge),
 // >0 to truncate groups.
 func NewDeduplicateByGroupsOperator(
 	schema *schemapb.CollectionSchema,

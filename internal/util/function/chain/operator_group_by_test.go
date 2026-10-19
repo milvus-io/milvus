@@ -473,7 +473,7 @@ func (s *GroupByOpTestSuite) TestGroupByOp_NonExistentGroupField() {
 	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
 	op := NewGroupByOp("nonexistent", 2, 10, 0)
 
-	_, err := op.Execute(ctx, df)
+	_, err := ExecuteOperator(ctx, df, op)
 	s.Error(err)
 	s.Contains(err.Error(), "not found")
 }
@@ -504,7 +504,7 @@ func (s *GroupByOpTestSuite) TestGroupByOp_NoScoreColumn() {
 	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
 	op := NewGroupByOp("category", 2, 10, 0)
 
-	_, err = op.Execute(ctx, df)
+	_, err = ExecuteOperator(ctx, df, op)
 	s.Error(err)
 	s.Contains(err.Error(), types.ScoreFieldName)
 }
@@ -632,7 +632,7 @@ func (s *GroupByOpTestSuite) TestMemoryLeak_GroupByOp_Error() {
 	ctx := types.NewFuncContextWithStage(s.pool, types.StageL2Rerank)
 	op := NewGroupByOp("nonexistent", 2, 10, 0)
 
-	_, err := op.Execute(ctx, df)
+	_, err := ExecuteOperator(ctx, df, op)
 	s.Error(err)
 
 	// Memory check happens in TearDownTest

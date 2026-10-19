@@ -33,7 +33,7 @@ its own package without dragging every task implementation along.
 5. **`TsoAllocator`** — the timestamp-allocation interface implemented by the
    proxy's timestamp allocator and consumed by the scheduler.
 6. **Value types** — `UniqueID`, `Timestamp`, `VChan`, `PChan`,
-   `PChanStatistics`, and the `BaseInsertTask` alias.
+   and the `BaseInsertTask` alias.
 
 ## Architecture
 
@@ -47,7 +47,7 @@ its own package without dragging every task implementation along.
 │   BaseTask ── Condition / TaskCondition                    │
 │                                                            │
 │   TsoAllocator    UniqueID / Timestamp / VChan / PChan     │
-│   PChanStatistics  BaseInsertTask                          │
+│   BaseInsertTask                                           │
 └────────────────────────────────────────────────────────────┘
 ```
 

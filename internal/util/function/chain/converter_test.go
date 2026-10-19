@@ -2533,6 +2533,53 @@ func (s *ConverterSuite) TestNullableRoundTrip_StringWithNulls() {
 	s.Equal([]bool{true, false}, typeutil.GetFieldDataValidData(exported.FieldsData[0]))
 }
 
+func (s *ConverterSuite) TestExportGoStringsSurviveRelease() {
+	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       2,
+		Topks:      []int64{2},
+		Scores:     []float32{0.9, 0.8},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{Data: []string{"pk-1", "pk-2"}},
+			},
+		},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_VarChar,
+				FieldName: "label",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{Data: []string{"red", "blue"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Limit the DataFrame lifetime to this scope so the exported strings are
+	// the remaining references to its Go-managed value buffers after release.
+	exported := func() *schemapb.SearchResultData {
+		df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, "label"))
+		s.Require().NoError(err)
+		defer df.Release()
+
+		exported, err := ToSearchResultData(df)
+		s.Require().NoError(err)
+		return exported
+	}()
+	pool.AssertSize(s.T(), 0)
+	runtime.GC()
+
+	s.Equal([]string{"pk-1", "pk-2"}, exported.GetIds().GetStrId().GetData())
+	s.Require().Len(exported.GetFieldsData(), 1)
+	s.Equal([]string{"red", "blue"}, exported.GetFieldsData()[0].GetScalars().GetStringData().GetData())
+}
+
 // =============================================================================
 // importIDs unsupported type
 // =============================================================================

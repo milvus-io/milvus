@@ -122,6 +122,7 @@ type ComponentParam struct {
 	RoleCfg        roleConfig
 	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
+	QueryViewCfg   queryViewConfig
 	FunctionCfg    functionConfig
 	CredentialCfg  credentialConfig
 
@@ -177,6 +178,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
+	p.QueryViewCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
@@ -349,8 +351,10 @@ type commonConfig struct {
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
-	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"true"`
-	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"true"`
+	ArrowCPUThreadPoolCoefficient       ParamItem `refreshable:"false"`
+	ArrowCPUThreadPoolMaxCapacity       ParamItem `refreshable:"false"`
+	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"false"`
+	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"false"`
 	ArrowReaderHoleSizeLimitBytes       ParamItem `refreshable:"true"`
 	ArrowReaderRangeSizeLimitBytes      ParamItem `refreshable:"true"`
 	StorageReaderThreadPoolSize         ParamItem `refreshable:"true"`
@@ -918,19 +922,41 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
 
+	p.ArrowCPUThreadPoolCoefficient = ParamItem{
+		Key:          "common.arrow.cpuThreadPoolCoefficient",
+		Version:      "3.0.1",
+		DefaultValue: "1",
+		Doc: `Coefficient for the process-wide Arrow CPU pool and shared storage Tokio worker count. ` +
+			`Threads = max(1, CPU cores x coefficient), truncated to an integer and capped by ` +
+			`common.arrow.cpuThreadPoolMaxCapacity when > 0. 0 uses CPU cores and ignores the cap. ` +
+			`Must be finite and nonnegative. Takes effect only at startup; requires a restart.`,
+		Forbidden: true,
+		Export:    false,
+	}
+	p.ArrowCPUThreadPoolCoefficient.Init(base.mgr)
+
+	p.ArrowCPUThreadPoolMaxCapacity = ParamItem{
+		Key:          "common.arrow.cpuThreadPoolMaxCapacity",
+		Version:      "3.0.1",
+		DefaultValue: "0",
+		Doc: `Upper bound on the Arrow CPU pool and shared storage Tokio worker count. ` +
+			`0 disables the cap. Has no effect when common.arrow.cpuThreadPoolCoefficient is 0. ` +
+			`Must be a nonnegative int32. Takes effect only at startup; requires a restart.`,
+		Forbidden: true,
+		Export:    false,
+	}
+	p.ArrowCPUThreadPoolMaxCapacity.Init(base.mgr)
+
 	p.ArrowIOThreadPoolCoefficient = ParamItem{
 		Key:          "common.arrow.ioThreadPoolCoefficient",
 		Version:      "3.0.0",
-		DefaultValue: "0",
-		Doc: `Coefficient for arrow's internal IO thread pool size ` +
-			`(threads = CPU cores × coefficient, then clamped by ` +
-			`common.arrow.ioThreadPoolMaxCapacity when > 0). Arrow runs async ` +
-			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
-			`S3 GetObject requests — it is the real ceiling on parallel ` +
-			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
-			`minio.maxConnections. 0 means a fixed pool of 8 threads (the cap ` +
-			`is ignored). Typical range: 2–8. Negative values are ignored.`,
-		Export: false,
+		DefaultValue: "1",
+		Doc: `Coefficient for the process-wide Arrow IO pool and shared storage Tokio blocking-thread limit. ` +
+			`Threads = max(1, CPU cores x coefficient), truncated to an integer and capped by ` +
+			`common.arrow.ioThreadPoolMaxCapacity when > 0. 0 uses 8 threads and ignores the cap. ` +
+			`Must be finite and nonnegative. Takes effect only at startup; requires a restart.`,
+		Forbidden: true,
+		Export:    false,
 	}
 	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
 
@@ -938,14 +964,11 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.arrow.ioThreadPoolMaxCapacity",
 		Version:      "3.0.0",
 		DefaultValue: "0",
-		Doc: `Upper bound on arrow's IO thread pool size after applying ` +
-			`common.arrow.ioThreadPoolCoefficient. When > 0, the computed ` +
-			`threads = coefficient × CPU cores is clamped to this value — ` +
-			`useful on very large hosts where the coefficient would otherwise ` +
-			`produce a pool larger than minio.maxConnections or the S3 gateway ` +
-			`can service. 0 disables the cap. Has no effect when coefficient ` +
-			`is 0.`,
-		Export: false,
+		Doc: `Upper bound on the Arrow IO pool and shared storage Tokio blocking-thread limit. ` +
+			`0 disables the cap. Has no effect when common.arrow.ioThreadPoolCoefficient is 0. ` +
+			`Must be a nonnegative int32. Takes effect only at startup; requires a restart.`,
+		Forbidden: true,
+		Export:    false,
 	}
 	p.ArrowIOThreadPoolMaxCapacity.Init(base.mgr)
 
@@ -6346,6 +6369,8 @@ type dataCoordConfig struct {
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
 	DVForceAllIndexReady           ParamItem `refreshable:"true"`
 
+	ManifestCommitConcurrency ParamItem `refreshable:"false"`
+
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
@@ -6377,7 +6402,6 @@ type dataCoordConfig struct {
 	CompactionExpiryTolerance                  ParamItem `refreshable:"true"`
 	BumpSchemaVersionCompactionEnabled         ParamItem `refreshable:"true"`
 	BumpSchemaVersionCompactionTriggerInterval ParamItem `refreshable:"true"`
-	L0ManifestUpdatePoolSize                   ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -6480,11 +6504,18 @@ type dataCoordConfig struct {
 	MaxImportJobNum                 ParamItem `refreshable:"true"`
 	WaitForIndex                    ParamItem `refreshable:"true"`
 	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
+	EnableImportV3                  ParamItem `refreshable:"true"`
 	EnableL0Import                  ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 	ImportEnableIDRangeMsg          ParamItem `refreshable:"true"`
+	ImportParquetFooterMaxSize      ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
+	ImportFragmentSizeInMB          ParamItem `refreshable:"true"`
+	FragmentMergeFanIn              ParamItem `refreshable:"true"`
+	ReshardResidentBucketCap        ParamItem `refreshable:"true"`
+	ReshardFlushConcurrency         ParamItem `refreshable:"true"`
+	ReshardMemoryExpansionFactor    ParamItem `refreshable:"true"`
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
 	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
@@ -6812,20 +6843,17 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)
 
-	p.L0ManifestUpdatePoolSize = ParamItem{
-		Key:          "dataCoord.compaction.levelzero.manifestUpdatePoolSize",
+	p.ManifestCommitConcurrency = ParamItem{
+		Key:          "dataCoord.manifestCommitConcurrency",
 		Version:      "3.0.0",
 		DefaultValue: "16",
-		Doc:          "The goroutine pool size for committing L0 compaction manifest updates inside DataCoord meta update.",
-		Export:       false,
+		Doc:          "Maximum concurrent DataCoord manifest commits across L0 compaction, index and stats publication, schema materialization, and GC. Values are clamped to [1, 256]. Workers start on demand. Read once during metadata initialization; changes require restart.",
+		Export:       true,
 		Formatter: func(v string) string {
-			if getAsInt(v) < 1 {
-				return "1"
-			}
-			return v
+			return strconv.Itoa(min(256, max(1, getAsInt(v))))
 		},
 	}
-	p.L0ManifestUpdatePoolSize.Init(base.mgr)
+	p.ManifestCommitConcurrency.Init(base.mgr)
 
 	p.MinSegmentToMerge = ParamItem{
 		Key:          "dataCoord.compaction.min.segment",
@@ -7205,8 +7233,8 @@ The value must be exactly true or false. A value that does not parse as a boolea
 		Formatter: func(v string) string {
 			return strconv.Itoa(min(256, max(1, getAsInt(v))))
 		},
-		Doc: `Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
-Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.`,
+		Doc: `Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Reads await asynchronous transaction callbacks in Go. Values are clamped to [1, 256], and the coordinator read limit is also capped by positive minio.maxConnections values. Restore assembly and verification share the same budget.
+Startup continuously schedules bounded concurrent reads and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.`,
 		Export: true,
 	}
 	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
@@ -7814,7 +7842,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		Version: "2.4.0",
 		Doc: "To prevent generating of small segments, we will re-group imported files. " +
 			"This parameter represents the sum of file sizes in each group (each ImportTask).",
-		DefaultValue: "16384",
+		DefaultValue: "8192",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -7890,6 +7918,19 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 	}
 	p.ImportInReplicatingCluster.Init(base.mgr)
 
+	p.EnableImportV3 = ParamItem{
+		Key:     "dataCoord.import.enableImportV3",
+		Version: "3.0.0",
+		Doc: "One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. " +
+			"Keep disabled until all DataNodes and all DataCoords that may become active support Import V3. " +
+			"The gate only selects the version for new requests; persisted WAL messages and jobs always resume " +
+			"with their stored version. Disabling the gate again after activation is unsupported.",
+		DefaultValue: "false",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.EnableImportV3.Init(base.mgr)
+
 	p.EnableL0Import = ParamItem{
 		Key:     "dataCoord.import.enableL0Import",
 		Version: "2.7.0",
@@ -7942,6 +7983,22 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 	}
 	p.ImportEnableIDRangeMsg.Init(base.mgr)
 
+	// ImportParquetFooterMaxSize bounds the parquet footer read that Import V3's
+	// count-only preimport does to obtain an exact row count. A file declaring a
+	// longer footer is rejected. Footer size tracks row_groups * columns, so raise
+	// this for files written with small row groups, many columns, or untruncated
+	// string statistics.
+	p.ImportParquetFooterMaxSize = ParamItem{
+		Key:          "dataCoord.import.parquetFooterMaxSize",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Doc: `Largest parquet footer, in bytes, that import sizing will read to obtain an exact row count.
+A file declaring a longer footer is rejected at submit. Footer size tracks row_groups * columns, so
+raise this for files written with small row groups, many columns, or untruncated string statistics.`,
+		Export: true,
+	}
+	p.ImportParquetFooterMaxSize.Init(base.mgr)
+
 	p.ImportFileNumPerSlot = ParamItem{
 		Key:          "dataCoord.import.fileNumPerSlot",
 		Version:      "2.5.15",
@@ -7965,6 +8022,79 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		},
 	}
 	p.ImportMemoryLimitPerSlot.Init(base.mgr)
+
+	p.ImportFragmentSizeInMB = ParamItem{
+		Key:          "dataCoord.import.fragmentSizeInMB",
+		Version:      "3.0.0",
+		Doc:          "Target logical size in MiB for one sorted ImportTaskV3 fragment.",
+		DefaultValue: "128",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportFragmentSizeInMB.Init(base.mgr)
+	if p.ImportFragmentSizeInMB.GetAsInt64() <= 0 {
+		panic("dataCoord.import.fragmentSizeInMB must be positive")
+	}
+
+	p.FragmentMergeFanIn = ParamItem{
+		Key:          "dataCoord.import.fragmentMergeFanIn",
+		Version:      "3.0.0",
+		Doc:          "Maximum direct merge fan-in used by ImportTaskV3. Values must be in [2,1024].",
+		DefaultValue: "128",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.FragmentMergeFanIn.Init(base.mgr)
+	if fanIn := p.FragmentMergeFanIn.GetAsInt(); fanIn < 2 || fanIn > 1024 {
+		panic("dataCoord.import.fragmentMergeFanIn must be in [2, 1024]")
+	}
+
+	p.ReshardResidentBucketCap = ParamItem{
+		Key:          "dataCoord.import.reshardResidentBucketCap",
+		Version:      "3.0.0",
+		Doc:          "Number of (vchannel, partition) buckets whose full in-flight working set (cap x fragmentSizeInMB) the ImportTaskV3 reshard slot estimate keeps memory-resident as a ceiling, so a job with at most this many buckets can reshard without local spill on an idle node. Beyond the cap the task keeps the SAME whole-task resident budget (cap x fragmentSizeInMB) and, when the total in-memory bytes exceed it, spills the largest bucket first into the DataNode's shared spill log, so a skewed partition hash spends the spill on the hot buckets while cold buckets stay resident. The DataNode's dynamic memory probe may still spill below this ceiling when the real process memory is tight. The cap also bounds per-task slot demand so the task stays schedulable on small nodes.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ReshardResidentBucketCap.Init(base.mgr)
+	if cap := p.ReshardResidentBucketCap.GetAsInt64(); cap < 1 {
+		panic("dataCoord.import.reshardResidentBucketCap must be at least 1")
+	}
+
+	p.ReshardFlushConcurrency = ParamItem{
+		Key:     "dataCoord.import.reshardFlushConcurrency",
+		Version: "3.0.0",
+		Doc: "Number of fragment writes one ImportTaskV3 reshard task keeps detached and in flight. " +
+			"A full bucket's sort/encode/upload runs on its own goroutine so it overlaps reading and hashing " +
+			"the next batches instead of stalling them. Every detached write holds its fragment input plus one " +
+			"sort copy, so the reshard slot estimate charges this many of them: raising it trades node task " +
+			"concurrency for per-task latency.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ReshardFlushConcurrency.Init(base.mgr)
+	if concurrency := p.ReshardFlushConcurrency.GetAsInt64(); concurrency < 1 {
+		panic("dataCoord.import.reshardFlushConcurrency must be at least 1")
+	}
+
+	p.ReshardMemoryExpansionFactor = ParamItem{
+		Key:     "dataCoord.import.reshardMemoryExpansionFactor",
+		Version: "3.0.0",
+		Doc: "Expansion factor applied to an ImportTaskV3 reshard task's whole per-task heap " +
+			"footprint when estimating its memory charge: WorkingSet charges factor x (fixed IO + " +
+			"pipeline + resident buckets + detached fragment inputs + their structural overhead + one " +
+			"sort copy per detached write). It covers the Go runtime headroom and the other growth " +
+			"between the source/flush boundaries the run returns memory at. Must be at least 1.",
+		DefaultValue: "1.65",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ReshardMemoryExpansionFactor.Init(base.mgr)
+	if factor := p.ReshardMemoryExpansionFactor.GetAsFloat(); factor < 1 {
+		panic("dataCoord.import.reshardMemoryExpansionFactor must be at least 1")
+	}
 
 	p.MaxSegmentsPerCopyTask = ParamItem{
 		Key:          "dataCoord.import.maxSegmentsPerCopyTask",
@@ -8382,6 +8512,7 @@ type dataNodeConfig struct {
 	MaxImportFileSizeInGB           ParamItem `refreshable:"true"`
 	ImportBaseBufferSize            ParamItem `refreshable:"true"`
 	ImportDeleteBufferSize          ParamItem `refreshable:"true"`
+	ReshardSpillMaxStreams          ParamItem `refreshable:"false"`
 	ImportMemoryLimitPercentage     ParamItem `refreshable:"true"`
 	ImportMaxWriteRetryAttempts     ParamItem `refreshable:"true"`
 	ImportWriteRetryInitialInterval ParamItem `refreshable:"true"`
@@ -8727,8 +8858,8 @@ if this parameter <= 0, will set it as 10`,
 	p.ImportDeleteBufferSize = ParamItem{
 		Key:          "dataNode.import.readDeleteBufferSizeInMB",
 		Version:      "2.5.14",
-		Doc:          "The delete buffer size (in MB) during import.",
-		DefaultValue: "16",
+		Doc:          "The delete memory budget (in MB) used for legacy L0 import slot estimation and typed snapshot delete maps. Shared-L0 snapshot tasks use bounded delete batches and pool the per-reader delete allowances for bitmaps in both phases; admission also reserves row buffers and requires an import memory allowance greater than twice this budget.",
+		DefaultValue: "128",
 		Formatter: func(v string) string {
 			bufferSize := getAsFloat(v)
 			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
@@ -8737,6 +8868,19 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.ImportDeleteBufferSize.Init(base.mgr)
+
+	p.ReshardSpillMaxStreams = ParamItem{
+		Key:          "dataNode.import.reshardSpillMaxStreams",
+		Version:      "3.0.0",
+		Doc:          "Maximum number of spill files (Arrow IPC streams) one ImportTaskV3 reshard run keeps open. Buckets are mapped to streams by a fixed hash, so every range of one bucket lives in exactly one file and a run with more buckets than streams never opens more files than this cap. A stream file is removed as soon as all of its ranges are consumed; the actual stream count is min(buckets, this value). Must be at least 1.",
+		DefaultValue: "128",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ReshardSpillMaxStreams.Init(base.mgr)
+	if streams := p.ReshardSpillMaxStreams.GetAsInt(); streams < 1 {
+		panic("dataNode.import.reshardSpillMaxStreams must be at least 1")
+	}
 
 	p.ImportMemoryLimitPercentage = ParamItem{
 		Key:          "dataNode.import.memoryLimitPercentage",
@@ -8908,7 +9052,7 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 			"records are still delivered in order. A chunk being read also fetches all byte ranges of its current round at once " +
 			"rather than one at a time; how far adjacent ranges are coalesced is left as configured (common.arrow.reader.*), so " +
 			"a sort issues the requests every other reader issues, only together. The requests actually in flight are capped by " +
-			"arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient, 8 threads by default). " +
+			"arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient, one thread per CPU core by default). " +
 			"Memory: a sort holds its whole decoded input regardless, so decoding chunks ahead adds nothing to its peak. Each " +
 			"chunk being read additionally holds the raw bytes of its current round, released when the round is replaced or the " +
 			"chunk is closed, so the read phase of one sort task adds up to this value times " +
@@ -9085,6 +9229,47 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
 }
 
+type queryViewConfig struct {
+	IDFLazyLoadSealedStats             ParamItem `refreshable:"true"`
+	IDFSealedStatsLoadConcurrencyRatio ParamItem `refreshable:"true"`
+	LeaseDuration                      ParamItem `refreshable:"false"`
+}
+
+func (p *queryViewConfig) init(base *BaseTable) {
+	p.IDFLazyLoadSealedStats = ParamItem{
+		Key:          "queryView.idfOracle.lazyLoadSealedStats",
+		Version:      "3.1.0",
+		Export:       true,
+		DefaultValue: "false",
+		Doc:          "Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.",
+	}
+	p.IDFLazyLoadSealedStats.Init(base.mgr)
+
+	p.IDFSealedStatsLoadConcurrencyRatio = ParamItem{
+		Key:          "queryView.idfOracle.sealedStatsLoadConcurrencyRatio",
+		Version:      "3.1.0",
+		Export:       true,
+		DefaultValue: "4",
+		Doc:          "Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.",
+		Formatter: func(v string) string {
+			if getAsFloat(v) <= 0 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.IDFSealedStatsLoadConcurrencyRatio.Init(base.mgr)
+
+	p.LeaseDuration = ParamItem{
+		Key:          "queryView.leaseDuration",
+		Version:      "3.1.0",
+		DefaultValue: "60s",
+		Doc:          "Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.",
+		Export:       true,
+	}
+	p.LeaseDuration.Init(base.mgr)
+}
+
 type streamingConfig struct {
 	// WAL payload chunking rollout switch.
 	SplitChunkSN ParamItem `refreshable:"true"`
@@ -9141,6 +9326,7 @@ type streamingConfig struct {
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
 
 	// partial update
+	PartialUpdateEnableCAS            ParamItem `refreshable:"false"`
 	PartialUpdateVersionIndexMaxBytes ParamItem `refreshable:"false"`
 
 	// memory usage control
@@ -9154,7 +9340,8 @@ type streamingConfig struct {
 	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
 	// summary store retention
-	SummaryMaxBytesPerPChannel ParamItem `refreshable:"true"`
+	SummaryMaxBytesPerPChannel   ParamItem `refreshable:"true"`
+	SummaryCacheBytesPerPChannel ParamItem `refreshable:"false"`
 
 	// recovery configuration.
 	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
@@ -9524,6 +9711,15 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 	}
 	p.LoggingAppendSlowThreshold.Init(base.mgr)
 
+	p.PartialUpdateEnableCAS = ParamItem{
+		Key:          "streaming.partialUpdate.enableCAS",
+		Version:      "3.0.4",
+		DefaultValue: "true",
+		Export:       false,
+		Doc:          "Enable partial-update CAS conflict detection. Disabling it allows concurrent updates based on stale rows to overwrite each other. Requires StreamingNode restart.",
+	}
+	p.PartialUpdateEnableCAS.Init(base.mgr)
+
 	p.PartialUpdateVersionIndexMaxBytes = ParamItem{
 		Key:          "streaming.partialUpdate.versionIndexMaxBytes",
 		Version:      "3.0.0",
@@ -9607,6 +9803,15 @@ materialization frontiers.`,
 		Export:       false,
 	}
 	p.SummaryMaxBytesPerPChannel.Init(base.mgr)
+
+	p.SummaryCacheBytesPerPChannel = ParamItem{
+		Key:          "streaming.summary.cacheBytesPerPChannel",
+		Version:      "3.1.0",
+		DefaultValue: "64MB",
+		Doc:          "Encoded WALSummary chunk cache budget per PChannel. Zero disables residency. Indexes, in-flight reads and decoded delivery batches are accounted separately. Applied when the WAL opens.",
+		Export:       true,
+	}
+	p.SummaryCacheBytesPerPChannel.Init(base.mgr)
 
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",

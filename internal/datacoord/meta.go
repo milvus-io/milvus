@@ -104,12 +104,13 @@ type meta struct {
 	// segmentManifestLocks serializes the full StorageV3 manifest commit for a
 	// segment. It must be acquired before segMu. Manifest I/O runs outside
 	// segMu; final full-record catalog and memory publication runs under segMu.
-	segmentManifestLocks *lock.KeyLock[int64]
-	copyResultLocksOnce  sync.Once
-	copyResultLocks      *lock.KeyLock[int64]
-	manifestReadOnce     sync.Once
-	manifestReadSlots    *semaphore.Weighted
-	dataViewManager      DataViewManager
+	segmentManifestLocks   *lock.KeyLock[int64]
+	copyResultLocksOnce    sync.Once
+	copyResultLocks        *lock.KeyLock[int64]
+	manifestCommitExecutor *manifestCommitExecutor
+	manifestReadOnce       sync.Once
+	manifestReadSlots      *semaphore.Weighted
+	dataViewManager        DataViewManager
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -272,6 +273,12 @@ func showCollectionIDs(ctx context.Context, broker broker.Broker) ([]int64, erro
 	return collectionIDs, nil
 }
 
+func (m *meta) closeManifestCommitExecutor() {
+	if m.manifestCommitExecutor != nil {
+		m.manifestCommitExecutor.close()
+	}
+}
+
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker) (*meta, error) {
 	// Fetch collection IDs first so both reloadFromKV and indexMeta can use them for per-collection loading.
@@ -293,7 +300,9 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
+	commitConcurrency := paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.GetAsInt()
 	mt := &meta{
+		manifestCommitExecutor:   newManifestCommitExecutor(commitConcurrency),
 		ctx:                      ctx,
 		catalog:                  catalog,
 		collections:              typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
@@ -306,6 +315,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		stagedSegmentToGroup:     make(map[int64]int64),
 		supersededSegmentToGroup: make(map[int64]int64),
 	}
+
+	initialized := false
+	defer func() {
+		if !initialized {
+			mt.closeManifestCommitExecutor()
+		}
+	}()
 
 	g, _ := errgroup.WithContext(ctx)
 
@@ -413,6 +429,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.stagedSegmentToGroup = stag
 	mt.supersededSegmentToGroup = sup
 
+	initialized = true
 	return mt, nil
 }
 
@@ -1399,77 +1416,84 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 	return true
 }
 
-func (u *l0ManifestUpdate) commitManifest() error {
-	if u.segment.GetManifestPath() == "" || u.manifestPath != "" || len(u.entries) == 0 {
+// submitManifest advances this segment's private snapshot only on confirmed
+// success. Cached revisions and empty updates complete inline without I/O.
+func (u *l0ManifestUpdate) submitManifest(ctx context.Context, io *packed.ManifestIOContext, complete func(error)) error {
+	if u.manifestPath != "" || len(u.entries) == 0 {
+		complete(updateManifestPathIfNewer(u.segment, u.manifestPath))
 		return nil
 	}
-	manifestPath, err := packed.AddDeltaLogsToManifestOverwrite(u.segment.GetManifestPath(), u.storageConfig, u.entries)
+	base, version, err := packed.UnmarshalManifestPath(u.segment.GetManifestPath())
 	if err != nil {
 		return err
 	}
-	u.manifestPath = manifestPath
-	return nil
+	return packed.SubmitManifestUpdates(ctx, io, base, version, u.storageConfig,
+		&packed.ManifestUpdates{DeltaLogs: u.entries}, func(result packed.ManifestUpdateResult, err error) {
+			if err == nil {
+				u.manifestPath = result.ManifestPath
+				err = updateManifestPathIfNewer(u.segment, u.manifestPath)
+			}
+			complete(err)
+		})
 }
 
-func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
-	updates = lo.Filter(updates, func(update *l0ManifestUpdate, _ int) bool {
-		return update.segment.GetManifestPath() != ""
-	})
-	if len(updates) == 0 {
-		return nil
-	}
-
+func commitL0ManifestUpdates(ctx context.Context, executor *manifestCommitExecutor, updates []*l0ManifestUpdate) error {
 	groups := make(map[int64][]*l0ManifestUpdate)
 	for _, update := range updates {
-		groups[update.segmentID] = append(groups[update.segmentID], update)
+		if update.segment.GetManifestPath() != "" {
+			groups[update.segmentID] = append(groups[update.segmentID], update)
+		}
 	}
-
-	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
-	if poolSize < 1 {
-		poolSize = 1
+	if len(groups) == 0 {
+		return nil
 	}
-	if poolSize > len(groups) {
-		poolSize = len(groups)
+	io, releaseIO, err := executor.acquire(ctx)
+	if err != nil {
+		return err
 	}
+	defer releaseIO()
 
-	pool := conc.NewPool[struct{}](poolSize)
-	defer pool.Release()
-
-	futures := make([]*conc.Future[struct{}], 0, len(groups))
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// Each segment has at most one outstanding commit. A completion makes its
+	// remaining updates ready for the caller to submit, never the callback.
+	// One buffered slot per group lets callbacks finish even during admission.
+	ready := make(chan []*l0ManifestUpdate, len(groups))
 	for _, group := range groups {
-		group := group
-		futures = append(futures, pool.Submit(func() (struct{}, error) {
-			return struct{}{}, commitL0ManifestUpdateGroup(group)
-		}))
+		ready <- group
 	}
-	err := conc.BlockOnAll(futures...)
+	var failed sync.Once
+	var firstErr error
+	for remaining := len(groups); remaining > 0; {
+		group := <-ready
+		if len(group) == 0 || workCtx.Err() != nil {
+			remaining--
+			continue
+		}
+		complete := func(err error) {
+			if err != nil {
+				failed.Do(func() {
+					firstErr = err
+					cancel()
+				})
+			}
+			ready <- group[1:]
+		}
+		if err := group[0].submitManifest(workCtx, io, complete); err != nil {
+			complete(err) // Rejection has no callback.
+		}
+	}
+	// All accepted callbacks have finished before shared retry caches are updated
+	// or the caller can release its segment locks, including on partial failure.
 	for _, update := range updates {
 		if update.committedV3Manifests != nil && update.manifestPath != "" {
 			update.committedV3Manifests[update.segmentID] = update.manifestPath
 		}
 	}
-	return err
-}
-
-func commitL0ManifestUpdateGroup(updates []*l0ManifestUpdate) error {
-	for _, update := range updates {
-		if update.manifestPath != "" {
-			if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
-				return err
-			}
-			continue
-		}
-		if len(update.entries) == 0 {
-			continue
-		}
-		if err := update.commitManifest(); err != nil {
-			return err
-		}
-		if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
-			return err
-		}
+	if firstErr != nil {
+		return firstErr
 	}
-	return nil
+	return ctx.Err()
 }
 
 func (u *l0ManifestUpdate) apply(modPack *updateSegmentPack) bool {
@@ -2013,15 +2037,24 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	}
 }
 
+// maxSegmentTimestampTo returns the highest accepted insert timestamp bound for
+// a segment: the max of the insert-binlog TimestampTo values and
+// Statistics.TimestampTo. V2/CDC segments carry the bound in their binlogs;
+// manifest-backed V3 segments have no FieldBinlog arrays and persist it in
+// Statistics instead, so the durable bound is whichever is larger.
+func maxSegmentTimestampTo(segment *SegmentInfo) uint64 {
+	if segment == nil {
+		return 0
+	}
+	maxTsTo := maxBinlogTimestampTo(segment.GetBinlogs())
+	if stats := segment.EnsureStats(); stats != nil && stats.GetTimestampTo() > maxTsTo {
+		maxTsTo = stats.GetTimestampTo()
+	}
+	return maxTsTo
+}
+
 // maxBinlogTimestampTo returns the highest TimestampTo across a segment's insert
-// binlogs, or 0 when the arrays are absent.
-//
-// Absent is not the same as "no rows": a V3 (manifest-backed) segment never
-// persists these arrays -- buildAlterSegmentsKvs skips the per-FieldBinlog KVs
-// for it (kv_catalog.go:357) and the SegmentInfo is written without them -- so a
-// V3 segment reloaded after a DataCoord restart reports 0 here regardless of the
-// row timestamps it actually holds. Callers therefore get a bound that is safe
-// to compare against but that does not fire for reloaded V3 segments.
+// binlogs, or 0 when the arrays are absent. It is retained for legacy V2 callers.
 func maxBinlogTimestampTo(fieldBinlogs []*datapb.FieldBinlog) uint64 {
 	var maxTsTo uint64
 	for _, fb := range fieldBinlogs {
@@ -2038,8 +2071,11 @@ func maxBinlogTimestampTo(fieldBinlogs []*datapb.FieldBinlog) uint64 {
 // Non-zero marks it as committed at that transaction time, overriding
 // start_position.Timestamp for all temporal decisions.
 //
-// Invariant: a non-zero commit_timestamp MUST be >= max(binlog.TimestampTo)
-// across all binlogs on the segment. Row timestamps cannot exceed the commit
+// Invariant: a non-zero commit_timestamp MUST be >= the accepted segment
+// timestamp bound (the binlog TimestampTo for V2/CDC segments, or
+// Statistics.TimestampTo for manifest-backed V3 segments, whose binlog arrays
+// are absent).
+// Row timestamps cannot exceed the commit
 // time logically (the data did not "exist" until commit). Violating inputs
 // (e.g., CDC where source-cluster TSO > target-cluster TSO) are rejected at
 // this entry point rather than letting C++ segcore silently lower row
@@ -2054,17 +2090,17 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 			return false
 		}
 		if ts != 0 {
-			maxTsTo := maxBinlogTimestampTo(segment.GetBinlogs())
+			maxTsTo := maxSegmentTimestampTo(segment)
 			if ts < maxTsTo {
-				mlog.Error(modPack.meta.ctx, "meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
+				mlog.Error(modPack.meta.ctx, "meta update: update commit timestamp rejected - commit_ts < segment timestamp bound",
 					mlog.Int64("segmentID", segmentID),
 					mlog.Uint64("commitTs", ts),
-					mlog.Uint64("maxBinlogTimestampTo", maxTsTo))
+					mlog.Uint64("segmentTimestampTo", maxTsTo))
 				// Preserve the commit fence and let the broadcast callback retry.
 				// It must not publish segment visibility or complete the job
 				// with a timestamp preceding the imported rows.
 				return modPack.fail(merr.WrapErrImportSysFailedMsg(
-					"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
+					"commit timestamp %d is less than the segment timestamp bound %d for import segment %d",
 					ts, maxTsTo, segmentID))
 			}
 		}
@@ -2261,7 +2297,7 @@ func (m *meta) buildUpdateSegmentPack(ctx context.Context, operators []UpdateOpe
 			return nil, updatePack.err
 		}
 	}
-	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
+	if err := commitL0ManifestUpdates(ctx, m.manifestCommitExecutor, updatePack.l0ManifestUpdates); err != nil {
 		return nil, err
 	}
 	for _, update := range updatePack.l0ManifestUpdates {
@@ -2681,13 +2717,8 @@ func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, f
 	stats := storage.BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
 	minTs, maxTs := stats.GetTimestampFrom(), stats.GetTimestampTo()
 	if minTs > 0 && maxTs > 0 {
-		return &msgpb.MsgPosition{
-				ChannelName: channel,
-				Timestamp:   minTs,
-			}, &msgpb.MsgPosition{
-				ChannelName: channel,
-				Timestamp:   maxTs,
-			}
+		return &msgpb.MsgPosition{ChannelName: channel, Timestamp: minTs},
+			&msgpb.MsgPosition{ChannelName: channel, Timestamp: maxTs}
 	}
 	return fallbackStart, fallbackDml
 }

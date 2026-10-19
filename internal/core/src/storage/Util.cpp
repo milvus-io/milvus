@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <deque>
 #include <filesystem>
@@ -22,6 +23,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <string_view>
 #include "common/FastMem.h"
 
 #include "arrow/array/builder_binary.h"
@@ -119,7 +121,8 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array,
                              int64_t dim,
                              bool nullable,
                              DataType element_type,
-                             const FieldMeta& field_meta);
+                             const FieldMeta& field_meta,
+                             bool preserve_array_element_validity = false);
 
 enum class CloudProviderType : int8_t {
     UNKNOWN = 0,
@@ -1624,20 +1627,69 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     return field_datas;
 }
 
-std::vector<FieldDataPtr>
-GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
-                           int64_t field_id,
-                           DataType data_type,
-                           DataType element_type,
-                           int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs,
-                           size_t max_rows /*=0*/,
-                           size_t offset /*=0*/) {
+namespace {
+
+int64_t
+ParseBinlogSequence(const std::string& path) {
+    const auto slash = path.find_last_of('/');
+    const auto name = std::string_view(path).substr(
+        slash == std::string::npos ? 0 : slash + 1);
+    int64_t sequence = 0;
+    const auto [end, error] =
+        std::from_chars(name.data(), name.data() + name.size(), sequence);
+    if (name.empty() || error != std::errc{} ||
+        end != name.data() + name.size()) {
+        ThrowInfo(DataFormatBroken,
+                  "insert binlog path has a non-numeric filename: {}",
+                  path);
+    }
+    return sequence;
+}
+
+}  // namespace
+
+void
+SortBinlogPaths(std::vector<std::string>& paths) {
+    if (paths.size() == 1) {
+        ParseBinlogSequence(paths.front());
+        return;
+    }
+    std::vector<std::pair<int64_t, std::string>> sequenced;
+    sequenced.reserve(paths.size());
+    for (auto& path : paths) {
+        sequenced.emplace_back(ParseBinlogSequence(path), std::move(path));
+    }
+    std::sort(sequenced.begin(),
+              sequenced.end(),
+              [](const auto& left, const auto& right) {
+                  return left.first < right.first;
+              });
+    for (size_t i = 0; i < sequenced.size(); ++i) {
+        paths[i] = std::move(sequenced[i].second);
+    }
+}
+
+// Shared implementation of the storage-v2 read path. A positive `max_rows`
+// keeps #50088's partial download: only the row groups covering
+// [offset, offset + max_rows) are read, and the visit ends once that many rows
+// have been handed to the visitor. `max_rows == 0` visits every row group.
+static VisitOutcome
+VisitFieldDataFromStorageV2Paged(
+    const std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const FieldDataVisitor& visitor,
+    size_t max_rows,
+    size_t offset) {
     if (!(remote_files.size() > 0)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "[StorageV2] remote files size is 0");
     }
-    std::vector<FieldDataPtr> field_data_list;
+    AssertInfo(static_cast<bool>(visitor),
+               "[StorageV2] field-data visitor is empty");
 
     // remote files might not followed the sequence of column group id,
     // so we need to put into map<column_group_id, remote_chunk_files>
@@ -1647,8 +1699,13 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "[StorageV2] remote files size is 0");
         }
-        int64_t group_id = ExtractGroupIdFromPath(remote_chunk_files[0]);
-        column_group_files[group_id] = remote_chunk_files;
+        auto files = remote_chunk_files;
+        // This is the common boundary for BuildSession primary/optional
+        // fields and the memory/disk cache readers used by stats builds.
+        // Normalize once per group before metadata lookup or row delivery.
+        SortBinlogPaths(files);
+        const auto group_id = ExtractGroupIdFromPath(files.front());
+        column_group_files[group_id] = std::move(files);
     }
 
     std::vector<std::string> remote_chunk_files;
@@ -1683,7 +1740,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             "[StorageV2] field {} not found in any column group, return "
             "empty result set",
             field_id);
-        return field_data_list;
+        return VisitOutcome::FieldMissing;
     }
     if (!(remote_chunk_files.size() > 0)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
@@ -1709,24 +1766,17 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             "result set",
             field_id,
             column_group_id);
-        return field_data_list;
+        return VisitOutcome::FieldMissing;
     }
 
     AssertInfo(fs != nullptr,
                "[StorageV2] storage v2 arrow file system is not initialized");
 
-    // set up channel for arrow reader
-    auto field_data_info = FieldDataInfo();
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    field_data_info.arrow_reader_channel->set_capacity(parallel_degree);
-
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     size_t total_num_rows = 0;
-    bool is_full = false;
-    for (auto& column_group_file : remote_chunk_files) {
+
+    for (const auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
-        std::vector<std::vector<int64_t>> row_group_lists;
         auto result = milvus_storage::FileRowGroupReader::Make(
             fs,
             column_group_file,
@@ -1744,11 +1794,15 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         auto row_group_num = row_group_meta_data_vector.size();
         LOG_DEBUG("[StorageV2] row_group_num: {}", row_group_num);
 
-        std::vector<int64_t> all_row_groups(row_group_num);
+        // Row groups this call has to read. Without a row budget that is
+        // every group; with one it is the window covering
+        // [offset, offset + max_rows) (#50088).
+        std::vector<int64_t> selected_row_groups(row_group_num);
         if (max_rows == 0) {
-            std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+            std::iota(
+                selected_row_groups.begin(), selected_row_groups.end(), 0);
         } else {
-            all_row_groups.clear();
+            selected_row_groups.clear();
             // Find the starting row group by walking through cumulative row
             // counts. Row groups can have different sizes, so we cannot assume
             // uniform size based on the first row group.
@@ -1768,25 +1822,25 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                     "[StorageV2] start_row_group {} is beyond group num {}",
                     start_row_group,
                     row_group_num);
-                return field_data_list;
+                return VisitOutcome::Exhausted;
             }
             LOG_DEBUG("[StorageV2] starting in row group: {}", start_row_group);
             size_t total_rows = 0;
             for (size_t i = start_row_group; i < row_group_num; i++) {
                 size_t num_rows = row_group_meta_data_vector.Get(i).row_num();
                 total_rows += num_rows;
-                all_row_groups.push_back(i);
+                selected_row_groups.push_back(static_cast<int64_t>(i));
                 if (total_rows >= max_rows) {
                     LOG_DEBUG("[StorageV2] ending in row group: {}", i);
                     break;
                 }
             }
         }
-        row_group_lists.push_back(std::move(all_row_groups));
 
-        // create a schema with only the field id
+        // Preserve the source field's nullability while decoding each row
+        // group. The visitor intentionally trades the old all-row-group
+        // parallel window for a genuine row-group early-stop boundary.
         auto field_schema = reader->schema()->field(col_offset)->Copy();
-        auto arrow_schema = arrow::schema({field_schema});
         auto status = reader->Close();
         if (!status.ok()) {
             ThrowInfo(ArrowStatusToErrorCode(status),
@@ -1796,23 +1850,35 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                           " with error: " + status.ToString());
         }
 
-        // split row groups for parallel reading
-        auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
-            parallel_degree);
-        auto load_future = pool.Submit([&]() {
-            return LoadWithStrategy(std::vector<std::string>{column_group_file},
-                                    field_data_info.arrow_reader_channel,
-                                    DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                    std::move(strategy),
-                                    row_group_lists,
-                                    fs,
-                                    nullptr,
-                                    milvus::proto::common::LoadPriority::HIGH);
-        });
-        // read field data from channel
-        try {
+        for (const auto row_group : selected_row_groups) {
+            // One block produces one ArrowDataWrapper followed by the channel
+            // close marker. Capacity two lets the producer finish before this
+            // thread consumes either item, avoiding producer/consumer
+            // deadlock and ensuring no task outlives captured state.
+            auto channel = std::make_shared<ArrowReaderChannel>(2);
+            auto load_future = pool.Submit([channel,
+                                            column_group_file,
+                                            fs,
+                                            row_group]() mutable {
+                auto strategy =
+                    std::make_unique<segcore::ParallelDegreeSplitStrategy>(1);
+                LoadWithStrategy(std::vector<std::string>{column_group_file},
+                                 channel,
+                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                                 std::move(strategy),
+                                 std::vector<std::vector<int64_t>>{{row_group}},
+                                 fs,
+                                 nullptr,
+                                 milvus::proto::common::LoadPriority::HIGH);
+            });
+
+            // LoadWithStrategy has published both the single wrapper and the
+            // close marker before get() returns. Any producer error is
+            // rethrown here before captured objects can leave scope.
+            load_future.get();
+
             std::shared_ptr<milvus::ArrowDataWrapper> r;
-            while (field_data_info.arrow_reader_channel->pop(r)) {
+            while (channel->pop(r)) {
                 size_t num_rows = 0;
                 std::vector<std::shared_ptr<arrow::ChunkedArray>>
                     chunked_arrays;
@@ -1830,48 +1896,86 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                 for (const auto& chunked_array : chunked_arrays) {
                     field_data->FillFieldData(chunked_array);
                 }
-                field_data_list.push_back(field_data);
+                if (visitor(std::move(field_data)) == VisitControl::Stop) {
+                    return VisitOutcome::Stopped;
+                }
                 total_num_rows += num_rows;
                 if (max_rows > 0 && total_num_rows >= max_rows) {
+                    // The page is full. The load task for this row group has
+                    // already been joined above, so returning here leaves
+                    // nothing running behind us.
                     LOG_DEBUG(
                         "[StorageV2] max_rows: {} reached, total rows: {}",
                         max_rows,
                         total_num_rows);
-                    is_full = true;
-                    break;
+                    return VisitOutcome::Exhausted;
                 }
             }
-            if (is_full) {
-                // The background load task captures locals by reference and
-                // may still be pushing into the bounded channel. Drain and
-                // join before leaving scope to avoid use-after-free (#46958).
-                std::shared_ptr<milvus::ArrowDataWrapper> discard;
-                while (field_data_info.arrow_reader_channel->pop(discard)) {
-                }
-                DrainFuture(load_future);
-                break;
-            }
-        } catch (...) {
-            // The load task captures this frame by reference and may be
-            // blocked pushing into the bounded channel. Unblock it, then
-            // wait for it to finish before unwinding (see #46958).
-            try {
-                std::shared_ptr<milvus::ArrowDataWrapper> discard;
-                while (field_data_info.arrow_reader_channel->pop(discard)) {
-                }
-            } catch (...) {
-            }
-            DrainFuture(load_future);
-            throw;
         }
-        // access underlying feature to get exception if any
-        load_future.get();
+    }
+    return VisitOutcome::Exhausted;
+}
+
+VisitOutcome
+VisitFieldDataFromStorageV2(
+    const std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const FieldDataVisitor& visitor) {
+    return VisitFieldDataFromStorageV2Paged(remote_files,
+                                            field_id,
+                                            data_type,
+                                            element_type,
+                                            dim,
+                                            std::move(fs),
+                                            visitor,
+                                            /*max_rows=*/0,
+                                            /*offset=*/0);
+}
+
+std::vector<FieldDataPtr>
+GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
+                           int64_t field_id,
+                           DataType data_type,
+                           DataType element_type,
+                           int64_t dim,
+                           milvus_storage::ArrowFileSystemPtr fs,
+                           size_t max_rows /*=0*/,
+                           size_t offset /*=0*/) {
+    std::vector<FieldDataPtr> field_data_list;
+    const auto outcome = VisitFieldDataFromStorageV2Paged(
+        remote_files,
+        field_id,
+        data_type,
+        element_type,
+        dim,
+        std::move(fs),
+        [&](FieldDataPtr field_data) {
+            field_data_list.push_back(std::move(field_data));
+            return VisitControl::Continue;
+        },
+        max_rows,
+        offset);
+    switch (outcome) {
+        case VisitOutcome::Exhausted:
+        case VisitOutcome::FieldMissing:
+            break;
+        case VisitOutcome::Stopped:
+            ThrowInfo(UnexpectedError,
+                      "always-continue storage-v2 visitor stopped early");
     }
     return field_data_list;
 }
 
-void
-IterateFieldDataFromManifest(
+// Shared implementation of the manifest read paths. `max_rows == 0` streams
+// the whole column through the record batch reader; a positive `max_rows`
+// takes the chunk-reader page starting at `offset` (#50088). The public
+// entry points below fix the paging arguments for their own contract.
+static VisitOutcome
+VisitFieldDataFromManifestPaged(
     const std::string& manifest_path,
     const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
     const FieldDataMeta& field_meta,
@@ -1879,13 +1983,15 @@ IterateFieldDataFromManifest(
     int64_t dim,
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
-    const std::function<void(FieldDataPtr)>& consumer,
+    const FieldDataVisitor& visitor,
     int64_t max_inflight_bytes,
     size_t max_rows,
     size_t offset) {
     AssertInfo(max_inflight_bytes > 0,
                "max_inflight_bytes must be positive, got {}",
                max_inflight_bytes);
+    AssertInfo(static_cast<bool>(visitor),
+               "manifest field-data visitor is empty");
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
@@ -1924,7 +2030,7 @@ IterateFieldDataFromManifest(
     };
     bool field_exists = column_exists(column_name);
     if (!field_exists) {
-        return;
+        return VisitOutcome::FieldMissing;
     }
 
     std::vector<std::string> needed_columns = {column_name};
@@ -2084,16 +2190,36 @@ IterateFieldDataFromManifest(
         auto t1 = now_ns();
         pending_bytes -= pending.front().second;
         pending.pop_front();
-        consumer(std::move(field_data));
+        const auto control = visitor(std::move(field_data));
         auto t2 = now_ns();
         decode_wait_ns += t1 - t0;
         consume_ns += t2 - t1;
         consume_max_ns = std::max(consume_max_ns, t2 - t1);
+        return control;
+    };
+
+    auto drain_after_stop = [&]() {
+        std::exception_ptr first_failure;
+        while (!pending.empty()) {
+            try {
+                pending.front().first.get();
+            } catch (...) {
+                if (!first_failure) {
+                    first_failure = std::current_exception();
+                }
+            }
+            pending_bytes -= pending.front().second;
+            pending.pop_front();
+        }
+        if (first_failure) {
+            std::rethrow_exception(first_failure);
+        }
     };
 
     auto data_type_v = data_type.value();
     auto element_type_v = element_type.value();
-    if (max_rows == 0) {  //read all with record batches
+    bool stopped = false;
+    if (max_rows == 0) {  // read all with record batches
         auto reader_result = reader->get_record_batch_reader("");
         if (!reader_result.ok()) {
             auto error = milvus_storage::ToSegcoreError(reader_result.status());
@@ -2102,8 +2228,7 @@ IterateFieldDataFromManifest(
                       error.what());
         }
         auto record_batch_reader = reader_result.ValueOrDie();
-        while (true) {
-            std::shared_ptr<arrow::RecordBatch> batch;
+        while (!stopped) {
             auto fetch_start = now_ns();
             auto status = record_batch_reader->ReadNext(&batch);
             auto fetch_elapsed = now_ns() - fetch_start;
@@ -2126,10 +2251,11 @@ IterateFieldDataFromManifest(
                 continue;
             }
 
-            // Charge this slice's arrow input bytes against the byte budget (see
-            // the note on the budget above for why input, not decoded, bytes).
-            // A record batch may share a large row-group backing buffer with
-            // adjacent slices, so count only the ranges this slice references.
+            // Charge this slice's arrow input bytes against the byte budget
+            // (see the note on the budget above for why input, not decoded,
+            // bytes). A record batch may share a large row-group backing
+            // buffer with adjacent slices, so count only the ranges this
+            // slice references.
             auto batch_bytes = EstimateRecordBatchBytes(*batch);
 
             auto decode_future = pool.Submit([batch,
@@ -2169,14 +2295,23 @@ IterateFieldDataFromManifest(
             while (pending.size() > 1 &&
                    (pending_bytes > max_inflight_bytes ||
                     pending.size() >= max_inflight_batches)) {
-                deliver_front();
+                if (deliver_front() == VisitControl::Stop) {
+                    stopped = true;
+                    break;
+                }
+            }
+            if (stopped) {
+                break;
             }
             // Opportunistically deliver whatever is already done, keeping
             // consumer-side work (e.g. disk writes) interleaved with fetching.
             while (!pending.empty() &&
                    pending.front().first.wait_for(std::chrono::seconds(0)) ==
                        std::future_status::ready) {
-                deliver_front();
+                if (deliver_front() == VisitControl::Stop) {
+                    stopped = true;
+                    break;
+                }
             }
         }
     } else {  // read specific rows with chunk_reader
@@ -2211,7 +2346,7 @@ IterateFieldDataFromManifest(
             LOG_DEBUG("[StorageV3] offset: {} is beyond total_rows: {}",
                       offset,
                       segment_total_rows);
-            return;
+            return VisitOutcome::Exhausted;
         }
         int64_t effective_rows = std::min(static_cast<int64_t>(max_rows),
                                           segment_total_rows - signed_offset);
@@ -2311,7 +2446,10 @@ IterateFieldDataFromManifest(
             auto field_data = CreateFieldData(
                 data_type_v, element_type_v, nullable, dim, num_rows);
             field_data->FillFieldData(chunked_array);
-            consumer(std::move(field_data));
+            if (visitor(std::move(field_data)) == VisitControl::Stop) {
+                stopped = true;
+                break;
+            }
             consumed_rows += num_rows;
             ++batch_count;
             if (consumed_rows >= effective_rows) {
@@ -2323,8 +2461,19 @@ IterateFieldDataFromManifest(
         }
     }
 
-    while (!pending.empty()) {
-        deliver_front();
+    if (stopped) {
+        // These decodes were submitted before the stop decision. They receive
+        // no callback, but get() still preserves the first real failure rather
+        // than turning it into cancellation or hiding it behind normal Stop.
+        drain_after_stop();
+    } else {
+        while (!pending.empty()) {
+            if (deliver_front() == VisitControl::Stop) {
+                stopped = true;
+                drain_after_stop();
+                break;
+            }
+        }
     }
 
     if (batch_count > 0) {
@@ -2344,6 +2493,69 @@ IterateFieldDataFromManifest(
             decode_wait_ns / 1'000'000,
             consume_ns / 1'000'000,
             consume_max_ns / 1'000'000);
+    }
+    return stopped ? VisitOutcome::Stopped : VisitOutcome::Exhausted;
+}
+
+VisitOutcome
+VisitFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const FieldDataVisitor& visitor,
+    int64_t max_inflight_bytes) {
+    return VisitFieldDataFromManifestPaged(manifest_path,
+                                           loon_ffi_properties,
+                                           field_meta,
+                                           data_type,
+                                           dim,
+                                           element_type,
+                                           std::move(storage_column_mapping),
+                                           visitor,
+                                           max_inflight_bytes,
+                                           /*max_rows=*/0,
+                                           /*offset=*/0);
+}
+
+void
+IterateFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const std::function<void(FieldDataPtr)>& consumer,
+    int64_t max_inflight_bytes,
+    size_t max_rows,
+    size_t offset) {
+    const auto outcome = VisitFieldDataFromManifestPaged(
+        manifest_path,
+        loon_ffi_properties,
+        field_meta,
+        data_type,
+        dim,
+        element_type,
+        std::move(storage_column_mapping),
+        [&](FieldDataPtr field_data) {
+            consumer(std::move(field_data));
+            return VisitControl::Continue;
+        },
+        max_inflight_bytes,
+        max_rows,
+        offset);
+    switch (outcome) {
+        case VisitOutcome::Exhausted:
+        case VisitOutcome::FieldMissing:
+            break;
+        case VisitOutcome::Stopped:
+            ThrowInfo(UnexpectedError,
+                      "always-continue manifest visitor stopped early");
     }
 }
 
@@ -2487,22 +2699,24 @@ OpenTextFieldSegmentReader(
     return std::move(reader_result.ValueOrDie());
 }
 
-std::vector<FieldDataPtr>
-GetTextFieldDatasFromManifest(
+VisitOutcome
+VisitTextFieldDataFromManifest(
     const std::string& manifest_path,
     const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
-    const FieldDataMeta& field_meta) {
+    const FieldDataMeta& field_meta,
+    const FieldDataVisitor& visitor) {
     AssertInfo(loon_ffi_properties != nullptr,
                "loon ffi properties is null when read text field data from "
                "manifest");
+    AssertInfo(static_cast<bool>(visitor),
+               "manifest TEXT field-data visitor is empty");
 
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
 
     std::string column_name = std::to_string(field_meta.field_id);
 
     if (!ManifestContainsColumn(loon_manifest, column_name)) {
-        LOG_INFO("TEXT field {} not found in manifest", field_meta.field_id);
-        return {};
+        return VisitOutcome::FieldMissing;
     }
 
     auto reader = OpenTextFieldSegmentReader(manifest_path,
@@ -2511,8 +2725,8 @@ GetTextFieldDatasFromManifest(
                                              field_meta,
                                              column_name);
 
-    std::vector<FieldDataPtr> field_datas;
-    while (true) {
+    bool stopped = false;
+    while (!stopped) {
         std::shared_ptr<arrow::RecordBatch> batch;
         auto status = reader->ReadNext(&batch);
         if (!status.ok()) {
@@ -2546,7 +2760,7 @@ GetTextFieldDatasFromManifest(
                                           1,
                                           num_rows);
         field_data->FillFieldData(chunked_array);
-        field_datas.push_back(field_data);
+        stopped = visitor(std::move(field_data)) == VisitControl::Stop;
     }
 
     auto status = reader->Close();
@@ -2558,6 +2772,34 @@ GetTextFieldDatasFromManifest(
                   error.what());
     }
 
+    return stopped ? VisitOutcome::Stopped : VisitOutcome::Exhausted;
+}
+
+std::vector<FieldDataPtr>
+GetTextFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta) {
+    std::vector<FieldDataPtr> field_datas;
+    const auto outcome = VisitTextFieldDataFromManifest(
+        manifest_path,
+        loon_ffi_properties,
+        field_meta,
+        [&](FieldDataPtr field_data) {
+            field_datas.push_back(std::move(field_data));
+            return VisitControl::Continue;
+        });
+    switch (outcome) {
+        case VisitOutcome::Exhausted:
+            break;
+        case VisitOutcome::FieldMissing:
+            LOG_INFO("TEXT field {} not found in manifest",
+                     field_meta.field_id);
+            break;
+        case VisitOutcome::Stopped:
+            ThrowInfo(UnexpectedError,
+                      "always-continue manifest TEXT visitor stopped early");
+    }
     return field_datas;
 }
 
@@ -3521,10 +3763,10 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays) {
     return result;
 }
 
-DataType
-ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values,
-                             const FieldMeta& field_meta) {
-    switch (values->type_id()) {
+std::optional<DataType>
+ArrowListElementTypeToMilvus(
+    const std::shared_ptr<arrow::DataType>& arrow_type) {
+    switch (arrow_type->id()) {
         case arrow::Type::BOOL:
             return DataType::BOOL;
         case arrow::Type::INT8:
@@ -3544,10 +3786,7 @@ ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values,
         case arrow::Type::STRING_VIEW:
             return DataType::STRING;
         default:
-            ThrowInfo(ErrorCode::Unsupported,
-                      "unsupported array element arrow type{}: {}",
-                      FieldErrorSuffix(field_meta),
-                      values->type()->ToString());
+            return std::nullopt;
     }
 }
 
@@ -3559,10 +3798,107 @@ IsCompatibleArrayElementType(DataType actual_type, DataType expected_type) {
     return actual_type == DataType::STRING && IsStringDataType(expected_type);
 }
 
+DataType
+ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values,
+                             const FieldMeta& field_meta) {
+    auto data_type = ArrowListElementTypeToMilvus(values->type());
+    if (!data_type.has_value()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "unsupported array element arrow type{}: {}",
+                  FieldErrorSuffix(field_meta),
+                  values->type()->ToString());
+    }
+    return data_type.value();
+}
+
+bool
+IsCompatibleArrayElementArrowType(
+    const std::shared_ptr<arrow::DataType>& actual_type,
+    DataType expected_type) {
+    const auto actual_data_type = ArrowListElementTypeToMilvus(actual_type);
+    return actual_data_type.has_value() &&
+           IsCompatibleArrayElementType(actual_data_type.value(),
+                                        expected_type);
+}
+
+DataType
+TypeSchemaArrayElementType(const proto::schema::TypeSchema& type) {
+    AssertInfo(type.has_array_element(),
+               "nested ARRAY type schema is missing an array element");
+    const auto& element = type.array_element();
+    if (element.has_array_element()) {
+        return DataType::ARRAY;
+    }
+    AssertInfo(element.has_leaf_type(),
+               "nested ARRAY type schema is missing a leaf type");
+    return DataType(element.leaf_type());
+}
+
+proto::schema::ScalarField
+ArrowNestedListToScalarFieldProto(
+    const std::shared_ptr<arrow::ListArray>& list_array,
+    int64_t row_index,
+    const proto::schema::TypeSchema& type,
+    const FieldMeta& field_meta) {
+    const auto expected_element_type = TypeSchemaArrayElementType(type);
+    const auto values = list_array->values();
+    if (expected_element_type != DataType::ARRAY) {
+        const auto actual_element_type =
+            ArrowListElementTypeToMilvus(values, field_meta);
+        if (!IsCompatibleArrayElementType(actual_element_type,
+                                          expected_element_type)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "array element type mismatch{}, expected {}, actual {}",
+                      FieldErrorSuffix(field_meta),
+                      expected_element_type,
+                      actual_element_type);
+        }
+        const auto start = list_array->value_offset(row_index);
+        const auto end = list_array->value_offset(row_index + 1);
+        // TODO(local-format): Preserve nullable scalar leaves when completing
+        // native Vortex nested ARRAY normalization; keep Raw behavior unchanged.
+        return ArrowListToScalarFieldProto(list_array, row_index, false);
+    }
+
+    if (values->type_id() != arrow::Type::LIST) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "nested array element type mismatch{}, expected Arrow "
+                  "list, actual {}",
+                  FieldErrorSuffix(field_meta),
+                  values->type()->ToString());
+    }
+    const auto nested = std::static_pointer_cast<arrow::ListArray>(values);
+    const auto& child_type = type.array_element();
+
+    proto::schema::ScalarField result;
+    auto* data = result.mutable_array_data();
+    data->set_element_type(static_cast<proto::schema::DataType>(
+        TypeSchemaArrayElementType(child_type)));
+    const auto start = list_array->value_offset(row_index);
+    const auto end = list_array->value_offset(row_index + 1);
+    data->mutable_data()->Reserve(static_cast<int>(end - start));
+    for (auto index = start; index < end; ++index) {
+        auto* child = data->add_data();
+        if (nested->IsNull(index)) {
+            if (!child_type.nullable()) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "non-nullable nested array{} contains null row {}",
+                          FieldErrorSuffix(field_meta),
+                          index);
+            }
+            continue;
+        }
+        *child = ArrowNestedListToScalarFieldProto(
+            nested, index, child_type, field_meta);
+    }
+    return result;
+}
+
 arrow::ArrayVector
 ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
                             DataType element_type,
-                            const FieldMeta& field_meta) {
+                            const FieldMeta& field_meta,
+                            bool preserve_element_validity) {
     arrow::ArrayVector result;
     result.reserve(arrays.size());
     for (const auto& arr : arrays) {
@@ -3571,15 +3907,26 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
             continue;
         }
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
-        auto actual_element_type =
-            ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
-        if (!(IsCompatibleArrayElementType(actual_element_type,
-                                           element_type))) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "array element type mismatch{}, expected {}, actual {}",
-                      FieldErrorSuffix(field_meta),
-                      element_type,
-                      actual_element_type);
+        const auto nested = field_meta.is_nested_array();
+        if (nested) {
+            if (!(element_type == DataType::ARRAY)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "nested ARRAY{} must have ARRAY element type, got {}",
+                          FieldErrorSuffix(field_meta),
+                          element_type);
+            }
+        } else {
+            const auto actual_element_type =
+                ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
+            if (!(IsCompatibleArrayElementType(actual_element_type,
+                                               element_type))) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "array element type mismatch{}, expected {}, actual {}",
+                    FieldErrorSuffix(field_meta),
+                    element_type,
+                    actual_element_type);
+            }
         }
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(list_arr->length());
@@ -3591,11 +3938,20 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
             if (list_arr->IsNull(i)) {
                 status = builder.AppendNull();
             } else {
-                auto start = list_arr->value_offset(i);
-                auto end = list_arr->value_offset(i + 1);
-                ValidateNoNullValuesInRange(
-                    list_arr->values(), start, end, "array list");
-                auto proto = ArrowListToScalarFieldProto(list_arr, i);
+                proto::schema::ScalarField proto;
+                if (nested) {
+                    proto = ArrowNestedListToScalarFieldProto(
+                        list_arr,
+                        i,
+                        field_meta.get_array_type_schema(),
+                        field_meta);
+                } else {
+                    proto = ArrowListToScalarFieldProto(
+                        list_arr,
+                        i,
+                        preserve_element_validity &&
+                            field_meta.is_element_nullable());
+                }
                 std::string serialized;
                 proto.SerializeToString(&serialized);
                 status = builder.Append(serialized);
@@ -3704,7 +4060,8 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
 // FieldMeta overload: extracts parameters and delegates.
 std::shared_ptr<arrow::Array>
 NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
-                       const FieldMeta& field_meta) {
+                       const FieldMeta& field_meta,
+                       bool preserve_array_element_validity) {
     auto dt = field_meta.get_data_type();
     int64_t dim = (IsVectorDataType(dt) && !IsSparseFloatVectorDataType(dt))
                       ? field_meta.get_dim()
@@ -3712,8 +4069,13 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
     auto element_type = IsVectorArrayDataType(dt) || IsArrayDataType(dt)
                             ? field_meta.get_element_type()
                             : DataType::NONE;
-    return NormalizeExternalArrowByType(
-        array, dt, dim, field_meta.is_nullable(), element_type, field_meta);
+    return NormalizeExternalArrowByType(array,
+                                        dt,
+                                        dim,
+                                        field_meta.is_nullable(),
+                                        element_type,
+                                        field_meta,
+                                        preserve_array_element_validity);
 }
 
 // Load path: batch wrapper.
@@ -3787,7 +4149,8 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
                              int64_t dim,
                              bool nullable,
                              DataType element_type,
-                             const FieldMeta& field_meta) {
+                             const FieldMeta& field_meta,
+                             bool preserve_array_element_validity) {
     // Single view-variant elimination pass: STRING_VIEW/LARGE_STRING -> STRING,
     // BINARY_VIEW/LARGE_BINARY -> BINARY, LARGE_LIST/LIST_VIEW -> LIST
     // (recursive into list inner). Downstream branches only need to dispatch
@@ -3874,8 +4237,8 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
     }
     // Array: List -> Protobuf Binary
     if (data_type == DataType::ARRAY && type_id == arrow::Type::LIST) {
-        auto result =
-            ConvertListToProtobufBinary({array}, element_type, field_meta);
+        auto result = ConvertListToProtobufBinary(
+            {array}, element_type, field_meta, preserve_array_element_validity);
         return result[0];
     }
     if (data_type == DataType::ARRAY && type_id == arrow::Type::BINARY) {
@@ -3891,11 +4254,15 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
 
 proto::schema::ScalarField
 ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
-                            int64_t row_index) {
+                            int64_t row_index,
+                            bool element_nullable) {
     proto::schema::ScalarField sf;
     int64_t start = list_array->value_offset(row_index);
     int64_t end = list_array->value_offset(row_index + 1);
     auto values = list_array->values();
+    if (!element_nullable) {
+        ValidateNoNullValuesInRange(values, start, end, "array list");
+    }
 
     switch (values->type_id()) {
         case arrow::Type::BOOL: {
@@ -3972,6 +4339,12 @@ ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
                 ErrorCode::Unsupported,
                 "Unsupported element type for ArrowListToScalarFieldProto: {}",
                 values->type()->ToString());
+    }
+    if (element_nullable) {
+        sf.mutable_valid_data()->Reserve(static_cast<int>(end - start));
+        for (int64_t j = start; j < end; ++j) {
+            sf.add_valid_data(values->IsValid(j));
+        }
     }
     return sf;
 }

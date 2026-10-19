@@ -22,8 +22,8 @@
 #include "common/type_c.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/VectorIndex.h"
+#include "index/Families.h"
+#include "index/contracts/query/IIndexReaderBase.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
@@ -41,6 +41,7 @@
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -102,8 +103,10 @@ TEST(GroupBYJSON, SealedData) {
     auto vector_data = raw_data.get_col<float>(vec_fid);
     auto indexing = GenVecIndexing(
         N, dim, vector_data.data(), knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -242,7 +245,7 @@ TEST(GroupBYJSON, GrowingRawData) {
                                  N,
                                  data_set.row_ids_.data(),
                                  data_set.timestamps_.data(),
-                                 data_set.raw_);
+                                 data_set.SharedRaw());
 
     // 2. Search group by json_field
     auto num_queries = 10;
