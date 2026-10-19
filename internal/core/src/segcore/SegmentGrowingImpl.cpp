@@ -2611,8 +2611,39 @@ SegmentGrowingImpl::chunk_string_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
-    ThrowInfo(ErrorCode::NotImplemented,
-              "chunk view by offsets not implemented for growing segment");
+    auto schema = get_schema_snapshot();
+    const auto& meta = (*schema)[field_id];
+    AssertInfo(meta.get_data_type() == DataType::VARCHAR,
+               "growing string views require VARCHAR; TEXT needs LOB decoding");
+    const auto* values = insert_record_.get_data<std::string>(field_id);
+    const auto chunk_rows = values->get_size_per_chunk();
+    const auto active_count = insert_record_.ack_responder_.GetAck();
+    AssertInfo(chunk_id >= 0 && chunk_id <= active_count / chunk_rows,
+               "invalid growing string chunk");
+    std::vector<int64_t> logical;
+    logical.reserve(offsets.size());
+    for (auto offset : offsets) {
+        AssertInfo(offset >= 0 && offset < chunk_rows &&
+                       offset < active_count - chunk_id * chunk_rows,
+                   "invalid growing string offset");
+        logical.push_back(chunk_id * chunk_rows + offset);
+    }
+    FixedVector<bool> valid;
+    if (meta.is_nullable()) {
+        valid.resize(offsets.size());
+        insert_record_.get_valid_data(field_id)->bulk_is_valid(
+            logical.data(), logical.size(), valid.data());
+    }
+    std::vector<std::string_view> views;
+    views.reserve(offsets.size());
+    for (size_t i = 0; i < logical.size(); ++i) {
+        views.push_back(valid.empty() || valid[i]
+                            ? values->view_element(logical[i])
+                            : std::string_view{});
+    }
+    return cachinglayer::PinWrapper<
+        std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+        std::make_pair(std::move(views), std::move(valid)));
 }
 
 cachinglayer::PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>

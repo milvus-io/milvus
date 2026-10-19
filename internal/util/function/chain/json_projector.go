@@ -56,14 +56,18 @@ func materializeEmptyPlannedColumns(
 			dataType = input.DataTypeHint
 			nullable = true
 		}
+		if err := builder.SetFieldType(input.LogicalName, dataType); err != nil {
+			return err
+		}
 		chunks, err := buildTypedEmptyChunks(dataType, numChunks, alloc)
 		if err != nil {
 			return merr.Wrapf(err, "function chain input %q", input.LogicalName)
 		}
-		builder.SetFieldType(input.LogicalName, dataType)
 		builder.SetFieldNullable(input.LogicalName, nullable)
 		if input.DataType != schemapb.DataType_JSON {
-			builder.SetFieldID(input.LogicalName, input.SourceFieldID)
+			builder.SetFieldSchema(input.LogicalName, &schemapb.FieldSchema{
+				Name: input.LogicalName, FieldID: input.SourceFieldID, DataType: dataType, Nullable: nullable,
+			})
 		}
 		if err := builder.AddColumnFromChunks(input.LogicalName, chunks); err != nil {
 			return err
@@ -281,7 +285,9 @@ func projectJSONFieldData(
 
 	for inputIdx, input := range inputs {
 		dataType := input.DataTypeHint
-		builder.SetFieldType(input.LogicalName, dataType)
+		if err := builder.SetFieldType(input.LogicalName, dataType); err != nil {
+			return err
+		}
 		builder.SetFieldNullable(input.LogicalName, true)
 		if err := builder.AddColumnFromChunks(input.LogicalName, writers[inputIdx].takeChunks()); err != nil {
 			return err

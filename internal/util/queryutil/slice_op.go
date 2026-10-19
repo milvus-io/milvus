@@ -87,7 +87,7 @@ func (op *SliceOperator) applySlice(result *internalpb.RetrieveResults) (*intern
 
 	window := op.selectDocWindow(size)
 	if window.start == window.end {
-		return &internalpb.RetrieveResults{}, nil
+		return rangeSliceRetrieveResults(result, window.start, window.end)
 	}
 	if window.start == 0 && window.end == size {
 		return result, nil
@@ -112,7 +112,12 @@ func (op *SliceOperator) applyElementLevelSlice(result *internalpb.RetrieveResul
 		return elemIndices[row], true
 	})
 	if window.start >= window.end {
-		return &internalpb.RetrieveResults{ElementLevel: true}, nil
+		sliced, err := rangeSliceRetrieveResults(result, window.start, window.end)
+		if err != nil {
+			return nil, err
+		}
+		sliced.ElementLevel = true
+		return sliced, nil
 	}
 	sliced, err := rangeSliceRetrieveResults(result, window.start, window.end)
 	if err != nil {

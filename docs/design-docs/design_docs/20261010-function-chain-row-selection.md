@@ -153,6 +153,25 @@ an existing pruning metadata gap: `DataFrameBuilder.Build` reconstructs Arrow
 fields, while `CopyAllMetadata` copies only the DataFrame metadata map. It does
 not change which columns pruning keeps.
 
+Each DataFrame column has one immutable descriptor with explicit origin and
+an owned FieldSchema/StructArrayFieldSchema or inferred computed metadata.
+Origin only distinguishes `columnDeclared` from `columnComputed`; both can
+represent ordinary values or structs. Declared column shape is described by
+FieldSchema or StructArrayFieldSchema, while computed column shape comes from
+its Arrow type.
+Type, ID, nullability, element types and vector parameters have one authority.
+CopyFieldMetadata replaces the entire descriptor, including absent properties,
+and shares immutable snapshots across selection, pruning and merge. Builder
+setters use copy-on-write. Merge validates same-name definitions and joins
+nullability before attaching the output descriptor. `SetFieldType` returns an
+internal error on a type conflict with a saved declaration and leaves metadata
+unchanged. Replacing a declaration requires `SetFieldSchema` or
+`SetStructArraySchema`; changing a type does not silently change column origin. Search and Query both export from
+this metadata through `exportFieldData(df, name)`. Query result export receives
+only the DataFrame and classifies columns by saved collection origin. Search's
+all-valid scalar mask omission is a response-assembly policy, not a separate
+conversion implementation.
+
 Computed columns use their declared `arrow.Field`; they do not inherit stale
 source-field metadata or a collection FieldID merely because they overwrite an
 existing name. The Milvus type is inferred where a mapping exists. Replacing a

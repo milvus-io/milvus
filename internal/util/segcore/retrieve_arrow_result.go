@@ -39,7 +39,9 @@ import (
 )
 
 // RetrieveArrowResult owns one C CRetrieveArrowResult: the protobuf header
-// plus the exported Arrow C structs for the user output columns.
+// plus the exported Arrow C structs. QueryScan stores candidate offsets or
+// post-match identities in Arrow and only scalar statistics in the header; ordinary
+// Retrieve stores user output columns in Arrow.
 //
 // Release frees all of it. It stays correct after GetResult: importing the
 // Arrow structs nulls their release callbacks, so the C side skips them.
@@ -95,7 +97,8 @@ func (r *RetrieveArrowResult) GetResult() (*segcorepb.RetrieveResults, arrow.Rec
 }
 
 // RetrieveAsArrow mirrors Retrieve, but returns the protobuf header and the
-// user output columns separately. See CRetrieveArrowResult in segment_c.h for
+// user output columns separately (candidate offsets in QueryScan mode).
+// See CRetrieveArrowResult in segment_c.h for
 // the split and its preconditions.
 func (s *cSegmentImpl) RetrieveAsArrow(ctx context.Context, plan *RetrievePlan) (*RetrieveArrowResult, error) {
 	traceCtx := ParseCTraceContext(ctx)

@@ -25,7 +25,18 @@ done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
 PROTO_DIR=$ROOT_DIR/pkg/proto
-API_PROTO_DIR=$ROOT_DIR/cmake_build/thirdparty/milvus-proto/proto
+# Honor local go.work/replace dependencies so protoc uses the same API as Go.
+# Published Go modules do not include the sibling proto directory; fall back
+# to the repository downloaded at the version pinned in go.mod in that case.
+if [[ -z "${API_PROTO_DIR:-}" ]]; then
+    API_GO_DIR=$(cd "$ROOT_DIR" && go list -m -f '{{.Dir}}' github.com/milvus-io/milvus-proto/go-api/v3) || exit 1
+    if [[ -n "$API_GO_DIR" && -f "$API_GO_DIR/../proto/common.proto" ]]; then
+        API_PROTO_DIR="$API_GO_DIR/../proto"
+    else
+        API_PROTO_DIR="$ROOT_DIR/cmake_build/thirdparty/milvus-proto/proto"
+    fi
+fi
+echo "using API proto: $API_PROTO_DIR"
 CPP_SRC_DIR=$ROOT_DIR/internal/core
 PROTOC_BIN=$ROOT_DIR/cmake_build/bin/protoc
 

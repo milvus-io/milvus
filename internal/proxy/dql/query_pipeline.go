@@ -199,8 +199,9 @@ func (p *QueryPipeline) Execute(ctx context.Context, results []*internalpb.Retri
 
 	output := finalMsg[chanOutput].(*internalpb.RetrieveResults)
 	result := &milvuspb.QueryResults{
-		Status:     merr.Success(),
-		FieldsData: output.GetFieldsData(),
+		Status:          merr.Success(),
+		FieldsData:      output.GetFieldsData(),
+		ComputedResults: output.GetComputedResults(),
 	}
 
 	// Propagate element-level indices for element_filter queries

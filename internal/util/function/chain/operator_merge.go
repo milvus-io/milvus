@@ -574,6 +574,9 @@ func (op *MergeOp) validateInputs(ctx *types.FuncContext, inputs []*DataFrame) (
 		}
 	}
 
+	if err := ValidateMergeColumnMetadata(inputs); err != nil {
+		return nil, err
+	}
 	if idType == nil {
 		idType = arrow.PrimitiveTypes.Int64
 	}
@@ -661,12 +664,20 @@ func (op *MergeOp) mergeWithScoreCollector(ctx *types.FuncContext, inputs []*Dat
 		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {
 			return nil, err
 		}
+		copied, nullable := false, false
 		for _, input := range inputs {
 			if input.HasColumn(colName) {
-				builder.CopyFieldMetadata(input, colName)
-				break
+				if !copied {
+					builder.CopyFieldMetadata(input, colName)
+					copied = true
+				}
+				nullable = nullable || input.FieldNullable(colName)
+			} else {
+				// The gather emits NULL for winners from inputs lacking this column.
+				nullable = true
 			}
 		}
+		builder.SetFieldNullable(colName, nullable)
 	}
 
 	success = true

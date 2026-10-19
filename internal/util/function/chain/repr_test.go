@@ -527,6 +527,7 @@ func TestProtoStageToReprStage(t *testing.T) {
 		stage    schemapb.FunctionChainStage
 		expected string
 	}{
+		{schemapb.FunctionChainStage_FunctionChainStageQueryScan, types.StageQueryScan},
 		{schemapb.FunctionChainStage_FunctionChainStageIngestion, types.StageIngestion},
 		{schemapb.FunctionChainStage_FunctionChainStagePreProcess, types.StagePreProcess},
 		{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, types.StageL0Rerank},
