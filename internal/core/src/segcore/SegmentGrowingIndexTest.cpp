@@ -311,6 +311,136 @@ TEST(SparseInterimIndexConfigTest, InvalidOverridesPreservePreviousSettings) {
     }
 }
 
+class SparseInterimIndexAlgorithmTest
+    : public ::testing::TestWithParam<std::tuple<std::string, std::string>> {};
+
+TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
+    const auto& [metric, algo] = GetParam();
+    // Keep build and query statistics aligned: this test covers algorithm
+    // overrides, not pruning behavior when corpus statistics change.
+    constexpr float avgdl = 100.0F;
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    InterimIndexConfigForTest options;
+    options.target_index_version = 10;
+    options.nlist = 1;
+    options.chunk_rows = 16;
+    ApplyInterimIndexConfigForTest(options, config);
+    config.set_sparse_interim_index_algos(
+        metric == knowhere::metric::IP ? algo : "TAAT_NAIVE",
+        metric == knowhere::metric::BM25 ? algo : "TAAT_NAIVE");
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_SPARSE_U32_F32, 2, metric);
+    schema->set_primary_field_id(pk);
+    FieldIndexMeta field_meta(
+        vec,
+        {{"index_type", knowhere::IndexEnum::INDEX_SPARSE_WAND},
+         {"metric_type", metric},
+         {"inverted_index_algo", "DAAT_MAXSCORE"},
+         {"drop_ratio_build", "0.5"},
+         {"bm25_k1", "1.2"},
+         {"bm25_b", "0.75"},
+         {"bm25_avgdl", std::to_string(avgdl)}},
+        {});
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        100, std::map<FieldId, FieldIndexMeta>{{vec, field_meta}});
+    auto make_data = [&](int64_t begin, int64_t count) {
+        auto data = DataGen(schema, count);
+        for (auto& field : *data.raw_->mutable_fields_data()) {
+            if (field.field_id() != vec.get()) {
+                continue;
+            }
+            auto* sparse =
+                field.mutable_vectors()->mutable_sparse_float_vector();
+            sparse->clear_contents();
+            sparse->set_dim(2);
+            for (int64_t i = 0; i < count; ++i) {
+                knowhere::sparse::SparseRow<float> row(2);
+                row.set_at(0, 0, static_cast<float>(begin + i + 1));
+                row.set_at(1, 1, 1.0F);
+                sparse->add_contents(row.data(), row.data_byte_size());
+            }
+        }
+        return data;
+    };
+
+    milvus::proto::plan::PlanNode node;
+    auto* anns = node.mutable_vector_anns();
+    anns->set_vector_type(milvus::proto::plan::VectorType::SparseFloatVector);
+    anns->set_placeholder_tag("$0");
+    anns->set_field_id(vec.get());
+    auto* info = anns->mutable_query_info();
+    info->set_topk(5);
+    info->set_metric_type(metric);
+    info->set_search_params(R"({"drop_ratio_search":0})");
+    info->set_bm25_avgdl(avgdl);
+    auto placeholders = CreateSparseFloatPlaceholderGroup(1);
+    knowhere::sparse::SparseRow<float> query_row(1);
+    query_row.set_at(0, 0, 1.0F);
+    placeholders.mutable_placeholders(0)->set_values(
+        0, query_row.data(), query_row.data_byte_size());
+    auto check = [&](SegmentInternalInterface& segment, int64_t count) {
+        auto serialized = node.SerializeAsString();
+        auto plan = query::CreateSearchPlanByExpr(
+            schema, serialized.data(), serialized.size());
+        auto parsed =
+            ParsePlaceholderGroup(plan.get(), placeholders.SerializeAsString());
+        auto result = segment.Search(plan.get(), parsed.get(), MAX_TIMESTAMP);
+        ASSERT_EQ(result->seg_offsets_.size(), 5);
+        for (int64_t i = 0; i < 5; ++i) {
+            EXPECT_EQ(result->seg_offsets_[i], count - 1 - i);
+            const float tf = count - i;
+            const float expected =
+                metric == knowhere::metric::IP
+                    ? tf
+                    : tf * 2.2F /
+                          (tf + 1.2F * (0.25F + 0.75F * (tf + 1) / avgdl));
+            EXPECT_NEAR(result->distances_[i], expected, 1e-4);
+        }
+    };
+
+    auto growing = CreateGrowingSegment(schema, index_meta, 1, config);
+    for (const auto& [begin, count] : {std::pair{0, 60}, std::pair{60, 40}}) {
+        auto data = make_data(begin, count);
+        auto offset = growing->PreInsert(count);
+        growing->Insert(offset,
+                        count,
+                        data.row_ids_.data(),
+                        data.timestamps_.data(),
+                        data.SharedRaw());
+        auto pin = growing->PinGrowingIndex(vec);
+        ASSERT_TRUE(pin)
+            << "algorithm must build an index instead of falling back";
+        EXPECT_EQ(pin.CoveredRowEnd(), begin + count);
+        check(*growing, begin + count);
+    }
+
+    auto sealed = CreateSealedSegment(schema, index_meta);
+    auto data = make_data(0, 100);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info =
+        PrepareInsertBinlog(kCollectionID, kPartitionID, kSegmentID, data, cm);
+    sealed->LoadFieldData(load_info);
+    ASSERT_TRUE(sealed->HasIndex(vec));
+    check(*sealed, 100);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MetricsAndAlgorithms,
+    SparseInterimIndexAlgorithmTest,
+    ::testing::Combine(::testing::Values(knowhere::metric::IP,
+                                         knowhere::metric::BM25),
+                       ::testing::Values("TAAT_NAIVE",
+                                         "DAAT_WAND",
+                                         "DAAT_MAXSCORE",
+                                         "BLOCK_MAX_WAND",
+                                         "BLOCK_MAX_MAXSCORE",
+                                         "SINDI")));
+
 TEST(GrowingIndexVersionTest, SupportsSindiWithConfiguredMaximumVersion) {
     constexpr int64_t dim = kTestSparseDim;
     constexpr int64_t row_count = 100;
