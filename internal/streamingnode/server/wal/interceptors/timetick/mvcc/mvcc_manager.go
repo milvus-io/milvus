@@ -19,7 +19,9 @@ func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 }
 
 // MVCCManager is the manager that manages all the mvcc state of one wal.
-// It keeps the last confirmed timestamp as mvcc of one pchannel and maximum timetick persisted into the wal of each vchannel.
+// It tracks PChannel confirmation separately from each live VChannel's latest
+// relevant persisted write. VChannel entries survive confirmation and are freed
+// on DropCollection, so the map size is bounded by the number of live VChannels.
 type MVCCManager struct {
 	query                  *QueryMVCCManager
 	mu                     sync.Mutex
