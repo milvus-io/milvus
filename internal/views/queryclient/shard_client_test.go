@@ -189,8 +189,9 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	planClient := &fakeQueryPlanClient{plan: plan}
 	client := newShardViewQueryClient(1, planClient, queryService)
 
-	stream, shardPlan, err := client.SearchStream(context.Background(), shardID.VChannel, &LegacySearchRequest{
-		Req: request, RequiredFieldIDs: []int64{101}, BarrierMVCC: 123,
+	stream, shardPlan, err := client.SearchStream(context.Background(), &ShardSearchRequest{
+		VChannel: shardID.VChannel,
+		Req:      request, RequiredFieldIDs: []int64{101}, BarrierMVCC: 123,
 	}, 20)
 
 	require.NoError(t, err)
@@ -252,8 +253,9 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	planClient := &fakeQueryPlanClient{plan: plan}
 	client := newShardViewQueryClient(1, planClient, queryService)
 
-	stream, shardPlan, err := client.QueryStream(context.Background(), shardID.VChannel, &LegacyQueryRequest{
-		Req: request, ReadProofAfter: 456, BarrierMVCC: 123,
+	stream, shardPlan, err := client.QueryStream(context.Background(), &ShardQueryRequest{
+		VChannel: shardID.VChannel,
+		Req:      request, ReadProofAfter: 456, BarrierMVCC: 123,
 	}, 32)
 
 	require.NoError(t, err)
@@ -291,7 +293,7 @@ func TestShardSearchStreamCloseReleasesChildStream(t *testing.T) {
 		},
 	)
 
-	stream, _, err := client.SearchStream(context.Background(), shardID.VChannel, &LegacySearchRequest{Req: request}, 32)
+	stream, _, err := client.SearchStream(context.Background(), &ShardSearchRequest{VChannel: shardID.VChannel, Req: request}, 32)
 	require.NoError(t, err)
 	require.NoError(t, stream.Close())
 
@@ -321,7 +323,7 @@ func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
 	}
 	client := newTestShardClient(1, shardID, plan, queryService)
 
-	_, _, err := client.SearchStream(context.Background(), shardID.VChannel, &LegacySearchRequest{Req: request}, 32)
+	_, _, err := client.SearchStream(context.Background(), &ShardSearchRequest{VChannel: shardID.VChannel, Req: request}, 32)
 
 	require.ErrorContains(t, err, "open failed")
 	require.Equal(t, 1, openedStream.closeCount())

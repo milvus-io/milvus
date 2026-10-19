@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
@@ -65,11 +66,12 @@ type ShardSearchRequest struct {
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
 type ShardQueryRequest struct {
-	VChannel    string
-	Req         *internalpb.RetrieveRequest
-	MVCC        *viewpb.QueryPlanMVCC
-	BarrierMVCC uint64
-	Reducer     reducer.RetrieveResultReducer
+	VChannel       string
+	Req            *internalpb.RetrieveRequest
+	Schema         *schemapb.CollectionSchema
+	MVCC           *viewpb.QueryPlanMVCC
+	BarrierMVCC    uint64
+	Reducer        reducer.RetrieveResultReducer
 }
 
 // Search executes Phase 1 + Phase 2 for a single shard's search.
@@ -120,8 +122,7 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 // request-scoped ReduceStream without consuming its output.
 func (s *shardViewQueryClient) SearchStream(
 	ctx context.Context,
-	vchannel string,
-	req *LegacySearchRequest,
+	req *ShardSearchRequest,
 	chunkBytes int,
 ) (searchutil.ReduceStream, *ShardPlan, error) {
 	if req == nil || req.Req == nil {
@@ -131,7 +132,7 @@ func (s *shardViewQueryClient) SearchStream(
 		return nil, nil, ctx.Err()
 	}
 
-	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}
+	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: req.VChannel}
 	planReq := &viewpb.GetQueryPlanRequest{
 		CollectionId:     req.Req.GetCollectionID(),
 		ShardId:          targetShardID.IntoProto(),
@@ -240,8 +241,7 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 // request-scoped Plain Query ReduceStream without consuming output.
 func (s *shardViewQueryClient) QueryStream(
 	ctx context.Context,
-	vchannel string,
-	req *LegacyQueryRequest,
+	req *ShardQueryRequest,
 	chunkBytes int,
 ) (queryutil.ReduceStream, *ShardPlan, error) {
 	if req == nil || req.Req == nil {
@@ -251,7 +251,7 @@ func (s *shardViewQueryClient) QueryStream(
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
-	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}
+	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: req.VChannel}
 	planReq := &viewpb.GetQueryPlanRequest{
 		CollectionId:   req.Req.GetCollectionID(),
 		ShardId:        targetShardID.IntoProto(),
