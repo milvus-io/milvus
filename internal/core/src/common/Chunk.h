@@ -749,6 +749,26 @@ class VectorArrayChunk : public Chunk {
         return element_nullable_;
     }
 
+    // Number of physically stored vectors in this chunk.
+    int64_t
+    PhysicalElementCount() const {
+        return static_cast<int64_t>(offsets_.back());
+    }
+
+    // Number of logical elements in this chunk, null elements included.
+    int64_t
+    LogicalElementCount() const {
+        return element_nullable_ ? static_cast<int64_t>(logical_offsets_.back())
+                                 : PhysicalElementCount();
+    }
+
+    // Element validity bitmap over the chunk's logical elements (LSB-first,
+    // 1 = valid). nullptr when the chunk is not element-nullable.
+    const uint8_t*
+    ElementValidity() const {
+        return element_bitmap_;
+    }
+
  private:
     VectorArrayView
     ViewUnchecked(int64_t idx) const {
