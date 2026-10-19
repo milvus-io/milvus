@@ -167,6 +167,54 @@ func TestExpandIndexParams(t *testing.T) {
 	})
 }
 
+func TestResolveAutoIndexParams(t *testing.T) {
+	autoIndexConfig := map[string]string{
+		common.IndexTypeKey:  "HNSW",
+		common.MetricTypeKey: "IP",
+		"M":                  "30",
+	}
+
+	t.Run("use defaults", func(t *testing.T) {
+		resolvedAutoIndexParams, resolvedUserParams, metricSpecified, err :=
+			ResolveAutoIndexParams(map[string]string{}, autoIndexConfig)
+		assert.NoError(t, err)
+		assert.False(t, metricSpecified)
+		assert.Equal(t, autoIndexConfig, resolvedAutoIndexParams)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "IP"},
+		}, resolvedUserParams)
+	})
+
+	t.Run("overlay supported user params", func(t *testing.T) {
+		userParams := map[string]string{
+			common.IndexTypeKey:     common.AutoIndexName,
+			common.MetricTypeKey:    "L2",
+			common.MRLDimKey:        "1024",
+			common.WithMRLRefineKey: "true",
+		}
+		resolvedAutoIndexParams, resolvedUserParams, metricSpecified, err :=
+			ResolveAutoIndexParams(userParams, autoIndexConfig)
+		assert.NoError(t, err)
+		assert.True(t, metricSpecified)
+		assert.Equal(t, "HNSW", resolvedAutoIndexParams[common.IndexTypeKey])
+		assert.Equal(t, "L2", resolvedAutoIndexParams[common.MetricTypeKey])
+		assert.Equal(t, "1024", resolvedAutoIndexParams[common.MRLDimKey])
+		assert.Equal(t, "true", resolvedAutoIndexParams[common.WithMRLRefineKey])
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			{Key: common.MRLDimKey, Value: "1024"},
+			{Key: common.WithMRLRefineKey, Value: "true"},
+		}, resolvedUserParams)
+	})
+
+	t.Run("reject unsupported user param", func(t *testing.T) {
+		_, _, _, err := ResolveAutoIndexParams(map[string]string{"nlist": "1024"}, autoIndexConfig)
+		assert.ErrorContains(t, err, "only metric type can be passed when use AutoIndex")
+	})
+}
+
 func TestValidateFieldIndexParams(t *testing.T) {
 	paramtable.Init()
 

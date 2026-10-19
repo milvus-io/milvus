@@ -135,6 +135,48 @@ func WrapUserIndexParams(metricType string) []*commonpb.KeyValuePair {
 	}
 }
 
+// ResolveAutoIndexParams validates an AutoIndex request, overlays its supported
+// user parameters on the selected physical configuration, and returns the
+// normalized user-facing parameters persisted with the index.
+func ResolveAutoIndexParams(userParams, autoIndexConfig map[string]string) (map[string]string, []*commonpb.KeyValuePair, bool, error) {
+	allowedKeys := map[string]struct{}{
+		common.IndexTypeKey:     {},
+		common.MetricTypeKey:    {},
+		common.MRLDimKey:        {},
+		common.WithMRLRefineKey: {},
+	}
+	for key := range userParams {
+		if _, ok := allowedKeys[key]; !ok {
+			return nil, nil, false, merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
+		}
+	}
+	if indexType, ok := userParams[common.IndexTypeKey]; ok && indexType != common.AutoIndexName {
+		return nil, nil, false, merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
+	}
+
+	resolvedAutoIndexParams := make(map[string]string, len(autoIndexConfig)+2)
+	for key, value := range autoIndexConfig {
+		resolvedAutoIndexParams[key] = value
+	}
+
+	metricType := autoIndexConfig[common.MetricTypeKey]
+	userMetricType, userMetricTypeSpecified := userParams[common.MetricTypeKey]
+	if userMetricTypeSpecified {
+		metricType = userMetricType
+		resolvedAutoIndexParams[common.MetricTypeKey] = userMetricType
+	}
+
+	resolvedUserParams := WrapUserIndexParams(metricType)
+	for _, key := range []string{common.MRLDimKey, common.WithMRLRefineKey} {
+		if value, ok := userParams[key]; ok {
+			resolvedAutoIndexParams[key] = value
+			resolvedUserParams = append(resolvedUserParams, &commonpb.KeyValuePair{Key: key, Value: value})
+		}
+	}
+
+	return resolvedAutoIndexParams, resolvedUserParams, userMetricTypeSpecified, nil
+}
+
 // AdjustAutoIndexParamsByDataType adjusts autoindex params based on vector data type.
 // If data_type is bf16 and refine_type is fp16/fp32, adjust to BF16.
 // If data_type is fp16 and refine_type is bf16/fp32, adjust to FP16.
