@@ -14,7 +14,6 @@ func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 		query:                  NewQueryMVCCManager(lastConfirmedTimeTick),
 		pchannelMVCCTimestamp:  lastConfirmedTimeTick,
 		recoveryTimeTick:       lastConfirmedTimeTick,
-		barrierTimeTick:        lastConfirmedTimeTick,
 		vchannelMVCCTimestamps: make(map[string]uint64),
 	}
 }
@@ -24,9 +23,8 @@ func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 type MVCCManager struct {
 	query                  *QueryMVCCManager
 	mu                     sync.Mutex
-	recoveryTimeTick       uint64            // fixed opening fence; never use zero for an unknown shard.
 	retiredTimeTick        uint64            // shared fence for retired/unknown identities, without per-shard tombstones.
-	barrierTimeTick        uint64            // latest relevant PChannel-wide operation, excluding ordinary ticks.
+	recoveryTimeTick       uint64            // fixed WAL opening timestamp; query targets never precede recovery.
 	pchannelMVCCTimestamp  uint64            // the last confirmed timetick of the pchannel.
 	vchannelMVCCTimestamps map[string]uint64 // map the vchannel to the maximum timetick that is persisted into the wal.
 }
@@ -42,7 +40,7 @@ func (cm *MVCCManager) GetMVCCOfVChannel(vchannel string) VChannelMVCC {
 		// Do not lower its target just because the per-shard entry was reclaimed.
 		tt = cm.retiredTimeTick
 	}
-	tt = max(cm.recoveryTimeTick, cm.barrierTimeTick, tt)
+	tt = max(cm.recoveryTimeTick, tt)
 	return VChannelMVCC{Timetick: tt, Confirmed: tt <= cm.pchannelMVCCTimestamp}
 }
 
@@ -73,9 +71,6 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	// UpdateMVCC. Never discard a successful write merely because tt <= C.
 	if messageutil.IsTimeTickConfirmBarrier(msgType) {
 		cm.pchannelMVCCTimestamp = max(cm.pchannelMVCCTimestamp, tt)
-		if msgType == message.MessageTypeRecoveryBarrier {
-			cm.barrierTimeTick = max(cm.barrierTimeTick, tt)
-		}
 		return
 	}
 
@@ -84,16 +79,14 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	if isTxn && msgType != message.MessageTypeCommitTxn {
 		return
 	}
-	if vchannel == "" || msg.IsPChannelLevel() {
-		cm.barrierTimeTick = max(cm.barrierTimeTick, tt)
-		return
-	}
-	if funcutil.IsControlChannel(vchannel) {
+	// PChannel/control operations do not change this VChannel's visible data.
+	// Query-plan transform barriers are handled independently by cm.query above.
+	if vchannel == "" || msg.IsPChannelLevel() || funcutil.IsControlChannel(vchannel) {
 		return
 	}
 	switch msgType {
 	case message.MessageTypeCreateCollection:
-		cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], tt, cm.recoveryTimeTick)
+		cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], tt)
 	case message.MessageTypeDropCollection:
 		// The outer VChannel exclusive append lock covers this callback. Earlier
 		// appends have finished publishing their targets, and the shard has stopped
@@ -126,7 +119,7 @@ func (cm *MVCCManager) GetQueryMVCCOfVChannel(vchannel string) QueryVChannelMVCC
 // It does not confirm a concurrent newer write or move the physical watermark.
 func (cm *MVCCManager) ApplyRecoveryBarrier(vchannel string, timetick uint64) {
 	cm.mu.Lock()
-	cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], timetick, cm.recoveryTimeTick)
+	cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], timetick)
 	cm.mu.Unlock()
 	cm.query.ApplyRecoveryBarrier(vchannel, timetick)
 }

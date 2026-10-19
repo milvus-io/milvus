@@ -73,15 +73,6 @@ func TestRetainedMVCCVisibilityBarriers(t *testing.T) {
 			require.Equal(t, VChannelMVCC{Timetick: 120, Confirmed: true}, cm.GetMVCCOfVChannel("a"))
 		})
 	}
-	cm := NewMVCCManager(100)
-	cm.ApplyRecoveryBarrier("a", 100)
-	cm.UpdateMVCC(createQueryTestMessage(t, 200, "", message.MessageTypeFlushAll, false, true))
-	require.Equal(t, VChannelMVCC{Timetick: 200}, cm.GetMVCCOfVChannel("a"))
-	require.Equal(t, VChannelMVCC{Timetick: 200}, cm.GetMVCCOfVChannel("unknown"))
-	cm.UpdateMVCC(createQueryTestMessage(t, 300, "", message.MessageTypeTimeTick, false, true))
-	require.Equal(t, VChannelMVCC{Timetick: 200, Confirmed: true}, cm.GetMVCCOfVChannel("a"))
-	cm.UpdateMVCC(createQueryTestMessage(t, 400, "", message.MessageTypeRecoveryBarrier, false, true))
-	require.Equal(t, VChannelMVCC{Timetick: 400, Confirmed: true}, cm.GetMVCCOfVChannel("a"))
 }
 
 func TestRetainedMVCCLifecycle(t *testing.T) {
@@ -153,21 +144,37 @@ func BenchmarkRetainedMVCC(b *testing.B) {
 	}
 }
 
+// PChannel operations do not change the legacy read snapshot. Query-plan
+// transform frontiers still track storage publication independently.
 func TestRetainedMVCCClusterBroadcast(t *testing.T) {
 	channels := message.ClusterChannels{Channels: []string{"p1", "p2"}, ControlChannel: "p1_vcchan"}
-	broadcast := message.NewFlushAllMessageBuilderV2().WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).WithClusterLevelBroadcast(channels).MustBuildBroadcast()
-	for _, msg := range broadcast.WithBroadcastID(1).SplitIntoMutableMessage() {
-		cm := NewMVCCManager(100)
-		cm.ApplyRecoveryBarrier("a", 100)
-		cm.ApplyRecoveryBarrier("b", 100)
-		require.True(t, msg.IsPChannelLevel())
-		require.NotEmpty(t, msg.VChannel())
-		cm.UpdateMVCC(msg.WithTimeTick(200))
-		for _, vc := range []string{"a", "b", "unknown"} {
-			require.Equal(t, VChannelMVCC{Timetick: 200}, cm.GetMVCCOfVChannel(vc))
-		}
-		cm.UpdateMVCC(createQueryTestMessage(t, 300, "", message.MessageTypeTimeTick, false, true))
-		require.Equal(t, VChannelMVCC{Timetick: 200, Confirmed: true}, cm.GetMVCCOfVChannel("a"))
-		require.Len(t, cm.vchannelMVCCTimestamps, 2)
+	for _, broadcast := range []message.BroadcastMutableMessage{
+		message.NewFlushAllMessageBuilderV2().WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).WithClusterLevelBroadcast(channels).MustBuildBroadcast(),
+		message.NewAlterWALMessageBuilderV2().WithHeader(&message.AlterWALMessageHeader{}).WithBody(&message.AlterWALMessageBody{}).WithClusterLevelBroadcast(channels).MustBuildBroadcast(),
+		message.NewAlterReplicateConfigMessageBuilderV2().WithHeader(&message.AlterReplicateConfigMessageHeader{}).WithBody(&message.AlterReplicateConfigMessageBody{}).WithClusterLevelBroadcast(channels).MustBuildBroadcast(),
+	} {
+		t.Run(broadcast.MessageType().String(), func(t *testing.T) {
+			for _, msg := range broadcast.WithBroadcastID(1).SplitIntoMutableMessage() {
+				cm := NewMVCCManager(100)
+				cm.ApplyRecoveryBarrier("a", 100)
+				cm.ApplyRecoveryBarrier("b", 100)
+				cm.UpdateMVCC(createQueryTestMessage(t, 120, "a", message.MessageTypeInsert, false, true))
+				require.True(t, msg.IsPChannelLevel())
+				require.NotEmpty(t, msg.VChannel())
+				cm.UpdateMVCC(msg.WithTimeTick(200))
+				require.Equal(t, VChannelMVCC{Timetick: 120}, cm.GetMVCCOfVChannel("a"))
+				for _, vc := range []string{"b", "unknown"} {
+					require.Equal(t, VChannelMVCC{Timetick: 100, Confirmed: true}, cm.GetMVCCOfVChannel(vc))
+				}
+				transformTarget := uint64(200)
+				if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+					transformTarget = 100
+				}
+				require.Equal(t, transformTarget, cm.GetQueryMVCCOfVChannel("a").TransformingTimetick)
+				cm.UpdateMVCC(createQueryTestMessage(t, 300, "", message.MessageTypeTimeTick, false, true))
+				require.Equal(t, VChannelMVCC{Timetick: 120, Confirmed: true}, cm.GetMVCCOfVChannel("a"))
+				require.Len(t, cm.vchannelMVCCTimestamps, 2)
+			}
+		})
 	}
 }

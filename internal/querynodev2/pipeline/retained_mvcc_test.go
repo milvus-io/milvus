@@ -185,6 +185,18 @@ func TestRetainedMVCCPipelineWait(t *testing.T) {
 						t.Fatal("application did not wake query")
 					}
 				}
+				// A cluster-wide flush changes storage state, not the visible rows.
+				// The legacy scanner does not deliver it to this pipeline, so it
+				// must not force the next read to wait for another consumer tick.
+				pchannel := funcutil.ToPhysicalChannel(channel)
+				flush := message.NewFlushAllMessageBuilderV2().
+					WithHeader(&message.FlushAllMessageHeader{}).
+					WithBody(&message.FlushAllMessageBody{}).
+					WithClusterLevelBroadcast(message.ClusterChannels{Channels: []string{pchannel}, ControlChannel: pchannel + "_vcchan"}).
+					MustBuildBroadcast()
+				for _, msg := range flush.WithBroadcastID(1).SplitIntoMutableMessage() {
+					cm.UpdateMVCC(msg.WithTimeTick(ts(200)))
+				}
 				// No next tick is supplied. The real wait passes at the applied target; the deliberately
 				// absent query distribution then rejects execution AFTER setting MVCC.
 				req, err := query(ts(1000), time.Second)
