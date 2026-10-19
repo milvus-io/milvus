@@ -1,6 +1,8 @@
 package datacoord
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/samber/lo"
@@ -12,6 +14,55 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
+
+func TestSelectSegmentsWithChannelOnlyScansChannel(t *testing.T) {
+	const (
+		totalChannels      = 100
+		segmentsPerChannel = 50
+		targetChannel      = "ch-1"
+	)
+
+	m := &meta{segments: NewSegmentsInfo()}
+	for channel := 0; channel < totalChannels; channel++ {
+		channelName := fmt.Sprintf("ch-%d", channel)
+		for i := 0; i < segmentsPerChannel; i++ {
+			id := int64(channel*segmentsPerChannel + i)
+			m.segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{
+				ID:            id,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: channelName,
+			}))
+		}
+	}
+
+	calls := 0
+	got := m.SelectSegments(context.Background(), WithChannel(targetChannel), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		calls++
+		return false
+	}))
+
+	assert.Empty(t, got)
+	assert.Equal(t, segmentsPerChannel, calls)
+}
+
+func TestSetIsCompactingUpdatesSecondaryIndexes(t *testing.T) {
+	segments := NewSegmentsInfo()
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "ch-1",
+	})
+	segments.SetSegment(segment.GetID(), segment)
+
+	segments.SetIsCompacting(segment.GetID(), true)
+
+	current := segments.GetSegment(segment.GetID())
+	assert.True(t, current.isCompacting)
+	assert.Same(t, current, segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()][segment.GetID()])
+	assert.Same(t, current, segments.secondaryIndexes.channel2Segments[segment.GetInsertChannel()][segment.GetID()])
+}
 
 func TestCompactionTo(t *testing.T) {
 	t.Run("mix_2_to_1", func(t *testing.T) {
