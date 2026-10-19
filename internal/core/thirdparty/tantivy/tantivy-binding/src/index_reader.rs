@@ -95,6 +95,8 @@ impl IndexReaderWrapper {
         index: Arc<Index>,
         set_bitset: SetBitsetFn,
     ) -> Result<IndexReaderWrapper> {
+        // TODO: Reuse unchanged SegmentReaders upstream by (segment_id, delete_opstamp)
+        // when creating a new snapshot, while keeping previously published snapshots fixed.
         IndexReaderWrapper::from_index_with_policy(index, set_bitset, ReloadPolicy::Manual)
     }
 
