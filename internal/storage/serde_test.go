@@ -19,8 +19,10 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"testing"
 	"unsafe"
@@ -2532,4 +2534,44 @@ func TestBuildRecord_ElementNullableArrayOfVectorRejectsMissingTypedData(t *test
 			assert.Contains(t, err.Error(), tt.errorText)
 		})
 	}
+}
+
+func TestFloatVectorSerializeAppendsLittleEndianBytes(t *testing.T) {
+	const dim = 4
+	values := []float32{
+		0, float32(math.Copysign(0, -1)), 1.5, -2.25,
+		float32(math.Inf(1)), float32(math.Inf(-1)),
+		math.Float32frombits(0x7fc00001), // NaN with a payload
+		math.Float32frombits(0x00000001), // smallest subnormal
+	}
+	expected := make([]byte, len(values)*4)
+	for i, v := range values {
+		binary.LittleEndian.PutUint32(expected[i*4:], math.Float32bits(v))
+	}
+	rows := [][]float32{values[:dim], values[dim:]}
+	serialize := serdeMap[schemapb.DataType_FloatVector].serialize
+
+	fixed := array.NewFixedSizeBinaryBuilder(memory.DefaultAllocator, &arrow.FixedSizeBinaryType{ByteWidth: dim * 4})
+	defer fixed.Release()
+	// Nullable float vectors are stored in a Binary column.
+	nullable := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer nullable.Release()
+	for _, row := range rows {
+		require.NoError(t, serialize(fixed, row, schemapb.DataType_None, dim, false))
+		require.NoError(t, serialize(nullable, row, schemapb.DataType_None, dim, false))
+	}
+	require.NoError(t, serialize(nullable, nil, schemapb.DataType_None, dim, false))
+	require.Error(t, serialize(nullable, []byte{1}, schemapb.DataType_None, dim, false))
+
+	// The builders copy the row bytes, so later writes to the rows must not show up.
+	rows[0][0] = 42
+	fixedArr := fixed.NewFixedSizeBinaryArray()
+	defer fixedArr.Release()
+	nullableArr := nullable.NewBinaryArray()
+	defer nullableArr.Release()
+	for i := range rows {
+		assert.Equal(t, expected[i*dim*4:(i+1)*dim*4], fixedArr.Value(i))
+		assert.Equal(t, expected[i*dim*4:(i+1)*dim*4], nullableArr.Value(i))
+	}
+	assert.True(t, nullableArr.IsNull(2))
 }

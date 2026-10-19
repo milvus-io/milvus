@@ -33,7 +33,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1013,25 +1012,24 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				b.AppendNull()
 				return nil
 			}
-			if vv, ok := v.([]float32); ok {
-				dim := len(vv)
-				byteLength := dim * 4
-				bytesData := make([]byte, byteLength)
-				for i, vec := range vv {
-					bytes := math.Float32bits(vec)
-					common.Endian.PutUint32(bytesData[i*4:], bytes)
-				}
-				if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
-					builder.Append(bytesData)
-					return nil
-				}
-				if builder, ok := b.(*array.BinaryBuilder); ok {
-					builder.Append(bytesData)
-					return nil
-				}
+			vv, ok := v.([]float32)
+			if !ok {
+				return merr.WrapErrServiceInternalMsg("expected []float32, got %T", v)
+			}
+			// Binlogs hold little-endian IEEE 754 floats, which is the in-memory
+			// layout on every supported target (deserialize casts the bytes back
+			// the same way), so the row's backing array is appended as is instead
+			// of being encoded into a new buffer per row.
+			bytesData := arrow.Float32Traits.CastToBytes(vv)
+			switch builder := b.(type) {
+			case *array.FixedSizeBinaryBuilder:
+				builder.Append(bytesData)
+			case *array.BinaryBuilder:
+				builder.Append(bytesData)
+			default:
 				return merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinaryBuilder or *array.BinaryBuilder, got %T", b)
 			}
-			return merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinaryBuilder, got %T", b)
+			return nil
 		},
 		serializeBatch: denseVectorBatchSerializer(schemapb.DataType_FloatVector),
 	}
