@@ -87,7 +87,10 @@ func (s *SortCompactionTaskSuite) setupTest() {
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	s.NoError(err)
 
-	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	// This fixture supplies and observes V1 binlogs through the mock uploader.
+	compactionParams := compaction.GenParams()
+	compactionParams.StorageVersion = storage.StorageV1
+	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compactionParams, []int64{pk.GetFieldID()})
 }
 
 func (s *SortCompactionTaskSuite) SetupTest() {
@@ -251,7 +254,9 @@ func (s *SortCompactionTaskSuite) setupBM25Test() {
 	pk, err := typeutil.GetPrimaryFieldSchema(plan.GetSchema())
 	s.NoError(err)
 
-	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams(), []int64{pk.GetFieldID()})
+	compactionParams := compaction.GenParams()
+	compactionParams.StorageVersion = storage.StorageV1
+	s.task = NewSortCompactionTask(context.Background(), s.mockBinlogIO, plan, compactionParams, []int64{pk.GetFieldID()})
 }
 
 func (s *SortCompactionTaskSuite) prepareSortCompactionWithBM25Task() {
