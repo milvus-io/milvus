@@ -1279,6 +1279,12 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 						segIdx.IndexStorePathVersion, segIdx.CollectionID,
 						segIdx.PartitionID, segIdx.SegmentID,
 						segIdx.BuildID, segIdx.IndexVersion)
+					if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
+						if segment := s.meta.GetSegment(ctx, segID); segment != nil {
+							builder.WithManifestPath(segment.GetManifestPath())
+						}
+					}
+
 					indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
 					indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 					indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)

@@ -114,11 +114,12 @@ const (
 	// SegmentIndexRemove deletes the record, retiring an artifact the manifest
 	// revision retracts.
 	SegmentIndexRemove
-	// SegmentIndexBackfill publishes an existing finished artifact and retires
-	// its historical catalog row without replacing the in-memory record.
+	// SegmentIndexBackfill copies an existing finished artifact into _index,
+	// publishes its destination layout and retires its historical catalog row.
 	SegmentIndexBackfill
-	// SegmentIndexRollback persists the locked record to etcd while retracting
-	// its manifest entry, without deleting artifact files or its memory record.
+	// SegmentIndexRollback copies a v2 artifact to index_v1 and persists the
+	// destination record to etcd while retracting its manifest entry. Source
+	// files remain protected until the build is retired.
 	SegmentIndexRollback
 )
 
@@ -297,7 +298,7 @@ func (m *meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 		}
 		stagedIndexes = append(stagedIndexes, staged)
 		if indexMutation.Type == SegmentIndexRollback {
-			if err := m.validateRollbackIndex(segment, *indexMutation, staged.record); err != nil {
+			if err := m.validateRollbackIndex(segment, *indexMutation, staged.source); err != nil {
 				return err
 			}
 		}
@@ -315,6 +316,12 @@ func (m *meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 				break
 			}
 		}
+	}
+
+	// Locks retain the source artifacts until every accepted copy completes.
+	// A failed copy cannot publish a manifest pointer or retire its catalog row.
+	if err := m.copyMigratedIndexFiles(ctx, segment, stagedIndexes); err != nil {
+		return err
 	}
 
 	io, releaseIO, err := m.manifestCommitExecutor.acquire(ctx)
@@ -590,17 +597,27 @@ func validateManifestIndexTaskProjection(m *meta, segment *SegmentInfo, entry pa
 		segIdx.SegmentID,
 		segIdx.BuildID,
 		segIdx.IndexVersion,
-	).BuildPrefix()
+	).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
 	expectedPath, err := packed.ManifestIndexRelativePath(basePath, indexPrefix)
 	if err != nil {
 		return err
 	}
+	if entry.Path != expectedPath {
+		return merr.WrapErrServiceInternalMsg("segment index path changed before manifest commit, segmentID=%d buildID=%d", segIdx.SegmentID, segIdx.BuildID)
+	}
+	return validateManifestIndexRecordProjection(entry, segIdx)
+}
+
+// Both writer publication and rollback compare artifact fields to the locked
+// source record. Their path validation differs: rollback can read legacy entries
+// outside _index, whereas new entries must obey the segment-rooted contract.
+func validateManifestIndexRecordProjection(entry packed.ManifestIndexInfo, segIdx *model.SegmentIndex) error {
 	if entry.IndexID != segIdx.IndexID || entry.BuildID != segIdx.BuildID ||
 		entry.IndexVersion != segIdx.IndexVersion || entry.NumRows != segIdx.NumRows ||
 		entry.SerializedSize != int64(segIdx.IndexSerializedSize) || entry.MemSize != int64(segIdx.IndexMemSize) ||
 		entry.CurrentIndexVersion != segIdx.CurrentIndexVersion ||
 		entry.CurrentScalarIndexVersion != segIdx.CurrentScalarIndexVersion ||
-		entry.IndexStorePathVersion != segIdx.IndexStorePathVersion || entry.Path != expectedPath ||
+		entry.IndexStorePathVersion != segIdx.IndexStorePathVersion ||
 		!slices.Equal(entry.IndexFileKeys, segIdx.IndexFileKeys) {
 		return merr.WrapErrServiceInternalMsg(
 			"segment index changed before manifest commit, segmentID=%d buildID=%d", segIdx.SegmentID, segIdx.BuildID)

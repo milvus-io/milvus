@@ -12,7 +12,7 @@ ChunkManager receives complete keys; it does not prepend its root.
 | Local | Absolute filesystem path including `localStorage.path` | `/var/lib/milvus/data/insert_log/1/2/3/...` |
 | Remote | Bucket-relative object key, normally including `minio.rootPath` | `files/insert_log/1/2/3/...` |
 
-**New local segment/index namespaces never use minio.rootPath.** Updates to an
+**New local segment namespaces never use minio.rootPath.** Updates to an
 existing legacy manifest retain its base path, including the historical prefix;
 do not rebase that manifest while appending data or stats. A remote key does not include
 the bucket name or a URI scheme. Local loon/Arrow filesystems use `/` as their
@@ -34,6 +34,20 @@ Explore is a separate layout: local temporary manifests live under
   consuming boundary.
 - Cleanup uses the same layout as the producer. Preserve remote keys exactly:
   `.`, `..`, and repeated separators are literal object-key components.
+
+## Manifest index artifacts
+
+When `dataCoord.index.writeSegmentIndexToManifest` is enabled, new StorageV3
+vector/scalar index builds select `IndexStorePathVersion=2` and write to
+`<manifest base>/_index/<build>/<version>/<file>`. This includes new indexes on
+legacy local segments: they follow that existing manifest base. Disabling the
+switch preserves the existing version-0/1 layout selection for new tasks.
+New or updated index entries must stay inside that `_index` directory; parent
+traversal and external namespaces are errors. Existing entries are not migrated.
+Builds retain their creation-time publication mode across switch changes and
+restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
+Readers and cleanup use each artifact's persisted version.
+See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
 
 ## Local upgrade compatibility
 
@@ -102,6 +116,9 @@ directory from the output manifest base.
 - V3 orphan scan: enumerate `insert_log` and reclaim files without segment
   metadata after the protection period. Files belonging to registered V3
   segments are skipped, even if an individual file is absent from the manifest.
+- A dedicated build-aware scan handles canonical `insert_log/.../_index`
+  orphans, including those in live V3 segments; snapshot and import protections
+  still apply.
 - Therefore an uncommitted stats file inside a live V3 segment is not guaranteed
   to be reclaimed by DataCoord's orphan scan.
 - Legacy `R/M/insert_log` orphan/LOB layouts and old Explore temporary paths
@@ -120,3 +137,20 @@ directory from the output manifest base.
 
 Source review and unit tests do not replace a real version-to-version upgrade
 test. Report which versions, layouts, and failure cases were actually exercised.
+
+## Historical index migration
+
+Backfill copies the explicit index files from path version 0/1 into the existing
+segment manifest base's `_index/<build>/<version>` and atomically publishes path
+version 2 with catalog-row retirement. Rollback copies v2 files to the
+collection-rooted `index_v1` namespace before restoring a path-version-1 catalog
+row and retracting the manifest entry. Existing v0/v1 rollback records keep their
+layout. Build IDs and file keys are unchanged.
+
+Copies use object-storage server-side Copy operations, concurrently with a shared
+bounded budget; no download/upload or local migration fallback is permitted.
+Copy failure/cancellation leaves visible metadata at the source. Source files
+and all three layout aliases of a retained V3 build's recorded keys/version stay
+protected from orphan scans until build retirement, subject to snapshot guards.
+This also protects partial destinations across failed attempts and restarts.
+See the [migration design](../../design-docs/design_docs/20260901-storagev3-manifest-index-backfill.md).

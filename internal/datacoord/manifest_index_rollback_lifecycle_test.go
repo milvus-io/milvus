@@ -36,10 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
-	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -65,7 +63,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 				b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
 					Status: merr.Success(), DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{restartCollID}}},
 				}, nil)
-				m, err := newMeta(ctx, catalog, storage.NewLocalChunkManager(objectstorage.RootPath(root)), b)
+				m, err := newMeta(ctx, catalog, migrationServerCopyFixture(t, root), b)
 				require.NoError(t, err)
 				t.Cleanup(m.closeManifestCommitExecutor)
 				return m
@@ -160,7 +158,12 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 				recovered, found := restarted.indexMeta.GetIndexJob(record.BuildID)
 				require.True(t, found)
 				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
-				assert.Equal(t, layout, recovered.IndexStorePathVersion)
+				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, recovered.IndexStorePathVersion)
+				for _, file := range migrationIndexPaths(root, restarted.GetSegment(ctx, restartSegID).GetManifestPath(), recovered) {
+					data, err := restarted.chunkManager.Read(ctx, file)
+					require.NoError(t, err)
+					assert.Equal(t, []byte("artifact"), data)
+				}
 				assert.False(t, indexManifestPublished(t, restarted.indexMeta, record.BuildID))
 			}
 		})

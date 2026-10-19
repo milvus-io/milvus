@@ -1617,6 +1617,30 @@ func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
 		return m
 	}
 
+	t.Run("failed result without worker payload preserves dispatched layout", func(t *testing.T) {
+		m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, nil)
+		err := m.FinishTask(&workerpb.IndexTaskInfo{BuildID: buildID, State: commonpb.IndexState_Failed, FailReason: "worker lost"})
+		assert.NoError(t, err)
+		stored, ok := m.segmentBuildInfo.Get(buildID)
+		assert.True(t, ok)
+		assert.Equal(t, commonpb.IndexState_Failed, stored.IndexState)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, stored.IndexStorePathVersion)
+	})
+
+	t.Run("segment rooted result cannot fall back to older layouts", func(t *testing.T) {
+		for _, actual := range []indexpb.IndexStorePathVersion{0, 1} {
+			m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, nil)
+			err := m.FinishTask(&workerpb.IndexTaskInfo{
+				BuildID: buildID, State: commonpb.IndexState_Finished,
+				IndexFileKeys: []string{"index.bin"}, IndexStorePathVersion: actual,
+			})
+			assert.Error(t, err)
+			stored, ok := m.segmentBuildInfo.Get(buildID)
+			assert.True(t, ok)
+			assert.Equal(t, commonpb.IndexState_InProgress, stored.IndexState)
+		}
+	})
+
 	t.Run("actual lower than requested persists actual version", func(t *testing.T) {
 		m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, []string{"old-file"})
 

@@ -1065,6 +1065,12 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 				segIdx.IndexStorePathVersion, segIdx.CollectionID,
 				segIdx.PartitionID, segIdx.SegmentID,
 				segIdx.BuildID, segIdx.IndexVersion)
+			if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
+				if segment := h.s.meta.GetSegment(context.TODO(), segID); segment != nil {
+					builder.WithManifestPath(segment.GetManifestPath())
+				}
+			}
+
 			indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
 			indexParams := h.s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 			indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)

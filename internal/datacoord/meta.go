@@ -108,6 +108,9 @@ type meta struct {
 	copyResultLocksOnce    sync.Once
 	copyResultLocks        *lock.KeyLock[int64]
 	manifestCommitExecutor *manifestCommitExecutor
+	manifestCopyOnce       sync.Once
+	manifestCopySlots      *semaphore.Weighted
+	manifestCopyLimit      int
 	manifestReadOnce       sync.Once
 	manifestReadSlots      *semaphore.Weighted
 	dataViewManager        DataViewManager

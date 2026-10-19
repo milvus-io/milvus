@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
@@ -349,7 +350,9 @@ func (i *manifestIndexBackfillInspector) backfillIndexes(ctx context.Context, se
 			!i.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			return errSegmentIndexBackfillSkipped
 		}
-		manifestIndex, err := buildManifestIndexInfo(i.meta, segment, segIdx)
+		destination := model.CloneSegmentIndex(segIdx)
+		destination.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+		manifestIndex, err := buildManifestIndexInfo(i.meta, segment, destination)
 		if err != nil {
 			return err
 		}

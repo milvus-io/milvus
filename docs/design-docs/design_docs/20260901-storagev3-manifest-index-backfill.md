@@ -1,7 +1,7 @@
 # StorageV3 Manifest Index Backfill and Rollback
 
 - **Created:** 2026-09-01
-- **Updated:** 2026-10-14
+- **Updated:** 2026-10-19
 - **Status:** Under Review; design and implementation in one PR
 - **Component:** DataCoord, StorageV3
 - **Depends on:** [StorageV3 Manifest Index Publication](20260811-storagev3-manifest-index-publication.md),
@@ -17,7 +17,8 @@ that finished while the switch was off: those artifacts still have a finished
 The optional manifest index backfill migrates that historical state. For each
 eligible record it uses one ordinary `CommitSegmentManifest` operation to:
 
-1. publish the existing artifact as a typed manifest index entry;
+1. copy the explicit artifact files into the segment `_index` namespace with
+   object-storage server-side copy, then publish their typed manifest index entry;
 2. advance `SegmentInfo.manifest_path` and set the
    `manifest_has_index` recovery marker; and
 3. delete the historical `SegmentIndex` catalog row.
@@ -34,7 +35,9 @@ read-then-delete window and require a second convergence protocol for no gain.
 The independent rollback migration restores manifest-resident index records to
 etcd. It retracts only their matching manifest entries in the same publication
 transaction. Manifest entries without in-memory records are left to GC.
-Neither direction moves index files or changes artifact paths or build IDs.
+Both directions copy artifact files when the source and destination layouts differ.
+Backfill changes v0/v1 to v2; rollback changes v2 to v1 and retains existing
+v0/v1 layouts. Build IDs, file keys and index versions remain unchanged.
 
 | Direction | Source | Destination | Activation |
 |---|---|---|---|
@@ -48,8 +51,9 @@ Neither direction moves index files or changes artifact paths or build IDs.
 
 ## Goals
 
-- Move historical, usable StorageV3 index metadata from etcd to manifests,
-  and restore manifest-resident records to etcd through an explicit rollback.
+- Move historical, usable StorageV3 index metadata from etcd to manifests and
+  copy its artifact files into `_index`; explicit rollback restores records to
+  etcd and copies v2 files into `index_v1`.
 - Publish each placement change atomically with its segment manifest pointer.
 - Reuse the foreground publication entry format, validation, lock order, and
   recovery path.
@@ -140,6 +144,7 @@ segmentManifestLock(segmentID)
   -> keyLock(all selected BuildIDs, sorted)
      -> snapshot current segment and all selected finished records
      -> validate live definition/current slot/entry projection
+     -> copy explicit artifact files to the destination layout, drain all copies
      -> commit next immutable manifest revision
      -> segMu
         -> catalog.Update(
@@ -152,7 +157,7 @@ segmentManifestLock(segmentID)
 The catalog refuses its chunked fallback whenever a `SegmentIndex` action is
 present, so the pointer/marker and row deletion cannot become visible
 separately. Installation updates the locked record through a clone with
-`ManifestPublished = true`. It updates the `(segment, index)` slot only if the
+`ManifestPublished = true` and path version 2. It updates the `(segment, index)` slot only if the
 slot still belongs to that BuildID, preserving a newer occupant.
 
 All selected indexes of a segment are published together when they fit in one
@@ -163,6 +168,38 @@ its catalog mutations or in-memory placement flags and is retried on a later
 scan; other batches and segments can continue. Every record is revalidated
 under its BuildID lock before manifest I/O. Mixed foreground/backfill mutations
 and duplicate index IDs in a backfill batch are rejected.
+
+### Server-side artifact copies
+
+Every file transfer calls `RemoteChunkManager.Copy`: MinIO/S3 uses CopyObject
+(or multipart server-side composition for large objects), GCS uses CopierFrom,
+and Azure starts a server-side copy and waits for its terminal status. There is
+no download/upload or local-file fallback. Local storage migration requiring a
+layout change returns ServiceUnimplemented and keeps its original metadata.
+
+Different segments retain the existing inspector concurrency. Within a segment,
+explicit file keys across all selected builds copy concurrently. A single `meta`
+semaphore bounds file-copy requests across both inspectors and all segments by
+`min(dataCoord.segmentIndexManifestLoadConcurrency, minio.maxConnections)`;
+nonpositive maxConnections is unset. The budget is fixed on first use and is
+separate from the manifest read/commit budgets. It limits Copy operations, not
+the internal multipart HTTP requests of an SDK. Goroutine count per batch is
+bounded by this same limit, rather than creating one goroutine for every file.
+
+The segment and BuildID locks span copying and publication. A failed file copy
+cancels sibling requests and drains accepted operations before returning; no
+manifest or catalog publication follows failure. Retry copies the same immutable
+source keys to deterministic targets. Cancellation after a provider accepts an
+asynchronous copy can leave remote work or target objects behind; source records
+and all layout aliases remain protected, and no new path becomes visible until
+a later attempt observes every copy completed. A successful copy followed by a
+manifest or catalog failure likewise retains the original placement.
+
+GC's manifest-index retirement holds the segment lock across file deletion and
+record retraction, so it cannot remove sources during a migration or let rollback
+restore a record after its source bytes were retired. No `segMu` is held over
+copy I/O. Existing readers keep cloned source records; only successful catalog
+publication installs the destination record.
 
 ### Crash and Retry Semantics
 
@@ -230,9 +267,13 @@ marked catalog-absent immediately and never enter the backfill queue. Targets
 whose selected placement is etcd remain catalog-backed and can be migrated
 later if they meet the ordinary predicate.
 
-Snapshot metadata continues to pin build IDs and segments for GC; backfill
-does not change artifact paths or build IDs, so it does not change snapshot
-ownership. External snapshot restore retains the publication PR's existing
+Snapshot metadata continues to pin build IDs and segments for GC. Migration
+keeps source files: old immutable manifests, loaded readers and snapshots can
+continue using their recorded paths. The orphan scanners protect all three
+layouts of the recorded file keys/version for a retained StorageV3 build,
+including unpublished or partially copied destinations. Build retirement removes
+these aliases under the existing snapshot protections. This intentionally trades
+extra storage until build retirement for safe retries and old-reader lifetime. External snapshot restore retains the publication PR's existing
 foreign-bucket behavior.
 
 Compaction and stats commits share the per-segment manifest lock. Backfill
@@ -316,11 +357,12 @@ manifest contains no index entries, as implemented by #53048.
 
 ### Goal and scope
 
-Provide an independently enabled reverse metadata migration. Restore existing
+Provide an independently enabled reverse artifact and metadata migration. Restore existing
 in-memory manifest-resident `SegmentIndex` records to etcd, including records on
 retained Dropped segments and records whose definitions were deleted. Keep
-artifact paths, build IDs, files, segment state, and unrelated manifest sections
-intact. No index rebuild or artifact copy is required.
+build IDs, source files, segment state, and unrelated manifest sections intact.
+Copy v2 artifacts to the collection-rooted `index_v1` directory before restoring
+the catalog row with path version 1. No index rebuild is required.
 
 Rollback does not discover work by enumerating manifest entries. Entries with
 no in-memory record belong to GC; rollback neither restores nor retracts them.
@@ -340,7 +382,7 @@ dataCoord:
 
 `enabled` is restart-scoped and defaults off. When enabled it takes precedence
 over `writeSegmentIndexToManifest` and `manifestIndexBackfill.enabled`:
-foreground completions and newly dispatched copy tasks choose etcd, and the
+new index builds and newly dispatched copy tasks choose etcd, and the
 forward inspector is inactive. Operators need only this independent switch to
 enter rollback mode.
 
@@ -377,20 +419,23 @@ which selected records still have an entry; it never adds records to the batch.
 Acquire selected BuildID locks in sorted order and revalidate the records.
 If a record disappeared or became catalog-backed, abandon the batch before
 manifest publication and let the next scan select the remaining work. Validate
-segment identity, artifact paths, and the selected records' manifest projection.
+segment identity, source artifact paths, and the selected records' manifest projection.
+The staged catalog record contains the destination layout; validation and copying
+still use the separately retained source record under its BuildID lock.
 Unselected manifest entries remain untouched.
 
 Construct a structured revision with conditional `DropIndexes` entries using
 both IndexID and ExpectedBuildID. Do not delete any artifact files. Reuse the
 manifest commit framework for final publication:
 
-1. Create the immutable revision from the locked source pointer.
-2. Use the async commit result to determine `manifest_has_index` from the
+1. Copy every selected v2 artifact file to index_v1 and drain all accepted copies.
+2. Create the immutable revision from the locked source pointer.
+3. Use the async commit result to determine `manifest_has_index` from the
    loaded source and staged mutations; do not reopen the committed revision.
-3. Under `segMu`, recheck source pointer, segment identity and retained state.
-4. Atomically publish the segment pointer/marker and PUT all selected
+4. Under `segMu`, recheck source pointer, segment identity and retained state.
+5. Atomically publish the segment pointer/marker and PUT all selected
    `SegmentIndex` records with `catalog.Update`.
-5. Clear catalog-absent provenance only after the transaction succeeds. Install
+6. Clear catalog-absent provenance only after the transaction succeeds. Install
    cloned records with `ManifestPublished = false`, preserving the current
    `(segment, index)` build slot.
 
@@ -505,6 +550,14 @@ A real local packed-manifest round trip should verify that artifact paths and
 records survive metadata restart. Unit/fault-injection results do not establish
 cluster failover, snapshot restore, or QueryNode end-to-end acceptance.
 
+Artifact migration coverage must exercise the real object-storage SDK copy
+request against a test endpoint that rejects downloads and ordinary uploads,
+then verify destination bytes after metadata restart. Inject failure after one
+file has copied and assert that the source pointer, catalog rows and in-memory
+record remain unchanged before retrying. Check the shared copy limit across
+segments, cancellation/draining, local-storage rejection, invalid source keys,
+all retained layout aliases, and mutual exclusion with GC retirement.
+
 ### Backfill
 
 - Final-state test asserts the same artifact moves from etcd-only to
@@ -572,7 +625,7 @@ disabled after all records in the fixture have migrated.
 
 This design builds on merged [PR #53048](https://github.com/milvus-io/milvus/pull/53048)
 and [PR #54044](https://github.com/milvus-io/milvus/pull/54044), rebased onto
-master `865c85105a`. The latter supplies caller-owned async manifest readers and
+the current PR baseline. The latter supplies caller-owned async manifest readers and
 commits, marker projection and callback draining.
 
 Both inspectors bound the number of segment protocols with Go goroutines;
@@ -595,7 +648,9 @@ The complete change is delivered in one PR targeting `master`:
 `feat/datacoord-manifest-index-rollback`. It includes this design, historical
 index backfill, reverse migration, configuration/metrics, GC/copy coordination,
 and their regression tests. Both migration directions build on the already
-merged publication framework; neither requires a separate unmerged PR.
+merged publication framework. The artifact layout and worker capability changes
+from [PR #54412](https://github.com/milvus-io/milvus/pull/54412) are prerequisites
+and are included in this working branch; migration adds no new wire fields.
 
 Each segment batch supplies one `SegmentIndexBackfill` per selected record in
 `SegmentCatalogMutation.SegmentIndexes`. It must satisfy the same publication

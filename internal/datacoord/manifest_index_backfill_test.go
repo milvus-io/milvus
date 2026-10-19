@@ -560,6 +560,7 @@ func TestBackfillMutationRejectsUnsupportedShapes(t *testing.T) {
 			seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
 			segment := m.GetSegment(ctx, restartSegID)
 			record, _ := m.indexMeta.GetIndexJob(restartBuildID)
+			record.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 			entry, err := buildManifestIndexInfo(m, segment, record)
 			require.NoError(t, err)
 			commit := SegmentManifestCommit{

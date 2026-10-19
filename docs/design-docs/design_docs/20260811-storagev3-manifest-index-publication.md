@@ -15,8 +15,9 @@ Every such manifest revision is created by DataCoord inside
 advances `SegmentInfo.manifest_path` and persists the index task metadata.
 
 Publication is opt-in and exclusive with the etcd `SegmentIndex` row, behind
-`dataCoord.index.writeSegmentIndexToManifest` (default off). Off is the pure
-legacy path: every task state goes to etcd and no manifest index entry is
+`dataCoord.index.writeSegmentIndexToManifest` (default off), captured when a build
+task is created. Off is the pure legacy path: every task state goes to etcd and
+no manifest index entry is
 produced. On changes only the terminal artifact placement: Unissued,
 InProgress, Failed, and fake-Finished records still persist to etcd; a Finished
 StorageV3 build with files is published to the manifest, and that publication
@@ -28,9 +29,9 @@ The same switch may be changed in either direction. A
 current manifest may contain index metadata. Additions set it atomically with
 the pointer. Retractions read the final immutable revision and clear the marker
 in that same catalog transaction only when its index section is empty. Startup
-recovery and GC follow this marker,
-not the switch's current value, so disabling publication redirects new results
-to etcd without hiding or leaking indexes written while it was enabled. An
+recovery and GC follow this marker, not the switch's current value, so disabling
+publication redirects newly created tasks to etcd without hiding or leaking
+indexes written while it was enabled. An
 all-etcd cluster has no marked segments and performs no manifest index reads.
 
 Historical eligible artifacts may be moved from etcd-only to manifest-only
@@ -100,13 +101,13 @@ revision.
 
 ### Artifact paths
 
-The manifest artifact path is intentionally distinct from the legacy etcd
-`SegmentIndex` path: index bytes keep their existing
-`index_v1/<collection>/<partition>/<segment>/<build>/<version>` layout.
-DataCoord stores that prefix in `LoonIndexInfo.path` relative to the segment's
-`_index` directory, so milvus-storage's relative/absolute normalization
-round-trips it back to the legacy prefix on read. The legacy etcd handoff
-remains on its existing global `index_files`/`index_v1` hierarchy.
+New builds with manifest publication enabled use
+`<manifest base>/_index/<build>/<version>` (`IndexStorePathVersion=2`). New entries
+store only `<build>/<version>`; external paths and parent traversal are rejected.
+Older persisted entries remain readable in their original layout. Task completion
+follows the persisted layout: version 2 publishes to the manifest, and version
+0/1 finishes in etcd, independently of subsequent switch changes or restarts.
+See the [artifact placement design](20261019-segment-rooted-index-artifacts.md).
 
 ### Concurrency
 
@@ -161,19 +162,15 @@ against its published manifest rather than the segment's earlier revision.
 A copy target is a fresh segment whose worker returns a complete first manifest
 pointer, index entries included; DataCoord publishes that pointer inline.
 
-The copied manifest object is a byte copy of the source's, and re-basing its
-pointer onto the target path is faithful for everything stored relative to the
-segment base — column groups and their per-file properties, stats, LOB. It is
-not faithful for index entries: an index artifact lives outside the segment
-directory, so its stored relative path walks back out of the base and thereby
-hardcodes the source collection/partition/segment/build IDs. Re-basing moves
-where that walk starts, not the IDs it encodes, so an inherited entry keeps
-pointing at the source's artifacts. The worker therefore retracts every
-inherited entry and records entries re-derived from the artifacts it actually
-copied, in one transaction on top of the copied manifest.
+The copied manifest object is a byte copy of the source's. Index entries need
+new target definition IDs and BuildIDs even when their paths are segment-relative.
+Historical entries can also reference the source's external index namespace.
+The worker therefore retracts inherited entries and records entries derived from
+the files it actually copied. New manifest-mode copy tasks place those files
+under the target segment's `_index`, irrespective of the source layout.
 
 Committing on the target also constrains what the copy may bring over. The copy
-carries the segment directory wholesale, and the manifest directory is part of
+carries the segment directory except `_index` (which uses the explicit pinned index list), and the manifest directory is part of
 it; but a snapshot pins one revision while the source segment keeps evolving
 later. The copy keeps only that pinned revision to avoid copying unrelated
 history. The pinned milvus-storage implementation (`3ae6ac4`) applies OVERWRITE

@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -175,12 +176,6 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 // was issued against.
 func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo) (bool, error) {
 	ctx := it.meta.ctx
-	// Manifest publication is opt-in and exclusive with the etcd record: off
-	// (the default) is the pure legacy path and must produce no manifest index
-	// entry at all, so the decline happens before any other inspection.
-	if !writeSegmentIndexToManifest() {
-		return false, nil
-	}
 	if result.GetState() != commonpb.IndexState_Finished {
 		return false, nil
 	}
@@ -202,6 +197,13 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	}
 	segIdx, ok := it.meta.indexMeta.GetIndexJob(it.BuildID)
 	if !ok || segIdx == nil {
+		return false, nil
+	}
+	// Creation pins both placement and publication mode in the path version:
+	// v2 builds publish to manifests, while v0/v1 builds finish in etcd.
+	// Consult the durable task, not the current switch or the worker's result,
+	// so mode changes and coordinator restarts cannot redirect an active build.
+	if !metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
 		return false, nil
 	}
 	// The index definition can be dropped while the build runs: GC's
@@ -423,6 +425,11 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// Send request to worker
 	if err = cluster.CreateIndex(nodeID, req); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
+		if metautil.IsSegmentRooted(req.GetIndexStorePathVersion()) && errors.Is(err, merr.ErrServiceUnimplemented) {
+			if updateErr := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
+				log.Warn(ctx, "failed to persist unsupported index task failure", mlog.Err(updateErr))
+			}
+		}
 		return
 	}
 
@@ -655,8 +662,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
 	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
 
-	// Create the job request. The path layout (v0/v1) is propagated via
-	// IndexStorePathVersion; C++ indexbuilder assembles the remote prefix locally.
+	// Legacy layouts are assembled by C++; segment-rooted builds below carry
+	// the complete prefix derived from the owning manifest, including legacy bases.
 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
 	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
 	req := &workerpb.CreateJobRequest{
@@ -692,6 +699,18 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	}
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)
+	if metautil.IsSegmentRooted(segIndex.IndexStorePathVersion) {
+		base, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+		if err != nil {
+			return nil, merr.Wrap(err, "resolve segment manifest for index build")
+		}
+		if base == "" {
+			return nil, merr.WrapErrServiceInternalMsg("segment-rooted index requires a manifest base, segmentID=%d", segment.GetID())
+		}
+		req.IndexFilePrefix = metautil.NewIndexPathBuilder(it.chunkManager.RootPath(), segIndex.IndexStorePathVersion,
+			segIndex.CollectionID, segIndex.PartitionID, segIndex.SegmentID, segIndex.BuildID, req.IndexVersion).
+			WithManifestPath(segment.GetManifestPath()).BuildPrefix()
+	}
 
 	return req, nil
 }

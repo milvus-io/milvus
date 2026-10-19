@@ -34,9 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -370,7 +368,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 					Status:        merr.Success(),
 					DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{restartCollID}}},
 				}, nil)
-				m, err := newMeta(ctx, catalog, storage.NewLocalChunkManager(objectstorage.RootPath(root)), b)
+				m, err := newMeta(ctx, catalog, migrationServerCopyFixture(t, root), b)
 				require.NoError(t, err)
 				t.Cleanup(m.closeManifestCommitExecutor)
 				return m
@@ -421,7 +419,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, entries, 2)
 			for _, entry := range entries {
-				assert.Equal(t, layout, entry.IndexStorePathVersion)
+				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, entry.IndexStorePathVersion)
 				assert.Equal(t, "vec", entry.ColumnName)
 				for _, key := range entry.IndexFileKeys {
 					data, err := m.chunkManager.Read(ctx, path.Join(entry.Path, key))
@@ -443,7 +441,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 				recovered, ok := restarted.indexMeta.GetIndexJob(record.BuildID)
 				require.True(t, ok)
 				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
-				assert.Equal(t, layout, recovered.IndexStorePathVersion)
+				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, recovered.IndexStorePathVersion)
 				assert.True(t, indexManifestPublished(t, restarted.indexMeta, record.BuildID))
 			}
 			_, pending := newManifestIndexBackfillInspector(ctx, restarted).scan(ctx)
@@ -499,7 +497,7 @@ func TestManifestIndexBackfillIdleAndWake(t *testing.T) {
 				require.NoError(t, m.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 					BuildID: buildID, State: commonpb.IndexState_Finished,
 					IndexFileKeys:         []string{"0", "1"},
-					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 				}))
 			case "version update":
 				require.NoError(t, m.indexMeta.UpdateVersion(buildID, 10))
