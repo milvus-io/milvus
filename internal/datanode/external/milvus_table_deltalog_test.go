@@ -1332,7 +1332,7 @@ func createSourcePKManifest(t *testing.T, basePath string, storageConfig *indexp
 	}
 	defer output.Destroy()
 
-	manifestPath, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, storageConfig, &packed.ManifestUpdates{
+	manifestPath, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), storageConfig, &packed.ManifestUpdates{
 		NewFiles: output,
 	})
 	if err != nil {

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"testing"
 	"time"
 
@@ -34,9 +35,9 @@ import (
 // Existing operator tests supply a blocking fake. Only this test adapter uses
 // a goroutine to model native callback delivery; production submits directly.
 func mockL0ManifestSubmissions(commit func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig, []packed.DeltaLogEntry) (string, error)) *mockey.Mocker {
-	return mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, base string, version int64, cfg *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+	return mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, baseManifest string, cfg *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
 		go func() {
-			manifest, err := commit(ctx, io, packed.MarshalManifestPath(base, version), cfg, updates.DeltaLogs)
+			manifest, err := commit(ctx, io, baseManifest, cfg, updates.DeltaLogs)
 			complete(packed.ManifestUpdateResult{ManifestPath: manifest}, err)
 		}()
 		return nil
@@ -51,7 +52,7 @@ func TestL0ManifestBatchSingleWorker(t *testing.T) {
 	var updates []*l0ManifestUpdate
 	for id := int64(1); id <= 4; id++ {
 		base := fmt.Sprintf("%s/segment-%d", cfg.RootPath, id)
-		initial, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}}})
+		initial, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}}})
 		require.NoError(t, err)
 		segment := NewSegmentInfo(&datapb.SegmentInfo{ID: id, ManifestPath: initial})
 		// Cached and empty steps must advance inline without losing the chain.
@@ -77,6 +78,47 @@ func TestL0ManifestBatchSingleWorker(t *testing.T) {
 	}
 }
 
+// On object storage, every revision the L0 chain publishes records the size of
+// its manifest object, and the next commit opens it with that size.
+func TestL0ManifestBatchRecordsManifestSize(t *testing.T) {
+	cfg := packed.CreateStorageConfig()
+	if cfg.GetStorageType() == "local" {
+		t.Skip("local storage records no manifest size")
+	}
+	executor := newManifestCommitExecutor(1)
+	defer executor.close()
+	base := path.Join(cfg.GetRootPath(), fmt.Sprintf("l0-manifest-size/%d", time.Now().UnixNano()))
+	initial, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), cfg,
+		&packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}}})
+	require.NoError(t, err)
+	segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 1, ManifestPath: initial})
+	cache := make(map[int64]string)
+	var updates []*l0ManifestUpdate
+	for logID := 2; logID <= 3; logID++ {
+		updates = append(updates, &l0ManifestUpdate{
+			segmentID: 1, segment: segment, storageConfig: cfg, committedV3Manifests: cache,
+			entries: []packed.DeltaLogEntry{{Path: fmt.Sprintf("%s/_delta/%d", base, logID), NumEntries: 1}},
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	require.NoError(t, commitL0ManifestUpdates(ctx, executor, updates))
+
+	published := segment.GetManifestPath()
+	require.Equal(t, published, cache[1])
+	revision, err := packed.ParseManifestPath(published)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, revision.ManifestVersion)
+	manifestFile, err := packed.ManifestFilePath(published)
+	require.NoError(t, err)
+	data, err := packed.ReadFile(cfg, manifestFile)
+	require.NoError(t, err)
+	require.EqualValues(t, len(data), revision.Size)
+	paths, err := packed.GetDeltaLogPathsFromManifest(published, cfg)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{base + "/_delta/1", base + "/_delta/2", base + "/_delta/3"}, paths)
+}
+
 func TestL0ManifestBatchDrainsAndStopsChains(t *testing.T) {
 	executor := newManifestCommitExecutor(1)
 	defer executor.close()
@@ -89,13 +131,13 @@ func TestL0ManifestBatchDrainsAndStopsChains(t *testing.T) {
 		}
 	}
 	type submission struct {
-		ctx      context.Context
-		base     string
-		complete func(packed.ManifestUpdateResult, error)
+		ctx          context.Context
+		baseManifest string
+		complete     func(packed.ManifestUpdateResult, error)
 	}
 	submitted := make(chan submission, 6)
-	patch := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, _ *packed.ManifestIOContext, base string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
-		submitted <- submission{ctx, base, complete}
+	patch := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+		submitted <- submission{ctx, baseManifest, complete}
 		return nil
 	}).Build()
 	defer patch.UnPatch()
@@ -116,7 +158,9 @@ func TestL0ManifestBatchDrainsAndStopsChains(t *testing.T) {
 	failure := &packed.ManifestCommitError{Outcome: packed.ManifestCommitUnknown, Err: merr.ErrServiceUnavailable}
 	pending[0].complete(packed.ManifestUpdateResult{}, failure)
 	require.ErrorIs(t, pending[1].ctx.Err(), context.Canceled)
-	pending[1].complete(packed.ManifestUpdateResult{ManifestPath: packed.MarshalManifestPath(pending[1].base, 8)}, nil)
+	published, err := advanceManifest(pending[1].baseManifest, 1)
+	require.NoError(t, err)
+	pending[1].complete(packed.ManifestUpdateResult{ManifestPath: published}, nil)
 	select {
 	case err := <-done:
 		t.Fatalf("returned before final callback: %v", err)
@@ -143,13 +187,17 @@ func TestL0ManifestBatchInlineAndRejected(t *testing.T) {
 				{segmentID: 1, segment: segment, entries: []packed.DeltaLogEntry{{Path: "b"}}},
 			}
 			calls := 0
-			patch := mockey.Mock(packed.SubmitManifestUpdates).To(func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+			patch := mockey.Mock(packed.SubmitManifestUpdates).To(func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
 				calls++
 				if reject {
 					return merr.ErrServiceUnavailable
 				}
+				_, version, err := packed.UnmarshalManifestPath(baseManifest)
+				require.NoError(t, err)
 				require.EqualValues(t, 6+calls, version)
-				complete(packed.ManifestUpdateResult{ManifestPath: packed.MarshalManifestPath(base, version+1)}, nil)
+				published, err := advanceManifest(baseManifest, 1)
+				require.NoError(t, err)
+				complete(packed.ManifestUpdateResult{ManifestPath: published}, nil)
 				return nil
 			}).Build()
 			defer patch.UnPatch()

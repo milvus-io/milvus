@@ -3082,7 +3082,7 @@ func TestAssembleCopySegmentRequest_ManifestFallbackSingleWorker(t *testing.T) {
 	task, job := newManifestFallbackAssembleFixture(ctx, 1, 2, 3)
 	for _, segment := range job.snapshotCache.data.Segments {
 		base := path.Join(cfg.RootPath, "insert_log/100/10", strconv.FormatInt(segment.GetSegmentId(), 10))
-		manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{
+		manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{
 			DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}},
 		})
 		require.NoError(t, err)
