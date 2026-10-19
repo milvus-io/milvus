@@ -1010,8 +1010,6 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
             diff.manifest_updated = true;
             diff.new_manifest_path = new_info.GetManifestPath();
         }
-        diff.rebuild_manifest_reader =
-            diff.manifest_updated || schema_ != new_info.schema_;
         ComputeDiffColumnGroups(diff, new_info);
     } else {
         AssertInfo(
@@ -1058,7 +1056,6 @@ SegmentLoadInfo::GetLoadDiff() {
         empty_info.info_.set_manifest_path("empty manifest");
         empty_info.column_groups_ =
             std::make_shared<milvus_storage::api::ColumnGroups>();
-        diff.rebuild_manifest_reader = true;
         empty_info.ComputeDiffColumnGroups(diff, *this);
     } else {
         empty_info.ComputeDiffBinlogs(diff, *this);

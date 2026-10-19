@@ -121,9 +121,6 @@ struct LoadDiff {
     // Text fields that need text indexes created from raw data
     std::unordered_set<FieldId> text_indexes_to_create;
 
-    // Reader state can change even when no physical column needs loading.
-    bool rebuild_manifest_reader = false;
-
     // Whether manifest path has changed (only when both use manifest mode)
     bool manifest_updated = false;
 
@@ -143,8 +140,7 @@ struct LoadDiff {
                !fields_to_fill_default.empty() ||
                !text_indexes_to_load.empty() || !json_stats_to_load.empty() ||
                !json_stats_to_replace.empty() || !json_stats_to_drop.empty() ||
-               !text_indexes_to_create.empty() || manifest_updated ||
-               rebuild_manifest_reader;
+               !text_indexes_to_create.empty() || manifest_updated;
     }
 
     [[nodiscard]] std::string
@@ -382,11 +378,6 @@ struct LoadDiff {
         oss << "manifest_updated=" << (manifest_updated ? "true" : "false");
         if (manifest_updated) {
             oss << ", new_manifest_path=" << new_manifest_path;
-        }
-
-        // rebuild_manifest_reader
-        if (rebuild_manifest_reader) {
-            oss << ", rebuild_manifest_reader=true";
         }
 
         oss << "}";

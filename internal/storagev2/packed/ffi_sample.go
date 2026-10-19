@@ -37,8 +37,10 @@ import (
 )
 
 // GetExternalFileColumns reads authoritative physical names from file metadata.
+// File properties retain the explored snapshot (for example Lance dataset_version)
+// independently of the filesystem configuration.
 // A metadata failure must propagate; it must never imply an absent column.
-func GetExternalFileColumns(format, path string, storageConfig *indexpb.StorageConfig, extfs ExternalSpecContext) ([]string, error) {
+func GetExternalFileColumns(format, path string, fileProperties map[string]string, storageConfig *indexpb.StorageConfig, extfs ExternalSpecContext) ([]string, error) {
 	properties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
 		return nil, merr.Wrap(err, "create external metadata properties")
@@ -54,8 +56,17 @@ func GetExternalFileColumns(format, path string, storageConfig *indexpb.StorageC
 	cFormat, cPath := C.CString(format), C.CString(path)
 	defer C.free(unsafe.Pointer(cFormat))
 	defer C.free(unsafe.Pointer(cPath))
+	var cFileProperties *C.char
+	if len(fileProperties) > 0 {
+		encoded, err := json.Marshal(fileProperties)
+		if err != nil {
+			return nil, merr.Wrap(err, "encode external file properties")
+		}
+		cFileProperties = C.CString(string(encoded))
+		defer C.free(unsafe.Pointer(cFileProperties))
+	}
 	var output *C.char
-	status := C.GetExternalFileColumns(cFormat, cPath, properties, &output)
+	status := C.GetExternalFileColumns(cFormat, cPath, properties, cFileProperties, &output)
 	defer C.free(unsafe.Pointer(output))
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err

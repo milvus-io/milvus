@@ -150,6 +150,7 @@ CStatus
 GetExternalFileColumns(const char* format,
                        const char* path,
                        const LoonProperties* c_properties,
+                       const char* file_properties_json,
                        char** columns_json) {
     if (columns_json == nullptr) {
         return MakeCStatusError("columns output is null");
@@ -168,6 +169,11 @@ GetExternalFileColumns(const char* format,
             }
         }
         milvus_storage::api::ColumnGroupFile file{path, 0, 0, {}};
+        if (file_properties_json != nullptr) {
+            // Lance reads dataset_version from the file, not reader properties.
+            // Dropping it can reopen latest after compaction removes this fragment.
+            nlohmann::json::parse(file_properties_json).get_to(file.properties);
+        }
         auto reader = milvus_storage::FormatReader::create(
             nullptr, format, file, properties, {}, nullptr);
         if (!reader.ok()) {

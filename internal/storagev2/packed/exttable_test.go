@@ -2520,6 +2520,8 @@ func TestFetchFragmentsFromExternalSourceWithRange_NeedsFileInfo(t *testing.T) {
 		FilePath: "f1.parquet", NumRows: 500,
 	}, nil).Build()
 	defer mockGetInfo.UnPatch()
+	mockColumns := mockey.Mock(GetExternalFileColumns).Return([]string{"id"}, nil).Build()
+	defer mockColumns.UnPatch()
 
 	fragments, err := FetchFragmentsFromExternalSourceWithRange(
 		ctx, "parquet", nil, "", config,
@@ -2609,7 +2611,7 @@ func TestRowLimitOrDefault(t *testing.T) {
 // ==================== fetchRowCountsConcurrently Tests ====================
 
 func TestFetchRowCountsConcurrently_AllKnownSkipsFFI(t *testing.T) {
-	// All fileInfos already have NumRows > 0 → no GetFileInfo call.
+	// All fileInfos already have row counts and columns, so no metadata is read.
 	mockCalled := int32(0)
 	m := mockey.Mock(GetFileInfo).To(func(format, path string, cfg *indexpb.StorageConfig, extfs ExternalSpecContext) (*FileInfo, error) {
 		atomic.AddInt32(&mockCalled, 1)
@@ -2633,15 +2635,22 @@ func TestFetchRowCountsConcurrently_MissingFilled(t *testing.T) {
 		return &FileInfo{FilePath: path, NumRows: 777}, nil
 	}).Build()
 	defer m.UnPatch()
+	columns := mockey.Mock(GetExternalFileColumns).To(func(format, path string, properties map[string]string, cfg *indexpb.StorageConfig, extfs ExternalSpecContext) ([]string, error) {
+		assert.Equal(t, map[string]string{"extra": path}, properties)
+		return []string{"id"}, nil
+	}).Build()
+	defer columns.UnPatch()
 
 	fileInfos := []FileInfo{
 		{FilePath: "a", NumRows: 10, Columns: []string{"id"}},
-		{FilePath: "b", NumRows: 0},
-		{FilePath: "c", NumRows: -1},
+		{FilePath: "b", NumRows: 0, Properties: map[string]string{"extra": "b"}},
+		{FilePath: "c", NumRows: -1, Properties: map[string]string{"extra": "c"}},
 	}
 	got, err := fetchRowCountsConcurrently(context.Background(), "parquet", fileInfos, &indexpb.StorageConfig{}, ExternalSpecContext{})
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{10, 777, 777}, got)
+	assert.Equal(t, []string{"id"}, fileInfos[1].Columns)
+	assert.Equal(t, []string{"id"}, fileInfos[2].Columns)
 }
 
 func TestFetchRowCountsConcurrently_WorkerErrorPropagated(t *testing.T) {
@@ -2683,7 +2692,7 @@ func TestFetchRowCountsConcurrently_CtxCancelledDuringRun(t *testing.T) {
 	defer m.UnPatch()
 
 	_, err := fetchRowCountsConcurrently(ctx, "parquet",
-		[]FileInfo{{FilePath: "x", NumRows: 0}}, &indexpb.StorageConfig{}, ExternalSpecContext{})
+		[]FileInfo{{FilePath: "x", NumRows: 0, Columns: []string{"id"}}}, &indexpb.StorageConfig{}, ExternalSpecContext{})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
@@ -2708,8 +2717,14 @@ func TestPhysicalFragmentColumns(t *testing.T) {
 }
 
 func TestFetchRowCountsConcurrently_KnownRowsStillDiscoverColumns(t *testing.T) {
-	fields := []FileInfo{{FilePath: "table", NumRows: 5}}
-	m := mockey.Mock(GetExternalFileColumns).Return([]string{"id", "value"}, nil).Build()
+	properties := map[string]string{"dataset_version": "10", "extra": "preserved"}
+	fields := []FileInfo{{FilePath: "table?fragment_id=0", NumRows: 5, Properties: properties}}
+	m := mockey.Mock(GetExternalFileColumns).To(func(format, path string, fileProperties map[string]string, cfg *indexpb.StorageConfig, extfs ExternalSpecContext) ([]string, error) {
+		assert.Equal(t, "lance-table", format)
+		assert.Equal(t, fields[0].FilePath, path)
+		assert.Equal(t, properties, fileProperties)
+		return []string{"id", "value"}, nil
+	}).Build()
 	defer m.UnPatch()
 	counts, err := fetchRowCountsConcurrently(context.Background(), "lance-table", fields, nil, ExternalSpecContext{})
 	require.NoError(t, err)
@@ -2752,11 +2767,28 @@ func TestGetExternalFileColumns_ReadFailures(t *testing.T) {
 	config := &indexpb.StorageConfig{StorageType: "local", BucketName: root, RootPath: root}
 	for _, path := range []string{filepath.Join(root, "missing.parquet"), corrupt} {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			columns, err := GetExternalFileColumns("parquet", path, config, ExternalSpecContext{})
+			columns, err := GetExternalFileColumns("parquet", path, nil, config, ExternalSpecContext{})
 			require.Error(t, err)
 			require.Nil(t, columns)
 		})
 	}
+}
+
+func TestFetchRowCountsConcurrently_LanceVersionReachesReader(t *testing.T) {
+	root := t.TempDir()
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	files := []FileInfo{{
+		FilePath:   filepath.Join(root, "table.lance") + "?fragment_id=0",
+		NumRows:    5,
+		Properties: map[string]string{"dataset_version": "invalid-version"},
+	}}
+	// The real Lance reader validates this property before opening the dataset.
+	// If Go or C++ drops it, opening latest fails with a different error instead.
+	counts, err := fetchRowCountsConcurrently(context.Background(), "lance-table", files, config, ExternalSpecContext{})
+	require.ErrorContains(t, err, "Invalid Lance dataset version")
+	require.ErrorContains(t, err, "invalid-version")
+	require.Nil(t, counts)
+	require.Nil(t, files[0].Columns)
 }
 
 func TestFetchFragmentsFromExternalSourceWithRange_MilvusTableColumns(t *testing.T) {

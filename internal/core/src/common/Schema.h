@@ -533,13 +533,15 @@ class Schema {
     // Normal collections: column name is the numeric field ID string.
     // External collections: milvus-table source columns prefer numeric field
     // ID strings; other source formats use external_field metadata; function
-    // outputs use numeric field ID strings.
+    // outputs use numeric field ID strings. Throws if the column cannot resolve.
     FieldId
     ResolveColumnFieldId(const std::string& column_name) const;
 
     // Resolve every logical field backed by one physical manifest column.
     // External schemas may intentionally map multiple fields to the same
-    // external_field.
+    // external_field. Unmapped nonnumeric external columns return an empty
+    // list so historical manifests can retain dropped fields. Numeric columns
+    // still resolve to IDs; callers filter IDs absent from the current schema.
     std::vector<FieldId>
     ResolveColumnFieldIds(const std::string& column_name) const;
 
