@@ -71,7 +71,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/iskorotkov/avro/v2 v2.33.1
 	github.com/magiconair/properties v1.8.7
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261014040338-d453f0648677
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261027141346-6f03375388ae
 	github.com/milvus-io/milvus/client/v3 v3.0.0
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/shirou/gopsutil/v4 v4.25.10
@@ -192,7 +192,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
-	github.com/hashicorp/go-immutable-radix v1.0.0 // indirect
+	github.com/hashicorp/go-immutable-radix v1.0.0
 	github.com/hashicorp/go-metrics v0.5.4 // indirect
 	github.com/hashicorp/go-msgpack/v2 v2.1.1 // indirect
 	github.com/hashicorp/go-multierror v1.0.0 // indirect

@@ -140,9 +140,9 @@ func TestQueryTaskRunnerMultiSegmentFieldRetrieval(t *testing.T) {
 	for _, zeroCopy := range []bool{false, true} {
 		t.Run(strconv.FormatBool(zeroCopy), func(t *testing.T) {
 			require.NoError(t, paramtable.Get().Save(cfg.Key, strconv.FormatBool(zeroCopy)))
-			var original func(context.Context, []segcore.CSegment, *segcore.RetrievePlan, []int32, []int64) (arrow.Record, error)
-			fill := mockey.Mock(segcore.FillRetrieveFieldsOrdered).Origin(&original).To(func(ctx context.Context, segments []segcore.CSegment, plan *segcore.RetrievePlan, indices []int32, offsets []int64) (arrow.Record, error) {
-				return original(ctx, segments, plan, indices, offsets)
+			var original func(context.Context, []segcore.CSegment, *segcore.RetrievePlan, []int32, []int64, int64) (arrow.Record, error)
+			fill := mockey.Mock(segcore.FillRetrieveFieldsOrdered).Origin(&original).To(func(ctx context.Context, segments []segcore.CSegment, plan *segcore.RetrievePlan, indices []int32, offsets []int64, budget int64) (arrow.Record, error) {
+				return original(ctx, segments, plan, indices, offsets, budget)
 			}).Build()
 			defer fill.UnPatch()
 			result, err := queryTaskRunner{}.Query(ctx, collection, selected, req, 1)

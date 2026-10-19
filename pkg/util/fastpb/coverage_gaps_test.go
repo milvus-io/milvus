@@ -79,6 +79,37 @@ func diffDecode(t *testing.T, wire []byte, fresh func() proto.Message, fast func
 	}
 }
 
+// The deferred message must retain protobuf presence, merge, and validation semantics.
+func TestUpsertRequest_WriteConditionFallback(t *testing.T) {
+	condition, err := proto.Marshal(&milvuspb.WriteCondition{
+		Field: "version", Op: milvuspb.WriteCondition_GT, OnMissing: milvuspb.WriteCondition_SKIP_IF_MISSING,
+	})
+	require.NoError(t, err)
+	wrap := func(payload []byte) []byte {
+		return protowire.AppendBytes(protowire.AppendTag(nil, 14, protowire.BytesType), payload)
+	}
+	// Interleave a fast-decoded field between repeated condition messages.
+	duplicate := wrap(condition)
+	duplicate = protowire.AppendString(protowire.AppendTag(duplicate, 3, protowire.BytesType), "coll")
+	// Explicit defaults must overwrite earlier values while retaining Field.
+	duplicate = append(duplicate, wrap([]byte{0x10, 0, 0x18, 0})...)
+	for _, tc := range []struct {
+		name string
+		wire []byte
+	}{
+		{"absent", nil},
+		{"present_empty", wrap(nil)},
+		{"populated", wrap(condition)},
+		{"duplicate_explicit_defaults", duplicate},
+		{"invalid_utf8", wrap([]byte{0x0a, 1, 0xff})},
+		{"truncated_nested_message", wrap([]byte{0x0a, 2, 'x'})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diffDecode(t, tc.wire, newUpsertRequest, decUpsertRequest)
+		})
+	}
+}
+
 // decoder adapters so each entry point shares diffDecode.
 var (
 	decFieldData    = func(b []byte, m proto.Message) error { return UnmarshalFieldData(b, m.(*schemapb.FieldData)) }

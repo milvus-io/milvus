@@ -30,10 +30,11 @@ import (
 
 // ChainRepr is the internal representation of a FuncChain.
 type ChainRepr struct {
-	Name      string
-	Stage     string
-	Operators []OperatorRepr
-	Info      ChainReprInfo
+	Name          string
+	OutputColumns []string // Final result projection; does not drop runtime columns.
+	Stage         string
+	Operators     []OperatorRepr
+	Info          ChainReprInfo
 }
 
 // OperatorRepr is the internal representation of an Operator.
@@ -86,21 +87,29 @@ func ProtoChainToRepr(pb *schemapb.FunctionChain) (*ChainRepr, error) {
 		return nil, merr.WrapErrParameterInvalidMsg("function chain proto is nil")
 	}
 
+	if pb.GetStage() != schemapb.FunctionChainStage_FunctionChainStageQueryScan && len(pb.GetOutputColumns()) != 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("output_columns is currently supported only by QueryScan chains")
+	}
+
 	stage, err := ProtoStageToReprStage(pb.GetStage())
 	if err != nil {
 		return nil, err
 	}
 
 	repr := &ChainRepr{
-		Name:      pb.GetName(),
-		Stage:     stage,
-		Operators: make([]OperatorRepr, 0, len(pb.GetOps())),
+		Name:          pb.GetName(),
+		OutputColumns: append([]string(nil), pb.GetOutputColumns()...),
+		Stage:         stage,
+		Operators:     make([]OperatorRepr, 0, len(pb.GetOps())),
 	}
 
 	for i, opPB := range pb.GetOps() {
 		opRepr, err := ProtoOpToRepr(opPB)
 		if err != nil {
 			return nil, merr.WrapErrParameterInvalidMsg("op[%d]: %v", i, err)
+		}
+		if opRepr.Type == types.OpTypeGrep && stage != types.StageQueryScan {
+			return nil, merr.WrapErrParameterInvalidMsg("grep supports only QueryScan")
 		}
 		repr.Operators = append(repr.Operators, *opRepr)
 	}
@@ -139,6 +148,9 @@ func ProtoOpToRepr(pb *schemapb.FunctionChainOp) (*OperatorRepr, error) {
 		Outputs: outputs,
 	}
 
+	if opType == types.OpTypeGrep && pb.GetExpr() != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("grep does not accept an expression")
+	}
 	if pb.GetExpr() != nil {
 		expr, exprInputs, err := ProtoExprToRepr(pb.GetExpr())
 		if err != nil {
@@ -228,6 +240,8 @@ func FunctionChainExprArgInput(arg *schemapb.FunctionChainExprArg) (string, erro
 // ProtoStageToReprStage converts public FunctionChainStage enum to chain runtime stage string.
 func ProtoStageToReprStage(stage schemapb.FunctionChainStage) (string, error) {
 	switch stage {
+	case schemapb.FunctionChainStage_FunctionChainStageQueryScan:
+		return types.StageQueryScan, nil
 	case schemapb.FunctionChainStage_FunctionChainStageIngestion:
 		return types.StageIngestion, nil
 	case schemapb.FunctionChainStage_FunctionChainStagePreProcess:
@@ -291,6 +305,11 @@ func (repr *ChainRepr) RefreshInfo() error {
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("op[%d]: unknown operator type: %s", i, opType)
 		}
+		if opType == types.OpTypeGrep {
+			// Public inputs name native field dependencies; the runtime frame
+			// only needs the candidate offsets, never a full text column.
+			inputs = []string{types.SegOffsetFieldName}
+		}
 		info.Ops = append(info.Ops, OperatorReprInfo{
 			Type:       opType,
 			ReadNames:  append([]string(nil), inputs...),
@@ -344,6 +363,14 @@ func funcChainFromRepr(repr *ChainRepr, alloc memory.Allocator, buildCtx types.F
 		return nil, merr.WrapErrParameterMissingMsg("stage is required")
 	}
 
+	for _, op := range repr.Operators {
+		if op.Type == types.OpTypeGrep && repr.Stage != types.StageQueryScan {
+			return nil, merr.WrapErrParameterInvalidMsg("grep supports only QueryScan")
+		}
+	}
+	if repr.Stage == types.StageQueryScan && (len(repr.Operators) != 1 || repr.Operators[0].Type != types.OpTypeGrep) {
+		return nil, merr.WrapErrParameterInvalidMsg("QueryScan requires exactly one grep operator")
+	}
 	chain := NewFuncChainWithAllocator(alloc)
 	if repr.Name != "" {
 		chain.SetName(repr.Name)

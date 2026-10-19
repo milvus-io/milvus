@@ -296,6 +296,9 @@ message RetrieveResults {
   // Execution features segcore used for this request; see
   // SearchResults.feature_bits.
   uint64 feature_bits = 21;
+
+  // Query-local typed columns; selected together with ids at every reduce.
+  repeated schema.FieldData computed_results = 22;
 }
 
 message LoadIndex {

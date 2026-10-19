@@ -35,6 +35,9 @@ struct ArrowArray;
 // converts to Arrow via BuildExplicitFieldsBatch, and exports
 // via arrow::ExportRecordBatch.
 //
+// Before field reads, check the aggregate per-segment average-size estimate
+// against max_output_size. The caller subtracts any already-computed output.
+//
 // Caller owns out_schema/out_array and must release them through
 // the Arrow C Data Interface.
 // Failed calls release partial outputs. In-memory Arrow statuses are classified
@@ -47,6 +50,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                           const int32_t* seg_indices,
                           const int64_t* seg_offsets,
                           int64_t total_rows,
+                          int64_t max_output_size,
                           struct ArrowSchema* out_schema,
                           struct ArrowArray* out_array,
                           void* cancellation_source);

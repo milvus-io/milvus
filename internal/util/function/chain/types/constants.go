@@ -23,6 +23,7 @@ package types
 // =============================================================================
 
 const (
+	OpTypeGrep    = "grep"
 	OpTypeMap     = "map"
 	OpTypeFilter  = "filter"
 	OpTypeSort    = "sort"
@@ -76,6 +77,7 @@ const (
 	IDFieldName        = "$id"
 	ScoreFieldName     = "$score"
 	SegOffsetFieldName = "$seg_offset"
+	TimestampFieldName = "$timestamp"
 	GroupByFieldName   = "$group_by"
 	// ElementIndicesFieldName stores one Int32 element index per result row.
 	ElementIndicesFieldName = "$element_indices"

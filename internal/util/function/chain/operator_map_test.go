@@ -560,7 +560,7 @@ func (s *MapOpTestSuite) TestMapOpFiniteScoreConstraint() {
 						// Model a schema-backed regular output for FieldData export.
 						fieldType, err := ToMilvusType(dataType)
 						s.Require().NoError(err)
-						result.fieldTypes[destination] = fieldType
+						result.fieldMetadata[destination] = columnMetadata{origin: columnComputed, field: &schemapb.FieldSchema{DataType: fieldType, Nullable: result.FieldNullable(destination)}}
 					}
 					exported, exportErr := ToSearchResultData(result)
 					if destination == types.ScoreFieldName && !tc.validScore {

@@ -261,8 +261,22 @@ func (op *OrderByLimitOperator) compareFieldValuesAt(fd *schemapb.FieldData, idx
 
 // reorderResult reorders result rows by given indices.
 func (op *OrderByLimitOperator) reorderResult(result *internalpb.RetrieveResults, indices []int) (*internalpb.RetrieveResults, error) {
+	var computed []*schemapb.FieldData
+	if result.GetComputedResults() != nil {
+		refs := make([]rowRef, len(indices))
+		for i, index := range indices {
+			refs[i] = rowRef{rowIdx: int64(index)}
+		}
+		var err error
+		computed, err = selectComputedResults([]*internalpb.RetrieveResults{result}, refs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	newResult := &internalpb.RetrieveResults{
-		FieldsData: make([]*schemapb.FieldData, len(result.GetFieldsData())),
+		ComputedResults: computed,
+		FieldsData:      make([]*schemapb.FieldData, len(result.GetFieldsData())),
 	}
 
 	if result.GetIds() != nil {

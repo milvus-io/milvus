@@ -310,8 +310,8 @@ func (d dec) insertRequest(b []byte, ir *milvuspb.InsertRequest) error {
 // UNTRUSTED ingress → strings are UTF-8 validated). Fields 1-8 share InsertRequest's
 // exact wire layout (hot field: fields_data (5)); the upsert-only fields
 // partial_update (9), namespace (10), field_ops (11), and the RLS fields
-// rls_principal (12) and skip_rls (13) are folded into the official merge, so
-// they decode via the standard codec and stay wire-equivalent.
+// rls_principal (12), skip_rls (13), and write_condition (14) are folded into
+// the official merge, so they decode via the standard codec and stay wire-equivalent.
 func UnmarshalUpsertRequest(b []byte, ur *milvuspb.UpsertRequest) error {
 	proto.Reset(ur) // match official proto.Unmarshal: clear target before decode
 	if err := (dec{utf8: true}).upsertRequest(b, ur); err != nil {
@@ -409,7 +409,7 @@ func (d dec) upsertRequest(b []byte, ur *milvuspb.UpsertRequest) error {
 			if err := appendPackedU32(v, &ur.HashKeys); err != nil {
 				return err
 			}
-		default: // fields 10-13 and any future field → official merge
+		default: // fields 10-14 and any future field → official merge
 			rest = append(rest, start[:tn+vn]...)
 		}
 	}

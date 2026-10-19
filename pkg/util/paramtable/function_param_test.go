@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -116,4 +117,44 @@ func TestFunctionConfigPyUDF(t *testing.T) {
 	defer cfg.PyUDFEnabled.SwapTempValue(oldEnabled)
 
 	assert.True(t, cfg.PyUDFEnabled.GetAsBool())
+}
+
+func TestGrepConfigValidationAndRefresh(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	for _, tc := range []struct {
+		item        *ParamItem
+		fallback    int64
+		zeroAllowed bool
+	}{
+		{&params.FunctionCfg.GrepMaxArgumentBytes, 65536, false},
+		{&params.FunctionCfg.GrepMaxRegexBytes, 10485760, false},
+		{&params.FunctionCfg.GrepMaxDFACacheBytes, 8388608, false},
+		{&params.FunctionCfg.GrepBatchSize, 128, false},
+		{&params.FunctionCfg.GrepMaxScanRows, 0, true},
+	} {
+		t.Run(tc.item.Key, func(t *testing.T) {
+			assert.Equal(t, tc.fallback, tc.item.GetAsInt64())
+			for _, value := range []string{"", "-1", "bad", "1.5", "9223372036854775808", "-9223372036854775809"} {
+				// Populate the typed cache before changing to an invalid value.
+				assert.NoError(t, params.Save(tc.item.Key, "7"))
+				assert.Equal(t, int64(7), tc.item.GetAsInt64())
+				assert.NoError(t, params.Save(tc.item.Key, value))
+				assert.Equal(t, tc.fallback, tc.item.GetAsInt64(), value)
+				assert.Equal(t, tc.item.DefaultValue, tc.item.GetValue(), value)
+				assert.Equal(t, tc.fallback, tc.item.GetAsInt64(), value)
+			}
+			assert.NoError(t, params.Save(tc.item.Key, "0"))
+			zeroExpected := tc.fallback
+			if tc.zeroAllowed {
+				zeroExpected = 0
+			}
+			assert.Equal(t, zeroExpected, tc.item.GetAsInt64())
+			for _, value := range []int64{1, 11, 9223372036854775807} {
+				assert.NoError(t, params.Save(tc.item.Key, strconv.FormatInt(value, 10)))
+				assert.Equal(t, value, tc.item.GetAsInt64())
+				assert.Equal(t, value, tc.item.GetAsInt64())
+			}
+		})
+	}
 }

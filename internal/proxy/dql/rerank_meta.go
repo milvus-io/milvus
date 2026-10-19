@@ -97,7 +97,9 @@ func newDataFrameInputPlanFromFieldNames(
 		// FunctionScore names describe whole schema fields, not typed JSON
 		// paths. Reject unsupported request inputs before creating a plan
 		// whose downstream validation assumes it was already compiled.
-		if _, err := chain.ToArrowType(field.GetDataType()); err != nil {
+		// JSON has an Arrow representation for computed outputs, but whole
+		// JSON roots are not valid FunctionScore field-name inputs.
+		if _, err := chain.ToArrowType(field.GetDataType()); err != nil || field.GetDataType() == schemapb.DataType_JSON {
 			return nil, merr.WrapErrParameterInvalidMsg(
 				"function score input field %q has unsupported field type %s", fieldName, field.GetDataType().String())
 		}
