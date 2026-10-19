@@ -42,10 +42,11 @@ func fixture(t *testing.T) *collector {
 		root:          root,
 		writeMeta:     write("covmeta.test"),
 		writeCounters: write("covcounters.test"),
-		dump: func() {
+		dump: func() error {
 			if err := os.WriteFile(filepath.Join(root, "cpp", "probe.gcda"), []byte("native data"), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			return nil
 		},
 	}
 }
@@ -72,7 +73,7 @@ func TestSnapshotPreservesRawDataAndRejectsReuse(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	c.dump = func() { t.Fatal("duplicate request dumped counters again") }
+	c.dump = func() error { t.Fatal("duplicate request dumped counters again"); return nil }
 	requestSnapshot(t, c, id)
 	if _, err := os.Stat(filepath.Join(run, "error")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("duplicate request changed existing result: %v", err)
@@ -91,22 +92,26 @@ func TestSnapshotFailuresNeverPublishCompletion(t *testing.T) {
 	}{
 		{"Go metadata", func(c *collector) { c.writeMeta = func(string) error { return os.ErrPermission } }, "Go metadata"},
 		{"Go counters", func(c *collector) { c.writeCounters = func(string) error { return os.ErrPermission } }, "Go counters"},
-		{"missing native counters", func(c *collector) { c.dump = func() {} }, "no .gcda"},
+		{"missing native counters", func(c *collector) { c.dump = func() error { return nil } }, "fewer .gcda"},
 		{"native dump error", func(c *collector) {
-			c.dump = func() {
+			c.dump = func() error {
 				if err := os.WriteFile(filepath.Join(c.root, "gcov-errors.log"), []byte("profiling: permission denied"), 0o600); err != nil {
 					t.Fatal(err)
 				}
+				return nil
 			}
 		}, "gcov dump failed"},
 		{"copy error", func(c *collector) {
 			original := c.dump
-			c.dump = func() {
-				original()
+			c.dump = func() error {
+				if err := original(); err != nil {
+					return err
+				}
 				// Block creation of the destination directory.
 				if err := os.WriteFile(filepath.Join(c.root, "runs", strings.Repeat("b", 32), "cpp"), nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
+				return nil
 			}
 		}, "C++ counters"},
 	} {
@@ -127,16 +132,49 @@ func TestSnapshotFailuresNeverPublishCompletion(t *testing.T) {
 
 func TestNativeFailureIsSticky(t *testing.T) {
 	c := fixture(t)
-	c.dump = func() {
+	c.dump = func() error {
 		if err := os.WriteFile(filepath.Join(c.root, "gcov-errors.log"), []byte("write failed"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		return nil
 	}
 	requestSnapshot(t, c, strings.Repeat("c", 32))
-	c.dump = func() { t.Fatal("native dump retried after losing an interval") }
+	c.dump = func() error { t.Fatal("native dump retried after losing an interval"); return nil }
 	run := requestSnapshot(t, c, strings.Repeat("d", 32))
 	if _, err := os.Stat(filepath.Join(run, "error")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSnapshotRejectsStaleNativeCounters(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dump func(*collector) func() error
+		want string
+	}{
+		{"unchanged", func(*collector) func() error { return func() error { return nil } }, "did not rewrite"},
+		{"missing", func(c *collector) func() error {
+			return func() error { return os.Remove(filepath.Join(c.root, "cpp", "probe.gcda")) }
+		}, "fewer .gcda"},
+		{"flush failure", func(*collector) func() error {
+			return func() error { return os.ErrPermission }
+		}, "gcov dump"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fixture(t)
+			requestSnapshot(t, c, strings.Repeat("1", 32))
+			c.dump = tc.dump(c)
+			run := requestSnapshot(t, c, strings.Repeat("2", 32))
+			failure, err := os.ReadFile(filepath.Join(run, "error"))
+			if err != nil || !strings.Contains(string(failure), tc.want) {
+				t.Fatalf("failure marker: %q, %v; want %q", failure, err, tc.want)
+			}
+			if _, err := os.Stat(filepath.Join(run, "done.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("failed snapshot published completion: %v", err)
+			}
+			c.dump = func() error { t.Fatal("native dump retried after losing an interval"); return nil }
+			requestSnapshot(t, c, strings.Repeat("3", 32))
+		})
 	}
 }
 
@@ -170,7 +208,7 @@ func TestStartRejectsConflictingOrStaleOutput(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := start(t.Context(), root, func() {}); err == nil {
+			if err := start(t.Context(), root, func() error { return nil }); err == nil {
 				t.Fatal("accepted invalid output")
 			}
 		})
@@ -186,7 +224,7 @@ func TestStartDoesNotModifyAnOwnedDirectory(t *testing.T) {
 	if err := os.WriteFile(ready, []byte("owner"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := start(t.Context(), root, func() {}); err == nil {
+	if err := start(t.Context(), root, func() error { return nil }); err == nil {
 		t.Fatal("accepted occupied directory")
 	}
 	data, err := os.ReadFile(ready)
@@ -247,10 +285,11 @@ func TestServeProcessesOnlyValidRegularRequests(t *testing.T) {
 func TestRepeatedSnapshotsKeepPreviousData(t *testing.T) {
 	c := fixture(t)
 	first := requestSnapshot(t, c, strings.Repeat("1", 32))
-	c.dump = func() {
+	c.dump = func() error {
 		if err := os.WriteFile(filepath.Join(c.root, "cpp", "probe.gcda"), []byte("updated data"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		return nil
 	}
 	second := requestSnapshot(t, c, strings.Repeat("2", 32))
 	for run, want := range map[string]string{first: "native data", second: "updated data"} {

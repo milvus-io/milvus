@@ -36,7 +36,7 @@ import (
 
 type collector struct {
 	root          string
-	dump          func()
+	dump          func() error
 	writeMeta     func(string) error
 	writeCounters func(string) error
 	// A failed native dump can lose an interval after reset. Never advertise
@@ -44,7 +44,7 @@ type collector struct {
 	nativeError error
 }
 
-func start(ctx context.Context, root string, dump func()) error {
+func start(ctx context.Context, root string, dump func() error) error {
 	root = filepath.Clean(root)
 	if !filepath.IsAbs(root) {
 		return merr.WrapErrParameterInvalidMsg("MILVUS_COVERAGE_DIR must be absolute")
@@ -157,11 +157,16 @@ func (c *collector) snapshot(run string) error {
 	if c.nativeError != nil {
 		return c.nativeError
 	}
+	cppRoot := filepath.Join(c.root, "cpp")
+	previous, err := gcdaTimes(cppRoot)
+	if err != nil {
+		return merr.Wrap(err, "inspect C++ counters before dump")
+	}
 	errorFile := filepath.Join(c.root, "gcov-errors.log")
 	if err := os.WriteFile(errorFile, nil, 0o600); err != nil {
 		return err
 	}
-	c.dump()
+	dumpErr := c.dump()
 	diagnostics, err := os.ReadFile(errorFile)
 	if err != nil {
 		c.nativeError = err
@@ -171,7 +176,26 @@ func (c *collector) snapshot(run string) error {
 		c.nativeError = merr.WrapErrServiceInternalMsg("gcov dump failed: %s", diagnostics)
 		return c.nativeError
 	}
-	cppRoot := filepath.Join(c.root, "cpp")
+	if dumpErr != nil {
+		c.nativeError = merr.Wrap(dumpErr, "gcov dump")
+		return c.nativeError
+	}
+	current, err := gcdaTimes(cppRoot)
+	if err != nil {
+		c.nativeError = merr.Wrap(err, "inspect C++ counters after dump")
+		return c.nativeError
+	}
+	if len(current) == 0 || len(current) < len(previous) {
+		c.nativeError = merr.WrapErrServiceInternalMsg("C++ dump produced fewer .gcda files than before")
+		return c.nativeError
+	}
+	for path, oldTime := range previous {
+		newTime, ok := current[path]
+		if !ok || !newTime.After(oldTime) {
+			c.nativeError = merr.WrapErrServiceInternalMsg("C++ dump did not rewrite %s", path)
+			return c.nativeError
+		}
+	}
 	count := 0
 	err = filepath.WalkDir(cppRoot, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -193,9 +217,7 @@ func (c *collector) snapshot(run string) error {
 	if err != nil {
 		return merr.Wrap(err, "C++ counters")
 	}
-	if count == 0 {
-		return merr.WrapErrServiceInternalMsg("C++ dump produced no .gcda files")
-	}
+	// The pre-copy check ensures that the dump rewrote every existing counter.
 	manifest, err := json.Marshal(struct {
 		PID        int       `json:"pid"`
 		ExportedAt time.Time `json:"exported_at"`
@@ -210,6 +232,25 @@ func (c *collector) snapshot(run string) error {
 		return err
 	}
 	return os.Rename(temp, filepath.Join(run, "done.json"))
+}
+
+func gcdaTimes(root string) (map[string]time.Time, error) {
+	times := make(map[string]time.Time)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.Type().IsRegular() || filepath.Ext(path) != ".gcda" {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		times[path] = info.ModTime()
+		return nil
+	})
+	return times, err
 }
 
 func copyFile(source, destination string) error {

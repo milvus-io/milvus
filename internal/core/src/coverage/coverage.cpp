@@ -14,15 +14,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdio>
+
 extern "C" void
 __gcov_dump(void);
 extern "C" void
 __gcov_reset(void);
 
-extern "C" __attribute__((visibility("default"))) void
+extern "C" __attribute__((visibility("default"))) int
 MilvusDumpCoverage() {
     // GCC merges each interval into the existing .gcda files. Reset re-arms
     // subsequent dumps; keep those files until the process has finished.
     __gcov_dump();
     __gcov_reset();
+    // libgcov buffers GCOV_ERROR_FILE until process exit unless flushed here.
+    return std::fflush(nullptr);
 }
