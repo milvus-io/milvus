@@ -2445,7 +2445,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		limiter, _ = node.GetRateLimiter()
 	}
 
-	dr := NewDeleteRunner(node, request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.chMgr, node.sched.DmQueue, node.lbPolicy, limiter)
+	dr := NewDeleteRunner(node, request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.sched.DmQueue, node.lbPolicy, limiter)
 
 	mlog.Debug(context.TODO(), "init delete runner in Proxy")
 	if err := dr.Init(ctx); err != nil {
@@ -5005,7 +5005,7 @@ func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *mi
 		Value: strconv.FormatInt(rsp.GetProgress(), 10),
 	})
 	var createTs int64
-	createTime, err := time.Parse("2006-01-02T15:04:05Z07:00", rsp.GetCreateTime())
+	createTime, err := time.Parse(time.RFC3339, rsp.GetCreateTime())
 	if err == nil {
 		createTs = createTime.Unix()
 	}

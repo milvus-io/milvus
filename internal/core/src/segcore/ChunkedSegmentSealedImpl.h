@@ -104,6 +104,12 @@ using namespace milvus::cachinglayer;
 // internal/core/unittest/test_commit_timestamp.cpp.
 class CommitTimestampV2TestAccess;
 
+enum class VortexColumnGroupLocalFormat {
+    Vortex,
+    Default,
+    Raw,
+};
+
 class ChunkedSegmentSealedImpl : public SegmentSealed {
     friend class CommitTimestampV2TestAccess;
 
@@ -479,12 +485,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr) const;
 
     // Result-fill reads through a request-pinned snapshot instead of
-    // re-capturing the published state per field at this layer. Inner column /
-    // index helpers called below (get_raw_data, PinIndex, HasFieldData, ...)
-    // still self-capture; migrating them is a Phase 4 follow-up. Public for
-    // cross-class access via dynamic_cast from SegmentInterface (same pattern
-    // as TryTakeForRetrieve); the virtual bulk_subscript keeps its frozen
-    // signature and delegates to these with a fresh capture.
+    // re-capturing the published state per field at this layer. The whole
+    // per-field chain (index routing via HasFieldDataFromState /
+    // IndexHasRawDataFromState / the runtime IndexInventory and column fill
+    // via get_raw_data_from_state / get_vector_from_state /
+    // get_emb_list_from_state) reads the same pinned snapshot end to end.
+    // Public for cross-class access via dynamic_cast from SegmentInterface
+    // (same pattern as TryTakeForRetrieve); the virtual bulk_subscript keeps
+    // its frozen signature and delegates to these with a fresh capture.
     std::unique_ptr<DataArray>
     bulk_subscript_from_state(
         const std::shared_ptr<const PublishedSegmentState>& snapshot,
@@ -767,6 +775,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // neither. Returns nullptr only if the caller decides not to build.
     std::shared_ptr<milvus::exec::SimpleGeometryCache>
     BuildGeometryCacheDetached(
+        milvus::OpContext* op_ctx,
         FieldId field_id,
         const std::shared_ptr<ChunkedColumnInterface>& column);
 
@@ -1239,12 +1248,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     template <typename S, typename T = S>
     static void
-    bulk_subscript_impl(milvus::OpContext* op_ctx,
-                        ChunkedColumnInterface* field,
-                        const int64_t* seg_offsets,
-                        int64_t count,
-                        T* dst_raw,
-                        bool small_int_raw_type = false);
+    bulk_subscript_impl(
+        milvus::OpContext* op_ctx,
+        ChunkedColumnInterface* field,
+        const int64_t* seg_offsets,
+        int64_t count,
+        T* dst_raw,
+        bool small_int_raw_type = false,
+        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
 
     static void
     bulk_subscript_impl(milvus::OpContext* op_ctx,
@@ -1261,24 +1272,29 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         ChunkedColumnInterface* field,
         const int64_t* seg_offsets,
         int64_t count,
-        google::protobuf::RepeatedPtrField<std::string>* dst_raw);
+        google::protobuf::RepeatedPtrField<std::string>* dst_raw,
+        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
 
     template <typename S, typename T = S>
     static void
-    bulk_subscript_ptr_impl(milvus::OpContext* op_ctx,
-                            const ChunkedColumnInterface* field,
-                            const int64_t* seg_offsets,
-                            int64_t count,
-                            T* dst);
+    bulk_subscript_ptr_impl(
+        milvus::OpContext* op_ctx,
+        const ChunkedColumnInterface* field,
+        const int64_t* seg_offsets,
+        int64_t count,
+        T* dst,
+        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
 
     template <typename T>
     static void
-    bulk_subscript_array_impl(milvus::OpContext* op_ctx,
-                              ChunkedColumnInterface* column,
-                              const int64_t* seg_offsets,
-                              int64_t count,
-                              google::protobuf::RepeatedPtrField<T>* dst,
-                              bool nested_array);
+    bulk_subscript_array_impl(
+        milvus::OpContext* op_ctx,
+        ChunkedColumnInterface* column,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<T>* dst,
+        bool nested_array,
+        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
 
     template <typename T>
     static void
@@ -1289,15 +1305,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t count,
         google::protobuf::RepeatedPtrField<T>* dst);
 
-    // TEXT column handling for StorageV2 (LOB reference resolution)
+    // TEXT column handling for StorageV2 (LOB reference resolution). Reads the
+    // text_lob_paths map from the passed runtime so callers that already hold a
+    // pinned snapshot avoid re-capturing the published state.
     void
     bulk_subscript_text_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
+        const std::shared_ptr<const RuntimeResourceState>& runtime,
         const ChunkedColumnInterface* column,
         const int64_t* seg_offsets,
         int64_t count,
-        google::protobuf::RepeatedPtrField<std::string>* dst) const;
+        google::protobuf::RepeatedPtrField<std::string>* dst,
+        const ChunkedColumnInterface::OwnedTakeData* taken_data =
+            nullptr) const;
 
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id,
@@ -1311,6 +1332,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  const FieldMeta& field_meta,
                  const int64_t* seg_offsets,
                  int64_t count) const;
+
+    // State-parameterized twins of get_raw_data / get_vector / get_emb_list
+    // (Phase 4): the per-field fill chain reads one pinned snapshot end to
+    // end. The public entry points below keep their frozen signatures and
+    // delegate with a fresh capture.
+    std::unique_ptr<DataArray>
+    get_raw_data_from_state(const PublishedSegmentState& snapshot,
+                            milvus::OpContext* op_ctx,
+                            FieldId field_id,
+                            const FieldMeta& field_meta,
+                            const int64_t* seg_offsets,
+                            int64_t count) const;
+
+    std::unique_ptr<DataArray>
+    get_vector_from_state(const PublishedSegmentState& snapshot,
+                          milvus::OpContext* op_ctx,
+                          FieldId field_id,
+                          const int64_t* ids,
+                          int64_t count) const;
+
+    std::unique_ptr<DataArray>
+    get_emb_list_from_state(const PublishedSegmentState& snapshot,
+                            milvus::OpContext* op_ctx,
+                            FieldId field_id,
+                            const FieldMeta& field_meta,
+                            const int64_t* seg_offsets,
+                            int64_t count) const;
 
     struct ValidResult {
         int64_t valid_count = 0;
@@ -1574,6 +1622,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         IsVectorIndexReady(FieldId field_id);
 
         void
+        StageMemorySizeDeltaLocked(int64_t delta) {
+            memory_size_delta_ += delta;
+        }
+
+        void
         StageVectorIndexMutationLocked(IndexInventory::Entry entry,
                                        bool drop_existing);
 
@@ -1602,12 +1655,21 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 PublishMode publish_mode = PublishMode::Drain) {
             std::vector<IndexInventory::RootSlot> retired_indexings;
             std::shared_ptr<PublishedSegmentState> next;
+            int64_t memory_size_delta = 0;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 next = segment_.BuildNextPublishedState(current, delta);
                 retired_indexings.swap(retired_indexings_);
+                memory_size_delta = memory_size_delta_;
             }
             segment_.PublishStateOnline(std::move(next), op_ctx, publish_mode);
+            if (memory_size_delta >= 0) {
+                segment_.stats_.mem_size +=
+                    static_cast<size_t>(memory_size_delta);
+            } else {
+                segment_.stats_.mem_size -=
+                    static_cast<size_t>(-memory_size_delta);
+            }
             for (auto& indexing : retired_indexings) {
                 if (indexing != nullptr) {
                     indexing->CancelWarmup();
@@ -1639,6 +1701,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         RuntimeResourceState* runtime_;
         PublishedSegmentState* staged_state_;
         std::vector<IndexInventory::RootSlot> retired_indexings_;
+        int64_t memory_size_delta_ = 0;
         std::mutex mutex_;
     };
 
@@ -1771,6 +1834,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     IndexHasRawDataFromState(const PublishedSegmentState& state,
                              FieldId field_id) const;
+
+    // State-parameterized twins of the public result-fill helpers below
+    // (Phase 4): the per-field fill chain reads one pinned snapshot end to end
+    // instead of re-capturing the published state per helper. Public entry
+    // points keep their frozen signatures and delegate with a fresh capture.
+    bool
+    HasFieldDataFromState(const PublishedSegmentState& state,
+                          FieldId field_id) const;
 
     void
     RecordDefaultFieldsFilledLocked(const std::vector<FieldId>& field_ids);
@@ -1982,6 +2053,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         const std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
+        const std::vector<VortexColumnGroupLocalFormat>& local_formats,
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         bool eager_load,
@@ -2013,7 +2085,29 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::shared_ptr<milvus_storage::api::ChunkReader>
             preopened_chunk_reader,
         bool enable_async_load,
-        bool lazy_materialization);
+        bool lazy_materialization,
+        bool use_vortex);
+
+    void
+    LoadVortexColumnGroup(
+        const std::shared_ptr<milvus_storage::api::ColumnGroup>& column_group,
+        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        int64_t index,
+        const std::vector<FieldId>& milvus_field_ids,
+        const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot,
+        bool eager_load,
+        const std::string& aggregated_warmup_policy,
+        milvus::OpContext* op_ctx,
+        bool is_replace,
+        RuntimeResourceState* runtime,
+        StagedStateCommitter* committer);
+
+    std::vector<VortexColumnGroupLocalFormat>
+    ResolveVortexColumnGroupLocalFormats(
+        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+        const SchemaPtr& schema_snapshot) const;
 
     void
     ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
@@ -2125,9 +2219,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_replace = false,
         StagedStateCommitter* committer = nullptr);
 
-    std::shared_ptr<ChunkedColumnInterface>
+    // Pure function of the published runtime state: never touches this.
+    // Static so callers that already hold a snapshot (SealedReadSnapshot,
+    // bulk_subscript_from_state) can look a column up without a fresh capture.
+    static std::shared_ptr<ChunkedColumnInterface>
     get_column(const std::shared_ptr<const RuntimeResourceState>& runtime,
-               FieldId field_id) const {
+               FieldId field_id) {
         if (runtime == nullptr) {
             return nullptr;
         }
@@ -2136,6 +2233,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             return it->second;
         }
         return nullptr;
+    }
+
+    // Zero-refcount borrowed twin of get_column for the per-chunk hot loop.
+    // Returns a pointer owned by the published runtime state; callers must not
+    // retain it past the request (same rule as
+    // SegmentReadSnapshot::GetColumn).
+    static const ChunkedColumnInterface*
+    BorrowColumn(const std::shared_ptr<const RuntimeResourceState>& runtime,
+                 FieldId field_id) {
+        if (runtime == nullptr) {
+            return nullptr;
+        }
+        auto it = runtime->fields.find(field_id);
+        return it == runtime->fields.end() ? nullptr : it->second.get();
     }
 
     std::shared_ptr<ChunkedColumnInterface>
@@ -2322,6 +2433,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         LoadColumnGroups(column_groups,
                          properties,
                          cg_field_ids,
+                         ResolveVortexColumnGroupLocalFormats(column_groups,
+                                                              schema_snapshot),
                          segment_load_info,
                          schema_snapshot,
                          eager_load,
@@ -2359,6 +2472,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         LoadColumnGroups(column_groups,
                          properties,
                          cg_field_ids,
+                         ResolveVortexColumnGroupLocalFormats(column_groups,
+                                                              schema_snapshot),
                          segment_load_info,
                          schema_snapshot,
                          eager_load,
@@ -2378,6 +2493,25 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             }
         }
         return columns;
+    }
+
+    VortexColumnGroupLocalFormat
+    TestResolveVortexColumnGroupLocalFormat(
+        const std::shared_ptr<milvus_storage::api::ColumnGroup>& column_group,
+        const SchemaPtr& schema_snapshot) const {
+        return ResolveVortexColumnGroupLocalFormats(
+                   std::make_shared<milvus_storage::api::ColumnGroups>(
+                       milvus_storage::api::ColumnGroups{column_group}),
+                   schema_snapshot)
+            .front();
+    }
+
+    std::vector<VortexColumnGroupLocalFormat>
+    TestResolveVortexColumnGroupLocalFormats(
+        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+        const SchemaPtr& schema_snapshot) const {
+        return ResolveVortexColumnGroupLocalFormats(column_groups,
+                                                    schema_snapshot);
     }
 
     void

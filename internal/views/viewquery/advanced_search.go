@@ -1,0 +1,154 @@
+package viewquery
+
+import (
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+// BuildSubSearchRequests expands an advanced search for both planning and
+// execution. Each result owns its mutable fields independently of the parent.
+func BuildSubSearchRequests(req *internalpb.SearchRequest) ([]*internalpb.SearchRequest, error) {
+	if len(req.GetSubReqs()) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("advanced search request has no sub-requests")
+	}
+	requests := make([]*internalpb.SearchRequest, len(req.GetSubReqs()))
+	for i, sub := range req.GetSubReqs() {
+		request, err := BuildSubSearchRequest(req, sub)
+		if err != nil {
+			return nil, err
+		}
+		requests[i] = request
+	}
+	return requests, nil
+}
+
+// BuildSubSearchRequest expands one advanced-search sub-request into a regular
+// SearchRequest while preserving the execution context carried by its parent.
+func BuildSubSearchRequest(parent *internalpb.SearchRequest, sub *internalpb.SubSearchRequest) (*internalpb.SearchRequest, error) {
+	if parent == nil {
+		return nil, merr.WrapErrServiceInternalMsg("advanced search request is nil")
+	}
+	if sub == nil {
+		return nil, merr.WrapErrServiceInternalMsg("advanced search contains a nil sub-request")
+	}
+
+	// Assemble only fields used by this sub-search before cloning. In particular,
+	// never copy the parent's SubReqs or payloads that the sub-request replaces.
+	req := &internalpb.SearchRequest{
+		Base:                    parent.GetBase(),
+		ReqID:                   parent.GetReqID(),
+		DbID:                    parent.GetDbID(),
+		CollectionID:            parent.GetCollectionID(),
+		OutputFieldsId:          parent.GetOutputFieldsId(),
+		MvccTimestamp:           parent.GetMvccTimestamp(),
+		GuaranteeTimestamp:      parent.GetGuaranteeTimestamp(),
+		TimeoutTimestamp:        parent.GetTimeoutTimestamp(),
+		Username:                parent.GetUsername(),
+		ConsistencyLevel:        parent.GetConsistencyLevel(),
+		IsTopkReduce:            parent.GetIsTopkReduce(),
+		IsRecallEvaluation:      parent.GetIsRecallEvaluation(),
+		IsIterator:              parent.GetIsIterator(),
+		CollectionTtlTimestamps: parent.GetCollectionTtlTimestamps(),
+		EntityTtlPhysicalTime:   parent.GetEntityTtlPhysicalTime(),
+		GroupByFieldIds:         parent.GetGroupByFieldIds(),
+		PartitionIDs:            sub.GetPartitionIDs(),
+		Dsl:                     sub.GetDsl(),
+		PlaceholderGroup:        sub.GetPlaceholderGroup(),
+		DslType:                 sub.GetDslType(),
+		SerializedExprPlan:      sub.GetSerializedExprPlan(),
+		Nq:                      sub.GetNq(),
+		Topk:                    sub.GetTopk(),
+		Offset:                  sub.GetOffset(),
+		MetricType:              sub.GetMetricType(),
+		IgnoreGrowing:           sub.GetIgnoreGrowing(),
+		GroupByFieldId:          sub.GetGroupByFieldId(),
+		GroupSize:               sub.GetGroupSize(),
+		FieldId:                 sub.GetFieldId(),
+		AnalyzerName:            sub.GetAnalyzerName(),
+		SearchType:              sub.GetSearchType(),
+		PkFilter:                common.PkFilterNoPkFilter,
+	}
+	req.ProtoReflect().SetUnknown(parent.ProtoReflect().GetUnknown())
+	return proto.Clone(req).(*internalpb.SearchRequest), nil
+}
+
+// UpdateSubSearchRequest writes optimizer-owned fields back to the advanced
+// request so Phase 2 observes the exact regular request optimized in Phase 1.
+// It consumes the optimized request's payload and partition slices. Callers must
+// relinquish other references to those slices when handing off the request.
+func UpdateSubSearchRequest(sub *internalpb.SubSearchRequest, optimized *internalpb.SearchRequest, skip bool) error {
+	if sub == nil || optimized == nil {
+		return merr.WrapErrServiceInternalMsg("cannot update advanced sub-search from a nil request")
+	}
+
+	sub.Dsl = optimized.GetDsl()
+	sub.PlaceholderGroup, optimized.PlaceholderGroup = optimized.PlaceholderGroup, nil
+	sub.DslType = optimized.GetDslType()
+	sub.SerializedExprPlan, optimized.SerializedExprPlan = optimized.SerializedExprPlan, nil
+	sub.Nq = optimized.GetNq()
+	sub.PartitionIDs, optimized.PartitionIDs = optimized.PartitionIDs, nil
+	sub.Topk = optimized.GetTopk()
+	sub.Offset = optimized.GetOffset()
+	sub.MetricType = optimized.GetMetricType()
+	sub.GroupByFieldId = optimized.GetGroupByFieldId()
+	sub.GroupSize = optimized.GetGroupSize()
+	sub.FieldId = optimized.GetFieldId()
+	sub.IgnoreGrowing = optimized.GetIgnoreGrowing()
+	sub.AnalyzerName = optimized.GetAnalyzerName()
+	sub.SearchType = optimized.GetSearchType()
+	sub.Skip = skip
+	return nil
+}
+
+// assembleAdvancedSearchResults preserves sub-search order and converts regular
+// node-local results into the protocol consumed by Proxy's hybrid reducer.
+func assembleAdvancedSearchResults(results []*internalpb.SearchResults) *internalpb.SearchResults {
+	channelsMVCC := make(map[string]uint64)
+	searchResults := &internalpb.SearchResults{
+		Status:     merr.Success(),
+		IsAdvanced: true,
+	}
+	var selectedCost *internalpb.CostAggregation
+	var relatedDataSize int64
+
+	for index, result := range results {
+		if result.GetIsTopkReduce() {
+			searchResults.IsTopkReduce = true
+		}
+		if result.GetIsRecallEvaluation() {
+			searchResults.IsRecallEvaluation = true
+		}
+		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
+		searchResults.ScannedRemoteBytes += result.GetScannedRemoteBytes()
+		searchResults.ScannedTotalBytes += result.GetScannedTotalBytes()
+		for channel, ts := range result.GetChannelsMvcc() {
+			channelsMVCC[channel] = ts
+		}
+		if cost := result.GetCostAggregation(); cost != nil && (selectedCost == nil || selectedCost.GetResponseTime() < cost.GetResponseTime()) {
+			selectedCost = cost
+		}
+
+		searchResults.NumQueries = result.GetNumQueries()
+		searchResults.SubResults = append(searchResults.SubResults, &internalpb.SubSearchResults{
+			MetricType:     result.GetMetricType(),
+			NumQueries:     result.GetNumQueries(),
+			TopK:           result.GetTopK(),
+			SlicedBlob:     result.GetSlicedBlob(),
+			ResultData:     result.GetResultData(),
+			SlicedNumCount: result.GetSlicedNumCount(),
+			SlicedOffset:   result.GetSlicedOffset(),
+			ReqIndex:       int64(index),
+		})
+	}
+
+	searchResults.ChannelsMvcc = channelsMVCC
+	searchResults.CostAggregation = &internalpb.CostAggregation{}
+	if selectedCost != nil {
+		searchResults.CostAggregation = proto.Clone(selectedCost).(*internalpb.CostAggregation)
+	}
+	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
+	return searchResults
+}

@@ -3,6 +3,7 @@ package lock
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // NewInterceptorBuilder creates a new redo interceptor builder.
@@ -16,6 +17,7 @@ type interceptorBuilder struct{}
 // Build creates a new redo interceptor.
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	return &lockAppendInterceptor{
+		enableCAS:      paramtable.Get().StreamingCfg.PartialUpdateEnableCAS.GetAsBool(),
 		channel:        param.ChannelInfo,
 		vchannelLocker: lock.NewKeyLock[string](),
 		txnManager:     param.TxnManager,

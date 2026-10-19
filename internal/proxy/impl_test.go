@@ -1599,16 +1599,17 @@ func TestProxy_Delete(t *testing.T) {
 	}
 	schema := mustNewSchemaInfo(collSchema)
 	basicInfo := &collectionInfo{
-		CollID: collectionID,
-		Schema: schema,
+		CollID:    collectionID,
+		Schema:    schema,
+		VChannels: channels,
 	}
 	paramtable.Init()
 
 	t.Run("delete run failed", func(t *testing.T) {
+		streaming.SetupNoopWALForTest()
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-
-		chMgr := channelmgr.NewMockChannelsMgr(t)
 
 		req := &milvuspb.DeleteRequest{
 			CollectionName: collectionName,
@@ -1635,17 +1636,27 @@ func TestProxy_Delete(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(partitionID, nil)
 		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(basicInfo, nil)
-		chMgr.On("GetVChannels", mock.Anything).Return(channels, nil)
-		chMgr.On("GetChannels", mock.Anything).Return(nil, errors.New("mock error"))
+		streaming.ExpectErrorOnce(errors.New("mock error"))
 		rc := mocks.NewMockRootCoordClient(t)
+		// The delete reuses the cached channels and reaches message repacking,
+		// which allocates message IDs before the WAL append fails.
+		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+			Status: merr.Success(),
+			ID:     1,
+			Count:  1000,
+		}, nil).Maybe()
 		tsoAllocator := &mockTsoAllocator{}
 		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
 		assert.NoError(t, err)
+		assert.NoError(t, idAllocator.Start())
+		defer idAllocator.Close()
 
 		queue, err := scheduler.NewTaskScheduler(ctx, tsoAllocator)
 		assert.NoError(t, err)
+		queue.Start()
+		defer queue.Close()
 
-		node := &Proxy{metaCache: cache, chMgr: chMgr, rowIDAllocator: idAllocator, sched: queue}
+		node := &Proxy{metaCache: cache, rowIDAllocator: idAllocator, sched: queue}
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := node.Delete(ctx, req)
 		assert.NoError(t, err)
