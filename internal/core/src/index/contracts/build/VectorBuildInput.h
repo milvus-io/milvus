@@ -50,7 +50,11 @@ struct VectorScalarFieldGroups {
 // entry per valid parent plus a terminal entry. It starts at zero, ends at
 // physical_rows, and may repeat for valid empty lists. An all-null embedding-list
 // input still supplies the single offset zero, which distinguishes it from an
-// ordinary all-null vector input.
+// ordinary all-null vector input. A VECTOR_ARRAY column indexed under an
+// element-level metric is ordinary input in the logical element domain:
+// logical_rows counts the elements of the non-null rows, physical_rows counts
+// the non-null elements, and parent_validity is the element validity of an
+// element-nullable field (absent otherwise).
 //
 // T remains the registry and engine dispatch tag. value_type is the actual
 // payload element: T for dense vectors and one owning SparseRow for each sparse

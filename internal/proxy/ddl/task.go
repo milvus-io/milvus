@@ -3292,9 +3292,7 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		// Element-nullable vector arrays cannot be indexed but can be loaded for queries.
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) &&
-			(field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable()) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -3561,9 +3559,7 @@ func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		// Element-nullable vector arrays cannot be indexed but can be loaded for queries.
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) &&
-			(field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable()) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}

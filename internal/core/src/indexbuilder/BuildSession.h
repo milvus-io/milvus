@@ -41,6 +41,9 @@ struct BuildFieldSpec {
     DataType field_type{DataType::NONE};
     DataType element_type{DataType::NONE};
     bool nullable{false};
+    // VECTOR_ARRAY elements may be null; element-level vector indexes then
+    // carry element-domain validity.
+    bool element_nullable{false};
     size_t estimated_missing_row_bytes{1};
 };
 

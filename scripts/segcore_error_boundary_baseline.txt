@@ -22,6 +22,7 @@ knowhere	internal/core/src/exec/operator/RescoresNode.cpp
 knowhere	internal/core/src/exec/operator/search-groupby/StrictGroupFilteredSearch.cpp
 knowhere	internal/core/src/exec/operator/Utils.h
 knowhere	internal/core/src/exec/QueryContext.h
+knowhere	internal/core/src/indexbuilder/VectorBuildMaterializer.cpp
 knowhere	internal/core/src/indexbuilder/VectorDiskBuildMaterializer.cpp
 knowhere	internal/core/src/index/contracts/build/VectorBuildInput.h
 knowhere	internal/core/src/index/contracts/query/IVectorReader.h
@@ -40,6 +41,7 @@ knowhere	internal/core/src/index/vector/VectorIndexReader.cpp
 knowhere	internal/core/src/index/vector/VectorIndexReader.h
 knowhere	internal/core/src/index/vector/VectorIndexValidDataUtils.h
 knowhere	internal/core/src/index/vector/VectorLoadResource.cpp
+knowhere	internal/core/src/index/vector/VectorLoadUtils.h
 knowhere	internal/core/src/index/vector/VectorMemArtifact.cpp
 knowhere	internal/core/src/index/vector/VectorMemBuilder.cpp
 knowhere	internal/core/src/index/vector/VectorMemBuilder.h

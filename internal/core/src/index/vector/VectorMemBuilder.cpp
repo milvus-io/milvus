@@ -118,6 +118,7 @@ PrepareInput(int64_t logical_rows,
              ValidityView parent_validity,
              std::optional<std::span<const size_t>> embedding_offsets,
              bool has_scalar_fields,
+             DataType elem_type,
              const std::optional<int64_t>& expected_rows,
              const knowhere::Json& build_params,
              KnowhereEngine& engine) {
@@ -127,7 +128,11 @@ PrepareInput(int64_t logical_rows,
     AssertInfo(logical_rows > 0, "memory vector logical row count is negative");
     AssertInfo(physical_rows >= 0,
                "memory vector physical row count is negative");
-    if (expected_rows.has_value()) {
+    const bool embedding_list = engine.IsEmbeddingList();
+    // The expected count is the segment row count; an element-level
+    // VECTOR_ARRAY input counts logical elements instead.
+    const bool element_level = elem_type != DataType::NONE && !embedding_list;
+    if (expected_rows.has_value() && !element_level) {
         AssertInfo(logical_rows == *expected_rows,
                    "memory vector input row count {} disagrees with expected "
                    "{}",
@@ -136,7 +141,6 @@ PrepareInput(int64_t logical_rows,
     }
 
     const auto valid_parents = CountValidParents(logical_rows, parent_validity);
-    const bool embedding_list = engine.IsEmbeddingList();
     if (embedding_list) {
         AssertInfo(!has_scalar_fields,
                    "embedding-list vector input cannot carry scalar fields");
@@ -382,7 +386,8 @@ VectorMemBuilder<T>::VectorMemBuilder(
                                    std::move(metric_type),
                                    version,
                                    use_knowhere_build_pool)),
-      build_params_(std::move(build_params)) {
+      build_params_(std::move(build_params)),
+      elem_type_(elem_type) {
     constexpr auto physical_type = PhysicalVectorDataType<T>();
     AssertInfo(dim >= 0 && (dim != 0 ||
                             physical_type == DataType::VECTOR_SPARSE_U32_F32),
@@ -435,6 +440,7 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
                                            input.parent_validity,
                                            input.embedding_offsets,
                                            !input.scalar_fields.empty(),
+                                           elem_type_,
                                            expected_rows_,
                                            build_params_,
                                            engine);
@@ -502,10 +508,6 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
         // queries and raw-vector retrieval still use the input dimension.
         engine.SetDim(prepared.embedding_list ? input.dim
                                               : engine.native_index.Dim());
-        // An embedding-list dataset searched with an ordinary metric builds a
-        // flat vector index, and knowhere then materializes an element-domain
-        // identity map instead of consuming the list validity, so the row
-        // count check only holds for row-domain builds.
         if (prepared.nullable && !prepared.embedding_list) {
             const auto valid_count = engine.native_index.ValidCount();
             if (!valid_count.has_value()) {
@@ -539,6 +541,7 @@ VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
                                            input.parent_validity,
                                            std::nullopt,
                                            false,
+                                           elem_type_,
                                            expected_rows_,
                                            build_params_,
                                            engine);

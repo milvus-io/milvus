@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "common/Utils.h"
+#include "knowhere/emb_list_utils.h"
 #include "knowhere/index/index_factory.h"
 
 namespace milvus::index {
@@ -231,6 +232,15 @@ CheckedVectorRowBytes(int64_t dim) {
     }
 }
 
+// A VECTOR_ARRAY engine runs in embedding-list mode only under an
+// embedding-list metric; an element-level metric indexes each element as an
+// ordinary vector.
+bool
+IsEmbListEngine(DataType elem_type, const MetricType& metric_type) {
+    return elem_type != DataType::NONE &&
+           knowhere::get_el_metric_type(metric_type).has_value();
+}
+
 size_t
 CheckedPayloadBytes(size_t row_bytes, size_t rows) {
     if (row_bytes != 0 &&
@@ -259,7 +269,7 @@ KnowhereEngine::KnowhereEngine(DataType physical_type,
       index_type_(std::move(index_type)),
       metric_type_(std::move(metric_type)),
       physical_type_(physical_type),
-      embedding_list_(elem_type != DataType::NONE),
+      embedding_list_(IsEmbListEngine(elem_type, metric_type_)),
       use_knowhere_build_pool_(use_knowhere_build_pool) {
 }
 
@@ -279,7 +289,7 @@ KnowhereEngine::KnowhereEngine(DataType physical_type,
       index_type_(std::move(index_type)),
       metric_type_(std::move(metric_type)),
       physical_type_(physical_type),
-      embedding_list_(elem_type != DataType::NONE),
+      embedding_list_(IsEmbListEngine(elem_type, metric_type_)),
       use_knowhere_build_pool_(use_knowhere_build_pool) {
 }
 
@@ -304,7 +314,7 @@ KnowhereEngine::KnowhereEngine(
       index_type_(std::move(index_type)),
       metric_type_(std::move(metric_type)),
       physical_type_(physical_type),
-      embedding_list_(elem_type != DataType::NONE),
+      embedding_list_(IsEmbListEngine(elem_type, metric_type_)),
       use_knowhere_build_pool_(use_knowhere_build_pool) {
 }
 
