@@ -3463,6 +3463,54 @@ func TestLoadCollectionTaskExecuteTextRequiresStorageV3(t *testing.T) {
 	assert.Contains(t, err.Error(), "TEXT field requires StorageV3")
 }
 
+func TestLoadCollectionTaskRequiresIndexOnElementNullableVectorArray(t *testing.T) {
+	const (
+		dbName         = "db"
+		collectionName = "element_nullable_vector_array"
+		collectionID   = int64(100)
+	)
+	schema := newTextSchemaForStorageV3Test(collectionName)
+	schema.Fields = schema.Fields[:1]
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID: 102, Name: testFloatVecField, DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: strconv.Itoa(testVecDim)}},
+	})
+	schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{
+		FieldID: 103, Name: "s",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID: 104, Name: "s[vec]", DataType: schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector, Nullable: true, ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+				{Key: common.MaxCapacityKey, Value: "8"},
+			},
+		}},
+	}}
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
+	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(mustNewSchemaInfo(schema), nil)
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+		Status:     merr.Success(),
+		IndexInfos: []*indexpb.IndexInfo{{FieldID: 102, IndexID: 1}},
+	}, nil)
+
+	task := &LoadCollectionTask{
+		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
+			Base:           commonpbutil.NewMsgBase(),
+			DbName:         dbName,
+			CollectionName: collectionName,
+		},
+		ctx:      context.Background(),
+		mixCoord: mixCoord,
+	}
+	task.MetaCache = cache
+
+	err := task.Execute(context.Background())
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "there is no vector index on field: [s[vec]]")
+}
+
 func TestLoadCollectionTaskPostExecuteSkipsFailedStatus(t *testing.T) {
 	task := &LoadCollectionTask{
 		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{

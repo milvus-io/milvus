@@ -101,6 +101,7 @@ class VectorDiskBuildMaterializerTest : public ::testing::Test {
                 DataType::VECTOR_FLOAT,
                 kDim,
                 false,
+                false,
                 kRows,
                 kFamily,
                 {{"use_memory", use_memory}}};

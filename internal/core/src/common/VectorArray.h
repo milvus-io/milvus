@@ -545,6 +545,17 @@ class VectorArrayView {
         return physical_length_;
     }
 
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
+    // Validity of the logical elements; empty unless element-nullable.
+    const TargetBitmapView&
+    element_validity_view() const {
+        return element_valid_data_;
+    }
+
     const char*
     data() const {
         return data_;

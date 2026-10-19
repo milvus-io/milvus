@@ -152,11 +152,13 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     // step 1.2: get which vector field to search
     auto vecfield_id = info.field_id_;
     auto& field = (*schema)[vecfield_id];
+    // Element-nullable VECTOR_ARRAY supports element-level search only.
     if (field.get_data_type() == DataType::VECTOR_ARRAY &&
-        field.is_element_nullable()) {
+        field.is_element_nullable() &&
+        info.struct_element_offsets_ == nullptr) {
         ThrowInfo(NotImplemented,
-                  "search on element-nullable VECTOR_ARRAY fields is not "
-                  "supported");
+                  "embedding list search on element-nullable VECTOR_ARRAY "
+                  "fields is not supported");
     }
     CheckBruteForceSearchParam(field, info);
 
@@ -270,6 +272,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     search_result.element_level_ = is_element_level_search;
     const auto has_offset_mapping =
         offset_mapping.IsEnabled() && !is_element_level_search;
+    // Element-nullable rows store only valid vectors: scan physical elements
+    // and map them to logical element ids through the bitset.
+    const bool has_element_id_mapping =
+        is_element_level_search && field.is_element_nullable();
     const auto* vector_array_column =
         data_type == DataType::VECTOR_ARRAY
             ? dynamic_cast<const segcore::ConcurrentVector<VectorArray>*>(
@@ -344,7 +350,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                          info,
                                          index_info,
                                          search_bitset,
-                                         iter_data_type);
+                                         iter_data_type,
+                                         has_element_id_mapping);
         cached_iter.NextBatch(info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     info.struct_element_offsets_.get());
@@ -364,6 +371,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     // begin_id must be the cumulative element count (not row offset),
     // because ArrayOffsets maps global element IDs to row IDs.
     int64_t cumulative_element_offset = 0;
+    int64_t cumulative_logical_element_offset = 0;
     int bf_chunk_count = 0;
 
     std::vector<size_t> offsets;
@@ -397,6 +405,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             query::dataset::RawDataset sub_data;
             std::unique_ptr<uint8_t[]> buf = nullptr;
+            std::shared_ptr<std::vector<int32_t>> element_ids;
             if (data_type != DataType::VECTOR_ARRAY) {
                 sub_data = query::dataset::RawDataset{
                     range_begin, dim, size_per_chunk, range_data};
@@ -413,6 +422,31 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                                    flat.element_count,
                                                    buf.get()};
                     cumulative_element_offset += flat.element_count;
+                    if (has_element_id_mapping) {
+                        auto ids = std::make_shared<std::vector<int32_t>>();
+                        ids->reserve(flat.element_count);
+                        cumulative_logical_element_offset +=
+                            AppendVectorArrayElementIds(
+                                static_cast<const VectorArrayView*>(range_data),
+                                size_per_chunk,
+                                cumulative_logical_element_offset,
+                                *ids);
+                        AssertInfo(static_cast<int64_t>(ids->size()) ==
+                                       flat.element_count,
+                                   "element id map has {} ids, expected {}",
+                                   ids->size(),
+                                   flat.element_count);
+                        chunk_bitset = AttachOffsetMappingIds(
+                            search_bitset,
+                            OffsetMappingIdView{
+                                ids->data(),
+                                static_cast<int64_t>(ids->size())});
+                        // Vector iterators read the ids after this call.
+                        if (use_vector_iterator) {
+                            search_result.resource_pins_.emplace_back(ids);
+                        }
+                        element_ids = std::move(ids);
+                    }
                 } else {
                     offsets = std::move(flat.row_offsets);
                     sub_data = query::dataset::RawDataset{range_begin,
