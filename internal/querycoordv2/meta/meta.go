@@ -17,6 +17,8 @@
 package meta
 
 import (
+	"sync"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 )
@@ -25,6 +27,12 @@ type Meta struct {
 	*CollectionManager
 	*ReplicaManager
 	*ResourceManager
+	Broker Broker // existing coordinator dependency, used only by enabled replica placement
+
+	placementMu      sync.Mutex
+	placementPolicy  *replicaPlacementPolicy
+	placementGroups  map[string]*replicaPlacement
+	placementPending sync.Map // collection ID -> uncertain atomic replica save
 }
 
 func NewMeta(
@@ -33,8 +41,8 @@ func NewMeta(
 	nodeMgr *session.NodeManager,
 ) *Meta {
 	return &Meta{
-		NewCollectionManager(catalog),
-		NewReplicaManager(idAllocator, catalog),
-		NewResourceManager(catalog, nodeMgr),
+		CollectionManager: NewCollectionManager(catalog),
+		ReplicaManager:    NewReplicaManager(idAllocator, catalog),
+		ResourceManager:   NewResourceManager(catalog, nodeMgr),
 	}
 }
