@@ -1836,3 +1836,19 @@ func TestPartialUpdateEnableCASConfig(t *testing.T) {
 	assert.NoError(t, params.Save(item.Key, "false"))
 	assert.False(t, item.GetAsBool())
 }
+
+func TestPartialUpdateRecoveryDecodeTimeoutConfig(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable())
+	item := &params.StreamingCfg.PartialUpdateRecoveryDecodeTimeout
+	assert.Equal(t, "streaming.partialUpdate.recoveryDecodeTimeout", item.Key)
+	assert.Equal(t, "3.0.4", item.Version)
+	assert.False(t, item.Export)
+	assert.Equal(t, 5*time.Second, item.GetAsDurationByParse())
+	assert.NoError(t, params.Save(item.Key, "30s"))
+	assert.Equal(t, 30*time.Second, item.GetAsDurationByParse())
+	assert.NoError(t, params.Save(item.Key, "0s"))
+	assert.Equal(t, time.Duration(0), item.GetAsDurationByParse())
+	assert.NoError(t, params.Reset(item.Key))
+	assert.Equal(t, 5*time.Second, item.GetAsDurationByParse())
+}

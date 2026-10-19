@@ -214,8 +214,13 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	}
 	// Missing schemaVersion means the proxy did not set it (old proxy or old SDK).
 	// Skip the schema presence and version checks for backward compatibility during
-	// rolling upgrades, where a legacy collection may still have Schema == nil when
-	// an old proxy writes.
+	// rolling upgrades. A collection without a schema is unreachable on supported
+	// paths: CreateCollection carries the schema and vchannel recovery meta
+	// persists it. With partial-update CAS enabled, partialupdate rejects such an
+	// insert before the WAL append: the row-lock hook does so before this check for
+	// a non-transactional insert, and the partialupdate interceptor after it for a
+	// transaction body or a replicated insert (see the 20260601 partial-update
+	// optimistic lock design doc).
 	if header.SchemaVersion == nil {
 		return collectionInfo.SchemaVersion(), nil
 	}
