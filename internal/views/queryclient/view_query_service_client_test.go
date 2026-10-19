@@ -86,6 +86,7 @@ func (f *fakeStreamingNodeViewQueryServiceClient) QueryOnViewStream(_ context.Co
 	f.pchannel = pchannel
 	return f.queryStream, nil
 }
+
 type fakeQueryNodeViewQueryServiceClient struct {
 	QueryNodeViewQueryServiceClient
 	nodeID       int64

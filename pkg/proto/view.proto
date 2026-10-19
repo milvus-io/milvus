@@ -577,4 +577,3 @@ message QueryOnViewStreamResponse {
         internal.RetrieveResults metadata = 2;
     }
 }
-
