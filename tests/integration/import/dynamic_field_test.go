@@ -29,7 +29,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -39,10 +41,13 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *BulkInsertSuite) testImportDynamicField() {
+func (s *BulkInsertSuite) TestImportDynamicField() {
 	const (
-		rowCount = 100
+		rowCount      = 100
+		formatFieldID = 102
+		formatField   = "source_format"
 	)
+	fileTypes := []importutilv2.FileType{importutilv2.JSON, importutilv2.Numpy, importutilv2.Parquet, importutilv2.CSV}
 
 	c := s.Cluster
 	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
@@ -66,6 +71,10 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 				Value: fmt.Sprintf("%d", dim),
 			},
 		},
+	}, &schemapb.FieldSchema{
+		FieldID:  formatFieldID,
+		Name:     formatField,
+		DataType: schemapb.DataType_Int64,
 	})
 	schema.EnableDynamicField = true
 	marshaledSchema, err := proto.Marshal(schema)
@@ -92,49 +101,38 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	// import
+	// Keep every format's 100 rows in a separate ImportFile, but share one job.
+	// A scalar marker lets each format assert its own query and search results.
 	var files []*internalpb.ImportFile
-
 	options := []*commonpb.KeyValuePair{}
-
-	switch s.fileType {
-	case importutilv2.Numpy:
-		importFile, err := GenerateNumpyFiles(c, schema, rowCount)
-		s.NoError(err)
-		importFile.Paths = lo.Filter(importFile.Paths, func(path string, _ int) bool {
-			return !strings.Contains(path, "$meta")
-		})
-		files = []*internalpb.ImportFile{importFile}
-	case importutilv2.JSON:
-		rowBasedFile := GenerateJSONFile(s.T(), c, schema, rowCount)
-		files = []*internalpb.ImportFile{
-			{
-				Paths: []string{
-					rowBasedFile,
-				},
-			},
+	for i, fileType := range fileTypes {
+		insertData, err := testutil.CreateInsertData(schema, rowCount)
+		s.Require().NoError(err)
+		markers := insertData.Data[formatFieldID].(*storage.Int64FieldData).Data
+		for j := range markers {
+			markers[j] = int64(i)
 		}
-	case importutilv2.Parquet:
-		filePath, err := GenerateParquetFile(s.Cluster, schema, rowCount)
-		s.NoError(err)
-		files = []*internalpb.ImportFile{
-			{
-				Paths: []string{
-					filePath,
-				},
-			},
+		var file *internalpb.ImportFile
+		switch fileType {
+		case importutilv2.Numpy:
+			file, err = writeNumpyFiles(c, schema, insertData)
+			s.Require().NoError(err)
+			// Preserve import into a dynamic-enabled collection without $meta.
+			file.Paths = lo.Filter(file.Paths, func(path string, _ int) bool {
+				return !strings.Contains(path, "$meta")
+			})
+		case importutilv2.JSON:
+			file = &internalpb.ImportFile{Paths: []string{writeJSONFile(s.T(), c, schema, insertData)}}
+		case importutilv2.Parquet:
+			filePath, err := writeParquetFile(c, schema, insertData)
+			s.Require().NoError(err)
+			file = &internalpb.ImportFile{Paths: []string{filePath}}
+		case importutilv2.CSV:
+			filePath, sep := writeCSVFile(s.T(), c, schema, insertData)
+			options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
+			file = &internalpb.ImportFile{Paths: []string{filePath}}
 		}
-	case importutilv2.CSV:
-		filePath, sep := GenerateCSVFile(s.T(), s.Cluster, schema, rowCount)
-		options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
-		s.NoError(err)
-		files = []*internalpb.ImportFile{
-			{
-				Paths: []string{
-					filePath,
-				},
-			},
-		}
+		files = append(files, file)
 	}
 
 	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
@@ -172,40 +170,37 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoadRefresh(ctx, "", collectionName)
 
-	// search
-	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
+	// Verify each format separately so another format cannot mask missing rows.
 	nq := 10
 	topk := 10
 	roundDecimal := -1
 
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
-	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
-	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
+	for i, fileType := range fileTypes {
+		s.Run(fileType.String(), func() {
+			expr := fmt.Sprintf("%s > 0 && %s == %d", integration.Int64Field, formatField, i)
+			queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+				CollectionName:   collectionName,
+				Expr:             expr,
+				OutputFields:     []string{"count(*)"},
+				ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			})
+			s.Require().NoError(merr.CheckRPCCall(queryResult, err))
+			s.Require().Len(queryResult.GetFieldsData(), 1)
+			s.Equal([]int64{rowCount}, queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 
-	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
-
-	err = merr.CheckRPCCall(searchResult, err)
-	s.NoError(err)
-	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
-}
-
-func (s *BulkInsertSuite) TestImportDynamicField_JSON() {
-	s.fileType = importutilv2.JSON
-	s.testImportDynamicField()
-}
-
-func (s *BulkInsertSuite) TestImportDynamicField_Numpy() {
-	s.fileType = importutilv2.Numpy
-	s.testImportDynamicField()
-}
-
-func (s *BulkInsertSuite) TestImportDynamicField_Parquet() {
-	s.fileType = importutilv2.Parquet
-	s.testImportDynamicField()
-}
-
-func (s *BulkInsertSuite) TestImportDynamicField_CSV() {
-	s.fileType = importutilv2.CSV
-	s.testImportDynamicField()
+			searchReq := integration.ConstructSearchRequest("", collectionName, expr,
+				integration.FloatVecField, schemapb.DataType_FloatVector, []string{formatField}, metric.L2, params, nq, dim, topk, roundDecimal)
+			searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
+			searchResult, err := c.MilvusClient.Search(ctx, searchReq)
+			s.Require().NoError(merr.CheckRPCCall(searchResult, err))
+			s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
+			s.Require().Len(searchResult.GetResults().GetFieldsData(), 1)
+			formats := searchResult.GetResults().GetFieldsData()[0].GetScalars().GetLongData().GetData()
+			s.Len(formats, nq*topk)
+			for _, source := range formats {
+				s.Equal(int64(i), source)
+			}
+		})
+	}
 }

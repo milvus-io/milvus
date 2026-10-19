@@ -1,9 +1,18 @@
 #include <gtest/gtest.h>
+#include <arrow/io/memory.h>
 #include <boost/filesystem.hpp>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <vector>
 
 #include "index/StringIndexSort.h"
 #include "index/IndexFactory.h"
 #include "pb/plan.pb.h"
+#include "storage/IndexEntryDirectStreamWriter.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/RemoteInputStream.h"
+#include "storage/RemoteOutputStream.h"
 #include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
@@ -424,6 +433,48 @@ TEST_F(StringIndexSortTest, LoadWithoutAssembleMmap) {
 
     // Clean up
     std::remove((TestLocalPath + "test_load_without_assemble.idx").c_str());
+}
+
+TEST_F(StringIndexSortTest, MmapLoadRemovesFilesOnParseFailure) {
+    const auto mmap_path = TestLocalPath + "string-sort-raii-test";
+    const auto mmap_meta_path = mmap_path + "-meta";
+    std::filesystem::remove(mmap_path);
+    std::filesystem::remove(mmap_meta_path);
+
+    auto arrow_output = arrow::io::BufferOutputStream::Create().ValueOrDie();
+    std::shared_ptr<arrow::io::OutputStream> arrow_output_base = arrow_output;
+    auto output = std::make_shared<storage::RemoteOutputStream>(
+        std::move(arrow_output_base));
+    storage::IndexEntryDirectStreamWriter writer(output);
+    writer.PutMeta("version", StringIndexSort::SERIALIZATION_VERSION);
+    writer.PutMeta("num_rows", size_t{1});
+    writer.PutMeta("is_nested", false);
+    const uint64_t invalid_index_data = 0;
+    const uint8_t valid_bitset = 1;
+    const int32_t idx_to_offset = 0;
+    writer.WriteEntry(
+        "index_data", &invalid_index_data, sizeof(invalid_index_data));
+    writer.WriteEntry("valid_bitset", &valid_bitset, sizeof(valid_bitset));
+    writer.WriteEntry("idx_to_offsets", &idx_to_offset, sizeof(idx_to_offset));
+    writer.Finish();
+    auto packed_data = arrow_output->Finish().ValueOrDie();
+
+    auto arrow_input = std::make_shared<arrow::io::BufferReader>(packed_data);
+    std::shared_ptr<arrow::io::RandomAccessFile> random_access_input =
+        arrow_input;
+    auto input = std::make_shared<storage::RemoteInputStream>(
+        std::move(random_access_input));
+    auto reader = storage::IndexEntryReader::Open(input, packed_data->size());
+
+    Config config;
+    config[MMAP_FILE_PATH] = mmap_path;
+    StringIndexSort index;
+    EXPECT_THROW(index.LoadEntries(*reader, config), SegcoreError);
+
+    EXPECT_FALSE(std::filesystem::exists(mmap_path));
+    EXPECT_FALSE(std::filesystem::exists(mmap_meta_path));
+    std::filesystem::remove(mmap_path);
+    std::filesystem::remove(mmap_meta_path);
 }
 }  // namespace index
 }  // namespace milvus

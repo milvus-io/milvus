@@ -90,8 +90,8 @@ func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp:  100,
 			consistencyLevel: commonpb.ConsistencyLevel_Strong,
+			schema:           schema,
 		}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 		mockey.Mock(isIgnoreGrowing).Return(false, nil).Build()
 		mockey.Mock((*searchTask).checkNq).Return(int64(1), nil).Build()
 
@@ -1170,9 +1170,8 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	cache := NewMockCache(t)
 	info := newSchemaInfo(schema)
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
-	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{schema: info}, nil).Maybe()
 	globalMetaCache = cache
 
 	{
@@ -4228,9 +4227,8 @@ func TestSearchTask_Requery(t *testing.T) {
 	collSchema := constructCollectionSchema(pkField, vecField, dim, collection)
 	schema := newSchemaInfo(collSchema)
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
-	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{schema: schema}, nil).Maybe()
 	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
 	globalMetaCache = cache
 
@@ -4512,6 +4510,69 @@ func TestSearchTask_SearchShardRecordsNodeHint(t *testing.T) {
 	assert.Equal(t, nodeID, recordedNodeID)
 }
 
+func TestSearchTask_SearchShardInvalidatesCacheOnCollectionNotLoaded(t *testing.T) {
+	ctx := context.Background()
+	const channel = "by-dev-rootcoord-dml_0_100v0"
+	const nodeID int64 = 101
+	const collectionID int64 = 100
+
+	newTask := func(manager shardclient.ShardClientMgr) *searchTask {
+		return &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionID: collectionID,
+			},
+			request: &milvuspb.SearchRequest{
+				DbName:         "default",
+				CollectionName: "test_search_shard_invalidate_on_not_loaded",
+			},
+			Condition:         NewTaskCondition(ctx),
+			shardClientMgr:    manager,
+			resultBuf:         typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+			queryChannelsNode: typeutil.NewConcurrentMap[string, int64](),
+		}
+	}
+
+	t.Run("collection_not_loaded_invalidates_cache", func(t *testing.T) {
+		qn := mocks.NewMockQueryNodeClient(t)
+		qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+			Status: merr.Status(merr.WrapErrCollectionNotLoaded(collectionID)),
+		}, nil)
+		manager := shardclient.NewMockShardClientManager(t)
+		manager.EXPECT().InvalidateShardLeaderCache([]int64{collectionID}).Return()
+
+		err := newTask(manager).searchShard(ctx, nodeID, qn, channel)
+		require.Error(t, err)
+	})
+
+	t.Run("not_shard_leader_invalidates_cache", func(t *testing.T) {
+		qn := mocks.NewMockQueryNodeClient(t)
+		qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_NotShardLeader},
+		}, nil)
+		manager := shardclient.NewMockShardClientManager(t)
+		manager.EXPECT().InvalidateShardLeaderCache([]int64{collectionID}).Return()
+
+		err := newTask(manager).searchShard(ctx, nodeID, qn, channel)
+		require.Error(t, err)
+	})
+
+	t.Run("other_system_error_keeps_cache", func(t *testing.T) {
+		qn := mocks.NewMockQueryNodeClient(t)
+		qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+			Status: merr.Status(merr.WrapErrServiceInternal("boom")),
+		}, nil)
+		manager := shardclient.NewMockShardClientManager(t)
+
+		err := newTask(manager).searchShard(ctx, nodeID, qn, channel)
+		require.Error(t, err)
+	})
+}
+
 type GetPartitionIDsSuite struct {
 	suite.Suite
 
@@ -4734,7 +4795,8 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 
 type MaterializedViewTestSuite struct {
 	suite.Suite
-	mockMetaCache *MockCache
+	mockMetaCache  *MockCache
+	collectionInfo *collectionInfo
 
 	ctx             context.Context
 	cancelFunc      context.CancelFunc
@@ -4762,12 +4824,12 @@ func (s *MaterializedViewTestSuite) TearDownSuite() {
 
 func (s *MaterializedViewTestSuite) SetupTest() {
 	s.mockMetaCache = NewMockCache(s.T())
+	s.collectionInfo = &collectionInfo{
+		collID:                s.colID,
+		partitionKeyIsolation: true,
+	}
 	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil)
-	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-		&collectionInfo{
-			collID:                s.colID,
-			partitionKeyIsolation: true,
-		}, nil)
+	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(s.collectionInfo, nil)
 	globalMetaCache = s.mockMetaCache
 }
 
@@ -4797,7 +4859,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithNoPartitionKey() {
 
 	schema := constructCollectionSchemaByDataType(s.colName, s.fieldName2Types, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.collectionInfo.schema = schemaInfo
 
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
@@ -4812,7 +4874,7 @@ func (s *MaterializedViewTestSuite) TestMvNotEnabledWithPartitionKey() {
 	task.request.Dsl = testInt64Field + " == 1"
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.collectionInfo.schema = schemaInfo
 	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
 
@@ -4828,7 +4890,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledNoPartitionKey() {
 	task.enableMaterializedView = true
 	schema := constructCollectionSchemaByDataType(s.colName, s.fieldName2Types, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.collectionInfo.schema = schemaInfo
 
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
@@ -4843,7 +4905,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
 	task.request.Dsl = testInt64Field + " == 1"
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.collectionInfo.schema = schemaInfo
 	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
 
@@ -4860,7 +4922,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
 	task.request.Dsl = testVarCharField + " == \"a\""
 	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 	schemaInfo := newSchemaInfo(schema)
-	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.collectionInfo.schema = schemaInfo
 	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
 	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
 
@@ -4880,7 +4942,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		task.IsAdvanced = isAdvanced
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
-		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.collectionInfo.schema = schemaInfo
 		s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
 		s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
 		err := task.PreExecute(s.ctx)
@@ -4900,7 +4962,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		task.request.Dsl = testVarCharField + " in [\"a\", \"b\", \"c\"]"
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
-		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.collectionInfo.schema = schemaInfo
 		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
 	}
 }
@@ -4914,7 +4976,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		task.request.Dsl = testVarCharField + " == \"a\" || " + testVarCharField + "  == \"b\" || " + testVarCharField + " == \"c\""
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
-		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+		s.collectionInfo.schema = schemaInfo
 		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
 	}
 }

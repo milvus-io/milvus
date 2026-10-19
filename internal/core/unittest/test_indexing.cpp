@@ -1068,6 +1068,8 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
         knowhere::GenDataSet(total_vectors, DIM, xb_data.data());
     xb_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(offsets.data()));
+    xb_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                    static_cast<int64_t>(offsets.size() - 1));
     xb_dataset->Set(knowhere::meta::NQ, num_emb_lists);
 
     // Setup file manager context
@@ -1143,6 +1145,8 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
     std::vector<size_t> query_offsets = {0, 3, 5};
     xq_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(query_offsets.data()));
+    xq_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                    static_cast<int64_t>(query_offsets.size() - 1));
     xq_dataset->Set(knowhere::meta::NQ, int64_t{2});
 
     milvus::SearchInfo search_info;
@@ -1290,6 +1294,8 @@ TEST(Indexing, DiskAnnEmbListBuildFromBinlog) {
     std::vector<size_t> query_offsets = {0, 3, 5};
     xq_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                     const_cast<const size_t*>(query_offsets.data()));
+    xq_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                    static_cast<int64_t>(query_offsets.size() - 1));
 
     milvus::SearchInfo search_info;
     search_info.topk_ = K;

@@ -109,6 +109,16 @@ func (m *ConcurrentMap[K, V]) Remove(key K) {
 	}
 }
 
+// CompareAndDelete removes key only if it still contains old. As with
+// sync.Map.CompareAndDelete, old must have a comparable dynamic type.
+func (m *ConcurrentMap[K, V]) CompareAndDelete(key K, old V) bool {
+	if !m.inner.CompareAndDelete(key, old) {
+		return false
+	}
+	m.len.Dec()
+	return true
+}
+
 func (m *ConcurrentMap[K, V]) Len() int {
 	return int(m.len.Load())
 }

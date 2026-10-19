@@ -446,13 +446,14 @@ TEST(TextMatch, TranslatorResourceAccountsForValidityBitmap) {
             101,
             "{}",
             index_size,
+            2,
             static_cast<int64_t>(texts.size()),
             ""};
         storagev1translator::TextMatchIndexTranslator translator(
             load_info, ctx, config);
 
         auto [estimated_loaded, estimated_total_loading] =
-            translator.estimated_byte_size_of_cell(0);
+            translator.estimated_loading_usage({0});
         if (mmap_enabled) {
             EXPECT_EQ(estimated_loaded.memory_bytes, bitmap_bytes);
             EXPECT_EQ(estimated_loaded.file_bytes, index_size);
@@ -463,7 +464,7 @@ TEST(TextMatch, TranslatorResourceAccountsForValidityBitmap) {
             EXPECT_EQ(estimated_loaded.memory_bytes, index_size + bitmap_bytes);
             EXPECT_EQ(estimated_loaded.file_bytes, 0);
             EXPECT_EQ(estimated_total_loading.memory_bytes,
-                      index_size + bitmap_bytes);
+                      2 * index_size + bitmap_bytes);
             EXPECT_EQ(estimated_total_loading.file_bytes, index_size);
         }
 

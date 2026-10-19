@@ -673,7 +673,11 @@ impl IndexReaderWrapper {
         self.json_regex_query(json_path, &pattern, bitset)
     }
 
-    // **Note**: literal length must be larger or equal to min_gram.
+    // **Note**: literal length must be larger or equal to min_gram. The C++
+    // side (`NgramInvertedIndex::ExecuteQuery`) is the gate; a violation
+    // here means that gate was bypassed. It is reported as an error rather
+    // than asserted: this runs under an `extern "C"` frame, where a panic
+    // cannot unwind and aborts the whole process.
     pub fn ngram_match_query(
         &self,
         literal: &str,
@@ -681,15 +685,15 @@ impl IndexReaderWrapper {
         max_gram: usize,
         bitset: *mut c_void,
     ) -> Result<()> {
-        // literal length should be larger or equal to min_gram.
-        assert!(
-            literal.chars().count() >= min_gram,
-            "literal length should be larger or equal to min_gram. literal: {}, min_gram: {}",
-            literal,
-            min_gram
-        );
+        let char_count = literal.chars().count();
+        if char_count < min_gram {
+            return Err(TantivyBindingError::InternalError(format!(
+                "ngram_match_query: literal char length {} < min_gram {}, literal: {:?}",
+                char_count, min_gram, literal
+            )));
+        }
 
-        if literal.chars().count() <= max_gram {
+        if char_count <= max_gram {
             return self.term_query_keyword(literal, bitset);
         }
 

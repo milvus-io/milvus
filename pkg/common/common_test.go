@@ -1,14 +1,20 @@
 package common
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math/rand"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestIsSystemField(t *testing.T) {
@@ -557,6 +563,119 @@ func TestQueryMode(t *testing.T) {
 	})
 }
 
+func TestRLSEnabled(t *testing.T) {
+	t.Run("returns value when set", func(t *testing.T) {
+		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"})
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("uses the last duplicate value", func(t *testing.T) {
+		enabled, err := IsRLSEnabled(
+			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "false"},
+			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
+		)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("defaults to false", func(t *testing.T) {
+		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: "other.key", Value: "true"})
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+
+		enabled, err = IsRLSEnabled()
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("force returns value and defaults to false", func(t *testing.T) {
+		force, err := IsRLSForce(&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"})
+		assert.NoError(t, err)
+		assert.True(t, force)
+
+		force, err = IsRLSForce()
+		assert.NoError(t, err)
+		assert.False(t, force)
+	})
+
+	t.Run("accepts standard boolean values", func(t *testing.T) {
+		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
+			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: value})
+			assert.NoError(t, err, "value %q should be accepted", value)
+		}
+	})
+
+	t.Run("accepts force values", func(t *testing.T) {
+		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
+			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
+			assert.NoError(t, err)
+		}
+	})
+
+	t.Run("force requires enabled RLS in effective properties", func(t *testing.T) {
+		assert.NoError(t, ValidateRLSForceRequiresEnabled(
+			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
+			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"},
+		))
+		assert.NoError(t, ValidateRLSForceRequiresEnabled(
+			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "false"},
+		))
+		for _, properties := range [][]*commonpb.KeyValuePair{
+			{{Key: RLSForceKey, Value: "true"}},
+			{{Key: RLSEnabledKey, Value: "false"}, {Key: RLSForceKey, Value: "true"}},
+		} {
+			err := ValidateRLSForceRequiresEnabled(properties...)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorContains(t, err, RLSForceKey+"=true requires "+RLSEnabledKey+"=true")
+		}
+	})
+
+	t.Run("accepts missing key", func(t *testing.T) {
+		assert.NoError(t, ValidateRLSProperties())
+	})
+
+	t.Run("rejects invalid values", func(t *testing.T) {
+		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+			for _, value := range []string{"", "invalid", "yes", "2"} {
+				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: value})
+				if assert.Error(t, err, "value %q should be rejected", value) {
+					assert.Contains(t, err.Error(), "invalid")
+					assert.Contains(t, err.Error(), key)
+				}
+			}
+		}
+	})
+
+	t.Run("rejects duplicate RLS properties", func(t *testing.T) {
+		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+			err := ValidateRLSProperties(
+				&commonpb.KeyValuePair{Key: key, Value: "false"},
+				&commonpb.KeyValuePair{Key: key, Value: "false"},
+			)
+			if assert.ErrorIs(t, err, merr.ErrParameterInvalid) {
+				assert.Contains(t, err.Error(), "duplicated collection property")
+				assert.Contains(t, err.Error(), key)
+			}
+		}
+	})
+
+	t.Run("rejects wrong case key", func(t *testing.T) {
+		for expected, variants := range map[string][]string{
+			RLSEnabledKey: {"RLS.ENABLED", "Rls.Enabled", "RLS.enabled"},
+			RLSForceKey:   {"RLS.FORCE", "Rls.Force", "RLS.force"},
+		} {
+			for _, key := range variants {
+				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: "true"})
+				if assert.Error(t, err, "key %q should be rejected", key) {
+					assert.Contains(t, err.Error(), "did you mean")
+					assert.Contains(t, err.Error(), expected)
+				}
+			}
+		}
+	})
+}
+
 func TestClampScalarIndexVersion(t *testing.T) {
 	max := MaximumScalarIndexEngineVersion
 
@@ -592,4 +711,116 @@ func TestWKTWKBConversion(t *testing.T) {
 			assert.Equal(t, tc.wkt, wktResult)
 		})
 	}
+}
+
+// TestInternalStorageRootSegmentsIsExhaustive fails when a storage path
+// constant is added to common.go without being classified as either a
+// top-level directory under the storage root (-> InternalStorageRootSegments)
+// or explicitly not one (-> nonTopLevelSegments below).
+//
+// InternalStorageRootSegments is consumed by import path validation in
+// datacoord: anything listed there is refused as an ordinary import target.
+// A missing entry silently reopens a path that import must not read, so the
+// classification is enforced here rather than left to review.
+func TestInternalStorageRootSegmentsIsExhaustive(t *testing.T) {
+	// Constants in the same const block that are deliberately NOT top-level
+	// directories under the storage root. Value is the reason, for readers.
+	nonTopLevelSegments := map[string]string{
+		"OffsetMapping":            "leaf file name under analyze_stats/, already covered by AnalyzeStatsPath",
+		"Centroids":                "leaf file name under analyze_stats/, already covered by AnalyzeStatsPath",
+		"DefaultResourceGroupName": "not a storage path at all",
+	}
+
+	// Both registries count as classified: the split between them is about WHEN
+	// a segment is denied (every storage type vs local only), not about whether
+	// it is a top-level internal directory.
+	registered := make(map[string]struct{},
+		len(InternalStorageRootSegments)+len(LocalOnlyStorageRootSegments))
+	for _, seg := range InternalStorageRootSegments {
+		registered[seg] = struct{}{}
+	}
+	for _, seg := range LocalOnlyStorageRootSegments {
+		if _, dup := registered[seg]; dup {
+			assert.Fail(t, "segment listed in both registries", seg)
+		}
+		registered[seg] = struct{}{}
+	}
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "common.go", nil, 0)
+	require.NoError(t, err)
+
+	checked := 0
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.CONST {
+			continue
+		}
+		if !constBlockDeclares(genDecl, "SegmentInsertLogPath") {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			valueSpec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, ident := range valueSpec.Names {
+				// Fail rather than skip on anything this guard cannot read. A
+				// silently skipped constant is never classified, yet leaves
+				// checked/registered/nonTopLevelSegments balanced, so the
+				// assertion below still passes -- exactly the outcome the guard
+				// exists to prevent.
+				if !assert.Less(t, i, len(valueSpec.Values),
+					"%s has no value of its own (implicit repetition); this guard cannot classify it. "+
+						"Give it an explicit string literal.", ident.Name) {
+					continue
+				}
+				lit, ok := valueSpec.Values[i].(*ast.BasicLit)
+				if !assert.True(t, ok && lit.Kind == token.STRING,
+					"%s is not a plain string literal; this guard cannot classify it. "+
+						"Use a literal, or move it out of this const block and classify it by hand.",
+					ident.Name) {
+					continue
+				}
+				value, err := strconv.Unquote(lit.Value)
+				require.NoError(t, err)
+
+				checked++
+				if _, excluded := nonTopLevelSegments[ident.Name]; excluded {
+					_, alsoRegistered := registered[value]
+					assert.False(t, alsoRegistered,
+						"%s is marked as not top-level but is also in InternalStorageRootSegments", ident.Name)
+					continue
+				}
+				_, ok = registered[value]
+				assert.True(t, ok,
+					"storage path constant %s (%q) is neither in InternalStorageRootSegments "+
+						"nor in nonTopLevelSegments. Classify it: if it is a top-level directory "+
+						"under the storage root, add it to InternalStorageRootSegments so import "+
+						"path validation refuses it; otherwise add it to nonTopLevelSegments here "+
+						"with the reason.", ident.Name, value)
+			}
+		}
+	}
+
+	require.NotZero(t, checked, "found no string constants in the storage path const block; "+
+		"the block was probably renamed or split, and this guard is no longer checking anything")
+	assert.Equal(t, len(registered)+len(nonTopLevelSegments), checked,
+		"const block size and classification lists disagree")
+}
+
+// constBlockDeclares reports whether genDecl declares a constant with the given name.
+func constBlockDeclares(genDecl *ast.GenDecl, name string) bool {
+	for _, spec := range genDecl.Specs {
+		valueSpec, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		for _, ident := range valueSpec.Names {
+			if ident.Name == name {
+				return true
+			}
+		}
+	}
+	return false
 }

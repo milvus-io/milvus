@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
@@ -617,16 +618,14 @@ func TestProxy_FlushAll_Success(t *testing.T) {
 	mockey.PatchConvey("TestProxy_FlushAll_Success", t, func() {
 		// Mock global meta cache methods
 		globalMetaCache = &MetaCache{}
-		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+		mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
+		mockey.Mock((*MetaCache).RemoveDatabase).Return(nil).Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
-		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+		mockey.Mock((*paramtable.ComponentParam).Save).Return(nil).Build()
 
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		mockey.Mock((*grpcmixcoordclient.Client).ListDatabases).To(func(ctx context.Context, req *milvuspb.ListDatabasesRequest, opts ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
@@ -673,16 +672,14 @@ func TestProxy_FlushAll_ServerAbnormal(t *testing.T) {
 	mockey.PatchConvey("TestProxy_FlushAll_ServerAbnormal", t, func() {
 		// Mock global meta cache methods
 		globalMetaCache = &MetaCache{}
-		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+		mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
+		mockey.Mock((*MetaCache).RemoveDatabase).Return(nil).Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
-		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+		mockey.Mock((*paramtable.ComponentParam).Save).Return(nil).Build()
 
 		// Act: Execute test
 		node := createTestProxy()
@@ -1130,7 +1127,7 @@ func TestProxyDropDatabase(t *testing.T) {
 		cacheBak := globalMetaCache
 		defer func() { globalMetaCache = cacheBak }()
 		cache := NewMockCache(t)
-		cache.EXPECT().RemoveDatabase(mock.Anything, mock.AnythingOfType("string")).Return()
+		cache.EXPECT().RemoveDatabase(mock.Anything, mock.AnythingOfType("string")).Return(nil)
 		globalMetaCache = cache
 
 		ctx := context.Background()
@@ -1473,6 +1470,7 @@ func TestProxy_Delete(t *testing.T) {
 	schema := newSchemaInfo(collSchema)
 	basicInfo := &collectionInfo{
 		collID: collectionID,
+		schema: schema,
 	}
 	paramtable.Init()
 
@@ -1495,11 +1493,6 @@ func TestProxy_Delete(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
-		cache.On("GetCollectionSchema",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(schema, nil)
 		cache.On("GetPartitionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -1564,11 +1557,10 @@ func TestProxy_ImportV2(t *testing.T) {
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
-
-		// get schema failed
+		// get collection info failed in PreExecute
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(nil, mockErr).Once()
 		globalMetaCache = mc
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
@@ -1576,10 +1568,10 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// schema has no fields
 		mc = NewMockCache(t)
-		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{}},
 		}, nil).Once()
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		globalMetaCache = mc
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
@@ -1588,9 +1580,9 @@ func TestProxy_ImportV2(t *testing.T) {
 		// get channel failed
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-				{IsPartitionKey: true},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{IsPartitionKey: true}},
 			}},
 		}, nil)
 		globalMetaCache = mc
@@ -1610,9 +1602,9 @@ func TestProxy_ImportV2(t *testing.T) {
 		// get partitions failed
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-				{IsPartitionKey: true},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{IsPartitionKey: true}},
 			}},
 		}, nil)
 		mc.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
@@ -1624,8 +1616,10 @@ func TestProxy_ImportV2(t *testing.T) {
 		// get partitionID failed
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
 		globalMetaCache = mc
@@ -1636,8 +1630,10 @@ func TestProxy_ImportV2(t *testing.T) {
 		// no file
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		globalMetaCache = mc
@@ -1660,8 +1656,10 @@ func TestProxy_ImportV2(t *testing.T) {
 		// normal case
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
@@ -1686,6 +1684,68 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
 		assert.Equal(t, "123456789", rsp.GetJobID())
+	})
+
+	// The key travels to DataCoord in the gRPC metadata, so what the proxy owes the
+	// hop is a context that still carries it when the coordinator client is called:
+	// that is what the client interceptor copies onto the outgoing call. It survives
+	// the scheduler queue, which runs the task on a context derived from this one.
+	t.Run("ImportV2 hands datacoord a context still carrying the idempotency key", func(t *testing.T) {
+		factory := dependency.NewDefaultFactory(true)
+		node, err := NewProxy(ctx, factory)
+		assert.NoError(t, err)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		node.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+		scheduler, err := newTaskScheduler(ctx, node.tsoAllocator)
+		assert.NoError(t, err)
+		node.sched = scheduler
+		assert.NoError(t, node.sched.Start())
+		defer node.sched.Close()
+		chMgr := NewMockChannelsMgr(t)
+		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"ch0"}, nil)
+		node.chMgr = chMgr
+
+		mc := NewMockCache(t)
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
+		}, nil)
+		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
+		globalMetaCache = mc
+
+		capturedKey := make(chan string, 1)
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, req *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
+				capturedKey <- interceptor.IdempotencyKeyFromContext(ctx)
+				return &internalpb.ImportResponse{
+					Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					JobID:  "123456789",
+				}, nil
+			})
+		node.mixCoord = mixCoord
+
+		mdCtx := metadata.NewIncomingContext(ctx, metadata.Pairs(util.HeaderIdempotencyKey, "run-1-batch-1"))
+		rsp, err := node.ImportV2(mdCtx, &internalpb.ImportRequest{
+			CollectionName: "aaa",
+			Files: []*internalpb.ImportFile{{
+				Id:    1,
+				Paths: []string{"a.json"},
+			}},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
+		select {
+		case key := <-capturedKey:
+			assert.Equal(t, "run-1-batch-1", key)
+		default:
+			t.Fatal("mixCoord.ImportV2 was never called")
+		}
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
@@ -1728,6 +1788,18 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
 	})
+}
+
+func TestConvertToV2ImportRequestPreservesRLSContext(t *testing.T) {
+	options := []*commonpb.KeyValuePair{
+		{Key: "rls_principal", Value: "alice"},
+		{Key: "skip_rls", Value: "true"},
+	}
+	req := convertToV2ImportRequest(&milvuspb.ImportRequest{
+		Options: options,
+	})
+
+	assert.Equal(t, options, req.GetOptions())
 }
 
 func TestGetCollectionRateSubLabel(t *testing.T) {

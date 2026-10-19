@@ -363,6 +363,14 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
+	// The caller may have timed out during the load/seek steps above. Commit
+	// the watch only if it is still wanted: once the pipeline starts, this
+	// node is subscribed while the coordinator has already marked the task
+	// failed, and the re-issued watch would race the stale registration.
+	if err = ctx.Err(); err != nil {
+		return merr.Status(err), nil
+	}
+
 	// start pipeline
 	pipeline.Start()
 	// delegator after all steps done
@@ -1840,7 +1848,7 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 			return merr.Status(err), nil
 		}
 	}
-	segments, err := node.manager.Segment.GetAndPinBy(segments.WithID(req.GetSegmentID()))
+	segments, err := node.manager.Segment.GetAndPinBy(segments.WithID(req.GetSegmentID()), segments.WithType(segments.SegmentTypeSealed))
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -1851,10 +1859,14 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 
 	segment := segments[0]
 	indexIDs := req.GetIndexIDs()
+	// A request can partially succeed. Publish the indexes already removed even
+	// if a subsequent deletion fails, so the coordinator can reconcile the rest.
+	defer node.distDeltaTracker.markSegmentUpsert(req.GetSegmentID())
 	for _, indexID := range indexIDs {
-		segment.DropIndex(ctx, indexID)
+		if err := segment.DropIndex(ctx, indexID); err != nil {
+			return merr.Status(err), nil
+		}
 	}
-	node.distDeltaTracker.markSegmentUpsert(req.GetSegmentID())
 
 	return merr.Success(), nil
 }

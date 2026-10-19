@@ -114,6 +114,10 @@ func (s *TestArrayStructSuite) run() {
 				Key:   common.DimKey,
 				Value: fmt.Sprintf("%d", dim),
 			},
+			{
+				Key:   common.MaxCapacityKey,
+				Value: "100",
+			},
 		},
 		IndexParams: nil,
 	}

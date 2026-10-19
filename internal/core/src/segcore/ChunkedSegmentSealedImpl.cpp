@@ -1959,6 +1959,7 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
         info_proto->fieldid(),
         field_meta.get_analyzer_params(),
         info_proto->index_size(),
+        info_proto->current_scalar_index_version(),
         num_rows,
         info_proto->warmup_policy()};
 
@@ -3434,6 +3435,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             segment_load_info_.GetStorageVersion();
+        load_field_data_info.load_priority = segment_load_info_.GetPriority();
         // when child fields specified, field id is group id, child field ids are actual id values here
         if (field_binlog.child_fields_size() > 0) {
             field_ids.reserve(field_binlog.child_fields_size());

@@ -783,8 +783,23 @@ func (_c *MockCache_RemoveCollectionsByID_Call) RunAndReturn(run func(context.Co
 }
 
 // RemoveDatabase provides a mock function with given fields: ctx, database
-func (_m *MockCache) RemoveDatabase(ctx context.Context, database string) {
-	_m.Called(ctx, database)
+func (_m *MockCache) RemoveDatabase(ctx context.Context, database string) []int64 {
+	ret := _m.Called(ctx, database)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveDatabase")
+	}
+
+	var r0 []int64
+	if rf, ok := ret.Get(0).(func(context.Context, string) []int64); ok {
+		r0 = rf(ctx, database)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	return r0
 }
 
 // MockCache_RemoveDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveDatabase'
@@ -806,13 +821,13 @@ func (_c *MockCache_RemoveDatabase_Call) Run(run func(ctx context.Context, datab
 	return _c
 }
 
-func (_c *MockCache_RemoveDatabase_Call) Return() *MockCache_RemoveDatabase_Call {
-	_c.Call.Return()
+func (_c *MockCache_RemoveDatabase_Call) Return(_a0 []int64) *MockCache_RemoveDatabase_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, string)) *MockCache_RemoveDatabase_Call {
-	_c.Run(run)
+func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, string) []int64) *MockCache_RemoveDatabase_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

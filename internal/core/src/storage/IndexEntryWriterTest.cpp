@@ -35,8 +35,10 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
+#include "folly/ScopeGuard.h"
 #include "test_utils/Constants.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "storage/FileWriter.h"
 #include "storage/IndexEntryDirectStreamWriter.h"
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryReader.h"
@@ -528,6 +530,57 @@ TEST_F(IndexEntryWriterV3Test, ReadEntryToFile) {
     ::unlink(local_file.c_str());
 }
 
+TEST_F(IndexEntryWriterV3Test, ReadEntryToFileUsesWriterPriority) {
+    const std::string file_path = kV3FilePath + "_tofile_writer_priority";
+    const size_t entry_size = 4 * 1024;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("file_entry", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(
+        input, file_size, 0, milvus::ThreadPoolPriority::LOW);
+
+    auto old_mode = FileWriter::GetMode();
+    auto& limiter = io::WriteRateLimiter::GetInstance();
+    auto restore_config = folly::makeGuard([old_mode, &limiter]() {
+        FileWriter::SetMode(old_mode);
+        limiter.Configure(/*refill_period_us=*/100000,
+                          /*avg_bps=*/8192 * 10,
+                          /*max_burst_bps=*/8192 * 40,
+                          /*high=*/-1,
+                          /*middle=*/-1,
+                          /*low=*/-1);
+    });
+
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    limiter.Configure(/*refill_period_us=*/5000000,
+                      /*avg_bps=*/820,
+                      /*max_burst_bps=*/820,
+                      /*high=*/-1,
+                      /*middle=*/-1,
+                      /*low=*/1);
+    limiter.Reset();
+
+    std::string local_file = GetRootPath() + "/read_entry_writer_priority.bin";
+    reader->ReadEntryToFile("file_entry", local_file);
+
+    auto remaining_credit = limiter.Acquire(entry_size, 1, io::Priority::LOW);
+    EXPECT_LT(remaining_credit, entry_size);
+
+    std::ifstream ifs(local_file, std::ios::binary | std::ios::ate);
+    ASSERT_TRUE(ifs.is_open());
+    ASSERT_EQ(static_cast<size_t>(ifs.tellg()), entry_size);
+
+    ::unlink(local_file.c_str());
+}
+
 TEST_F(IndexEntryWriterV3Test, ReadEntriesToFiles) {
     const std::string file_path = kV3FilePath + "_tofiles";
     const size_t size_a = 256 * 1024;
@@ -768,9 +821,9 @@ TEST_F(IndexEntryWriterV3Test, ReadEntriesToFilesMultiRangeParallel) {
     const std::string file_path = kV3FilePath + "_multirange";
 
     // Each entry > 16MB to require multiple ranges
-    const size_t size_a = 35 * 1024 * 1024;  // 35 MB = 3 ranges
-    const size_t size_b = 50 * 1024 * 1024;  // 50 MB = 4 ranges
-    const size_t size_c = 20 * 1024 * 1024;  // 20 MB = 2 ranges
+    const size_t size_a = 35 * 1024 * 1024 + 17;    // 3 ranges
+    const size_t size_b = 50 * 1024 * 1024 + 123;   // 4 ranges
+    const size_t size_c = 20 * 1024 * 1024 + 2047;  // 2 ranges
     // Total: 9 parallel range tasks across 3 entries
 
     auto data_a = GeneratePattern(size_a);
@@ -788,7 +841,13 @@ TEST_F(IndexEntryWriterV3Test, ReadEntriesToFilesMultiRangeParallel) {
 
     auto input = CreateInputStream(file_path);
     int64_t file_size = GetFileSize(file_path);
-    auto reader = IndexEntryReader::Open(input, file_size);
+    auto reader = IndexEntryReader::Open(
+        input, file_size, 0, milvus::ThreadPoolPriority::LOW);
+
+    auto old_mode = FileWriter::GetMode();
+    auto restore_mode =
+        folly::makeGuard([old_mode]() { FileWriter::SetMode(old_mode); });
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
 
     std::string file_a = GetRootPath() + "/multirange_a.bin";
     std::string file_b = GetRootPath() + "/multirange_b.bin";
@@ -1005,12 +1064,34 @@ class IndexEntryEncryptedV3Test : public IndexEntryWriterV3Test {
     std::shared_ptr<MockCipherPlugin> mock_cipher_;
 };
 
+TEST_F(IndexEntryEncryptedV3Test, RejectsUnalignedSliceSize) {
+    const std::string file_path = kV3FilePath + "_enc_unaligned_slice_size";
+    constexpr size_t slice_size = 512;
+    auto data = GeneratePattern(1024);
+
+    {
+        IndexEntryEncryptedLocalWriter writer(file_path,
+                                              fs_,
+                                              mock_cipher_,
+                                              /*ez_id=*/1,
+                                              /*collection_id=*/100,
+                                              GetRootPath(),
+                                              slice_size);
+        writer.WriteEntry("enc_entry", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    auto file_size = GetFileSize(file_path);
+    EXPECT_THROW(IndexEntryReader::Open(input, file_size, 100),
+                 milvus::SegcoreError);
+}
+
 TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
     const std::string file_path = kV3FilePath + "_enc_small";
-    const size_t entry_size = 1024;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
+    const size_t entry_size = 2 * slice_size;
     auto data = GeneratePattern(entry_size);
-
-    const size_t slice_size = 1024;
 
     {
         // Note: remote_path should be relative to fs root
@@ -1066,8 +1147,8 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedWriterCreatesMissingTempDir) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
     // Entry larger than slice_size, requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multislice";
-    const size_t slice_size = 1024;
-    const size_t entry_size = 5 * slice_size + 100;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
+    const size_t entry_size = 5 * slice_size + 100;  // 6 slices
     auto data = GeneratePattern(entry_size);
 
     {
@@ -1092,11 +1173,11 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
     // Multiple entries, each requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_multi_multi";
-    const size_t slice_size = 1024;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
 
-    const size_t size_a = 3 * slice_size + 500;
-    const size_t size_b = 2 * slice_size + 100;
-    const size_t size_c = 5 * slice_size;
+    const size_t size_a = 3 * slice_size + 500;  // 4 slices
+    const size_t size_b = 2 * slice_size + 100;  // 3 slices
+    const size_t size_c = 5 * slice_size;        // 5 slices
 
     auto data_a = GeneratePattern(size_a);
     auto data_b = GeneratePattern(size_b);
@@ -1128,7 +1209,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
     // Large meta entry requiring multiple slices
     const std::string file_path = kV3FilePath + "_enc_largemeta";
-    const size_t slice_size = 1024;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
 
     auto data = GeneratePattern(256);
 
@@ -1162,8 +1243,8 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
     // Test fd-based entry with multiple slices
     const std::string file_path = kV3FilePath + "_enc_fd";
-    const size_t slice_size = 1024;
-    const size_t entry_size = 4 * slice_size + 200;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
+    const size_t entry_size = 4 * slice_size + 200;  // 5 slices
     auto data = GeneratePattern(entry_size);
 
     // Write source file
@@ -1204,7 +1285,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationAcceptsValidDirectory) {
     const std::string file_path = kV3FilePath + "_dir_valid";
-    const size_t slice_size = 1024;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
     const size_t entry_size = 2 * slice_size + 100;  // 3 slices
     auto data = GeneratePattern(entry_size);
 
@@ -1233,7 +1314,7 @@ TEST_F(IndexEntryEncryptedV3Test,
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationRejectsSliceOffsetPastDataRegion) {
     const std::string file_path = kV3FilePath + "_dir_bad_slice_offset";
-    constexpr size_t slice_size = 1024;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
     auto data = GeneratePattern(2 * slice_size + 100);
 
     {
@@ -1272,7 +1353,7 @@ TEST_F(IndexEntryEncryptedV3Test,
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationRejectsSliceSizePastDataRegion) {
     const std::string file_path = kV3FilePath + "_dir_bad_slice_size";
-    constexpr size_t slice_size = 1024;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
     auto data = GeneratePattern(2 * slice_size + 100);
 
     {
@@ -1311,7 +1392,7 @@ TEST_F(IndexEntryEncryptedV3Test,
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationRejectsOutOfRangeSlice) {
     const std::string file_path = kV3FilePath + "_dir_out_of_range";
-    const size_t slice_size = 1024;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
     const size_t entry_size = 2 * slice_size + 100;  // 3 slices
     auto data = GeneratePattern(entry_size);
 
@@ -1353,7 +1434,7 @@ TEST_F(IndexEntryEncryptedV3Test,
 TEST_F(IndexEntryEncryptedV3Test,
        EncryptedDirectoryValidationRejectsIncompleteCoverage) {
     const std::string file_path = kV3FilePath + "_dir_incomplete";
-    const size_t slice_size = 1024;
+    constexpr size_t slice_size = FileWriter::ALIGNMENT_BYTES;
     const size_t entry_size = 2 * slice_size + 100;  // 3 slices
     auto data = GeneratePattern(entry_size);
 

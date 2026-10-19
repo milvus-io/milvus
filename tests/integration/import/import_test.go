@@ -41,7 +41,7 @@ import (
 )
 
 type BulkInsertSuite struct {
-	integration.MiniClusterSuite
+	importSuite
 
 	failed       bool
 	failedReason string
@@ -58,7 +58,7 @@ type BulkInsertSuite struct {
 
 func (s *BulkInsertSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
-	s.MiniClusterSuite.SetupSuite()
+	s.importSuite.SetupSuite()
 }
 
 func (s *BulkInsertSuite) SetupTest() {
@@ -229,47 +229,6 @@ func (s *BulkInsertSuite) TestGeometryTypes() {
 	s.testType = schemapb.DataType_Geometry
 	s.expr = "st_equals(" + "testField" + schemapb.DataType_name[int32(s.testType)] + ",'POINT (-84.036 39.997)')"
 	s.run()
-}
-
-func (s *BulkInsertSuite) TestMultiFileTypes() {
-	fileTypeArr := []importutilv2.FileType{importutilv2.JSON, importutilv2.Numpy, importutilv2.Parquet, importutilv2.CSV}
-
-	for _, fileType := range fileTypeArr {
-		s.fileType = fileType
-
-		s.vecType = schemapb.DataType_BinaryVector
-		s.indexType = "BIN_IVF_FLAT"
-		s.metricType = metric.HAMMING
-		s.run()
-
-		s.vecType = schemapb.DataType_FloatVector
-		s.indexType = "HNSW"
-		s.metricType = metric.L2
-		s.run()
-
-		s.vecType = schemapb.DataType_Float16Vector
-		s.indexType = "HNSW"
-		s.metricType = metric.L2
-		s.run()
-
-		s.vecType = schemapb.DataType_BFloat16Vector
-		s.indexType = "HNSW"
-		s.metricType = metric.L2
-		s.run()
-
-		s.vecType = schemapb.DataType_Int8Vector
-		s.indexType = "HNSW"
-		s.metricType = metric.L2
-		s.run()
-
-		// TODO: not support numpy for SparseFloatVector by now
-		if fileType != importutilv2.Numpy {
-			s.vecType = schemapb.DataType_SparseFloatVector
-			s.indexType = "SPARSE_WAND"
-			s.metricType = metric.IP
-			s.run()
-		}
-	}
 }
 
 func (s *BulkInsertSuite) TestPK() {

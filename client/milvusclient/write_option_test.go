@@ -47,6 +47,39 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	s.ElementsMatch([]bool{true, true, true}, fd.GetValidData())
 }
 
+func (s *ColumnBasedDataOptionSuite) TestWithRLSContext() {
+	const principal = "alice"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64)),
+	}
+
+	columnOpt := NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true)
+	insertReq, err := columnOpt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, insertReq.GetRlsPrincipal())
+	s.True(insertReq.GetSkipRls())
+
+	upsertReq, err := columnOpt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, upsertReq.GetRlsPrincipal())
+	s.True(upsertReq.GetSkipRls())
+
+	rowOpt := NewRowBasedInsertOption("c", map[string]any{"id": int64(1)}).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true)
+	insertReq, err = rowOpt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, insertReq.GetRlsPrincipal())
+	s.True(insertReq.GetSkipRls())
+
+	upsertReq, err = rowOpt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, upsertReq.GetRlsPrincipal())
+	s.True(upsertReq.GetSkipRls())
+}
+
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
 	dim := 4
 	structSchema := entity.NewStructSchema().
@@ -208,6 +241,15 @@ func (s *DeleteOptionSuite) TestBasic() {
 	opt := NewDeleteOption(collectionName)
 
 	s.Equal(collectionName, opt.Request().GetCollectionName())
+}
+
+func (s *DeleteOptionSuite) TestWithRLSContext() {
+	req := NewDeleteOption("collection").
+		WithRLSPrincipal("alice").
+		WithSkipRLS(true).
+		Request()
+	s.Equal("alice", req.GetRlsPrincipal())
+	s.True(req.GetSkipRls())
 }
 
 func TestDeleteOption(t *testing.T) {

@@ -594,7 +594,7 @@ func (w *LegacyDeltalogWriter) GetWrittenUncompressed() uint64 {
 	return w.writtenUncompressed
 }
 
-func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
+func NewLegacyDeltalogReader(ctx context.Context, pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			pkField,
@@ -609,7 +609,7 @@ func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloade
 	blobsReader := func() ([]*Blob, error) {
 		path := paths[chunkPos]
 		chunkPos++
-		blobs, err := downloader(context.Background(), []string{path})
+		blobs, err := downloader(ctx, []string{path})
 		if err != nil {
 			return nil, err
 		}

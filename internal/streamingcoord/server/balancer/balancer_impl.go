@@ -591,20 +591,34 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context, rgName stri
 		return nil, merr.Wrap(err, "fail to collect all status")
 	}
 
+	// clean up the freeze node that has been removed from session.
+	// Use the full session view (all resource groups) instead of nodeStatus:
+	// nodeStatus only contains nodes of the primary/fallback resource group
+	// (see filterStreamingNodeStatusByResourceGroupHint), so a frozen node in
+	// another resource group would otherwise be wrongly unfrozen.
+	// Run before marking frozen nodes below so the marking uses the
+	// post-cleanup freeze set. Non-fatal: a transient failure to get the
+	// session view must not abort the whole balance round, so skip the
+	// cleanup this round and log a warning instead.
+	allNodes, err := b.GetAllStreamingNodes(ctx)
+	if err != nil {
+		b.Logger().Warn("fail to get all streaming nodes, skip freeze cleanup this round", zap.Error(err))
+	} else {
+		b.freezeNodes.Range(func(serverID int64) bool {
+			if _, ok := allNodes[serverID]; !ok {
+				b.Logger().Info("freeze node has been removed from session", zap.Int64("serverID", serverID))
+				b.freezeNodes.Remove(serverID)
+			}
+			return true
+		})
+	}
+
 	// mark the frozen node as frozen in the node status.
 	for _, node := range nodeStatus {
 		if b.freezeNodes.Contain(node.ServerID) && node.IsHealthy() {
 			node.Err = types.ErrFrozen
 		}
 	}
-	// clean up the freeze node that has been removed from session.
-	b.freezeNodes.Range(func(serverID int64) bool {
-		if _, ok := nodeStatus[serverID]; !ok {
-			b.Logger().Info("freeze node has been removed from session", zap.Int64("serverID", serverID))
-			b.freezeNodes.Remove(serverID)
-		}
-		return true
-	})
 	return nodeStatus, nil
 }
 
@@ -619,15 +633,30 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 	for _, channel := range modifiedChannels {
 		channel := channel
 		g.Go(func() error {
+			// ownerLost is true if the streaming node of any read-write assignment history has left the session view.
+			ownerLost := false
 			// all history channels should be remove from related nodes.
 			for _, assignment := range channel.AssignHistories() {
 				opCtx, cancel := context.WithTimeout(ctx, opTimeout)
 				defer cancel()
-				if err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment); err != nil {
+				err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment)
+				if errors.Is(err, types.ErrNotAlive) {
+					if assignment.Channel.AccessMode == types.AccessModeRW {
+						ownerLost = true
+					}
+					b.Logger().Warn("streaming node of channel is not alive, wal close not confirmed", zap.String("assignment", assignment.String()))
+					continue
+				}
+				if err != nil {
 					b.Logger().Warn("fail to remove channel", zap.String("assignment", assignment.String()), zap.Error(err))
 					return err
 				}
 				b.Logger().Info("remove channel success", zap.String("assignment", assignment.String()))
+			}
+			if ownerLost {
+				if err := b.waitNodeLostGracePeriod(ctx, channel); err != nil {
+					return err
+				}
 			}
 
 			// assign the channel to the target node.
@@ -651,6 +680,25 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 	// huge unavaiable time may be caused by this,
 	// should be fixed in future.
 	return g.Wait()
+}
+
+// waitNodeLostGracePeriod blocks for streaming.walBalancer.nodeLostGracePeriod or until ctx is done.
+func (b *balancerImpl) waitNodeLostGracePeriod(ctx context.Context, meta *channel.PChannelMeta) error {
+	grace := paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.GetAsDurationByParse()
+	if grace <= 0 {
+		return nil
+	}
+	b.Logger().Info("wait grace period before assigning channel whose streaming node is lost",
+		zap.String("target", meta.CurrentAssignment().String()),
+		zap.Duration("gracePeriod", grace))
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // generateCurrentLayout generate layout from all nodes info and meta.

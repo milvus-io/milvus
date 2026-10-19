@@ -1,4 +1,7 @@
+use rust_stemmers::Algorithm;
 use serde_json as json;
+
+use super::stemmer_filter::Stemmer;
 use tantivy_5::tokenizer::*;
 
 use super::util::*;
@@ -112,31 +115,31 @@ fn get_stemmer_filter(params: &json::Map<String, json::Value>) -> Result<SystemF
 }
 
 trait LanguageParser {
-    fn into_language(self) -> Result<Language>;
+    fn into_language(self) -> Result<Algorithm>;
 }
 
 impl LanguageParser for &str {
-    fn into_language(self) -> Result<Language> {
+    fn into_language(self) -> Result<Algorithm> {
         match self.to_lowercase().as_str() {
-            "arabic" => Ok(Language::Arabic),
-            "arabig" => Ok(Language::Arabic),
-            "danish" => Ok(Language::Danish),
-            "dutch" => Ok(Language::Dutch),
-            "english" => Ok(Language::English),
-            "finnish" => Ok(Language::Finnish),
-            "french" => Ok(Language::French),
-            "german" => Ok(Language::German),
-            "greek" => Ok(Language::Greek),
-            "hungarian" => Ok(Language::Hungarian),
-            "italian" => Ok(Language::Italian),
-            "norwegian" => Ok(Language::Norwegian),
-            "portuguese" => Ok(Language::Portuguese),
-            "romanian" => Ok(Language::Romanian),
-            "russian" => Ok(Language::Russian),
-            "spanish" => Ok(Language::Spanish),
-            "swedish" => Ok(Language::Swedish),
-            "tamil" => Ok(Language::Tamil),
-            "turkish" => Ok(Language::Turkish),
+            "arabic" => Ok(Algorithm::Arabic),
+            "arabig" => Ok(Algorithm::Arabic),
+            "danish" => Ok(Algorithm::Danish),
+            "dutch" => Ok(Algorithm::Dutch),
+            "english" => Ok(Algorithm::English),
+            "finnish" => Ok(Algorithm::Finnish),
+            "french" => Ok(Algorithm::French),
+            "german" => Ok(Algorithm::German),
+            "greek" => Ok(Algorithm::Greek),
+            "hungarian" => Ok(Algorithm::Hungarian),
+            "italian" => Ok(Algorithm::Italian),
+            "norwegian" => Ok(Algorithm::Norwegian),
+            "portuguese" => Ok(Algorithm::Portuguese),
+            "romanian" => Ok(Algorithm::Romanian),
+            "russian" => Ok(Algorithm::Russian),
+            "spanish" => Ok(Algorithm::Spanish),
+            "swedish" => Ok(Algorithm::Swedish),
+            "tamil" => Ok(Algorithm::Tamil),
+            "turkish" => Ok(Algorithm::Turkish),
             other => Err(TantivyBindingError::InternalError(format!(
                 "unsupport language: {}",
                 other

@@ -18,6 +18,7 @@ package paramtable
 
 type httpConfig struct {
 	Enabled               ParamItem `refreshable:"false"`
+	EnableV1              ParamItem `refreshable:"false"`
 	DebugMode             ParamItem `refreshable:"false"`
 	Port                  ParamItem `refreshable:"false"`
 	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
@@ -39,6 +40,19 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.Enabled.Init(base.mgr)
+
+	p.EnableV1 = ParamItem{
+		Key:          "proxy.http.enableV1",
+		DefaultValue: "true",
+		Version:      "2.6.25",
+		Doc: `Whether to register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
+Restart to apply. Disabling keeps listeners, V2, probes, and metrics available.
+The non-underscore /api/v1/* REST API is removed regardless of this setting.
+WebUI data requires these console APIs; use enableWebUI to hide the pages.
+managementMetricsOnly takes precedence on the metrics port.`,
+		Export: true,
+	}
+	p.EnableV1.Init(base.mgr)
 
 	p.DebugMode = ParamItem{
 		Key:          "proxy.http.debug_mode",
@@ -104,6 +118,7 @@ cost. Disabling restores the old always-decode behavior.`,
 		Version:      "2.6.0",
 		Doc:          "Strict-Transport-Security max-age in seconds",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.HSTSMaxAge.Init(base.mgr)
 
@@ -113,6 +128,7 @@ cost. Disabling restores the old always-decode behavior.`,
 		Version:      "2.6.0",
 		Doc:          "Include subdomains in Strict-Transport-Security",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.HSTSIncludeSubDomains.Init(base.mgr)
 
@@ -122,6 +138,7 @@ cost. Disabling restores the old always-decode behavior.`,
 		Version:      "2.6.0",
 		Doc:          "Whether to enable setting the Strict-Transport-Security header",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.EnableHSTS.Init(base.mgr)
 

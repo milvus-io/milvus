@@ -10,6 +10,22 @@ type MapUtilSuite struct {
 	suite.Suite
 }
 
+func (suite *MapUtilSuite) TestCompareAndDeletePreservesReplacement() {
+	entries := NewConcurrentMap[int64, *int]()
+	old, replacement := new(int), new(int)
+	entries.Insert(1, old)
+	entries.Insert(1, replacement)
+	suite.False(entries.CompareAndDelete(1, old))
+	suite.Equal(1, entries.Len())
+	value, ok := entries.Get(1)
+	suite.True(ok)
+	suite.Same(replacement, value)
+	suite.True(entries.CompareAndDelete(1, replacement))
+	suite.Zero(entries.Len())
+	suite.False(entries.CompareAndDelete(1, replacement))
+	suite.Zero(entries.Len())
+}
+
 func (suite *MapUtilSuite) TestMapEqual() {
 	left := map[int64]int64{
 		1: 10,

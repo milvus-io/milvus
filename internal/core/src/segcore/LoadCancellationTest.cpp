@@ -285,7 +285,8 @@ class SlowChunkTranslator : public cachinglayer::Translator<milvus::Chunk> {
         return uid;
     }
     std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+    estimated_loading_usage(
+        const std::vector<cachinglayer::cid_t>&) const override {
         return {{0, 0}, {0, 0}};
     }
     int64_t

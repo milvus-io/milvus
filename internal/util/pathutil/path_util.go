@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -20,7 +21,12 @@ const (
 )
 
 const (
-	CachePathPrefix       = "cache"
+	// CachePathPrefix is the shared top-level directory for every node-local
+	// cache below. It aliases common.LocalCacheRootPath so the segment stays
+	// registered in common.LocalOnlyStorageRootSegments: under
+	// common.storageType=local this directory sits directly under the
+	// ChunkManager root, and import path validation refuses paths into it.
+	CachePathPrefix       = common.LocalCacheRootPath
 	GrowingMMapPathPrefix = "growing_mmap"
 	LocalChunkPathPrefix  = "local_chunk"
 	BM25PathPrefix        = "bm25"

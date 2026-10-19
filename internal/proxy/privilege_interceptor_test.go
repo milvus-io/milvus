@@ -85,12 +85,12 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		err = InitMetaCache(ctx, client)
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
@@ -137,18 +137,20 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.Error(t, err)
 
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.FlushRequest{
-			DbName:          "db_test",
+			DbName:          "default",
 			CollectionNames: []string{"col1"},
 		})
 		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 
-		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "foo"), &milvuspb.LoadCollectionRequest{
+		// fooo holds Global-All only on "default"; a request explicitly targeting
+		// another db must be denied regardless of the connection-context db.
+		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "default"), &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
@@ -279,6 +281,73 @@ func TestRootShouldBindRole(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	})
+}
+
+func TestCheckSkipRLSPrivilege(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
+	defer Params.Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer privilege.CleanPrivilegeCache()
+	previousCache := globalMetaCache
+	defer func() { globalMetaCache = previousCache }()
+
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+	assert.NoError(t, checkSkipRLSPrivilege(context.Background(), "db1", "coll1", "query"))
+
+	enforce, err := resolveRLSEnforcement(context.Background(), false, true, true, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.False(t, enforce)
+
+	enforce, err = resolveRLSEnforcement(context.Background(), true, true, false, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.True(t, enforce)
+
+	enforce, err = resolveRLSEnforcement(context.Background(), true, false, true, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.False(t, enforce)
+
+	_, err = resolveRLSEnforcement(context.Background(), true, true, true, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Contains(t, err.Error(), "rls.force")
+
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	ctx := GetContext(context.Background(), "alice:123456")
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status:      merr.Success(),
+			PolicyInfos: nil,
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("alice", "role1"),
+			},
+		}, nil
+	}
+	require.NoError(t, InitMetaCache(ctx, client))
+	err = checkSkipRLSPrivilege(ctx, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Contains(t, err.Error(), "SkipRLS")
+	_, err = resolveRLSEnforcement(ctx, true, false, true, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "coll1", commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(), "db1"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("alice", "role1"),
+			},
+		}, nil
+	}
+	require.NoError(t, InitMetaCache(ctx, client))
+	assert.NoError(t, checkSkipRLSPrivilege(ctx, "db1", "coll1", "query"))
+	enforce, err = resolveRLSEnforcement(ctx, true, false, true, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.False(t, enforce)
+	_, err = resolveRLSEnforcement(ctx, true, true, true, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
 func TestResourceGroupPrivilege(t *testing.T) {
@@ -697,4 +766,142 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{})
 		assert.Error(t, err)
 	})
+}
+
+func TestCheckClusterPrivilege_AuthorizationDisabled(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	err := CheckClusterPrivilege(context.Background(), &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "authorization disabled must short-circuit to allow")
+}
+
+func TestCheckClusterPrivilege_RootBypass(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+	ctx := GetContext(context.Background(), "root:123456")
+
+	err := CheckClusterPrivilege(ctx, &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "root must bypass when rootShouldBindRole is false; "+
+		"this is what keeps milvus-backup working unchanged")
+}
+
+func TestCheckClusterPrivilege_NoAuthInfo(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	err := CheckClusterPrivilege(context.Background(), &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.Error(t, err, "a ctx without auth metadata must be refused, not allowed")
+}
+
+// TestCheckClusterPrivilege_GrantedUserIsAllowed proves the gate can actually be
+// opened by granting the privilege, using the same policy encoding the RBAC API
+// stores. Without this, every other test here is consistent with a gate nobody
+// can ever pass -- which would look identical in CI and break every non-root
+// milvus-backup deployment in production.
+func TestCheckClusterPrivilege_GrantedUserIsAllowed(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_importer", commonpb.ObjectType_Global.String(), "*",
+					commonpb.ObjectPrivilege_PrivilegeImportBinlog.String(), util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("importer", "role_importer"),
+			},
+		}, nil
+	}
+	// InitMetaCache also seeds the privilege cache from ListPolicy, which is
+	// what this test needs; the same helper is used at the top of this file.
+	require.NoError(t, InitMetaCache(context.Background(), client))
+
+	err := CheckClusterPrivilege(GetContext(context.Background(), "importer:123456"),
+		&internalpb.ImportRequest{}, milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "a user holding the granted privilege must be allowed; "+
+		"if this fails the gate is unopenable and binlog import is dead for every non-root user")
+
+	err = CheckClusterPrivilege(GetContext(context.Background(), "alice:123456"),
+		&internalpb.ImportRequest{}, milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted,
+		"a user without the grant must still be refused")
+}
+
+// TestClusterPrivilegePathsAgree pins the two cluster-privilege entry points to
+// the same decision. CheckClusterPrivilege repeats the preconditions of
+// enforceClusterPrivilege rather than sharing them (they differ only in error
+// shape, ctx write-back and the audit report), so a condition added to one and
+// not the other would silently split who is allowed in. The shared
+// implementation belongs in its own change; until then this test is what
+// catches the drift.
+func TestClusterPrivilegePathsAgree(t *testing.T) {
+	paramtable.Init()
+	privilegeName := commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_importer", commonpb.ObjectType_Global.String(), "*",
+					privilegeName, util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("importer", "role_importer"),
+			},
+		}, nil
+	}
+	require.NoError(t, InitMetaCache(context.Background(), client))
+
+	cases := []struct {
+		name          string
+		authorization string
+		rootBindRole  string
+		ctx           context.Context
+		wantAllowed   bool
+	}{
+		{"authorization disabled", "false", "false", context.Background(), true},
+		{"root bypass", "true", "false", GetContext(context.Background(), "root:123456"), true},
+		{"root bound to roles", "true", "true", GetContext(context.Background(), "root:123456"), false},
+		{"no auth info", "true", "false", context.Background(), false},
+		{"granted user", "true", "false", GetContext(context.Background(), "importer:123456"), true},
+		{"ungranted user", "true", "false", GetContext(context.Background(), "alice:123456"), false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, tt.authorization)
+			paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, tt.rootBindRole)
+			defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+			defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+			checkErr := CheckClusterPrivilege(tt.ctx, &internalpb.ImportRequest{},
+				milvuspb.MilvusService_Import_FullMethodName, privilegeName)
+			_, enforceErr := enforceClusterPrivilege(tt.ctx, privilegeName)
+
+			assert.Equal(t, tt.wantAllowed, checkErr == nil, "CheckClusterPrivilege")
+			assert.Equal(t, checkErr == nil, enforceErr == nil,
+				"the two cluster-privilege paths disagree on this input")
+		})
+	}
 }

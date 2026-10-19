@@ -1,6 +1,8 @@
+use rust_stemmers::Algorithm;
 use tantivy_5::tokenizer::*;
 
 use super::filter::*;
+use super::stemmer_filter::Stemmer;
 use super::stop_words;
 use super::tokenizers::*;
 
@@ -27,7 +29,7 @@ pub fn chinese_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
 pub fn english_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
     let builder = standard_builder()
         .filter(LowerCaser)
-        .filter(Stemmer::new(Language::English))
+        .filter(Stemmer::new(Algorithm::English))
         .filter(StopWordFilter::remove(
             stop_words::ENGLISH.iter().map(|&word| word.to_owned()),
         ));

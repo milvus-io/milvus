@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -207,7 +208,7 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 
 		case common.EncryptionRootKeyKey:
 			defaultRootKey = property.Value
-			log.Info("User explicitly set rootKey", zap.Int64("ezID", ezID), zap.String("value", property.GetValue()))
+			log.Ctx(context.TODO()).Info("User explicitly set rootKey", zap.Int64("ezID", ezID))
 		}
 	}
 
@@ -446,10 +447,11 @@ func InitOnceCipher() {
 	initCipherOnce.Do(func() {
 		err := initCipher()
 		if err != nil {
-			log.Panic(fmt.Sprintf("fail to init cipher plugin, go_so_path=%s, cpp_so_path=%s, error=%v",
-				paramtable.GetCipherParams().SoPathGo.GetValue(),
-				paramtable.GetCipherParams().SoPathCpp.GetValue(),
-				err))
+			// Init receives credentials and topology; its error can echo either.
+			log.Ctx(context.TODO()).Panic("fail to init cipher plugin",
+				zap.String("go_so_path", config.RedactedValue),
+				zap.String("cpp_so_path", config.RedactedValue),
+				zap.String("error", config.RedactedValue))
 		}
 	})
 }
@@ -471,7 +473,7 @@ func registerCallback() {
 	log.Info("cipher config callbacks registered")
 }
 
-func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) error {
+func reloadCipherConfig(ctx context.Context, key, _, _ string) error {
 	cipher := GetCipher()
 	if cipher == nil {
 		log.Warn("cipher plugin not loaded, skip config reload", zap.String("key", key))
@@ -481,16 +483,13 @@ func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) err
 	cipherReloadMutex.Lock()
 	defer cipherReloadMutex.Unlock()
 
-	log.Info("reloading cipher plugin config",
-		zap.String("key", key),
-		zap.String("oldValue", oldValue),
-		zap.String("newValue", newValue))
+	log.Ctx(ctx).Info("reloading cipher plugin config", zap.String("key", key))
 
 	initConfigs := buildCipherInitConfig()
 	if err := cipher.Init(initConfigs); err != nil {
-		log.Error("fail to reload cipher plugin config",
+		log.Ctx(ctx).Error("fail to reload cipher plugin config",
 			zap.String("key", key),
-			zap.Error(err))
+			zap.String("error", config.RedactedValue))
 		return err
 	}
 

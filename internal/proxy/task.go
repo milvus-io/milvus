@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -454,6 +455,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate query mode
 	if err := common.ValidateQueryMode(t.GetProperties()...); err != nil {
+		return err
+	}
+
+	// validate row level security
+	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
 		return err
 	}
 
@@ -1420,17 +1426,69 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
+	var collInfo *collectionInfo
+	resolveCollectionInfo := func() error {
+		if collInfo != nil {
+			return nil
+		}
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+		if err != nil {
+			return err
+		}
+		collInfo, err = globalMetaCache.GetCollectionInfo(ctx, t.GetDbName(), t.CollectionName, collectionID)
+		if err != nil {
+			return err
+		}
+		if collInfo == nil || collInfo.schema == nil || collInfo.schema.GetName() == "" {
+			return merr.WrapErrServiceInternalMsg("failed to resolve collection metadata for alter collection target %d", collectionID)
+		}
+		t.CollectionID = collectionID
+		return nil
+	}
+	requiresManageRLS := false
+	for _, property := range t.GetProperties() {
+		if property.GetKey() == common.RLSEnabledKey || property.GetKey() == common.RLSForceKey {
+			requiresManageRLS = true
+			break
+		}
+	}
+	if !requiresManageRLS {
+		for _, key := range t.GetDeleteKeys() {
+			if key == common.RLSEnabledKey || key == common.RLSForceKey {
+				requiresManageRLS = true
+				break
+			}
+		}
+	}
+	if requiresManageRLS {
+		if err := resolveCollectionInfo(); err != nil {
+			return err
+		}
+		canonicalDBName := collInfo.dbName
+		if canonicalDBName == "" {
+			canonicalDBName = t.GetDbName()
+		}
+		if err := checkManageRLSPrivilege(ctx, t.AlterCollectionRequest,
+			canonicalDBName, collInfo.schema.GetName()); err != nil {
+			return err
+		}
+	}
 
-	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
-	if err != nil {
+	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
 		return err
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
-	if err != nil {
-		return err
+	for _, key := range t.GetDeleteKeys() {
+		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
+			if strings.EqualFold(key, expected) && key != expected {
+				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
+			}
+		}
 	}
 
-	t.CollectionID = collectionID
+	if err := resolveCollectionInfo(); err != nil {
+		return err
+	}
+	collSchema := collInfo.schema
 
 	if len(t.GetProperties()) > 0 {
 		hasMmap := hasMmapProp(t.Properties...)
@@ -1518,14 +1576,8 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	isPartitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), t.CollectionName)
-	if err != nil {
-		return err
-	}
-	collBasicInfo, err := globalMetaCache.GetCollectionInfo(t.ctx, t.GetDbName(), t.CollectionName, t.CollectionID)
-	if err != nil {
-		return err
-	}
+	isPartitionKeyMode := collSchema.IsPartitionKeyCollection()
+	collBasicInfo := collInfo
 	newIsoValue, isoChanged, err := detectBoolPropChange(
 		collBasicInfo.partitionKeyIsolation, common.PartitionKeyIsolationKey,
 		t.Properties, t.GetDeleteKeys(),
@@ -2436,13 +2488,20 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		zap.Any("schema", request.Schema),
 		zap.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadCollection(ctx, request)
-	if err = merr.CheckRPCCall(t.result, err); err != nil {
+	if err != nil {
 		return merr.Wrap(err, "call query coordinator LoadCollection")
+	}
+	if t.result == nil {
+		return merr.CheckRPCCall(t.result, nil)
 	}
 	return nil
 }
 
 func (t *loadCollectionTask) PostExecute(ctx context.Context) error {
+	if t.result != nil && !merr.Ok(t.result) {
+		return nil
+	}
+
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	log.Ctx(ctx).Debug("loadCollectionTask PostExecute",
 		zap.String("role", typeutil.ProxyRole),
@@ -2705,8 +2764,11 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		zap.Any("schema", request.Schema),
 		zap.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadPartitions(ctx, request)
-	if err = merr.CheckRPCCall(t.result, err); err != nil {
+	if err != nil {
 		return err
+	}
+	if t.result == nil {
+		return merr.CheckRPCCall(t.result, nil)
 	}
 
 	return nil

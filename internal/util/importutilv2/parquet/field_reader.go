@@ -746,13 +746,12 @@ func ReadNullableTimestamptzData(pcr *FieldReader, count int64) (any, []bool, er
 
 	// 2. Initialize the target array for internal int64 timestamps (UTC microseconds).
 	int64Ts := make([]int64, 0, len(data))
-	defaultValue := pcr.field.GetDefaultValue().GetTimestamptzData()
 
 	// 3. Iterate over the string array and convert each timestamp.
 	for i, strValue := range data {
 		// Check the validity mask: If it's null, append the zero value (0) and continue.
 		if !validData[i] {
-			int64Ts = append(int64Ts, defaultValue)
+			int64Ts = append(int64Ts, 0)
 			continue
 		}
 
@@ -764,6 +763,10 @@ func ReadNullableTimestamptzData(pcr *FieldReader, count int64) (any, []bool, er
 			return nil, nil, err
 		}
 		int64Ts = append(int64Ts, tz)
+	}
+	if pcr.field.GetDefaultValue() != nil {
+		defaultValue := pcr.field.GetDefaultValue().GetTimestamptzData()
+		return fillWithDefaultValueImpl(int64Ts, defaultValue, validData, pcr.field)
 	}
 	return int64Ts, validData, nil
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -226,6 +227,21 @@ func (c *Collection) ID() int64 {
 // GetCCollection returns the CCollection of collection
 func (c *Collection) GetCCollection() *segcore.CCollection {
 	return c.ccollection
+}
+
+func (c *Collection) GetIndexType(fieldID int64) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.ccollection == nil || c.ccollection.IndexMeta() == nil {
+		return ""
+	}
+	for _, indexMeta := range c.ccollection.IndexMeta().GetIndexMetas() {
+		if indexMeta.GetFieldID() == fieldID {
+			return common.GetIndexType(indexMeta.GetIndexParams())
+		}
+	}
+	return ""
 }
 
 // Schema returns the schema of collection

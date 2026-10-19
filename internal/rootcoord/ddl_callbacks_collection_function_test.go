@@ -478,6 +478,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 
 		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
 		suite.NoError(err)
+		mockMeta.AssertNotCalled(suite.T(), "GetRLSMetadata", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 }
 

@@ -59,6 +59,8 @@ type searchOption struct {
 	annRequest                 *AnnRequest
 	collectionName             string
 	partitionNames             []string
+	rlsPrincipal               string
+	skipRLS                    bool
 	outputFields               []string
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
@@ -302,6 +304,8 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 
 	request.CollectionName = opt.collectionName
 	request.PartitionNames = opt.partitionNames
+	request.RlsPrincipal = opt.rlsPrincipal
+	request.SkipRls = opt.skipRLS
 	request.ConsistencyLevel = commonpb.ConsistencyLevel(opt.consistencyLevel)
 	request.UseDefaultConsistency = opt.useDefaultConsistencyLevel
 	request.OutputFields = opt.outputFields
@@ -311,6 +315,16 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 
 func (opt *searchOption) WithPartitions(partitionNames ...string) *searchOption {
 	opt.partitionNames = partitionNames
+	return opt
+}
+
+func (opt *searchOption) WithRLSPrincipal(principal string) *searchOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *searchOption) WithSkipRLS(skip bool) *searchOption {
+	opt.skipRLS = skip
 	return opt
 }
 
@@ -455,6 +469,8 @@ type HybridSearchOption interface {
 type hybridSearchOption struct {
 	collectionName string
 	partitionNames []string
+	rlsPrincipal   string
+	skipRLS        bool
 
 	reqs []*AnnRequest
 
@@ -481,6 +497,16 @@ func (opt *hybridSearchOption) WithPartitons(partitions ...string) *hybridSearch
 
 func (opt *hybridSearchOption) WithPartitions(partitions ...string) *hybridSearchOption {
 	opt.partitionNames = partitions
+	return opt
+}
+
+func (opt *hybridSearchOption) WithRLSPrincipal(principal string) *hybridSearchOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *hybridSearchOption) WithSkipRLS(skip bool) *hybridSearchOption {
+	opt.skipRLS = skip
 	return opt
 }
 
@@ -526,6 +552,8 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 	r := &milvuspb.HybridSearchRequest{
 		CollectionName:        opt.collectionName,
 		PartitionNames:        opt.partitionNames,
+		RlsPrincipal:          opt.rlsPrincipal,
+		SkipRls:               opt.skipRLS,
 		Requests:              requests,
 		UseDefaultConsistency: opt.useDefaultConsistency,
 		ConsistencyLevel:      commonpb.ConsistencyLevel(opt.consistencyLevel),
@@ -559,6 +587,8 @@ type QueryOption interface {
 type queryOption struct {
 	collectionName             string
 	partitionNames             []string
+	rlsPrincipal               string
+	skipRLS                    bool
 	queryParams                map[string]string
 	outputFields               []string
 	consistencyLevel           entity.ConsistencyLevel
@@ -571,6 +601,8 @@ func (opt *queryOption) Request() (*milvuspb.QueryRequest, error) {
 	req := &milvuspb.QueryRequest{
 		CollectionName: opt.collectionName,
 		PartitionNames: opt.partitionNames,
+		RlsPrincipal:   opt.rlsPrincipal,
+		SkipRls:        opt.skipRLS,
 		OutputFields:   opt.outputFields,
 
 		Expr:                  opt.expr,
@@ -630,6 +662,16 @@ func (opt *queryOption) WithConsistencyLevel(consistencyLevel entity.Consistency
 
 func (opt *queryOption) WithPartitions(partitionNames ...string) *queryOption {
 	opt.partitionNames = partitionNames
+	return opt
+}
+
+func (opt *queryOption) WithRLSPrincipal(principal string) *queryOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *queryOption) WithSkipRLS(skip bool) *queryOption {
+	opt.skipRLS = skip
 	return opt
 }
 

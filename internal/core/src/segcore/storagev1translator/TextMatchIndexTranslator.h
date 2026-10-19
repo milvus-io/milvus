@@ -29,6 +29,7 @@ struct TextMatchIndexLoadInfo {
     int64_t field_id;
     std::string analyzer_params;
     int64_t index_size;
+    int32_t scalar_index_version;
     int64_t num_rows;
     std::string
         warmup_policy;  // "disable" or "sync", empty means use global config
@@ -55,7 +56,8 @@ class TextMatchIndexTranslator
 
     std::pair<milvus::cachinglayer::ResourceUsage,
               milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
 
     int64_t
     cells_storage_bytes(

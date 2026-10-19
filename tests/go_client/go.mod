@@ -3,7 +3,7 @@ module github.com/milvus-io/milvus/tests/go_client
 go 1.25.8
 
 require (
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.23
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.26-0.20260930082330-23a2a392c405
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
 	github.com/milvus-io/milvus/pkg/v2 v2.6.7-0.20251202033909-b71a123d25ad
 	github.com/peterstace/simplefeatures v0.54.0
@@ -51,7 +51,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect
-	github.com/klauspost/compress v1.17.9 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20240226150601-1dcf7310316a // indirect

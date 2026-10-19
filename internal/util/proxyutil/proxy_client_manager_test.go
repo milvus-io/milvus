@@ -201,6 +201,20 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
 		assert.NoError(t, err)
 	})
+
+	t.Run("target one proxy", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := mocks.NewMockProxyClient(t)
+		p2 := mocks.NewMockProxyClient(t)
+		p2.EXPECT().InvalidateCollectionMetaCache(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		pcm := NewProxyClientManager(DefaultProxyCreator)
+		pcm.proxyClient.Insert(1, p1)
+		pcm.proxyClient.Insert(2, p2)
+
+		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{}, SetTargetProxyID(2))
+		assert.NoError(t, err)
+		assert.ErrorIs(t, pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{}, SetTargetProxyID(3)), merr.ErrNodeNotFound)
+	})
 }
 
 func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {

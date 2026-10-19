@@ -188,11 +188,13 @@ mq:
 woodpecker:
   meta:
     type: etcd # The Type of the metadata provider. currently only support etcd.
-    prefix: woodpecker # The Prefix of the metadata provider. default is woodpecker.
+    prefix: woodpecker # The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.
   client:
     segmentAppend:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
+      maxBatchEntries: 1000 # Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.
+      maxBatchBytes: 2000000 # Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.
     segmentRollingPolicy:
       maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
@@ -255,6 +257,15 @@ pulsar:
   # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
   # If this option is zero or negative, it will be ignored and the default value (100m) will be used.
   backlogAutoClearBytes: 100m
+  # The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+  # exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+  # shared: multiple producers can write to the topic at the same time.
+  # exclusive access is enforced by pulsar broker 2.8.0 or later.
+  producerAccessMode: exclusive
+  # The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
+  # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+  # When it is exceeded, the wal open fails and the streaming coord retries the assignment later. 0 disables the limit.
+  producerCreateTimeout: 1m
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
@@ -322,6 +333,7 @@ proxy:
   maxCollectionDescriptionLength: 1024 # The maximum byte length of a collection description accepted by CreateCollection and AlterCollection. Existing collection metadata is not revalidated, but restore or replication flows that recreate a collection through CreateCollection must satisfy this limit or raise it first.
   maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
+  maxMembershipFilterPlanSize: 134217728 # The request-wide large-filter budget in bytes for the aggregate serialized size of RLS-bearing HybridSearch plans. The proxy checks assembled plans with proto.Size before proto.Marshal. Must be positive; invalid values fall back to 128 MiB.
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
@@ -344,6 +356,20 @@ proxy:
   # Disabled if the value is less or equal to 0.
   maxResultEntries: -1
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
+  rls:
+    maxPoliciesPerCollection: 100 # Maximum number of row policies allowed on one collection.
+    maxTagsPerPrincipal: 50 # Maximum number of tags allowed on one collection-scoped RLS principal.
+    maxExpressionLength: 4096 # Maximum length of one RLS using_expr or check_expr in bytes.
+    maxCombinedExpressionLength: 16384 # Maximum length of the final combined RLS expression in bytes.
+    maxPolicyNameLength: 255 # Maximum RLS policy name length in bytes.
+    maxPolicyDescriptionLength: 1024 # Maximum RLS policy description length in bytes.
+    maxPrincipalNameLength: 255 # Maximum RLS principal name length in bytes.
+    maxTagKeyLength: 128 # Maximum RLS principal tag key length in bytes.
+    maxTagValueLength: 1024 # Maximum RLS principal string tag value or array string element length in bytes.
+    maxArrayLiteralElements: 1024 # Maximum elements for RLS array tags and in or array_contains* predicates.
+    maxPrincipalCacheEntries: 65536 # Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.
+    maxPrincipalCacheBytes: 67108864 # Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.
+    metaRefreshInterval: 3600 # Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -377,6 +403,12 @@ proxy:
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
+    # Whether to register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
+    # Restart to apply. Disabling keeps listeners, V2, probes, and metrics available.
+    # The non-underscore /api/v1/* REST API is removed regardless of this setting.
+    # WebUI data requires these console APIs; use enableWebUI to hide the pages.
+    # managementMetricsOnly takes precedence on the metrics port.
+    enableV1: true
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
@@ -432,8 +464,8 @@ queryCoord:
   checkBalanceInterval: 300
   autoBalanceInterval: 3000 # the interval for triggerauto balance
   checkIndexInterval: 10000
-  channelTaskTimeout: 60000 # 1 minute
-  segmentTaskTimeout: 120000 # 2 minute
+  channelTaskTimeout: 120000 # 2 minutes
+  segmentTaskTimeout: 300000 # 5 minutes
   distPullInterval: 500
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
@@ -463,6 +495,11 @@ queryCoord:
   # Set to 0 to disable the penalty period.
   resourceExhaustionPenaltyDuration: 30
   resourceExhaustionCleanupInterval: 10 # Interval (in seconds) for cleaning up expired resource exhaustion marks on query nodes.
+  autoscale:
+    precheckEnabled: false # Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.
+    enabled: false # Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.
+    maxMemoryLimit: 0 # Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.
+    maxDiskLimit: 0 # Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.
   forceLoadPriority:  # Global override for segment load priority. Options: HIGH, LOW. If empty, uses the original priority.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
@@ -475,6 +512,10 @@ queryCoord:
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
+  groupBy:
+    strictGroupStrategy: per_group # Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.
+    strictGroupPhase1CandidateWeight: 0 # Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.
+    strictGroupSkipRefine: false # Skip query-time refinement consistently in both phases of single-query strict grouping with group size greater than one. May reduce recall.
   stats:
     publishInterval: 1000 # The interval that query node publishes the node statistics information, including segment status, cpu usage, memory usage, health status, etc. Unit: ms.
   segcore:
@@ -762,7 +803,24 @@ dataCoord:
   checkAutoBalanceConfigInterval: 10 # the interval of check auto balance config
   import:
     filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
-    taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
+    # The retention period in seconds for tasks in the Completed or Failed state.
+    # Nothing else bounds the terminal set -- maxImportJobNum counts only jobs that are
+    # neither Completed nor Failed -- so this value alone decides how many finished
+    # importJob entries stay in etcd, each carrying its schema, file list and options
+    # plus every preimport and import task under it.
+    # The 48h default exists for BulkImport idempotency and only for it: the idempotency
+    # window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+    # earlier than its tombstone lets an in-window retry resolve to a jobID that
+    # GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
+    # as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
+    # age is measured from the last StreamingCoord start: every restart extends its
+    # remaining life by up to another maxLifetime, while this retention keeps counting
+    # from the job's own completion. Equal values hold only for a window with no restart,
+    # which is not a property a default may assume. Raise it further if StreamingCoord
+    # restarts more than once inside one tombstone lifetime.
+    # A cluster whose clients never send an Idempotency-Key is under no such requirement
+    # and can lower this freely; 10800 was the default before idempotency keys existed.
+    taskRetention: 172800
     maxSizeInMBPerImportTask: 16384 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
     scheduleInterval: 2 # The interval for scheduling import, measured in seconds.
     checkIntervalHigh: 2 # The interval for checking import, measured in seconds, is set to a high frequency for the import checker.
@@ -936,6 +994,32 @@ grpc:
   gracefulStopTimeout: 3 # second, time to wait graceful stop finish
   client:
     compressionEnabled: false
+    # The compression tier for gRPC messages: fastest, default, better, best.
+    # snappy and s2 have three tiers rather than four, so fastest and default behave identically for them.
+    compressionLevel: default
+    # The gRPC compression algorithm: zstd, snappy, or s2.
+    # Only zstd is understood by every Milvus version. A node that has not been upgraded yet has no snappy or s2 decompressor
+    # and rejects those encodings, failing every RPC sent to it, and there is no automatic fallback.
+    # Change this only after every node in the cluster has been upgraded.
+    compressionAlgorithm: zstd
+    # Whether the zstd encoder embeds a per-frame checksum. Off by default: it costs throughput on every message,
+    # while TCP already checksums the link and zstd's entropy decoding rejects a damaged frame rather than
+    # returning garbage. Turn it on where a verified end-to-end integrity check on the payload is worth the cost.
+    # Frames a peer wrote with a checksum are still verified either way.
+    compressionCRC: false
+    # Size of the zstd encoder state pool, as a multiple of GOMAXPROCS (default 2). It also sizes the free
+    # lists every codec parks its per-message writers and readers in, so it is the one ceiling on how much
+    # memory compression holds.
+    # Compression always runs inline on the gRPC goroutine handling the RPC; this is not a thread count.
+    # For the zstd encoder it is the ceiling on how many RPCs may compress at the same time: once every state is
+    # borrowed, further callers block until one is returned, so too small a pool costs throughput under load.
+    # Decoding does not draw on it -- an inbound message takes a pooled streaming decoder instead.
+    # The encoder pool is allocated on the first message this process compresses -- nothing at startup, then all of
+    # it at once -- and costs this value x GOMAXPROCS x the per-state size: roughly 2.6MB at fastest, 3.6MB at
+    # default, 6.5MB at better and 36MB at best. Most of a state is its history buffer, which is only allocated
+    # once that state sees a message above 128KB, so RSS reaches that figure in two steps.
+    # Raising this at a high compressionLevel is therefore expensive.
+    compressionConcurrency: 2
     dialTimeout: 200
     keepAliveTime: 10000
     keepAliveTimeout: 20000
@@ -961,6 +1045,7 @@ internaltls:
   sni: localhost # The server name indication (SNI) for internal TLS, should be the same as the name provided by the certificates ref: https://en.wikipedia.org/wiki/Server_Name_Indication
 
 common:
+  enableFastPB: true # Use fastPB for supported protobuf decoding paths. Set false for an immediate fallback to the official protobuf decoder.
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire
@@ -1016,6 +1101,15 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Restrict the management port (default 9091) to GET/HEAD on /metrics,
+    # /metrics_default, /healthz, /livez and /management/check/ready. Probes return
+    # only their HTTP status and a generic message. All other management, WebUI,
+    # profiling, eventlog and legacy /api/v1 endpoints return 404, regardless of
+    # enableWebUI or enablePprof. Metrics and probes remain unauthenticated: restrict
+    # network access to trusted monitoring and probe clients. Independent of
+    # authorizationEnabled; does not affect the main service port. Set on every
+    # process and restart to apply. Cannot be changed through /management/config/alter.
+    managementMetricsOnly: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
@@ -1323,6 +1417,11 @@ streaming:
     # The timeout of wal balancer operation, 30m by default.
     # If the operation exceeds this timeout, it will be canceled.
     operationTimeout: 30m
+    # The wait time before assigning the pchannels of a streaming node that has left the session view to another streaming node, 5s by default.
+    # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+    # It gives the old streaming node time to exit before another streaming node writes to the same wal.
+    # It lowers the chance of two writers on one wal but does not rule it out. 0 disables the wait.
+    nodeLostGracePeriod: 5s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       # Whether to allow rebalance, true by default.

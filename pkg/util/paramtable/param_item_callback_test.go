@@ -19,11 +19,13 @@ package paramtable
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func TestParamItem_RegisterCallback(t *testing.T) {
@@ -109,6 +111,50 @@ func TestParamItem_CallbackErrorHandling(t *testing.T) {
 	param.handleConfigChange(event)
 
 	assert.True(t, callbackCalled)
+}
+
+func TestParamItem_SensitiveCallbackLogsAreRedacted(t *testing.T) {
+	logs := log.CaptureGlobalLogs(t, &log.Config{Level: "debug", Format: "text", DisableCaller: true, DisableTimestamp: true, DisableStacktrace: true})
+
+	priorValue := strings.Repeat("old-cipher-sentinel-", 2)
+	updatedValue := strings.Repeat("new-cipher-sentinel-", 2)
+
+	for _, test := range []struct {
+		name        string
+		callbackErr error
+		message     string
+	}{
+		{name: "success", message: "param value changed"},
+		{name: "error", callbackErr: fmt.Errorf("callback error"), message: "param change callback failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			logs.Reset()
+			manager := config.NewManager()
+			param := &ParamItem{
+				Key:          "cipherPlugin.kms.defaultKey",
+				DefaultValue: priorValue,
+				Sensitivity:  Sensitive,
+			}
+			param.Init(manager)
+
+			param.RegisterCallback(func(_ context.Context, _ string, oldValue, newValue string) error {
+				assert.Equal(t, priorValue, oldValue)
+				assert.Equal(t, updatedValue, newValue)
+				return test.callbackErr
+			})
+			param.handleConfigChange(&config.Event{
+				EventType: config.UpdateType,
+				Key:       param.Key,
+				Value:     updatedValue,
+			})
+
+			output := logs.String()
+			assert.Contains(t, output, test.message)
+			assert.GreaterOrEqual(t, strings.Count(output, config.RedactedValue), 2)
+			assert.NotContains(t, output, priorValue)
+			assert.NotContains(t, output, updatedValue)
+		})
+	}
 }
 
 func TestParamItem_NoValueChange(t *testing.T) {

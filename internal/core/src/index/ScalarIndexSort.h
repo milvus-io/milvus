@@ -19,7 +19,6 @@
 #include <assert.h>
 #include <stdint.h>
 #include <sys/mman.h>
-#include <unistd.h>
 #include <chrono>
 #include <cstddef>
 #include <iterator>
@@ -62,7 +61,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     ~ScalarIndexSort() {
         if (is_mmap_ && mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
             munmap(mmap_data_, mmap_size_);
-            unlink(mmap_filepath_.c_str());
+        }
+        if (mmap_meta_data_ != nullptr && mmap_meta_data_ != MAP_FAILED) {
+            munmap(mmap_meta_data_, mmap_meta_size_);
         }
     }
 
@@ -135,8 +136,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
         ScalarIndex<T>::ComputeByteSize();
         int64_t total = this->cached_byte_size_;
 
-        // idx_to_offsets_: vector<int32_t>
-        total += idx_to_offsets_.capacity() * sizeof(int32_t);
+        // idx_to_offsets_: vector (memory load) or mmap region (mmap load)
+        if (mmap_meta_data_ != nullptr) {
+            total += mmap_meta_size_;
+        } else {
+            total += idx_to_offsets_.capacity() * sizeof(int32_t);
+        }
 
         // valid_bitset_: TargetBitmap
         total += valid_bitset_.size_in_bytes();
@@ -242,7 +247,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     bool is_built_ = false;
     Config config_;
-    std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
+    // Maps row id to the sorted index offset. Build and memory-load paths own
+    // the vector; mmap-load points the read accessor into mmap_meta_data_.
+    std::vector<int32_t> idx_to_offsets_;
+    const int32_t* idx_to_offsets_ptr_ = nullptr;
+    size_t idx_to_offsets_size_ = 0;
     std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     size_t total_num_rows_{0};
     // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
@@ -259,6 +268,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.
     char* mmap_data_ = nullptr;
     std::string mmap_filepath_;
+
+    // mmap backing for the persisted idx_to_offsets V3 side entry.
+    char* mmap_meta_data_ = nullptr;
+    int64_t mmap_meta_size_ = 0;
+    std::string mmap_meta_filepath_;
+    std::unique_ptr<MmapFileRAII> mmap_meta_file_raii_;
 
     mutable const IndexStructure<T>* data_ptr_ = nullptr;
     mutable const IndexStructure<T>* end_ptr_ = nullptr;

@@ -30,6 +30,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
@@ -3442,6 +3443,24 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	})
 }
 
+func TestLoadCollectionTaskPostExecuteSkipsFailedStatus(t *testing.T) {
+	task := &loadCollectionTask{
+		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
+			DbName:         "db",
+			CollectionName: "collection",
+		},
+		result: &commonpb.Status{
+			Code:   merr.Code(merr.ErrServiceResourceInsufficient),
+			Reason: "insufficient resource",
+			ExtraInfo: map[string]string{
+				"suggested_expand_percent": "10",
+			},
+		},
+	}
+
+	assert.NoError(t, task.PostExecute(context.Background()))
+}
+
 func Test_loadPartitionTask_Execute(t *testing.T) {
 	qc := NewMixCoordMock()
 
@@ -4811,6 +4830,8 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	qc := NewMixCoordMock()
 	InitMetaCache(context.Background(), qc)
 	collectionName := "test_alter_collection_check_loaded"
+	marshaledSchema, err := proto.Marshal(&schemapb.CollectionSchema{Name: collectionName})
+	require.NoError(t, err)
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
@@ -4819,7 +4840,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 		},
 		DbName:         dbName,
 		CollectionName: collectionName,
-		Schema:         nil,
+		Schema:         marshaledSchema,
 		ShardsNum:      1,
 	}
 	qc.CreateCollection(context.Background(), createColReq)
@@ -5362,6 +5383,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		schema:      &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "test"}},
 		replicateID: "local-mac-1",
 	}, nil).Maybe()
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(1, nil).Maybe()
@@ -5487,6 +5509,88 @@ func TestInsertForReplicate(t *testing.T) {
 		}
 		err := task.PreExecute(context.Background())
 		assert.Error(t, err)
+	})
+}
+
+func TestRLS8AlterCollectionProperties(t *testing.T) {
+	qc := NewMixCoordMock()
+	ctx := context.Background()
+	previousCache := globalMetaCache
+	t.Cleanup(func() { globalMetaCache = previousCache })
+	require.NoError(t, InitMetaCache(ctx, qc))
+	prefix := "TestRLSEnabled"
+
+	getSchemaBytes := func(colName string) []byte {
+		fieldName2Type := map[string]schemapb.DataType{
+			"fvec_field":  schemapb.DataType_FloatVector,
+			"int64_field": schemapb.DataType_Int64,
+		}
+		schema := constructCollectionSchemaByDataType(colName, fieldName2Type, "int64_field", false)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		return marshaledSchema
+	}
+
+	createCollection := func(colName string) {
+		createColReq := &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+				Timestamp: Timestamp(time.Now().UnixNano()),
+			},
+			DbName:         dbName,
+			CollectionName: colName,
+			Schema:         getSchemaBytes(colName),
+			ShardsNum:      1,
+		}
+		status, err := qc.CreateCollection(ctx, createColReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	}
+
+	t.Run("alter accepts rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter accepts standard boolean rls.enabled spelling", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "True"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter accepts deleting rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{common.RLSEnabledKey},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
 	})
 }
 

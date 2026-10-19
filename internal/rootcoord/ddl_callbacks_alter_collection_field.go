@@ -46,7 +46,8 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 
 	newFieldProperties := common.NewKeyValuePairs(oldFieldPropertiesMap)
-	if newFieldProperties.Equal(oldFieldProperties) && desc == nil {
+	propertiesChanged := !newFieldProperties.Equal(oldFieldProperties)
+	if !propertiesChanged && desc == nil {
 		// if there's no change, return nil directly to promise idempotent.
 		return errIgnoredAlterCollection
 	}
@@ -61,6 +62,11 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 				field.Description = desc.GetValue()
 			}
 			break
+		}
+	}
+	if propertiesChanged {
+		if err := validateRLSPoliciesWithSchema(coll.RLSPolicies, schema); err != nil {
+			return err
 		}
 	}
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())

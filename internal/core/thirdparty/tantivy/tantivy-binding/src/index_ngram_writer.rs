@@ -157,4 +157,44 @@ mod tests {
             .unwrap();
         assert_eq!(res, vec![4].into_iter().collect::<HashSet<u32>>());
     }
+
+    // A literal shorter than min_gram must surface as an Err, never a panic:
+    // this function is reached through an `extern "C"` frame, where a panic
+    // aborts the whole process.
+    #[test]
+    fn test_ngram_short_literal_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let mut writer = IndexWriterWrapper::create_ngram_writer(
+            "test",
+            dir.path().to_str().unwrap(),
+            2,
+            3,
+            1,
+            15000000,
+        )
+        .unwrap();
+        writer.add("订单（已取消）", Some(0)).unwrap();
+        writer.commit().unwrap();
+        let reader = writer.create_reader(set_bitset).unwrap();
+
+        // one 3-byte character: byte length passes min_gram, char count does not
+        for literal in ["订", "）", "a", ""] {
+            let mut res: HashSet<u32> = HashSet::new();
+            assert!(
+                reader
+                    .ngram_match_query(literal, 2, 3, &mut res as *mut _ as *mut c_void)
+                    .is_err(),
+                "literal {:?} should be rejected",
+                literal
+            );
+            assert!(res.is_empty());
+        }
+
+        // sanity: a valid literal still works on the same reader
+        let mut res: HashSet<u32> = HashSet::new();
+        reader
+            .ngram_match_query("订单", 2, 3, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![0].into_iter().collect::<HashSet<u32>>());
+    }
 }

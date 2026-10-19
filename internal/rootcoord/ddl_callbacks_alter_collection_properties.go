@@ -2,6 +2,7 @@ package rootcoord
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -42,6 +43,16 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	if hookutil.ContainsCipherProperties(req.GetProperties(), req.GetDeleteKeys()) {
 		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
+	}
+	if err := common.ValidateRLSProperties(req.GetProperties()...); err != nil {
+		return err
+	}
+	for _, key := range req.GetDeleteKeys() {
+		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
+			if strings.EqualFold(key, expected) && key != expected {
+				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
+			}
+		}
 	}
 
 	if funcutil.SliceContain(req.GetDeleteKeys(), common.EnableDynamicSchemaKey) {
@@ -112,6 +123,9 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	}
 	// Check if the properties are changed.
 	newPropsKeyValuePairs := common.NewKeyValuePairs(newProperties)
+	if err := common.ValidateRLSForceRequiresEnabled(newPropsKeyValuePairs...); err != nil {
+		return err
+	}
 	if !newPropsKeyValuePairs.Equal(coll.Properties) {
 		udpates.Properties = newPropsKeyValuePairs
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
@@ -286,11 +300,11 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			return merr.Wrap(err, "failed to update load config")
 		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			if errors.Is(err, merr.ErrResourceGroupNotFound) {
-				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
-				return nil
+			if !errors.Is(err, merr.ErrResourceGroupNotFound) {
+				return merr.Wrap(err, "failed to update load config")
 			}
-			return merr.Wrap(err, "failed to update load config")
+			// Properties are already persisted; still invalidate Proxy caches.
+			log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
 		}
 	}
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {

@@ -55,7 +55,9 @@ func (c *WALCallback) alterWALV2AckCallback(
 ) error {
 	logger := log.Ctx(ctx).With(
 		zap.Stringer("targetWALName", result.Message.Header().TargetWalName),
-		zap.Any("config", result.Message.Header().Config),
+		// Both keys and values come from the request payload; only their count is
+		// safe to attach to every callback log line.
+		zap.Int("configCount", len(result.Message.Header().Config)),
 		zap.Uint64("broadcastID", result.Message.BroadcastHeader().BroadcastID),
 	)
 

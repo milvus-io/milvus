@@ -86,7 +86,7 @@ func (s *MiniClusterSuite) waitForIndexBuiltInternal(ctx context.Context, dbName
 		case <-ctx.Done():
 			s.FailNow("failed to wait index built until ctx done")
 			return
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }
@@ -118,7 +118,7 @@ func waitingForIndexBuilt(ctx context.Context, cluster *cluster.MiniClusterV3, t
 		case <-ctx.Done():
 			t.FailNow()
 			return
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }

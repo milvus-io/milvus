@@ -769,10 +769,9 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
         for (int64_t chunk_id = 0;
              chunk_id < num_data_chunk_ && processed_rows < active_count_;
              ++chunk_id) {
-            const auto chunk_size =
-                segment_->is_chunked()
-                    ? segment_->chunk_size(field_id_, chunk_id)
-                    : size_per_chunk_;
+            const auto chunk_size = segment_->is_chunked()
+                                        ? chunk_sizes_[chunk_id]
+                                        : size_per_chunk_;
             const auto size =
                 std::min(chunk_size, active_count_ - processed_rows);
             segment_->ApplyFieldValidData(op_ctx_,
@@ -1184,7 +1183,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
              i < num_data_chunk_ && valid_processed_size < active_count_;
              ++i) {
             int64_t size = segment_->is_chunked()
-                               ? segment_->chunk_size(field_id_, i)
+                               ? chunk_sizes_[i]
                                : (i == num_data_chunk_ - 1
                                       ? active_count_ - valid_processed_size
                                       : size_per_chunk_);
@@ -1630,20 +1629,15 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
         auto val = GetValueFromProto<int64_t>(expr_->val_);
 
         if (milvus::query::out_of_range<T>(val)) {
-            int64_t batch_size;
-            if (input != nullptr) {
-                batch_size = input->size();
-            } else {
-                batch_size = overflow_check_pos_ + batch_size_ >= active_count_
-                                 ? active_count_ - overflow_check_pos_
-                                 : batch_size_;
-                overflow_check_pos_ += batch_size;
-            }
+            // Size the batch from the cursor that produced `valid`. A separate
+            // cursor was not advanced when a conjunct skipped this expression
+            // via MoveCursor(), so data and valid bitmaps got different sizes.
             auto valid =
                 (input != nullptr)
                     ? ProcessChunksForValidByOffsets<T>(
                           SegmentExpr::CanUseIndex(), *input)
                     : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
+            const int64_t batch_size = valid.size();
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);

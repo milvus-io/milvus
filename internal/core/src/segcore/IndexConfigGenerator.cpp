@@ -124,6 +124,13 @@ VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
     SearchInfo searchParam(searchInfo);
     searchParam.metric_type_ = metric_type_;
     searchParam.search_params_ = search_params_;
+    // Per-group completion has already been rewritten into ordinary Search.
+    // Preserve its server-controlled refinement override across interim-index
+    // parameter replacement. Original grouped iterators apply it after this.
+    if (!searchInfo.strict_group_size_ &&
+        searchInfo.strict_group_skip_refine_) {
+        searchParam.search_params_["skip_refine"] = true;
+    }
     for (auto& key : maintain_params) {
         if (searchInfo.search_params_.contains(key)) {
             searchParam.search_params_[key] = searchInfo.search_params_[key];

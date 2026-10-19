@@ -110,3 +110,88 @@ TEST(ConcurrentVector, TestAckSingle) {
     }
     EXPECT_EQ(ack.GetAck(), N);
 }
+
+namespace {
+void
+AppendValid(ThreadSafeValidData& valid,
+            const milvus::FieldMeta& field_meta,
+            const std::vector<bool>& bits) {
+    milvus::DataArray data;
+    for (bool b : bits) {
+        data.add_valid_data(b);
+    }
+    valid.set_data_raw(bits.size(), &data, field_meta);
+}
+}  // namespace
+
+TEST(ThreadSafeValidData, ChunkedLayout) {
+    const int64_t size_per_chunk = 4;
+    milvus::FieldMeta field_meta(milvus::FieldName("f"),
+                                 milvus::FieldId(100),
+                                 milvus::DataType::INT64,
+                                 true,
+                                 std::nullopt);
+    ThreadSafeValidData valid(size_per_chunk);
+    ASSERT_TRUE(valid.empty());
+
+    // Appends that start mid-chunk and span chunk boundaries.
+    std::vector<bool> expected;
+    std::default_random_engine e(42);
+    for (int round = 0; round < 20; ++round) {
+        std::vector<bool> bits(e() % 11);
+        for (size_t i = 0; i < bits.size(); ++i) {
+            bits[i] = (e() & 1) != 0;
+        }
+        AppendValid(valid, field_meta, bits);
+        expected.insert(expected.end(), bits.begin(), bits.end());
+    }
+    ASSERT_FALSE(valid.empty());
+
+    for (size_t i = 0; i < expected.size(); ++i) {
+        ASSERT_EQ(valid.is_valid(i), expected[i]) << "offset " << i;
+    }
+
+    auto flat = valid.get_data();
+    ASSERT_EQ(flat.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        ASSERT_EQ(flat[i], expected[i]) << "offset " << i;
+    }
+
+    std::vector<int64_t> offsets = {0,
+                                    3,
+                                    4,
+                                    static_cast<int64_t>(expected.size()) - 1,
+                                    -1,
+                                    static_cast<int64_t>(expected.size())};
+    std::unique_ptr<bool[]> out(new bool[offsets.size()]);
+    valid.bulk_is_valid(offsets.data(), offsets.size(), out.get());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        auto offset = offsets[i];
+        bool want = offset >= 0 &&
+                    offset < static_cast<int64_t>(expected.size()) &&
+                    expected[offset];
+        ASSERT_EQ(out[i], want) << "offset " << offset;
+    }
+}
+
+TEST(ThreadSafeValidData, ChunkPointerStableAcrossAppends) {
+    const int64_t size_per_chunk = 8;
+    milvus::FieldMeta field_meta(milvus::FieldName("f"),
+                                 milvus::FieldId(100),
+                                 milvus::DataType::INT64,
+                                 true,
+                                 std::nullopt);
+    ThreadSafeValidData valid(size_per_chunk);
+    AppendValid(valid, field_meta, std::vector<bool>(size_per_chunk, true));
+
+    // A borrowed pointer into the first chunk must stay valid after many
+    // appends: existing chunk buffers are never relocated.
+    bool* first_chunk = valid.get_chunk_data(0);
+    for (int i = 0; i < 1000; ++i) {
+        AppendValid(valid, field_meta, std::vector<bool>(7, false));
+    }
+    ASSERT_EQ(valid.get_chunk_data(0), first_chunk);
+    for (int64_t i = 0; i < size_per_chunk; ++i) {
+        ASSERT_TRUE(first_chunk[i]);
+    }
+}

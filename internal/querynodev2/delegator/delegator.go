@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
+	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/config"
@@ -308,87 +309,21 @@ func (sd *shardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int
 	return partStatMap
 }
 
-func (sd *shardDelegator) shallowCopySearchRequest(req *internalpb.SearchRequest, targetID int64) *internalpb.SearchRequest {
-	// Create a new SearchRequest with the same fields
-	nodeReq := &internalpb.SearchRequest{
-		Base:                    &commonpb.MsgBase{TargetID: targetID},
-		ReqID:                   req.ReqID,
-		DbID:                    req.DbID,
-		CollectionID:            req.CollectionID,
-		PartitionIDs:            req.PartitionIDs, // Shallow copy: Same underlying slice
-		Dsl:                     req.Dsl,
-		PlaceholderGroup:        req.PlaceholderGroup, // Shallow copy: Same underlying byte slice
-		DslType:                 req.DslType,
-		SerializedExprPlan:      req.SerializedExprPlan, // Shallow copy: Same underlying byte slice
-		OutputFieldsId:          req.OutputFieldsId,     // Shallow copy: Same underlying slice
-		MvccTimestamp:           req.MvccTimestamp,
-		GuaranteeTimestamp:      req.GuaranteeTimestamp,
-		TimeoutTimestamp:        req.TimeoutTimestamp,
-		Nq:                      req.Nq,
-		Topk:                    req.Topk,
-		MetricType:              req.MetricType,
-		IgnoreGrowing:           req.IgnoreGrowing,
-		Username:                req.Username,
-		SubReqs:                 req.SubReqs, // Shallow copy: Same underlying slice of pointers
-		IsAdvanced:              req.IsAdvanced,
-		Offset:                  req.Offset,
-		ConsistencyLevel:        req.ConsistencyLevel,
-		GroupByFieldId:          req.GroupByFieldId,
-		GroupSize:               req.GroupSize,
-		FieldId:                 req.FieldId,
-		IsTopkReduce:            req.IsTopkReduce,
-		IsRecallEvaluation:      req.IsRecallEvaluation,
-		CollectionTtlTimestamps: req.CollectionTtlTimestamps,
-		PkFilter:                req.PkFilter,
-	}
-
-	return nodeReq
-}
-
 func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
 	nodeReq := &querypb.SearchRequest{
 		DmlChannels:     []string{sd.vchannelName},
 		SegmentIDs:      segmentIDs,
 		Scope:           scope,
-		Req:             sd.shallowCopySearchRequest(req.GetReq(), targetID),
+		Req:             shallowcopy.ShallowCopySearchRequest(req.GetReq(), targetID),
 		FromShardLeader: req.FromShardLeader,
 		TotalChannelNum: req.TotalChannelNum,
 	}
 	return nodeReq
 }
 
-func (sd *shardDelegator) shallowCopyRetrieveRequest(req *internalpb.RetrieveRequest, targetID int64) *internalpb.RetrieveRequest {
-	// Create a new RetrieveRequest with the same fields
-	// Base must be a new object since each copy needs different TargetID
-	// Slices are shallow copied (same underlying array) since they are read-only after copy
-	return &internalpb.RetrieveRequest{
-		Base:                         &commonpb.MsgBase{TargetID: targetID},
-		ReqID:                        req.ReqID,
-		DbID:                         req.DbID,
-		CollectionID:                 req.CollectionID,
-		PartitionIDs:                 req.PartitionIDs,       // Shallow copy: Same underlying slice
-		SerializedExprPlan:           req.SerializedExprPlan, // Shallow copy: Same underlying byte slice
-		OutputFieldsId:               req.OutputFieldsId,     // Shallow copy: Same underlying slice
-		MvccTimestamp:                req.MvccTimestamp,
-		GuaranteeTimestamp:           req.GuaranteeTimestamp,
-		TimeoutTimestamp:             req.TimeoutTimestamp,
-		Limit:                        req.Limit,
-		IgnoreGrowing:                req.IgnoreGrowing,
-		IsCount:                      req.IsCount,
-		IterationExtensionReduceRate: req.IterationExtensionReduceRate,
-		Username:                     req.Username,
-		ReduceStopForBest:            req.ReduceStopForBest,
-		ReduceType:                   req.ReduceType,
-		ConsistencyLevel:             req.ConsistencyLevel,
-		IsIterator:                   req.IsIterator,
-		CollectionTtlTimestamps:      req.CollectionTtlTimestamps,
-		PkFilter:                     req.PkFilter,
-	}
-}
-
 func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.QueryRequest {
 	return &querypb.QueryRequest{
-		Req:             sd.shallowCopyRetrieveRequest(req.GetReq(), targetID),
+		Req:             shallowcopy.ShallowCopyRetrieveRequest(req.GetReq(), targetID),
 		DmlChannels:     []string{sd.vchannelName},
 		SegmentIDs:      segmentIDs,
 		FromShardLeader: req.FromShardLeader,
@@ -438,7 +373,8 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("growingNum", len(growing)),
 	)
 
-	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	indexType := sd.collection.GetIndexType(req.GetReq().GetFieldId())
+	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum, indexType)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err

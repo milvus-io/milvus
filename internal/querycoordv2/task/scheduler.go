@@ -694,6 +694,10 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
 		scheduler.segmentTasks.Insert(index, task)
+
+	case *DropIndexTask:
+		index := NewReplicaDropIndex(task)
+		scheduler.segmentTasks.Insert(index, task)
 	}
 
 	scheduler.taskStats.Add(task.ID(), task)
@@ -1302,7 +1306,17 @@ func (scheduler *taskScheduler) remove(task Task) {
 		}
 	}
 
-	task.Cancel(nil)
+	// A task that is still Started when removed did not finish on its own: it
+	// was dropped by RemoveByNode (a node went down) or Stop (shutdown). Cancel
+	// it with a real error so a caller blocked in Wait can distinguish this
+	// from a successful completion, whose err is nil. Terminal tasks keep
+	// Cancel(nil): for already-failed/canceled tasks the CAS makes it a no-op,
+	// and for a succeeded task nil preserves the success result.
+	if task.Status() == TaskStatusStarted {
+		task.Cancel(merr.WrapErrServiceUnavailable("task removed before finish"))
+	} else {
+		task.Cancel(nil)
+	}
 	_, ok := scheduler.tasks.GetAndRemove(task.ID())
 	scheduler.waitQueue.Remove(task)
 	scheduler.processQueue.Remove(task)
@@ -1321,7 +1335,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
-		scheduler.segmentTasks.Remove(index)
+		scheduler.segmentTasks.CompareAndDelete(index, task)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 		if task.Status() == TaskStatusFailed &&
 			task.Err() != nil &&
@@ -1331,13 +1345,17 @@ func (scheduler *taskScheduler) remove(task Task) {
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
-		scheduler.channelTasks.Remove(index)
+		scheduler.channelTasks.CompareAndDelete(index, task)
 		log = log.With(zap.String("channel", task.Channel()))
 
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
-		scheduler.segmentTasks.Remove(index)
+		scheduler.segmentTasks.CompareAndDelete(index, task)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
+
+	case *DropIndexTask:
+		index := NewReplicaDropIndex(task)
+		scheduler.segmentTasks.CompareAndDelete(index, task)
 	}
 
 	log.Info("task removed")

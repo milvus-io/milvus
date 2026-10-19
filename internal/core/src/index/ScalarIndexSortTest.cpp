@@ -1,11 +1,15 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include "bitset/bitset.h"
 #include "common/Tracer.h"
@@ -18,6 +22,9 @@
 #include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/IndexEntryDirectStreamWriter.h"
+#include "storage/IndexEntryReader.h"
+#include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -26,6 +33,145 @@
 #include "test_utils/storage_test_utils.h"
 using namespace milvus;
 using namespace milvus::index;
+
+namespace {
+
+class RecordingIndexEntryWriter : public storage::IndexEntryWriter {
+ public:
+    void
+    WriteEntry(const std::string& name, const void*, size_t size) override {
+        names_.insert(name);
+        total_bytes_ += size;
+    }
+
+    void
+    WriteEntry(const std::string& name, int, size_t size) override {
+        names_.insert(name);
+        total_bytes_ += size;
+    }
+
+    void
+    Finish() override {
+    }
+
+    size_t
+    GetTotalBytesWritten() const override {
+        return total_bytes_;
+    }
+
+    bool
+    HasEntry(const std::string& name) const {
+        return names_.count(name) != 0;
+    }
+
+ private:
+    std::unordered_set<std::string> names_;
+    size_t total_bytes_{0};
+};
+
+class MemoryOutputStream : public OutputStream {
+ public:
+    explicit MemoryOutputStream(std::shared_ptr<std::vector<uint8_t>> data)
+        : data_(std::move(data)) {
+    }
+
+    size_t
+    Tell() const override {
+        return data_->size();
+    }
+
+    size_t
+    Write(const void* data, size_t size) override {
+        const auto* bytes = static_cast<const uint8_t*>(data);
+        data_->insert(data_->end(), bytes, bytes + size);
+        return size;
+    }
+
+    size_t
+    Write(int, size_t) override {
+        return 0;
+    }
+
+    void
+    Close() override {
+    }
+
+ private:
+    std::shared_ptr<std::vector<uint8_t>> data_;
+};
+
+class FailingMemoryInputStream : public InputStream {
+ public:
+    FailingMemoryInputStream(std::shared_ptr<const std::vector<uint8_t>> data,
+                             size_t failing_offset)
+        : data_(std::move(data)), failing_offset_(failing_offset) {
+    }
+
+    size_t
+    Size() const override {
+        return data_->size();
+    }
+
+    bool
+    Seek(int64_t offset) override {
+        if (offset < 0 || static_cast<size_t>(offset) > data_->size()) {
+            return false;
+        }
+        position_ = static_cast<size_t>(offset);
+        return true;
+    }
+
+    size_t
+    Tell() const override {
+        return position_;
+    }
+
+    bool
+    Eof() const override {
+        return position_ == data_->size();
+    }
+
+    size_t
+    Read(void* data, size_t size) override {
+        auto bytes_read = ReadAt(data, position_, size);
+        position_ += bytes_read;
+        return bytes_read;
+    }
+
+    size_t
+    ReadAt(void* data, size_t offset, size_t size) override {
+        if (offset == failing_offset_ || offset >= data_->size()) {
+            return 0;
+        }
+        auto bytes_read = std::min(size, data_->size() - offset);
+        std::memcpy(data, data_->data() + offset, bytes_read);
+        return bytes_read;
+    }
+
+    size_t
+    Read(int, size_t) override {
+        return 0;
+    }
+
+ private:
+    std::shared_ptr<const std::vector<uint8_t>> data_;
+    size_t failing_offset_;
+    size_t position_{0};
+};
+
+std::shared_ptr<std::vector<uint8_t>>
+BuildPackedScalarSortIndex(const std::vector<int64_t>& values) {
+    auto packed_data = std::make_shared<std::vector<uint8_t>>();
+    ScalarIndexSort<int64_t> source;
+    source.Build(values.size(), values.data());
+    auto output = std::make_shared<MemoryOutputStream>(packed_data);
+    storage::IndexEntryDirectStreamWriter writer(output);
+    source.WriteEntries(&writer);
+    writer.Finish();
+    return packed_data;
+}
+
+}  // namespace
 
 static storage::FileManagerContext
 CreateScalarSortTestFileManagerContext() {
@@ -152,4 +298,106 @@ TEST(StlSortIndexTest, TestIn) {
 
     test_stlsort_for_range(
         data, DataType::INT64, true, exec_expr, expected_result);
+}
+
+TEST(StlSortIndexTest, V3PersistsDirectLoadMetadata) {
+    const std::vector<int64_t> data = {10, 2, 6, 5, 9, 3, 7, 8, 4, 1};
+    auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
+    index->Build(data.size(), data.data());
+    RecordingIndexEntryWriter writer;
+
+    index->WriteEntries(&writer);
+
+    EXPECT_TRUE(writer.HasEntry("index_data"));
+    EXPECT_TRUE(writer.HasEntry("idx_to_offsets"));
+    EXPECT_TRUE(writer.HasEntry("valid_bitset"));
+}
+
+TEST(StlSortIndexTest, MmapFileOnlyPadsEmptyIndex) {
+    constexpr size_t kAlignment = 32;
+    constexpr const char* kMmapPath = "/tmp/milvus/mmap_test";
+    Config config;
+    config[milvus::index::ENABLE_MMAP] = true;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+
+    const std::vector<int64_t> values = {10, 2, 6, 5};
+    BinarySet non_empty_binary;
+    {
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
+        index->Build(values.size(), values.data());
+        non_empty_binary = index->Serialize({});
+    }
+    {
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
+        index->Load(non_empty_binary, config);
+        const auto data_size = non_empty_binary.GetByName("index_data")->size;
+        const auto aligned_size =
+            ((data_size + kAlignment - 1) / kAlignment) * kAlignment;
+        EXPECT_EQ(std::filesystem::file_size(kMmapPath), aligned_size);
+    }
+
+    const bool all_null[] = {false, false, false, false};
+    BinarySet empty_binary;
+    {
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
+        index->Build(values.size(), values.data(), all_null);
+        empty_binary = index->Serialize({});
+    }
+    {
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
+        index->Load(empty_binary, config);
+        EXPECT_EQ(std::filesystem::file_size(kMmapPath), 1);
+    }
+}
+
+TEST(StlSortIndexTest, MmapLoadRemovesBackingFileOnStreamFailure) {
+    constexpr const char* kMmapPath = "/tmp/milvus/mmap_test";
+    std::filesystem::remove(kMmapPath);
+
+    const std::vector<int64_t> values = {10, 2, 6, 5};
+    auto packed_data = BuildPackedScalarSortIndex(values);
+
+    auto input = std::make_shared<FailingMemoryInputStream>(
+        packed_data, storage::MILVUS_V3_MAGIC_SIZE);
+    auto reader = storage::IndexEntryReader::Open(input, packed_data->size());
+
+    Config config;
+    config[milvus::index::ENABLE_MMAP] = true;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    {
+        ScalarIndexSort<int64_t> index;
+        EXPECT_THROW(index.LoadEntries(*reader, config), SegcoreError);
+    }
+
+    EXPECT_FALSE(std::filesystem::exists(kMmapPath));
+    std::filesystem::remove(kMmapPath);
+}
+
+TEST(StlSortIndexTest, MmapLoadRemovesMetaFileOnStreamFailure) {
+    constexpr const char* kMmapPath = "/tmp/milvus/mmap_test";
+    const auto mmap_meta_path = std::string(kMmapPath) + "-meta";
+    std::filesystem::remove(kMmapPath);
+    std::filesystem::remove(mmap_meta_path);
+
+    const std::vector<int64_t> values = {10, 2, 6, 5};
+    auto packed_data = BuildPackedScalarSortIndex(values);
+    const auto offsets_entry_offset =
+        storage::MILVUS_V3_MAGIC_SIZE +
+        values.size() * sizeof(IndexStructure<int64_t>);
+    auto input = std::make_shared<FailingMemoryInputStream>(
+        packed_data, offsets_entry_offset);
+    auto reader = storage::IndexEntryReader::Open(input, packed_data->size());
+
+    Config config;
+    config[milvus::index::ENABLE_MMAP] = true;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    {
+        ScalarIndexSort<int64_t> index;
+        EXPECT_THROW(index.LoadEntries(*reader, config), SegcoreError);
+    }
+
+    EXPECT_FALSE(std::filesystem::exists(kMmapPath));
+    EXPECT_FALSE(std::filesystem::exists(mmap_meta_path));
+    std::filesystem::remove(kMmapPath);
+    std::filesystem::remove(mmap_meta_path);
 }

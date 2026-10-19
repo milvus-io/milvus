@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -166,4 +167,25 @@ func TestStreamingQuotaMetrics(t *testing.T) {
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(nil, errors.New("test"))
 	m = getStreamingQuotaMetrics()
 	assert.Nil(t, m)
+}
+
+func TestGetLocalStorageMetrics(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.QueryNodeCfg.DiskCapacityLimit.Key, "1600"))
+	t.Cleanup(func() {
+		params.Reset(params.QueryNodeCfg.DiskCapacityLimit.Key)
+	})
+
+	const gib = int64(1024 * 1024 * 1024)
+	loader := segments.NewMockLoader(t)
+	loader.EXPECT().GetLocalDiskUsage().Return(2*gib, nil).Once()
+	metrics := getLocalStorageMetrics(loader)
+	require.NotNil(t, metrics)
+	require.Equal(t, int64(1600)*gib, metrics.CapacityBytes)
+	require.Equal(t, int64(2)*gib, metrics.UsedBytes)
+
+	missingLoader := segments.NewMockLoader(t)
+	missingLoader.EXPECT().GetLocalDiskUsage().Return(0, errors.New("disk usage unavailable")).Once()
+	require.Nil(t, getLocalStorageMetrics(missingLoader))
 }

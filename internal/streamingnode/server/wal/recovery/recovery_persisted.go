@@ -160,13 +160,14 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 	if err := resource.Resource().StreamingNodeCatalog().SaveConsumeCheckpoint(ctx, channelInfo.Name, checkpoint); err != nil {
 		return nil, errors.Wrap(err, "failed to save checkpoint to catalog")
 	}
-	r.Logger().Info("initialize checkpoint done",
+	fields := []zap.Field{
 		zap.Int("vchannels", len(vchannels)),
 		zap.String("checkpoint", checkpoint.MessageId.String()),
 		zap.Uint64("timetick", checkpoint.TimeTick),
 		zap.Int64("magic", checkpoint.RecoveryMagic),
-		zap.Any("alterWALState", checkpoint.AlterWalState),
-	)
+	}
+	fields = append(fields, utility.AlterWALStateLogFields(checkpoint.AlterWalState)...)
+	r.Logger().Info("initialize checkpoint done", fields...)
 	return checkpoint, nil
 }
 

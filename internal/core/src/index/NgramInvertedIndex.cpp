@@ -51,6 +51,23 @@
 
 namespace milvus::index {
 
+// Number of UTF-8 characters in `literal`. The rust binding checks min_gram
+// against `str::chars().count()`, so the gate on this side must count
+// characters too, not bytes: a single 3-byte character passes a byte-length
+// check against min_gram=2 and then trips the rust-side check. Invalid
+// UTF-8 needs no special handling here; the FFI shim rejects it before the
+// rust-side check runs.
+inline size_t
+Utf8LiteralLength(const std::string& literal) {
+    size_t count = 0;
+    for (unsigned char c : literal) {
+        if ((c & 0xC0) != 0x80) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 const std::string NGRAM_AVG_ROW_SIZE_FILE_NAME = "ngram_avg_row_size";
 
 const JsonCastType JSON_CAST_TYPE = JsonCastType::FromString("VARCHAR");
@@ -310,7 +327,16 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                                  exec::SegmentExpr* segment) {
     tracer::AutoSpan span(
         "NgramInvertedIndex::ExecuteQuery", tracer::GetRootSpan(), true);
-    if (literal.length() < min_gram_) {
+    // On 2.6 the tantivy string FFI is C-string based on both sides: rows
+    // are indexed truncated at their first NUL and a literal handed to
+    // ngram_match_query is truncated the same way. A literal with an
+    // interior NUL therefore cannot be answered by the index (the C++ gate
+    // and the rust check would not even agree on its length); leave it to
+    // the brute-force path, which reads the raw data with explicit lengths.
+    if (literal.find('\0') != std::string::npos) {
+        return std::nullopt;
+    }
+    if (Utf8LiteralLength(literal) < min_gram_) {
         return std::nullopt;
     }
 
@@ -323,7 +349,12 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                               static_cast<int>(literal.length()));
             span.SetAttribute("min_gram", min_gram_);
             span.SetAttribute("max_gram", max_gram_);
-            bool need_post_filter = literal.length() > max_gram_;
+            // A literal of at most max_gram chars is itself an indexed gram
+            // and rust answers it with an exact term query, so no post-filter
+            // is needed. Count chars, as rust does; byte length would send
+            // every short multi-byte (e.g. CJK) literal through a redundant
+            // full post-filter.
+            bool need_post_filter = Utf8LiteralLength(literal) > max_gram_;
 
             if (schema_.data_type() == proto::schema::DataType::JSON) {
                 auto predicate = [&literal, this](const milvus::Json& data) {
@@ -518,7 +549,7 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
     TargetBitmap bitset(static_cast<size_t>(Count()), true);
     auto literals = split_by_wildcard(literal);
     for (const auto& l : literals) {
-        if (l.length() < min_gram_) {
+        if (Utf8LiteralLength(l) < min_gram_) {
             return std::nullopt;
         }
         TargetBitmap tmp_bitset(static_cast<size_t>(Count()), false);

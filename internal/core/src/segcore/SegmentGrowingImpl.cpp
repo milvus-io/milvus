@@ -2024,7 +2024,7 @@ SegmentGrowingImpl::FillAbsentFields() {
             if (field_meta.is_nullable() &&
                 insert_record_.is_data_exist(field_id) &&
                 insert_record_.is_valid_data_exist(field_id) &&
-                insert_record_.get_valid_data(field_id)->get_data().empty()) {
+                insert_record_.get_valid_data(field_id)->empty()) {
                 fill_empty_field(field_meta);
             }
             continue;
@@ -2294,11 +2294,12 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 int64_t num_rows) {
     // Rows are written at their reserved ABSOLUTE offsets
     // (SimpleGeometryCache::AppendDataAt), matching how readers address the
-    // cache (GetByOffsetUnsafe) and how the R-Tree index path's AddGeometry
+    // cache (GetByOffset) and how the R-Tree index path's AddGeometry
     // works. This makes the write idempotent: a batch retried after a
     // mid-batch retriable failure (e.g. a transient GEOS allocation throw)
-    // overwrites its own slots instead of re-appending after the partial
-    // prefix and shifting every later row to the wrong offset. It also
+    // addresses its own slots instead of re-appending after the partial
+    // prefix and shifting every later row to the wrong offset (the slots it
+    // already published are simply skipped -- first writer wins). It also
     // removes the old tail-append ORDERING DEPENDENCY on strictly serialized,
     // in-order Insert() batches.
     try {
@@ -2381,7 +2382,7 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
                     segment_instance_uid(), get_segment_id(), field_id);
 
         // Process each field data chunk, writing rows at their reserved
-        // absolute offsets so a retried load overwrites in place (see
+        // absolute offsets so a retried load lands on the same slots (see
         // BuildGeometryCacheForInsert).
         int64_t absolute_offset = reserved_offset;
         for (const auto& data : field_data) {
@@ -2462,9 +2463,15 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
     } else {
         auto vec_base = insert_record_.get_data_base(field_id);
         if (vec_base != nullptr) {
-            auto valid_data_vec = vec_base->get_valid_data();
+            // Avoid vec_base->get_valid_data(): it materializes a flat copy of
+            // the WHOLE validity bitmap (O(segment rows)) while this path only
+            // needs `count` offsets (and, on the mapping-storage branch, only
+            // an emptiness check).
+            auto valid_data_ptr = insert_record_.is_valid_data_exist(field_id)
+                                      ? insert_record_.get_valid_data(field_id)
+                                      : nullptr;
             bool is_mapping_storage = vec_base->is_mapping_storage();
-            if (!valid_data_vec.empty()) {
+            if (valid_data_ptr != nullptr && !valid_data_ptr->empty()) {
                 result.valid_data = std::make_unique<bool[]>(count);
 
                 if (is_mapping_storage) {
@@ -2475,14 +2482,8 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
                         result.valid_offsets);
                 } else {
                     result.valid_offsets.reserve(count);
-                    for (int64_t i = 0; i < count; ++i) {
-                        auto offset = seg_offsets[i];
-                        bool is_valid = offset >= 0 &&
-                                        offset < static_cast<int64_t>(
-                                                     valid_data_vec.size()) &&
-                                        valid_data_vec[offset];
-                        result.valid_data[i] = is_valid;
-                    }
+                    valid_data_ptr->bulk_is_valid(
+                        seg_offsets, count, result.valid_data.get());
                 }
                 result.valid_count = result.valid_offsets.size();
             }

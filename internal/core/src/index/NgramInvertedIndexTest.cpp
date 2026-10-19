@@ -1519,6 +1519,158 @@ TEST(NgramPatternMatchConsistency, UTF8Patterns) {
     }
 }
 
+TEST(NgramPatternMatchConsistency, SingleMultiByteCharLiterals) {
+    // A literal that is a single multi-byte char (e.g. "）" = 1 char / 3
+    // bytes) has byte length >= min_gram(2) but char count < min_gram, so
+    // the ngram index cannot serve it and must return nullopt (fall back
+    // to brute-force matching) instead of tripping the tantivy-side assert.
+    boost::container::vector<std::string> test_data = {
+        "订单（已取消）",
+        "中文测试",
+        "café latte",
+        "emoji😀test",
+        "hello world",
+    };
+
+    // Patterns whose wildcard-free literal is a single multi-byte char:
+    // 1 char in every case, 2-4 bytes in UTF-8.
+    std::vector<std::pair<std::string, proto::plan::OpType>> test_cases = {
+        {"）", proto::plan::OpType::InnerMatch},
+        {"）", proto::plan::OpType::PrefixMatch},
+        {"）", proto::plan::OpType::PostfixMatch},
+        {"好", proto::plan::OpType::InnerMatch},  // 3-byte CJK char
+        {"é", proto::plan::OpType::InnerMatch},   // 2-byte char
+        {"😀", proto::plan::OpType::InnerMatch},   // 4-byte char
+        {"%）%", proto::plan::OpType::Match},
+        {"%abc%）%", proto::plan::OpType::Match},  // split part "）" is 1 char
+    };
+
+    for (const auto& [pattern, op_type] : test_cases) {
+        // Compute expected results with brute-force semantics
+        std::vector<bool> expected_results;
+
+        PatternMatchTranslator translator;
+        std::string like_pattern;
+        switch (op_type) {
+            case proto::plan::OpType::PrefixMatch:
+                like_pattern = pattern + "%";
+                break;
+            case proto::plan::OpType::PostfixMatch:
+                like_pattern = "%" + pattern;
+                break;
+            case proto::plan::OpType::InnerMatch:
+                like_pattern = "%" + pattern + "%";
+                break;
+            case proto::plan::OpType::Match:
+                like_pattern = pattern;
+                break;
+            default:
+                continue;
+        }
+
+        LikePatternMatcher like_matcher(like_pattern);
+        for (const auto& data : test_data) {
+            expected_results.push_back(like_matcher(data));
+        }
+
+        // Every literal here is 1 char < min_gram(2), so the ngram index
+        // must forward to brute-force matching.
+        test_ngram_with_data(test_data,
+                             pattern,
+                             op_type,
+                             expected_results,
+                             /*forward_to_br=*/true);
+    }
+
+    // Control: a multi-char CJK literal (2 chars / 6 bytes >= min_gram) is
+    // still served by the ngram index path.
+    {
+        std::vector<bool> expected_results;
+        LikePatternMatcher like_matcher("%中文%");
+        for (const auto& data : test_data) {
+            expected_results.push_back(like_matcher(data));
+        }
+        test_ngram_with_data(test_data,
+                             "中文",
+                             proto::plan::OpType::InnerMatch,
+                             expected_results);
+    }
+}
+
+// On 2.6 the tantivy string FFI truncates at NUL on both the write and the
+// query side, so a literal with an interior NUL cannot be served by the
+// index: it must fall back to brute force and still produce the right rows.
+// The InnerMatch case is <= max_gram chars (no post-filter); served by the
+// index it would have returned "xabzz" as a false positive.
+TEST(NgramPatternMatchConsistency, EmbeddedNulLiteralFallsBack) {
+    const std::string nul_row("xab\0cy", 6);
+    const std::string nul_short("ab\0c", 4);
+    boost::container::vector<std::string> test_data = {
+        nul_row, "xabzz", "hello", nul_short};
+
+    struct TestCase {
+        std::string literal;
+        proto::plan::OpType op_type;
+        std::vector<bool> expected;
+    };
+    std::vector<TestCase> test_cases = {
+        {nul_short,
+         proto::plan::OpType::InnerMatch,
+         {true, false, false, true}},
+        {nul_short,
+         proto::plan::OpType::PrefixMatch,
+         {false, false, false, true}},
+        {std::string("b\0c", 3),
+         proto::plan::OpType::PostfixMatch,
+         {false, false, false, true}},
+        {"%xa%" + std::string("\0cy", 3) + "%",
+         proto::plan::OpType::Match,
+         {true, false, false, false}},
+    };
+    for (const auto& test_case : test_cases) {
+        test_ngram_with_data(test_data,
+                             test_case.literal,
+                             test_case.op_type,
+                             test_case.expected,
+                             /*forward_to_br=*/true);
+    }
+}
+
+// The C++ gate is the primary defense; this pins the second one: a literal
+// that reaches the rust binding below min_gram must come back as a
+// SegcoreError, not a panic. The binding is entered through `extern "C"`
+// frames, where a panic cannot unwind and aborts the QueryNode.
+TEST(NgramPatternMatchConsistency, ShortLiteralAtRustBoundaryThrows) {
+    auto path = TestLocalPath + "ngram_short_literal_ffi/";
+    boost::filesystem::remove_all(path);
+    boost::filesystem::create_directories(path);
+
+    milvus::tantivy::TantivyIndexWrapper wrapper(
+        "ngram", path.c_str(), uintptr_t{2}, uintptr_t{3});
+    std::vector<std::string> data = {"订单（已取消）", "hello world"};
+    wrapper.add_data<std::string>(data.data(), data.size(), 0);
+    wrapper.finish();
+    wrapper.create_reader(milvus::index::SetBitsetSealed);
+
+    const std::string one_char_three_bytes = "订";
+    ASSERT_EQ(one_char_three_bytes.size(), 3);
+
+    {
+        TargetBitmap bitset(data.size());
+        EXPECT_THROW(
+            wrapper.ngram_match_query(one_char_three_bytes, 2, 3, &bitset),
+            milvus::SegcoreError);
+        EXPECT_THROW(wrapper.ngram_match_query("a", 2, 3, &bitset),
+                     milvus::SegcoreError);
+    }
+
+    // the reader is still usable afterwards
+    TargetBitmap bitset(data.size());
+    wrapper.ngram_match_query("订单", 2, 3, &bitset);
+    EXPECT_TRUE(bitset[0]);
+    EXPECT_FALSE(bitset[1]);
+}
+
 TEST(NgramPatternMatchConsistency, EscapeSequences) {
     // Test data with special characters
     boost::container::vector<std::string> test_data = {

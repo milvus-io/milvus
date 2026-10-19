@@ -156,3 +156,60 @@ TEST(Expr, IntegerOverflow) {
         }
     }
 }
+
+// A conjunct that skips an overflowing predicate for some batches (via
+// MoveCursor) must not leave the overflow fast path with a stale batch size:
+// the result and validity bitmaps have to keep covering the same rows.
+TEST(Expr, IntegerOverflowAfterConjunctSkip) {
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i8_fid = schema->AddDebugField("age", DataType::INT8, true);
+    auto k_fid = schema->AddDebugField("k", DataType::INT64);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    // not a multiple of the 8192-row expression batch
+    const int N = 3 * 8192 + 100;
+    auto raw_data = DataGen(schema, N);
+    for (auto& field_data : *raw_data.raw_->mutable_fields_data()) {
+        if (field_data.field_id() == k_fid.get()) {
+            auto* ks = field_data.mutable_scalars()->mutable_long_data();
+            for (int i = 0; i < N; ++i) {
+                ks->set_data(i, i);
+            }
+        }
+    }
+    auto age_valid = raw_data.get_col_valid(i8_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    seg->PreInsert(N);
+    seg->Insert(0,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+
+    // The first batch is all FALSE on the left, so the outer AND skips the
+    // whole inner OR there. 1000 does not fit INT8, so `age < 1000` takes the
+    // overflow fast path, and in the inner OR it is the left operand whose
+    // sizes drive the three-valued merge with `k < 0`.
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch("k >= 8192 and (age < 1000 or k < 0)",
+                                       "fakevec",
+                                       10,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    auto final = ExecuteQueryExpr(
+        (plan->plan_node_->plannodes_->sources()[0])->sources()[0],
+        seg.get(),
+        N,
+        MAX_TIMESTAMP);
+    ASSERT_EQ(final.size(), N);
+    for (int i = 0; i < N; ++i) {
+        ASSERT_EQ(final[i], i >= 8192 && age_valid[i]) << "@" << i;
+    }
+}

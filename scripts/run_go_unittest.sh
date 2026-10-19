@@ -21,6 +21,8 @@ set -e
 
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
+# setenv.sh disables errexit; test failures must still fail this runner.
+set -e
 
 if [[ $(uname -s) == "Darwin" ]]; then
     export MallocNanoZone=0
@@ -66,6 +68,7 @@ done
 
 function test_proxy()
 {
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/http/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
@@ -175,6 +178,7 @@ popd
 }
 
 function test_mixcoord() {
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/coordinator" -run TestHandleAlterConfigRejectsManagementMetricsOnly -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/mixcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 

@@ -20,9 +20,11 @@
 #include <cstring>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "common/Consts.h"
@@ -159,6 +161,60 @@ upper_div(int64_t value, int64_t align) {
     Assert(align > 0);
     auto groups = value / align + (value % align != 0);
     return groups;
+}
+
+template <typename T,
+          std::enable_if_t<std::is_integral_v<T> &&
+                               !std::is_same_v<std::remove_cv_t<T>, bool>,
+                           int> = 0>
+constexpr T
+SaturatingAdd(T lhs, T rhs) noexcept {
+    if constexpr (std::is_unsigned_v<T>) {
+        return rhs > std::numeric_limits<T>::max() - lhs
+                   ? std::numeric_limits<T>::max()
+                   : lhs + rhs;
+    } else {
+        if (rhs > 0 && lhs > std::numeric_limits<T>::max() - rhs) {
+            return std::numeric_limits<T>::max();
+        }
+        if (rhs < 0 && lhs < std::numeric_limits<T>::min() - rhs) {
+            return std::numeric_limits<T>::min();
+        }
+        return lhs + rhs;
+    }
+}
+
+template <typename T,
+          std::enable_if_t<std::is_integral_v<T> &&
+                               !std::is_same_v<std::remove_cv_t<T>, bool>,
+                           int> = 0>
+constexpr T
+SaturatingMultiply(T lhs, T rhs) noexcept {
+    if constexpr (std::is_unsigned_v<T>) {
+        return lhs != 0 && rhs > std::numeric_limits<T>::max() / lhs
+                   ? std::numeric_limits<T>::max()
+                   : lhs * rhs;
+    } else {
+        if (lhs == 0 || rhs == 0) {
+            return 0;
+        }
+        if (lhs > 0) {
+            if (rhs > 0 && lhs > std::numeric_limits<T>::max() / rhs) {
+                return std::numeric_limits<T>::max();
+            }
+            if (rhs < 0 && rhs < std::numeric_limits<T>::min() / lhs) {
+                return std::numeric_limits<T>::min();
+            }
+        } else {
+            if (rhs > 0 && lhs < std::numeric_limits<T>::min() / rhs) {
+                return std::numeric_limits<T>::min();
+            }
+            if (rhs < 0 && lhs < std::numeric_limits<T>::max() / rhs) {
+                return std::numeric_limits<T>::max();
+            }
+        }
+        return lhs * rhs;
+    }
 }
 
 inline bool

@@ -16,9 +16,11 @@
 
 #pragma once
 
+#include <cstring>
 #include <memory>
 #include <map>
 #include <limits>
+#include <functional>
 #include <string>
 #include <queue>
 #include <utility>
@@ -232,6 +234,9 @@ struct VectorIterator {
 };
 
 struct SearchResult {
+    using FilteredVectorSearchFn =
+        std::function<void(const BitsetView&, int64_t, SearchResult&)>;
+
     SearchResult() = default;
 
     int64_t
@@ -288,6 +293,79 @@ struct SearchResult {
         return view;
     }
 
+    void
+    SetVectorSearchProvider(const BitsetView& base_filter,
+                            FilteredVectorSearchFn provider) {
+        vector_search_base_filter_.reset();
+        vector_search_base_filter_view_ = base_filter;
+        // The execution pipeline owns its input column. Direct callers without
+        // an owner retain a defensive copy of their filter.
+        if (!vector_search_filter_owner_) {
+            GetVectorSearchBaseFilter();
+        }
+        filtered_vector_search_fn_ = std::move(provider);
+    }
+
+    void
+    ClearVectorSearchProvider() {
+        filtered_vector_search_fn_ = {};
+        vector_search_base_filter_view_ = {};
+        vector_search_base_filter_.reset();
+        vector_search_filter_owner_.reset();
+    }
+
+    const TargetBitmap*
+    GetVectorSearchBaseFilter() {
+        const auto& base_filter = vector_search_base_filter_view_;
+        if (!vector_search_base_filter_ && !base_filter.empty()) {
+            auto copied_filter =
+                std::make_unique<TargetBitmap>(base_filter.size(), false);
+            if (!base_filter.has_out_ids()) {
+                std::memcpy(copied_filter->data(),
+                            base_filter.data(),
+                            base_filter.byte_size());
+            } else {
+                for (size_t i = 0; i < base_filter.size(); ++i) {
+                    (*copied_filter)[i] = base_filter.test(i);
+                }
+            }
+            vector_search_base_filter_ = std::move(copied_filter);
+            vector_search_base_filter_view_ =
+                BitsetView(*vector_search_base_filter_);
+        }
+        return vector_search_base_filter_.get();
+    }
+
+    bool
+    CanSearchFilteredVectors() const {
+        return allow_filtered_vector_search_ &&
+               static_cast<bool>(filtered_vector_search_fn_);
+    }
+
+    // Synchronous ordinary top-k search. Serial callers may reuse the bitmap
+    // after releasing the result; each invocation gets a fresh BitsetView.
+    std::optional<std::unique_ptr<SearchResult>>
+    SearchFilteredVectors(const std::shared_ptr<TargetBitmap>& filter,
+                          int64_t topk) {
+        if (!filter || topk <= 0 || !CanSearchFilteredVectors()) {
+            return std::nullopt;
+        }
+        const auto* base = GetVectorSearchBaseFilter();
+        if (base && base->size() != filter->size()) {
+            return std::nullopt;
+        }
+        if (base) {
+            *filter |= *base;
+        }
+        auto result = std::make_unique<SearchResult>();
+        result->allow_filtered_vector_search_ = false;
+        result->vector_search_filter_owner_ = filter;
+        filtered_vector_search_fn_(BitsetView(*filter), topk, *result);
+        AssertInfo(!result->vector_iterators_.has_value(),
+                   "ordinary filtered search must not return iterators");
+        return result;
+    }
+
  public:
     int64_t total_nq_;
     int64_t unity_topK_;
@@ -321,6 +399,13 @@ struct SearchResult {
     // record the storage usage in search
     StorageCost search_storage_cost_;
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
+
+    // Re-enters the same sealed/growing provider for synchronous Search.
+    FilteredVectorSearchFn filtered_vector_search_fn_{};
+    TargetBitmapPtr vector_search_base_filter_{};
+    BitsetView vector_search_base_filter_view_{};
+    std::shared_ptr<const void> vector_search_filter_owner_{};
+    bool allow_filtered_vector_search_{true};
 
     bool element_level_{false};
     std::vector<int32_t> element_indices_;

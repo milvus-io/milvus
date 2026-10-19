@@ -103,6 +103,8 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, wpCfg.AppendQueueSize.GetAsInt(), 10000)
 		assert.Equal(t, wpCfg.AppendMaxRetries.GetAsInt(), 3)
+		assert.Equal(t, wpCfg.AppendMaxBatchEntries.GetAsInt(), 1000)
+		assert.Equal(t, wpCfg.AppendMaxBatchBytes.GetAsSize(), int64(2000000))
 		assert.Equal(t, wpCfg.SegmentRollingMaxSize.GetAsSize(), int64(256*1024*1024))
 		assert.Equal(t, wpCfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds(), float64(600))
 		assert.Equal(t, wpCfg.SegmentRollingMaxBlocks.GetAsInt64(), int64(1000))
@@ -230,6 +232,16 @@ func TestServiceParam(t *testing.T) {
 	t.Run("pulsar_backlog_auto_clear_bytes", func(t *testing.T) {
 		Params := &SParams.PulsarCfg
 		assert.Equal(t, int64(100*1024*1024), Params.BacklogAutoClearBytes.GetAsSize())
+	})
+
+	t.Run("pulsar_producer_access_mode", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "exclusive", Params.ProducerAccessMode.GetValue())
+	})
+
+	t.Run("pulsar_producer_create_timeout", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "1m", Params.ProducerCreateTimeout.GetValue())
 	})
 
 	t.Run("test rocksmqConfig", func(t *testing.T) {

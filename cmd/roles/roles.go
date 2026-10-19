@@ -364,6 +364,18 @@ func (mr *MilvusRoles) handleSignals() func() {
 	}
 }
 
+// componentNum counts the components that Run will actually start.
+func (mr *MilvusRoles) componentNum() int {
+	return lo.CountBy([]bool{
+		mr.EnableProxy,
+		mr.EnableQueryNode,
+		mr.EnableDataNode,
+		mr.EnableStreamingNode,
+		mr.EnableMixCoord || (mr.EnableRootCoord && mr.EnableQueryCoord && mr.EnableDataCoord),
+		mr.EnableCDC,
+	}, func(enabled bool) bool { return enabled })
+}
+
 // Run Milvus components.
 func (mr *MilvusRoles) Run() {
 	// start signal handler, defer close func
@@ -436,21 +448,7 @@ func (mr *MilvusRoles) Run() {
 	// init tracer before run any component
 	tracer.Init()
 
-	enableComponents := []bool{
-		mr.EnableProxy,
-		mr.EnableQueryNode,
-		mr.EnableDataNode,
-		mr.EnableStreamingNode,
-		mr.EnableMixCoord,
-		mr.EnableRootCoord,
-		mr.EnableQueryCoord,
-		mr.EnableDataCoord,
-		mr.EnableCDC,
-	}
-	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
-		return v
-	})
-	healthz.SetComponentNum(len(enableComponents))
+	healthz.SetComponentNum(mr.componentNum())
 
 	mr.setupLogger()
 	defer log.Cleanup()
@@ -486,6 +484,11 @@ func (mr *MilvusRoles) Run() {
 
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
 		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
+		// The version-gate switcher is a cluster-wide, one-shot capability:
+		// only the MixCoord role starts it, so a single coordinator drives the
+		// flip of every version-gated config item. Other roles observe the
+		// flipped value through the regular config refresh.
+		paramtable.StartVersionGateSwitcher()
 		mixCoord := mr.runMixCoord(ctx, local)
 		componentFutureMap[typeutil.MixCoordRole] = mixCoord
 	}

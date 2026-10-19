@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -44,7 +45,6 @@ type QueryNodeSuite struct {
 	dim               int
 	numCollections    int
 	rowsPerCollection int
-	waitTime          time.Duration
 	prefix            string
 }
 
@@ -53,7 +53,6 @@ func (s *QueryNodeSuite) setupParam() {
 	s.dim = 128
 	s.numCollections = 2
 	s.rowsPerCollection = 100
-	s.waitTime = time.Second * 10
 }
 
 func (s *QueryNodeSuite) loadCollection(collectionName string, dim int) {
@@ -168,6 +167,40 @@ func (s *QueryNodeSuite) checkCollections() bool {
 	return notLoaded == 0
 }
 
+func (s *QueryNodeSuite) waitForCollectionsReady() {
+	// Loading progress can still be 100% immediately after a node exits. Query
+	// every collection as well so the next assertions run after data recovery.
+	deadline, ok := s.Cluster.GetContext().Deadline()
+	s.Require().True(ok, "the mini cluster must have a recovery deadline")
+	s.Require().EventuallyWithT(func(t *assert.CollectT) {
+		ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 2*time.Second)
+		defer cancel()
+		for idx := 0; idx < s.numCollections; idx++ {
+			name := s.prefix + "_" + strconv.Itoa(idx)
+			progress, err := s.Cluster.MilvusClient.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+				CollectionName: name,
+			})
+			if !assert.NoError(t, err) || !assert.True(t, merr.Ok(progress.GetStatus())) ||
+				!assert.EqualValues(t, 100, progress.GetProgress()) {
+				return
+			}
+			result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+				CollectionName: name,
+				OutputFields:   []string{"count(*)"},
+			})
+			if !assert.NoError(t, err) || !assert.True(t, merr.Ok(result.GetStatus())) ||
+				!assert.Len(t, result.GetFieldsData(), 1) {
+				return
+			}
+			counts := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+			if !assert.Equal(t, []int64{int64(s.rowsPerCollection)}, counts, "collection %s", name) {
+				return
+			}
+		}
+	}, time.Until(deadline), 100*time.Millisecond, "collections did not recover after the query node change")
+	s.Require().True(s.checkCollections())
+}
+
 func (s *QueryNodeSuite) search(collectionName string, dim int) {
 	c := s.Cluster
 	var err error
@@ -237,8 +270,7 @@ func (s *QueryNodeSuite) setupData() {
 	log.Info(fmt.Sprintf("=========================start to search %s=========================", searchName))
 	s.search(searchName, s.dim)
 	log.Info("=========================Search finished=========================")
-	time.Sleep(s.waitTime)
-	s.checkCollections()
+	s.waitForCollectionsReady()
 	log.Info(fmt.Sprintf("=========================start to search2 %s=========================", searchName))
 	s.search(searchName, s.dim)
 	log.Info("=========================Search2 finished=========================")
@@ -267,21 +299,22 @@ func (s *QueryNodeSuite) checkAllCollectionsReady() {
 }
 
 func (s *QueryNodeSuite) checkQNRestarts() {
-	// Stop all query nodes
+	// Start replacements while the old nodes drain, as in a rolling restart.
+	var stopped sync.WaitGroup
 	for _, qn := range s.Cluster.GetAllQueryNodes() {
-		go qn.Stop()
+		stopped.Add(1)
+		go func() {
+			defer stopped.Done()
+			qn.Stop()
+		}()
 	}
 	// Add new Query nodes.
 	s.Cluster.AddQueryNode()
 	s.Cluster.AddQueryNode()
 
-	time.Sleep(s.waitTime)
-	for i := 0; i < 1000; i++ {
-		time.Sleep(s.waitTime)
-		if s.checkCollections() {
-			break
-		}
-	}
+	// A successful query must not be served by an old node still stopping.
+	stopped.Wait()
+	s.waitForCollectionsReady()
 	s.checkAllCollectionsReady()
 }
 
@@ -289,13 +322,13 @@ func (s *QueryNodeSuite) TestSwapQN() {
 	s.setupParam()
 	s.setupData()
 	// Test case with one query node stopped
-	go s.Cluster.DefaultQueryNode().Stop()
-	time.Sleep(s.waitTime)
+	s.Cluster.DefaultQueryNode().Stop()
+	s.waitForCollectionsReady()
 	s.checkAllCollectionsReady()
 	// Test case with new Query nodes added
 	s.Cluster.AddQueryNode()
 	s.Cluster.AddQueryNode()
-	time.Sleep(s.waitTime)
+	s.waitForCollectionsReady()
 	s.checkAllCollectionsReady()
 
 	// Test case with all query nodes replaced

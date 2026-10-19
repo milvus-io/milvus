@@ -443,9 +443,8 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         auto geometry_cache = segment_->GetGeometryCache(st_->field_id);
 
         if (geometry_cache) {
-            auto cache_lock = geometry_cache->AcquireReadLock();
             for (size_t k = 0; k < hit_abs.size(); ++k) {
-                auto cached = geometry_cache->GetByOffsetUnsafe(hit_abs[k]);
+                auto cached = geometry_cache->GetByOffset(hit_abs[k]);
                 if (cached == nullptr) {
                     continue;  // null/invalid geometry -> false
                 }

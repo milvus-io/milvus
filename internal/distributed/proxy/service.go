@@ -166,24 +166,28 @@ func (s *Server) registerHTTPServer() {
 	if !proxy.Params.HTTPCfg.DebugMode.GetAsBool() {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	metricsGinHandler := gin.Default()
-	apiv1 := metricsGinHandler.Group(apiPathPrefix)
-	apiv1.Use(httpserver.RequestHandlerFunc)
-	// Add authentication middleware if authorization is enabled
-	// This ensures the metrics port follows the same security policy as the main HTTP server
-	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		apiv1.Use(authenticate)
-	}
-	handlers := httpserver.NewHandlers(s.proxy)
-	handlers.RegisterRoutesTo(apiv1)
-	if p, ok := s.proxy.(*proxy.Proxy); ok {
-		p.RegisterRestRouter(apiv1)
-	}
+	metricsGinHandler := newMetricsPortEngine(gin.Default(), s.proxy)
 	mhttp.Register(&mhttp.Handler{
 		Path:        mhttp.RootPath,
 		HandlerFunc: nil,
 		Handler:     metricsGinHandler.Handler(),
 	})
+}
+
+// newMetricsPortEngine registers the optional console APIs on the metrics port.
+// The non-underscore legacy REST routes are retired regardless of enableV1.
+func newMetricsPortEngine(engine *gin.Engine, proxyComponent types.ProxyComponent) *gin.Engine {
+	if !proxy.Params.HTTPCfg.EnableV1.GetAsBool() {
+		return engine
+	}
+	apiv1 := engine.Group(apiPathPrefix, httpserver.RequestHandlerFunc)
+	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		apiv1.Use(authenticate)
+	}
+	if p, ok := proxyComponent.(*proxy.Proxy); ok {
+		p.RegisterRestRouter(apiv1)
+	}
+	return engine
 }
 
 func (s *Server) httpHandler(ginHandler http.Handler) http.Handler {
@@ -216,14 +220,17 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	ginHandler.Use(accesslog.AccessLogMiddleware)
 	ginHandler.Use(httpserver.LoggerHandlerFunc(), gin.Recovery())
 	ginHandler.Use(httpserver.RequestHandlerFunc)
+	ginHandler.Use(httpserver.IdempotencyKeyHandlerFunc)
 	ginHandler.Use(func(c *gin.Context) {
 		c.Set(httpserver.ContextUsername, "")
 	})
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		ginHandler.Use(authenticate)
 	}
-	app := ginHandler.Group("/v1")
-	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	if proxy.Params.HTTPCfg.EnableV1.GetAsBool() {
+		app := ginHandler.Group("/v1")
+		httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	}
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
 	http2Server := &http2.Server{}
@@ -1115,6 +1122,38 @@ func (s *Server) ListPrivilegeGroups(ctx context.Context, req *milvuspb.ListPriv
 
 func (s *Server) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 	return s.proxy.OperatePrivilegeGroup(ctx, req)
+}
+
+func (s *Server) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateRowPolicy(ctx, req)
+}
+
+func (s *Server) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.UpdateRowPolicy(ctx, req)
+}
+
+func (s *Server) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.DropRowPolicy(ctx, req)
+}
+
+func (s *Server) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return s.proxy.ListRowPolicies(ctx, req)
+}
+
+func (s *Server) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.proxy.SetRLSPrincipalTags(ctx, req)
+}
+
+func (s *Server) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return s.proxy.GetRLSPrincipalTags(ctx, req)
+}
+
+func (s *Server) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return s.proxy.ListRLSPrincipals(ctx, req)
+}
+
+func (s *Server) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.proxy.DeleteRLSPrincipalTags(ctx, req)
 }
 
 func (s *Server) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {

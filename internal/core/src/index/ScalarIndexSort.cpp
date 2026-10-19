@@ -16,12 +16,12 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <stdio.h>
 #include <string.h>
 #include <algorithm>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -62,7 +62,8 @@ const std::string STLSORT_INDEX_FILE_NAME = "stlsort-index";
 
 constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
 
-const uint64_t MMAP_INDEX_PADDING = 1;
+// mmap rejects a zero-length mapping; all-null indexes need one backing byte.
+constexpr size_t MIN_MMAP_FILE_SIZE = 1;
 
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
@@ -119,6 +120,8 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
     is_built_ = true;
 
     setup_data_pointers();
@@ -163,6 +166,8 @@ ScalarIndexSort<T>::BuildWithFieldData(
         }
         idx_to_offsets_[data_[i].idx_] = i;
     }
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
     is_built_ = true;
 
     setup_data_pointers();
@@ -228,8 +233,10 @@ ScalarIndexSort<T>::SetupMmapFromData(
                          : MMAP_PATH_FOR_TEST;
     std::filesystem::create_directories(
         std::filesystem::path(mmap_filepath_).parent_path());
+    auto mmap_file_raii = std::make_unique<MmapFileRAII>(mmap_filepath_);
 
     auto aligned_size = ((size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+    auto mmap_size = std::max(aligned_size, MIN_MMAP_FILE_SIZE);
 
     // Write data to file with alignment padding
     {
@@ -241,31 +248,31 @@ ScalarIndexSort<T>::SetupMmapFromData(
             std::vector<uint8_t> padding(aligned_size - size, 0);
             file_writer.Write(padding.data(), padding.size());
         }
-        // Write extra padding for safety
-        std::vector<uint8_t> padding(MMAP_INDEX_PADDING, 0);
-        file_writer.Write(padding.data(), padding.size());
+        // Keep the mmap length non-zero when the index contains no valid
+        // values.
+        if (aligned_size == 0) {
+            const uint8_t empty_index_placeholder = 0;
+            file_writer.Write(&empty_index_placeholder,
+                              sizeof(empty_index_placeholder));
+        }
         file_writer.Finish();
     }
 
     // mmap the file
     auto file = File::Open(mmap_filepath_, O_RDONLY);
-    mmap_data_ = static_cast<char*>(mmap(NULL,
-                                         aligned_size + MMAP_INDEX_PADDING,
-                                         PROT_READ,
-                                         MAP_PRIVATE,
-                                         file.Descriptor(),
-                                         0));
+    mmap_data_ = static_cast<char*>(
+        mmap(NULL, mmap_size, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
 
     if (mmap_data_ == MAP_FAILED) {
         file.Close();
-        remove(mmap_filepath_.c_str());
         ThrowInfo(
             ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
     }
 
-    mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+    mmap_size_ = mmap_size;
     data_size_ = size;
     file.Close();
+    this->mmap_file_raii_ = std::move(mmap_file_raii);
 }
 
 template <typename T>
@@ -313,6 +320,8 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         idx_to_offsets_[item.idx_] = i;
         valid_bitset_.set(item.idx_);
     }
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
 
     is_built_ = true;
     ComputeByteSize();
@@ -530,13 +539,13 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
 template <typename T>
 std::optional<T>
 ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
-    AssertInfo(idx < idx_to_offsets_.size(), "out of range of total count");
+    AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
     AssertInfo(is_built_, "index has not been built");
 
     if (!valid_bitset_[idx]) {
         return std::nullopt;
     }
-    auto offset = idx_to_offsets_[idx];
+    auto offset = idx_to_offsets_ptr_[idx];
     return operator[](offset).a_;
 }
 
@@ -593,6 +602,12 @@ ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
     writer->WriteEntry(
         "index_data", data_.data(), data_.size() * sizeof(IndexStructure<T>));
+    writer->WriteEntry("idx_to_offsets",
+                       idx_to_offsets_.data(),
+                       idx_to_offsets_.size() * sizeof(int32_t));
+    writer->WriteEntry("valid_bitset",
+                       reinterpret_cast<const uint8_t*>(valid_bitset_.data()),
+                       valid_bitset_.size_in_bytes());
 }
 
 template <typename T>
@@ -604,32 +619,212 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     auto is_nested = reader.GetMeta<bool>("is_nested");
     AssertInfo(!is_nested, "nested scalar sort index is not supported in 2.6");
 
-    auto data_entry = reader.ReadEntry("index_data");
-
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+
+    AssertInfo(index_size <= std::numeric_limits<size_t>::max() /
+                                 sizeof(IndexStructure<T>),
+               "scalar sort index data size overflow: {} entries",
+               index_size);
+    const auto expected_data_size = index_size * sizeof(IndexStructure<T>);
+    AssertInfo(reader.GetEntrySize("index_data") == expected_data_size,
+               "invalid scalar sort index data size: expected {}, got {}",
+               expected_data_size,
+               reader.GetEntrySize("index_data"));
 
     if (is_mmap_) {
-        auto load_priority =
-            GetValueFromConfig<milvus::proto::common::LoadPriority>(
-                config, milvus::LOAD_PRIORITY)
-                .value_or(milvus::proto::common::LoadPriority::HIGH);
-        SetupMmapFromData(
-            data_entry.data.data(), data_entry.data.size(), load_priority);
+        mmap_filepath_ = disk_file_manager_ != nullptr
+                             ? disk_file_manager_->GetLocalIndexObjectPrefix() +
+                                   STLSORT_INDEX_FILE_NAME
+                             : MMAP_PATH_FOR_TEST;
+        std::filesystem::create_directories(
+            std::filesystem::path(mmap_filepath_).parent_path());
+        auto mmap_file_raii = std::make_unique<MmapFileRAII>(mmap_filepath_);
+
+        size_t written = 0;
+        AssertInfo(expected_data_size <=
+                       std::numeric_limits<size_t>::max() - (ALIGNMENT - 1),
+                   "scalar sort mmap size overflow: {}",
+                   expected_data_size);
+        auto aligned_size =
+            ((expected_data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+        auto mmap_size = std::max(aligned_size, MIN_MMAP_FILE_SIZE);
+        {
+            auto file_writer = storage::FileWriter(
+                mmap_filepath_,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
+            reader.ReadEntryStream(
+                "index_data", [&](const uint8_t* data, size_t len) {
+                    AssertInfo(
+                        len <= expected_data_size - written,
+                        "scalar sort index stream exceeds expected size");
+                    file_writer.Write(data, len);
+                    written += len;
+                });
+            AssertInfo(written == expected_data_size,
+                       "scalar sort index stream size mismatch: got {}, "
+                       "expected {}",
+                       written,
+                       expected_data_size);
+            if (aligned_size > expected_data_size) {
+                std::vector<uint8_t> padding(aligned_size - expected_data_size,
+                                             0);
+                file_writer.Write(padding.data(), padding.size());
+            }
+            // Keep the mmap length non-zero when the index contains no valid
+            // values.
+            if (aligned_size == 0) {
+                const uint8_t empty_index_placeholder = 0;
+                file_writer.Write(&empty_index_placeholder,
+                                  sizeof(empty_index_placeholder));
+            }
+            file_writer.Finish();
+        }
+
+        data_size_ = expected_data_size;
+        mmap_size_ = mmap_size;
+        auto file = File::Open(mmap_filepath_, O_RDONLY);
+        mmap_data_ = static_cast<char*>(mmap(
+            nullptr, mmap_size_, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
+        if (mmap_data_ == MAP_FAILED) {
+            file.Close();
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to mmap scalar sort index: {}",
+                      strerror(errno));
+        }
+        file.Close();
+        this->mmap_file_raii_ = std::move(mmap_file_raii);
     } else {
         data_.resize(index_size);
-        std::memcpy(
-            data_.data(), data_entry.data.data(), data_entry.data.size());
+        size_t written = 0;
+        reader.ReadEntryStream(
+            "index_data", [&](const uint8_t* data, size_t len) {
+                AssertInfo(len <= expected_data_size - written,
+                           "scalar sort index stream exceeds expected size");
+                std::memcpy(reinterpret_cast<uint8_t*>(data_.data()) + written,
+                            data,
+                            len);
+                written += len;
+            });
+        AssertInfo(written == expected_data_size,
+                   "scalar sort index stream size mismatch: got {}, expected "
+                   "{}",
+                   written,
+                   expected_data_size);
     }
 
     setup_data_pointers();
 
-    idx_to_offsets_.resize(total_num_rows_);
-    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    const auto has_offsets = reader.HasEntry("idx_to_offsets");
+    const auto has_validity = reader.HasEntry("valid_bitset");
 
-    for (size_t i = 0; i < Size(); ++i) {
-        const auto& item = operator[](i);
-        idx_to_offsets_[item.idx_] = i;
-        valid_bitset_.set(item.idx_);
+    if (has_offsets && has_validity) {
+        AssertInfo(total_num_rows_ <=
+                       std::numeric_limits<size_t>::max() / sizeof(int32_t),
+                   "scalar sort offset size overflow for {} rows",
+                   total_num_rows_);
+        const auto offsets_size = total_num_rows_ * sizeof(int32_t);
+        AssertInfo(reader.GetEntrySize("idx_to_offsets") == offsets_size,
+                   "invalid idx_to_offsets size: expected {}, got {}",
+                   offsets_size,
+                   reader.GetEntrySize("idx_to_offsets"));
+
+        valid_bitset_ = TargetBitmap(total_num_rows_, false);
+        const auto validity_size = valid_bitset_.size_in_bytes();
+        AssertInfo(reader.GetEntrySize("valid_bitset") >= validity_size,
+                   "invalid valid_bitset size: expected at least {}, got {}",
+                   validity_size,
+                   reader.GetEntrySize("valid_bitset"));
+        auto validity_entry = reader.ReadEntry("valid_bitset");
+        std::memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()),
+                    validity_entry.data.data(),
+                    validity_size);
+
+        if (is_mmap_) {
+            mmap_meta_filepath_ = mmap_filepath_ + "-meta";
+            auto mmap_meta_file_raii =
+                std::make_unique<MmapFileRAII>(mmap_meta_filepath_);
+            {
+                auto file_writer = storage::FileWriter(
+                    mmap_meta_filepath_,
+                    storage::io::GetPriorityFromLoadPriority(load_priority));
+                size_t written = 0;
+                reader.ReadEntryStream(
+                    "idx_to_offsets", [&](const uint8_t* data, size_t len) {
+                        AssertInfo(len <= offsets_size - written,
+                                   "idx_to_offsets stream exceeds expected "
+                                   "size");
+                        file_writer.Write(data, len);
+                        written += len;
+                    });
+                AssertInfo(written == offsets_size,
+                           "idx_to_offsets stream size mismatch: got {}, "
+                           "expected {}",
+                           written,
+                           offsets_size);
+                file_writer.Finish();
+            }
+
+            mmap_meta_size_ = offsets_size;
+            auto file = File::Open(mmap_meta_filepath_, O_RDONLY);
+            mmap_meta_data_ = static_cast<char*>(mmap(nullptr,
+                                                      mmap_meta_size_,
+                                                      PROT_READ,
+                                                      MAP_PRIVATE,
+                                                      file.Descriptor(),
+                                                      0));
+            if (mmap_meta_data_ == MAP_FAILED) {
+                file.Close();
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "failed to mmap scalar sort offsets: {}",
+                          strerror(errno));
+            }
+            file.Close();
+            mmap_meta_file_raii_ = std::move(mmap_meta_file_raii);
+            idx_to_offsets_ptr_ =
+                reinterpret_cast<const int32_t*>(mmap_meta_data_);
+            idx_to_offsets_size_ = total_num_rows_;
+        } else {
+            idx_to_offsets_.resize(total_num_rows_);
+            size_t written = 0;
+            reader.ReadEntryStream(
+                "idx_to_offsets", [&](const uint8_t* data, size_t len) {
+                    AssertInfo(len <= offsets_size - written,
+                               "idx_to_offsets stream exceeds expected size");
+                    std::memcpy(
+                        reinterpret_cast<uint8_t*>(idx_to_offsets_.data()) +
+                            written,
+                        data,
+                        len);
+                    written += len;
+                });
+            AssertInfo(written == offsets_size,
+                       "idx_to_offsets stream size mismatch: got {}, expected "
+                       "{}",
+                       written,
+                       offsets_size);
+            idx_to_offsets_ptr_ = idx_to_offsets_.data();
+            idx_to_offsets_size_ = idx_to_offsets_.size();
+        }
+    } else {
+        // Backward compatibility for V3 indexes written before side entries
+        // were persisted.
+        idx_to_offsets_.resize(total_num_rows_);
+        valid_bitset_ = TargetBitmap(total_num_rows_, false);
+        for (size_t i = 0; i < Size(); ++i) {
+            const auto& item = operator[](i);
+            AssertInfo(item.idx_ >= 0 &&
+                           static_cast<size_t>(item.idx_) < total_num_rows_,
+                       "invalid scalar sort row id: {}",
+                       item.idx_);
+            idx_to_offsets_[item.idx_] = i;
+            valid_bitset_.set(item.idx_);
+        }
+        idx_to_offsets_ptr_ = idx_to_offsets_.data();
+        idx_to_offsets_size_ = idx_to_offsets_.size();
     }
 
     is_built_ = true;

@@ -52,11 +52,11 @@ type HealthResponse struct {
 }
 
 type HealthHandler struct {
+	mu           sync.RWMutex
 	indicators   []Indicator
 	indicatorNum int
 
 	// unregister role when call stop by restful api
-	unregisterLock    sync.RWMutex
 	unregisteredRoles map[string]struct{}
 }
 
@@ -65,16 +65,20 @@ var _ http.Handler = (*HealthHandler)(nil)
 var defaultHandler = HealthHandler{}
 
 func Register(indicator Indicator) {
+	defaultHandler.mu.Lock()
+	defer defaultHandler.mu.Unlock()
 	defaultHandler.indicators = append(defaultHandler.indicators, indicator)
 }
 
 func SetComponentNum(num int) {
+	defaultHandler.mu.Lock()
+	defer defaultHandler.mu.Unlock()
 	defaultHandler.indicatorNum = num
 }
 
 func UnRegister(role string) {
-	defaultHandler.unregisterLock.Lock()
-	defer defaultHandler.unregisterLock.Unlock()
+	defaultHandler.mu.Lock()
+	defer defaultHandler.mu.Unlock()
 
 	if defaultHandler.unregisteredRoles == nil {
 		defaultHandler.unregisteredRoles = make(map[string]struct{})
@@ -87,19 +91,24 @@ func Handler() *HealthHandler {
 }
 
 func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Snapshot registration state without holding the lock while checking components.
+	handler.mu.RLock()
+	registeredNum, indicatorNum := len(handler.indicators), handler.indicatorNum
+	indicators := make([]Indicator, 0, registeredNum)
+	for _, in := range handler.indicators {
+		if _, unregistered := handler.unregisteredRoles[in.GetName()]; !unregistered {
+			indicators = append(indicators, in)
+		}
+	}
+	handler.mu.RUnlock()
+
 	resp := &HealthResponse{
 		State: "OK",
 	}
 
 	unhealthyComponent := make([]string, 0)
-	ctx := context.Background()
-	for _, in := range handler.indicators {
-		handler.unregisterLock.RLock()
-		_, unregistered := handler.unregisteredRoles[in.GetName()]
-		handler.unregisterLock.RUnlock()
-		if unregistered {
-			continue
-		}
+	ctx := r.Context()
+	for _, in := range indicators {
 		code := in.Health(ctx)
 		resp.Detail = append(resp.Detail, &IndicatorState{
 			Name: in.GetName(),
@@ -111,8 +120,12 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if len(unhealthyComponent) > 0 {
-		resp.State = fmt.Sprintf("Not all components are healthy, %d/%d", handler.indicatorNum-len(unhealthyComponent), handler.indicatorNum)
+	// Explicitly unregistered roles still count as registered: stopping a role via
+	// the management API must not make the remaining process unhealthy.
+	if indicatorNum == 0 || registeredNum != indicatorNum {
+		resp.State = fmt.Sprintf("Not all components are registered, %d/%d", registeredNum, indicatorNum)
+	} else if len(unhealthyComponent) > 0 {
+		resp.State = fmt.Sprintf("Not all components are healthy, %d/%d", indicatorNum-len(unhealthyComponent), indicatorNum)
 		log.Info("check health failed", zap.Strings("UnhealthyComponent", unhealthyComponent))
 	}
 

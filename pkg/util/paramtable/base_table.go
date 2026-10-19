@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"os"
 	"path"
 	"runtime"
@@ -24,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
@@ -75,6 +77,12 @@ type BaseTable struct {
 	once   sync.Once
 	mgr    *config.Manager
 	config *baseTableConfig
+
+	// etcdClient is the single etcd client created when remote config is
+	// enabled. It is injected into the config etcd source and shared with other
+	// etcd users (e.g. the version gate confirmator); it lives for the process
+	// lifetime and is never closed by the source.
+	etcdClient *clientv3.Client
 }
 
 type baseTableConfig struct {
@@ -152,6 +160,11 @@ func (bt *BaseTable) init() {
 		panic(err)
 	}
 
+	// Establish the initial file-backed group spellings before importing
+	// environment overrides. A spelling learned only after an unsegmented
+	// value exists must fail closed, as it does for later source refreshes.
+	// Source priority still makes environment values override file values.
+	bt.initConfigsFromLocal()
 	if !bt.config.skipEnv {
 		err := bt.mgr.AddSource(config.NewEnvSource(formatter))
 		if err != nil {
@@ -159,7 +172,6 @@ func (bt *BaseTable) init() {
 			return
 		}
 	}
-	bt.initConfigsFromLocal()
 	if !bt.config.skipRemote {
 		bt.initConfigsFromRemote()
 	}
@@ -186,7 +198,8 @@ func (bt *BaseTable) initConfigsFromLocal() {
 		RefreshInterval: refreshInterval,
 	}))
 	if err != nil {
-		log.Warn("init baseTable with file failed", zap.Strings("configFile", bt.config.yamlFiles), zap.Error(err))
+		log.Ctx(context.TODO()).Warn("init baseTable with file failed", zap.Strings("configFile", bt.config.yamlFiles),
+			zap.String("error", config.RedactedValue))
 		return
 	}
 }
@@ -203,22 +216,30 @@ func (bt *BaseTable) initConfigsFromRemote() {
 	if etcdConfig.UseEmbedEtcd.GetAsBool() && !etcd.HasServer() {
 		return
 	}
+	etcdCli, err := etcd.CreateEtcdClient(
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdEnableAuth.GetAsBool(),
+		etcdConfig.EtcdAuthUserName.GetValue(),
+		etcdConfig.EtcdAuthPassword.GetValue(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
+	if err != nil {
+		// TLS and dial errors can contain protected paths, endpoints, or
+		// transport settings. Keep those details in the in-process error only.
+		log.Ctx(context.TODO()).Warn("init with etcd client failed", zap.String("error", config.RedactedValue))
+		return
+	}
+	bt.etcdClient = etcdCli
+
 	info := &config.EtcdInfo{
-		UseEmbed:        etcdConfig.UseEmbedEtcd.GetAsBool(),
-		EnableAuth:      etcdConfig.EtcdEnableAuth.GetAsBool(),
-		UserName:        etcdConfig.EtcdAuthUserName.GetValue(),
-		PassWord:        etcdConfig.EtcdAuthPassword.GetValue(),
-		UseSSL:          etcdConfig.EtcdUseSSL.GetAsBool(),
-		Endpoints:       etcdConfig.Endpoints.GetAsStrings(),
-		CertFile:        etcdConfig.EtcdTLSCert.GetValue(),
-		KeyFile:         etcdConfig.EtcdTLSKey.GetValue(),
-		CaCertFile:      etcdConfig.EtcdTLSCACert.GetValue(),
-		MinVersion:      etcdConfig.EtcdTLSMinVersion.GetValue(),
 		KeyPrefix:       etcdConfig.RootPath.GetValue(),
 		RefreshInterval: refreshInterval,
 	}
-
-	s, err := config.NewEtcdSource(info)
+	s, err := config.NewEtcdSource(etcdCli, info)
 	if err != nil {
 		log.Info("init with etcd failed", zap.Error(err))
 		return

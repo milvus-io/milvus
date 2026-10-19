@@ -46,8 +46,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -1848,20 +1850,39 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	// Broadcast the import message
 	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
-	err = s.broadcastImport(
+	duplicatedJobID, duplicated, err := s.broadcastImport(
 		ctx,
-		in.GetCollectionName(),
 		in.GetCollectionID(),
 		in.GetPartitionIDs(),
 		in.GetFiles(),
 		in.GetOptions(),
-		in.GetSchema(),
 		jobID,
 		in.GetChannelNames(),
+		interceptor.IdempotencyKeyFromContext(ctx),
+		in.GetRlsPrincipal(),
+		in.GetSkipRls(),
 	)
 	if err != nil {
 		log.Warn("failed to broadcast import message", zap.Error(err))
 		resp.Status = merr.Status(merr.Wrap(err, "failed to broadcast import"))
+		return resp, nil
+	}
+	if duplicated {
+		// The idempotency window still holds this key, so the original job is the
+		// answer. Whether that job is still queryable is not checked here: the client
+		// takes the jobID to GetImportProgress, which reports a missing job on its own.
+		resp.JobID = fmt.Sprint(duplicatedJobID)
+		// Log the original job's state, not just its ID. A key whose original ended
+		// Failed resolves to that same job for the rest of the window, so a client
+		// retrying it never makes progress; without the state here that looks
+		// indistinguishable from a key stuck on a healthy job.
+		originalState := "gone"
+		if job := s.importMeta.GetJob(ctx, duplicatedJobID); job != nil {
+			originalState = job.GetState().String()
+		}
+		log.Info("import request resolved to an existing job",
+			zap.String("jobID", resp.JobID),
+			zap.String("originalState", originalState))
 		return resp, nil
 	}
 
@@ -1872,6 +1893,9 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 // createImportJobFromAck creates an import job from ack callback.
 // This is called internally when broadcast ack is received.
+// Replicated or old-Proxy messages land here directly, so RLS preparation is
+// re-checked. A preparation failure creates a terminal Failed job instead of
+// returning a retryable error that would wedge the ACK callback.
 func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
@@ -1898,9 +1922,13 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		return resp, nil
 	}
 
+	var rlsPredicate *planpb.Expr
+	var rlsErr error
+	rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, in)
+
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
-	if isBackup {
+	if isBackup && rlsErr == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -1939,22 +1967,29 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	createTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:          jobID,
-			CollectionID:   in.GetCollectionID(),
-			CollectionName: in.GetCollectionName(),
-			PartitionIDs:   in.GetPartitionIDs(),
-			Vchannels:      importCollectionInfo.VChannelNames,
-			Schema:         in.GetSchema(),
-			TimeoutTs:      timeoutTs,
-			CleanupTs:      math.MaxUint64,
-			State:          internalpb.ImportJobState_Pending,
-			Files:          files,
-			Options:        in.GetOptions(),
-			CreateTime:     createTime.Format("2006-01-02T15:04:05Z07:00"),
-			ReadyVchannels: in.GetChannelNames(),
-			DataTs:         in.GetDataTimestamp(),
+			JobID:             jobID,
+			CollectionID:      in.GetCollectionID(),
+			CollectionName:    in.GetCollectionName(),
+			PartitionIDs:      in.GetPartitionIDs(),
+			Vchannels:         importCollectionInfo.VChannelNames,
+			Schema:            in.GetSchema(),
+			TimeoutTs:         timeoutTs,
+			CleanupTs:         math.MaxUint64,
+			State:             internalpb.ImportJobState_Pending,
+			Files:             files,
+			Options:           in.GetOptions(),
+			CreateTime:        createTime.Format("2006-01-02T15:04:05Z07:00"),
+			ReadyVchannels:    in.GetChannelNames(),
+			DataTs:            in.GetDataTimestamp(),
+			RlsCheckPredicate: rlsPredicate,
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
+	}
+	if rlsErr != nil {
+		log.Warn("RLS import check could not be prepared, creating the job in Failed state",
+			zap.Int64("jobID", jobID), zap.Int64("collectionID", in.GetCollectionID()), zap.Error(rlsErr))
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason(rlsErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {

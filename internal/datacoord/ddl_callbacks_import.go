@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -35,9 +36,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
+const (
+	importRLSContextVersionProperty = "_irv"
+	importRLSContextVersion         = "1"
+)
+
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
+	options := funcutil.Map2KeyValuePair(body.GetOptions())
+	version, trustedRLSContext := result.Message.Properties().Get(importRLSContextVersionProperty)
+	trustedRLSContext = trustedRLSContext && version == importRLSContextVersion
+	var rlsPrincipal string
+	var skipRLS bool
+	var err error
+	if trustedRLSContext {
+		rlsPrincipal, skipRLS, err = importutilv2.GetRLSOptions(options)
+	}
+	if !trustedRLSContext || err != nil {
+		// Import options predate RLS and were client-controlled. Only a message
+		// marked after DataCoord sanitizes the options may carry authorized RLS
+		// context. Malformed marked context also fails closed without wedging the
+		// indefinitely retried ACK callback.
+		if err != nil {
+			log.Ctx(ctx).Warn("ignore malformed RLS context in import message", zap.Error(err))
+		}
+		rlsPrincipal, skipRLS = "", false
+	}
+	options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
+		return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
+	})
 
 	// Ensure Schema.DbName is populated from the broadcast message's DbName,
 	// matching the behavior in master where this was set before calling ImportV2.
@@ -70,9 +98,11 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 				Paths: file.GetPaths(),
 			}
 		}),
-		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
+		Options:       options,
 		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 		JobID:         body.GetJobID(),
+		RlsPrincipal:  rlsPrincipal,
+		SkipRls:       skipRLS,
 	})
 
 	err = merr.CheckRPCCall(importResp, err)
@@ -87,10 +117,44 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
+//
+// All of this runs before the broadcaster's idempotency lookup, which cannot happen
+// until the resource keys are held inside Broadcast. A retry therefore has to pass
+// these checks again before it can resolve to its original jobID, and not all of them
+// are a pure function of the request: ValidateMaxImportJobExceed counts in-flight jobs
+// and ValidateBinlogImportRequest lists the backup files in object storage. A retry
+// sent while the job limit is saturated -- by the original request among others -- or
+// after the backup files changed is rejected here rather than returning the original
+// jobID. Retrying the same key once the limit frees up resolves normally; minting a
+// fresh key instead is what would import the data twice.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	// Must run before any option is read: checks read options as a repeated KV
+	// (first match wins) while the broadcast body folds them into a map (last
+	// value wins), so a duplicate key would validate under one value and
+	// execute under another.
+	if err := importutilv2.ValidateNoDuplicateKeys(options); err != nil {
+		return err
+	}
+
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
+		return err
+	}
+
+	// Keep ordinary imports out of Milvus's own storage directories.
+	//
+	// Deliberately NOT re-checked in createImportJobFromAck, unlike the L0 gate
+	// there, because this check is root-relative. It denies paths under THIS
+	// cluster's ChunkManager.RootPath(), and nothing ties a CDC pair's storage
+	// roots together (ReplicateConfiguration carries connection params and
+	// pchannels only). With the same root on both sides -- the default, and the
+	// normal deployment -- the primary's check covers the secondary exactly;
+	// only under differing roots does the same key mean something different on
+	// each side. Recorded in the PR's Known limitations rather than guarded
+	// here, since reaching it also requires enableInReplicatingCluster=true,
+	// which defaults to false and refuses every import on a replicating cluster.
+	if err := ValidateImportFilePaths(s.meta.chunkManager, files, options); err != nil {
 		return err
 	}
 
@@ -126,18 +190,50 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 	return nil
 }
 
+// jobIDFromDuplicatedBroadcast recovers the original import jobID from the broadcast
+// message the broadcaster returned on an idempotency hit. The broadcaster does not
+// know about import-specific structures, so the decode happens here.
+//
+// The request payload is deliberately NOT compared against the original: keeping the
+// key unique per logical request is the client's contract, and enforcing it
+// server-side would mean inventing an equality predicate over file lists whose false
+// mismatches would reject legitimate retries -- pushing the caller to mint a new key
+// and import the data twice, the very outcome this feature exists to prevent.
+//
+// The collectionID comparison is not such a predicate and is not a semantic guard: the
+// idempotency key is scoped to this collection's ID, so a hit already means both
+// broadcasts targeted it. It is checked as an invariant, to fail loudly on an encoding
+// or scoping bug rather than hand back a jobID for another collection's import.
+func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage, collectionID int64) (int64, error) {
+	importMsg, err := message.AsBroadcastImportMessageV1(msg)
+	if err != nil {
+		return 0, merr.Wrap(err, "malformed duplicated import broadcast message")
+	}
+	body, err := importMsg.Body()
+	if err != nil {
+		return 0, merr.Wrap(err, "malformed duplicated import broadcast message body")
+	}
+	if body.GetCollectionID() != collectionID {
+		return 0, merr.WrapErrServiceInternalMsg(
+			"idempotency scope resolved to an import into collection %d, not %d",
+			body.GetCollectionID(), collectionID)
+	}
+	return body.GetJobID(), nil
+}
+
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
-	collectionName string,
 	collectionID int64,
 	partitionIDs []int64,
 	files []*internalpb.ImportFile,
 	options []*commonpb.KeyValuePair,
-	schema *schemapb.CollectionSchema,
 	jobID int64,
 	vchannels []string,
-) error {
+	idempotencyKey string,
+	rlsPrincipal string,
+	skipRLS bool,
+) (duplicatedJobID int64, duplicated bool, err error) {
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
@@ -148,20 +244,36 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Validate the request before broadcasting
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
-		return merr.Wrap(err, "failed to validate import request")
+		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
-		return merr.Wrap(err, "failed to start broadcast with collection id")
+		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll.Status, err); err != nil {
-		return err
+		return 0, false, err
+	}
+	schema := coll.GetSchema()
+	if schema == nil || schema.GetName() == "" {
+		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
+	}
+	schema.Fields = lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return !common.IsSystemField(field.GetFieldID())
+	})
+	msgOptions := funcutil.KeyValuePair2Map(options)
+	delete(msgOptions, importutilv2.RLSPrincipal)
+	delete(msgOptions, importutilv2.SkipRLS)
+	if rlsPrincipal != "" {
+		msgOptions[importutilv2.RLSPrincipal] = rlsPrincipal
+	}
+	if skipRLS {
+		msgOptions[importutilv2.SkipRLS] = "true"
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
@@ -172,18 +284,44 @@ func (s *Server) broadcastImport(ctx context.Context,
 				Timestamp: 0,
 			},
 			DbName:         coll.DbName,
-			CollectionName: collectionName,
+			CollectionName: schema.GetName(),
 			CollectionID:   collectionID,
 			PartitionIDs:   partitionIDs,
-			Options:        funcutil.KeyValuePair2Map(options),
+			Options:        msgOptions,
 			Files:          msgFiles,
-			Schema:         schema, // TODO: should we use the schema from the collection?
+			Schema:         schema,
 			JobID:          jobID,
 		}).
+		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
+		// Scoped to the collection by ID, so the same client key stays a distinct
+		// operation against another collection, and a rename does not move the key off
+		// the collection it was bound to: a retry naming the renamed collection still
+		// resolves to its original job. A retry still naming the OLD collection never
+		// reaches here -- the proxy resolves the name first -- so it fails rather than
+		// importing twice. The broadcaster adds the message type; everything else about
+		// the dedup identity is this scope.
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
 	// Broadcast the message
-	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	result, err := broadcaster.Broadcast(ctx, msg)
+	if err != nil {
+		return 0, false, err
+	}
+	if result.Duplicated == nil {
+		return 0, false, nil
+	}
+	// The broadcaster resolved this idempotency key to an earlier broadcast, so no
+	// new job was created; recover what that broadcast carried.
+	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated, collectionID)
+	if err != nil {
+		return 0, false, err
+	}
+	// Never log the raw key: it is client-controlled and may carry sensitive data.
+	log.Ctx(ctx).Info("import broadcast deduplicated by idempotency key",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("jobID", originalJobID),
+		zap.String("idempotencyKeyFingerprint", message.IdempotencyKeyFingerprint(idempotencyKey)))
+	return originalJobID, true, nil
 }

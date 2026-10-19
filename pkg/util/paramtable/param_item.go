@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -33,6 +34,86 @@ import (
 )
 
 type ParamChangeCallback func(ctx context.Context, key, oldValue, newValue string) error
+
+// VersionGateSwitcher describes the "version-gated auto-switch" semantics of a
+// configuration item:
+//   - when the user configures the item with EnableAutoSwitchValue (the
+//     sentinel), AutoSwitch is triggered;
+//   - once the cluster-wide confirmed version reaches GateVersion and the
+//     SwitchDelay stability window has elapsed since the confirmation, the
+//     one-shot confirmator flips the config-center value to TargetValue;
+//   - before that the item resolves to PreSwitchValue (the value used before
+//     the switch, i.e. the pre-change behavior) on every read path.
+//
+// DefaultValue is allowed to equal EnableAutoSwitchValue, which means the item
+// is in AutoSwitch mode by default (no explicit user configuration needed);
+// the "not yet switched" state is expressed by resolving reads to
+// PreSwitchValue instead of leaking the sentinel value to callers.
+//
+// The gate is applied at the value-resolution layer (getWithRaw), so GetValue
+// and all GetAs* accessors uniformly return the effective value. The raw
+// configured value is left untouched for callers that need to detect the
+// sentinel (e.g. the version gate confirmator).
+//
+// nil means no version gating (default, backward compatible).
+type VersionGateSwitcher struct {
+	EnableAutoSwitchValue string        // sentinel value: configuring this value triggers AutoSwitch
+	PreSwitchValue        string        // effective value while the gate is not yet activated (pre-change behavior)
+	GateVersion           string        // minimum cluster version (semver) required to switch
+	TargetValue           string        // effective value after AutoSwitch takes effect
+	SwitchDelay           time.Duration // stability window to wait after cluster-wide confirmation before switching
+
+	// localSatisfied is set by StartVersionGateSwitcher for embedded-etcd
+	// (single-process) deployments: the local process is the entire cluster, so
+	// when the local version is already >= GateVersion there is nothing to
+	// coordinate and the gate resolves directly to TargetValue. It is a pure
+	// paramtable-internal hint, never part of the configurable contract.
+	localSatisfied bool
+}
+
+// Validate checks the switcher's field contract, panicking on a missing or
+// malformed field. A version-gated item must declare its full semantics:
+//   - EnableAutoSwitchValue: the sentinel that triggers AutoSwitch;
+//   - PreSwitchValue:        the pre-change behavior — without it the sentinel
+//     would leak to callers, so an empty value is a coding error;
+//   - GateVersion:           a valid semver (the confirmator parses it);
+//   - TargetValue:           the post-switch value.
+//
+// Validate is called from ParamItem.Init, so a misconfigured gated item fails
+// fast at startup instead of silently degrading at runtime.
+func (sw *VersionGateSwitcher) Validate() {
+	if sw.EnableAutoSwitchValue == "" {
+		panic("version gate: EnableAutoSwitchValue must not be empty")
+	}
+	if sw.PreSwitchValue == "" {
+		panic("version gate: PreSwitchValue must not be empty (the pre-change behavior is required)")
+	}
+	if sw.GateVersion == "" {
+		panic("version gate: GateVersion must not be empty")
+	}
+	if _, err := semver.Parse(sw.GateVersion); err != nil {
+		panic(fmt.Sprintf("version gate: invalid GateVersion %q: %v", sw.GateVersion, err))
+	}
+	if sw.TargetValue == "" {
+		panic("version gate: TargetValue must not be empty")
+	}
+	if sw.SwitchDelay < 0 {
+		panic("version gate: SwitchDelay must not be negative")
+	}
+}
+
+// Sensitivity controls configuration presentation and log redaction only.
+// Mutation restrictions are independent of this policy.
+type Sensitivity int
+
+const (
+	// Auto inherits the manager's prefix and key-name inference rules.
+	Auto Sensitivity = iota
+	// Sensitive explicitly redacts the value regardless of its key name.
+	Sensitive
+	// NonSensitive explicitly exposes a reviewed value regardless of inference.
+	NonSensitive
+)
 
 type ParamItem struct {
 	Key          string // which should be named as "A.B.C"
@@ -46,6 +127,13 @@ type ParamItem struct {
 	Formatter func(originValue string) string
 	Forbidden bool
 	Immutable bool
+	// Sensitivity defaults to Auto. Scalar GetValue calls remain raw for
+	// internal consumers in every state.
+	Sensitivity Sensitivity
+
+	// VersionGateSwitcher attaches version-gated auto-switch semantics to this
+	// item; nil means no version gating (backward compatible).
+	VersionGateSwitcher *VersionGateSwitcher
 
 	manager *config.Manager
 
@@ -58,11 +146,35 @@ type ParamItem struct {
 
 func (pi *ParamItem) Init(manager *config.Manager) {
 	pi.manager = manager
+	if pi.VersionGateSwitcher != nil {
+		// A version-gated item must declare its full semantics; a
+		// misconfigured switcher is a coding error and must fail fast.
+		pi.VersionGateSwitcher.Validate()
+	}
 	if pi.Forbidden {
 		pi.manager.ForbidUpdate(pi.Key)
 	}
 	if pi.Immutable {
 		pi.manager.ImmutableUpdate(pi.Key)
+	}
+	switch pi.Sensitivity {
+	case Sensitive:
+		pi.manager.RegisterSensitiveKey(pi.Key)
+		for _, key := range pi.FallbackKeys {
+			pi.manager.RegisterSensitiveKey(key)
+		}
+	case NonSensitive:
+		pi.manager.RegisterNonSensitiveKey(pi.Key)
+		for _, key := range pi.FallbackKeys {
+			pi.manager.RegisterNonSensitiveKey(key)
+		}
+	}
+	// Sources already refresh while ParamItems initialize. Publish policy for
+	// every spelling before declaring any key visible to logs or projections.
+	// Until declaration, those boundaries omit or redact the value.
+	pi.manager.RegisterConfigKey(pi.Key)
+	for _, key := range pi.FallbackKeys {
+		pi.manager.RegisterConfigKey(key)
 	}
 
 	currentValue := pi.GetValue()
@@ -102,20 +214,40 @@ func (pi *ParamItem) handleConfigChange(event *config.Event) {
 		return
 	}
 
+	// Etcd updates may contain management-request payload even for a public
+	// scalar. Callback errors may embed the same payload in their message or
+	// verbose chain, so protect them along with the old and new values.
+	redactPayload := event.EventSource == "EtcdSource" || pi.manager == nil || pi.manager.IsSensitive(pi.Key)
+	logOldValue, logNewValue := config.RedactedValue, config.RedactedValue
+	if !redactPayload {
+		logOldValue = pi.configValueForLog(oldValue)
+		logNewValue = pi.configValueForLog(newValue)
+	}
+
 	if err := pi.callback(context.Background(), pi.Key, oldValue, newValue); err != nil {
-		log.Error("param change callback failed",
+		// A callback may read other sensitive settings, even when this key is
+		// public (for example, cipher rotation reloads all KMS credentials).
+		log.Ctx(context.TODO()).Error("param change callback failed",
 			zap.String("key", pi.Key),
-			zap.String("oldValue", oldValue),
-			zap.String("newValue", newValue),
-			zap.Error(err))
+			zap.String("oldValue", logOldValue),
+			zap.String("newValue", logNewValue),
+			zap.String("error", config.RedactedValue))
 	} else {
-		log.Info("param value changed",
+		log.Ctx(context.TODO()).Info("param value changed",
 			zap.String("key", pi.Key),
-			zap.String("oldValue", oldValue),
-			zap.String("newValue", newValue))
+			zap.String("oldValue", logOldValue),
+			zap.String("newValue", logNewValue))
 	}
 
 	pi.lastValue.Store(&newValue)
+}
+
+func (pi *ParamItem) configValueForLog(value string) string {
+	if pi.manager == nil {
+		// Only reachable before Init; assume the worst.
+		return config.RedactedValue
+	}
+	return pi.manager.RedactValue(pi.Key, value)
 }
 
 // Get original value with error
@@ -127,7 +259,7 @@ func (pi *ParamItem) get() (string, error) {
 func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 	// For unittest.
 	if s := pi.tempValue.Load(); s != nil {
-		return *s, *s, nil
+		return pi.gateValue(*s), *s, nil
 	}
 
 	if pi.manager == nil {
@@ -155,7 +287,7 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 		effectiveRaw = pi.DefaultValue
 		raw = pi.DefaultValue
 	}
-	result = effectiveRaw
+	result = pi.gateValue(effectiveRaw)
 	if pi.Formatter != nil {
 		result = pi.Formatter(result)
 	}
@@ -165,17 +297,37 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 	return result, raw, err
 }
 
+// gateValue applies the version-gated auto-switch semantics to a configured
+// value: when the item carries a VersionGateSwitcher and the value is the
+// sentinel (EnableAutoSwitchValue), the effective value is TargetValue when
+// the gate is locally satisfied (embedded-etcd single-process deployments
+// where the local version is already >= GateVersion, see localSatisfied), and
+// PreSwitchValue otherwise, until the one-shot confirmator flips the config
+// center value to TargetValue. Every read path (GetValue and all GetAs*)
+// resolves through this, so the gate is uniformly visible regardless of the
+// caller's accessor type. The raw value is unaffected: callers that need to
+// detect the sentinel (e.g. the version gate confirmator) still see it.
+func (pi *ParamItem) gateValue(v string) string {
+	if pi.VersionGateSwitcher == nil || v != pi.VersionGateSwitcher.EnableAutoSwitchValue {
+		return v
+	}
+	if pi.VersionGateSwitcher.localSatisfied {
+		return pi.VersionGateSwitcher.TargetValue
+	}
+	return pi.VersionGateSwitcher.PreSwitchValue
+}
+
 // SetTempValue set the value for this ParamItem,
 // Once value set, ParamItem will use the value instead of underlying config manager.
 func (pi *ParamItem) SwapTempValue(s string) string {
+	var old *string
 	if s == "" {
-		if old := pi.tempValue.Swap(nil); old != nil {
-			return *old
-		}
-		return ""
+		old = pi.tempValue.Swap(nil)
+	} else {
+		old = pi.tempValue.Swap(&s)
 	}
 	pi.manager.EvictCachedValue(pi.Key)
-	if old := pi.tempValue.Swap(&s); old != nil {
+	if old != nil {
 		return *old
 	}
 	return ""
@@ -390,6 +542,15 @@ type ParamGroup struct {
 	Version   string
 	Doc       string
 	Export    bool
+	// Sensitive marks every value below KeyPrefix as sensitive. Use it when the
+	// members are provider- or plugin-defined, so the core cannot enumerate
+	// which of them carry credentials or protected topology.
+	Sensitive bool
+	// NonSensitiveSuffixes lists leaf names below KeyPrefix that the group itself
+	// defines and that are known to carry neither credentials nor infrastructure
+	// topology, for example a pure enable flag. Only meaningful together with
+	// Sensitive; every other leaf below the prefix still fails closed.
+	NonSensitiveSuffixes []string
 
 	GetFunc func() map[string]string
 	DocFunc func(string) string
@@ -398,14 +559,26 @@ type ParamGroup struct {
 }
 
 func (pg *ParamGroup) Init(manager *config.Manager) {
+	if !pg.Sensitive && len(pg.NonSensitiveSuffixes) > 0 {
+		panic(fmt.Sprintf("%s declares NonSensitiveSuffixes without Sensitive", pg.KeyPrefix))
+	}
 	pg.manager = manager
+	if pg.Sensitive {
+		pg.manager.RegisterSensitivePrefix(pg.KeyPrefix)
+		for _, suffix := range pg.NonSensitiveSuffixes {
+			pg.manager.RegisterNonSensitiveSuffix(pg.KeyPrefix, suffix)
+		}
+	}
+	// Keep the namespace hidden until its default and reviewed exemptions are
+	// installed, including the empty-prefix hook configuration namespace.
+	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)
 }
 
 func (pg *ParamGroup) GetValue() map[string]string {
 	if pg.GetFunc != nil {
 		return pg.GetFunc()
 	}
-	values := pg.manager.GetBy(config.WithPrefix(pg.KeyPrefix), config.RemovePrefix(pg.KeyPrefix))
+	values := pg.manager.GetEffectiveBy(config.WithPrefix(pg.KeyPrefix), config.RemovePrefix(pg.KeyPrefix))
 	return values
 }
 

@@ -47,6 +47,17 @@ func (s *SearchIteratorSuite) SetupSuite() {
 		WithField(entity.NewField().WithName("Vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128))
 }
 
+func (s *SearchIteratorSuite) TestSearchIteratorOptionWithRLSContext() {
+	opt := NewSearchIteratorOption("coll", entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+		return rand.Float32()
+	}))).WithRLSPrincipal("alice").WithSkipRLS(true).WithBatchSize(10)
+	req, err := opt.SearchOption().Request()
+
+	s.Require().NoError(err)
+	s.Equal("alice", req.GetRlsPrincipal())
+	s.True(req.GetSkipRls())
+}
+
 func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 	ctx := context.Background()
 	s.Run("success", func() {
@@ -429,6 +440,18 @@ func (s *QueryIteratorSuite) SetupSuite() {
 		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("Vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128)).
 		WithField(entity.NewField().WithName("Name").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256))
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorOptionWithRLSContext() {
+	req, err := NewQueryIteratorOption("coll").
+		WithRLSPrincipal("alice").
+		WithSkipRLS(true).
+		WithBatchSize(10).
+		Request()
+
+	s.Require().NoError(err)
+	s.Equal("alice", req.GetRlsPrincipal())
+	s.True(req.GetSkipRls())
 }
 
 func (s *QueryIteratorSuite) TestQueryIteratorInit() {

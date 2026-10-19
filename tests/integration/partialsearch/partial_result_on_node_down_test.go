@@ -74,8 +74,11 @@ func (s *PartialSearchTestSuit) initCollection(collectionName string, replica in
 }
 
 func (s *PartialSearchTestSuit) executeQuery(collection string) (int, error) {
+	return s.executeQueryWithContext(context.Background(), collection)
+}
+
+func (s *PartialSearchTestSuit) executeQueryWithContext(ctx context.Context, collection string) (int, error) {
 	time.Sleep(100 * time.Millisecond)
-	ctx := context.Background()
 	queryResult, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         "",
 		CollectionName: collection,
@@ -175,60 +178,41 @@ func (s *PartialSearchTestSuit) TestAllNodeDownOnSingleReplica() {
 	s.initCollection(name, 1, channelNum, segmentNumInChannel, segmentRowNum)
 	totalEntities := segmentNumInChannel * segmentRowNum
 
-	stopSearchCh := make(chan struct{})
-	failCounter := atomic.NewInt64(0)
-	partialResultCounter := atomic.NewInt64(0)
+	queryCtx, cancel := context.WithTimeout(s.Cluster.GetContext(), timeout)
+	numEntities, err := s.executeQueryWithContext(queryCtx, name)
+	cancel()
+	s.Require().NoError(err)
+	s.Require().Equal(totalEntities, numEntities)
 
-	partialResultRecoverTs := atomic.NewInt64(0)
-	fullResultRecoverTs := atomic.NewInt64(0)
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-stopSearchCh:
-				log.Info("stop search")
-				return
-			default:
-				numEntities, err := s.executeQuery(name)
-				if err != nil {
-					log.Info("query failed", zap.Error(err))
-					failCounter.Inc()
-				} else if failCounter.Load() > 0 {
-					if numEntities < totalEntities {
-						log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
-						partialResultCounter.Inc()
-						partialResultRecoverTs.Store(time.Now().UnixNano())
-						s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
-					} else {
-						log.Info("query return full result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
-						fullResultRecoverTs.Store(time.Now().UnixNano())
-					}
-				}
-			}
-		}
-	}()
-
-	time.Sleep(10 * time.Second)
-	s.Equal(failCounter.Load(), int64(0))
-	s.Equal(partialResultCounter.Load(), int64(0))
-
-	// stop all qn in single replica expected got search failures
+	// Keep all query nodes down until a bounded query actually observes the
+	// outage. A background query can otherwise retry across the entire outage.
 	for _, qn := range s.Cluster.GetAllQueryNodes() {
 		qn.Stop()
 	}
-	time.Sleep(2 * time.Second)
+	queryCtx, cancel = context.WithTimeout(s.Cluster.GetContext(), timeout)
+	_, err = s.executeQueryWithContext(queryCtx, name)
+	cancel()
+	s.Require().Error(err)
 	s.Cluster.AddQueryNode()
 
-	time.Sleep(20 * time.Second)
-	s.True(failCounter.Load() >= 0)
-	s.True(partialResultCounter.Load() >= 0)
-	log.Info("partialResultRecoverTs", zap.Int64("partialResultRecoverTs", partialResultRecoverTs.Load()), zap.Int64("fullResultRecoverTs", fullResultRecoverTs.Load()))
-	s.True(partialResultRecoverTs.Load() < fullResultRecoverTs.Load())
-	close(stopSearchCh)
-	wg.Wait()
+	// Recovery may go directly to full results. Check any observed partial
+	// result against the required ratio and wait for exact full recovery.
+	recoveryCtx, cancelRecovery := context.WithTimeout(s.Cluster.GetContext(), 2*time.Minute)
+	defer cancelRecovery()
+	for recoveryCtx.Err() == nil {
+		queryCtx, cancel = context.WithTimeout(recoveryCtx, timeout)
+		numEntities, err = s.executeQueryWithContext(queryCtx, name)
+		cancel()
+		if err != nil {
+			continue
+		}
+		s.GreaterOrEqual(numEntities, int(float64(totalEntities)*partialResultRequiredDataRatio))
+		s.LessOrEqual(numEntities, totalEntities)
+		if numEntities == totalEntities {
+			return
+		}
+	}
+	s.Fail("query did not recover full results", "last row count: %d, last error: %v", numEntities, err)
 }
 
 // expected return full result
