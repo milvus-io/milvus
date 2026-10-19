@@ -80,7 +80,10 @@ external-path entry still fails. Target paths are validated before any file copy
 
 The segment-directory listing excludes `_index`: only the pinned snapshot's
 explicit index list selects builds to copy. Otherwise obsolete builds and old
-BuildIDs would be inherited. Cleanup prefixes and result admission use the same
+BuildIDs would be inherited. Snapshot export also excludes `_index` from its
+segment-directory listing and collects indexes from that explicit list, so
+GC of unreferenced builds does not change the export file set.
+Cleanup prefixes and result admission use the same
 persisted destination version. A result claiming a different layout is rejected
 before making the target segment visible.
 
