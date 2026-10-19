@@ -87,6 +87,11 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 		return
 	}
 	switch msgType {
+	case message.MessageTypeCreateSegment, message.MessageTypeFlush:
+		// These storage operations do not change query-visible data and are not
+		// delivered to the delegator. Tracking them would require another tick
+		// to advance tSafe. The query-plan frontier is handled independently above.
+		return
 	case message.MessageTypeCreateCollection:
 		cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], tt)
 	case message.MessageTypeDropCollection:

@@ -75,6 +75,34 @@ func TestRetainedMVCCVisibilityBarriers(t *testing.T) {
 	}
 }
 
+func TestRetainedMVCCIgnoresSegmentStorageMessages(t *testing.T) {
+	for _, kind := range []message.MessageType{message.MessageTypeCreateSegment, message.MessageTypeFlush} {
+		t.Run(kind.String(), func(t *testing.T) {
+			cm := NewMVCCManager(100)
+			cm.ApplyRecoveryBarrier("a", 100)
+			cm.UpdateMVCC(createQueryTestMessage(t, 120, "a", message.MessageTypeInsert, false, true))
+			cm.UpdateMVCC(createQueryTestMessage(t, 140, "a", kind, false, true))
+			require.Equal(t, VChannelMVCC{Timetick: 120}, cm.GetMVCCOfVChannel("a"))
+			require.Equal(t, uint64(100), cm.GetConfirmedTimeTick())
+			// The independent query-plan protocol must still observe Flush.
+			transformTarget := uint64(100)
+			if kind == message.MessageTypeFlush {
+				transformTarget = 140
+			}
+			require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 120, TransformingTimetick: transformTarget}, cm.GetQueryMVCCOfVChannel("a"))
+			cm.UpdateMVCC(createQueryTestMessage(t, 300, "", message.MessageTypeTimeTick, false, true))
+			cm.UpdateMVCC(createQueryTestMessage(t, 400, "a", kind, false, true))
+			require.Equal(t, VChannelMVCC{Timetick: 120, Confirmed: true}, cm.GetMVCCOfVChannel("a"))
+			require.Equal(t, uint64(300), cm.GetConfirmedTimeTick())
+			// Excluding storage operations must not suppress the next visible write.
+			cm.UpdateMVCC(createQueryTestMessage(t, 500, "a", message.MessageTypeDelete, false, true))
+			require.Equal(t, VChannelMVCC{Timetick: 500}, cm.GetMVCCOfVChannel("a"))
+			cm.UpdateMVCC(createQueryTestMessage(t, 600, "", message.MessageTypeTimeTick, false, true))
+			require.Equal(t, VChannelMVCC{Timetick: 500, Confirmed: true}, cm.GetMVCCOfVChannel("a"))
+		})
+	}
+}
+
 func TestRetainedMVCCLifecycle(t *testing.T) {
 	cm := NewMVCCManager(100)
 	for i := 0; i < 1000; i++ {

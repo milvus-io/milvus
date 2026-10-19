@@ -205,6 +205,25 @@ func TestRetainedMVCCPipelineWait(t *testing.T) {
 				require.Equal(t, target, req.Req.GuaranteeTimestamp)
 				require.Equal(t, target, req.Req.MvccTimestamp)
 				require.Equal(t, target, sd.GetTSafe())
+				// The delegator subscription excludes these storage-only messages.
+				// Feed them to the real write-side manager, but not the consumer.
+				// Neither may introduce another tSafe wait after data application.
+				for _, storage := range []message.MutableMessage{
+					message.NewCreateSegmentMessageBuilderV2().WithVChannel(channel).
+						WithHeader(&message.CreateSegmentMessageHeader{CollectionId: collectionID, PartitionId: 1, SegmentId: 2}).
+						WithBody(&message.CreateSegmentMessageBody{}).MustBuildMutable().WithTimeTick(ts(210)),
+					message.NewFlushMessageBuilderV2().WithVChannel(channel).
+						WithHeader(&message.FlushMessageHeader{CollectionId: collectionID, PartitionId: 1, SegmentId: 1}).
+						WithBody(&message.FlushMessageBody{}).MustBuildMutable().WithTimeTick(ts(220)),
+				} {
+					cm.UpdateMVCC(storage)
+					req, err = query(ts(1000), time.Second)
+					require.Error(t, err) // no query distribution, after the real wait
+					require.NotErrorIs(t, err, context.DeadlineExceeded, storage.MessageType().String())
+					require.Equal(t, target, req.Req.GuaranteeTimestamp)
+					require.Equal(t, target, req.Req.MvccTimestamp)
+					require.Equal(t, target, sd.GetTSafe())
+				}
 			})
 		})
 	}
