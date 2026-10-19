@@ -1823,7 +1823,9 @@ TEST(SearchOnSealedColumnBitsetLifetime,
         [&](int64_t offset) { return valid_data[offset]; });
 }
 
-TEST(ElementNullableVectorArraySearch, RejectsUnsupportedRepresentation) {
+// Element-nullable VECTOR_ARRAY supports element-level search only; a search
+// without struct element offsets is an embedding-list search and is rejected.
+TEST(ElementNullableVectorArraySearch, RejectsEmbeddingListSearch) {
     auto schema = std::make_shared<Schema>();
     auto primary_key = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(primary_key);

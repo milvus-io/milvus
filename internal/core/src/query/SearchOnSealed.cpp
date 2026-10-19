@@ -92,11 +92,15 @@ SearchOnSealedIndex(const Schema& schema,
 
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
+    // Element-nullable VECTOR_ARRAY supports element-level search only; the
+    // reader's IdMap returns logical element ids. Embedding-list search is
+    // rejected.
     if (field.get_data_type() == DataType::VECTOR_ARRAY &&
-        field.is_element_nullable()) {
+        field.is_element_nullable() &&
+        search_info.struct_element_offsets_ == nullptr) {
         ThrowInfo(NotImplemented,
-                  "search on element-nullable VECTOR_ARRAY fields is not "
-                  "supported");
+                  "embedding list search on element-nullable VECTOR_ARRAY "
+                  "fields is not supported");
     }
     auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32;
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
@@ -214,10 +218,11 @@ SearchOnSealedColumn(const Schema& schema,
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
     if (field.get_data_type() == DataType::VECTOR_ARRAY &&
-        field.is_element_nullable()) {
+        field.is_element_nullable() &&
+        search_info.struct_element_offsets_ == nullptr) {
         ThrowInfo(NotImplemented,
-                  "search on element-nullable VECTOR_ARRAY fields is not "
-                  "supported");
+                  "embedding list search on element-nullable VECTOR_ARRAY "
+                  "fields is not supported");
     }
 
     auto data_type = field.get_data_type();
@@ -245,6 +250,13 @@ SearchOnSealedColumn(const Schema& schema,
         column->IsNullable() && !is_element_level_search;
     if (needs_offset_mapping) {
         column->BuildValidRowIds(op_context);
+    }
+    // Element-nullable chunks store only valid vectors: scan physical
+    // elements and map them to logical element ids through the bitset.
+    const bool has_element_id_mapping =
+        is_element_level_search && field.is_element_nullable();
+    if (has_element_id_mapping) {
+        column->BuildElementPhysicalToLogicalIds(op_context);
     }
 
     // Check for nullable vector field with all null values - must be done before creating iterators
@@ -322,6 +334,14 @@ SearchOnSealedColumn(const Schema& schema,
         if (has_offset_mapping) {
             id_view =
                 offset_mapping.GetPhysicalToLogicalIds(offset, chunk_size);
+            chunk_bitview = AttachOffsetMappingIds(search_bitview, id_view);
+        } else if (has_element_id_mapping) {
+            id_view = column->GetElementPhysicalToLogicalIds(i);
+            AssertInfo(id_view.count == chunk_size,
+                       "element id map of chunk {} has {} ids, expected {}",
+                       i,
+                       id_view.count,
+                       chunk_size);
             chunk_bitview = AttachOffsetMappingIds(search_bitview, id_view);
         }
 

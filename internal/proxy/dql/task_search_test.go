@@ -6894,7 +6894,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	const rangeParams = `{"nprobe": 10, "radius": 0.2}`
 	const plainParams = `{"nprobe": 10}`
 
-	t.Run("element-nullable vector array rejects both placeholder kinds", func(t *testing.T) {
+	t.Run("element-nullable vector array rejects only embedding-list search", func(t *testing.T) {
 		schema.StructArrayFields[0].Fields[0].ElementNullable = true
 		defer func() { schema.StructArrayFields[0].Fields[0].ElementNullable = false }()
 		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, plainParams, false, false)
@@ -6902,7 +6902,7 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 		require.ErrorContains(t, task.initSearchRequest(ctx), "embedding-list search is not supported for element-nullable vector array")
 		task = makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, false, false)
 		task.schema = mustNewSchemaInfo(schema)
-		require.ErrorContains(t, task.initSearchRequest(ctx), "search on element-nullable vector array field emb_vec is not supported yet")
+		require.NoError(t, task.initSearchRequest(ctx))
 	})
 
 	t.Run("element-level range search should succeed", func(t *testing.T) {
@@ -7101,7 +7101,7 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		)
 	}
 
-	t.Run("hybrid element-nullable vector array rejects both placeholder kinds", func(t *testing.T) {
+	t.Run("hybrid element-nullable vector array rejects only embedding-list search", func(t *testing.T) {
 		schema.StructArrayFields[0].Fields[0].ElementNullable = true
 		defer func() { schema.StructArrayFields[0].Fields[0].ElementNullable = false }()
 		qt := buildHybridTask("emb_vec", "", false, "")
@@ -7109,7 +7109,7 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 		require.ErrorContains(t, qt.initAdvancedSearchRequest(ctx), "embedding-list search is not supported for element-nullable vector array")
 		qt = buildElementHybridTask("emb_vec", "", false, "")
 		qt.schema = mustNewSchemaInfo(schema)
-		require.ErrorContains(t, qt.initAdvancedSearchRequest(ctx), "search on element-nullable vector array field emb_vec is not supported yet")
+		require.NoError(t, qt.initAdvancedSearchRequest(ctx))
 	})
 
 	t.Run("hybrid with ArrayOfVector EmbList metric plain topK should succeed", func(t *testing.T) {

@@ -39,6 +39,7 @@
 #include "segcore/Types.h"
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "index/vector/KnowhereEngine.h"
+#include "index/vector/VectorMemBuilder.h"
 #include "index/vector/VectorDiskLoader.h"
 #include "storage/artifact/DiskEngineFileHandle.h"
 #include "index/Meta.h"
@@ -1642,7 +1643,7 @@ TEST_F(LegacyIndexLoadTest, EmptyEmbeddingListsKeepValidParentRows) {
         .element_type = DataType::VECTOR_FLOAT,
         .index_engine_version =
             knowhere::Version::GetCurrentVersion().VersionNumber(),
-        .params = {{METRIC_TYPE, "L2"}, {DIM_KEY, 4}},
+        .params = {{METRIC_TYPE, "MAX_SIM_L2"}, {DIM_KEY, 4}},
     });
     adapted.params["nullable"] = true;
     adapted.params[INDEX_NUM_ROWS_KEY] = 3;
@@ -1690,6 +1691,138 @@ TEST_F(LegacyIndexLoadTest, EmptyEmbeddingListsKeepValidParentRows) {
     }
     ExpectNativeReads();
     EXPECT_TRUE(std::filesystem::is_empty(staging_));
+}
+
+// Before element-level metrics became ordinary vector input, a VECTOR_ARRAY
+// field indexed under an element-level metric (L2, IP, COSINE) was built in
+// embedding-list mode: the engine received the list offsets and the
+// row-domain validity of a nullable field, knowhere indexed every element and
+// kept an element-domain identity map, and a segment whose lists were all
+// empty persisted only the empty-list offsets. Such indexes must still load
+// through the production loader and answer element-level searches.
+TEST_F(LegacyIndexLoadTest,
+       LegacyElementLevelEmbeddingListIndexLoadsAndSearches) {
+    constexpr int64_t dim = 4;
+    // An embedding-list engine metric reproduces the old build mode; the
+    // knowhere build itself still runs under the element-level metric from
+    // the build params, as it did then.
+    auto build_legacy = [&](const Config& params,
+                            const VectorBuildInput<float>& input) {
+        VectorMemBuilder<float> builder(
+            DataType::VECTOR_FLOAT,
+            params.at(INDEX_TYPE).get<std::string>(),
+            knowhere::metric::MAX_SIM_L2,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            dim,
+            params);
+        Persist(*std::move(builder).Build(input));
+    };
+    auto load =
+        [&](const Config& params, bool mmap, const std::string& family) {
+            return LoaderRegistry::Instance().Lookup(family).Load(
+                {IndexFiles{context_,
+                            paths_,
+                            LegacyIndexStorageConfig{
+                                storage::V1SourceLayout::MemoryEntries}},
+                 Options(params, mmap)});
+        };
+    const std::vector<float> query{0, 1, 0, 0};
+    auto search = [&](const IVectorReader& vectors, const std::string& metric) {
+        VectorSearchParams params{
+            .search_params_ = {{knowhere::indexparam::EF, 16}},
+            .metric_type_ = metric,
+            .topk_ = 3,
+        };
+        SearchResult result;
+        vectors.Search(knowhere::GenDataSet(1, dim, query.data()),
+                       params,
+                       BitsetView{},
+                       nullptr,
+                       result);
+        return result;
+    };
+
+    for (const std::string metric : {"L2", "IP", "COSINE"}) {
+        for (bool nullable : {false, true}) {
+            for (bool empty : {false, true}) {
+                for (bool mmap : {false, true}) {
+                    SCOPED_TRACE(metric);
+                    SCOPED_TRACE(nullable);
+                    SCOPED_TRACE(empty);
+                    SCOPED_TRACE(mmap);
+                    auto adapted = AdaptIndexType({
+                        .index_type = "HNSW",
+                        .field_type = DataType::VECTOR_ARRAY,
+                        .element_type = DataType::VECTOR_FLOAT,
+                        .index_engine_version =
+                            knowhere::Version::GetCurrentVersion()
+                                .VersionNumber(),
+                        .params = {{METRIC_TYPE, metric},
+                                   {DIM_KEY, dim},
+                                   {knowhere::indexparam::HNSW_M, 8},
+                                   {knowhere::indexparam::EFCONSTRUCTION, 16}},
+                    });
+                    adapted.params["nullable"] = nullable;
+                    adapted.params[INDEX_NUM_ROWS_KEY] = 4;
+
+                    // Rows: [e0, e1], [], null (or [] when not nullable),
+                    // [e2]. The empty variant keeps every list empty.
+                    const std::array<bool, 4> validity{
+                        true, true, !nullable, true};
+                    const std::vector<float> values =
+                        empty ? std::vector<float>{}
+                              : std::vector<float>{
+                                    1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+                    std::vector<size_t> offsets;
+                    if (empty) {
+                        offsets.assign(nullable ? 4 : 5, 0);
+                    } else if (nullable) {
+                        offsets = {0, 2, 2, 3};
+                    } else {
+                        offsets = {0, 2, 2, 2, 3};
+                    }
+                    const VectorBuildInput<float> input{
+                        .physical_values = values,
+                        .logical_rows = 4,
+                        .physical_rows = empty ? 0 : 3,
+                        .dim = dim,
+                        .parent_validity =
+                            nullable
+                                ? ValidityView::FromExpanded(validity.data())
+                                : ValidityView{},
+                        .embedding_offsets = std::span<const size_t>(offsets),
+                    };
+                    build_legacy(adapted.params, input);
+
+                    auto reader = load(adapted.params, mmap, adapted.family);
+                    const auto* vectors =
+                        dynamic_cast<const IVectorReader*>(reader.get());
+                    ASSERT_NE(vectors, nullptr);
+                    EXPECT_EQ(vectors->Dim(), dim);
+                    EXPECT_EQ(reader->Count(), empty ? 0 : 3);
+
+                    const auto result = search(*vectors, metric);
+                    EXPECT_EQ(result.total_nq_, 1);
+                    ASSERT_EQ(result.seg_offsets_.size(), 3);
+                    if (empty) {
+                        for (const auto offset : result.seg_offsets_) {
+                            EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+                        }
+                    } else {
+                        // Element ids index the stored vectors in order.
+                        EXPECT_EQ(result.seg_offsets_[0], 1);
+                        EXPECT_NEAR(
+                            result.distances_[0], metric == "L2" ? 0 : 1, 1e-5);
+                        std::set<int64_t> ids(result.seg_offsets_.begin(),
+                                              result.seg_offsets_.end());
+                        EXPECT_EQ(ids, (std::set<int64_t>{0, 1, 2}));
+                    }
+                    reader.reset();
+                    EXPECT_TRUE(std::filesystem::is_empty(staging_));
+                }
+            }
+        }
+    }
 }
 
 TEST_F(LegacyIndexLoadTest,
