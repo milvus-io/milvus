@@ -9094,6 +9094,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         LoadFieldDataInfo load_field_data_info;
         load_field_data_info.storage_version =
             segment_load_info.GetStorageVersion();
+        load_field_data_info.load_priority = segment_load_info.GetPriority();
         load_field_data_info.shard = segment_load_info.GetInsertChannel();
         auto fields_to_load = field_ids;
         AssertInfo(!fields_to_load.empty(),
