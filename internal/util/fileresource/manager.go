@@ -251,6 +251,10 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 	m.Lock()
 	defer m.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	if version <= m.version.Load() {
 		return nil
 	}
@@ -291,6 +295,10 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 			Path:      resource.GetPath(),
 			LocalPath: localFilePath,
 		})
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	if err := analyzer.UpdateGlobalResourceInfo(newResourceMap); err != nil {

@@ -24,9 +24,10 @@ Segments. Query resource-group scope does not restrict this WAL/schema operation
 CreateCollection registers a WAL function-runner key, WAL recovery rebuilds it,
 AlterCollection updates it, and DropCollection/WAL teardown releases it.
 ReleaseCollection releases query resources, not this WAL key.
-Shared runner initialization preserves tracing values but does not inherit the
-request that first triggered it: cancelling one wait does not fail other waiters.
-Resource preparation retains its own snapshot-fetch and per-file download limits.
+Resource preparation preserves tracing values without inheriting one RPC's
+cancellation or deadline: cancelling one wait does not fail other waiters.
+The last departing waiter cancels the shared task and its local retries. The
+existing per-file download limit remains; snapshot fetch adds no separate timeout.
 Default analyzers on schemas with no file-resource IDs bypass preparation, so an
 unrelated broken resource does not prevent their runner initialization. Explicit
 analyzer or multi-analyzer configuration still prepares conservatively: older
@@ -102,8 +103,36 @@ RPC remains as a forwarding entry for existing callers. There is no
 
 Before native validation, the selected StreamingNode calls `fileresource.Prepare`
 to pull Coordinator's current resource snapshot and synchronize its local files
-and native resource table. In sync mode, validation copies the applied name-to-ID map under the manager
-lock, together with the filenames derived from the registered object paths,
+and native resource table. Legacy file-resource mode selection is unchanged;
+this PR does not adapt the old CloseMode/RefMode behavior to the new pull path.
+Preparation uses two stages backed by the same `syncutil.FlightGroup` utility.
+Overlapping snapshot fetches share one request. Snapshot applications share a
+worker for the manager, so a newer snapshot keeps an existing download alive
+when an older snapshot's caller cancels. Each caller checks its required version
+after the shared application finishes; callers that joined an older application
+enter another application round if needed. An older round's failure does not
+fail a newer target, and an already applied version satisfies its caller even
+when a newer application fails.
+Each RPC waits with its own context. Canceling
+one RPC releases only its wait, while the final departing waiter cancels the
+shared task. Completed fetches are not cached: a request arriving during a
+download can discover a newer snapshot instead of joining stale preparation.
+Legacy runner prewarming remains. Only runners requiring file resources with
+the new pull path enabled defer preparation until first use, so background
+prewarming cannot keep that shared I/O alive after every requesting RPC cancels.
+Each RPC owns a wait on a per-runner initialization flight covering both
+resource preparation and native construction. Callers arriving during native
+construction join that initialization without starting another snapshot fetch.
+The last departing caller cancels the initialization flight's preparation wait,
+which releases its ownership of the shared resource flights. Native construction
+itself has no context cancellation API: an admitted build survives cancellation,
+and subsequent callers rejoin it without preparing again. Canceled preparation
+workers check their context under the native-init publication lock before they
+can admit a build. Default inline analyzers with empty parameters or `{}` bypass
+resource preparation.
+
+Validation copies the applied name-to-ID map under the manager lock, together
+with the filenames derived from the registered object paths,
 and passes them as explicit native extra info. Only this validation snapshot
 classifies an unknown resource name or a mismatched remote `file_name` as bad
 input. The filename must equal the basename of the registered path; validation
@@ -137,14 +166,23 @@ creation and index operations keep mapping both `Io` and `IoNotFound` to
 the terminal missing-path policy.
 Deterministically invalid analyzer options remain input errors at their Rust
 origin; HandlerClient maps these to the public DDL parameter-error contract.
-Discovery and resource preparation still use the existing streaming readiness
-retry loop, and Unimplemented returns immediately. The caller context controls
-these retries, including cancellation of DDL validation. Known permanent storage
-failures during preparation (such as a missing object or denied access) terminate the streaming retry loop as
-system errors; unclassified network/gRPC errors and fetch timeouts remain eligible
-for retry. With no available StreamingNode, discovery waits until a node becomes
-available or the caller context ends. No independent retry loop or shutdown
-lifecycle is introduced.
+Discovery and transport recovery retain the existing streaming readiness loop.
+Transient snapshot-fetch and resource-download failures instead retry inside the
+StreamingNode's shared preparation task, using the existing retry utility's
+backoff. Inner RPC or per-file timeouts can retry while another caller still
+waits; the final departing caller cancels the shared task and its retries. Retry
+attempts consider the latest known inventory, so an old snapshot cannot
+indefinitely pin a resource removed in a newer snapshot. The latest target is
+metadata owned by the preparer, not a completed fetch cache; retaining it does
+not keep a worker alive after all its callers cancel.
+Known permanent preparation failures return immediately in the response Status
+with their original system error code. An unsupported snapshot RPC also stops
+local retries. Native analyzer validation and execution are not retried by this
+preparation loop. WAL materialization no longer needs to surface transient
+preparation failures to the producer for another append attempt; cancellation is
+preserved, while permanent preparation and native construction failures retain
+the existing terminal policy. With no available StreamingNode, discovery still
+waits until a node becomes available or the caller context ends.
 
 The internal Coordinator `GetFileResourceSnapshot` RPC uses a dedicated
 `GetFileResourceSnapshotRequest`. Its `known_version` is the last snapshot

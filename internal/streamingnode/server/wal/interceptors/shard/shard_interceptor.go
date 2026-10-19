@@ -200,6 +200,9 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 				mlog.Int64("collectionID", header.GetCollectionId()),
 				mlog.Int32("schemaVersion", schemaVersion),
 				mlog.Err(err))
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
 		}
 	}

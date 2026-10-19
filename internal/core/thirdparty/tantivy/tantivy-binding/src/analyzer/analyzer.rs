@@ -232,8 +232,9 @@ pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
         return Ok(vec![]);
     }
 
-    let json_params = &json::from_str::<json::Map<String, json::Value>>(&params)
-        .map_err(|e| TantivyBindingError::JsonError(e))?;
+    let json_params = &json::from_str::<json::Map<String, json::Value>>(&params).map_err(|e| {
+        TantivyBindingError::InvalidArgument(format!("invalid analyzer parameters: {}", e))
+    })?;
 
     let mut helper = create_helper(extra_info)?;
     create_analyzer_by_json(json_params, &mut helper)?;
@@ -244,6 +245,32 @@ pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
 mod tests {
     use crate::analyzer::analyzer::create_analyzer;
     use tantivy::tokenizer::TokenStream;
+
+    #[test]
+    fn test_analyzer_json_error_origin() {
+        use crate::error::TantivyBindingError;
+
+        for params in [r#"{"tokenizer":"#, "[]", "null", r#"{"limit":1e999}"#] {
+            assert!(matches!(
+                create_analyzer(params, ""),
+                Err(TantivyBindingError::JsonError(_))
+            ));
+            assert!(matches!(
+                super::validate_analyzer(params, ""),
+                Err(TantivyBindingError::InvalidArgument(_))
+            ));
+        }
+        for params in ["{}", r#"{"tokenizer":"standard"}"#] {
+            assert!(matches!(
+                create_analyzer(params, "invalid internal snapshot"),
+                Err(TantivyBindingError::JsonError(_))
+            ));
+            assert!(matches!(
+                super::validate_analyzer(params, "invalid internal snapshot"),
+                Err(TantivyBindingError::JsonError(_))
+            ));
+        }
+    }
 
     #[test]
     fn test_missing_resource_name_classification_uses_validation_snapshot() {

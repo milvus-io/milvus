@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/bm25"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -41,7 +42,8 @@ type FunctionRunnerManager interface {
 	// "WAL-"+vchannel while delegator uses "DELEGATOR-"+vchannel.
 	// Invalid function metadata is returned synchronously. Runner initialization
 	// failures are logged and retried by later requests instead of failing
-	// collection recovery.
+	// collection recovery. Runners requiring pull preparation initialize on
+	// first use so a background prewarm cannot keep shared resource I/O alive.
 	Alloc(collectionID int64, key string, schema *schemapb.CollectionSchema) error
 
 	// Update moves an allocated lifecycle key to a newer schema version and
@@ -121,6 +123,9 @@ type functionRunnerVersion struct {
 }
 
 type functionRunnerEntry struct {
+	// Share preparation through native completion, not just the native build.
+	initialization syncutil.FlightGroup[struct{}, struct{}]
+
 	mu       sync.RWMutex
 	schema   *schemapb.CollectionSchema
 	function *schemapb.FunctionSchema
@@ -168,6 +173,13 @@ func (e *functionRunnerCollectionEntry) allocOrUpdate(
 		// New lookups can no longer reach these entries. Let existing callbacks
 		// release their runner leases without blocking the schema update.
 		go closeFunctionRunnerEntries(staleRunnerEntries)
+	}
+	// Only the new pull preparation requires a requesting RPC to own its wait.
+	// Preserve prewarming for all other runner paths.
+	if fileresource.IsPullEnabled() {
+		runnerEntries = lo.Filter(runnerEntries, func(entry *functionRunnerEntry, _ int) bool {
+			return !entry.needsFileResources()
+		})
 	}
 	if len(runnerEntries) == 0 {
 		return nil
@@ -345,15 +357,60 @@ func (e *functionRunnerEntry) GetRunner(ctx context.Context) (FunctionRunner, fu
 	return e.runner, e.mu.RUnlock, nil
 }
 
+func (e *functionRunnerEntry) needsFileResources() bool {
+	if len(e.schema.GetFileResourceIds()) > 0 {
+		return true
+	}
+	for _, fieldID := range e.function.GetInputFieldIds() {
+		if analyzerMayUseFileResources(typeutil.GetField(e.schema, fieldID)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *functionRunnerEntry) ensureRunner(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if e.isReady() {
+	e.mu.RLock()
+	closed, ready := e.closed, e.isReadyLocked()
+	e.mu.RUnlock()
+	if closed {
+		return errFunctionRunnerEntryRemoved
+	}
+	if ready {
 		return nil
 	}
 
-	init, runInit, err := e.getOrCreateInit()
+	_, err := e.initialization.Do(ctx, struct{}{}, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, e.initialize(ctx)
+	})
+	return err
+}
+
+func (e *functionRunnerEntry) initialize(ctx context.Context) error {
+	e.mu.RLock()
+	closed, ready, init := e.closed, e.isReadyLocked(), e.init
+	e.mu.RUnlock()
+	if closed {
+		return errFunctionRunnerEntryRemoved
+	}
+	if ready {
+		return nil
+	}
+	if init != nil {
+		// All earlier callers may have canceled while native construction was
+		// running. Rejoin that build without repeating its successful preparation.
+		return e.waitInit(ctx, init)
+	}
+	if e.needsFileResources() {
+		if err := fileresource.Prepare(ctx); err != nil {
+			return merr.Wrap(err, "prepare function file resources")
+		}
+	}
+
+	init, runInit, err := e.getOrCreateInit(ctx)
 	if err != nil {
 		return err
 	}
@@ -361,15 +418,14 @@ func (e *functionRunnerEntry) ensureRunner(ctx context.Context) error {
 		return nil
 	}
 	if runInit {
-		// Initialization is shared by all waiters. Keep trace values, but do not
-		// let the electing request cancel another caller's initialization.
-		// Prepare bounds its coordinator fetch and each resource download.
-		go e.runInit(context.WithoutCancel(ctx), init)
+		// Native construction has no context API. Keep its result available even
+		// if all callers leave; the initialization flight only owns the wait.
+		go e.runInit(init)
 	}
 	return e.waitInit(ctx, init)
 }
 
-func (e *functionRunnerEntry) getOrCreateInit() (*functionRunnerInit, bool, error) {
+func (e *functionRunnerEntry) getOrCreateInit(ctx context.Context) (*functionRunnerInit, bool, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -378,6 +434,11 @@ func (e *functionRunnerEntry) getOrCreateInit() (*functionRunnerInit, bool, erro
 	}
 	if e.isReadyLocked() {
 		return nil, false, nil
+	}
+	// Check cancellation under the publication lock. An abandoned preparation
+	// cannot start a build after its replacement has observed no native init.
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
 	}
 	init := e.init
 	if init == nil {
@@ -397,19 +458,8 @@ func (e *functionRunnerEntry) waitInit(ctx context.Context, init *functionRunner
 	}
 }
 
-func (e *functionRunnerEntry) runInit(ctx context.Context, init *functionRunnerInit) {
-	var runner FunctionRunner
-	var err error
-	needsResources := len(e.schema.GetFileResourceIds()) > 0
-	for _, fieldID := range e.function.GetInputFieldIds() {
-		needsResources = needsResources || analyzerMayUseFileResources(typeutil.GetField(e.schema, fieldID))
-	}
-	if needsResources {
-		err = fileresource.Prepare(ctx)
-	}
-	if err == nil {
-		runner, err = BuildEmbeddingRunner(e.schema, e.function)
-	}
+func (e *functionRunnerEntry) runInit(init *functionRunnerInit) {
+	runner, err := BuildEmbeddingRunner(e.schema, e.function)
 	if err == nil && runner == nil {
 		err = errors.New("function runner is nil")
 	}

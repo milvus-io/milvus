@@ -243,6 +243,7 @@ func TestValidateAnalyzerNativeTransport(t *testing.T) {
 			`{"tokenizer":"standard","filter":[{"type":"stemmer","language":"xx"}]}`,
 			`{"tokenizer":"standard","filter":["unknown_filter"]}`,
 			`{"tokenizer":"standard","unknown_option":true}`,
+			`{"tokenizer":"standard","limit":1e999}`,
 			`{"tokenizer":`,
 			`[]`,
 			`null`,
@@ -293,13 +294,16 @@ func TestAnalyzerPreparationErrorClassification(t *testing.T) {
 				return nil, nil
 			}).Build()
 			handler := NewHandlerService(nil)
-			_, validateErr := handler.ValidateAnalyzer(t.Context(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
-			require.Error(t, validateErr)
-			wireErr := status.AsStreamingError(validateErr)
-			require.Equal(t, tc.terminal, wireErr.IsUnrecoverable())
-			require.False(t, wireErr.IsInvalidArgument(), "storage state is not an analyzer parameter error")
-			if !tc.terminal {
+			resp, validateErr := handler.ValidateAnalyzer(t.Context(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			if tc.terminal {
+				require.NoError(t, validateErr)
+				want := merr.Status(merr.Wrap(tc.err, "prepare analyzer file resources"))
+				require.True(t, proto.Equal(want, resp.GetStatus()))
+				require.Equal(t, merr.Code(tc.err), resp.GetStatus().GetCode())
+			} else {
+				require.Nil(t, resp)
 				require.ErrorIs(t, validateErr, tc.err)
+				require.False(t, status.AsStreamingError(validateErr).IsUnrecoverable())
 			}
 			require.Zero(t, native.Times())
 		})
@@ -327,7 +331,7 @@ func TestRunAnalyzerPreparationStatus(t *testing.T) {
 			native := mockey.Mock(analyzer.Run).Return(nil, nil).Build()
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			resp, err := client.RunAnalyzer(ctx, inlineAnalyzerRequest("{}"))
+			resp, err := client.RunAnalyzer(ctx, inlineAnalyzerRequest(`{"tokenizer":"standard"}`))
 			require.NoError(t, err, "preparation failures must remain business Status across streaming interceptors")
 			require.NotNil(t, resp)
 			want := merr.Status(merr.Wrap(prepareErr, "prepare analyzer file resources"))
@@ -396,5 +400,42 @@ func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
 		require.Contains(t, resp.GetStatus().GetReason(), "missing.txt")
 		require.Contains(t, resp.GetStatus().GetReason(), "No such file or directory")
 		require.Empty(t, resp.GetResourceIds())
+	})
+}
+
+func TestRunDefaultInlineAnalyzerSkipsPreparation(t *testing.T) {
+	mockey.PatchConvey("resource-free defaults do not fetch the inventory", t, func() {
+		prepare := mockey.Mock(fileresource.Prepare).Return(merr.ErrServiceUnavailable).Build()
+		native := mockey.Mock(analyzer.Run).Return(nil, nil).Build()
+		for _, params := range []string{"", "{}", " {} "} {
+			resp, err := NewHandlerService(nil).RunAnalyzer(t.Context(), inlineAnalyzerRequest(params))
+			require.NoError(t, err)
+			require.NoError(t, merr.Error(resp.GetStatus()))
+		}
+		require.Zero(t, prepare.Times())
+		require.Equal(t, 3, native.Times())
+	})
+}
+
+func TestValidateAnalyzerPreparationStatusTransport(t *testing.T) {
+	mockey.PatchConvey("terminal preparation errors retain their status across streaming interceptors", t, func() {
+		listener := bufconn.Listen(1024 * 1024)
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
+		go server.Serve(listener)
+		defer server.Stop()
+		conn, err := grpc.NewClient("passthrough:///validate-preparation", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		require.NoError(t, err)
+		defer conn.Close()
+		var failure error
+		mockey.Mock(fileresource.Prepare).To(func(context.Context) error { return failure }).Build()
+		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
+		for _, cause := range []error{merr.WrapErrIoKeyNotFound("dictionary"), merr.ErrIoBucketNotFound, merr.ErrIoPermissionDenied} {
+			failure = cause
+			resp, err := client.ValidateAnalyzer(t.Context(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			require.NoError(t, err)
+			want := merr.Status(merr.Wrap(cause, "prepare analyzer file resources"))
+			require.True(t, proto.Equal(want, resp.GetStatus()))
+		}
 	})
 }

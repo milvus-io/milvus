@@ -3,12 +3,16 @@ package fileresource
 import (
 	"context"
 	"sync"
-	"time"
+
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // SnapshotFetcher returns the current inventory version and, only when it
@@ -19,43 +23,139 @@ type SnapshotFetcher func(ctx context.Context, knownVersion uint64) ([]*internal
 
 var snapshotFetcher struct {
 	sync.RWMutex
-	fetch SnapshotFetcher
+	preparer *resourcePreparer
 }
 
 // SetSnapshotFetcher must be called after InitManager. It enables preparation
 // by pull for workers outside QueryCoord's legacy file-resource push distribution.
 func SetSnapshotFetcher(fetch SnapshotFetcher) {
 	snapshotFetcher.Lock()
-	snapshotFetcher.fetch = fetch
+	snapshotFetcher.preparer = nil
+	if fetch != nil {
+		snapshotFetcher.preparer = &resourcePreparer{manager: GlobalFileManager, fetch: fetch}
+	}
 	snapshotFetcher.Unlock()
 }
 
-// Prepare refreshes the atomic resource inventory before creating a consumer.
-// Sync publishes only after downloads finish and ignores stale versions; it also
-// notifies analyzer, XGBoost and PyUDF consumers using the same resource paths.
-// Existing consumers do not hold the preparation lock while doing their work.
-func Prepare(ctx context.Context) error {
+// IsPullEnabled identifies consumers of the new demand-driven preparation path.
+// It does not interpret or change the legacy file-resource mode configuration.
+func IsPullEnabled() bool {
 	snapshotFetcher.RLock()
-	fetch := snapshotFetcher.fetch
+	defer snapshotFetcher.RUnlock()
+	return snapshotFetcher.preparer != nil
+}
+
+// retryPreparation keeps transient preparation failures on the worker. Its
+// context belongs to the flight, so retries stop only when all waiters leave.
+// An inner RPC/download deadline can expire while this shared context is alive.
+func retryPreparation(ctx context.Context, work func() error) error {
+	err := retry.Handle(ctx, func() (bool, error) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		err := work()
+		return err != nil && ctx.Err() == nil && retry.IsRecoverable(err) && !merr.IsNonRetryableErr(err) &&
+			grpcstatus.Code(err) != codes.Unimplemented, err
+	}, retry.AttemptAlways())
+	// retry.Handle can return its previous attempt's error after cancellation.
+	// The shared lifetime, rather than that stale transient cause, ended the wait.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
+type resourceSnapshot struct {
+	resources []*internalpb.FileResourceInfo
+	version   uint64
+}
+
+// resourcePreparer keeps the two flight stages and latest target for one manager.
+// The target is metadata, not a cached Prepare result: every call still fetches.
+type resourcePreparer struct {
+	manager Manager
+	fetch   SnapshotFetcher
+
+	snapshotFlights syncutil.FlightGroup[uint64, resourceSnapshot]
+	syncFlights     syncutil.FlightGroup[struct{}, uint64]
+	mu              sync.Mutex
+	latest          resourceSnapshot
+}
+
+// Prepare refreshes the atomic resource inventory before creating a consumer.
+// Fetch and application are separate flights so calls arriving during a download
+// can discover newer snapshots. Each caller checks its own required version after
+// an application completes. Only the last departing waiter cancels shared work.
+func Prepare(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	snapshotFetcher.RLock()
+	preparer := snapshotFetcher.preparer
 	snapshotFetcher.RUnlock()
-	if fetch == nil {
+	if preparer == nil {
 		return nil
 	}
-	// Background runner initialization also needs a bounded coordinator call.
-	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	knownVersion := GlobalFileManager.GetVersion()
-	resources, version, err := fetch(fetchCtx, knownVersion)
+	knownVersion := preparer.manager.GetVersion()
+	snapshot, err := preparer.snapshotFlights.Do(ctx, knownVersion, func(ctx context.Context) (resourceSnapshot, error) {
+		var snapshot resourceSnapshot
+		err := retryPreparation(ctx, func() error {
+			resources, version, err := preparer.fetch(ctx, knownVersion)
+			snapshot = resourceSnapshot{resources: resources, version: version}
+			return err
+		})
+		return snapshot, err
+	})
 	if err != nil {
 		return err
 	}
-	if version <= knownVersion {
+	return preparer.syncSnapshot(ctx, snapshot)
+}
+
+func (p *resourcePreparer) syncSnapshot(ctx context.Context, snapshot resourceSnapshot) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if snapshot.version <= p.manager.GetVersion() {
 		return nil
 	}
-	// Never infer "unchanged" from an empty list: a newer empty snapshot clears
-	// the inventory. Sync rechecks the version under its lock in case another
-	// pull or the legacy push path has advanced it while this RPC was in flight.
-	return Sync(ctx, version, resources)
+	p.mu.Lock()
+	if snapshot.version > p.latest.version {
+		p.latest = snapshot
+	}
+	p.mu.Unlock()
+
+	for {
+		attempted, err := p.syncFlights.Do(ctx, struct{}{}, p.syncLatest)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// A newer application may fail after this caller's version was installed.
+		if snapshot.version <= p.manager.GetVersion() {
+			return nil
+		}
+		if attempted >= snapshot.version {
+			return err
+		}
+		// This caller joined an older application. Its result (including a
+		// permanent error) cannot decide whether the newer target can be applied.
+	}
+}
+
+func (p *resourcePreparer) syncLatest(ctx context.Context) (uint64, error) {
+	var target resourceSnapshot
+	err := retryPreparation(ctx, func() error {
+		p.mu.Lock()
+		target = p.latest
+		p.mu.Unlock()
+		// Re-read the target on every retry: a newer snapshot can remove the
+		// resource that made the previous attempt fail. Sync publishes atomically.
+		if target.version <= p.manager.GetVersion() {
+			return nil
+		}
+		return p.manager.Sync(ctx, target.version, target.resources)
+	})
+	return target.version, err
 }
 
 // ValidateAnalyzer must follow a successful Prepare. A sync-mode inventory is
