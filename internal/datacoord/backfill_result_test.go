@@ -330,7 +330,7 @@ func TestOpsToManifestUpdates(t *testing.T) {
 			Type: "add", Columns: []string{"100"}, Format: "parquet", RowCount: 5,
 			Files: []BackfillManifestFile{{Path: "_data/100_a.parquet", StartIndex: 0, EndIndex: 5}},
 		}}}
-		u, err := opsToManifestUpdates(entry)
+		u, err := opsToManifestUpdates(entry, "")
 		assert.NoError(t, err)
 		require.Len(t, u.ColumnGroups, 1)
 		assert.Equal(t, []string{"100"}, u.ColumnGroups[0].Columns)
@@ -345,7 +345,7 @@ func TestOpsToManifestUpdates(t *testing.T) {
 			Type: "replace", Columns: []string{"100"}, Format: "parquet", RowCount: 5,
 			Files: []BackfillManifestFile{{Path: "_data/100_b.parquet", StartIndex: 0, EndIndex: 5}},
 		}}}
-		u, err := opsToManifestUpdates(entry)
+		u, err := opsToManifestUpdates(entry, "")
 		assert.NoError(t, err)
 		assert.Equal(t, []string{"100"}, u.DropColumns)
 		require.Len(t, u.ColumnGroups, 1)
@@ -357,7 +357,7 @@ func TestOpsToManifestUpdates(t *testing.T) {
 			Type: "add", Columns: []string{"100"}, RowCount: 5,
 			Files: []BackfillManifestFile{{Path: "_data/100_c.parquet", StartIndex: 0, EndIndex: 5}},
 		}}}
-		u, err := opsToManifestUpdates(entry)
+		u, err := opsToManifestUpdates(entry, "")
 		assert.NoError(t, err)
 		assert.Equal(t, "parquet", u.ColumnGroups[0].Format)
 	})
@@ -367,7 +367,7 @@ func TestOpsToManifestUpdates(t *testing.T) {
 			Type: "upsert", Columns: []string{"100"},
 			Files: []BackfillManifestFile{{Path: "x", StartIndex: 0, EndIndex: 1}},
 		}}}
-		_, err := opsToManifestUpdates(entry)
+		_, err := opsToManifestUpdates(entry, "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported backfill manifest op")
 	})
@@ -377,14 +377,14 @@ func TestOpsToManifestUpdates(t *testing.T) {
 			Type: "add", Columns: []string{"100"}, RowCount: 9,
 			Files: []BackfillManifestFile{{Path: "x", StartIndex: 0, EndIndex: 5}},
 		}}}
-		_, err := opsToManifestUpdates(entry)
+		_, err := opsToManifestUpdates(entry, "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "rowCount")
 	})
 
 	t.Run("empty files rejected", func(t *testing.T) {
 		entry := &BackfillSegment{Ops: []BackfillManifestOp{{Type: "add", Columns: []string{"100"}}}}
-		_, err := opsToManifestUpdates(entry)
+		_, err := opsToManifestUpdates(entry, "")
 		assert.Error(t, err)
 	})
 
@@ -399,13 +399,34 @@ func TestOpsToManifestUpdates(t *testing.T) {
 				Files: []BackfillManifestFile{{Path: "_data/100_b.parquet", StartIndex: 0, EndIndex: 5}},
 			},
 		}}
-		_, err := opsToManifestUpdates(entry)
+		_, err := opsToManifestUpdates(entry, "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "more than one op")
 	})
 
 	t.Run("no ops rejected", func(t *testing.T) {
-		_, err := opsToManifestUpdates(&BackfillSegment{})
+		_, err := opsToManifestUpdates(&BackfillSegment{}, "")
 		assert.Error(t, err)
+	})
+
+	t.Run("file outside segment base rejected", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{
+			Type: "add", Columns: []string{"100"}, RowCount: 5,
+			Files: []BackfillManifestFile{{Path: "/files/other_seg/_data/100.parquet", StartIndex: 0, EndIndex: 5}},
+		}}}
+		_, err := opsToManifestUpdates(entry, "files/seg812")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "outside segment manifest base")
+	})
+
+	t.Run("file inside segment base accepted", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{
+			Type: "add", Columns: []string{"100"}, RowCount: 5,
+			Files: []BackfillManifestFile{{Path: "files/seg812/_data/100.parquet", StartIndex: 0, EndIndex: 5}},
+		}}}
+		u, err := opsToManifestUpdates(entry, "files/seg812")
+		assert.NoError(t, err)
+		require.Len(t, u.ColumnGroups, 1)
+		assert.Equal(t, "files/seg812/_data/100.parquet", u.ColumnGroups[0].Files[0].Path)
 	})
 }

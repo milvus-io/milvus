@@ -264,12 +264,15 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 // current manifest. "add" registers a new single-field column group;
 // "replace" first drops the target columns (no-op when absent, auto-dropping
 // their indexes) and then registers the replacement group, so the drop and the
-// re-add travel in one loon transaction.
+// re-add travel in one loon transaction. basePath is the segment's manifest
+// base (from its current manifest path); every op file path must lie under it,
+// so a result cannot reference another segment's files (which would break
+// reads once that segment is GC'd) or leave files outside the base uncollected.
 //
 // This function does NOT read parquet footers. It trusts the row ranges in the
 // result JSON per the backfill contract (the loon writer stored the same
 // ranges when the manifest was produced).
-func opsToManifestUpdates(entry *BackfillSegment) (*packed.ManifestUpdates, error) {
+func opsToManifestUpdates(entry *BackfillSegment, basePath string) (*packed.ManifestUpdates, error) {
 	if len(entry.Ops) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("backfill segment has no manifest ops")
 	}
@@ -295,7 +298,7 @@ func opsToManifestUpdates(entry *BackfillSegment) (*packed.ManifestUpdates, erro
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg("unsupported backfill manifest op %q", op.Type)
 		}
-		cg, err := buildManifestColumnGroup(op)
+		cg, err := buildManifestColumnGroup(op, basePath)
 		if err != nil {
 			return nil, err
 		}
@@ -308,7 +311,9 @@ func opsToManifestUpdates(entry *BackfillSegment) (*packed.ManifestUpdates, erro
 // into the serializable column-group descriptor DataCoord registers via
 // loon_transaction_add_column_group. Malformed ops are Input errors: they
 // violate the external (Spark) result contract and retrying cannot fix them.
-func buildManifestColumnGroup(op *BackfillManifestOp) (*packed.ColumnGroupEntry, error) {
+// basePath must be the segment's manifest base; every op file path is checked
+// to lie under it (see opsToManifestUpdates).
+func buildManifestColumnGroup(op *BackfillManifestOp, basePath string) (*packed.ColumnGroupEntry, error) {
 	if len(op.Columns) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("backfill manifest op has no columns")
 	}
@@ -325,6 +330,10 @@ func buildManifestColumnGroup(op *BackfillManifestOp) (*packed.ColumnGroupEntry,
 		f := &op.Files[i]
 		if f.Path == "" {
 			return nil, merr.WrapErrParameterInvalidMsg("backfill manifest op for columns %v has an empty file path", op.Columns)
+		}
+		if basePath != "" && !strings.HasPrefix(f.Path, basePath+"/") {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"backfill manifest file %q is outside segment manifest base %q", f.Path, basePath)
 		}
 		if f.EndIndex <= f.StartIndex {
 			return nil, merr.WrapErrParameterInvalidMsg(
