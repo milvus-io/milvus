@@ -153,7 +153,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		}
 	}
 
-
 	if globalMetaCache != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:

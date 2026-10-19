@@ -1205,7 +1205,6 @@ func TestCatalog_AlterCollectionDB(t *testing.T) {
 		err := kc.AlterCollectionDB(ctx, oldC, newC, 0)
 		assert.NoError(t, err)
 	})
-
 }
 
 func TestCatalog_AlterPartition(t *testing.T) {

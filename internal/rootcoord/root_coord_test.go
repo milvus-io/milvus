@@ -1687,7 +1687,6 @@ func TestCore_getMetastorePrivilegeName(t *testing.T) {
 	priv, err := c.getMetastorePrivilegeName(context.Background(), util.AnyWord)
 	assert.NoError(t, err)
 	assert.Equal(t, priv, util.AnyWord)
-
 }
 
 func TestCore_expandPrivilegeGroup(t *testing.T) {

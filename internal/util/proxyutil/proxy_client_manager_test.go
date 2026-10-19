@@ -201,7 +201,6 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
 		assert.NoError(t, err)
 	})
-
 }
 
 func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {

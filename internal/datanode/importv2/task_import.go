@@ -162,7 +162,6 @@ func (t *ImportTask) Clone() Task {
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
-
 	bufferSize := t.GetBufferSize()
 	log.Info("start to import", WrapLogFields(t,
 		zap.Int64("bufferSize", bufferSize),

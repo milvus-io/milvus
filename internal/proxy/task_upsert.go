@@ -674,7 +674,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 
 // prepareUpsert merges old fields for partial updates before generating function outputs.
 func (it *upsertTask) prepareUpsert(ctx context.Context) error {
-
 	if it.req.GetPartialUpdate() {
 		if err := it.queryPreExecute(ctx); err != nil {
 			return err

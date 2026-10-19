@@ -1177,7 +1177,6 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		assert.Len(t, task.Req.Properties, 2)
 		assert.NoError(t, err)
 	})
-
 }
 
 func Test_createCollectionTask_PartitionKey(t *testing.T) {
