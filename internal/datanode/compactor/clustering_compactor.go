@@ -1051,6 +1051,11 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 
 	pkIter := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
+		for _, field := range selectedFields {
+			if column, ok := storage.TryRecordColumn(r, field.GetFieldID()); !ok || column == nil {
+				return merr.WrapErrServiceInternalMsg("missing clustering analyze column for field %d", field.GetFieldID())
+			}
+		}
 		return storage.ValueDeserializerWithSelectedFields(r, v, selectedFields, true)
 	})
 	defer pkIter.Close()

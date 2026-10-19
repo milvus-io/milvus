@@ -1003,6 +1003,62 @@ func TestClusteringMappingRejectsInvalidTimestamp(t *testing.T) {
 	}
 }
 
+func TestClusteringAnalyzeRejectsMissingScalarColumn(t *testing.T) {
+	for _, missingField := range []int64{common.RowIDField, common.TimeStampField, 100, 101, 104} {
+		for _, wrapped := range []bool{false, true} {
+			t.Run(fmt.Sprintf("field_%d/wrapped_%t", missingField, wrapped), func(t *testing.T) {
+				schema := genCollectionSchema()
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 104, Name: "ttl", DataType: schemapb.DataType_Timestamptz,
+				})
+				schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{Key: common.CollectionTTLFieldKey, Value: "ttl"})
+				malformed := proto.Clone(schema).(*schemapb.CollectionSchema)
+				for i, field := range malformed.Fields {
+					if field.FieldID == missingField {
+						malformed.Fields = append(malformed.Fields[:i], malformed.Fields[i+1:]...)
+						break
+					}
+				}
+				record := clusteringTestRecord(t, malformed, 0, 1)
+				defer record.Release()
+				readerRecord := record
+				if wrapped {
+					readerRecord = &materializedRecord{base: record}
+				}
+				reader := &mockReader{records: []storage.Record{readerRecord}}
+				patch := mockey.Mock(newTextDecodedCompactionSegmentRecordReader).
+					Return(reader, nil, nil).Build()
+				defer patch.UnPatch()
+				segment := &datapb.CompactionSegmentBinlogs{CollectionID: CollectionID, SegmentID: 1}
+				task := &clusteringCompactionTask{
+					plan:               &datapb.CompactionPlan{Schema: schema, SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{segment}},
+					binlogIO:           mock_util.NewMockBinlogIO(t),
+					primaryKeyField:    typeutil.GetField(schema, 100),
+					clusteringKeyField: typeutil.GetField(schema, 101),
+					ttlFieldID:         104,
+					compactionParams:   compaction.GenParams(),
+				}
+				var result map[interface{}]int64
+				var err error
+				require.NotPanics(t, func() { result, err = task.scalarAnalyzeSegment(context.Background(), segment) })
+				require.Nil(t, result)
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.ErrorContains(t, err, fmt.Sprintf("field %d", missingField))
+
+				// Exercise the same failure through the analyze worker in Compact.
+				reader.idx = 0
+				task.plan.Type = datapb.CompactionType_ClusteringCompaction
+				task.plan.ClusteringKeyField = 101
+				compactTask := NewClusteringCompactionTask(context.Background(), task.binlogIO, task.plan, task.compactionParams)
+				compactionResult, err := compactTask.Compact()
+				require.Nil(t, compactionResult)
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.ErrorContains(t, err, fmt.Sprintf("field %d", missingField))
+			})
+		}
+	}
+}
+
 func TestClusteringMappingRejectsMissingScalarColumn(t *testing.T) {
 	for _, missingField := range []int64{100, 101, 104} {
 		for _, wrapped := range []bool{false, true} {
