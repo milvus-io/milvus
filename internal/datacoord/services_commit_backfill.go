@@ -20,6 +20,7 @@ import (
 	"context"
 	"sort"
 	"strconv"
+	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -97,9 +98,10 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	}
 
 	// Split the units into the two dispatch paths and apply them directly:
-	// every V2 column-group upsert in one UpdateSegmentsInfo (one catalog
-	// transaction), and the V3 manifest commits in bounded batches of
-	// CommitSegmentManifests (each batch one all-or-nothing catalog
+	// every V2 column-group upsert in bounded batches of UpdateSegmentsInfo
+	// (each batch one catalog transaction holding segMu for at most
+	// maxBackfillCommitBatch records), and the V3 manifest commits in bounded
+	// batches of CommitSegmentManifests (each batch one all-or-nothing catalog
 	// transaction). A failed batch does not cancel later batches; per-segment
 	// statuses reflect batch-level outcomes.
 	v2Units := make([]backfillCommitUnit, 0)
@@ -113,14 +115,21 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	}
 
 	var lastErr error
-	// V2 dispatch: a single UpdateSegmentsInfo carrying every column-group
-	// upsert, gated by the schema fence re-check. On mismatch the schema moved
-	// after the fast-fail, so the whole result (V2 and V3 alike) is stale and
-	// nothing is applied.
-	if len(v2Units) > 0 {
+	// V2 dispatch: bounded UpdateSegmentsInfo batches, gated by the schema fence
+	// re-check. On mismatch the schema moved after the fast-fail, so the whole
+	// result (V2 and V3 alike) is stale and nothing is applied. Batching bounds
+	// the segMu hold time of each AlterSegments, matching the old broadcast cap
+	// of maxItemsPerBroadcast so a large V2 result cannot block flush/compaction
+	// meta writes for the whole commit.
+	for start := 0; start < len(v2Units); start += maxBackfillCommitBatch {
+		end := start + maxBackfillCommitBatch
+		if end > len(v2Units) {
+			end = len(v2Units)
+		}
+		batch := v2Units[start:end]
 		if err := s.recheckBackfillSchemaVersion(ctx, result); err != nil {
 			lastErr = err
-			appendUnitStatuses(&statuses, v2Units, false, err.Error())
+			appendUnitStatuses(&statuses, batch, false, err.Error())
 			appendUnitStatuses(&statuses, v3Units, false, err.Error())
 			committed, failed := countStatuses(statuses)
 			log.Warn(ctx, "CommitBackfillResult rejected by schema version fence before V2 commit",
@@ -137,18 +146,18 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 				SegmentStatuses:   sortStatuses(statuses),
 			}, nil
 		}
-		operators := make([]UpdateOperator, 0, len(v2Units))
-		for _, unit := range v2Units {
+		operators := make([]UpdateOperator, 0, len(batch))
+		for _, unit := range batch {
 			operators = append(operators, unit.operator)
 		}
 		if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 			log.Error(ctx, "CommitBackfillResult V2 column-group update failed",
-				mlog.Err(err), mlog.Int("segments", len(v2Units)))
+				mlog.Err(err), mlog.Int("segments", len(batch)))
 			lastErr = err
-			appendUnitStatuses(&statuses, v2Units, false, err.Error())
-		} else {
-			appendUnitStatuses(&statuses, v2Units, true, "")
+			appendUnitStatuses(&statuses, batch, false, err.Error())
+			continue
 		}
+		appendUnitStatuses(&statuses, batch, true, "")
 	}
 
 	// Segments whose delta was already applied (replay of a committed result)
@@ -172,9 +181,20 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		appendUnitStatuses(&statuses, v3Applied, true, "")
 	}
 
-	// Per-segment commits (replace of an indexed field): each goes through
+	// A V3 commit advances the manifest pointer that the DataView snapshot
+	// serves; recompute so consumers observe the new manifest versions. The
+	// framework does not recompute for manifest commits (stats, L0, bump-schema
+	// and the old ack callback all call recomputeDataView themselves), so this
+	// path must do it too, once, whenever any V3 segment was committed.
+	v3Committed := false
+	markV3Committed := func() { v3Committed = true }
+
+	// Per-segment commits (replace of a dropped column): each goes through
 	// meta.CommitSegmentManifest so the SegmentIndexRemove lands in the same
-	// catalog transaction as the new manifest pointer.
+	// catalog transaction as the new manifest pointer. Each commit does manifest
+	// object-storage I/O; run them with bounded concurrency so a large replace
+	// result does not pay that latency serially inside the caller's request. A
+	// failed commit records its per-segment status; the others still run.
 	if len(v3Single) > 0 {
 		if err := s.recheckBackfillSchemaVersion(ctx, result); err != nil {
 			log.Warn(ctx, "CommitBackfillResult rejected by schema version fence before commit",
@@ -182,16 +202,35 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			lastErr = err
 			appendUnitStatuses(&statuses, v3Single, false, err.Error())
 		} else {
+			sem := make(chan struct{}, backfillClassifyConcurrency)
+			var wg sync.WaitGroup
+			var mu sync.Mutex
 			for _, unit := range v3Single {
-				if err := s.meta.CommitSegmentManifest(ctx, unit.commit); err != nil {
-					log.Error(ctx, "CommitBackfillResult V3 manifest commit failed",
-						mlog.Err(err), mlog.FieldSegmentID(unit.segmentID))
-					lastErr = err
-					appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, false, err.Error())
-					continue
-				}
-				appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, true, "")
+				wg.Add(1)
+				go func(unit backfillCommitUnit) {
+					defer wg.Done()
+					select {
+					case sem <- struct{}{}:
+					case <-ctx.Done():
+						return
+					}
+					defer func() { <-sem }()
+					if err := s.meta.CommitSegmentManifest(ctx, unit.commit); err != nil {
+						log.Error(ctx, "CommitBackfillResult V3 manifest commit failed",
+							mlog.Err(err), mlog.FieldSegmentID(unit.segmentID))
+						mu.Lock()
+						lastErr = err
+						appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, false, err.Error())
+						mu.Unlock()
+						return
+					}
+					mu.Lock()
+					appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, true, "")
+					markV3Committed()
+					mu.Unlock()
+				}(unit)
 			}
+			wg.Wait()
 		}
 	}
 
@@ -227,6 +266,15 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			continue
 		}
 		appendUnitStatuses(&statuses, batch, true, "")
+		markV3Committed()
+	}
+
+	// The backfill commit is a Flushed->Flushed SegmentMeta mutation that
+	// advances manifest pointers; reconcile the DataView snapshot so consumers
+	// observe the new versions. V2 column-group upserts do not touch the
+	// manifest, so only V3 commits trigger.
+	if v3Committed {
+		s.meta.recomputeDataView(ctx, result.CollectionID)
 	}
 
 	committed, failed := countStatuses(statuses)
@@ -351,8 +399,6 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 // callers can surface them even when a segment never reached a commit).
 func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult) ([]backfillCommitUnit, []*datapb.CommitBackfillResultSegmentStatus) {
 	bucket := bucketFromChunkManager(s.meta.chunkManager)
-	units := make([]backfillCommitUnit, 0, len(result.Segments))
-	statuses := make([]*datapb.CommitBackfillResultSegmentStatus, 0)
 
 	// Deterministic order so commit units & diagnostic output are stable.
 	segIDs := make([]string, 0, len(result.Segments))
@@ -361,264 +407,304 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 	}
 	sort.Strings(segIDs)
 
-	for _, segIDStr := range segIDs {
-		entry := result.Segments[segIDStr]
-		segID, perr := strconv.ParseInt(segIDStr, 10, 64)
-		if perr != nil {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: 0, Ok: false, Kind: "", Reason: "invalid segment id " + segIDStr,
-			})
-			continue
-		}
+	// Per-segment classification is dominated by one manifest read from object
+	// storage per V3 delta entry (the replay/conflict pre-check). Run it with
+	// bounded concurrency so a large result does not pay the object-storage
+	// latency serially, while preserving the deterministic per-segment order in
+	// the returned units and statuses. Meta reads (GetSegment) take segMu.RLock;
+	// the per-segment body appends nothing to shared slices.
+	results := make([]classifySegmentResult, len(segIDs))
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sem := make(chan struct{}, backfillClassifyConcurrency)
+	var wg sync.WaitGroup
+	for i, segIDStr := range segIDs {
+		wg.Add(1)
+		go func(idx int, segIDStr string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-workerCtx.Done():
+				results[idx] = classifySegmentResult{segIDStr: segIDStr, err: workerCtx.Err()}
+				return
+			}
+			defer func() { <-sem }()
+			res := s.classifyOneBackfillSegment(workerCtx, bucket, result, segIDStr)
+			res.segIDStr = segIDStr
+			results[idx] = res
+		}(i, segIDStr)
+	}
+	wg.Wait()
 
-		segInfo := s.meta.GetSegment(ctx, segID)
-		if segInfo == nil {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: inferKind(&entry), Reason: "segment not found in meta",
-			})
-			continue
-		}
-		if segInfo.GetCollectionID() != result.CollectionID {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: inferKind(&entry),
-				Reason: "segment does not belong to the result's collection",
-			})
-			continue
-		}
-		// Partition-scoped backfills set PartitionID to the target partition;
-		// collection-wide / multi-partition backfills leave it at 0 (no check).
-		// Spark historically emits -1 for multi-partition results; partition IDs
-		// are always positive, so any value <= 0 means "no partition check".
-		// Rejecting a mismatching segment otherwise prevents writing metadata
-		// against the wrong partition.
-		if result.PartitionID > 0 && segInfo.GetPartitionID() != result.PartitionID {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: inferKind(&entry),
-				Reason: "segment does not belong to the result's partition",
-			})
-			continue
-		}
-		if segInfo.GetState() != commonpb.SegmentState_Flushed {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: inferKind(&entry),
-				Reason: "segment state is not Flushed: " + segInfo.GetState().String(),
-			})
-			continue
-		}
-
-		if entry.IsV2() {
-			if segInfo.GetStorageVersion() != storage.StorageV2 {
-				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-					SegmentId: segID, Ok: false, Kind: "v2",
-					Reason: "segment storage version is not V2",
-				})
-				continue
+	units := make([]backfillCommitUnit, 0, len(result.Segments))
+	statuses := make([]*datapb.CommitBackfillResultSegmentStatus, 0)
+	for _, res := range results {
+		if res.err != nil {
+			// Context cancelled during classification: the request is being
+			// torn down, but the per-segment contract still accounts for the
+			// segment — surface it as failed rather than silently dropping it
+			// and under-reporting the total.
+			segID, perr := strconv.ParseInt(res.segIDStr, 10, 64)
+			if perr != nil {
+				segID = 0
 			}
-			groups, err := buildV2Groups(bucket, &entry)
-			if err != nil {
-				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-					SegmentId: segID, Ok: false, Kind: "v2", Reason: err.Error(),
-				})
-				continue
-			}
-			units = append(units, backfillCommitUnit{
-				segmentID: segID,
-				kind:      "v2",
-				operator:  UpdateSegmentColumnGroupsOperator(segID, groups),
-			})
-			continue
-		}
-
-		// V3 path.
-		if segInfo.GetStorageVersion() != storage.StorageV3 {
 			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: "v3",
-				Reason: "segment storage version is not V3",
+				SegmentId: segID, Ok: false, Kind: inferKindFromSegIDStr(result, res.segIDStr),
+				Reason: "classification cancelled: " + res.err.Error(),
 			})
 			continue
 		}
-		if segInfo.GetManifestPath() == "" {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: "v3",
-				Reason: "segment has no existing manifest path",
-			})
-			continue
+		if res.unit != nil {
+			units = append(units, *res.unit)
 		}
-
-		basePath, currentVer, verErr := packed.UnmarshalManifestPath(segInfo.GetManifestPath())
-		if verErr != nil {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: "v3",
-				Reason: "failed to parse current manifest path: " + verErr.Error(),
-			})
-			continue
+		if res.status != nil {
+			statuses = append(statuses, res.status)
 		}
-
-		// Delta mode: apply the manifest operations to the segment's current
-		// manifest. No source-version comparison — the new revision is
-		// generated from the pointer current under the per-segment manifest
-		// lock (rebase semantics), so concurrent stats/index commits are
-		// preserved rather than rejected.
-		if entry.IsV3Delta() {
-			// Already-applied replay detection: an add whose target column
-			// already exists in the manifest with exactly the op's descriptors
-			// is a re-submission of a committed result and must return success
-			// instead of hitting milvus-storage's existing-column rejection.
-			// The decision is taken against an unlocked manifest read here; when
-			// it omits an already-applied op, InspectedManifest pins the pointer
-			// it was taken against and the commit re-validates it under the
-			// manifest lock, so a concurrent writer cannot race the omission
-			// into silently skipping a conflicting operation.
-			updates, alreadyApplied, omitted, err := s.deltaOpsToManifestUpdates(ctx, segInfo, &entry)
-			if err != nil {
-				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-					SegmentId: segID, Ok: false, Kind: "v3", Reason: err.Error(),
-				})
-				continue
-			}
-			if alreadyApplied {
-				units = append(units, backfillCommitUnit{
-					segmentID:      segID,
-					kind:           "v3",
-					alreadyApplied: true,
-				})
-				continue
-			}
-			unit := backfillCommitUnit{
-				segmentID: segID,
-				kind:      "v3",
-				commit: SegmentManifestCommit{
-					SegmentID:     segID,
-					StorageConfig: createStorageConfig(),
-					Mutation: ManifestMutation{
-						Type:    ManifestMutationCommitUpdates,
-						Updates: updates,
-					},
-				},
-			}
-			if omitted {
-				unit.commit.InspectedManifest = segInfo.GetManifestPath()
-			}
-			// A replace of an indexed column: the manifest's DropColumns strips
-			// the column's index entries, so every SegmentIndex record on the
-			// replaced indexes must be retracted in the SAME catalog transaction
-			// as the new manifest pointer, or readers keep serving an index
-			// built from the old column data while indexInspector skips
-			// rebuilding. The single-commit path re-enumerates the records under
-			// the manifest lock (a build created after this classification is
-			// still caught) and stages the SegmentIndexRemove atomically; once
-			// the record is gone the inspector issues a fresh build against the
-			// new data (reset).
-			if indexIDs := s.replaceIndexRemovalIndexIDs(result.CollectionID, segID, &entry); len(indexIDs) > 0 {
-				unit.singleCommit = true
-				unit.commit.IndexRemovalIndexIDs = indexIDs
-			}
-			units = append(units, unit)
-			continue
-		}
-
-		// Legacy mode: adopt a pre-baked version. Enforce that the base the
-		// version was built from still equals the current manifest; a source
-		// that moved (stats/index committed) means the pre-baked revision does
-		// not contain those changes and must be rejected. The authoritative
-		// check happens under the manifest lock via ExpectedManifest; this
-		// pre-check only fast-fails with a precise diagnostic.
-		if entry.Version <= 0 {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: "v3",
-				Reason: "missing or invalid manifest version",
-			})
-			continue
-		}
-		if entry.SourceVersion > 0 && entry.SourceVersion != currentVer {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: "v3",
-				Reason: "source manifest version " + strconv.FormatInt(entry.SourceVersion, 10) +
-					" does not match current " + strconv.FormatInt(currentVer, 10) +
-					"; re-run the backfill against the current manifest",
-			})
-			continue
-		}
-		// Reject stale results (e.g. Spark retry) that would move the manifest
-		// pointer backwards. The commit framework short-circuits only on
-		// equality, so strict monotonicity here is the guard against silent
-		// rollback.
-		if entry.Version <= currentVer {
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: segID, Ok: false, Kind: "v3",
-				Reason: "incoming manifest version " + strconv.FormatInt(entry.Version, 10) +
-					" is not greater than current " + strconv.FormatInt(currentVer, 10),
-			})
-			continue
-		}
-		// ExpectedManifest pins the base the pre-baked version was built from.
-		// Empty when the result carries no sourceVersion (produced before the
-		// field existed) — best-effort, preserving the pre-CAS behavior.
-		expectedManifest := ""
-		if entry.SourceVersion > 0 {
-			expectedManifest = packed.MarshalManifestPath(basePath, entry.SourceVersion)
-		}
-		units = append(units, backfillCommitUnit{
-			segmentID: segID,
-			kind:      "v3",
-			commit: SegmentManifestCommit{
-				SegmentID:        segID,
-				StorageConfig:    createStorageConfig(),
-				ExpectedManifest: expectedManifest,
-				Mutation: ManifestMutation{
-					Type:         ManifestMutationNoop,
-					ManifestPath: packed.MarshalManifestPath(basePath, entry.Version),
-				},
-			},
-		})
 	}
 	return units, statuses
 }
 
-// replaceIndexRemovalIndexIDs returns the index IDs whose field a delta
-// backfill replace targets. A replace's DropColumns strips the column's index
-// entries from the manifest inside milvus-storage, so every SegmentIndex record
-// on those indexes must be retracted in the same catalog transaction as the new
-// pointer. Indexes are matched by definition (not by existing records): a build
-// can be created between classification and commit, so the replace is routed to
-// the single-segment commit, which re-enumerates the live records under the
-// manifest lock.
-func (s *Server) replaceIndexRemovalIndexIDs(collectionID, segID int64, entry *BackfillSegment) []int64 {
-	replaced := make(map[string]struct{})
-	for _, op := range entry.Ops {
-		if op.Type != "replace" {
-			continue
-		}
-		for _, col := range op.Columns {
-			replaced[col] = struct{}{}
-		}
+// backfillClassifyConcurrency bounds the number of segment classifications
+// (each reading the segment's manifest from object storage) running in
+// parallel during CommitBackfillResult pre-validation.
+const backfillClassifyConcurrency = 32
+
+// classifySegmentResult is the outcome of classifying one backfill segment.
+// Exactly one of unit / status / err is set: a commit unit, a per-segment
+// failure status recorded during pre-validation, or a context cancellation.
+// segIDStr is always the source key, retained so a cancelled slot can still be
+// reported as failed.
+type classifySegmentResult struct {
+	segIDStr string
+	unit     *backfillCommitUnit
+	status   *datapb.CommitBackfillResultSegmentStatus
+	err      error
+}
+
+// inferKindFromSegIDStr returns the v2/v3 kind of a segment entry that was not
+// classified (context cancellation) by looking at its declared storage form.
+func inferKindFromSegIDStr(result *BackfillResult, segIDStr string) string {
+	entry, ok := result.Segments[segIDStr]
+	if !ok {
+		return ""
 	}
-	if len(replaced) == 0 {
-		return nil
+	return inferKind(&entry)
+}
+
+// classifyOneBackfillSegment validates one segment entry and constructs its
+// commit unit (or a pre-validation failure status). Pure: reads only, no shared
+// state mutated, so it is safe to run concurrently under bounded concurrency.
+func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, result *BackfillResult, segIDStr string) classifySegmentResult {
+	entry := result.Segments[segIDStr]
+	segID, perr := strconv.ParseInt(segIDStr, 10, 64)
+	if perr != nil {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: 0, Ok: false, Kind: "", Reason: "invalid segment id " + segIDStr,
+		}}
 	}
-	var indexIDs []int64
-	for _, index := range s.meta.indexMeta.GetIndexesForCollection(collectionID, "") {
-		if _, ok := replaced[strconv.FormatInt(index.FieldID, 10)]; ok {
-			indexIDs = append(indexIDs, index.IndexID)
+
+	segInfo := s.meta.GetSegment(ctx, segID)
+	if segInfo == nil {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: inferKind(&entry), Reason: "segment not found in meta",
+		}}
+	}
+	if segInfo.GetCollectionID() != result.CollectionID {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: inferKind(&entry),
+			Reason: "segment does not belong to the result's collection",
+		}}
+	}
+	// Partition-scoped backfills set PartitionID to the target partition;
+	// collection-wide / multi-partition backfills leave it at 0 (no check).
+	// Spark historically emits -1 for multi-partition results; partition IDs
+	// are always positive, so any value <= 0 means "no partition check".
+	// Rejecting a mismatching segment otherwise prevents writing metadata
+	// against the wrong partition.
+	if result.PartitionID > 0 && segInfo.GetPartitionID() != result.PartitionID {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: inferKind(&entry),
+			Reason: "segment does not belong to the result's partition",
+		}}
+	}
+	if segInfo.GetState() != commonpb.SegmentState_Flushed {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: inferKind(&entry),
+			Reason: "segment state is not Flushed: " + segInfo.GetState().String(),
+		}}
+	}
+
+	if entry.IsV2() {
+		if segInfo.GetStorageVersion() != storage.StorageV2 {
+			return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v2",
+				Reason: "segment storage version is not V2",
+			}}
 		}
+		groups, err := buildV2Groups(bucket, &entry)
+		if err != nil {
+			return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v2", Reason: err.Error(),
+			}}
+		}
+		return classifySegmentResult{unit: &backfillCommitUnit{
+			segmentID: segID,
+			kind:      "v2",
+			operator:  UpdateSegmentColumnGroupsOperator(segID, groups),
+		}}
 	}
-	return indexIDs
+
+	// V3 path.
+	if segInfo.GetStorageVersion() != storage.StorageV3 {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: "v3",
+			Reason: "segment storage version is not V3",
+		}}
+	}
+	if segInfo.GetManifestPath() == "" {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: "v3",
+			Reason: "segment has no existing manifest path",
+		}}
+	}
+
+	basePath, currentVer, verErr := packed.UnmarshalManifestPath(segInfo.GetManifestPath())
+	if verErr != nil {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: "v3",
+			Reason: "failed to parse current manifest path: " + verErr.Error(),
+		}}
+	}
+
+	// Delta mode: apply the manifest operations to the segment's current
+	// manifest. No source-version comparison — the new revision is
+	// generated from the pointer current under the per-segment manifest
+	// lock (rebase semantics), so concurrent stats/index commits are
+	// preserved rather than rejected.
+	if entry.IsV3Delta() {
+		// Already-applied replay detection: an op whose target column already
+		// exists in the manifest with exactly the op's descriptors is a
+		// re-submission of a committed result and must return success instead of
+		// hitting milvus-storage's existing-column rejection or republishing (and
+		// for an indexed field, re-retracting the rebuilt index records). The
+		// decision is taken against an unlocked manifest read here; when it omits
+		// an already-applied op, InspectedManifest pins the pointer it was taken
+		// against and the commit re-validates it under the manifest lock, so a
+		// concurrent writer cannot race the omission into silently skipping a
+		// conflicting operation.
+		updates, alreadyApplied, omitted, err := s.deltaOpsToManifestUpdates(ctx, segInfo, basePath, &entry)
+		if err != nil {
+			return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v3", Reason: err.Error(),
+			}}
+		}
+		if alreadyApplied {
+			return classifySegmentResult{unit: &backfillCommitUnit{
+				segmentID:      segID,
+				kind:           "v3",
+				alreadyApplied: true,
+			}}
+		}
+		unit := backfillCommitUnit{
+			segmentID: segID,
+			kind:      "v3",
+			commit: SegmentManifestCommit{
+				SegmentID:     segID,
+				StorageConfig: createStorageConfig(),
+				Mutation: ManifestMutation{
+					Type:    ManifestMutationCommitUpdates,
+					Updates: updates,
+				},
+			},
+		}
+		if omitted {
+			unit.commit.InspectedManifest = segInfo.GetManifestPath()
+		}
+		// A replace's DropColumns strips the replaced column's index entries
+		// from the manifest inside milvus-storage, so every SegmentIndex
+		// record on those indexes must be retracted in the SAME catalog
+		// transaction as the new manifest pointer. The single-commit path
+		// resolves the index-removal set from the CURRENT index definitions
+		// under the manifest lock — an index created after this
+		// classification is still caught — and stages the SegmentIndexRemove
+		// atomically; the batch path cannot retract records at all. Route
+		// every commit that drops columns through it.
+		if len(updates.DropColumns) > 0 {
+			unit.singleCommit = true
+		}
+		return classifySegmentResult{unit: &unit}
+	}
+
+	// Legacy mode: adopt a pre-baked version. Enforce that the base the
+	// version was built from still equals the current manifest; a source
+	// that moved (stats/index committed) means the pre-baked revision does
+	// not contain those changes and must be rejected. The authoritative
+	// check happens under the manifest lock via ExpectedManifest; this
+	// pre-check only fast-fails with a precise diagnostic.
+	if entry.Version <= 0 {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: "v3",
+			Reason: "missing or invalid manifest version",
+		}}
+	}
+	if entry.SourceVersion > 0 && entry.SourceVersion != currentVer {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: "v3",
+			Reason: "source manifest version " + strconv.FormatInt(entry.SourceVersion, 10) +
+				" does not match current " + strconv.FormatInt(currentVer, 10) +
+				"; re-run the backfill against the current manifest",
+		}}
+	}
+	// Reject stale results (e.g. Spark retry) that would move the manifest
+	// pointer backwards. The commit framework short-circuits only on
+	// equality, so strict monotonicity here is the guard against silent
+	// rollback.
+	if entry.Version <= currentVer {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: "v3",
+			Reason: "incoming manifest version " + strconv.FormatInt(entry.Version, 10) +
+				" is not greater than current " + strconv.FormatInt(currentVer, 10),
+		}}
+	}
+	// ExpectedManifest pins the base the pre-baked version was built from.
+	// Empty when the result carries no sourceVersion (produced before the
+	// field existed) — best-effort, preserving the pre-CAS behavior.
+	expectedManifest := ""
+	if entry.SourceVersion > 0 {
+		expectedManifest = packed.MarshalManifestPath(basePath, entry.SourceVersion)
+	}
+	return classifySegmentResult{unit: &backfillCommitUnit{
+		segmentID: segID,
+		kind:      "v3",
+		commit: SegmentManifestCommit{
+			SegmentID:        segID,
+			StorageConfig:    createStorageConfig(),
+			ExpectedManifest: expectedManifest,
+			Mutation: ManifestMutation{
+				Type:         ManifestMutationNoop,
+				ManifestPath: packed.MarshalManifestPath(basePath, entry.Version),
+			},
+		},
+	}}
 }
 
 // deltaOpsToManifestUpdates converts a delta backfill's ops into the manifest
-// updates to commit, applying already-applied replay detection first: an "add"
-// whose target column already exists in the segment's manifest with exactly
-// the op's file descriptors is treated as already committed and excluded, so a
+// updates to commit, applying already-applied replay detection first: an op
+// whose target column already exists in the segment's manifest with exactly the
+// op's file descriptors is treated as already committed and excluded, so a
 // re-submission after a lost response returns success instead of failing on
-// milvus-storage's existing-column rejection. A column that exists with
-// different descriptors is a conflict and fails. "replace" ops are always
-// committed (drop + re-add is idempotent: the C++ layer applies the drop
-// before add validation). When every op is already applied, alreadyApplied is
-// true and the caller skips the segment. omitted reports whether an add was
-// excluded as already applied; the caller must then pin the inspected manifest
-// pointer (InspectedManifest) so the commit re-validates the omission under the
-// manifest lock instead of trusting this unlocked read.
-func (s *Server) deltaOpsToManifestUpdates(ctx context.Context, segInfo *SegmentInfo, entry *BackfillSegment) (updates *packed.ManifestUpdates, alreadyApplied bool, omitted bool, err error) {
+// milvus-storage's existing-column rejection or republishing (and for an
+// indexed field, re-retracting the rebuilt index records). For an "add", a
+// column present with different descriptors is a conflict and fails. For a
+// "replace", only an exact match is a replay; any other state commits (drop +
+// re-add is idempotent: the C++ layer applies the drop before add validation),
+// which is also the normal first-time replace of a pre-existing column.
+// When every op is already applied, alreadyApplied is true and the caller skips
+// the segment. omitted reports whether an op was excluded as already applied;
+// the caller must then pin the inspected manifest pointer (InspectedManifest)
+// so the commit re-validates the omission under the manifest lock instead of
+// trusting this unlocked read.
+func (s *Server) deltaOpsToManifestUpdates(ctx context.Context, segInfo *SegmentInfo, basePath string, entry *BackfillSegment) (updates *packed.ManifestUpdates, alreadyApplied bool, omitted bool, err error) {
 	existing, err := packed.ReadManifestColumnGroups(segInfo.GetManifestPath(), createStorageConfig())
 	if err != nil {
 		return nil, false, false, merr.Wrap(err, "read segment manifest for backfill delta replay check")
@@ -627,52 +713,53 @@ func (s *Server) deltaOpsToManifestUpdates(ctx context.Context, segInfo *Segment
 	allApplied := true
 	for i := range entry.Ops {
 		op := &entry.Ops[i]
-		if op.Type == "add" {
-			switch matchAddAgainstManifest(op, existing) {
-			case addOpNotPresent:
-				remaining.Ops = append(remaining.Ops, *op)
-				allApplied = false
-			case addOpAlreadyApplied:
-				// already committed; exclude from this replay
-				omitted = true
-			case addOpConflict:
-				return nil, false, false, merr.WrapErrParameterInvalidMsg(
-					"backfill manifest column %v already exists with different files; re-run the backfill", op.Columns)
-			}
-			continue
+		switch matchOpAgainstManifest(op, existing) {
+		case opNotPresent:
+			remaining.Ops = append(remaining.Ops, *op)
+			allApplied = false
+		case opAlreadyApplied:
+			// already committed; exclude from this replay
+			omitted = true
+		case opConflict:
+			return nil, false, false, merr.WrapErrParameterInvalidMsg(
+				"backfill manifest column %v already exists with different files; re-run the backfill", op.Columns)
 		}
-		remaining.Ops = append(remaining.Ops, *op)
-		allApplied = false
 	}
 	if allApplied {
 		return nil, true, false, nil
 	}
-	updates, err = opsToManifestUpdates(remaining)
+	updates, err = opsToManifestUpdates(remaining, basePath)
 	if err != nil {
 		return nil, false, false, err
 	}
 	return updates, false, omitted, nil
 }
 
-// addOpState classifies an "add" op against the column groups already present
-// in the segment's manifest.
-type addOpState int
+// opState classifies an op against the column groups already present in the
+// segment's manifest.
+type opState int
 
 const (
-	// addOpNotPresent: the column does not exist yet; the add must be committed.
-	addOpNotPresent addOpState = iota
-	// addOpAlreadyApplied: the column exists in exactly the op's shape; a
-	// replay of a committed result, safe to skip.
-	addOpAlreadyApplied
-	// addOpConflict: the column exists in a different shape; committing would
-	// hit milvus-storage's existing-column rejection.
-	addOpConflict
+	// opNotPresent: the column does not exist in the op's shape; the op must be
+	// committed. For a replace this also covers a column present under different
+	// descriptors — replacing an existing column is its normal first-time
+	// behavior.
+	opNotPresent opState = iota
+	// opAlreadyApplied: the column exists in exactly the op's shape; a replay
+	// of a committed result, safe to skip.
+	opAlreadyApplied
+	// opConflict: the column exists in a different shape and the op cannot
+	// overwrite it (an "add" onto an existing column would hit milvus-storage's
+	// existing-column rejection).
+	opConflict
 )
 
-// matchAddAgainstManifest classifies one "add" op against the manifest's
-// current column groups. Descriptor identity follows the same path + row-range
-// notion milvus-storage itself uses for fragment identity.
-func matchAddAgainstManifest(op *BackfillManifestOp, existing []packed.ColumnGroupEntry) addOpState {
+// matchOpAgainstManifest classifies one op against the manifest's current
+// column groups. An exact descriptor match is a replay for both op kinds. For
+// an "add", a column present under different descriptors is a conflict; for a
+// "replace" it is the normal commit path. Descriptor identity follows the same
+// path + row-range notion milvus-storage itself uses for fragment identity.
+func matchOpAgainstManifest(op *BackfillManifestOp, existing []packed.ColumnGroupEntry) opState {
 	opCols := make(map[string]struct{}, len(op.Columns))
 	for _, col := range op.Columns {
 		opCols[col] = struct{}{}
@@ -682,11 +769,14 @@ func matchAddAgainstManifest(op *BackfillManifestOp, existing []packed.ColumnGro
 			continue
 		}
 		if sameColumnSet(g.Columns, opCols) && sameFileDescriptors(g.Files, op.Files) {
-			return addOpAlreadyApplied
+			return opAlreadyApplied
 		}
-		return addOpConflict
+		if op.Type == "replace" {
+			return opNotPresent
+		}
+		return opConflict
 	}
-	return addOpNotPresent
+	return opNotPresent
 }
 
 func columnSetsIntersect(columns []string, target map[string]struct{}) bool {

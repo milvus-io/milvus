@@ -169,6 +169,12 @@ Column names are Milvus field-ID strings — the same convention the Spark job
 and `ColumnGroupEntry.Columns` use — so `DropColumns` and the added group
 reference the same identity.
 
+Every op file path is validated to lie under the target segment's manifest base
+(`<base>/_data/<file>`): a path pointing at another segment's files would break
+reads once that segment is GC'd, and a path outside the base would never be
+collected. This mirrors the V2 path normalization (which rebuilds paths from the
+segment ID) for the delta form.
+
 ### 3. CommitBackfillResult: no broadcast, direct framework call
 
 `CommitBackfillResult` (`services_commit_backfill.go`) drops all broadcast
@@ -207,9 +213,24 @@ CommitBackfillResult
   `UpdateManifestVersion` cannot. `SourceVersion == 0` skips the fence
   (best-effort, preserving today's behavior for results produced before the
   field existed).
+- **Replace routing:** every delta commit whose `DropColumns` is non-empty is
+  dispatched through the per-segment `CommitSegmentManifest` (the single-commit
+  path), never the batch. The batch publishes segment records only and cannot
+  stage the SegmentIndex removal that a column drop requires; the single-commit
+  path resolves the index-removal set from the CURRENT index definitions under
+  the manifest lock (an index created during the commit window is still caught)
+  and retracts the records atomically with the new pointer.
 - `CommitSegmentManifests` is one catalog transaction per batch
   (all-or-nothing per batch, dropped/unhealthy segments skipped benignly),
   preserving the batch atomicity the broadcast ack callback deliberately kept.
+  Both V2 and V3 dispatch use bounded batches of `maxBackfillCommitBatch`
+  (512), so a large result cannot hold `segMu` (V2) or the manifest locks (V3)
+  for the whole commit; per-segment manifest reads and single-segment commits
+  run with bounded concurrency inside the RPC instead of serially.
+- **DataView reconciliation:** after any V3 commit succeeds, the handler calls
+  `meta.recomputeDataView` (matching the old ack callback and every other
+  manifest-commit caller); V2-only results skip it because V2 upserts do not
+  touch the manifest.
 - The schema-version fence is retained as a fast-fail and re-checked per batch.
   Without the broadcast resource-key serialization, a collection DDL can commit
   in the window between the fence check and the manifest commit; this is
@@ -233,15 +254,17 @@ either node.
 
 Safety of the second (standby) execution follows from the per-cluster state:
 
-- Delta mode is idempotent by construction: `add` registers a column-group
-  keyed by field ID; a replay on a manifest that already carries the group is a
-  no-op/replaced group, and `replace` (`DropColumns` + add) is a no-op when the
-  column is absent. The manifest lock serializes each cluster's own writers.
+- Delta mode is idempotent: an op whose target column already exists in the
+  manifest with exactly the op's file descriptors is recognized as already
+  applied and skipped (`add` keyed by column, `replace` keyed by its exact
+  replacement group), so a replay on a manifest that already carries the group
+  commits nothing. The manifest lock serializes each cluster's own writers.
 - Legacy mode is fenced by `SourceVersion`: if the standby's manifest already
   advanced past the source (its own stats/index commits, or metadata replicated
   from the primary), the commit is rejected as stale instead of overwriting.
 - Validation (`storage_version`, state, collection/partition membership,
-  schema-version fence) is evaluated against the local cluster's metadata.
+  schema-version fence, and each delta file path lying under the target
+  segment's manifest base) is evaluated against the local cluster's metadata.
 
 No cross-cluster coordination, no once-only marker, and no assumption about
 which cluster commits first.
@@ -251,9 +274,20 @@ which cluster commits first.
 - A failed `CommitSegmentManifests` batch leaves nothing published (the
   prepared revisions are orphaned and invisible); the caller retries on the
   current pointer.
-- Replaying a committed delta is idempotent: `add` keyed by column, `replace`
-  guarded by drop-noop. Legacy replay is rejected by the `SourceVersion` CAS
+- Replaying a committed delta is idempotent: an op whose target column already
+  exists in the manifest with exactly the op's file descriptors is recognized
+  as already applied and skipped (`add` keyed by column, `replace` keyed by its
+  exact replacement group), so a retry after a lost response neither republishes
+  a new revision nor (for an indexed field) re-retracts the rebuilt
+  SegmentIndex records. Legacy replay is rejected by the `SourceVersion` CAS
   once the first commit advanced the pointer.
+- Two distinct replace results on the same column are ordered by the manifest
+  lock, not by version: a replace carries no source-version comparison, so an
+  older replace result retried after a newer one was applied re-runs its
+  drop+re-add and wins over the newer content. This is accepted: a retried
+  result with *identical* files is the only replay case and is skipped; a
+  different-file retry is treated as a fresh replace. Producers must not
+  re-submit stale replace results against a segment they did not overwrite.
 - `CommitSegmentManifests` skips dropped/unhealthy segments as a benign outcome;
   such segments surface in `SegmentStatuses` via the pre-validation diagnostics.
 
