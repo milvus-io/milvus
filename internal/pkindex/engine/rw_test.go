@@ -18,6 +18,7 @@ package engine
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -27,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
+	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
 func TestWriteAndRead(t *testing.T) {
@@ -154,6 +156,44 @@ func TestConcurrentInstallAndRead(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// A table whose largest key is the empty varchar key arrives with a nil MaxKey
+// once its Info has been through a proto3 message, which carries an empty key
+// as nil. The range check must still prune every non-empty key, and an empty
+// table must be pruned outright.
+func TestCommittedPruneTreatsNilBoundsAsEmptyKey(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	w, err := sst.NewWriter(dir, 1)
+	require.NoError(t, err)
+	require.NoError(t, w.Add(codec.EncodeVarcharPK(""), entry(10)))
+	info, err := w.Close()
+	require.NoError(t, err)
+	info.MinKey, info.MaxKey = nil, nil
+	emptyKeyTable := CommittedTable{Info: info, Path: filepath.Join(dir, sst.FileName(1))}
+
+	ew, err := sst.NewWriter(dir, 2)
+	require.NoError(t, err)
+	emptyInfo, err := ew.Close()
+	require.NoError(t, err)
+	emptyTable := CommittedTable{Info: emptyInfo, Path: filepath.Join(dir, sst.FileName(2))}
+
+	require.NoError(t, e.InstallCommitted(ctx, []CommittedTable{emptyTable, emptyKeyTable}))
+
+	c := e.cfg.Shared.cache
+	before := c.Metrics()
+	assert.Nil(t, getOne(t, e, codec.EncodeVarcharPK("a")), "no table holds it")
+	after := c.Metrics()
+	assert.Equal(t, before.Hits+before.Misses, after.Hits+after.Misses,
+		"a key above the empty key must be pruned without touching either reader")
+
+	v := getOne(t, e, codec.EncodeVarcharPK(""))
+	require.NotNil(t, v, "the empty key itself is still found")
+	got, err := codec.DecodePKEntry(v)
+	require.NoError(t, err)
+	assert.Equal(t, int64(10), got.SegmentID)
 }
 
 func TestCommittedReadersShareNodeCache(t *testing.T) {

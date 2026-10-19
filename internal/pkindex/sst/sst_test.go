@@ -94,6 +94,24 @@ func TestReadInfoMatchesWriter(t *testing.T) {
 	assert.Equal(t, written, read)
 }
 
+// The empty varchar key is a legal key. Both sources of Info must then agree
+// on a non-nil MaxKey, or a consumer that trusts one of them sees a different
+// range than a consumer that trusts the other.
+func TestReadInfoMatchesWriterOnEmptyKey(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir, fixtureID)
+	require.NoError(t, err)
+	require.NoError(t, w.Add(codec.EncodeVarcharPK(""), codec.EncodePKEntry(codec.PKEntry{SegmentID: 1})))
+	written, err := w.Close()
+	require.NoError(t, err)
+	assert.NotNil(t, written.MinKey)
+	assert.NotNil(t, written.MaxKey)
+
+	read, err := ReadInfo(fixtureID, filepath.Join(dir, FileName(fixtureID)))
+	require.NoError(t, err)
+	assert.Equal(t, written, read)
+}
+
 func TestReadInfoOnEmptyTable(t *testing.T) {
 	dir := t.TempDir()
 	_, path := writeFixture(t, dir, 0)

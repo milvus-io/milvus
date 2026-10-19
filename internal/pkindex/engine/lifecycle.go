@@ -104,12 +104,28 @@ func (e *Engine) InstallCommitted(ctx context.Context, tables []CommittedTable, 
 	// resolve every generation before touching anything, so a bad argument
 	// leaves the engine exactly as it was
 	retiring := make([]*generation, 0, len(retire))
+	seenGen := make(map[Generation]struct{}, len(retire))
 	for _, gen := range retire {
+		if _, dup := seenGen[gen]; dup {
+			// retiring a generation twice would close its DB twice, which
+			// pebble answers with a panic
+			return errors.Wrapf(errDuplicateRetire, "generation %d", gen)
+		}
+		seenGen[gen] = struct{}{}
 		g := e.findFrozen(gen)
 		if g == nil {
 			return errors.Wrapf(ErrNotFrozen, "generation %d", gen)
 		}
 		retiring = append(retiring, g)
+	}
+	// the same table twice would open two readers for one file and leak the
+	// one that the next install does not find under its ID
+	keep := make(map[sst.ID]struct{}, len(tables))
+	for _, t := range tables {
+		if _, dup := keep[t.Info.ID]; dup {
+			return errors.Wrapf(errDuplicateTable, "sst %d", int64(t.Info.ID))
+		}
+		keep[t.Info.ID] = struct{}{}
 	}
 	// a set usually repeats most of its tables, so reuse the readers already
 	// open under those IDs: reopening would drop what their blocks had cached
@@ -121,9 +137,7 @@ func (e *Engine) InstallCommitted(ctx context.Context, tables []CommittedTable, 
 	// alone, before anything is swapped
 	readers := make([]installedTable, 0, len(tables))
 	opened := make([]*sst.Reader, 0, len(tables))
-	keep := make(map[sst.ID]struct{}, len(tables))
 	for _, t := range tables {
-		keep[t.Info.ID] = struct{}{}
 		if r, ok := open[t.Info.ID]; ok {
 			readers = append(readers, installedTable{info: t.Info, reader: r})
 			continue

@@ -368,6 +368,40 @@ func TestInstallCommittedRejectsUnknownRetire(t *testing.T) {
 	assert.Empty(t, e.FrozenGenerations())
 }
 
+// Retiring a generation twice would close its DB twice, which pebble answers
+// with a panic, so the duplicate is rejected before anything is swapped.
+func TestInstallCommittedRejectsDuplicateRetire(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+	require.NoError(t, e.Write(ctx, []Mutation{{Key: pk(1), Value: entry(10)}}))
+	gen, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+
+	err = e.InstallCommitted(ctx, nil, gen, gen)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errDuplicateRetire), "got %v", err)
+
+	// nothing changed, and the generation is still there to retire once
+	assert.Equal(t, []Generation{gen}, e.FrozenGenerations())
+	requireSegment(t, e, pk(1), 10)
+	require.NoError(t, e.InstallCommitted(ctx, nil, gen))
+	assert.Empty(t, e.FrozenGenerations())
+}
+
+// The same table twice would open two readers for one file and leak the one a
+// later install does not find under its ID, so the duplicate is rejected.
+func TestInstallCommittedRejectsDuplicateTable(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+	table := buildCommitted(t, t.TempDir(), 7, map[int64][]byte{1: entry(10)})
+
+	err := e.InstallCommitted(ctx, []CommittedTable{table, table})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errDuplicateTable), "got %v", err)
+	assert.Equal(t, 0, e.Stats().CommittedTables)
+	assert.Nil(t, getOne(t, e, pk(1)))
+}
+
 // InstallCommitted promises that a lookup never pays to fault in an index or a
 // filter, so the tables it installs are warm by the time it returns.
 func TestInstallCommittedPreloadsNewTables(t *testing.T) {

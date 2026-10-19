@@ -53,6 +53,8 @@ var (
 	errNoSharedResources      = errors.New("pkindex engine opened without shared resources")
 	errNoAllocID              = errors.New("pkindex engine opened without an ID allocator")
 	errReservedTombstoneValue = errors.New("pkindex value is the reserved tombstone encoding")
+	errDuplicateRetire        = errors.New("pkindex generation is listed twice in retire")
+	errDuplicateTable         = errors.New("pkindex table ID is listed twice in the committed set")
 )
 
 // errClosed is ErrClosed in the form the methods return: a closed engine is

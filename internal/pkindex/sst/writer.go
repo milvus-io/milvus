@@ -79,6 +79,9 @@ func (w *Writer) Add(key, value []byte) error {
 	}
 	if w.minKey == nil {
 		w.minKey = append([]byte{}, key...)
+		// non-nil from the first key on, so that an empty largest key gives
+		// the same Info as ReadInfo
+		w.maxKey = []byte{}
 	}
 	w.maxKey = append(w.maxKey[:0], key...)
 	w.entries++

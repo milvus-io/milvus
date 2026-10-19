@@ -75,13 +75,15 @@ func (e *Engine) lookup(key []byte) ([]byte, error) {
 }
 
 // get reads key from this committed table, with the same found and tombstone
-// rules as generation.get. A key outside the table's range is pruned without
-// touching the file.
+// rules as generation.get. An empty table, and a key outside the table's
+// range, are pruned without touching the file. The bounds are compared as
+// bytes even when nil: the largest key of a non-empty table with a nil or
+// empty MaxKey is the empty key, and proto3 bytes carry an empty key as nil.
 func (cr installedTable) get(key []byte) (value []byte, found bool, err error) {
-	if cr.info.MinKey != nil && sst.Comparer.Compare(key, cr.info.MinKey) < 0 {
+	if cr.info.NumEntries == 0 {
 		return nil, false, nil
 	}
-	if cr.info.MaxKey != nil && sst.Comparer.Compare(key, cr.info.MaxKey) > 0 {
+	if sst.Comparer.Compare(key, cr.info.MinKey) < 0 || sst.Comparer.Compare(key, cr.info.MaxKey) > 0 {
 		return nil, false, nil
 	}
 	v, ok, err := cr.reader.Get(key)
