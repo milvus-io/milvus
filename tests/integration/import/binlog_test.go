@@ -58,7 +58,7 @@ type SourceCollectionInfo struct {
 	l1MaxTs uint64 // max timestamp from L1 segments' insert binlogs
 }
 
-func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
+func (s *importTestBase) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster
@@ -250,7 +250,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	}
 }
 
-func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
+func (s *importTestBase) runBinlogTest(dmlGroup *DMLGroup) {
 	const dim = 128
 
 	sourceCollectionInfo := s.PrepareSourceCollection(dim, dmlGroup)

@@ -332,6 +332,7 @@ func TestSnapshotReaderFactoryEncryption(t *testing.T) {
 			defer open.UnPatch()
 			legacy := mockey.Mock(binlog.NewReader).When(func(_ context.Context, _ storage.ChunkManager,
 				_ *schemapb.CollectionSchema, _ *indexpb.StorageConfig, _ int64, _ []string, _, _ uint64, _ int, ezk string,
+				_ *indexcgopb.StoragePluginContext,
 			) bool {
 				require.Equal(t, "source-key", ezk, "ordinary backup retains its reader's key resolution")
 				return true

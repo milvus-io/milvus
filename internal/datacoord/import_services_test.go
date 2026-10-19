@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -139,6 +140,22 @@ func (s *ImportServicesSuite) TestImportV2_InvalidBinlogPathsAreNotRetryable() {
 	}
 }
 
+func (s *ImportServicesSuite) TestImportV2_UnsupportedTaskVersionReturnsError() {
+	ctx := context.Background()
+	paramtable.Init()
+	server := &Server{}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.ImportV2(ctx, &internalpb.ImportRequestInternal{
+		Options: []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		Version: 99,
+	})
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceInternal))
+}
+
 func (s *ImportServicesSuite) TestImportV2_L0ImportDisabledReturnsError() {
 	paramtable.Init()
 	ctx := context.Background()
@@ -191,6 +208,7 @@ func (s *ImportServicesSuite) TestImportV2_L0ImportEnabledPassesGate() {
 
 func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 	ctx := context.Background()
+	paramtable.Init()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.allocator = nil
@@ -211,6 +229,7 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 	ctx := context.Background()
+	paramtable.Init()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -234,6 +253,7 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// Mock validation to pass but broadcast to fail
 	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
@@ -308,6 +328,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// Mock validation to pass
 	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
@@ -608,6 +629,7 @@ func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtThe
 
 func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// Mock validation to pass
 	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
@@ -713,6 +735,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"nil_schema", nil},
 		{"l0_disabled", nil},
 		{"l0_enabled", nil},
+		{"unsupported_version", nil},
+		{"unsupported_version_no_job_id", merr.ErrDataIntegrity},
 	} {
 		s.Run(tc.name, func() {
 			ctx := context.Background()
@@ -746,6 +770,10 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				body.Schema = nil
 			case "l0_disabled", "l0_enabled":
 				body.Options["l0_import"] = "true"
+			case "unsupported_version":
+				body.Version = 99
+			case "unsupported_version_no_job_id":
+				body.Version, body.JobID = 99, 0
 			}
 			params := paramtable.Get()
 			s.Require().NoError(params.Save(params.DataCoordCfg.EnableL0Import.Key, fmt.Sprint(tc.name == "l0_enabled")))
@@ -810,6 +838,19 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			}
 			s.Equal(fmt.Sprint(wantID), resp.JobID)
 			s.Equal(wantID, saved.JobID)
+			if tc.name == "unsupported_version" {
+				// The minimal terminal envelope keeps only what querying, GC and a
+				// CDC rollback need: no files, no options, no data timestamp. It is
+				// recorded as V2 so no V3 task is ever derived from it.
+				s.Equal(internalpb.ImportJobState_Failed, saved.State)
+				s.Contains(saved.Reason, "unsupported import task version 99")
+				s.Equal(internalpb.ImportVersion_ImportVersionV2, saved.Version)
+				s.Empty(saved.Files)
+				s.Empty(saved.Options)
+				s.Zero(saved.DataTs)
+				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
+				return
+			}
 			s.Equal(body.CollectionID, saved.CollectionID)
 			s.Equal(body.CollectionName, saved.CollectionName)
 			s.Equal(body.PartitionIDs, saved.PartitionIDs)
@@ -912,4 +953,89 @@ func (s *ImportServicesSuite) TestImportV2_JobLimitStillRejectsANewJob() {
 	s.NoError(err)
 	s.NotEqual(int32(0), resp.GetStatus().GetCode())
 	s.Contains(resp.GetStatus().GetReason(), "number of jobs has reached the limit")
+}
+
+func (s *ImportServicesSuite) TestImportV2_MessageVersionIsAuthoritative() {
+	paramtable.Init()
+	ctx := context.Background()
+
+	var capturedVersion internalpb.ImportVersion
+	mockBroadcast := mockey.Mock((*Server).broadcastImport).To(func(
+		_ *Server, _ context.Context, _ int64, _ []int64, _ []*internalpb.ImportFile,
+		_ []*commonpb.KeyValuePair, _ int64, _ []string,
+		_ string, version internalpb.ImportVersion,
+	) (int64, bool, error) {
+		capturedVersion = version
+		return 0, false, nil
+	}).Build()
+	defer mockBroadcast.UnPatch()
+
+	server := &Server{importMeta: &importMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil).Times(5)
+	server.allocator = mockAllocator
+
+	newReq := func(version internalpb.ImportVersion) *internalpb.ImportRequestInternal {
+		return &internalpb.ImportRequestInternal{
+			CollectionID:   100,
+			CollectionName: "test",
+			PartitionIDs:   []int64{1},
+			ChannelNames:   []string{"v1"},
+			Schema:         &schemapb.CollectionSchema{Name: "test"},
+			Files:          []*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+			Options:        []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+			Version:        version,
+		}
+	}
+
+	params := paramtable.Get()
+	defer params.Reset(params.DataCoordCfg.EnableImportV3.Key)
+
+	// Gate off: an unversioned request is normalized to V2, but an explicitly
+	// forwarded V3 message is honored anyway -- the message version is
+	// authoritative, the gate only selects the version of new unversioned
+	// requests at the entrance.
+	params.Save(params.DataCoordCfg.EnableImportV3.Key, "false")
+	resp, err := server.ImportV2(ctx, newReq(internalpb.ImportVersion_ImportVersionUnspecified))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV2, capturedVersion)
+
+	resp, err = server.ImportV2(ctx, newReq(internalpb.ImportVersion_ImportVersionV3))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV3, capturedVersion)
+
+	// Gate on: an unversioned request is normalized to V3, an explicit V2 message
+	// stays V2.
+	params.Save(params.DataCoordCfg.EnableImportV3.Key, "true")
+	resp, err = server.ImportV2(ctx, newReq(internalpb.ImportVersion_ImportVersionUnspecified))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV3, capturedVersion)
+
+	// A snapshot-sourced request stays on V2 even with the gate on: the V3
+	// pipeline has no snapshot source support, so routing one there would import
+	// the snapshot's rows without folding its L0 deletes.
+	snapshotReq := newReq(internalpb.ImportVersion_ImportVersionUnspecified)
+	snapshotReq.Options = append(snapshotReq.Options,
+		&commonpb.KeyValuePair{Key: importutilv2.BackupFlag, Value: "true"},
+		&commonpb.KeyValuePair{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot})
+	resp, err = server.ImportV2(ctx, snapshotReq)
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV2, capturedVersion,
+		"snapshot import must never be routed to Import V3")
+
+	resp, err = server.ImportV2(ctx, newReq(internalpb.ImportVersion_ImportVersionV2))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV2, capturedVersion)
+
+	// An unknown explicit version is still rejected before broadcast.
+	params.Save(params.DataCoordCfg.EnableImportV3.Key, "false")
+	resp, err = server.ImportV2(ctx, newReq(99))
+	s.NoError(err)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceInternal))
 }

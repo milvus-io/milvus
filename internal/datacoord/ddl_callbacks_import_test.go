@@ -170,7 +170,7 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	s := &Server{broker: fake, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
 	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
 	_, _, err := s.broadcastImport(ctx, 100, []int64{200, 100},
-		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "")
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 	require.NoError(t, err)
 	require.True(t, called)
 	require.True(t, api.closeCalled.Load())
@@ -209,7 +209,7 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	partitionIDs := []int64{20, 10}
 	_, duplicated, err := server.broadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "")
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 	require.NoError(t, err)
 	require.False(t, duplicated)
 	require.Equal(t, partitionIDs, received)
@@ -222,7 +222,7 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	received = nil
 	_, _, err = server.broadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "")
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 	require.ErrorContains(t, err, "lost its shared L0 inventory")
 	require.Nil(t, received, "invalid source plans must fail before broadcast")
 }
@@ -285,7 +285,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			type boundaryAllocator struct{ allocator.Allocator }
 			s := &Server{meta: &meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
 			_, _, err := s.broadcastImport(context.Background(), 100, []int64{10}, files,
-				opts, 1, []string{"v1"}, "")
+				opts, 1, []string{"v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 			if stage == "auto_id" {
 				require.NoError(t, err)
 				require.Equal(t, 1, transport.Times())
@@ -352,7 +352,7 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 				&commonpb.KeyValuePair{Key: importutilv2.AutoCommitKey, Value: "false"})
 			_, _, err := server.broadcastImport(ctx, 100, []int64{10},
 				[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-				options, 1000, []string{"target_v1"}, "")
+				options, 1000, []string{"target_v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 			require.NoError(t, err)
 			require.Equal(t, "false", received[importutilv2.AutoCommitKey])
 			require.Equal(t, importutilv2.SourceTypeSnapshot, received[importutilv2.SourceType])
@@ -635,6 +635,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -683,6 +684,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -743,6 +745,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -807,6 +810,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -872,6 +876,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -954,6 +959,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.NoError(err)
@@ -995,7 +1001,7 @@ func TestBroadcastImport_RejectsChangedCanonicalSnapshot(t *testing.T) {
 	}, nil).Once()
 
 	server := &Server{broker: mockBroker}
-	_, _, err := server.broadcastImport(ctx, 100, nil, nil, nil, 1000, []string{"v1"}, "")
+	_, _, err := server.broadcastImport(ctx, 100, nil, nil, nil, 1000, []string{"v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	assert.Nil(t, api.capturedMsg)
@@ -1289,8 +1295,11 @@ func TestImportFlowIntegration(t *testing.T) {
 
 func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -2203,4 +2212,38 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
 	assert.Equal(t, []string{"vchannel1"}, saved.GetReadyVchannels())
 	assert.Equal(t, uint64(200), saved.GetDataTs())
+}
+
+// TestUpdateImportAckCallback_V3JobUncommittedWithoutRangesFailsJob pins the V3
+// range gate: a V3 job always needs exact ranges (no version-gate / no
+// local-allocator fallback), so an UpdateImport that finds it in Uncommitted
+// with no local ranges signals cross-cluster file divergence and must fail it.
+func TestUpdateImportAckCallback_V3JobUncommittedWithoutRangesFailsJob(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:   27,
+			State:   internalpb.ImportJobState_Uncommitted,
+			Version: internalpb.ImportVersion_ImportVersionV3,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			}},
+			Files: []*internalpb.ImportFile{
+				{Id: 101, Paths: []string{"a.parquet"}},
+				{Id: 102, Paths: []string{"b.parquet"}},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	require.NoError(t, importMeta.AddJob(ctx, job))
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+		buildUpdateImportBroadcastResult(27, validIDRangeFileRanges(), 0)))
+
+	got := importMeta.GetJob(ctx, 27)
+	require.NotNil(t, got)
+	assert.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+	assert.Contains(t, got.GetReason(), "cross-cluster file divergence")
 }
