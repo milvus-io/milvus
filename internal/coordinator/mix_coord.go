@@ -567,6 +567,11 @@ func (s *mixCoordImpl) HasCollection(ctx context.Context, req *milvuspb.HasColle
 	return s.rootcoordServer.HasCollection(ctx, req)
 }
 
+// IsCollectionAvailable is an in-process, positive-only GC fast path.
+func (s *mixCoordImpl) IsCollectionAvailable(collectionID int64) bool {
+	return s.rootcoordServer.IsCollectionAvailable(collectionID)
+}
+
 func (s *mixCoordImpl) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.rootcoordServer.DescribeCollection(ctx, req)
 }
@@ -1589,4 +1594,38 @@ func (s *mixCoordImpl) GetRefreshExternalCollectionProgress(ctx context.Context,
 
 func (s *mixCoordImpl) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
 	return s.datacoordServer.ListRefreshExternalCollectionJobs(ctx, req)
+}
+
+func (s *mixCoordImpl) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	resp, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, req)
+	if merr.CheckRPCCall(resp, err) == nil {
+		resp.IndexInfoList = s.datacoordServer.GetQueryViewCollectionIndexInfos(req.GetCollectionID())
+	}
+	return resp, err
+}
+
+func (s *mixCoordImpl) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	if req.GetLoadInfoVersion() != 0 {
+		loadInfo, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{
+			CollectionID: req.GetCollectionId(),
+			Version:      req.GetLoadInfoVersion(),
+		})
+		if err := merr.CheckRPCCall(loadInfo, err); err != nil {
+			return &datapb.GetStreamingNodeQueryViewResourcesResponse{
+				Status:       merr.Status(err),
+				CollectionId: req.GetCollectionId(),
+				Vchannel:     req.GetVchannel(),
+				DataVersion:  req.GetDataVersion(),
+			}, nil
+		}
+		req = &datapb.GetStreamingNodeQueryViewResourcesRequest{
+			Base:            req.GetBase(),
+			CollectionId:    req.GetCollectionId(),
+			Vchannel:        req.GetVchannel(),
+			DataVersion:     req.GetDataVersion(),
+			LoadInfoVersion: req.GetLoadInfoVersion(),
+			PartitionIds:    append([]int64(nil), loadInfo.GetPartitionIDs()...),
+		}
+	}
+	return s.datacoordServer.GetStreamingNodeQueryViewResources(ctx, req)
 }

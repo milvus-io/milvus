@@ -166,6 +166,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
 	core := newTestCore(withHealthyCode(),
 		withMeta(&MetaTable{
+			ctx:              context.Background(),
 			catalog:          rootcoord.NewCatalog(catalogKV),
 			names:            testDB,
 			aliases:          newNameDb(),

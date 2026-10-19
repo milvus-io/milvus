@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -35,7 +36,144 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
+	ctx := context.Background()
+	core := initStreamingSystemAndCore(t)
+	const db, name = "rls_switch_db", "rls_switch_collection"
+	createCollectionForTest(t, ctx, core, db, name)
+	meta := core.meta.(*MetaTable)
+	coll, err := meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	id := coll.CollectionID
+
+	// Configure metadata before enabling enforcement, through the WAL callbacks.
+	createPolicy := &rlsutil.CreateRowPolicyRequest{
+		DbName: db, CollectionName: name, PolicyName: "tenant",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:  "field1 == $current_principal_tags['tenant']",
+	}
+	require.NoError(t, core.broadcastCreateRLSPolicy(ctx, createPolicy))
+	setTags := &rlsutil.SetRLSPrincipalTagsRequest{
+		DbName: db, CollectionName: name, PrincipalName: "alice",
+		Tags: map[string]rlsutil.TagValue{"tenant": rlsutil.NewInt64TagValue(1)},
+	}
+	require.NoError(t, core.broadcastSetRLSPrincipalTags(ctx, setTags))
+
+	for _, enabled := range []string{"True", "false", "true"} {
+		status, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			DbName: db, CollectionName: name,
+			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: enabled}},
+		})
+		require.NoError(t, merr.CheckRPCCall(status, err))
+		coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
+		require.NoError(t, err)
+		actual, err := common.IsRLSEnabled(coll.Properties...)
+		require.NoError(t, err)
+		require.Equal(t, enabled != "false", actual)
+		require.Len(t, coll.RLSPolicies, 1)
+
+		if enabled == "false" {
+			// Disabling also permits editing the configuration for the next enable.
+			require.NoError(t, core.broadcastUpdateRLSPolicy(ctx, &rlsutil.UpdateRowPolicyRequest{
+				DbName: db, CollectionName: name, PolicyName: "tenant",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "field1 == 2",
+			}))
+			setTags.Tags["tenant"] = rlsutil.NewInt64TagValue(2)
+			require.NoError(t, core.broadcastSetRLSPrincipalTags(ctx, setTags))
+		}
+		tags, err := meta.GetRLSPrincipalTags(ctx, &rlsutil.GetRLSPrincipalTagsRequest{
+			DbName: db, CollectionName: name, PrincipalName: "alice",
+		})
+		require.NoError(t, err)
+		require.Equal(t, setTags.Tags, tags)
+	}
+	require.Equal(t, "field1 == 2", coll.RLSPolicies["tenant"].UsingExpr)
+
+	status, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: db, CollectionName: name,
+		Properties: []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "true"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: db, CollectionName: name,
+		Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "false"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrParameterInvalid)
+	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: db, CollectionName: name,
+		DeleteKeys: []string{common.RLSEnabledKey, common.RLSForceKey},
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	enabled, err := common.IsRLSEnabled(coll.Properties...)
+	require.NoError(t, err)
+	require.False(t, enabled)
+
+	// Recovery restores metadata even while enforcement is disabled.
+	coll = coll.Clone()
+	coll.RLSPolicies = nil
+	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
+	require.Len(t, coll.RLSPolicies, 1)
+	meta.ddLock.Lock()
+	meta.collID2Meta[id] = coll.Clone()
+	meta.ddLock.Unlock()
+	require.ErrorContains(t, core.broadcastCreateRLSPolicy(ctx, createPolicy), "already exists")
+	require.Equal(t, "field1 == 2", coll.RLSPolicies["tenant"].UsingExpr)
+
+	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: db, CollectionName: name,
+		Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Len(t, coll.RLSPolicies, 1)
+	require.Equal(t, "field1 == 2", coll.RLSPolicies["tenant"].UsingExpr)
+	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: db, CollectionName: name,
+		Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "false"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
+	meta.ddLock.Lock()
+	meta.collID2Meta[id] = coll
+	meta.ddLock.Unlock()
+
+	require.NoError(t, core.broadcastDeleteRLSPrincipalTags(ctx, &rlsutil.DeleteRLSPrincipalTagsRequest{
+		DbName: db, CollectionName: name, PrincipalName: "alice", TagKeys: []string{"tenant"},
+	}))
+	require.NoError(t, core.broadcastDropRLSPolicy(ctx, &rlsutil.DropRowPolicyRequest{
+		DbName: db, CollectionName: name, PolicyName: "tenant",
+	}))
+	policies, err := meta.ListRLSPolicies(ctx, &rlsutil.ListRowPoliciesRequest{DbName: db, CollectionName: name})
+	require.NoError(t, err)
+	require.Empty(t, policies)
+	principals, err := meta.ListRLSPrincipals(ctx, &rlsutil.ListRLSPrincipalsRequest{DbName: db, CollectionName: name})
+	require.NoError(t, err)
+	require.Empty(t, principals)
+
+	// Dropping a disabled collection, unlike toggling enforcement, removes metadata.
+	require.NoError(t, core.broadcastCreateRLSPolicy(ctx, createPolicy))
+	require.NoError(t, core.broadcastSetRLSPrincipalTags(ctx, setTags))
+	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{DbName: db, CollectionName: name})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	// The production tombstone sweeper performs this after data GC.
+	require.NoError(t, meta.RemoveCollection(ctx, id, 0))
+	stored, err := meta.catalog.ListRLSPolicies(ctx, id)
+	require.NoError(t, err)
+	require.Empty(t, stored)
+	_, err = meta.catalog.GetRLSPrincipal(ctx, id, "alice")
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+}
 
 func mustMarshalRLSPrincipalMessage(principal *model.RLSPrincipal) *messagespb.RLSPrincipalMetadata {
 	message, err := marshalRLSPrincipalMessage(principal)

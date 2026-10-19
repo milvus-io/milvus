@@ -33,6 +33,8 @@ milvus run [server type] [flags]
 		Start the datacoord server.
 	-alias ''
 		Set alias
+	--native-profile
+		Enable the existing jemalloc heap profiler (requires a Linux build with jemalloc profiling support).
 `
 	stopLine = `
 milvus stop [server type] [flags]

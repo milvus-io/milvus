@@ -122,6 +122,18 @@ func TestCipherStartupFailureLogsProtectConfig(t *testing.T) {
 }
 
 func TestHookStartupFailureLogsProtectConfig(t *testing.T) {
+	const childEnv = "MILVUS_TEST_HOOK_STARTUP_FAILURE"
+	if os.Getenv(childEnv) != "1" {
+		// Start without the config watchers registered by other hook tests.
+		// Their async GetHook calls race with resetting initOnce below.
+		executable, err := os.Executable()
+		require.NoError(t, err)
+		cmd := exec.Command(executable, "-test.run=^TestHookStartupFailureLogsProtectConfig$") // #nosec G204 -- Re-exec the current test binary with a fixed test filter.
+		cmd.Env = append(os.Environ(), childEnv+"=1")
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		return
+	}
 	paramtable.Init()
 	params := paramtable.Get()
 	const key, canary = "opaqueSetting", "hook-startup-secret-canary"

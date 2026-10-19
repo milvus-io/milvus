@@ -313,6 +313,11 @@ func buildMergeEntries(
 				fmt.Sprintf("heapMergeReduce: input %d missing required %s column", inputIdx, segOffsetCol))
 		}
 
+		// Validate before heap comparisons or copying values without null bits.
+		if err := chain.ValidateScoreChunk(scoreChunk, chunkIdx); err != nil {
+			return nil, merr.Wrapf(err, "heapMergeReduce: input %d", inputIdx)
+		}
+
 		entry := &mergeEntry{
 			inputIdx: inputIdx,
 			scoreArr: scoreChunk.(*array.Float32),

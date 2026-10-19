@@ -551,22 +551,23 @@ func TestRewrite_And_In_Intersection_Empty_ToFalse(t *testing.T) {
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
-func TestRewrite_And_In_And_NotEqual_Remove(t *testing.T) {
+func TestRewrite_And_In_And_NotEqual_RemovesExcludedValue(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field != 5`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
-	require.Equal(t, 9, len(term.GetValues()))
+	values := make([]int64, 0, len(term.GetValues()))
+	for _, value := range term.GetValues() {
+		values = append(values, value.GetInt64Val())
+	}
+	require.Equal(t, []int64{1, 2, 3, 4, 6, 7, 8, 9, 10}, values)
 }
 
-func TestRewrite_And_In_And_NotEqual_AllRemoved_ToFalse(t *testing.T) {
+func TestRewrite_And_In_And_NotEquals_AllExcluded_ToFalse(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// in [10 values] and != each of them → false
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field != 1 and Int64Field != 2 and Int64Field != 3 and Int64Field != 4 and Int64Field != 5 and Int64Field != 6 and Int64Field != 7 and Int64Field != 8 and Int64Field != 9 and Int64Field != 10`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
@@ -574,18 +575,14 @@ func TestRewrite_Or_In_Or_NotEqual_VInSet_ToTrue(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field != 5`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
-	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
-		"OR(IN, !=) tautology should be rewritten to AlwaysTrueExpr")
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr))
 }
 
-func TestRewrite_Or_In_Or_NotEqual_VarChar_Tautology(t *testing.T) {
+func TestRewrite_Or_In_Or_NotEqual_VarChar_ToTrue(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `VarCharField in ["", "a", "b"] or VarCharField != ""`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
-	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
-		"OR(IN, !=) tautology with VarChar should be rewritten to AlwaysTrueExpr")
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr))
 }
 
 func TestRewrite_Or_In_Or_NotEqual_Nullable_KeepsOriginalPredicate(t *testing.T) {
@@ -601,6 +598,21 @@ func TestRewrite_Or_In_Or_NotEqual_Nullable_KeepsOriginalPredicate(t *testing.T)
 		require.NotNil(t, expr.GetBinaryExpr(), "nullable OR(IN, !=) should keep OR predicate shape: %s", exprStr)
 		require.NotNil(t, findTermExpr(expr), "nullable OR(IN, !=) should keep IN term: %s", exprStr)
 		require.NotNil(t, findUnaryRangeExpr(expr, planpb.OpType_NotEqual), "nullable OR(IN, !=) should keep != predicate: %s", exprStr)
+	}
+}
+
+func TestRewrite_Or_In_Or_NotEqual_Nullable_MissDropsRedundantIn(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+	for _, filter := range []string{
+		`NullableInt64Field in [1,2] or NullableInt64Field != 3`,
+		`NullableVarCharField in ["a","b"] or NullableVarCharField != "c"`,
+	} {
+		expr, err := parser.ParseExpr(helper, filter, nil)
+		require.NoError(t, err, filter)
+		notEqual := expr.GetUnaryRangeExpr()
+		require.NotNil(t, notEqual, "removing a redundant IN must preserve NULL semantics: %s", filter)
+		require.Equal(t, planpb.OpType_NotEqual, notEqual.GetOp())
+		require.True(t, notEqual.GetColumnInfo().GetNullable())
 	}
 }
 
@@ -698,19 +710,26 @@ func TestRewrite_NullableContradictions_UnderNot_DoNotBecomeAlwaysTrue(t *testin
 	}
 }
 
-func TestRewrite_Or_In_Or_NotEqual_VNotInSet_ToNotEqual(t *testing.T) {
+func TestRewrite_Or_In_Or_NotEqual_VNotInSet_DropsRedundantIn(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field != 20`, nil)
 	require.NoError(t, err)
-	require.NotNil(t, expr)
-	ure := expr.GetUnaryRangeExpr()
-	require.NotNil(t, ure)
-	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
-	require.Equal(t, int64(20), ure.GetValue().GetInt64Val())
+	notEqual := expr.GetUnaryRangeExpr()
+	require.NotNil(t, notEqual)
+	require.Equal(t, planpb.OpType_NotEqual, notEqual.GetOp())
+	require.Equal(t, int64(20), notEqual.GetValue().GetInt64Val())
 }
 
-// Test contradictory equals: (a == 1) AND (a == 2) → false
-// NOTE: This is a known limitation - currently NOT optimized
+func TestRewrite_Or_EqualsMergeToInThenDropRedundantIn(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `Int64Field == 1 or Int64Field == 2 or Int64Field != 3`, nil)
+	require.NoError(t, err)
+	notEqual := expr.GetUnaryRangeExpr()
+	require.NotNil(t, notEqual)
+	require.Equal(t, planpb.OpType_NotEqual, notEqual.GetOp())
+	require.Equal(t, int64(3), notEqual.GetValue().GetInt64Val())
+}
+
 func TestRewrite_And_Equal_And_Equal_Contradiction_CurrentLimitation(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field == 1 and Int64Field == 2`, nil)

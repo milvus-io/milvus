@@ -12,12 +12,14 @@
 #include "segcore/load_index_c.h"
 
 #include <folly/ExceptionWrapper.h>
+#include <folly/ScopeGuard.h>
 #include <stdlib.h>
 #include <string.h>
 #include <chrono>
 #include <cstdint>
 #include <exception>
 #include <iosfwd>
+#include <limits>
 #include <map>
 #include <memory>
 #include <new>
@@ -37,11 +39,8 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "common/type_c.h"
-#include "fmt/core.h"
 #include "glog/logging.h"
-#include "index/Index.h"
-#include "index/IndexFactory.h"
-#include "index/IndexInfo.h"
+#include "index/LoadResource.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "knowhere/utils.h"
@@ -53,12 +52,21 @@
 #include "pb/schema.pb.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
+#include "storage/FileManager.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 
 namespace {
+
+CStatus
+FailureCStatusNoThrow(int error_code, const char* message) noexcept {
+    CStatus status{};
+    status.error_code = error_code;
+    status.error_msg = message == nullptr ? nullptr : strdup(message);
+    return status;
+}
 
 void
 FillLoadIndexInfoFromProto(const milvus::proto::cgo::LoadIndexInfo& info_proto,
@@ -126,7 +134,7 @@ EstimateLoadIndexResourceFromLoadInfo(
     // Keep admission estimation metadata-only: exact scalar V3 directory
     // inspection belongs to SealedIndexTranslator, where the result is used
     // for the actual MCL loading reservation.
-    return milvus::index::IndexFactory::GetInstance().IndexLoadResource(
+    return milvus::index::IndexLoadResource(
         field_type,
         element_type,
         load_index_info->index_engine_version,
@@ -139,16 +147,23 @@ EstimateLoadIndexResourceFromLoadInfo(
 
 }  // namespace
 
-bool
-IsLoadWithDisk(const char* index_type, int index_engine_version) {
+CStatus
+IsLoadWithDisk(const char* index_type,
+               int index_engine_version,
+               bool* is_load_with_disk) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        return knowhere::UseDiskLoad(index_type, index_engine_version) ||
-               strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
+        AssertInfo(is_load_with_disk != nullptr,
+                   "load-with-disk output is null");
+        *is_load_with_disk = false;
+        AssertInfo(index_type != nullptr, "index type is null");
+        *is_load_with_disk =
+            knowhere::UseDiskLoad(index_type, index_engine_version) ||
+            strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
+        return milvus::SuccessCStatus();
     }
-    CGO_CATCH_AND_LOG("IsLoadWithDisk")
-    return false;
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -156,14 +171,14 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
+        AssertInfo(c_load_index_info != nullptr,
+                   "load index info output is null");
+        *c_load_index_info = nullptr;
         auto load_index_info =
             std::make_unique<milvus::segcore::LoadIndexInfo>();
 
         *c_load_index_info = load_index_info.release();
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
+        return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
 }
@@ -178,14 +193,16 @@ DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info) {
 
 CStatus
 EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info,
-                          LoadResourceRequest* c_load_resource_request) {
+                          LoadResourceRequest* request) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
+        AssertInfo(request != nullptr, "load resource output is null");
+        *request = LoadResourceRequest{};
+        AssertInfo(c_load_index_info != nullptr, "load index info is null");
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        *c_load_resource_request =
-            EstimateLoadIndexResourceFromLoadInfo(load_index_info);
+        *request = EstimateLoadIndexResourceFromLoadInfo(load_index_info);
         return milvus::SuccessCStatus();
     }
     // Estimation failure must reach the Go caller as an error: a swallowed
@@ -204,6 +221,12 @@ EstimateLoadIndexResourceFromSerializedInfo(
     try {
         AssertInfo(load_resource_request != nullptr,
                    "load resource request is null");
+        *load_resource_request = {};
+        AssertInfo(serialized_load_index_info != nullptr,
+                   "serialized load index info is null");
+        AssertInfo(
+            len <= static_cast<uint64_t>(std::numeric_limits<int>::max()),
+            "load index info is too large");
         auto info_proto = milvus::proto::cgo::LoadIndexInfo();
         auto parsed =
             info_proto.ParseFromArray(serialized_load_index_info, len);
@@ -272,16 +295,18 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
     try {
         auto load_index_info =
             static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
+        AssertInfo(load_index_info != nullptr, "load index info is null");
 
         auto ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
         auto span = milvus::tracer::StartSpan("SegCoreLoadIndex", &ctx);
         milvus::tracer::SetRootSpan(span);
+        auto trace_guard = folly::makeGuard([&]() {
+            span->End();
+            milvus::tracer::CloseRootSpan();
+        });
 
         LoadIndexData(ctx, load_index_info);
-
-        span->End();
-        milvus::tracer::CloseRootSpan();
 
         LOG_INFO(
             "[collection={}][segment={}][field={}][enable_mmap={}] load index "
@@ -293,10 +318,7 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             load_index_info->index_id,
             load_index_info->mmap_dir_path);
 
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
+        return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
 }
@@ -308,12 +330,9 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+        AssertInfo(load_index_info != nullptr, "load index info is null");
         load_index_info->cache_index.reset();
-        load_index_info->index.reset();
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
+        return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
 }
@@ -325,8 +344,15 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
     SCOPE_CGO_CALL_METRIC();
 
     try {
+        AssertInfo(c_load_index_info != nullptr, "load index info is null");
+        AssertInfo(serialized_load_index_info != nullptr,
+                   "serialized load index info is null");
+        AssertInfo(len <= std::numeric_limits<int>::max(),
+                   "serialized load index info is too large");
         auto info_proto = std::make_unique<milvus::proto::cgo::LoadIndexInfo>();
-        info_proto->ParseFromArray(serialized_load_index_info, len);
+        AssertInfo(info_proto->ParseFromArray(serialized_load_index_info,
+                                              static_cast<int>(len)),
+                   "failed to parse serialized load index info");
         auto load_index_info =
             static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
         // TODO: keep this since LoadIndexInfo is used by SegmentSealed.
@@ -340,19 +366,29 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                     .GetChunkManager()
                     ->GetRootPath();
         }
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
+        return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
 }
 
-void
+CStatus
 SetLoadIndexInfoShard(CLoadIndexInfo c_load_index_info, const char* shard) {
     SCOPE_CGO_CALL_METRIC();
 
-    auto load_index_info =
-        static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
-    load_index_info->shard = shard == nullptr ? "" : shard;
+    try {
+        auto load_index_info =
+            static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
+        AssertInfo(load_index_info != nullptr, "load index info is null");
+        load_index_info->shard = shard == nullptr ? "" : shard;
+        return milvus::SuccessCStatus();
+    } catch (milvus::SegcoreError& e) {
+        return milvus::FailureCStatus(&e);
+    } catch (std::bad_alloc& e) {
+        return FailureCStatusNoThrow(milvus::MemAllocateFailed, e.what());
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    } catch (...) {
+        return FailureCStatusNoThrow(milvus::UnexpectedError,
+                                     "unknown exception");
+    }
 }

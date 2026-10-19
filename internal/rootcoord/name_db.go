@@ -90,29 +90,12 @@ func (n *nameDb) listCollectionID(dbName string) ([]typeutil.UniqueID, error) {
 	return maps.Values(name2ID), nil
 }
 
-func (n *nameDb) removeIf(selector func(db string, collection string, id UniqueID) bool) {
-	type union struct {
-		db         string
-		collection string
-		id         UniqueID
+func (n *nameDb) removeIfMatched(db, collection string, collectionID UniqueID) bool {
+	if id, ok := n.get(db, collection); !ok || id != collectionID {
+		return false
 	}
-
-	matches := make([]union, 0, len(n.db2Name2ID))
-	for dbName, db := range n.db2Name2ID {
-		for collection, id := range db {
-			if selector(dbName, collection, id) {
-				matches = append(matches, union{
-					db:         dbName,
-					collection: collection,
-					id:         id,
-				})
-			}
-		}
-	}
-
-	for _, match := range matches {
-		delete(n.db2Name2ID[match.db], match.collection)
-	}
+	n.remove(db, collection)
+	return true
 }
 
 func (n *nameDb) remove(db, collection string) {

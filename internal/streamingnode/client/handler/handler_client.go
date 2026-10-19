@@ -75,6 +75,12 @@ type ConsumerOptions struct {
 // HandlerClient wraps the PChannel Assignment Service Discovery.
 // Provides the ability to create pchannel-level producer and consumer.
 type HandlerClient interface {
+	// RunAnalyzer executes an analyzer on a streaming node.
+	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
+
+	// GetCollectionSchema resolves a schema on the current primary WAL owner.
+	GetCollectionSchema(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error)
+
 	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
 	// If the wal is located at remote, it will return 0, error.
 	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
@@ -127,7 +133,7 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 		)
 	})
 	watcher := assignment.NewWatcher(rb.Resolver())
-	return &handlerClientImpl{
+	hc := &handlerClientImpl{
 		lifetime:         typeutil.NewLifetime(),
 		service:          lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
 		rb:               rb,
@@ -136,6 +142,7 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 		newProducer:      producer.CreateProducer,
 		newConsumer:      consumer.CreateConsumer,
 	}
+	return hc
 }
 
 // getDialOptions returns grpc dial options.

@@ -25,6 +25,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -45,18 +46,43 @@ import (
 // addition to the appended field) to exactly the writer's column set. Passing
 // such an over-wide record straight to the FFI writer misaligns column count
 // against the writer's manifest and crashes loon_writer_write.
-func toWriterRecord(r Record, schema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) (arrow.Record, func()) {
+func toWriterRecord(r Record, schema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) (arrow.Record, func(), error) {
 	if sar, ok := r.(*simpleArrowRecord); ok && sar.r.Schema().Equal(arrowSchema) {
-		return sar.r, func() {}
+		return sar.r, func() {}, nil
 	}
-	// Include struct sub-fields, matching the writer's arrow schema layout.
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	arrays := make([]arrow.Array, len(allFields))
+	var normalized []arrow.Array
+	defer func() {
+		for _, column := range normalized {
+			column.Release()
+		}
+	}()
 	for i, field := range allFields {
-		arrays[i] = r.Column(field.GetFieldID())
+		column := r.Column(field.GetFieldID())
+		expected := arrowSchema.Field(i).Type
+		if column == nil || column.Len() < r.Len() {
+			return nil, nil, merr.WrapErrServiceInternalMsg("missing or short writer column for field %s", field.GetName())
+		}
+		if !arrow.TypeEqual(column.DataType(), expected) {
+			// Absent TEXT fields are filled with binary nulls, including for
+			// decoded UTF8 writers. Nulls have no LOB/string payload to convert;
+			// normalize them to the writer's fixed schema on every batch.
+			sourceType, targetType := column.DataType().ID(), expected.ID()
+			if field.GetDataType() == schemapb.DataType_Text && column.NullN() == column.Len() &&
+				(sourceType == arrow.STRING || sourceType == arrow.BINARY) &&
+				(targetType == arrow.STRING || targetType == arrow.BINARY) {
+				column = array.MakeArrayOfNull(memory.DefaultAllocator, expected, r.Len())
+				normalized = append(normalized, column)
+			} else {
+				return nil, nil, merr.WrapErrServiceInternalMsg("writer column type mismatch for field %s: got %s, expected %s",
+					field.GetName(), column.DataType(), expected)
+			}
+		}
+		arrays[i] = column
 	}
 	rec := array.NewRecord(arrowSchema, arrays, int64(r.Len()))
-	return rec, rec.Release
+	return rec, rec.Release, nil
 }
 
 var _ RecordWriter = (*packedRecordWriter)(nil)
@@ -78,20 +104,11 @@ type packedRecordWriter struct {
 }
 
 func (pw *packedRecordWriter) Write(r Record) error {
-	var rec arrow.Record
-	sar, ok := r.(*simpleArrowRecord)
-	if !ok {
-		// Get all fields including struct sub-fields
-		allFields := typeutil.GetAllFieldSchemas(pw.schema)
-		arrays := make([]arrow.Array, len(allFields))
-		for i, field := range allFields {
-			arrays[i] = r.Column(field.FieldID)
-		}
-		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
-		defer rec.Release()
-	} else {
-		rec = sar.r
+	rec, release, err := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	if err != nil {
+		return err
 	}
+	defer release()
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
 		size := calculateActualDataSize(arr)
@@ -162,13 +179,45 @@ func NewPackedRecordWriter(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*packedRecordWriter, error) {
+	return newPackedRecordWriter(bucketName, paths, schema, false, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
+}
+
+// NewPackedRecordWriterWithFieldIDNames is the packed-record writer used by
+// Import V3 temporary fragments. It writes arrow column names as field IDs,
+// matching the field-ID-based column names that every packed reader
+// (newPackedRecordReader / newFFIPackedRecordReaderFromFragments) uses to open
+// the same object.
+func NewPackedRecordWriterWithFieldIDNames(
+	bucketName string,
+	paths []string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) (*packedRecordWriter, error) {
+	return newPackedRecordWriter(bucketName, paths, schema, true, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
+}
+
+func newPackedRecordWriter(
+	bucketName string,
+	paths []string,
+	schema *schemapb.CollectionSchema,
+	useFieldID bool,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) (*packedRecordWriter, error) {
 	// Validate PK field exists before proceeding
 	_, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
 
-	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	arrowSchema, err := ConvertToArrowSchema(schema, useFieldID)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
@@ -218,7 +267,10 @@ type packedRecordBatchWriter struct {
 }
 
 func (pw *packedRecordBatchWriter) Write(r Record) error {
-	rec, release := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	rec, release, err := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	if err != nil {
+		return err
+	}
 	defer release()
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
@@ -466,20 +518,11 @@ type packedTextBatchWriter struct {
 }
 
 func (pw *packedTextBatchWriter) Write(r Record) error {
-	var rec arrow.Record
-	sar, ok := r.(*simpleArrowRecord)
-	if !ok {
-		// get all fields including struct sub-fields
-		allFields := typeutil.GetAllFieldSchemas(pw.schema)
-		arrays := make([]arrow.Array, len(allFields))
-		for i, field := range allFields {
-			arrays[i] = r.Column(field.FieldID)
-		}
-		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
-		defer rec.Release()
-	} else {
-		rec = sar.r
+	rec, release, err := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	if err != nil {
+		return err
 	}
+	defer release()
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
 		size := calculateActualDataSize(arr)
@@ -558,6 +601,7 @@ func NewPackedTextBatchWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	textColumnConfigs []packed.TextColumnConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
 	schemaBasedFormats []string,
 ) (*packedTextBatchWriter, error) {
@@ -605,7 +649,7 @@ func NewPackedTextBatchWriter(
 		SchemaBasedFormats: schemaBasedFormats,
 	}
 
-	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig)
+	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig, storagePluginContext)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "can not new segment writer")
 	}

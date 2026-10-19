@@ -658,40 +658,49 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 }
 
 func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
+	dbName, collectionName, dropped, err := mt.markCollectionDropping(ctx, collectionID, ts)
+	if err != nil || !dropped {
+		return err
+	}
+
+	// Grant cleanup scans the catalog by prefix and can be much slower than the
+	// metadata update above. Keep it synchronous so the caller's collection
+	// resource lock remains held, but do not serialize unrelated DDL metadata
+	// operations on ddLock while the scan is running.
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, dbName, collectionName); err != nil {
+		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
+			mlog.String("dbName", dbName), mlog.String("collectionName", collectionName), mlog.Err(err))
+	}
+
+	return nil
+}
+
+func (mt *MetaTable) markCollectionDropping(ctx context.Context, collectionID UniqueID, ts Timestamp) (string, string, bool, error) {
+	dbName, persisted, err := mt.persistCollectionDropping(ctx, collectionID, ts)
+	if err != nil || !persisted {
+		return "", "", false, err
+	}
+
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
+	// Re-read after changing lock modes: partition GC may have removed a
+	// partition, or another drop may have already published the state.
 	coll, ok := mt.collID2Meta[collectionID]
-	if !ok {
-		return nil
+	if !ok || coll.State == pb.CollectionState_CollectionDropping {
+		return "", "", false, nil
 	}
-	if coll.State == pb.CollectionState_CollectionDropping {
-		return nil
-	}
-
-	// Resolve the database before persisting the Dropping state. Once the
-	// collection becomes Dropping, callback retries take the idempotent return
-	// above, so no fallible lookup should remain before the in-memory counters
-	// and channel stats are updated.
-	db, err := mt.getDatabaseByIDInternal(ctx, normalizeCollectionDBID(coll.DBID), typeutil.MaxTimestamp)
-	if err != nil {
-		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
-	}
-
-	clone := coll.Clone()
+	clone := coll.ShallowClone()
 	clone.State = pb.CollectionState_CollectionDropping
 	clone.UpdateTimestamp = ts
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false); err != nil {
-		return err
-	}
 	mt.collID2Meta[collectionID] = clone
 	for _, fileResourceID := range coll.FileResourceIds {
 		if mt.fileResourceRefCnt[fileResourceID] > 0 {
 			mt.fileResourceRefCnt[fileResourceID]--
 		} else {
-			mlog.Warn(context.TODO(), "DropCollection: file resource refCnt underflow",
+			mlog.Warn(ctx, "DropCollection: file resource refCnt underflow",
 				mlog.Int64("collectionID", collectionID), mlog.Int64("fileResourceID", fileResourceID))
 		}
 	}
@@ -708,58 +717,58 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		mt.decreaseAvailableCollectionCountLocked(coll.DBID)
 	}
 	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
-	metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
+	metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Dec()
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
 
 	mlog.Info(ctx, "drop collection from meta table", mlog.Int64("collection", collectionID),
 		mlog.String("state", coll.State.String()), mlog.Uint64("ts", ts))
 
-	// Delete all grants referencing this collection immediately so they don't
-	// linger until the tombstone sweeper runs (which can take minutes).
-	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, db.Name, coll.Name); err != nil {
-		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
-			mlog.String("dbName", db.Name), mlog.String("collectionName", coll.Name), mlog.Err(err))
+	return dbName, coll.Name, true, nil
+}
+
+// persistCollectionDropping shares ddLock so catalog writes for different
+// collections can overlap while excluding partition GC, whose legacy path
+// rewrites the collection record. Collection GC only removes Dropping collections,
+// for which this method is already a no-op. Normal DDL for this collection remains
+// ordered by the broadcaster resource locks.
+func (mt *MetaTable) persistCollectionDropping(ctx context.Context, collectionID UniqueID, ts Timestamp) (string, bool, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok || coll.State == pb.CollectionState_CollectionDropping {
+		return "", false, nil
 	}
 
-	return nil
+	// Resolve the database before persistence so a lookup failure remains
+	// retryable without changing the collection state or its counters.
+	db, err := mt.getDatabaseByIDInternal(ctx, normalizeCollectionDBID(coll.DBID), typeutil.MaxTimestamp)
+	if err != nil {
+		return "", false, merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
+	}
+	clone := coll.ShallowClone()
+	clone.State = pb.CollectionState_CollectionDropping
+	clone.UpdateTimestamp = ts
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false); err != nil {
+		return "", false, err
+	}
+	return db.Name, true, nil
 }
 
-func (mt *MetaTable) removeIfNameMatchedInternal(ctx context.Context, collectionID UniqueID, name string) {
-	mt.names.removeIf(func(db string, collection string, id UniqueID) bool {
-		if collectionID == id {
-			mlog.Info(ctx, "remove from names",
-				mlog.String("dbName", db),
-				mlog.String("collectionName", collection),
-				mlog.Int64("collectionID", id),
-			)
-			return true
-		}
-		return false
-	})
-}
-
-func (mt *MetaTable) removeIfAliasMatchedInternal(ctx context.Context, collectionID UniqueID, alias string) {
-	mt.aliases.removeIf(func(db string, collection string, id UniqueID) bool {
-		if collectionID == id {
-			mlog.Info(ctx, "remove from aliases",
-				mlog.String("dbName", db),
-				mlog.String("alias", collection),
-				mlog.Int64("collectionID", id),
-			)
-			return true
-		}
-		return false
-	})
-}
-
-func (mt *MetaTable) removeIfMatchedInternal(ctx context.Context, collectionID UniqueID, name string) {
-	mt.removeIfNameMatchedInternal(ctx, collectionID, name)
-	mt.removeIfAliasMatchedInternal(ctx, collectionID, name)
-}
-
-func (mt *MetaTable) removeAllNamesIfMatchedInternal(ctx context.Context, collectionID UniqueID, names []string) {
+func (mt *MetaTable) removeAllNamesIfMatchedInternal(ctx context.Context, dbName string, collectionID UniqueID, names []string) {
 	for _, name := range names {
-		mt.removeIfMatchedInternal(ctx, collectionID, name)
+		// Name publication, rename and alias rebinding all update these maps
+		// under ddLock. Check ownership at the exact key so GC of an old
+		// collection cannot erase a replacement, without scanning all names.
+		if mt.names.removeIfMatched(dbName, name, collectionID) {
+			mlog.Info(ctx, "remove from names", mlog.String("dbName", dbName),
+				mlog.String("collectionName", name), mlog.Int64("collectionID", collectionID))
+		}
+		if mt.aliases.removeIfMatched(dbName, name, collectionID) {
+			mlog.Info(ctx, "remove from aliases", mlog.String("dbName", dbName),
+				mlog.String("alias", name), mlog.Int64("collectionID", collectionID))
+		}
 	}
 }
 
@@ -811,7 +820,11 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	allNames = append(allNames, coll.Name)
 
 	// We cannot delete the name directly, since newly collection with same name may be created.
-	mt.removeAllNamesIfMatchedInternal(ctx, collectionID, allNames)
+	dbName := coll.DBName
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
+	mt.removeAllNamesIfMatchedInternal(ctx, dbName, collectionID, allNames)
 	mt.removeCollectionByIDInternal(ctx, collectionID)
 
 	mlog.Info(ctx, "remove collection",
@@ -980,6 +993,15 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 		return coll.ShallowClone(), nil
 	}
 	return filterUnavailablePartition(coll), nil
+}
+
+// IsCollectionAvailable is a positive-only check of current resident metadata.
+// A miss does not prove absence: callers must use the normal lookup before GC.
+func (mt *MetaTable) IsCollectionAvailable(collectionID int64) bool {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	collection := mt.collID2Meta[collectionID]
+	return collection != nil && collection.Available()
 }
 
 func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
@@ -2570,21 +2592,13 @@ func (mt *MetaTable) resolveRLSCollection(ctx context.Context, dbName string, co
 	if err != nil {
 		return nil, err
 	}
-	enabled, err := common.IsRLSEnabled(collection.Properties...)
-	if err != nil {
+	if _, err := common.IsRLSEnabled(collection.Properties...); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
-	}
-	if !enabled {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"RLS is not enabled for collection %q; set %s=true when creating the collection",
-			collection.Name,
-			common.RLSEnabledKey,
-		)
 	}
 	return collection, nil
 }
 
-func (mt *MetaTable) reloadEnabledCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
+func (mt *MetaTable) reloadCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
 	policies, err := mt.catalog.ListRLSPolicies(ctx, collection.CollectionID)
 	if err != nil {
 		return merr.Wrapf(err, "failed to reload RLS policies for collection %d", collection.CollectionID)
@@ -2611,31 +2625,24 @@ func (mt *MetaTable) reloadEnabledCollectionRLSMetadata(ctx context.Context, col
 }
 
 func (mt *MetaTable) reloadCollectionsRLSMetadata(ctx context.Context, collections []*model.Collection) error {
-	enabledCollections := make([]*model.Collection, 0)
 	for _, collection := range collections {
 		if collection == nil {
 			continue
 		}
-		enabled, err := common.IsRLSEnabled(collection.Properties...)
-		if err != nil {
+		if _, err := common.IsRLSEnabled(collection.Properties...); err != nil {
 			return merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
 		}
-		if !enabled {
-			collection.RLSPolicies = nil
-			continue
-		}
-		enabledCollections = append(enabledCollections, collection)
 	}
 
-	if ctx == nil {
-		ctx = context.TODO()
-	}
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(rlsRecoveryConcurrency)
-	for _, collection := range enabledCollections {
-		collection := collection
+	// Policies are metadata even while enforcement is disabled.
+	for _, collection := range collections {
+		if collection == nil {
+			continue
+		}
 		group.Go(func() error {
-			return mt.reloadEnabledCollectionRLSMetadata(groupCtx, collection)
+			return mt.reloadCollectionRLSMetadata(groupCtx, collection)
 		})
 	}
 	return group.Wait()
@@ -2651,11 +2658,13 @@ func upsertCollectionRLSPolicy(collection *model.Collection, policy *model.RLSPo
 	collection.RLSPolicies[policy.PolicyName] = model.CloneRLSPolicy(policy)
 }
 
-func removeCollectionRLSPolicy(collection *model.Collection, policyName string) {
+func removeCollectionRLSPolicy(collection *model.Collection, policy *model.RLSPolicy) {
 	if collection == nil {
 		return
 	}
-	delete(collection.RLSPolicies, policyName)
+	if cached := collection.RLSPolicies[policy.PolicyName]; cached != nil && cached.PolicyID == policy.PolicyID {
+		delete(collection.RLSPolicies, policy.PolicyName)
+	}
 }
 
 func validateRLSCombinedExpressionLength(policies []*model.RLSPolicy) error {
@@ -2846,50 +2855,6 @@ func validateRLSNoReferencedFieldDropped(coll *model.Collection, droppedFieldIDs
 		}
 	}
 	return nil
-}
-
-func validateRLSFunctionOutputNotReferenced(coll *model.Collection, fn *model.Function, operation string) error {
-	if fn == nil || len(fn.OutputFieldIDs) == 0 {
-		return nil
-	}
-	fieldRefs, err := collectRLSPolicyFieldRefs(coll)
-	if err != nil {
-		return err
-	}
-	for _, fieldID := range fn.OutputFieldIDs {
-		if policies := fieldRefs[fieldID]; len(policies) > 0 {
-			sort.Strings(policies)
-			return merr.WrapErrParameterInvalidMsg("function %q cannot be %s because output field %d is referenced by RLS policies %v", fn.Name, operation, fieldID, policies)
-		}
-	}
-	return nil
-}
-
-func findRLSFunctionByName(coll *model.Collection, functionName string) *model.Function {
-	for _, fn := range coll.Functions {
-		if fn.Name == functionName {
-			return fn
-		}
-	}
-	return nil
-}
-
-func rlsFunctionKeepsOutputShape(oldFn *model.Function, newFn *model.Function) bool {
-	if oldFn == nil || newFn == nil {
-		return false
-	}
-	if oldFn.Type != newFn.Type {
-		return false
-	}
-	if len(oldFn.OutputFieldIDs) != len(newFn.OutputFieldIDs) {
-		return false
-	}
-	for i := range oldFn.OutputFieldIDs {
-		if oldFn.OutputFieldIDs[i] != newFn.OutputFieldIDs[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func validateRLSPolicyExpression(schemaHelper *typeutil.SchemaHelper, exprKind string, expr string, enforceArrayLiteralLimit bool) error {
@@ -3140,13 +3105,7 @@ func (mt *MetaTable) ApplyDropRLSPolicy(ctx context.Context, collectionID int64,
 	}
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	collection = mt.collID2Meta[collectionID]
-	if collection != nil {
-		current := collection.RLSPolicies[policyName]
-		if current != nil && current.PolicyID == policy.PolicyID {
-			removeCollectionRLSPolicy(collection, policyName)
-		}
-	}
+	removeCollectionRLSPolicy(mt.collID2Meta[collectionID], policy)
 	return nil
 }
 
@@ -3187,11 +3146,9 @@ func (mt *MetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kin
 	}
 	loadPrincipals := false
 	switch kind {
-	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL:
+	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL, rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES:
 		metadata.Policies = model.RLSPolicyMapToSlice(coll.RLSPolicies)
-		loadPrincipals = true
-	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES:
-		metadata.Policies = model.RLSPolicyMapToSlice(coll.RLSPolicies)
+		loadPrincipals = kind == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL
 	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS:
 		loadPrincipals = true
 	default:
@@ -3200,18 +3157,14 @@ func (mt *MetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kin
 	}
 	mt.ddLock.RUnlock()
 
-	if !loadPrincipals {
-		return metadata, nil
-	}
-
 	var principals []*model.RLSPrincipal
-	if principalName == "" {
+	if loadPrincipals && principalName == "" {
 		var err error
 		principals, err = mt.catalog.ListRLSPrincipals(ctx, collectionID)
 		if err != nil {
 			return nil, merr.Wrap(err, "failed to list RLS principal metadata")
 		}
-	} else {
+	} else if loadPrincipals {
 		// TODO: Add a bounded Coord-side principal cache for point reads;
 		// never restore startup full loading.
 		principal, err := mt.catalog.GetRLSPrincipal(ctx, collectionID, principalName)
@@ -3251,17 +3204,6 @@ func (mt *MetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kin
 	return metadata, nil
 }
 
-func cloneRLSTags(tags map[string]rlsutil.TagValue) map[string]rlsutil.TagValue {
-	if tags == nil {
-		return nil
-	}
-	cloned := make(map[string]rlsutil.TagValue, len(tags))
-	for key, value := range tags {
-		cloned[key] = value
-	}
-	return cloned
-}
-
 func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*model.RLSPrincipal, error) {
 	if req == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("set RLS principal tags request is nil")
@@ -3289,9 +3231,9 @@ func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsuti
 		return nil, merr.Wrap(err, "failed to get RLS principal")
 	}
 
-	mergedTags := cloneRLSTags(req.GetTags())
+	mergedTags := maps.Clone(req.GetTags())
 	if !isNew {
-		mergedTags = cloneRLSTags(existingPrincipal.Tags)
+		mergedTags = maps.Clone(existingPrincipal.Tags)
 		if mergedTags == nil {
 			mergedTags = make(map[string]rlsutil.TagValue, len(req.GetTags()))
 		}
@@ -3334,7 +3276,7 @@ func (mt *MetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRL
 		}
 		return nil, merr.Wrap(err, "failed to get RLS principal")
 	}
-	return cloneRLSTags(principal.Tags), nil
+	return maps.Clone(principal.Tags), nil
 }
 
 func (mt *MetaTable) ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error) {
@@ -3403,7 +3345,7 @@ func (mt *MetaTable) PrepareDeleteRLSPrincipalTags(ctx context.Context, req *rls
 		return principal, true, nil
 	}
 
-	tags := cloneRLSTags(principal.Tags)
+	tags := maps.Clone(principal.Tags)
 	for _, key := range tagKeys {
 		delete(tags, key)
 	}

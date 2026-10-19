@@ -18,7 +18,11 @@
 
 package chain
 
-import "github.com/milvus-io/milvus/pkg/v3/util/merr"
+import (
+	"github.com/apache/arrow/go/v17/arrow"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
 
 // PruneDataFrame returns a DataFrame containing keepNonSystem plus retained system columns.
 // If no column is dropped, the original DataFrame is returned unchanged.
@@ -57,5 +61,14 @@ func PruneDataFrame(df *DataFrame, keepNonSystem ColumnSet, policy SystemColumnP
 			return nil, err
 		}
 	}
-	return builder.Build(), nil
+	result := builder.Build()
+	if df.schema != nil {
+		fields := make([]arrow.Field, 0, len(keepNames))
+		for _, name := range keepNames {
+			fields = append(fields, df.schema.Field(df.nameIndex[name]))
+		}
+		metadata := df.schema.Metadata()
+		result.schema = arrow.NewSchema(fields, &metadata)
+	}
+	return result, nil
 }

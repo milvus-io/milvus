@@ -137,13 +137,17 @@ func setLocalManifestLegacyPrefix(t *testing.T, prefix string) {
 	t.Cleanup(func() { require.NoError(t, params.Save(key, original)) })
 }
 
-func newLocalManifestTestMeta(catalog *catalogmocks.DataCoordCatalog, cm storage.ChunkManager) *meta {
+func newLocalManifestTestMeta(t *testing.T, catalog *catalogmocks.DataCoordCatalog, cm storage.ChunkManager) *meta {
+	t.Helper()
+	executor := newManifestCommitExecutor(1)
+	t.Cleanup(executor.close)
 	return &meta{
-		ctx:          context.Background(),
-		catalog:      catalog,
-		chunkManager: cm,
-		segments:     NewSegmentsInfo(),
-		channelCPs:   newChannelCps(),
+		manifestCommitExecutor: executor,
+		ctx:                    context.Background(),
+		catalog:                catalog,
+		chunkManager:           cm,
+		segments:               NewSegmentsInfo(),
+		channelCPs:             newChannelCps(),
 	}
 }
 
@@ -183,7 +187,7 @@ func TestReloadLocalManifestPathsReadOnlyAndLazyPersistence(t *testing.T) {
 		return []*datapb.SegmentInfo{stored}, nil
 	}).Times(3)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Times(3)
-	mt := newLocalManifestTestMeta(catalog, cm)
+	mt := newLocalManifestTestMeta(t, catalog, cm)
 	expected := packed.MarshalManifestPath(filepath.ToSlash(filepath.Join(root, legacyBase)), 17)
 
 	// The same legacy catalog value is resolved on every reload without writes.
@@ -258,7 +262,7 @@ func TestReloadLocalManifestPathsRejectInvalid(t *testing.T) {
 			catalog := catalogmocks.NewDataCoordCatalog(t)
 			catalog.EXPECT().ListSegments(mock.Anything, int64(1)).Return([]*datapb.SegmentInfo{raw}, nil).Once()
 			catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Maybe()
-			mt := newLocalManifestTestMeta(catalog, storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())))
+			mt := newLocalManifestTestMeta(t, catalog, storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())))
 			require.ErrorIs(t, mt.reloadFromKV(context.Background(), []int64{1}), merr.ErrDataIntegrity)
 			assert.Nil(t, mt.segments.GetSegment(3), "invalid metadata must never enter the segment cache")
 			assert.True(t, proto.Equal(original, raw))
@@ -294,7 +298,7 @@ func TestReloadLocalManifestPathsBypass(t *testing.T) {
 			if tc.remote {
 				cm = mocks.NewChunkManager(t)
 			}
-			mt := newLocalManifestTestMeta(catalog, cm)
+			mt := newLocalManifestTestMeta(t, catalog, cm)
 			require.NoError(t, mt.reloadFromKV(context.Background(), []int64{1}))
 			loaded := mt.segments.GetSegment(3)
 			require.NotNil(t, loaded)

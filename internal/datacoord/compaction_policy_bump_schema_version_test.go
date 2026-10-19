@@ -18,12 +18,15 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -219,6 +222,79 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerCapturesSchemaSnapshot() {
 	collection.Schema.Fields = append(collection.Schema.Fields, &schemapb.FieldSchema{FieldID: 102, Name: "new_field", DataType: schemapb.DataType_Int64})
 	s.EqualValues(2, view.schema.GetVersion())
 	s.Len(view.schema.GetFields(), 2)
+}
+
+func (s *BumpSchemaVersionPolicySuite) TestTriggerClonesSchemaOnlyForCandidates() {
+	for _, stale := range []bool{false, true} {
+		s.Run(fmt.Sprintf("stale=%t", stale), func() {
+			collection := newBumpSchemaVersionTestCollection(100, 2)
+			mockAlloc := newMockAllocator(s.T())
+			policy := newBumpSchemaVersionPolicy(&meta{
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:    NewSegmentsInfo(),
+			}, mockAlloc, s.handler)
+			policy.meta.collections.Insert(collection.ID, collection)
+			segmentSchemaVersion := int32(2)
+			if stale {
+				segmentSchemaVersion = 1
+			}
+			for _, segmentID := range []int64{101, 102} {
+				policy.meta.segments.SetSegment(segmentID, newBumpSchemaVersionTestSegment(collection.ID, segmentID, segmentSchemaVersion, storage.StorageV3, "manifest"))
+			}
+
+			cloneCount := 0
+			var clone func(proto.Message) proto.Message
+			cloneMock := mockey.Mock(proto.Clone).To(func(message proto.Message) proto.Message {
+				if message == collection.Schema {
+					cloneCount++
+				}
+				return clone(message)
+			}).Origin(&clone).Build()
+			defer cloneMock.UnPatch()
+
+			events, err := policy.Trigger(context.Background())
+			s.NoError(err)
+			views := events[TriggerTypeBumpSchemaVersion]
+			if !stale {
+				s.Empty(views)
+				s.Zero(cloneCount)
+				mockAlloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
+				return
+			}
+			s.Require().Len(views, 2)
+			s.Equal(1, cloneCount)
+			s.Same(views[0].(*BumpSchemaVersionView).schema, views[1].(*BumpSchemaVersionView).schema)
+			mockAlloc.AssertNumberOfCalls(s.T(), "AllocID", 1)
+		})
+	}
+}
+
+func (s *BumpSchemaVersionPolicySuite) TestTriggerRetainsSchemaAcrossCacheReplacement() {
+	collection := newBumpSchemaVersionTestCollection(100, 2)
+	policy := s.bumpSchemaVersionPolicy
+	policy.meta.collections.Insert(collection.ID, collection)
+	policy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collection.ID, 101, 1, storage.StorageV3, "manifest"))
+	// This segment only becomes stale at V3, after this scan's V2 snapshot.
+	policy.meta.segments.SetSegment(102, newBumpSchemaVersionTestSegment(collection.ID, 102, 2, storage.StorageV3, "manifest"))
+
+	var selectSegments func(*bumpSchemaVersionPolicy, int64, int32) []*chanPartSegments
+	selectMock := mockey.Mock((*bumpSchemaVersionPolicy).staleFlushedSegments).To(
+		func(policy *bumpSchemaVersionPolicy, collectionID int64, version int32) []*chanPartSegments {
+			segments := selectSegments(policy, collectionID, version)
+			policy.meta.collections.Insert(collectionID, newBumpSchemaVersionTestCollection(collectionID, 3))
+			return segments
+		}).Origin(&selectSegments).Build()
+	defer selectMock.UnPatch()
+
+	events, err := policy.Trigger(context.Background())
+	s.NoError(err)
+	views := events[TriggerTypeBumpSchemaVersion]
+	s.Require().Len(views, 1)
+	view := views[0].(*BumpSchemaVersionView)
+	s.EqualValues(101, view.segments[0].ID)
+	s.EqualValues(2, view.schema.GetVersion())
+	s.NotSame(collection.Schema, view.schema)
+	s.EqualValues(3, policy.meta.GetCollection(collection.ID).Schema.GetVersion())
 }
 
 func (s *BumpSchemaVersionPolicySuite) TestTriggerSchedulesReadySegmentWhenCollectionHasMissingManifestFlushedDataSegment() {

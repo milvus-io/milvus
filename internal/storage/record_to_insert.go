@@ -50,7 +50,7 @@ func RecordToInsertData(
 
 	for _, field := range typeutil.GetAllFieldSchemas(schema) {
 		fieldID := field.GetFieldID()
-		col, ok := recordColumn(rec, fieldID)
+		col, ok := TryRecordColumn(rec, fieldID)
 		if !ok {
 			if requiredFields != nil && requiredFields.Contain(fieldID) {
 				return nil, merr.WrapErrParameterInvalidMsg("required field %s (ID=%d) not found in record",
@@ -113,8 +113,18 @@ func RecordToInsertData(
 	return insertData, nil
 }
 
-func recordColumn(rec Record, fieldID FieldID) (col arrow.Array, ok bool) {
+// TryRecordColumn checks field presence for built-in Records and wrappers that
+// implement TryColumn. Custom Records should return nil for absent fields or
+// implement TryColumn to support a non-panicking lookup.
+func TryRecordColumn(rec Record, fieldID FieldID) (col arrow.Array, ok bool) {
+	if rec == nil {
+		return nil, false
+	}
 	switch r := rec.(type) {
+	case interface {
+		TryColumn(FieldID) (arrow.Array, bool)
+	}:
+		return r.TryColumn(fieldID)
 	case *simpleArrowRecord:
 		colIdx, ok := r.field2Col[fieldID]
 		if !ok {
@@ -127,6 +137,11 @@ func recordColumn(rec Record, fieldID FieldID) (col arrow.Array, ok bool) {
 	case *compositeRecord:
 		col := r.Column(fieldID)
 		return col, col != nil
+	case *selectiveRecord:
+		if r.fieldId != fieldID {
+			return nil, false
+		}
+		return TryRecordColumn(r.r, fieldID)
 	}
 
 	col = rec.Column(fieldID)

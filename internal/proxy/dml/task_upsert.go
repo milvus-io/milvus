@@ -191,23 +191,6 @@ func (it *UpsertTask) refreshMutationResultCounts() {
 	it.result.UpsertCnt = it.result.InsertCnt
 }
 
-func (it *UpsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
-	ret := make(map[pChan]pChanStatistics)
-
-	channels := it.GetChannels()
-
-	beginTs := it.BeginTs()
-	endTs := it.EndTs()
-
-	for _, channel := range channels {
-		ret[channel] = pChanStatistics{
-			MinTs: beginTs,
-			MaxTs: endTs,
-		}
-	}
-	return ret, nil
-}
-
 func (it *UpsertTask) SetChannels() error {
 	collID, err := it.GetMetaCache().GetCollectionID(it.ctx, it.req.GetDbName(), it.req.CollectionName)
 	if err != nil {
@@ -510,17 +493,10 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	}
 	existRowNum := typeutil.GetSizeOfIDs(existIDs)
 	if existRowNum > 0 && it.rlsEnabled {
+		// Authorize the PK-deduplicated read snapshot, including partition-key collections.
 		if err := rlsutil.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, usingExpr, "upsert", "using"); err != nil {
 			log.Warn(ctx, "RLS using expression validation failed for upsert", mlog.Err(err))
 			return nil, err
-		}
-		if it.partitionKeyMode && usingExpr != nil {
-			// Query reduction keeps one row per PK, while partition-key upsert
-			// deletes that PK from every physical partition. Until internal
-			// retrieval preserves every (partition, PK) copy, a non-trivial USING
-			// predicate cannot authorize all rows that the delete will affect.
-			return nil, merr.WrapErrOperationNotSupportedMsg(
-				"RLS upsert with a USING predicate is not supported for partition-key collections")
 		}
 		if partialUpdate && usingExpr != nil {
 			if err := dql.FormatTimestamptzFields(existFieldData, it.schema.SchemaHelper.GetTimezone()); err != nil {
@@ -647,6 +623,14 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				validData[i] = true
 			}
 			typeutil.SetFieldDataValidData(fieldData, validData)
+		}
+
+		// An omitted vector validity bitmap means every supplied row is valid.
+		// Materialize it before merge, which indexes logical rows and appends
+		// validity separately from the compact vector payload.
+		if fieldSchema.GetNullable() && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) &&
+			len(typeutil.GetFieldDataValidData(fieldData)) == 0 {
+			typeutil.SetFieldDataValidData(fieldData, lo.RepeatBy(upsertIDSize, func(int) bool { return true }))
 		}
 
 		// compatible with different nullable/default_value data format from sdk
@@ -1344,7 +1328,9 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 			},
 		}), nil
 
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_Timestamptz:
+		// Partial upsert merges query-result strings before insert validation
+		// converts Timestamptz values to their internal int64 representation.
 		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
@@ -1390,23 +1376,6 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 						ArrayData: &schemapb.ArrayArray{
 							Data:        make([]*schemapb.ScalarField, upsertIDSize),
 							ElementType: field.GetElementType(),
-						},
-					},
-				},
-			},
-		}), nil
-
-	case schemapb.DataType_Timestamptz:
-		return withValidData(&schemapb.FieldData{
-			FieldId:   field.FieldID,
-			FieldName: field.Name,
-			Type:      field.DataType,
-			IsDynamic: field.IsDynamic,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_TimestamptzData{
-						TimestamptzData: &schemapb.TimestamptzArray{
-							Data: make([]int64, upsertIDSize),
 						},
 					},
 				},

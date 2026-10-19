@@ -80,10 +80,11 @@ PhySearchGroupByNode::GetOutput() {
     auto op_context = query_context_->get_op_context();
     auto search_result = query_context_->get_search_result();
 
-    search_info_.array_offsets_ = query_context_->get_array_offsets();
+    search_info_.struct_element_offsets_ =
+        query_context_->get_struct_element_offsets();
     if (search_result.element_level_) {
-        AssertInfo(search_info_.array_offsets_ != nullptr,
-                   "Array offsets not available");
+        AssertInfo(search_info_.struct_element_offsets_ != nullptr,
+                   "Struct element offsets not available");
     }
 
     if (search_result.vector_iterators_.has_value()) {
@@ -93,6 +94,8 @@ PhySearchGroupByNode::GetOutput() {
                    "your code");
 
         std::vector<CompositeGroupKey> composite_group_by_values;
+        const bool use_json_stats =
+            query_context_->get_plan_options().expr_use_json_stats;
         milvus::exec::SearchGroupBy(op_context,
                                     search_result.vector_iterators_.value(),
                                     search_info_,
@@ -105,7 +108,8 @@ PhySearchGroupByNode::GetOutput() {
                                         ? &search_result.element_indices_
                                         : nullptr,
                                     &search_result,
-                                    query_context_->get_read_snapshot().get());
+                                    query_context_->get_read_snapshot().get(),
+                                    use_json_stats);
         search_result.composite_group_by_values_ =
             std::move(composite_group_by_values);
         search_result.group_size_ = search_info_.group_size_;

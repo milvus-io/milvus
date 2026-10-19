@@ -18,6 +18,7 @@ package dml
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -32,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
@@ -118,16 +118,12 @@ func rlsPolicyInfos(collectionID int64, policies []*rlsutil.RowPolicy) []*rootco
 		if policy == nil {
 			continue
 		}
-		actions := make([]milvuspb.RowPolicyAction, len(policy.Actions))
-		for i, action := range policy.Actions {
-			actions[i] = milvuspb.RowPolicyAction(action)
-		}
 		converted = append(converted, &rootcoordpb.RLSPolicyInfo{
 			CollectionId: collectionID,
 			PolicyId:     int64(len(converted) + 1),
 			PolicyName:   policy.PolicyName,
-			PolicyType:   milvuspb.RowPolicyType(policy.PolicyType),
-			Actions:      actions,
+			PolicyType:   policy.PolicyType,
+			Actions:      slices.Clone(policy.Actions),
 			UsingExpr:    policy.UsingExpr,
 			CheckExpr:    policy.CheckExpr,
 			Description:  policy.Description,
@@ -224,6 +220,7 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 			CollID:     collectionID,
 			Schema:     pinnedSchema,
 			RlsEnabled: true,
+			VChannels:  []string{"vchan1"},
 		}, nil).Maybe()
 		cache.EXPECT().GetCollectionSchema(mock.Anything, "default", aliasName).
 			Run(func(context.Context, string, string) { nameSchemaLoads++ }).
@@ -326,12 +323,9 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionDelete},
 			UsingExpr:  "value == 10",
 		}})
-		chMgr := channelmgr.NewMockChannelsMgr(t)
-		chMgr.EXPECT().GetVChannels(collectionID).Return([]string{"vchan1"}, nil)
 		runner := &DeleteRunner{
 			node:      &mockTaskNode{metaCache: cache},
 			metaCache: cache,
-			chMgr:     chMgr,
 			req: &milvuspb.DeleteRequest{
 				DbName:         "default",
 				CollectionName: aliasName,
@@ -341,6 +335,7 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 		}
 		require.NoError(t, runner.Init(ctx))
 		require.Same(t, pinnedSchema, runner.schema)
+		require.Equal(t, []vChan{"vchan1"}, runner.vChannels)
 		require.Zero(t, *nameSchemaLoads)
 	})
 }
@@ -624,28 +619,51 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		require.Equal(t, []int64{1}, task.deletePKs.GetIntId().GetData())
 	})
 
-	mockey.PatchConvey("partition-key upsert rejects a non-trivial using policy for existing rows", t, func() {
-		const collectionID = int64(991012)
-		task := newTask(collectionID)
-		task.partitionKeyMode = true
-		refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
-			PolicyName: "upsert_partition_key",
-			PolicyType: rlsutil.PolicyTypePermissive,
-			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
-			UsingExpr:  "id == 1",
-			CheckExpr:  "true",
-		}})
-		resolvePredicates(task)
-		existingPK := proto.Clone(task.req.GetFieldsData()[0]).(*schemapb.FieldData)
-		existingPK.GetScalars().GetLongData().Data = []int64{1}
-		mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
-			Status:     merr.Success(),
-			FieldsData: []*schemapb.FieldData{existingPK},
-		}, segcore.StorageCost{}, nil).Build()
+	for _, tc := range []struct {
+		name          string
+		partialUpdate bool
+		usingExpr     string
+		wantDenied    bool
+	}{
+		{name: "partition-key full upsert allows authorized rows", usingExpr: "id in [1, 2, 3]"},
+		{name: "partition-key full upsert rejects unauthorized rows", usingExpr: "id == 1", wantDenied: true},
+		{name: "partition-key partial upsert allows authorized rows", partialUpdate: true, usingExpr: "id in [1, 2, 3]"},
+		{name: "partition-key partial upsert rejects unauthorized rows", partialUpdate: true, usingExpr: "id == 1", wantDenied: true},
+	} {
+		mockey.PatchConvey(tc.name, t, func() {
+			const collectionID = int64(991012)
+			task := newTask(collectionID)
+			schema := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
+			schema.Fields[2].IsPartitionKey = true
+			task.schema = mustNewSchemaInfo(schema)
+			task.partitionKeyMode = true
+			task.req.PartitionName = ""
+			task.req.PartialUpdate = tc.partialUpdate
+			task.upsertMsg.InsertMsg.Version = msgpb.InsertDataVersion_ColumnBased
+			refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
+				PolicyName: "upsert_partition_key",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+				UsingExpr:  tc.usingExpr,
+				CheckExpr:  "true",
+			}})
+			resolvePredicates(task)
+			require.NotNil(t, task.rlsUsingPredicate)
+			mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+				Status:     merr.Success(),
+				FieldsData: cloneFieldDataList(task.req.GetFieldsData()),
+			}, segcore.StorageCost{}, nil).Build()
 
-		err := task.prepareUpsert(context.Background())
-		require.ErrorIs(t, err, merr.ErrOperationNotSupported)
-	})
+			_, err := task.queryPreExecute(context.Background())
+			if tc.wantDenied {
+				require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []int64{1, 2, 3}, task.deletePKs.GetIntId().GetData())
+			require.Len(t, task.insertFieldData, len(task.req.GetFieldsData()))
+		})
+	}
 
 	mockey.PatchConvey("always-true using policy preserves direct full upsert", t, func() {
 		const collectionID = int64(991007)

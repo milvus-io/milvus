@@ -33,14 +33,16 @@
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/JsonUtils.h"
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
-#include "index/Index.h"
-#include "index/ScalarIndex.h"
+#include "exec/expression/IndexPathSelection.h"
+#include "index/contracts/query/IJsonIndexReader.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "knowhere/comp/index_param.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "segcore/ConcurrentVector.h"
@@ -48,30 +50,32 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "simdjson/error.h"
 
 namespace milvus {
 namespace exec {
 
-#define JSON_TYPE_CASE(OutputType, TargetType, JSON_INNER_TYPE, CastExpr)     \
-    if constexpr (std::is_same_v<OutputType, TargetType>) {                   \
-        auto result = json_val.at<JSON_INNER_TYPE>(this->json_path_.value()); \
-        if (result.error() == simdjson::SUCCESS) {                            \
-            return CastExpr;                                                  \
-        }                                                                     \
-        if (this->strict_cast_) {                                             \
-            ThrowInfo(UnexpectedError,                                        \
-                      "failed to cast json value to " #TargetType             \
-                      ", wrong json data inner type");                        \
-        }                                                                     \
-        return std::nullopt;                                                  \
+#define JSON_TYPE_CASE(OutputType, TargetType, JSON_INNER_TYPE, CastExpr)    \
+    if constexpr (std::is_same_v<OutputType, TargetType>) {                  \
+        auto result =                                                        \
+            json_val.template at<JSON_INNER_TYPE>(this->json_path_.value()); \
+        if (result.error() == simdjson::SUCCESS) {                           \
+            return CastExpr;                                                 \
+        }                                                                    \
+        if (this->strict_cast_) {                                            \
+            ThrowInfo(UnexpectedError,                                       \
+                      "failed to cast json value to " #TargetType            \
+                      ", wrong json data inner type");                       \
+        }                                                                    \
+        return std::nullopt;                                                 \
     }
 
 #define JSON_STRING_CASE(OutputType)                                          \
     if constexpr (std::is_same_v<OutputType, std::string>) {                  \
         if (this->specific_json_type_) {                                      \
-            auto str_result =                                                 \
-                json_val.at<std::string_view>(this->json_path_.value());      \
+            auto str_result = json_val.template at<std::string_view>(         \
+                this->json_path_.value());                                    \
             if (str_result.error() == simdjson::SUCCESS) {                    \
                 return std::string(str_result.value());                       \
             }                                                                 \
@@ -184,19 +188,71 @@ class GrowingDataGetter : public DataGetter<OutputType> {
 template <typename OutputType, typename InnerRawType = OutputType>
 class SealedDataGetter : public DataGetter<OutputType> {
  private:
+    using IndexValueType =
+        std::conditional_t<std::is_same_v<OutputType, std::string>,
+                           std::string_view,
+                           OutputType>;
+
     milvus::OpContext* op_ctx_;
     const segcore::SegmentSealed& segment_;
     const segcore::SegmentReadSnapshot* snapshot_{nullptr};
     const FieldId field_id_;
     bool from_data_;
+    bool from_vortex_column_ = false;
+    std::shared_ptr<ChunkedColumnInterface> column_owner_;
+    const ChunkedColumnInterface* column_{nullptr};
 
-    // Thread-safety contract: string_chunk_pins_ is mutable and accessed
-    // without locks inside Get(). Each getter belongs to one SearchGroupBy
-    // invocation on one segment and is used on a single Driver thread.
-    // Sharing a getter across threads would require synchronizing this cache.
+    // Thread-safety contract: these caches are mutable and accessed without
+    // locks inside Get(). Each getter belongs to one SearchGroupBy invocation
+    // on one segment and is used on a single Driver thread. Sharing a getter
+    // across threads would require synchronizing them.
     mutable std::unordered_map<int64_t, PinWrapper<Chunk*>> string_chunk_pins_;
+    mutable std::unordered_map<int64_t, OwnedTakeData> vortex_file_data_;
 
-    PinWrapper<const index::IndexBase*> index_ptr_;
+    // Keep the parent cell pinned longer than a resolved JSON view. The typed
+    // value interface is borrowed from the root reader or that view.
+    segcore::IndexPin index_pin_;
+    index::JsonResolvedReader json_view_;
+    const index::IScalarValueReader<IndexValueType>* value_reader_{nullptr};
+    std::unique_ptr<index::JsonKeyStats::ShreddingReader> shredding_reader_;
+
+    template <typename T>
+    const OwnedTakeData&
+    GetVortexFile(int64_t chunk_id) const {
+        // TODO(local-format): This bounded compatibility path decodes each
+        // visited Vortex file at most once and retains it for the getter
+        // lifetime. Replace it with candidate batching or a bounded page cache
+        // only as a separate, measured group-by optimization.
+        auto cached = vortex_file_data_.find(chunk_id);
+        if (cached != vortex_file_data_.end()) {
+            return cached->second;
+        }
+
+        const auto start = column_->GetNumRowsUntilChunk(chunk_id);
+        const auto rows = column_->chunk_row_nums(chunk_id);
+        std::vector<int64_t> offsets(rows);
+        for (int64_t i = 0; i < rows; ++i) {
+            offsets[i] = start + i;
+        }
+        auto take = column_->Take(
+            op_ctx_,
+            TakeOptions{OffsetView::From(offsets.data(), offsets.size()),
+                        TargetTypeOf<T>()});
+        AssertInfo(take != nullptr,
+                   "Vortex group-by field {} does not support target {}",
+                   field_id_.get(),
+                   static_cast<int>(TargetTypeOf<T>()));
+        auto owned = take->GetOwn();
+        AssertInfo(owned.size == rows,
+                   "Vortex group-by field {} returned {} rows for file {}, "
+                   "expected {}",
+                   field_id_.get(),
+                   owned.size,
+                   chunk_id,
+                   rows);
+        return vortex_file_data_.emplace(chunk_id, std::move(owned))
+            .first->second;
+    }
 
     // VARCHAR and raw JSON share StringChunk storage. Keep visited chunks
     // pinned for the getter's lifetime and construct only the requested view.
@@ -205,27 +261,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
     GetStringRow(int64_t chunk_id, int64_t inner_offset) const {
         auto it = string_chunk_pins_.find(chunk_id);
         if (it == string_chunk_pins_.end()) {
-            PinWrapper<Chunk*> pin;
-            if (snapshot_) {
-                // Snapshot-backed path borrows the column from the frozen
-                // published state; the snapshot owns it for the request.
-                auto* column = snapshot_->GetColumn(field_id_);
-                AssertInfo(column != nullptr,
-                           "group-by field {} has no raw string column",
-                           field_id_.get());
-                pin = column->GetChunk(op_ctx_, chunk_id);
-            } else {
-                // Non-pinned fallback must keep the column's shared_ptr alive
-                // until GetChunk() pins the chunk: GetChunkedColumn() returns
-                // a temporary owner that is destroyed at the semicolon, so a
-                // concurrent publication could retire the column before
-                // pinning.
-                auto column = segment_.GetChunkedColumn(field_id_);
-                AssertInfo(column != nullptr,
-                           "group-by field {} has no raw string column",
-                           field_id_.get());
-                pin = column->GetChunk(op_ctx_, chunk_id);
-            }
+            auto pin = column_->GetChunk(op_ctx_, chunk_id);
             it = string_chunk_pins_.emplace(chunk_id, std::move(pin)).first;
         }
         const auto* chunk = static_cast<const StringChunk*>(it->second.get());
@@ -242,15 +278,27 @@ class SealedDataGetter : public DataGetter<OutputType> {
                      std::optional<std::string> json_path,
                      std::optional<DataType> json_type,
                      bool strict_cast,
-                     const segcore::SegmentReadSnapshot* snapshot = nullptr)
+                     const segcore::SegmentReadSnapshot* snapshot = nullptr,
+                     bool use_json_stats = true)
         : op_ctx_(op_ctx),
           segment_(segment),
           snapshot_(snapshot),
           field_id_(field_id) {
         from_data_ = segment_.HasFieldData(field_id_);
-        if (!from_data_) {
-            auto index = segment_.PinIndex(op_ctx_, field_id_);
-            if (index.empty()) {
+        if (from_data_) {
+            if (snapshot_) {
+                column_ = snapshot_->GetColumn(field_id_);
+            } else {
+                column_owner_ = segment_.GetChunkedColumn(field_id_);
+                column_ = column_owner_.get();
+            }
+            AssertInfo(column_ != nullptr,
+                       "group-by field {} has no loaded column",
+                       field_id_.get());
+            from_vortex_column_ = column_->GetLocalFormat() ==
+                                  ChunkedColumnInterface::LocalFormat::Vortex;
+        } else {
+            if (!InitValueReader(json_path, json_type, strict_cast)) {
                 ThrowInfo(
                     UnexpectedError,
                     "The segment:{} used to init data getter has no effective "
@@ -258,21 +306,96 @@ class SealedDataGetter : public DataGetter<OutputType> {
                     "index or data",
                     segment_.get_segment_id());
             }
-            index_ptr_ = std::move(index[0]);
         }
         this->json_path_ = json_path;
         this->specific_json_type_ = json_type.has_value();
         this->strict_cast_ = strict_cast;
+        if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
+            constexpr auto type = std::is_same_v<OutputType, std::string>
+                                      ? index::JSONType::STRING
+                                  : std::is_same_v<OutputType, bool>
+                                      ? index::JSONType::BOOL
+                                  : std::is_same_v<OutputType, int8_t> ||
+                                          std::is_same_v<OutputType, int16_t> ||
+                                          std::is_same_v<OutputType, int32_t> ||
+                                          std::is_same_v<OutputType, int64_t>
+                                      ? index::JSONType::INT64
+                                      : index::JSONType::UNKNOWN;
+            // Honor the query switch and reject unsupported paths/types before
+            // fetching stats, which could trigger deferred initialization.
+            if (use_json_stats && from_data_ && json_path.has_value() &&
+                json_type.has_value() &&
+                index::JsonKeyStats::IsShreddingReaderSupported(
+                    json_path.value(), type)) {
+                auto stats = segment_.GetJsonStats(op_ctx_, field_id_);
+                if (stats != nullptr) {
+                    shredding_reader_ = stats->CreateShreddingReader(
+                        json_path.value(),
+                        type,
+                        snapshot_ ? snapshot_->get_row_count()
+                                  : segment_.get_row_count());
+                }
+            }
+        }
     }
 
     std::optional<OutputType>
     Get(int64_t idx) const {
+        if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
+            if (shredding_reader_) {
+                auto value = shredding_reader_->Get(op_ctx_, idx);
+                if (value.has_value()) {
+                    if constexpr (std::is_same_v<OutputType, std::string> ||
+                                  std::is_same_v<OutputType, bool>) {
+                        return std::get<OutputType>(std::move(value.value()));
+                    } else {
+                        return static_cast<OutputType>(
+                            std::get<int64_t>(value.value()));
+                    }
+                }
+                // Invalid typed rows include missing paths, other JSON types
+                // and legacy empty strings. Raw parsing preserves strict_cast
+                // and null semantics; real read failures are never swallowed.
+            }
+        }
         if (from_data_) {
-            auto id_offset_pair =
-                snapshot_ ? snapshot_->get_chunk_by_offset(field_id_, idx)
-                          : segment_.get_chunk_by_offset(field_id_, idx);
+            auto id_offset_pair = column_->GetChunkIDByOffset(idx);
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
+            if (from_vortex_column_) {
+                if constexpr (std::is_same_v<InnerRawType, std::string>) {
+                    const auto& data =
+                        GetVortexFile<std::string_view>(chunk_id);
+                    if (data.validity && !data.validity[inner_offset]) {
+                        return std::nullopt;
+                    }
+                    return std::string(data.values.template data_as<
+                                       std::string_view>()[inner_offset]);
+                } else if constexpr (std::is_same_v<InnerRawType,
+                                                    milvus::Json>) {
+                    const auto& data = GetVortexFile<milvus::Json>(chunk_id);
+                    if (data.validity && !data.validity[inner_offset]) {
+                        return std::nullopt;
+                    }
+                    const auto& json_val =
+                        data.values
+                            .template data_as<milvus::Json>()[inner_offset];
+                    JSON_TYPE_CASES(OutputType)
+                    JSON_STRING_CASE(OutputType)
+                    return std::nullopt;
+                } else {
+                    static_assert(
+                        std::is_same_v<OutputType, InnerRawType>,
+                        "OutputType and InnerRawType must be the same for "
+                        "non-json/string field group by");
+                    const auto& data = GetVortexFile<InnerRawType>(chunk_id);
+                    if (data.validity && !data.validity[inner_offset]) {
+                        return std::nullopt;
+                    }
+                    return data.values
+                        .template data_as<InnerRawType>()[inner_offset];
+                }
+            }
             if constexpr (std::is_same_v<InnerRawType, std::string>) {
                 auto row = GetStringRow(chunk_id, inner_offset);
                 if (!row.has_value()) {
@@ -295,22 +418,12 @@ class SealedDataGetter : public DataGetter<OutputType> {
                     std::is_same_v<OutputType, InnerRawType>,
                     "OutputType and InnerRawType must be the same for "
                     "non-json/string field group by");
-                auto pw = [&]() -> PinWrapper<Span<InnerRawType>> {
-                    if (snapshot_) {
-                        auto* column = snapshot_->GetColumn(field_id_);
-                        AssertInfo(column != nullptr,
-                                   "group-by field {} has no raw data column",
-                                   field_id_.get());
-                        return column->Span(op_ctx_, chunk_id)
-                            .template transform<Span<InnerRawType>>(
-                                [](SpanBase&& span_base) {
-                                    return static_cast<Span<InnerRawType>>(
-                                        span_base);
-                                });
-                    }
-                    return segment_.chunk_data<InnerRawType>(
-                        op_ctx_, field_id_, chunk_id);
-                }();
+                auto pw = column_->Span(op_ctx_, chunk_id)
+                              .template transform<Span<InnerRawType>>(
+                                  [](SpanBase&& span_base) {
+                                      return static_cast<Span<InnerRawType>>(
+                                          span_base);
+                                  });
                 auto& span = pw.get();
                 if (!span.is_valid(inner_offset)) {
                     return std::nullopt;
@@ -319,26 +432,89 @@ class SealedDataGetter : public DataGetter<OutputType> {
                 return raw;
             }
         } else {
-            AssertInfo(index_ptr_.get() != nullptr,
-                       "indexed field {} has no valid index pointer",
+            AssertInfo(value_reader_ != nullptr,
+                       "indexed field {} has no typed value reader",
                        field_id_.get());
-            auto chunk_index =
-                dynamic_cast<const index::ScalarIndex<OutputType>*>(
-                    index_ptr_.get());
-            AssertInfo(chunk_index != nullptr,
-                       "index type mismatch for field {}: expected "
-                       "ScalarIndex<OutputType>",
-                       field_id_.get());
-            auto raw = chunk_index->Reverse_Lookup(idx);
-            // A null row has no value in the index (Reverse_Lookup ==
-            // nullopt). Return nullopt so it forms a distinct null group,
-            // consistent with the from-data getter branches above — instead
-            // of asserting and failing the whole group-by query.
-            if (!raw.has_value()) {
-                return std::nullopt;
-            }
-            return raw.value();
+            // Lookup owns string bytes and returns nullopt for NULL rows, so
+            // indexed and raw sources produce the same nullable group key.
+            return value_reader_->Lookup(idx);
         }
+    }
+
+ private:
+    bool
+    InitValueReader(const std::optional<std::string>& json_path,
+                    const std::optional<DataType>& json_type,
+                    bool strict_cast) {
+        constexpr bool is_json = std::is_same_v<InnerRawType, milvus::Json>;
+        if constexpr (is_json) {
+            // The index cannot reproduce at_string_any, strict cast failures,
+            // or the original integer-vs-floating JSON number category from a
+            // projected DOUBLE value. Those cases require raw JSON.
+            if (!json_path.has_value() || !json_type.has_value() ||
+                strict_cast ||
+                (json_type.value() != DataType::BOOL &&
+                 json_type.value() != DataType::VARCHAR)) {
+                return false;
+            }
+        }
+
+        auto value_type = segment_.GetFieldDataType(field_id_);
+        if (value_type == DataType::TIMESTAMPTZ) {
+            value_type = DataType::INT64;
+        }
+        ExprIndexRequirement requirement{
+            .field_id = field_id_,
+            .reader = RequiredReader::ValueLookup,
+            .value_type = value_type,
+        };
+        if constexpr (is_json) {
+            requirement.value_type = json_type.value();
+            requirement.is_json_field = true;
+            requirement.json_path = json_path.value();
+        }
+
+        const auto capabilities = segment_.IndexCapability(field_id_);
+        const auto decision = DetermineExecPath(requirement, capabilities);
+        if (!decision.key.has_value()) {
+            return false;
+        }
+        const auto* entry = capabilities.Find(*decision.key);
+        AssertInfo(
+            entry != nullptr,
+            "selected group-by index for field {} is absent from metadata",
+            field_id_.get());
+        index_pin_ = segment_.PinIndex(op_ctx_, *decision.key);
+        if (!index_pin_) {
+            return false;
+        }
+        AssertInfo(segcore::SameCaps(entry->caps, index_pin_->Caps()),
+                   "group-by index metadata for field {} does not match reader "
+                   "capabilities",
+                   field_id_.get());
+
+        const index::IIndexReaderBase* reader = index_pin_.get();
+        if constexpr (is_json) {
+            if (entry->caps.json_paths) {
+                auto* json_reader =
+                    dynamic_cast<const index::IJsonIndexReader*>(reader);
+                AssertInfo(json_reader != nullptr,
+                           "selected JSON group-by index has no path reader");
+                json_view_ = json_reader->Resolve(requirement.json_path,
+                                                  entry->json_cast_type);
+                if (!json_view_) {
+                    return false;
+                }
+                reader = json_view_.get();
+            }
+        }
+        value_reader_ =
+            dynamic_cast<const index::IScalarValueReader<IndexValueType>*>(
+                reader);
+        AssertInfo(value_reader_ != nullptr,
+                   "selected group-by index for field {} has no value reader",
+                   field_id_.get());
+        return true;
     }
 };
 
@@ -350,7 +526,8 @@ GetDataGetter(milvus::OpContext* op_ctx,
               std::optional<std::string> json_path = std::nullopt,
               std::optional<DataType> json_type = std::nullopt,
               bool strict_cast = false,
-              const segcore::SegmentReadSnapshot* snapshot = nullptr) {
+              const segcore::SegmentReadSnapshot* snapshot = nullptr,
+              bool use_json_stats = true) {
     if (json_path.has_value()) {
         auto json_path_tokens = milvus::parse_json_pointer(json_path.value());
         json_path = milvus::Json::pointer(json_path_tokens);
@@ -373,7 +550,8 @@ GetDataGetter(milvus::OpContext* op_ctx,
             json_path,
             json_type,
             strict_cast,
-            snapshot);
+            snapshot,
+            use_json_stats);
     } else {
         ThrowInfo(UnexpectedError,
                   "The segment used to init data getter is neither growing or "
@@ -445,7 +623,8 @@ class MultiFieldDataGetter {
         const std::optional<std::string>& json_path = std::nullopt,
         const std::optional<DataType>& json_type = std::nullopt,
         bool strict_cast = false,
-        const segcore::SegmentReadSnapshot* snapshot = nullptr);
+        const segcore::SegmentReadSnapshot* snapshot = nullptr,
+        bool use_json_stats = true);
 
     void
     GetInto(int64_t idx, CompositeGroupKey& out) const;
@@ -467,7 +646,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<size_t>& topk_per_nq_prefix_sum,
               std::vector<int32_t>* element_indices = nullptr,
               SearchResult* search_result = nullptr,
-              const segcore::SegmentReadSnapshot* snapshot = nullptr);
+              const segcore::SegmentReadSnapshot* snapshot = nullptr,
+              bool use_json_stats = true);
 
 bool
 TryStrictGroupFilteredSearch(
