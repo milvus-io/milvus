@@ -402,6 +402,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			gc.recycleUnusedBinlogFiles(ctx)
 			gc.recycleUnusedIndexFilesV0(ctx)
 			gc.recycleUnusedIndexFilesV1(ctx)
+			gc.recycleUnusedIndexFilesV2(ctx)
 			gc.recycleUnusedImportV3Prefixes(ctx)
 		})
 	}()
@@ -2137,6 +2138,12 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
 		segmentIndex.PartitionID, segmentIndex.SegmentID,
 		segmentIndex.BuildID, segmentIndex.IndexVersion)
+	if metautil.IsSegmentRooted(segmentIndex.IndexStorePathVersion) {
+		if segment := gc.meta.GetSegment(context.TODO(), segmentIndex.SegmentID); segment != nil {
+			builder.WithManifestPath(segment.GetManifestPath())
+		}
+	}
+
 	filesMap := make(map[string]struct{})
 	for _, fileID := range segmentIndex.IndexFileKeys {
 		filesMap[builder.BuildFilePath(fileID)] = struct{}{}
@@ -2170,12 +2177,27 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 // SegmentIndex once the copy has finished, so a restore that runs longer than
 // missingTolerance would otherwise lose the files it copied first.
 func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
+	gc.recycleUnusedIndexFiles(ctx, false)
+}
+
+// recycleUnusedIndexFilesV2 applies the same build/snapshot protection to
+// indexes inside live V3 segments, which the generic binlog scan skips.
+func (gc *garbageCollector) recycleUnusedIndexFilesV2(ctx context.Context) {
+	gc.recycleUnusedIndexFiles(ctx, true)
+}
+
+func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context, segmentRooted bool) {
 	start := time.Now()
-	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexFilesV1"), mlog.Time("startAt", start))
-	log.Info(ctx, "start recycleUnusedIndexFilesV1...")
+	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexFiles"), mlog.Time("startAt", start), mlog.Bool("segmentRooted", segmentRooted))
+	log.Info(ctx, "start recycleUnusedIndexFiles...")
 
 	rootPath := gc.option.cli.RootPath()
 	prefix := path.Join(rootPath, common.SegmentIndexV1Path) + "/"
+	parse := parseIndexV1FilePath
+	if segmentRooted {
+		prefix = path.Join(rootPath, common.SegmentInsertLogPath) + "/"
+		parse = parseIndexV2FilePath
+	}
 	snapshotMeta := gc.meta.GetSnapshotMeta()
 
 	// The decision for the build currently being walked is cached: a build's
@@ -2235,10 +2257,19 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 			skipped++
 			return true
 		}
-		collectionID, segmentID, buildID, err := parseIndexV1FilePath(rootPath, file)
+		// insert_log also contains data, stats and manifests. Only the exact
+		// segment _index subtree belongs to this scan.
+		if segmentRooted {
+			rel, ok := strings.CutPrefix(file, prefix)
+			parts := strings.SplitN(rel, "/", 5)
+			if !ok || len(parts) < 5 || parts[3] != "_index" {
+				return true
+			}
+		}
+		collectionID, segmentID, buildID, err := parse(rootPath, file)
 		if err != nil {
 			skipped++
-			log.Warn(ctx, "recycleUnusedIndexFilesV1 skip unparsable index file", mlog.String("file", file), mlog.Err(err))
+			log.Warn(ctx, "recycleUnusedIndexFiles skip unparsable index file", mlog.String("file", file), mlog.Err(err))
 			return true
 		}
 		d := decide(collectionID, segmentID, buildID)
@@ -2250,12 +2281,12 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 		}
 		futures = append(futures, gc.option.removeObjectPool.Submit(func() (struct{}, error) {
 			if err := gc.option.cli.Remove(ctx, file); err != nil {
-				log.Warn(ctx, "recycleUnusedIndexFilesV1 remove file failed", mlog.String("file", file), mlog.Err(err))
+				log.Warn(ctx, "recycleUnusedIndexFiles remove file failed", mlog.String("file", file), mlog.Err(err))
 				return struct{}{}, err
 			}
 			removed.Inc()
-			log.Info(ctx, "recycleUnusedIndexFilesV1 removed orphan index file",
-				mlog.String("file", file), mlog.Int64("collectionID", collectionID), mlog.Int64("buildID", buildID))
+			log.Info(ctx, "recycleUnusedIndexFiles removed orphan index file",
+				mlog.String("file", file), mlog.FieldCollectionID(collectionID), mlog.FieldBuildID(buildID))
 			return struct{}{}, nil
 		}))
 		return true
@@ -2266,10 +2297,29 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 	log = log.With(mlog.Duration("timeCost", time.Since(start)), mlog.Int("total", total),
 		mlog.Int("valid", valid), mlog.Int("skipped", skipped), mlog.Int32("removed", removed.Load()))
 	if err != nil {
-		log.Warn(ctx, "recycleUnusedIndexFilesV1 walk failed, remaining files wait for the next scan", mlog.Err(err))
+		log.Warn(ctx, "recycleUnusedIndexFiles walk failed, remaining files wait for the next scan", mlog.Err(err))
 		return
 	}
-	log.Info(ctx, "recycleUnusedIndexFilesV1 done")
+	log.Info(ctx, "recycleUnusedIndexFiles done")
+}
+
+// parseIndexV2FilePath recognizes only canonical segment index objects.
+func parseIndexV2FilePath(rootPath, filePath string) (collectionID, segmentID, buildID int64, err error) {
+	prefix := path.Join(rootPath, common.SegmentInsertLogPath) + "/"
+	rel, ok := strings.CutPrefix(filePath, prefix)
+	parts := strings.Split(rel, "/")
+	if !ok || len(parts) < 7 || parts[3] != "_index" || parts[6] == "" {
+		return 0, 0, 0, merr.WrapErrDataIntegrityMsg("invalid segment index object %s", filePath)
+	}
+	ids := make([]int64, 0, 5)
+	for _, pos := range []int{0, 1, 2, 4, 5} {
+		id, parseErr := strconv.ParseInt(parts[pos], 10, 64)
+		if parseErr != nil || id < 0 {
+			return 0, 0, 0, merr.WrapErrDataIntegrityMsg("invalid identifier in segment index object %s", filePath)
+		}
+		ids = append(ids, id)
+	}
+	return ids[0], ids[2], ids[3], nil
 }
 
 // parseIndexV1FilePath extracts the collection, segment and build IDs from an

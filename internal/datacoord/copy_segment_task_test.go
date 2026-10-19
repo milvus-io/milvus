@@ -1561,7 +1561,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PlacementMismatchFailsBef
 
 	err := SyncCopySegmentTask(task, resp, copyMeta, m)
 	s.Require().Error(err)
-	s.Contains(err.Error(), "enabled at dispatch")
+	s.Contains(err.Error(), "path version")
 	s.Zero(manifestReads, "current worker acknowledgement must be used without read-back")
 
 	segment := m.GetSegment(ctx, result.GetSegmentId())
@@ -3096,4 +3096,17 @@ func TestAssembleCopySegmentRequest_ManifestFallbackSingleWorker(t *testing.T) {
 		require.Equal(t, job.snapshotCache.data.Segments[i].GetManifestPath(), source.GetManifestPath())
 		require.Empty(t, source.GetIndexFiles())
 	}
+}
+
+func TestCopyTaskPinsSegmentIndexLayout(t *testing.T) {
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	UpdateCopyTaskIndexWriteToManifest(true)(task)
+	version, known := task.Clone().GetIndexStorePathVersion()
+	require.True(t, known)
+	require.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, version)
+	// Old durable tasks preserve absence instead of silently changing layouts.
+	old := createTestCopyTask(100, 2001).(*copySegmentTask)
+	old.task.Load().IndexWriteToManifest = proto.Bool(true)
+	_, known = old.GetIndexStorePathVersion()
+	require.False(t, known)
 }

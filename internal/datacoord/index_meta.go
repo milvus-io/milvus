@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -58,6 +59,10 @@ import (
 var errIndexOperationIgnored = errors.New("index operation ignored")
 
 func validateIndexStorePathVersionForFinish(buildID int64, requested, actual indexpb.IndexStorePathVersion) error {
+	if metautil.IsSegmentRooted(requested) && actual != requested {
+		return merr.WrapErrServiceInternalMsg("index worker changed segment-rooted path layout, buildID=%d, requested=%s, actual=%s",
+			buildID, requested.String(), actual.String())
+	}
 	if actual > requested {
 		return merr.WrapErrParameterInvalidMsg(
 			"index store path version returned by worker is newer than requested, buildID=%d, requested=%s, actual=%s",
@@ -321,6 +326,12 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 // Precondition: the caller holds keyLock for taskInfo.BuildID.
 func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskInfo *workerpb.IndexTaskInfo) (*model.SegmentIndex, uint64, error) {
 	actualPathVersion := taskInfo.GetIndexStorePathVersion()
+	// Failed/empty results may be synthesized by the scheduler without a
+	// worker payload. They carry no artifact layout; retain the dispatched
+	// version so terminal tasks can retire and GC can reclaim their uploads.
+	if taskInfo.GetState() != commonpb.IndexState_Finished || len(taskInfo.GetIndexFileKeys()) == 0 {
+		actualPathVersion = segIdx.IndexStorePathVersion
+	}
 	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
 		mlog.Warn(m.ctx, "invalid index store path version returned by worker",
 			mlog.Int64("buildID", taskInfo.GetBuildID()),

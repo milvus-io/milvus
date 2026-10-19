@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -228,6 +229,13 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		indexType = newIndexType
 	}
 
+	// Persist the layout before dispatch. Retries and recovery must not choose
+	// another directory when the manifest publication switch changes.
+	pathVersion := i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion()
+	if segment.GetStorageVersion() == storage.StorageV3 && writeSegmentIndexToManifest() {
+		pathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	}
+
 	segIndex := &model.SegmentIndex{
 		SegmentID:             segment.ID,
 		CollectionID:          segment.CollectionID,
@@ -238,7 +246,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		CreatedUTCTime:        uint64(time.Now().Unix()),
 		WriteHandoff:          false,
 		IndexType:             indexType,
-		IndexStorePathVersion: i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion(),
+		IndexStorePathVersion: pathVersion,
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err

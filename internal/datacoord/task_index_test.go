@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -667,6 +668,8 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	}
 	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
 	s.True(ok)
+	segIndex.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	base := fmt.Sprintf("/local/legacy/insert_log/%d/%d/%d", s.collID, s.partID, s.segID)
 
 	childField := &schemapb.FieldSchema{
 		Name:        "events[embedding]",
@@ -701,10 +704,12 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	req, err := it.prepareJobRequest(
 		context.Background(),
 		&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID:           s.segID,
-			CollectionID: s.collID,
-			PartitionID:  s.partID,
-			NumOfRows:    4,
+			ID:             s.segID,
+			CollectionID:   s.collID,
+			PartitionID:    s.partID,
+			NumOfRows:      4,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(base, 7),
 		}},
 		segIndex,
 		[]*commonpb.KeyValuePair{
@@ -714,7 +719,9 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 		"HNSW",
 	)
 
-	s.NoError(err)
+	s.Require().NoError(err)
+	s.Equal(fmt.Sprintf("%s/_index/%d/%d", base, s.taskID, segIndex.IndexVersion+1), req.GetIndexFilePrefix())
+	s.Equal(segIndex.IndexStorePathVersion, req.GetIndexStorePathVersion())
 	s.True(req.GetField().GetNullable())
 	s.False(childField.GetNullable())
 	s.NotSame(childField, req.GetField())
