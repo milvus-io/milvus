@@ -1437,7 +1437,7 @@ func (s *SchedulerSuite) TestScheduler_CollectCompletedTasksWhileExecuteBlocked(
 		}
 		// Close stops the ticker loop; also wait for asynchronous submission.
 		scheduler.submitMu.Lock()
-		scheduler.submitMu.Unlock()
+		defer scheduler.submitMu.Unlock()
 		_, _ = futureA.Await()
 	}()
 
