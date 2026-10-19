@@ -28,11 +28,13 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/VectorArray.h"
+#include "index/Meta.h"
 #include "index/Utils.h"
 #include "index/contracts/Registry.h"
 #include "index/contracts/build/VectorBuildInput.h"
 #include "index/vector/VectorBuilderUtils.h"
 #include "index/vector/VectorTypeUtils.h"
+#include "knowhere/emb_list_utils.h"
 
 namespace milvus::indexbuilder {
 
@@ -117,6 +119,18 @@ IsSupportedVectorScalarInfoType(DataType type) {
         default:
             return false;
     }
+}
+
+bool
+IsEmbeddingListBuild(DataType field_type, const index::BuildParams& params) {
+    if (field_type != DataType::VECTOR_ARRAY ||
+        !params.contains(index::METRIC_TYPE) ||
+        !params.at(index::METRIC_TYPE).is_string()) {
+        return false;
+    }
+    return knowhere::get_el_metric_type(
+               params.at(index::METRIC_TYPE).get<std::string>())
+        .has_value();
 }
 
 struct VectorScalarInfoAccumulator::Impl {
@@ -336,6 +350,7 @@ VectorBuildMaterializer::VectorBuildMaterializer(
     DataType field_type,
     DataType value_type,
     int64_t dim,
+    bool element_nullable,
     int64_t expected_rows,
     const index::IndexFamily& family,
     const index::BuildParams& params)
@@ -343,7 +358,17 @@ VectorBuildMaterializer::VectorBuildMaterializer(
       value_type_(value_type),
       dim_(dim),
       observed_dim_(dim),
-      expected_rows_(expected_rows) {
+      expected_rows_(expected_rows),
+      embedding_list_(IsEmbeddingListBuild(field_type, params)),
+      element_nullable_(element_nullable) {
+    AssertInfo(!element_nullable_ || field_type_ == DataType::VECTOR_ARRAY,
+               "element-nullable vector build requires VECTOR_ARRAY, got {}",
+               field_type_);
+    if (element_nullable_ && embedding_list_) {
+        ThrowInfo(Unsupported,
+                  "element-nullable VECTOR_ARRAY does not support "
+                  "embedding-list metrics");
+    }
     index::DispatchPhysicalVectorDataType(
         value_type,
         [&]<typename T>() {
@@ -370,7 +395,12 @@ VectorBuildMaterializer::VectorBuildMaterializer(
       expected_rows_(other.expected_rows_),
       spec_(std::move(other.spec_)),
       layout_(std::move(other.layout_)),
+      embedding_list_(other.embedding_list_),
+      element_nullable_(other.element_nullable_),
       embedding_offsets_(std::move(other.embedding_offsets_)),
+      logical_elements_(other.logical_elements_),
+      physical_elements_(other.physical_elements_),
+      element_validity_(std::move(other.element_validity_)),
       scalar_info_(std::move(other.scalar_info_)),
       consumed_(other.consumed_),
       state_(std::move(other.state_)) {
@@ -391,7 +421,12 @@ VectorBuildMaterializer::operator=(VectorBuildMaterializer&& other) noexcept {
     expected_rows_ = other.expected_rows_;
     spec_ = std::move(other.spec_);
     layout_ = std::move(other.layout_);
+    embedding_list_ = other.embedding_list_;
+    element_nullable_ = other.element_nullable_;
     embedding_offsets_ = std::move(other.embedding_offsets_);
+    logical_elements_ = other.logical_elements_;
+    physical_elements_ = other.physical_elements_;
+    element_validity_ = std::move(other.element_validity_);
     scalar_info_ = std::move(other.scalar_info_);
     consumed_ = other.consumed_;
     state_ = std::move(other.state_);
@@ -434,7 +469,7 @@ VectorBuildMaterializer::InitializeTyped(const index::IndexFamily& family,
         ThrowInfo(Unsupported,
                   "VECTOR_ARRAY optional scalar input is unsupported");
     }
-    if (field_type_ == DataType::VECTOR_ARRAY) {
+    if (embedding_list_) {
         embedding_offsets_.emplace_back(0);
     }
     state_.template emplace<TypedState<T>>(
@@ -491,22 +526,36 @@ VectorBuildMaterializer::BuildTyped(
     std::span<const index::VectorScalarFieldGroups> field_views) {
     using ValueType = typename TypedState<T>::ValueType;
     const std::span<const ValueType> physical_values = state.values;
-    const auto physical_rows = field_type_ == DataType::VECTOR_ARRAY
-                                   ? embedding_offsets_.back()
-                                   : layout_.PhysicalRows();
-    AssertInfo(physical_rows <=
-                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
-               "vector physical row count exceeds int64");
+    // An element-level VECTOR_ARRAY build is an ordinary vector input whose
+    // logical rows are the logical elements; null rows contribute none.
+    const bool element_level =
+        field_type_ == DataType::VECTOR_ARRAY && !embedding_list_;
+    const auto physical_rows = embedding_list_ ? embedding_offsets_.back()
+                               : element_level ? physical_elements_
+                                               : layout_.PhysicalRows();
+    const auto logical_rows =
+        element_level ? logical_elements_ : layout_.LogicalRows();
+    AssertInfo(physical_rows <= static_cast<size_t>(
+                                    std::numeric_limits<int64_t>::max()) &&
+                   logical_rows <=
+                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+               "vector row count exceeds int64");
     std::optional<std::span<const size_t>> offsets;
-    if (field_type_ == DataType::VECTOR_ARRAY) {
+    if (embedding_list_) {
         offsets.emplace(embedding_offsets_);
+    }
+    ValidityView validity = layout_.Validity();
+    if (element_level) {
+        validity = element_nullable_ && !element_validity_.empty()
+                       ? ValidityView::FromPacked(element_validity_.data())
+                       : ValidityView{};
     }
     index::VectorBuildInput<T> input{
         .physical_values = physical_values,
-        .logical_rows = static_cast<int64_t>(layout_.LogicalRows()),
+        .logical_rows = static_cast<int64_t>(logical_rows),
         .physical_rows = static_cast<int64_t>(physical_rows),
         .dim = observed_dim_,
-        .parent_validity = layout_.Validity(),
+        .parent_validity = validity,
         .embedding_offsets = offsets,
         .scalar_fields = field_views,
     };
@@ -675,11 +724,20 @@ VectorBuildMaterializer::AppendBatch(TypedState<T>& state,
             if (count != 0) {
                 state.values.insert(state.values.end(), begin, begin + count);
             }
-            AssertInfo(vector_count <= std::numeric_limits<size_t>::max() -
-                                           embedding_offsets_.back(),
-                       "VECTOR_ARRAY physical row count overflows size_t");
-            embedding_offsets_.push_back(embedding_offsets_.back() +
-                                         vector_count);
+            if (embedding_list_) {
+                AssertInfo(vector_count <= std::numeric_limits<size_t>::max() -
+                                               embedding_offsets_.back(),
+                           "VECTOR_ARRAY physical row count overflows size_t");
+                embedding_offsets_.push_back(embedding_offsets_.back() +
+                                             vector_count);
+            } else {
+                AssertInfo(vector_count <= std::numeric_limits<size_t>::max() -
+                                               physical_elements_,
+                           "VECTOR_ARRAY physical element count overflows "
+                           "size_t");
+                physical_elements_ += vector_count;
+                AppendElementValidity(value, row);
+            }
             AssertInfo(value.byte_size() <=
                            std::numeric_limits<size_t>::max() - total_bytes,
                        "VECTOR_ARRAY byte count overflows size_t");
@@ -732,6 +790,50 @@ VectorBuildMaterializer::AppendBatch(TypedState<T>& state,
         }
     }
     layout_.Append(batch->Length(), validity);
+}
+
+void
+VectorBuildMaterializer::AppendElementValidity(const VectorArray& value,
+                                               size_t row) {
+    AssertInfo(value.length() >= value.physical_length(),
+               "VECTOR_ARRAY value {} has {} logical and {} physical elements",
+               row,
+               value.length(),
+               value.physical_length());
+    const auto logical = static_cast<size_t>(value.length());
+    AssertInfo(
+        logical <= std::numeric_limits<size_t>::max() - 7 - logical_elements_,
+        "VECTOR_ARRAY logical element count overflows size_t");
+    const auto next = logical_elements_ + logical;
+    if (!element_nullable_) {
+        AssertInfo(!value.is_element_nullable() &&
+                       value.length() == value.physical_length(),
+                   "VECTOR_ARRAY value {} carries null elements in a "
+                   "non-element-nullable field",
+                   row);
+        logical_elements_ = next;
+        return;
+    }
+    // Bits of this row's elements follow the previous rows' bits; a null row
+    // contributes no element.
+    element_validity_.resize((next + 7) / 8, 0);
+    const auto validity = value.element_validity_view();
+    size_t valid = 0;
+    for (size_t i = 0; i < logical; ++i) {
+        if (!value.is_element_nullable() || validity[i]) {
+            const auto bit = logical_elements_ + i;
+            element_validity_[bit >> 3] |=
+                static_cast<uint8_t>(1U << static_cast<unsigned>(bit & 7));
+            ++valid;
+        }
+    }
+    AssertInfo(valid == static_cast<size_t>(value.physical_length()),
+               "VECTOR_ARRAY value {} has {} valid elements but {} physical "
+               "vectors",
+               row,
+               valid,
+               value.physical_length());
+    logical_elements_ = next;
 }
 
 }  // namespace milvus::indexbuilder

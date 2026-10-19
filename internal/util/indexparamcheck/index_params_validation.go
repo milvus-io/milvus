@@ -395,14 +395,7 @@ func ValidateFieldIndexParams(field *schemapb.FieldSchema, indexParamsMap map[st
 	}
 	if field.GetDataType() == schemapb.DataType_ArrayOfVector {
 		metricType := indexParamsMap[common.MetricTypeKey]
-		if field.GetElementNullable() {
-			if funcutil.SliceContain(EmbListMetrics, metricType) {
-				return ValidateArrayOfVectorMetricType(field.GetElementType(), true, metricType)
-			}
-			// Temporary: element-level indexes need query-layer support before they can be built.
-			return merr.WrapErrParameterInvalidMsg("indexing element-nullable vector array field %s is not supported yet", field.GetName())
-		}
-		if err := ValidateArrayOfVectorMetricType(field.GetElementType(), false, metricType); err != nil {
+		if err := ValidateArrayOfVectorMetricType(field.GetElementType(), field.GetElementNullable(), metricType); err != nil {
 			return err
 		}
 	}

@@ -99,6 +99,12 @@ class VectorPrimaryLayout {
 bool
 IsSupportedVectorScalarInfoType(DataType type);
 
+// A VECTOR_ARRAY field builds an embedding-list index only under an
+// embedding-list metric. Any other metric indexes each element as an ordinary
+// vector in the logical element domain.
+bool
+IsEmbeddingListBuild(DataType field_type, const index::BuildParams& params);
+
 class VectorScalarInfoAccumulator {
  public:
     struct Impl;
@@ -133,6 +139,7 @@ class VectorBuildMaterializer final {
     VectorBuildMaterializer(DataType field_type,
                             DataType value_type,
                             int64_t dim,
+                            bool element_nullable,
                             int64_t expected_rows,
                             const index::IndexFamily& family,
                             const index::BuildParams& params);
@@ -201,6 +208,9 @@ class VectorBuildMaterializer final {
     void
     AppendBatch(TypedState<T>& state, const FieldDataPtr& batch);
 
+    void
+    AppendElementValidity(const VectorArray& value, size_t row);
+
     template <typename T>
     storage::ArtifactPtr
     BuildTyped(TypedState<T>& state,
@@ -213,7 +223,15 @@ class VectorBuildMaterializer final {
     int64_t expected_rows_{0};
     index::BuilderInputSpec spec_;
     VectorPrimaryLayout layout_;
+    // VECTOR_ARRAY only: offsets for an embedding-list build; otherwise the
+    // logical element count, the physical (non-null) element count and, for
+    // an element-nullable field, the element-domain validity bitmap.
+    bool embedding_list_{false};
+    bool element_nullable_{false};
     std::vector<size_t> embedding_offsets_;
+    size_t logical_elements_{0};
+    size_t physical_elements_{0};
+    std::vector<uint8_t> element_validity_;
     std::optional<VectorScalarInfo> scalar_info_;
     bool consumed_{false};
     State state_;
