@@ -168,7 +168,6 @@ func (t *ImportTask) Clone() Task {
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
-
 	if err := importutilv2.ValidateSnapshotTaskPartitions(t.req.GetFiles(), t.GetPartitionIDs()); err != nil {
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
 		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}

@@ -966,7 +966,6 @@ func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	assertFieldExists(t, ctx, core, dbName, collectionName, "field4", 103)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 103)
-
 }
 
 func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.T) {

@@ -89,9 +89,7 @@ func TestIsTerminalImportV3Err(t *testing.T) {
 		// a parquet type/dimension mismatch cannot be retried away, and an
 		// uncapped retry loop would burn one segment and log range per round.
 		{"ErrParameterInvalid is terminal", merr.WrapErrParameterInvalidMsg("import file size exceeds the maximum"), true},
-		// An RLS write-predicate denial is deterministic: the rows violate the
-		// principal's policy, so retrying the same import cannot succeed.
-		{"ErrPrivilegeNotPermitted is terminal", merr.WrapErrPrivilegeNotPermitted("import operation denied by RLS check expression"), true},
+		{"ErrPrivilegeNotPermitted is terminal", merr.WrapErrPrivilegeNotPermitted("import operation denied"), true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -963,7 +964,7 @@ func (s *ImportServicesSuite) TestImportV2_MessageVersionIsAuthoritative() {
 	mockBroadcast := mockey.Mock((*Server).broadcastImport).To(func(
 		_ *Server, _ context.Context, _ int64, _ []int64, _ []*internalpb.ImportFile,
 		_ []*commonpb.KeyValuePair, _ int64, _ []string,
-		_ string, _ string, _ bool, version internalpb.ImportVersion,
+		_ string, version internalpb.ImportVersion,
 	) (int64, bool, error) {
 		capturedVersion = version
 		return 0, false, nil

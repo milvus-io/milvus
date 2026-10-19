@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -315,14 +314,6 @@ func TestBuildReshardTaskPlanDerivesExecutionInput(t *testing.T) {
 	require.Equal(t, []int64{3}, plan.GetPartitionIds())
 	require.NotNil(t, plan.GetCollectionSchema())
 	require.Greater(t, plan.GetFragmentSize(), int64(0))
-
-	// The job's RLS write predicate must travel with the plan so the DataNode
-	// can enforce it per source batch (Import V3 parity with Import V2).
-	predicate := &planpb.Expr{}
-	job.RlsCheckPredicate = predicate
-	plan, err = reshardPlan(job, task, getImportV3Config())
-	require.NoError(t, err)
-	require.Same(t, predicate, plan.GetRlsCheckPredicate())
 
 	task.FileIds = []int64{9}
 	_, err = reshardPlan(job, task, getImportV3Config())
