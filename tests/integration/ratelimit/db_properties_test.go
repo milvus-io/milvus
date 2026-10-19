@@ -218,9 +218,11 @@ func TestLimitWithDBProperties(t *testing.T) {
 
 func (s *DBPropertiesSuite) waitForSuccessOrTimeout(fn func() (error, bool), desc string) {
 	time.Sleep(3 * time.Second)
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
 	for {
 		select {
-		case <-time.After(15 * time.Second):
+		case <-timer.C:
 			s.FailNow("waiting for " + desc + " timeout")
 		default:
 			err, ok := fn()
