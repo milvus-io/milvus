@@ -29,9 +29,9 @@ See [Transaction Messages](../message/message-semantic-txn.md) for message types
 
 ### Transaction Lifecycle
 
-1. **Begin**: Allocate a TxnID and a TimeTick. Create a `TxnSession` tracking in-flight message count.
+1. **Begin**: Allocate a TxnID and a TimeTick. Create a `TxnSession` tracking in-flight and successful logical body counts.
 2. **Append**: Each message in the transaction increments the in-flight counter and refreshes the session TTL.
-3. **Commit**: Mark the transaction as committed. The transaction's messages become visible to consumers as a single atomic group at the assigned TimeTick.
+3. **Commit**: Close body admission and wait for in-flight appends. Check a nonzero Commit `body_cnt` against successful appends; zero skips validation for legacy transactions. A mismatch rolls back the session and releases references, causing a whole-transaction retry. After successful Commit append, mark the transaction as committed. The transaction's messages become visible to consumers as a single atomic group at the assigned TimeTick.
 4. **Rollback**: Mark the transaction as rolled back. All messages in the transaction are discarded.
 5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
 6. **Force-fail**: The [Lock](lock.md) interceptor force-fails locally originated active transactions at a VChannel when an exclusive operation is appended.

@@ -60,39 +60,56 @@ the source WAL/checkpoint. No new transaction ID, term, or runtime owner is need
 An intact prefix resumes with deduplication. A prefix aborted by Flush starts again
 from Begin. Duplicate Begin does not replace a still-valid prefix.
 
-## Proving that a replay is complete
+## Transaction body count
 
-Ordering each individual stream is insufficient when old and new streams overlap.
-Source MessageIDs identify immutable source records, but are not consecutive and
-cannot alone prove that no body was skipped. CDC therefore carries the previous
-source record's MessageID in each transaction message:
+`CommitTxnMessageHeader.body_cnt` is the expected number of logical body messages.
+It excludes Begin, Commit, physical WAL chunks and backend retry copies. A value
+of **zero skips validation everywhere**, preserving old WAL/senders and empty
+transactions without an additional presence field.
 
-```
-Begin(b, prev=b) → Body(x, prev=b) → Body(y, prev=x) → Commit(c, prev=y)
-```
+The primary producer fills the count from its VChannel batch and sends Commit
+only after every body append succeeds. TxnSession increments its successful-body
+counter once per successful logical append, not per backend attempt. Commit closes
+body admission, waits for in-flight appends to finish, and compares the count.
+A mismatch terminates the session, releases references and returns
+TransactionExpired so the producer retries the whole transaction with a new TxnID.
+This catches an upper-layer retry that appended an extra body with a new TimeTick.
+Late appends cannot revive the rejected session. A backend retry retains its local
+TimeTick; the consumer's existing physical deduplication removes its extra copies.
 
-An empty transaction uses `Commit.prev = Begin.ID`. CDC preserves the assembled
-source transaction's stable body order, including on reconnect/restart; it does not
-sort by local destination IDs. The wire-only `_rtprev` property is added to a copy
-of the source message. The receiving Proxy moves it into the additive
-`ReplicateHeader.prev_txn_message_id` protobuf field, which is persisted in WAL.
+Consumers validate the count after chunk assembly and TimeTick deduplication,
+before publishing an assembled transaction. A nonzero mismatch in a durable
+Commit is a data-integrity failure and stops consumption/recovery rather than
+silently publishing or dropping an incomplete transaction. The source consumer
+performs this validation before CDC sees a transaction.
+
+CDC forwards a nonzero source count unchanged. For old commits with zero count,
+it fills the number of assembled bodies on a copy of the Commit header; it does
+not mutate retained source messages. Empty transactions retain zero. Each replay
+preserves the assembled source order and the same immutable source body IDs.
+There is no per-body predecessor property, ID manifest, replication term or owner.
 
 Under its existing mutex, held through append and acker completion, ReplicatesManager:
 
-1. Checks the source checkpoint first. Already committed traffic remains idempotent.
+1. Checks the source checkpoint. Already committed traffic remains idempotent.
 2. Admits Begin when there is no current transaction; duplicate active Begin is ignored.
-3. Ignores already accepted body IDs, otherwise requires `prev == accepted tail`.
-4. Requires Commit's predecessor to match the accepted tail before preparing Commit.
-5. Advances the tail only after successful body append, and clears the prefix and
-   advances the source checkpoint only after successful Commit append.
+3. Ignores already accepted source body IDs; records new IDs only after append succeeds.
+4. Compares a nonzero Commit count to the accepted source-ID set size **before**
+   preparing the session. A mismatch returns TransactionExpired without changing
+   the session to OnCommit, allowing reconnect to replay and fill missing bodies.
+5. Clears the receiving state and advances the source checkpoint only after a
+   successful Commit append.
 
-Missing Begin or a missing predecessor returns TransactionExpired, causing CDC to
-reconnect and replay the full transaction. It must not return Ignore/success for
-an incomplete Commit. Messages from any connection can complete the same source
-prefix: completeness, not the identity of the winning connection, determines safety.
-A Flush clears the body dedup set so rewritten bodies receive new local segments.
-There is still only one current replicated transaction per PChannel, as required by
-the existing sequential CDC channel stream; there is no concurrent-attempt map.
+For a fixed source transaction, the accepted distinct IDs are a subset of its
+immutable body set. Equal cardinality therefore proves completeness even when
+old and new connections overlap. A duplicate body cannot substitute for a missing
+one. A stale Commit is safe once all bodies exist; no connection needs to win.
+A zero-count Commit intentionally bypasses this proof for compatibility.
+
+Missing Begin also returns TransactionExpired. A durable local Flush clears the
+body dedup set and aborts the session, so replayed bodies receive new local segments.
+There is still one current replicated transaction per PChannel, following the
+existing sequential CDC channel stream; no concurrent-attempt map is introduced.
 
 ## Failure, recovery and promotion
 
@@ -102,14 +119,14 @@ session and segment references and fences the WAL before releasing append locks.
 A final backend failure for any replicated append or local flush also fences the
 writer: the record may already exist, so memory cannot safely resume from an
 assumed failed append. WAL recovery resolves the durable outcome before retry.
-A predecessor mismatch is rejected before Commit preparation and does not fence a
+A replicated body-count mismatch is rejected before Commit preparation and does not fence a
 healthy WAL. Caller RPC cancellation is not a transaction rollback protocol.
 
-Recovery reconstructs the accepted source-ID set and tail from the uncommitted
+Recovery reconstructs the accepted source-ID set and successful body count from the uncommitted
 TxnBuffer, and the session from the same snapshot. A replayed Flush removes the
 old builder; a durable Commit publishes the complete transaction. Recovered session
 references retain the existing RecoverDone barrier until resolved. TxnBuffer also
-checks persisted predecessor links before assembling a transaction.
+checks the persisted nonzero Commit body count before assembling a transaction.
 
 Flush has no wait-for-source gate, pending counter, FIFO queue or promotion lock.
 Broadcaster uses its existing resource keys and worker pool for all operations.
@@ -127,9 +144,10 @@ replication progress must be checked separately when that is required.
 
 ## Compatibility boundary
 
-The predecessor field is additive; old WAL records and legacy unchained transactions
-remain readable. Once a prefix uses predecessor links, unchecked new body/Commit
-messages cannot complete it. Historical unmarked flushes retain their old behavior.
+The Commit count is additive. Missing fields decode to zero, and zero explicitly
+skips all count checks even for nonempty transactions. New producers set nonzero
+counts for nonempty transactions; CDC fills old zero-count commits from the
+assembled source transaction. Historical unmarked flushes retain their old behavior.
 
 Operators must upgrade **all participating source CDC, Proxy, StreamingNode and
 consumer processes before invoking local Flush on a secondary**. Coordinating this
@@ -153,9 +171,9 @@ understand the durable local-flush abort boundary.
 ## Key Packages
 
 - `internal/datacoord/` — local producers and resource keys
-- `internal/cdc/replication/replicatestream/` — full transaction forwarding and predecessor links
-- `pkg/streaming/util/message/` — wire conversion and persisted replication header
-- `internal/streamingnode/server/wal/interceptors/replicate/` — prefix validation and durable-flush abort
+- `internal/cdc/replication/replicatestream/` — full transaction forwarding and legacy Commit count decoration
+- `pkg/streaming/util/message/` — Commit body-count format and assembly validation
+- `internal/streamingnode/server/wal/interceptors/replicate/` — deduplicated body counting and durable-flush abort
 - `internal/streamingnode/server/wal/interceptors/txn/` — scoped session cleanup
 - `internal/streamingnode/server/wal/interceptors/timetick/` — Commit outcome handling
 - `internal/streamingnode/server/wal/adaptor/` — backend retry and failure fencing

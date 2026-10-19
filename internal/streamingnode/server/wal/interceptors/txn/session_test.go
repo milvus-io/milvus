@@ -115,7 +115,7 @@ func TestSession(t *testing.T) {
 	session.AddNewMessageDoneAndKeepalive(0)
 
 	// Test Commit.
-	err = session.RequestCommitAndWait(ctx, 0)
+	err = session.RequestCommitAndWait(ctx, 0, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, message.TxnStateOnCommit, session.state)
 	session.CommitDone()
@@ -129,12 +129,12 @@ func TestSession(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
-	err = session.RequestCommitAndWait(ctx, 0)
+	err = session.RequestCommitAndWait(ctx, 0, 0)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
 	// Test Commit Expired
-	err = session.RequestCommitAndWait(ctx, expiredTs)
+	err = session.RequestCommitAndWait(ctx, expiredTs, 0)
 	assert.Error(t, err)
 	serr = status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
@@ -178,7 +178,7 @@ func TestManager(t *testing.T) {
 			}, 0)
 			switch i % 3 {
 			case 0:
-				err := session.RequestCommitAndWait(context.Background(), 0)
+				err := session.RequestCommitAndWait(context.Background(), 0, 0)
 				session.CommitDone()
 				assert.NoError(t, err)
 			case 1:
@@ -279,7 +279,7 @@ func TestTxnSessionRejectCommitAdmission(t *testing.T) {
 		cleanupCalled.Inc()
 	}, 0)
 
-	err := session.RequestCommitAndWait(context.Background(), 11)
+	err := session.RequestCommitAndWait(context.Background(), 11, 0)
 	require.NoError(t, err)
 
 	session.RejectCommit()
@@ -357,7 +357,7 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		session2.RegisterCleanup(func() {
 			cleanupCalled.Inc()
 		}, 0)
-		err = session2.RequestCommitAndWait(context.Background(), 0)
+		err = session2.RequestCommitAndWait(context.Background(), 0, 0)
 		assert.NoError(t, err)
 		session2.CommitDone()
 

@@ -26,7 +26,7 @@ func TestLocalFlushReleasesRecoveredSessionBeforeReplay(t *testing.T) {
 	id := walimplstest.NewTestMessageID(1)
 	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("target_v1").WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().
 		WithTxnContext(message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}).WithTimeTick(1).WithLastConfirmedUseMessageID().
-		WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", VChannel: "source_v1", TimeTick: 100, MessageID: id, LastConfirmedMessageID: id, PrevTxnMessageID: id})
+		WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", VChannel: "source_v1", TimeTick: 100, MessageID: id, LastConfirmedMessageID: id})
 	buffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	buffer.HandleImmutableMessages([]message.ImmutableMessage{begin.IntoImmutableMessage(id)}, 1)
 	manager := txn.NewTxnManager(types.PChannelInfo{Name: "target"}, buffer.GetUncommittedMessageBuilder())

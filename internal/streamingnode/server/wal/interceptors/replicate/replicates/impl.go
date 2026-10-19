@@ -212,17 +212,17 @@ func (impl *replicatesManagerImpl) startReplicateTxnMessage(_ context.Context, m
 	txn := msg.TxnContext()
 	switch msg.MessageType() {
 	case message.MessageTypeBeginTxn:
-		if err := impl.secondaryState.StartBegin(txn, rh); err != nil {
+		if err := impl.secondaryState.StartBegin(txn); err != nil {
 			return nil, err
 		}
 		return replicateAckerImpl(func(err error) {
 			if err == nil {
-				impl.secondaryState.BeginDone(txn, rh, msg.VChannel())
+				impl.secondaryState.BeginDone(txn, msg.VChannel())
 			}
 			impl.mu.Unlock()
 		}), nil
 	case message.MessageTypeCommitTxn:
-		if err := impl.secondaryState.StartCommit(txn, rh); err != nil {
+		if err := impl.secondaryState.StartCommit(txn, message.MustAsMutableCommitTxnMessageV2(msg).Header().BodyCnt); err != nil {
 			return nil, err
 		}
 		// only update the checkpoint when the txn is committed.

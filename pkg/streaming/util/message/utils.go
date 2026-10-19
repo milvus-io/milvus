@@ -59,7 +59,6 @@ type ReplicateHeader struct {
 	LastConfirmedMessageID MessageID
 	TimeTick               uint64
 	VChannel               string
-	PrevTxnMessageID       MessageID
 }
 
 // IsLocalFlush reports whether this is a cluster-local transaction abort boundary.

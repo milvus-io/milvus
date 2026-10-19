@@ -181,7 +181,7 @@ func (impl *timeTickAppendInterceptor) handleCommit(ctx context.Context, msg mes
 	}
 
 	// Start commit the message.
-	if err = session.RequestCommitAndWait(ctx, msg.TimeTick()); err != nil {
+	if err = session.RequestCommitAndWait(ctx, msg.TimeTick(), commitTxnMsg.Header().BodyCnt); err != nil {
 		return nil, err
 	}
 	return session, nil

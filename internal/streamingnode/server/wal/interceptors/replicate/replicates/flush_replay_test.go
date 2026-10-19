@@ -38,15 +38,16 @@ func TestLocalFlushReplayAndRecovery(t *testing.T) {
 				source = append(source[:2:2], source[1], source[2])
 				ids := []int64{10, 30, 20, 40}
 				out := make([]message.MutableMessage, len(source))
-				previous := ids[0]
 				for i, msg := range source {
 					wire := msg.IntoImmutableMessageProto()
 					wire.Id = walimplstest.NewTestMessageID(ids[i]).IntoProto()
 					copy := message.MilvusMessageToImmutableMessage(wire)
-					replicated := message.MustNewReplicateMessage("test2", message.WithReplicateTxnPrevious(copy, walimplstest.NewTestMessageID(previous)))
+					if copy.MessageType() == message.MessageTypeCommitTxn {
+						copy = message.WithTxnBodyCount(copy, 2)
+					}
+					replicated := message.MustNewReplicateMessage("test2", copy.IntoImmutableMessageProto())
 					replicated.OverwriteReplicateVChannel("test1-rootcoord-dml_0")
 					out[i] = replicated
-					previous = ids[i]
 				}
 				return out
 			}

@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -33,6 +34,23 @@ func TestTimeTickCommitAppendSuccessCommits(t *testing.T) {
 	require.True(t, expectedMsgID.EQ(msgID))
 	require.Equal(t, message.TxnStateCommitted, session.State())
 	requireCommitAckerSuccess(t, impl, session)
+}
+
+func TestTimeTickBodyCountMismatchNeverAppendsCommit(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	message.MustAsMutableCommitTxnMessageV2(commit).OverwriteHeader(&message.CommitTxnMessageHeader{BodyCnt: 1})
+	cleaned := false
+	session.RegisterCleanup(func() { cleaned = true }, 0)
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("count mismatch must reject before WAL append")
+		return nil, nil
+	})
+	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+	require.True(t, cleaned)
+	requireCommitAckerError(t, impl, err)
 }
 
 func TestTimeTickCommitAdmissionRejects(t *testing.T) {

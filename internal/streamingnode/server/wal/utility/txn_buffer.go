@@ -144,7 +144,7 @@ func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.Immuta
 	}
 
 	// build the txn message and remove it from buffer.
-	checkReplicatedTxnPredecessor(builder, msg)
+	checkTxnBodyCount(builder, commitMsg)
 	b.bytes -= builder.EstimateSize()
 	txnMsg, err := builder.Build(commitMsg)
 	delete(b.builders, commitMsg.TxnContext().TxnID)
@@ -200,25 +200,16 @@ func (b *TxnBuffer) handleTxnBodyMessage(msg message.ImmutableMessage) {
 		)
 		return
 	}
-	checkReplicatedTxnPredecessor(builder, msg)
 	builder.Add(msg)
 	b.bytes += msg.EstimateSize()
 }
 
 // The writer verifies this before append. Violations in persisted messages must
 // stop recovery/consumption rather than silently publish a partial transaction.
-func checkReplicatedTxnPredecessor(builder *message.ImmutableTxnMessageBuilder, msg message.ImmutableMessage) {
-	header := msg.ReplicateHeader()
-	if header == nil || header.PrevTxnMessageID == nil {
-		return
-	}
-	begin, body := builder.Messages()
-	last := begin.ReplicateHeader().MessageID
-	if len(body) > 0 {
-		last = body[len(body)-1].ReplicateHeader().MessageID
-	}
-	if !header.PrevTxnMessageID.EQ(last) {
-		panic("persisted replicated transaction has an incomplete predecessor chain")
+func checkTxnBodyCount(builder *message.ImmutableTxnMessageBuilder, commit message.ImmutableCommitTxnMessageV2) {
+	_, body := builder.Messages()
+	if err := message.CheckTxnBodyCount(commit.Header().BodyCnt, len(body)); err != nil {
+		panic(err)
 	}
 }
 

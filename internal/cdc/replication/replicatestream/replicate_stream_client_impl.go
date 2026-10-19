@@ -260,14 +260,7 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 }
 
 func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
-	return r.sendMessageWithPrevious(msg, nil)
-}
-
-func (r *replicateStreamClient) sendMessageWithPrevious(msg message.ImmutableMessage, previous message.MessageID) (err error) {
 	immutableMessage := msg.IntoImmutableMessageProto()
-	if previous != nil {
-		immutableMessage = message.WithReplicateTxnPrevious(msg, previous)
-	}
 
 	defer func() {
 		logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("revision", r.channel.ModRevision))
@@ -291,28 +284,20 @@ func (r *replicateStreamClient) sendMessageWithPrevious(msg message.ImmutableMes
 }
 
 func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
-	// Preserve the assembled transaction's order, including after reconnect.
-	// The predecessor chain proves completeness independently of which stream
-	// delivers a duplicate body or commit. Begin points to itself.
-	previous := txnMsg.Begin().MessageID()
-	if err = r.sendMessageWithPrevious(txnMsg.Begin(), previous); err != nil {
+	if err = r.sendMessage(txnMsg.Begin()); err != nil {
 		return err
 	}
-
-	// send txn body messages
-	if err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
-		if err := r.sendMessageWithPrevious(msg, previous); err != nil {
-			return err
-		}
-		previous = msg.MessageID()
-		return nil
-	}); err != nil {
+	// Preserve the assembled source order on every replay.
+	if err = txnMsg.RangeOver(r.sendMessage); err != nil {
 		return err
 	}
-
-	// send txn commit message
-	err = r.sendMessageWithPrevious(txnMsg.Commit(), previous)
-	return
+	commit := txnMsg.Commit()
+	if message.MustAsImmutableCommitTxnMessageV2(commit).Header().BodyCnt == 0 {
+		// Old source WALs have no count. Decorate only a copy retained for this
+		// send; never overwrite a nonzero producer count and hide lost bodies.
+		commit = message.WithTxnBodyCount(commit, uint64(txnMsg.Size()))
+	}
+	return r.sendMessage(commit)
 }
 
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {

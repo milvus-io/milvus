@@ -44,6 +44,7 @@ type TxnSession struct {
 	expired          bool                         // The flag indicates the transaction has trigger expired once.
 	txnContext       message.TxnContext           // transaction id of the session
 	inFlightCount    int                          // The message is in flight count of the session.
+	bodyCount        uint64                       // Successfully appended logical bodies, excluding backend retries.
 	state            message.TxnState             // The state of the session.
 	doneWait         chan struct{}                // The channel for waiting the transaction committed.
 	rollback         bool                         // The flag indicates the transaction is rollbacked.
@@ -89,6 +90,7 @@ func (s *TxnSession) AddNewMessageDoneAndKeepalive(timetick uint64) {
 		s.lastTimetick = timetick
 	}
 	s.inFlightCount--
+	s.bodyCount++
 	if s.doneWait != nil && s.inFlightCount == 0 {
 		close(s.doneWait)
 	}
@@ -138,7 +140,7 @@ func (s *TxnSession) expiredTimeTick() uint64 {
 }
 
 // RequestCommitAndWait request commits the transaction and waits for the all messages sent.
-func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64) error {
+func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64, bodyCnt uint64) error {
 	waitCh, err := s.getDoneChan(timetick, message.TxnStateOnCommit)
 	if err != nil {
 		return err
@@ -148,6 +150,15 @@ func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64) 
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-waitCh:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if bodyCnt != 0 && bodyCnt != s.bodyCount {
+			// No Commit has reached WAL. End this attempt and release references;
+			// the producer retries the entire transaction with a fresh TxnID.
+			s.state = message.TxnStateRollbacked
+			s.cleanup()
+			return status.NewTransactionExpired("txn %d body count mismatch: expected %d, appended %d", s.txnContext.TxnID, bodyCnt, s.bodyCount)
+		}
 		return nil
 	}
 }
