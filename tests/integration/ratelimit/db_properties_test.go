@@ -46,10 +46,11 @@ type DBPropertiesSuite struct {
 }
 
 func (s *DBPropertiesSuite) prepareDatabase(ctx context.Context, dbName string, configKey string, configValue string) {
-	timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-	defer cancelFunc()
+	// The first DDL may also wait for streaming channel assignment after startup.
+	createCtx, cancelCreate := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelCreate()
 
-	resp, err := s.Cluster.MilvusClient.CreateDatabase(timeoutCtx, &milvuspb.CreateDatabaseRequest{
+	resp, err := s.Cluster.MilvusClient.CreateDatabase(createCtx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,
 		Properties: []*commonpb.KeyValuePair{
 			{
@@ -58,10 +59,12 @@ func (s *DBPropertiesSuite) prepareDatabase(ctx context.Context, dbName string, 
 			},
 		},
 	})
-	s.NoError(merr.CheckRPCCall(resp, err))
+	s.Require().NoError(merr.CheckRPCCall(resp, err))
 
-	resp2, err2 := s.Cluster.MilvusClient.DescribeDatabase(timeoutCtx, &milvuspb.DescribeDatabaseRequest{DbName: dbName})
-	s.NoError(merr.CheckRPCCall(resp2, err2))
+	describeCtx, cancelDescribe := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelDescribe()
+	resp2, err2 := s.Cluster.MilvusClient.DescribeDatabase(describeCtx, &milvuspb.DescribeDatabaseRequest{DbName: dbName})
+	s.Require().NoError(merr.CheckRPCCall(resp2, err2))
 }
 
 func (s *DBPropertiesSuite) prepareCollection(ctx context.Context, dbName string, collectionName string) {
