@@ -434,9 +434,18 @@ Reader preparation and cell loading share the default process-wide
 - a positive worker limit from `queryNode.segcore.storageV2.asyncLoadThreadPoolSize`,
   defaulting to `max(1, min(CPU_NUM, 16))`;
 - two unbounded priority queues;
-- thread name prefix `MILVUS_ASYNC_LOAD_`.
+- thread name prefix `MILVUS_ASYNC_LOAD_`;
+- Linux worker nice value 19, applied at thread creation, including pool growth.
 
-QueryNode applies this limit at startup and watches updates and override deletion.
+Both HIGH and LOW task queues run on these nice-19 workers. OS CPU scheduling
+priority is separate from the queue ordering: under CPU contention, loading can
+receive less CPU time, including demand loads that queries wait for. This is a
+fixed default-pool policy, not a dynamically configurable setting. Supplied
+executors retain their own thread policy; non-Linux platforms keep the existing
+named-thread factory because nice is not uniformly per-thread. Folly logs a
+warning and keeps the inherited priority if the OS rejects the nice change.
+
+QueryNode applies the worker limit at startup and watches updates and override deletion.
 Configuration alone does not create the executor; its first user creates it with
 the latest limit. Updates resize the same executor, preserving queued work and
 existing keep-alives. Shrinking may wait for running workers, so configuration
