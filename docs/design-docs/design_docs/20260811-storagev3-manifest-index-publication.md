@@ -14,8 +14,9 @@ Every such manifest revision is created by DataCoord inside
 advances `SegmentInfo.manifest_path` and persists the index task metadata.
 
 Publication is opt-in and exclusive with the etcd `SegmentIndex` row, behind
-`dataCoord.index.writeSegmentIndexToManifest` (default off). Off is the pure
-legacy path: every task state goes to etcd and no manifest index entry is
+`dataCoord.index.writeSegmentIndexToManifest` (default off), captured when a build
+task is created. Off is the pure legacy path: every task state goes to etcd and
+no manifest index entry is
 produced. On changes only the terminal artifact placement: Unissued,
 InProgress, Failed, and fake-Finished records still persist to etcd; a Finished
 StorageV3 build with files is published to the manifest, and that publication
@@ -27,9 +28,9 @@ The same switch may be changed in either direction. A
 current manifest may contain index metadata. Additions set it atomically with
 the pointer. Retractions read the final immutable revision and clear the marker
 in that same catalog transaction only when its index section is empty. Startup
-recovery and GC follow this marker,
-not the switch's current value, so disabling publication redirects new results
-to etcd without hiding or leaking indexes written while it was enabled. An
+recovery and GC follow this marker, not the switch's current value, so disabling
+publication redirects newly created tasks to etcd without hiding or leaking
+indexes written while it was enabled. An
 all-etcd cluster has no marked segments and performs no manifest index reads.
 
 Index workers keep their existing responsibility — build the index and upload
@@ -96,10 +97,10 @@ revision.
 New builds with manifest publication enabled use
 `<manifest base>/_index/<build>/<version>` (`IndexStorePathVersion=2`). New entries
 store only `<build>/<version>`; external paths and parent traversal are rejected.
-Older persisted entries remain readable in their original layout. Old tasks
-finishing after enabling the switch fail publication if their artifacts are
-outside `_index`; they do not silently fall back to etcd. See the
-[artifact placement design](20261019-segment-rooted-index-artifacts.md).
+Older persisted entries remain readable in their original layout. Task completion
+follows the persisted layout: version 2 publishes to the manifest, and version
+0/1 finishes in etcd, independently of subsequent switch changes or restarts.
+See the [artifact placement design](20261019-segment-rooted-index-artifacts.md).
 
 ### Concurrency
 

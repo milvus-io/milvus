@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strconv"
 	"strings"
@@ -695,6 +696,10 @@ func seedRestartFixture(t *testing.T, m *meta) {
 // in-progress index task, without finishing or publishing it.
 func seedRestartTask(t *testing.T, m *meta) {
 	t.Helper()
+	pathVersion := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+	if writeSegmentIndexToManifest() {
+		pathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	}
 	ctx := context.TODO()
 	basePath := "/tmp/test-restart/insert_log/300/30/8001"
 
@@ -724,14 +729,16 @@ func seedRestartTask(t *testing.T, m *meta) {
 		BuildID:               restartBuildID,
 		IndexVersion:          1,
 		IndexState:            commonpb.IndexState_InProgress,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		IndexStorePathVersion: pathVersion,
 	}))
 }
 
 // publishRestartTask finishes the seeded task through the real index-task
-// result entry point, including its write-to-manifest switch decision.
+// result entry point, including its persisted publication-mode decision.
 func publishRestartTask(t *testing.T, m *meta) {
 	t.Helper()
+	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
 
 	result := &workerpb.IndexTaskInfo{
 		BuildID:               restartBuildID,
@@ -739,12 +746,11 @@ func publishRestartTask(t *testing.T, m *meta) {
 		IndexFileKeys:         []string{"0", "1"},
 		SerializedSize:        4096,
 		MemSize:               8192,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		IndexStorePathVersion: segIdx.IndexStorePathVersion,
 	}
-	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
-	require.True(t, ok)
 	it := newIndexBuildTask(segIdx, 1, m, nil, nil, nil)
 	require.NoError(t, it.setJobInfo(result))
+	require.Equal(t, commonpb.IndexState_Finished, it.IndexState)
 }
 
 // End to end for the switch: a finished artifact is published to the manifest
@@ -792,7 +798,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	_, ok := restarted.indexMeta.GetIndexJob(restartBuildID)
 	assert.True(t, ok, "the index inspector must not reissue a build for it")
 
-	// Turning publication off affects new completions only. The durable marker
+	// Turning publication off affects new tasks only. The durable marker
 	// still makes the already manifest-resident record recoverable.
 	withSegmentIndexManifestWrites(t, false)
 	restartedOff := bootMetaForRestart(t, catalog, restartCollID)
@@ -831,34 +837,90 @@ func TestSegmentIndexPersistedToEtcdWhenManifestWritesOff(t *testing.T) {
 	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
 }
 
-// An old-layout task must fail after enabling manifest publication. It must
-// neither append an external-path entry nor silently finish through etcd.
-func TestOffEraTaskCannotPublishExternalIndexPath(t *testing.T) {
-	withSegmentIndexManifestWrites(t, false)
-	store := newFakeManifestStore(t)
-	ctx := context.TODO()
-	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	m := bootMetaForRestart(t, catalog, restartCollID)
-	seedRestartTask(t, m)
-	old, ok := m.indexMeta.GetIndexJob(restartBuildID)
-	require.True(t, ok)
-	old.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
-	require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, old))
-	withSegmentIndexManifestWrites(t, true)
-	restarted := bootMetaForRestart(t, catalog, restartCollID)
-	old, ok = restarted.indexMeta.GetIndexJob(restartBuildID)
-	require.True(t, ok)
-	it := newIndexBuildTask(old, 1, restarted, nil, nil, nil)
-	err := it.setJobInfo(&workerpb.IndexTaskInfo{
-		BuildID: restartBuildID, State: commonpb.IndexState_Finished,
-		IndexFileKeys: []string{"index.bin"}, IndexStorePathVersion: old.IndexStorePathVersion,
-	})
-	require.ErrorContains(t, err, "outside segment index directory")
-	require.Empty(t, store.revisions)
-	persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
-	require.NoError(t, err)
-	require.Len(t, persisted, 1)
-	require.Equal(t, commonpb.IndexState_InProgress, persisted[0].IndexState)
+// In-flight builds retain their creation-time placement across switch changes,
+// including a coordinator restart before completion and another after commit.
+func TestIndexPublicationModeSurvivesSwitchAndRestart(t *testing.T) {
+	for _, version := range []indexpb.IndexStorePathVersion{0, 1, 2} {
+		for _, restart := range []bool{false, true} {
+			t.Run(fmt.Sprintf("version_%d/restart_%t", version, restart), func(t *testing.T) {
+				manifestMode := metautil.IsSegmentRooted(version)
+				withSegmentIndexManifestWrites(t, manifestMode)
+				store := newFakeManifestStore(t)
+				ctx := context.TODO()
+				catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+				m := bootMetaForRestart(t, catalog, restartCollID)
+				seedRestartTask(t, m)
+				segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
+				require.True(t, ok)
+				segIdx = model.CloneSegmentIndex(segIdx)
+				segIdx.IndexStorePathVersion = version
+				require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, segIdx))
+				originalManifest := m.GetSegment(ctx, restartSegID).GetManifestPath()
+
+				withSegmentIndexManifestWrites(t, !manifestMode)
+				if restart {
+					m = bootMetaForRestart(t, catalog, restartCollID)
+				}
+				publishRestartTask(t, m)
+				persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+				require.NoError(t, err)
+				segment := m.GetSegment(ctx, restartSegID)
+				if manifestMode {
+					require.Empty(t, persisted)
+					require.NotEqual(t, originalManifest, segment.GetManifestPath())
+					entries := store.revisions[segment.GetManifestPath()]
+					require.Len(t, entries, 1)
+					require.Equal(t, version, entries[0].IndexStorePathVersion)
+				} else {
+					require.Empty(t, store.revisions)
+					require.Equal(t, originalManifest, segment.GetManifestPath())
+					require.Len(t, persisted, 1)
+					require.Equal(t, commonpb.IndexState_Finished, persisted[0].IndexState)
+					require.Equal(t, version, persisted[0].IndexStorePathVersion)
+					store.failReadsFrom()
+				}
+				recovered := bootMetaForRestart(t, catalog, restartCollID)
+				finished, ok := recovered.indexMeta.GetIndexJob(restartBuildID)
+				require.True(t, ok)
+				require.Equal(t, commonpb.IndexState_Finished, finished.IndexState)
+				require.Equal(t, version, finished.IndexStorePathVersion)
+				require.Equal(t, []string{"0", "1"}, finished.IndexFileKeys)
+			})
+		}
+	}
+}
+
+func TestIndexPublicationModeRejectsWorkerLayoutChange(t *testing.T) {
+	for _, manifestMode := range []bool{false, true} {
+		t.Run(fmt.Sprintf("manifest_%t", manifestMode), func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, manifestMode)
+			store := newFakeManifestStore(t)
+			ctx := context.TODO()
+			catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+			m := bootMetaForRestart(t, catalog, restartCollID)
+			seedRestartTask(t, m)
+			segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
+			require.True(t, ok)
+			originalManifest := m.GetSegment(ctx, restartSegID).GetManifestPath()
+			actual := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+			if manifestMode {
+				actual = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+			}
+			withSegmentIndexManifestWrites(t, !manifestMode)
+			it := newIndexBuildTask(segIdx, 1, m, nil, nil, nil)
+			require.Error(t, it.setJobInfo(&workerpb.IndexTaskInfo{
+				BuildID: restartBuildID, State: commonpb.IndexState_Finished,
+				IndexFileKeys: []string{"index.bin"}, IndexStorePathVersion: actual,
+			}))
+			require.Empty(t, store.revisions)
+			require.Equal(t, originalManifest, m.GetSegment(ctx, restartSegID).GetManifestPath())
+			persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+			require.NoError(t, err)
+			require.Len(t, persisted, 1)
+			require.Equal(t, commonpb.IndexState_InProgress, persisted[0].IndexState)
+			require.Equal(t, segIdx.IndexStorePathVersion, persisted[0].IndexStorePathVersion)
+		})
+	}
 }
 
 // Regression test for an ABBA deadlock between the manifest commit and every
@@ -1020,6 +1082,10 @@ func TestReloadRejectsUnusableManifestIndexEntry(t *testing.T) {
 // arrives.
 func seedUnpublishedBuild(t *testing.T, m *meta, indexName string) {
 	t.Helper()
+	pathVersion := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+	if writeSegmentIndexToManifest() {
+		pathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	}
 	ctx := context.TODO()
 	basePath := "/tmp/test-restart/insert_log/300/30/8001"
 
@@ -1049,7 +1115,7 @@ func seedUnpublishedBuild(t *testing.T, m *meta, indexName string) {
 		BuildID:               restartBuildID,
 		IndexVersion:          1,
 		IndexState:            commonpb.IndexState_InProgress,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		IndexStorePathVersion: pathVersion,
 	}))
 }
 
@@ -1154,10 +1220,9 @@ func TestValidateManifestIndexPublishable(t *testing.T) {
 	require.Error(t, validateManifestIndexPublishable(5001, pathless))
 }
 
-// With the switch off, publishIndexToManifest declines before touching
-// anything: zero manifest I/O, and setJobInfo records the result the legacy
-// way - an etcd row and no manifest entry, so the segment stays unmarked.
-func TestPublishIndexToManifestDeclinedWhenSwitchOff(t *testing.T) {
+// A build created with the switch off performs zero manifest I/O and finishes
+// in etcd, leaving the segment unmarked.
+func TestPublishIndexToManifestDeclinedForOffModeTask(t *testing.T) {
 	withSegmentIndexManifestWrites(t, false)
 	store := newFakeManifestStore(t)
 	ctx := context.TODO()
@@ -1174,7 +1239,7 @@ func TestPublishIndexToManifestDeclinedWhenSwitchOff(t *testing.T) {
 		State:                 commonpb.IndexState_Finished,
 		IndexFileKeys:         []string{"0", "1"},
 		SerializedSize:        4096,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		IndexStorePathVersion: segIdx.IndexStorePathVersion,
 	}
 
 	published, err := it.publishIndexToManifest(result)

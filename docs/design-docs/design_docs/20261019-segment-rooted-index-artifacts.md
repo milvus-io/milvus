@@ -49,19 +49,25 @@ not restage existing index entries.
 
 ## Retries, mode changes and upgrades
 
-A task's path version is durable. Toggling the switch does not redirect an
-already dispatched upload. An old version-0/1 task completed after enabling
-manifest publication fails path validation; it cannot publish an external
-reference or silently finish in etcd. Such a task needs a new build. No automatic
-migration/rebuild policy is introduced here. Turning the switch off still permits
-an already dispatched version-2 build to finish using etcd metadata, with its
-physical path unchanged.
+A task's durable path version pins both artifact placement and publication mode
+at creation. Version-2 builds finish in the manifest even after the switch is
+turned off; version-0/1 builds finish in etcd even after it is turned on. Completion
+uses the coordinator's persisted task version, not the current switch or the
+worker's claimed version. Worker results still undergo layout validation.
+Retries and coordinator restarts preserve this choice. Pre-version-2 tasks also
+finish in etcd because their metadata cannot establish an on-mode choice for the
+new layout. No artifact migration or automatic rebuild is required by a switch
+change, and external index paths are never added to a manifest.
 
 Upgrade DataCoord, index workers and QueryNodes before enabling this behavior.
 An older native worker treats unknown path versions as collection-rooted and
 can echo the requested version despite writing the old layout. The existing
-switch is an operator gate, not a per-worker capability negotiation. Downgrading
-readers while version-2 artifacts exist is unsupported.
+switch remains an operator gate. DataCoord additionally checks the selected
+worker's `QuerySlot.segment_rooted_indexes` capability before dispatching a v2
+build or copy destination. A missing capability fails the task with an explicit
+upgrade-required reason, without dispatching or downgrading its layout. RPC
+failures remain retryable. Downgrading readers while version-2 artifacts exist
+is unsupported.
 
 ## Snapshot restore
 
@@ -84,8 +90,10 @@ Recorded-file deletion uses version 2 and the segment's actual manifest base.
 The orphan scanner applies the existing build-state, import, age and snapshot
 protections to `insert_log/.../_index`. It skips ordinary data/stats/manifests,
 retains active builds and recorded finished files, and reclaims unrecorded builds
-or obsolete attempt files. The generic V3 binlog scan alone is insufficient
-because it skips registered V3 segments. Dropped-segment GC still owns whole
+or obsolete attempt files. This check runs inside the existing `insert_log`
+traversal, before the generic registered-V3 skip; there is no second recursive
+LIST of the prefix. It remains active even when the write switch is off, because
+historical v2 files still need reclamation. Dropped-segment GC still owns whole
 segment deletion. Historical noncanonical local namespace orphan-scan gaps
 remain as documented in the storage path contract.
 
@@ -96,7 +104,7 @@ and GC integration, regression tests and documentation. No intermediate layer
 publishes version 2 before the consumers understand it.
 
 Focused validation covers layout selection, native upload/read, repeated real
-manifest commits, old-task rejection without metadata publication, version
+manifest commits, creation-time publication across switch changes and restart, version
 mismatch, restart/load metadata, conversion from all source layouts, exclusion
 of unpinned builds, copy-task persistence, and orphan/snapshot/import GC rules.
 Run Go tests with `-tags dynamic,test -gcflags="all=-N -l"` and native checks in
@@ -108,11 +116,24 @@ separately from source-traced upgrade and distributed failure scenarios.
 The matching development container completed the native build and six focused
 native tests, including upload/read under an existing local manifest's `_index`.
 The metautil path tests and focused DataCoord, importv2 and packed tests passed.
-These cover old-task rejection across restart, new-layout task requests,
+These covered the original old-task rejection across restart, new-layout task requests,
 manifest-only recovery, copy conversion and GC protections. Real local FFI tests
 also passed repeated manifest commits and rejection of an external-path addition.
 Legacy manifest recovery tests passed separately. No live mixed-version cluster
 or object-storage deployment was exercised.
+
+The subsequent creation-time publication and review fixes were validated in
+the matching development container through the data-backed Docker daemon.
+Focused tests passed for version-0/1 off-to-on and version-2 on-to-off commits,
+with and without a coordinator restart; manifest recovery; rejection of worker
+layout changes; old-worker capability rejection and durable task failure; and
+worker capability advertisement. The GC tests passed for the merged traversal,
+including a single insert_log listing with the write switch off, live V3 data,
+snapshots, active builds, importing segments, malformed paths and removal errors.
+The DataNode service suite could not initialize because etcd was unreachable;
+capability advertisement was also verified directly without registration.
+A broader GC/manifest run was interrupted before completion and is not counted
+as passing. No live mixed-version cluster validation was performed.
 
 With PCH disabled, the baseline build required the missing `<optional>` include
 in `RegexQuery.h`; this change includes that build prerequisite.

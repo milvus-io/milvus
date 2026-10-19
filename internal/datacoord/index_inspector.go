@@ -229,8 +229,8 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		indexType = newIndexType
 	}
 
-	// Persist the layout before dispatch. Retries and recovery must not choose
-	// another directory when the manifest publication switch changes.
+	// Persist the layout and publication mode before dispatch. Retries and
+	// recovery must not redirect this build when the switch changes.
 	pathVersion := i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion()
 	if segment.GetStorageVersion() == storage.StorageV3 && writeSegmentIndexToManifest() {
 		pathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED

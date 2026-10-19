@@ -176,12 +176,6 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 // was issued against.
 func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo) (bool, error) {
 	ctx := it.meta.ctx
-	// Manifest publication is opt-in and exclusive with the etcd record: off
-	// (the default) is the pure legacy path and must produce no manifest index
-	// entry at all, so the decline happens before any other inspection.
-	if !writeSegmentIndexToManifest() {
-		return false, nil
-	}
 	if result.GetState() != commonpb.IndexState_Finished {
 		return false, nil
 	}
@@ -203,6 +197,13 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	}
 	segIdx, ok := it.meta.indexMeta.GetIndexJob(it.BuildID)
 	if !ok || segIdx == nil {
+		return false, nil
+	}
+	// Creation pins both placement and publication mode in the path version:
+	// v2 builds publish to manifests, while v0/v1 builds finish in etcd.
+	// Consult the durable task, not the current switch or the worker's result,
+	// so mode changes and coordinator restarts cannot redirect an active build.
+	if !metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
 		return false, nil
 	}
 	// The index definition can be dropped while the build runs: GC's
@@ -424,6 +425,11 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// Send request to worker
 	if err = cluster.CreateIndex(nodeID, req); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
+		if metautil.IsSegmentRooted(req.GetIndexStorePathVersion()) && errors.Is(err, merr.ErrServiceUnimplemented) {
+			if updateErr := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
+				log.Warn(ctx, "failed to persist unsupported index task failure", mlog.Err(updateErr))
+			}
+		}
 		return
 	}
 

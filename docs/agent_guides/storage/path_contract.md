@@ -44,8 +44,9 @@ legacy local segments: they follow that existing manifest base. Disabling the
 switch preserves the existing version-0/1 layout selection for new tasks.
 New or updated index entries must stay inside that `_index` directory; parent
 traversal and external namespaces are errors. Existing entries are not migrated.
-Old-layout tasks finishing after the switch is enabled fail publication, without
-falling back to etcd. Readers and cleanup use each artifact's persisted version.
+Builds retain their creation-time publication mode across switch changes and
+restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
+Readers and cleanup use each artifact's persisted version.
 See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
 
 ## Local upgrade compatibility

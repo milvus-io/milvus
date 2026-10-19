@@ -287,9 +287,9 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	m.segmentBuildInfo.Add(segIdx)
 }
 
-// writeSegmentIndexToManifest reports whether completed StorageV3 index
-// artifacts are published through segment manifests. SegmentIndex remains the
-// durable task record while a build is active or failed. Only a successful
+// writeSegmentIndexToManifest selects manifest publication for new StorageV3
+// tasks. Existing index builds follow their persisted path version. SegmentIndex
+// remains the durable task record while a build is active or failed. Only a successful
 // publication retires its Finished etcd row.
 func writeSegmentIndexToManifest() bool {
 	return paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool()

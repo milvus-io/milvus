@@ -1364,6 +1364,14 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 }
 
 func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVersion) {
+	recycle := func(gc *garbageCollector) {
+		if metautil.IsSegmentRooted(version) {
+			gc.recycleUnusedBinLogWithChecker(context.TODO(), "root/insert_log", metrics.InsertFileLabel,
+				storage.ParseSegmentIDByBinlog, func(_ *storage.ChunkObjectInfo, segment *SegmentInfo) bool { return segment != nil })
+		} else {
+			gc.recycleUnusedIndexFilesV1(context.TODO())
+		}
+	}
 	toPath := func(file string) string {
 		if version == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED {
 			file = strings.Replace(file, "root/index_v1/", "root/insert_log/", 1)
@@ -1398,6 +1406,10 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 				keyLock:          lock.NewKeyLock[UniqueID](),
 			},
 		}
+		m.segments.SetSegment(segID, NewSegmentInfo(&datapb.SegmentInfo{
+			ID: segID, CollectionID: collID, PartitionID: partID,
+			State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+		}))
 		m.snapshotMeta = &snapshotMeta{}
 		add := func(buildID UniqueID, state commonpb.IndexState, keys []string) {
 			m.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
@@ -1416,7 +1428,7 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		return func(_ context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
 			expected := "root/index_v1/"
 			if version == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED {
-				expected = "root/insert_log/"
+				expected = "root/insert_log"
 			}
 			assert.Equal(t, expected, prefix)
 			assert.True(t, recursive)
@@ -1440,6 +1452,42 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		return &removed
 	}
 
+	if metautil.IsSegmentRooted(version) {
+		t.Run("single binlog traversal reclaims indexes with switch off", func(t *testing.T) {
+			key := paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.Key
+			previous := paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetValue()
+			require.NoError(t, paramtable.Get().Save(key, "false"))
+			t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(key, previous)) })
+			unblocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+			defer unblocked.UnPatch()
+			cm := mocks.NewChunkManager(t)
+			cm.EXPECT().RootPath().Return("root")
+			walks := map[string]int{}
+			cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, true, mock.Anything).RunAndReturn(
+				func(_ context.Context, prefix string, _ bool, fn storage.ChunkObjectWalkFunc) error {
+					walks[prefix]++
+					if prefix == "root/insert_log" {
+						for _, file := range []string{
+							toPath("root/index_v1/100/200/300/2003/2/orphan"),
+							"root/insert_log/100/200/300/_data/live",
+							"root/insert_log/100/200/300/_manifest/1.manifest",
+						} {
+							fn(&storage.ChunkObjectInfo{FilePath: file, ModifyTime: old})
+						}
+					}
+					return nil
+				})
+			removed := collectRemoved(cm)
+			gc := newGarbageCollector(newMeta(t), nil, GcOption{cli: cm, missingTolerance: time.Hour})
+			gc.recycleUnusedBinlogFiles(context.TODO())
+			require.Equal(t, 1, walks["root/insert_log"])
+			for prefix, count := range walks {
+				require.Equal(t, 1, count, prefix)
+			}
+			require.ElementsMatch(t, []string{"root/index_v1/100/200/300/2003/2/orphan"}, *removed)
+		})
+	}
+
 	t.Run("removes files meta does not account for", func(t *testing.T) {
 		unblocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
 		defer unblocked.UnPatch()
@@ -1454,12 +1502,13 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 			"root/index_v1/100/200/300/2003/2/part":  old,        // no record at all: remove
 			"root/index_v1/100/200/300/2003/2/young": time.Now(), // may still be uploading: keep
 			"root/insert_log/100/200/300/_data/file": old,        // ordinary V3 data must survive the index scan
+			"root/insert_log/100/200/300/_index/bad": old,        // malformed v2 index: keep
 			"root/index_v1/not/a/valid/path":         old,        // unparsable: skip
 		}))
 		removed := collectRemoved(cm)
 
 		gc := newGarbageCollector(newMeta(t), nil, GcOption{cli: cm, missingTolerance: time.Hour})
-		gc.recycleUnusedIndexFiles(context.TODO(), metautil.IsSegmentRooted(version))
+		recycle(gc)
 
 		assert.ElementsMatch(t, []string{
 			"root/index_v1/100/200/300/2000/2/stale",
@@ -1490,7 +1539,7 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		removed := collectRemoved(cm)
 
 		gc := newGarbageCollector(m, nil, GcOption{cli: cm, missingTolerance: time.Hour})
-		gc.recycleUnusedIndexFiles(context.TODO(), metautil.IsSegmentRooted(version))
+		recycle(gc)
 		assert.ElementsMatch(t, []string{"root/index_v1/100/200/302/2005/1/part"}, *removed)
 	})
 
@@ -1518,7 +1567,7 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		removed := collectRemoved(cm)
 
 		gc := newGarbageCollector(newMeta(t), nil, GcOption{cli: cm, missingTolerance: time.Hour})
-		gc.recycleUnusedIndexFiles(context.TODO(), metautil.IsSegmentRooted(version))
+		recycle(gc)
 		assert.ElementsMatch(t, []string{
 			"root/index_v1/100/200/300/2000/2/stale",
 			"root/index_v1/100/200/300/2003/2/part",
@@ -1546,7 +1595,7 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		removed := collectRemoved(cm)
 
 		gc := newGarbageCollector(m, nil, GcOption{cli: cm, missingTolerance: time.Hour})
-		gc.recycleUnusedIndexFiles(context.TODO(), metautil.IsSegmentRooted(version))
+		recycle(gc)
 		assert.ElementsMatch(t, []string{"root/index_v1/100/200/305/2009/1/part"}, *removed)
 	})
 
@@ -1563,7 +1612,7 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		removed := collectRemoved(cm)
 
 		gc := newGarbageCollector(newMeta(t), nil, GcOption{cli: cm, missingTolerance: time.Hour})
-		gc.recycleUnusedIndexFiles(context.TODO(), metautil.IsSegmentRooted(version))
+		recycle(gc)
 		assert.Empty(t, *removed)
 	})
 
@@ -1580,7 +1629,7 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("remove error"))
 
 		gc := newGarbageCollector(newMeta(t), nil, GcOption{cli: cm, missingTolerance: time.Hour})
-		gc.recycleUnusedIndexFiles(context.TODO(), metautil.IsSegmentRooted(version))
+		recycle(gc)
 	})
 }
 

@@ -251,6 +251,37 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		it.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
 	})
+
+	s.Run("unsupported v2 worker fails durably", func() {
+		job, ok := s.mt.indexMeta.GetIndexJob(s.taskID)
+		s.Require().True(ok)
+		original := model.CloneSegmentIndex(job)
+		defer s.mt.indexMeta.segmentBuildInfo.Add(original)
+		segment := s.mt.segments.segments[s.segID]
+		previousManifest, previousStorageVersion := segment.ManifestPath, segment.StorageVersion
+		defer func() {
+			segment.ManifestPath, segment.StorageVersion = previousManifest, previousStorageVersion
+		}()
+		segment.ManifestPath = packed.MarshalManifestPath("root/insert_log/1/2/1179", 1)
+		segment.StorageVersion = storage.StorageV3
+		job.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+		s.mt.indexMeta.segmentBuildInfo.Add(job)
+		it.IndexStorePathVersion = job.IndexStorePathVersion
+		it.SetState(indexpb.JobState_JobStateInit, "")
+		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
+		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		s.mt.indexMeta.catalog = catalogMock
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(
+			merr.Wrapf(merr.ErrServiceUnimplemented, "worker does not support segment-rooted indexes"))
+		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
+		it.CreateTaskOnWorker(1, cluster)
+		s.Equal(commonpb.IndexState_Failed, it.IndexState)
+		stored, ok := s.mt.indexMeta.GetIndexJob(s.taskID)
+		s.Require().True(ok)
+		s.Equal(commonpb.IndexState_Failed, stored.IndexState)
+		s.Contains(stored.FailReason, "does not support segment-rooted indexes")
+	})
 }
 
 func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMaxSimRequiresEnoughVectors() {
