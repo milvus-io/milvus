@@ -450,6 +450,8 @@ type RecordBuilder struct {
 	builders    []array.Builder
 	defaults    []appendValueDefault
 	allocator   *recordBuilderAllocator
+	// Append reuses this slice and clears its borrowed columns before returning.
+	columns []arrow.Array
 
 	nRows int
 	size  uint64
@@ -500,36 +502,17 @@ func (b *RecordBuilder) Append(rec Record, start, end int) error {
 	if err := b.prepareAppendDefaults(); err != nil {
 		return err
 	}
-	for offset := start; offset < end; offset++ {
-		for i, builder := range b.builders {
-			f := b.fields[i]
-			col := rec.Column(f.FieldID)
-			// TEXT may be decoded UTF8 or a binary LOB reference. Preserve the
-			// reader's representation instead of treating decoded text as a ref.
-			if f.GetDataType() == schemapb.DataType_Text &&
-				(col.DataType().ID() == arrow.STRING || col.DataType().ID() == arrow.BINARY) &&
-				col.DataType().ID() != builder.Type().ID() {
-				if builder.NullN() == builder.Len() {
-					// Missing TEXT fields can have been filled with binary nulls.
-					nulls := builder.Len()
-					builder.Release()
-					builder = array.NewBuilder(b.allocator, col.DataType())
-					builder.AppendNulls(nulls)
-					b.builders[i] = builder
-				} else if col.IsNull(offset) {
-					builder.AppendNull()
-					continue
-				}
-			}
-			size, err := appendValueAt(builder, col, offset, f, b.defaults[i])
-			if err != nil {
-				return merr.Wrapf(err, "failed to append value at offset %d for field %s", offset, f.GetName())
-			}
-			b.size += size
-		}
+	if start >= end {
+		return b.appendColumns(nil, start, end)
 	}
-	b.nRows += (end - start)
-	return nil
+	if b.columns == nil {
+		b.columns = make([]arrow.Array, len(b.fields))
+	}
+	defer clear(b.columns)
+	for i, field := range b.fields {
+		b.columns[i] = rec.Column(field.GetFieldID())
+	}
+	return b.appendColumns(b.columns, start, end)
 }
 
 // appendColumns appends rows from source columns already resolved in builder
@@ -543,11 +526,13 @@ func (b *RecordBuilder) appendColumns(columns []arrow.Array, start, end int) err
 		for i, builder := range b.builders {
 			f := b.fields[i]
 			col := columns[i]
-			// Keep TEXT representation handling aligned with Append.
+			// TEXT may be decoded UTF8 or a binary LOB reference. Preserve the
+			// reader's representation instead of treating decoded text as a ref.
 			if f.GetDataType() == schemapb.DataType_Text &&
 				(col.DataType().ID() == arrow.STRING || col.DataType().ID() == arrow.BINARY) &&
 				col.DataType().ID() != builder.Type().ID() {
 				if builder.NullN() == builder.Len() {
+					// Missing TEXT fields can have been filled with binary nulls.
 					nulls := builder.Len()
 					builder.Release()
 					builder = array.NewBuilder(b.allocator, col.DataType())
