@@ -108,7 +108,9 @@ characters. The collector processes requests serially and creates an exclusive
 `runs/<id>` directory. The same ID cannot overwrite a previous snapshot.
 
 The collector writes Go metadata/counters, explicitly dumps the C++ runtime,
-and copies `.gcda` files preserving their paths. `done.json` is atomically
+flushes libgcov diagnostics, and checks that every previous `.gcda` file was
+rewritten and the file count did not drop. It then copies `.gcda` files
+preserving their paths. `done.json` is atomically
 published only after these steps succeed; otherwise `error` describes the
 failure. The caller must treat missing completion as failure/timeout. A native
 dump error permanently rejects subsequent snapshots from that process because
@@ -159,8 +161,10 @@ build-specific and are not upgraded or merged across source revisions.
 ## Test Plan
 
 Collector tests exercise raw snapshot copying, duplicate IDs, malformed IDs,
-conflicting/stale directories, Go writer failures, absent native counters,
-copy errors, and persistent native dump failures. Full validation also requires
+conflicting/stale directories, Go writer failures, absent or stale native counters,
+copy errors, diagnostic flush failures, and persistent native dump failures.
+The Go CI command includes `cmd/coverage`, vets the `servercoverage` hook, and
+runs the exporter protocol test. Full validation also requires
 an instrumented Linux/GCC build, a live SDK workload against that build, and
 successful report decoding with observed hits in both Go and C++ business code.
 Normal builds must continue to compile without the collector/native hook.
