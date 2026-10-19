@@ -1,9 +1,8 @@
 # Licensed under the Apache License, Version 2.0.
-set(probe_env "TSAN_OPTIONS=halt_on_error=1:exitcode=66")
+set(probe_env "TSAN_OPTIONS=halt_on_error=1:exitcode=66:suppressions=${CMAKE_CURRENT_LIST_DIR}/../../tsan.supp")
 if(DEFINED ARCHER)
     list(APPEND probe_env "OMP_TOOL=enabled" "OMP_TOOL_LIBRARIES=${ARCHER}"
-        "ARCHER_OPTIONS=verbose=1"
-        "TSAN_OPTIONS=halt_on_error=1:exitcode=66:ignore_noninstrumented_modules=1")
+        "ARCHER_OPTIONS=verbose=1")
 endif()
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env --unset=LD_PRELOAD
@@ -25,7 +24,7 @@ else()
     if(NOT result STREQUAL "66" OR NOT report MATCHES "ThreadSanitizer: data race")
         message(FATAL_ERROR "Expected a TSan data race and exit 66 (${result}):\n${report}")
     endif()
-    if(NOT report MATCHES "(access\\.c|access\\.cpp|openmp\\.cpp):[0-9]+")
+    if(NOT report MATCHES "(access\\.c|access\\.cpp|openmp\\.cpp|probe\\.cpp):[0-9]+")
         message(FATAL_ERROR "Missing source line information in report:\n${report}")
     endif()
     if(MODE STREQUAL "race-c" AND NOT report MATCHES "tsan_increment_c")

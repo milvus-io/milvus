@@ -68,9 +68,11 @@ milvus_sanitizer_env() {
             echo "ERROR: installed LLVM symbolizer is missing" >&2
             return 1
         fi
-        # Upstream Archer excludes uninstrumented runtime internals. Native
-        # positive/negative probes guard against accidentally hiding application races.
-        export TSAN_OPTIONS="${TSAN_OPTIONS:+${TSAN_OPTIONS}:}ignore_noninstrumented_modules=1:external_symbolizer_path=${prefix}/lib/llvm-symbolizer"
+        if [[ ! -f "${prefix}/lib/tsan.supp" ]]; then
+            echo "ERROR: installed TSan suppressions are missing" >&2
+            return 1
+        fi
+        export TSAN_OPTIONS="suppressions=${prefix}/lib/tsan.supp:external_symbolizer_path=${prefix}/lib/llvm-symbolizer${TSAN_OPTIONS:+:${TSAN_OPTIONS}}"
     fi
     # A detected race must fail the runner; user options may add symbolizer paths.
     export TSAN_OPTIONS="${TSAN_OPTIONS:+${TSAN_OPTIONS}:}halt_on_error=1:exitcode=66"

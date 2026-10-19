@@ -30,7 +30,7 @@ for marker in "$PWD/internal/core/output/lib/milvus-sanitizer" "$PWD/internal/co
         cp "$marker" "$LIBRARY_PATH/"
     fi
 done
-for metadata in milvus-archer tsan-dependencies.json; do
+for metadata in milvus-archer tsan-dependencies.json tsan.supp; do
     if [[ -f "$PWD/internal/core/output/lib/$metadata" ]]; then
         cp "$PWD/internal/core/output/lib/$metadata" "$LIBRARY_PATH/"
     fi
@@ -56,3 +56,8 @@ cp "${PYUDF_WHEELS[0]}" "$PYUDF_RUNTIME_DIR/"
 for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|tsan|atomic)' | awk '{print $3}'); do
     cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
 done
+
+if [[ -f "$LIBRARY_PATH/milvus-archer" ]]; then
+    python3 "$PWD/internal/core/milvus_tsan.py" verify "$LIBRARY_PATH"
+    python3 "$PWD/internal/core/milvus_tsan.py" verify-runtime "$LIBRARY_PATH"
+fi

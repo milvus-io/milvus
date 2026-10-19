@@ -28,14 +28,18 @@ MANIFEST = "tsan-dependencies.json"
 POLICY_CONF = "user.milvus:tsan_dependency_policy"
 
 
-def profile():
-    lines = ["[settings]"]
-    for pattern in ["&", *[f"{name}/*" for name in PACKAGES]]:
+def profile(all_dependencies=False):
+    patterns = [""] if all_dependencies else ["&", *[f"{name}/*" for name in PACKAGES]]
+    lines = (
+        ["include(default)", "", "[settings]"] if all_dependencies else ["[settings]"]
+    )
+    for pattern in patterns:
+        prefix = f"{pattern}:" if pattern else ""
         lines += [
-            f"{pattern}:compiler=clang",
-            f"{pattern}:compiler.version=20",
-            f"{pattern}:compiler.libcxx=libstdc++11",
-            f"{pattern}:compiler.cppstd=20",
+            f"{prefix}compiler=clang",
+            f"{prefix}compiler.version=20",
+            f"{prefix}compiler.libcxx=libstdc++11",
+            f"{prefix}compiler.cppstd=20",
         ]
     # OpenBLAS' GCC/Fortran OpenMP backend would introduce a second runtime.
     # Its pthread backend retains parallel BLAS without linking libgomp.
@@ -52,18 +56,25 @@ def profile():
     # explicitly so a prebuilt non-TSan package cannot satisfy this profile.
     lines.append("user.milvus:sanitizer=thread")
     lines.append("user.milvus:tsan_runtime_dependencies=True")
-    lines.append("tools.info.package_id:confs=" + json.dumps([*FLAGS, POLICY_CONF]))
+    identity_confs = [*FLAGS, POLICY_CONF]
+    if all_dependencies:
+        identity_confs.append("user.milvus:sanitizer")
+    lines.append("tools.info.package_id:confs=" + json.dumps(identity_confs))
     root = os.environ.get("MILVUS_LLVM_ROOT", "/usr/lib/llvm-20")
-    for pattern in ["&", *[f"{name}/*" for name in PACKAGES]]:
+    for pattern in patterns:
+        prefix = f"{pattern}:" if pattern else ""
         lines.append(
-            f"{pattern}:tools.build:compiler_executables="
+            f"{prefix}tools.build:compiler_executables="
             + json.dumps({"c": f"{root}/bin/clang", "cpp": f"{root}/bin/clang++"})
         )
-    for package in PACKAGES:
-        lines.append(f"{package}/*:{POLICY_CONF}=3")
+    flag_patterns = [""] if all_dependencies else [f"{name}/*" for name in PACKAGES]
+    for pattern in flag_patterns:
+        prefix = f"{pattern}:" if pattern else ""
+        lines.append(f"{prefix}{POLICY_CONF}=3")
         for key, flags in FLAGS.items():
-            lines.append(f"{package}/*:{key}+=" + json.dumps(flags))
-        lines.append(f"{package}/*:tools.build:skip_test=True")
+            lines.append(f"{prefix}{key}+=" + json.dumps(flags))
+        if not all_dependencies:
+            lines.append(f"{prefix}tools.build:skip_test=True")
     return "\n".join(lines) + "\n"
 
 
@@ -177,6 +188,8 @@ def verify_runtime(lib_dir):
     for name in ["llvm-symbolizer", "tsan-symbolizer/llvm-symbolizer"]:
         if not os.access(lib_dir / name, os.X_OK):
             raise ValueError(f"Missing LLVM symbolizer: {name}")
+    if not (lib_dir / "tsan.supp").is_file():
+        raise ValueError("Missing TSan suppressions")
     env = {**os.environ, "LD_LIBRARY_PATH": str(lib_dir.resolve())}
     paths = {path.resolve() for path in lib_dir.glob("*.so*")}
     binary = lib_dir.parent / "bin/milvus"
@@ -236,9 +249,10 @@ if __name__ == "__main__":
         "command", choices=["profile", "verify", "verify-runtime", "package-symbolizer"]
     )
     parser.add_argument("lib_dir", type=Path, nargs="?")
+    parser.add_argument("--all", action="store_true", dest="all_dependencies")
     args = parser.parse_args()
     if args.command == "profile":
-        print(profile(), end="")
+        print(profile(all_dependencies=args.all_dependencies), end="")
     elif args.lib_dir is None:
         parser.error(f"{args.command} requires a library directory")
     elif args.command == "verify-runtime":
