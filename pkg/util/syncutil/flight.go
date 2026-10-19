@@ -69,7 +69,7 @@ func (g *FlightGroup[K, V]) Do(ctx context.Context, key K, work func(context.Con
 				delete(g.flights, key)
 			}
 			close(call.done)
-			call.cancel()
+			cancel()
 			g.mu.Unlock()
 		}()
 	}
