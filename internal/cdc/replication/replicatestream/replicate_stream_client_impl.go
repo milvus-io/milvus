@@ -260,7 +260,14 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 }
 
 func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
+	return r.sendMessageWithPrevious(msg, nil)
+}
+
+func (r *replicateStreamClient) sendMessageWithPrevious(msg message.ImmutableMessage, previous message.MessageID) (err error) {
 	immutableMessage := msg.IntoImmutableMessageProto()
+	if previous != nil {
+		immutableMessage = message.WithReplicateTxnPrevious(msg, previous)
+	}
 
 	defer func() {
 		logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("revision", r.channel.ModRevision))
@@ -284,20 +291,27 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 }
 
 func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
-	// send txn begin message
-	if err = r.sendMessage(txnMsg.Begin()); err != nil {
+	// Preserve the assembled transaction's order, including after reconnect.
+	// The predecessor chain proves completeness independently of which stream
+	// delivers a duplicate body or commit. Begin points to itself.
+	previous := txnMsg.Begin().MessageID()
+	if err = r.sendMessageWithPrevious(txnMsg.Begin(), previous); err != nil {
 		return err
 	}
 
 	// send txn body messages
 	if err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
-		return r.sendMessage(msg)
+		if err := r.sendMessageWithPrevious(msg, previous); err != nil {
+			return err
+		}
+		previous = msg.MessageID()
+		return nil
 	}); err != nil {
 		return err
 	}
 
 	// send txn commit message
-	err = r.sendMessage(txnMsg.Commit())
+	err = r.sendMessageWithPrevious(txnMsg.Commit(), previous)
 	return
 }
 

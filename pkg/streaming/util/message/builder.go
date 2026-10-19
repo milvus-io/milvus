@@ -82,12 +82,26 @@ func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) (Replic
 	m.properties.Delete(messageTimeTick)
 	m.properties.Delete(messageLastConfirmed)
 	m.properties.Delete(messageWALTerm)
+	var prevTxnMessageID MessageID
+	if raw, ok := m.properties.Get(messageReplicateTxnPrevious); ok {
+		var previous commonpb.MessageID
+		if err := DecodeProto(raw, &previous); err != nil {
+			return nil, merr.Wrap(err, "decode replicated transaction predecessor")
+		}
+		var err error
+		prevTxnMessageID, err = UnmarshalMessageID(&previous)
+		if err != nil {
+			return nil, merr.Wrap(err, "decode replicated transaction predecessor")
+		}
+		m.properties.Delete(messageReplicateTxnPrevious)
+	}
 	m.WithReplicateHeader(&ReplicateHeader{
 		ClusterID:              clustrID,
 		MessageID:              msg.MessageID(),
 		LastConfirmedMessageID: msg.LastConfirmedMessageID(),
 		TimeTick:               msg.TimeTick(),
 		VChannel:               msg.VChannel(),
+		PrevTxnMessageID:       prevTxnMessageID,
 	})
 	return m, nil
 }

@@ -59,6 +59,13 @@ type ReplicateHeader struct {
 	LastConfirmedMessageID MessageID
 	TimeTick               uint64
 	VChannel               string
+	PrevTxnMessageID       MessageID
+}
+
+// IsLocalFlush reports whether this is a cluster-local transaction abort boundary.
+func IsLocalFlush(msg BasicMessage) bool {
+	return msg.IsUnreplicable() && msg.ReplicateHeader() == nil &&
+		(msg.MessageType() == MessageTypeManualFlush || msg.MessageType() == MessageTypeFlushAll)
 }
 
 // WithBroadcastControlChannel adds the control channel to the vchannels of the broadcast header

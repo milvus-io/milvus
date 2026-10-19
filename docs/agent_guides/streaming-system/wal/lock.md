@@ -15,10 +15,11 @@ See [Message Semantic Docs](../message/message.md) for per-message lock requirem
 
 ## Local flush and replication
 
-A PChannel admission gate runs before WAL locks. Local flushes wait for the current
-replicated transaction to commit and precede new transactions. Exclusive-lock
-cleanup only fails locally originated transactions; ForcePromote explicitly rolls
-back replicated transactions after successful append. See [Local Flush Control](local-flush.md).
+Local Flush takes its existing exclusive WAL lock and aborts incomplete receiving
+transactions in that scope after successful append. It does not wait for the
+source Commit. Ordinary exclusive cleanup only fails locally originated sessions.
+ManualFlush affects one business VChannel per copy; FlushAll affects the PChannel.
+See [Local Flush Control](local-flush.md).
 
 ## Key Packages
 

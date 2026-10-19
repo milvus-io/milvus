@@ -28,6 +28,61 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
+func TestFlushAbortsRecoveredReplicaSessionsByVChannel(t *testing.T) {
+	resource.InitForTest(t)
+	builders := make(map[message.TxnID]*message.ImmutableTxnMessageBuilder)
+	for id, vchannel := range []string{"v1", "v2"} {
+		begin := message.NewBeginTxnMessageBuilderV2().WithVChannel(vchannel).
+			WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().
+			WithTxnContext(message.TxnContext{TxnID: message.TxnID(id + 1), Keepalive: message.TxnKeepaliveInfinite}).
+			WithTimeTick(1).WithLastConfirmedUseMessageID().
+			WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", MessageID: walimplstest.NewTestMessageID(1), LastConfirmedMessageID: walimplstest.NewTestMessageID(0), TimeTick: 10, VChannel: vchannel}).
+			IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		builders[message.TxnID(id+1)] = message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin))
+	}
+	m := NewTxnManager(types.PChannelInfo{Name: "test"}, builders)
+	cleaned := make(map[message.TxnID]int)
+	for id := range builders {
+		session, err := m.GetSessionOfTxn(id)
+		require.NoError(t, err)
+		session.RegisterCleanup(func() { cleaned[id]++ }, 1)
+	}
+	m.FailTxnAtVChannel("")
+	require.Len(t, m.sessions, 2, "ordinary exclusives cannot discard a receiving txn")
+	first := m.sessions[1]
+	m.AbortTxnAtVChannel("v1")
+	require.Equal(t, message.TxnStateRollbacked, first.State())
+	require.True(t, first.IsExpiredOrDone(1), "LastConfirmedMessageID must be able to pass the aborted infinite-lease txn")
+	require.Equal(t, 1, cleaned[1])
+	require.Zero(t, cleaned[2])
+	require.Len(t, m.sessions, 1)
+	select {
+	case <-m.RecoverDone():
+		t.Fatal("the other VChannel still has a recovered transaction")
+	default:
+	}
+	closing := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() { closing <- m.GracefulClose(ctx) }()
+	require.Eventually(t, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return m.closed != nil
+	}, time.Second, time.Millisecond)
+	m.AbortTxnAtVChannel("")
+	require.Equal(t, 1, cleaned[2])
+	require.Empty(t, m.sessions)
+	select {
+	case <-m.RecoverDone():
+	default:
+		t.Fatal("flush must release the recovered-segment flush barrier")
+	}
+	m.AbortTxnAtVChannel("")
+	require.Equal(t, map[message.TxnID]int{1: 1, 2: 1}, cleaned)
+	require.NoError(t, <-closing, "flush must wake a concurrently closing manager")
+}
+
 func TestSession(t *testing.T) {
 	resource.InitForTest(t)
 	ctx := context.Background()
@@ -534,88 +589,4 @@ func newImmutableBeginTxnMessageWithVChannel(vchannel string, txnID int64, timet
 		}).
 		IntoImmutableMessage(rmq.NewRmqID(1))
 	return message.MustAsImmutableBeginTxnMessageV2(msg)
-}
-
-func TestReplicatedCommitRetryKeepsSegmentReferences(t *testing.T) {
-	metrics := metricsutil.NewTxnMetrics("replicated-commit-retry")
-	defer metrics.Close()
-	session := newTxnSession("v1", message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}, 1, metrics.BeginTxn())
-	cleaned := 0
-	session.RegisterCleanup(func() { cleaned++ }, 1)
-	require.NoError(t, session.RequestCommitAndWait(context.Background(), 2))
-	session.RetryCommit()
-	require.Equal(t, message.TxnStateInFlight, session.State())
-	require.Zero(t, cleaned)
-	// Retried body/commit can use the same session without releasing its segment.
-	require.NoError(t, session.AddNewMessage(context.Background(), 3))
-	session.AddNewMessageDoneAndKeepalive(3)
-	require.NoError(t, session.RequestCommitAndWait(context.Background(), 4))
-	session.CommitDone()
-	require.Equal(t, 1, cleaned)
-}
-
-func TestExclusiveWritePreservesRecoveredReplicatedTxn(t *testing.T) {
-	resource.InitForTest(t)
-	makeBuilder := func(id message.TxnID, replicated bool) *message.ImmutableTxnMessageBuilder {
-		msg := message.NewBeginTxnMessageBuilderV2().
-			WithVChannel("v1").
-			WithHeader(&message.BeginTxnMessageHeader{}).
-			WithBody(&message.BeginTxnMessageBody{}).
-			MustBuildMutable().
-			WithTimeTick(1).
-			WithTxnContext(message.TxnContext{TxnID: id, Keepalive: message.TxnKeepaliveInfinite})
-		if replicated {
-			msg = msg.WithReplicateHeader(&message.ReplicateHeader{
-				ClusterID: "source", TimeTick: 10,
-				MessageID: walimplstest.NewTestMessageID(1), LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
-			})
-		}
-		return message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(msg.IntoImmutableMessage(walimplstest.NewTestMessageID(int64(id)))))
-	}
-	manager := NewTxnManager(types.PChannelInfo{Name: "preserve-replicated"}, map[message.TxnID]*message.ImmutableTxnMessageBuilder{
-		1: makeBuilder(1, false), 2: makeBuilder(2, true),
-	})
-	defer manager.metrics.Close()
-	local, err := manager.GetSessionOfTxn(1)
-	require.NoError(t, err)
-	replica, err := manager.GetSessionOfTxn(2)
-	require.NoError(t, err)
-	var localCleaned, replicaCleaned bool
-	local.RegisterCleanup(func() { localCleaned = true }, 1)
-	replica.RegisterCleanup(func() { replicaCleaned = true }, 1)
-	manager.FailTxnAtVChannel("v1")
-	require.True(t, localCleaned)
-	require.False(t, replicaCleaned)
-	_, err = manager.GetSessionOfTxn(1)
-	require.Error(t, err)
-	_, err = manager.GetSessionOfTxn(2)
-	require.NoError(t, err)
-	manager.FailTxnAtVChannel("")
-	require.False(t, replicaCleaned)
-	manager.RollbackAllInFlightTransactions()
-	require.True(t, replicaCleaned)
-	select {
-	case <-manager.RecoverDone():
-	default:
-		t.Fatal("promotion must resolve recovered transactions")
-	}
-}
-
-func TestReplicatedCommitPreparationCancellation(t *testing.T) {
-	metrics := metricsutil.NewTxnMetrics("replicated-prepare-cancel")
-	defer metrics.Close()
-	session := newTxnSession("v1", message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}, 1, metrics.BeginTxn())
-	session.replicated = true
-	// Force the generic wait branch to observe cancellation after transition.
-	require.NoError(t, session.AddNewMessage(context.Background(), 2))
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	require.ErrorIs(t, session.RequestCommitAndWait(ctx, 3), context.Canceled)
-	require.Equal(t, message.TxnStateInFlight, session.State())
-	session.AddNewMessageDoneAndKeepalive(2)
-	require.NoError(t, session.RequestCommitAndWait(context.Background(), 4))
-	// A failed prepare must not undo a transition owned by another attempt.
-	require.Error(t, session.RequestCommitAndWait(context.Background(), 5))
-	require.Equal(t, message.TxnStateOnCommit, session.State())
-	session.CommitDone()
 }

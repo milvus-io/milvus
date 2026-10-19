@@ -35,13 +35,6 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	// must stay a no-op from here on, panic paths included.
 	guards := b.guards
 	b.guards = nil
-	// Some primary-only producers also mark their concrete messages _ur.
-	// Persisted lock ownership must depend on the message, not the entrance,
-	// so recovery can reconstruct exactly the same promotion admission.
-	if msg.IsUnreplicable() && guards.admission != nil {
-		guards.admission()
-		guards.admission = nil
-	}
 
 	// Stamping the header, opening the span and injecting the trace context all
 	// operate on this call's own values, so they stay outside the manager lock.

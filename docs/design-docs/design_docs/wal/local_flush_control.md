@@ -33,77 +33,90 @@ the preceding Drop's L1/L0 persistence and ACK. Other errors and historical/repl
 existing behavior. Replicated DDL does not acquire the local API resource locks;
 those locks alone cannot prevent this race. No ACK is synthesized outside WAL.
 
-## Ordering against replication
+## Abort and replay against replication
 
-A PChannel admission gate in the Lock interceptor precedes WAL locks and TimeTick
-allocation. Registering a local flush and admitting a replicated BeginTxn are
-atomic under the same mutex. A Begin admitted before registration counts as the
-current transaction even while its WAL append is in flight.
+Transactions are VChannel-scoped. A local ManualFlush takes the existing exclusive
+VChannel WAL lock; FlushAll takes the PChannel exclusive lock. It does not wait for
+an incomplete transaction to commit. Ordinary lock cleanup continues to fail local
+sessions. Once the local flush record is durable, the Replicate interceptor aborts
+receiving sessions in that scope, releases their segment/proof references, and
+clears the replication helper's accepted prefix before releasing the WAL lock.
+Aborted sessions are marked terminal so infinite leases cannot pin
+LastConfirmedMessageID; completing the last session also wakes graceful shutdown.
+ManualFlush's CChannel copy does not abort business transactions. Other VChannels
+on the same PChannel remain unaffected. Ordinary non-flush exclusive operations
+continue to skip replicated sessions.
 
-1. Drain that transaction: admit its body, CommitTxn and reconnect duplicate
-   Begin/body messages, including older deduplicated traffic needed to reach the
-   current transaction on reconnection. Hold subsequent new transactions and non-transactional
-   replicated messages.
-2. After CommitTxn successfully appends locally, append the local flush under its
-   usual exclusive WAL lock.
-3. Release subsequent replication after flush append. The RPC separately waits
-   for consuming ACKs; replication does not wait for L1/L0 completion.
+The consumer TxnBuffer applies the same abort boundary before forwarding a local
+flush. Thus a WAL reopen cannot recover a pre-flush partial transaction. Only the
+replayed body's newly assigned local segments can appear in the committed txn.
+No rollback message is sent back to the source and no replication checkpoint is
+advanced. The local flush itself is the durable abort record.
 
-The local order is `current replicated Txn → local Flush → next Txn`. Registered
-flushes take precedence over the next transaction; independent flushes have no
-FIFO contract. A pending count and an append reservation (`busy`) preserve this
-priority until each admitted flush finishes appending. ManualFlush's CChannel copy does not enter the gate;
-FlushAll gates every PChannel. The gate is PChannel-wide, matching the existing
-single replicated transaction per PChannel. A collection flush may therefore wait
-for the current transaction of another VChannel on that PChannel. This is not a
-global transaction cut across PChannels.
+CDC retains each complete source transaction until Commit is acknowledged. A
+transaction-expired response terminates the stream; reconnect replays Begin, all
+body messages and Commit. CDC restart obtains the complete transaction again from
+the source WAL/checkpoint. No new transaction ID, term, or runtime owner is needed.
+An intact prefix resumes with deduplication. A prefix aborted by Flush starts again
+from Begin. Duplicate Begin does not replace a still-valid prefix.
 
-Ordinary exclusive writes only force-fail locally originated transactions.
-Replicated transactions retain their source ID, infinite lease and segment
-references. A failed replicated Commit append restores its session to InFlight
-and leaves the replication helper's current transaction intact. The replication
-manager serializes the entire append through its acker, so Commit attempts cannot
-race each other. Preparation owns its state transition and restores it on wait
-failure; append completion handles failures after preparation. Ordinary request
-cancellation is removed by the WAL adaptor, and backend errors normally retry
-inside it; RetryCommit is not an RPC-timeout retry mechanism. Receiving Commit
-or entering OnCommit does not release the flush. Successful retry releases it;
-reconnect duplicates keep the existing replication deduplication behavior.
+## Proving that a replay is complete
 
-## Recovery, cancellation and promotion
+Ordering each individual stream is insufficient when old and new streams overlap.
+Source MessageIDs identify immutable source records, but are not consecutive and
+cannot alone prove that no body was skipped. CDC therefore carries the previous
+source record's MessageID in each transaction message:
 
-WAL recovery restores the gate's active transaction from the recovered transaction
-buffer and source checkpoint. Local flushes have no ReplicateHeader and do not
-advance the source replication checkpoint. Request timeout does not remove a
-persisted broadcast task or its resource locks. An append attempt's cancellation
-removes its gate waiter; retry registers again at the then-current local boundary.
-WAL shutdown wakes gate waiters so migration cannot hang on the gate.
+```
+Begin(b, prev=b) → Body(x, prev=b) → Body(y, prev=x) → Commit(c, prev=y)
+```
 
-Replication disconnecting mid-transaction keeps Flush waiting for reconnection
-and commit. ForcePromote bypasses the gate, takes the PChannel exclusive WAL lock,
-and only after successful append rolls back unfinished transactions and clears
-the gate's current transaction. An unsuccessful promotion does not release Flush.
+An empty transaction uses `Commit.prev = Begin.ID`. CDC preserves the assembled
+source transaction's stable body order, including on reconnect/restart; it does not
+sort by local destination IDs. The wire-only `_rtprev` property is added to a copy
+of the source message. The receiving Proxy moves it into the additive
+`ReplicateHeader.prev_txn_message_id` protobuf field, which is persisted in WAL.
 
-ForcePromote uses a fixed RW promotion admission lock to avoid waiting behind a
-local Flush's resource locks. Ordinary replicable broadcasts hold the shared
-admission lock in addition to normal resource keys; ForcePromote takes the
-exclusive admission lock. Unreplicable broadcasts retain normal resource locks
-without admission locks. Primary-only producers that mark a message `_ur` release
-their temporary admission guard before registering the task, so recovery depends
-only on persisted properties. ForcePromote still carries ExclusiveCluster in its
-broadcast header for callback ordering and incomplete-broadcast repair. Recovery
-reconstructs both lock domains from persisted message properties and headers.
-Ordinary broadcasts acquire normal resource keys before admission, so requests
-blocked behind a local Flush cannot prevent promotion.
+Under its existing mutex, held through append and acker completion, ReplicatesManager:
 
-Admission alone does not guarantee progress: a local Flush waiting for a source
-transaction occupies a broadcaster worker. ForcePromote appends through a dedicated
-worker and a separate pending queue. New tasks, recovered tasks and backoff retries
-all route by the persisted ForcePromote header, so a saturated ordinary pool cannot
-prevent promotion from rolling back the transaction. Callback ordering still uses
-the existing resource-key scheduler. Other local `_ur` controls (including resource
-group operations) may append concurrently with promotion; their conflicting ACKs
-and callbacks remain ordered by the header keys.
+1. Checks the source checkpoint first. Already committed traffic remains idempotent.
+2. Admits Begin when there is no current transaction; duplicate active Begin is ignored.
+3. Ignores already accepted body IDs, otherwise requires `prev == accepted tail`.
+4. Requires Commit's predecessor to match the accepted tail before preparing Commit.
+5. Advances the tail only after successful body append, and clears the prefix and
+   advances the source checkpoint only after successful Commit append.
+
+Missing Begin or a missing predecessor returns TransactionExpired, causing CDC to
+reconnect and replay the full transaction. It must not return Ignore/success for
+an incomplete Commit. Messages from any connection can complete the same source
+prefix: completeness, not the identity of the winning connection, determines safety.
+A Flush clears the body dedup set so rewritten bodies receive new local segments.
+There is still only one current replicated transaction per PChannel, as required by
+the existing sequential CDC channel stream; there is no concurrent-attempt map.
+
+## Failure, recovery and promotion
+
+Ordinary backend failures retry inside the WAL adaptor. There is no RetryCommit
+state restoration. A final failure after replicated Commit preparation retains the
+session and segment references and fences the WAL before releasing append locks.
+A final backend failure for any replicated append or local flush also fences the
+writer: the record may already exist, so memory cannot safely resume from an
+assumed failed append. WAL recovery resolves the durable outcome before retry.
+A predecessor mismatch is rejected before Commit preparation and does not fence a
+healthy WAL. Caller RPC cancellation is not a transaction rollback protocol.
+
+Recovery reconstructs the accepted source-ID set and tail from the uncommitted
+TxnBuffer, and the session from the same snapshot. A replayed Flush removes the
+old builder; a durable Commit publishes the complete transaction. Recovered session
+references retain the existing RecoverDone barrier until resolved. TxnBuffer also
+checks persisted predecessor links before assembling a transaction.
+
+Flush has no wait-for-source gate, pending counter, FIFO queue or promotion lock.
+Broadcaster uses its existing resource keys and worker pool for all operations.
+ForcePromote retains ExclusiveCluster, successful-append rollback, salvage
+checkpoints and callback ordering. It needs no separate execution lane to rescue
+Flush from a disconnected source. Coordinator resource keys serialize local APIs;
+replicated DDL still relies on WAL ordering and consuming ACKs.
 
 ## Operational behavior
 
@@ -114,22 +127,25 @@ replication progress must be checked separately when that is required.
 
 ## Compatibility boundary
 
-No RPC or protobuf changes are required. CDC and consumers use the existing `_ur`
-property. Secondary local-flush ordering requires upgraded WAL writers: deploying
-only the DataCoord producer cannot provide the new transaction boundary on an
-older StreamingNode. Upgrade StreamingNodes before enabling the new DataCoord
-producer on secondary clusters. During rollback, finish pending local-flush and
-ForcePromote tasks before handing coordination back to a version that reconstructs
-both operations in the same resource-lock domain. Historical unmarked flush
-messages remain replicable.
+The predecessor field is additive; old WAL records and legacy unchained transactions
+remain readable. Once a prefix uses predecessor links, unchecked new body/Commit
+messages cannot complete it. Historical unmarked flushes retain their old behavior.
+
+Operators must upgrade **all participating source CDC, Proxy, StreamingNode and
+consumer processes before invoking local Flush on a secondary**. Coordinating this
+cross-cluster rollout is an operational responsibility; no version probing or
+feature gate is introduced. The new abort guarantee is not promised during a
+mixed-version deployment. Before downgrade, drain local-flush tasks and replication
+and arrange a compatible checkpoint/recovery boundary; an old consumer does not
+understand the durable local-flush abort boundary.
 
 ## Scope of other control operations
 
 | Operation | Scope and entrance | Change here |
 | --- | --- | --- |
-| Flush / FlushAll | Local WAL, either role, `_ur`, AckSyncUp | Enabled on secondary with transaction-boundary admission |
+| Flush / FlushAll | Local WAL, either role, `_ur`, AckSyncUp | Enabled on secondary with abort and full-txn replay |
 | Resource-group create/update/drop and node transfer | Local CChannel, either role, `_ur` | Existing behavior retained |
-| ForcePromote | Secondary-only topology transition | Independent promotion admission; explicit txn rollback retained |
+| ForcePromote | Secondary-only topology transition | Existing resource keys and explicit txn rollback retained |
 | Snapshot/manifest/external-collection controls marked `_ur` | Concrete messages stay local; ordinary producers still check primary | Role admission unchanged |
 | Collection/partition DDL, DML, load configuration and TransferReplica | Existing logical replication path | Remain replicated; no message-type blacklist |
 | WAL-generated CreateSegment/Flush/TimeTick | Self-controlled local messages | Unchanged |
@@ -137,8 +153,10 @@ messages remain replicable.
 ## Key Packages
 
 - `internal/datacoord/` — local producers and resource keys
-- `internal/streamingcoord/server/broadcaster/` — promotion admission and recovery
-- `internal/streamingnode/server/wal/interceptors/lock/` — transaction boundary gate
-- `internal/streamingnode/server/wal/interceptors/replicate/replicates/` — commit tracking
-- `internal/streamingnode/server/wal/interceptors/txn/` — transaction origin and retry
-- `internal/streamingnode/server/wal/interceptors/timetick/` — commit outcome handling
+- `internal/cdc/replication/replicatestream/` — full transaction forwarding and predecessor links
+- `pkg/streaming/util/message/` — wire conversion and persisted replication header
+- `internal/streamingnode/server/wal/interceptors/replicate/` — prefix validation and durable-flush abort
+- `internal/streamingnode/server/wal/interceptors/txn/` — scoped session cleanup
+- `internal/streamingnode/server/wal/interceptors/timetick/` — Commit outcome handling
+- `internal/streamingnode/server/wal/adaptor/` — backend retry and failure fencing
+- `internal/streamingnode/server/wal/utility/` — consuming and recovering the abort boundary

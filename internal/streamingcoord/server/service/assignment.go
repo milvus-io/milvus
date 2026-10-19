@@ -257,7 +257,7 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	mlog.Warn(ctx, "Force promote replicate configuration requested")
 
 	// Use WithSecondaryClusterResourceKey to:
-	// 1. Acquire exclusive promotion admission without blocking behind local Flush
+	// 1. Acquire exclusive cluster-level resource key
 	// 2. Verify the cluster is secondary (not primary)
 	broadcaster, err := broadcast.StartBroadcastWithSecondaryClusterResourceKey(ctx)
 	if err != nil {

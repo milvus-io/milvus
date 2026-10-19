@@ -54,9 +54,10 @@ All topology changes are triggered by `AlterReplicateConfig` broadcast messages,
 - `internal/streamingnode/server/wal/interceptors/replicate/` — Replicate interceptor, `ReplicateManager`, secondary state
 - `internal/cdc/replication/` — CDC `ChannelReplicator`, `ReplicateStreamClient`
 
-## Local flush ordering
+## Local flush and transaction replay
 
-Local Flush/FlushAll use `_ur` and do not advance the source checkpoint. Their
-PChannel gate drains the current replicated transaction, appends the flush, then
-admits the next transaction. See [Local Flush Control](../wal/local-flush.md) for
-reconnect, commit failure, WAL recovery and ForcePromote behavior.
+Local Flush/FlushAll use `_ur`, abort incomplete receiving transactions in their
+scope, and do not advance the source checkpoint. CDC resends complete transactions;
+source MessageID predecessor links persisted in ReplicateHeader prevent incomplete
+Commit across overlapping streams. See [Local Flush Control](../wal/local-flush.md)
+for recovery, final append failure and the operator-managed upgrade boundary.

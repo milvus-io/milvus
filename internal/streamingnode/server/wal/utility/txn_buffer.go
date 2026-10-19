@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // NewTxnBuffer creates a new txn buffer.
@@ -58,6 +59,15 @@ func (b *TxnBuffer) Snapshot() *TxnBuffer {
 func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts uint64) []message.ImmutableMessage {
 	result := make([]message.ImmutableMessage, 0, len(msgs))
 	for _, msg := range msgs {
+		if message.IsLocalFlush(msg) {
+			for id, builder := range b.builders {
+				begin, _ := builder.Messages()
+				if msg.MessageType() == message.MessageTypeFlushAll ||
+					(!funcutil.IsControlChannel(msg.VChannel()) && begin.VChannel() == msg.VChannel()) {
+					b.rollbackTxn(id)
+				}
+			}
+		}
 		// Check for force promote AlterReplicateConfig message
 		// If force promote (and not ignored), rollback all uncommitted transactions
 		if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
@@ -134,6 +144,7 @@ func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.Immuta
 	}
 
 	// build the txn message and remove it from buffer.
+	checkReplicatedTxnPredecessor(builder, msg)
 	b.bytes -= builder.EstimateSize()
 	txnMsg, err := builder.Build(commitMsg)
 	delete(b.builders, commitMsg.TxnContext().TxnID)
@@ -189,8 +200,26 @@ func (b *TxnBuffer) handleTxnBodyMessage(msg message.ImmutableMessage) {
 		)
 		return
 	}
+	checkReplicatedTxnPredecessor(builder, msg)
 	builder.Add(msg)
 	b.bytes += msg.EstimateSize()
+}
+
+// The writer verifies this before append. Violations in persisted messages must
+// stop recovery/consumption rather than silently publish a partial transaction.
+func checkReplicatedTxnPredecessor(builder *message.ImmutableTxnMessageBuilder, msg message.ImmutableMessage) {
+	header := msg.ReplicateHeader()
+	if header == nil || header.PrevTxnMessageID == nil {
+		return
+	}
+	begin, body := builder.Messages()
+	last := begin.ReplicateHeader().MessageID
+	if len(body) > 0 {
+		last = body[len(body)-1].ReplicateHeader().MessageID
+	}
+	if !header.PrevTxnMessageID.EQ(last) {
+		panic("persisted replicated transaction has an incomplete predecessor chain")
+	}
 }
 
 // clearExpiredTxn clears the expired txn.

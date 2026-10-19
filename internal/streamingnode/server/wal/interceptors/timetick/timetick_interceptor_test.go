@@ -67,6 +67,31 @@ func TestTimeTickCommitInnerErrorPreservesExistingStateTransition(t *testing.T) 
 	requireCommitAckerError(t, impl, expectedErr)
 }
 
+func TestReplicatedCommitFinalFailureFencesBeforeReleasingReferences(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	commit = commit.WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", MessageID: walimplstest.NewTestMessageID(3), LastConfirmedMessageID: walimplstest.NewTestMessageID(0), TimeTick: 100, VChannel: "v1"})
+	cleaned := false
+	session.RegisterCleanup(func() { cleaned = true }, 0)
+	fenced := false
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	ctx = utility.WithAppendFailureHandler(ctx, func(err error) {
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Equal(t, message.TxnStateOnCommit, session.State())
+		require.False(t, cleaned)
+		fenced = true
+	})
+	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return nil, context.DeadlineExceeded // Final backend result, after its retry loop.
+	})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.True(t, fenced)
+	require.Equal(t, message.TxnStateOnCommit, session.State())
+	require.False(t, cleaned)
+	impl.txnManager.RollbackAllInFlightTransactions() // WAL teardown releases held references.
+	require.True(t, cleaned)
+}
+
 func requireCommitAckerSuccess(t *testing.T, impl *timeTickAppendInterceptor, session *txn.TxnSession) {
 	t.Helper()
 	details, err := impl.operator.AckManager().SyncAndGetAcknowledged(context.Background())
@@ -146,30 +171,4 @@ func newCommitTxnMessageForExistingSession(
 		WithBody(&message.CommitTxnMessageBody{}).
 		MustBuildMutable().
 		WithTxnContext(*txnContext), session
-}
-
-func TestTimeTickReplicatedCommitAppendFailureCanRetry(t *testing.T) {
-	impl := newTestTimeTickAppendInterceptor(t)
-	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
-	commit = commit.WithReplicateHeader(&message.ReplicateHeader{
-		ClusterID: "source", TimeTick: 10,
-		MessageID: walimplstest.NewTestMessageID(10), LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
-	})
-	cleaned := false
-	session.RegisterCleanup(func() { cleaned = true }, 1)
-	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-		return nil, context.DeadlineExceeded
-	})
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Equal(t, message.TxnStateInFlight, session.State())
-	require.False(t, cleaned)
-	requireCommitAckerError(t, impl, context.DeadlineExceeded)
-	_, err = impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-		return walimplstest.NewTestMessageID(2), nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, message.TxnStateCommitted, session.State())
-	require.True(t, cleaned)
-	requireCommitAckerSuccess(t, impl, session)
 }

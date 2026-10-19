@@ -31,7 +31,6 @@ func newTestInterceptor() *lockAppendInterceptor {
 		channel:        types.PChannelInfo{Name: testPChannelName},
 		vchannelLocker: lock.NewKeyLock[string](),
 		txnManager:     new(txn.TxnManager),
-		replicateOrder: newReplicateAppendOrder(nil),
 	}
 }
 

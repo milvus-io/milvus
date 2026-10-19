@@ -146,6 +146,7 @@ func (m *messageImpl) WithReplicateHeader(rh *ReplicateHeader) MutableMessage {
 		LastConfirmedMessageId: rh.LastConfirmedMessageID.IntoProto(),
 		TimeTick:               rh.TimeTick,
 		Vchannel:               rh.VChannel,
+		PrevTxnMessageId:       MustMarshalMessageID(rh.PrevTxnMessageID),
 	})
 	if err != nil {
 		panic("should not happen on replicate header proto")
@@ -347,6 +348,7 @@ func (m *messageImpl) ReplicateHeader() *ReplicateHeader {
 		LastConfirmedMessageID: lastConfirmedMessageID,
 		TimeTick:               header.TimeTick,
 		VChannel:               header.Vchannel,
+		PrevTxnMessageID:       MustUnmarshalMessageID(header.PrevTxnMessageId),
 	}
 }
 

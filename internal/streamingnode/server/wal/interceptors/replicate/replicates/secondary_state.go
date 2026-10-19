@@ -36,7 +36,7 @@ func recoverSecondaryState(param *ReplicateManagerRecoverParam) (*secondaryState
 		if err := txnHelper.StartBegin(begin.TxnContext(), begin.ReplicateHeader()); err != nil {
 			return nil, err
 		}
-		txnHelper.BeginDone(begin.TxnContext())
+		txnHelper.BeginDone(begin.TxnContext(), begin.ReplicateHeader(), begin.VChannel())
 		for _, msg := range body {
 			if err := txnHelper.AddNewMessage(msg.TxnContext(), msg.ReplicateHeader()); err != nil {
 				return nil, err

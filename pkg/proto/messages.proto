@@ -861,6 +861,9 @@ message ReplicateHeader {
     common.MessageID last_confirmed_message_id = 3; // the last confirmed message id of replicate msg from source cluster
     uint64 time_tick     = 4; // the time tick of replicate msg from source cluster
     string vchannel      = 5; // the vchannel of replicate msg from source cluster
+    // Previous source message in this transaction's replication sequence.
+    // Begin points to itself; absent on legacy senders and auto-commit messages.
+    common.MessageID prev_txn_message_id = 6;
 }
 
 // ResourceDomain is the domain of resource hold.

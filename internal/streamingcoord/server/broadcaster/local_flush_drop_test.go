@@ -10,13 +10,23 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+)
+
+type (
+	localFlushWAL       struct{ streaming.WALAccesser }
+	localFlushAllocator struct{ idalloc.Allocator }
+	localFlushCatalog   struct {
+		metastore.StreamingCoordCataLog
+	}
 )
 
 func TestLocalFlushAndReplicatedDropCallbackOrder(t *testing.T) {
@@ -27,8 +37,8 @@ func TestLocalFlushAndReplicatedDropCallbackOrder(t *testing.T) {
 		close(dropped)
 		return nil
 	})
-	resource.InitForTest(resource.OptStreamingCatalog(&promotionTestCatalog{}))
-	save := mockey.Mock((*promotionTestCatalog).SaveBroadcastTask).Return(nil).Build()
+	resource.InitForTest(resource.OptStreamingCatalog(&localFlushCatalog{}))
+	save := mockey.Mock((*localFlushCatalog).SaveBroadcastTask).Return(nil).Build()
 	defer save.UnPatch()
 	wal := &localFlushWAL{}
 	walPatch := mockey.Mock(streaming.WAL).Return(wal).Build()

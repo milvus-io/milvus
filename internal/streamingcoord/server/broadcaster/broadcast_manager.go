@@ -39,7 +39,6 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 	logger := resource.Resource().Logger().With(mlog.FieldComponent("broadcaster"))
 	metrics := newBroadcasterMetrics()
 	rkLocker := newResourceKeyLocker()
-	promotionLocker := &sync.RWMutex{}
 	ackScheduler := newAckCallbackScheduler(logger)
 
 	recoveryTasks := make([]*broadcastTask, 0, len(protos))
@@ -57,24 +56,9 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 	for _, task := range recoveryTasks {
 		switch task.task.State {
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK:
-			var guards *lockGuards
-			if task.IsForcePromoteMessage() {
-				if !promotionLocker.TryLock() {
-					panic("conflicting recovered promotion admission")
-				}
-				guards = newPromotionLockGuards(promotionLocker)
-			} else {
-				var err error
-				guards, err = rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
-				if err != nil {
-					panic(err)
-				}
-				if !task.BroadcastMessage().IsUnreplicable() {
-					if !promotionLocker.TryRLock() {
-						panic("conflicting recovered promotion admission")
-					}
-					guards.admission = promotionLocker.RUnlock
-				}
+			guards, err := rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
+			if err != nil {
+				panic(err)
 			}
 			task.WithResourceKeyLockGuards(guards)
 
@@ -113,7 +97,6 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		schemaTasks:        schemaTasks,
 		idempotencyIndex:   idxOfKeys,
 		resourceKeyLocker:  rkLocker,
-		promotionLocker:    promotionLocker,
 		metrics:            metrics,
 		broadcastScheduler: newBroadcasterScheduler(pendingTasks, logger),
 		ackScheduler:       ackScheduler,
@@ -142,7 +125,6 @@ type broadcastTaskManager struct {
 	schemaTasks        *schemaTaskIndex
 	idempotencyIndex   *idempotencyIndex // map the idempotency key to the broadcastID that owns it
 	resourceKeyLocker  *resourceKeyLocker
-	promotionLocker    *sync.RWMutex // ForcePromote must not wait for local flush resource locks.
 	metrics            *broadcasterMetrics
 	broadcastScheduler *broadcasterScheduler // the scheduler of the broadcast task
 	ackScheduler       *ackCallbackScheduler // the scheduler of the ack task
@@ -168,12 +150,6 @@ func (bm *broadcastTaskManager) withResourceKeys(ctx context.Context, checkClust
 	startLockInstant := time.Now()
 	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
 	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
-	if !unreplicable {
-		// Acquire after normal resource keys: a request blocked behind a local
-		// flush must not hold admission and prevent ForcePromote from draining it.
-		bm.promotionLocker.RLock()
-		guards.admission = bm.promotionLocker.RUnlock
-	}
 
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
@@ -197,9 +173,8 @@ func (bm *broadcastTaskManager) withResourceKeys(ctx context.Context, checkClust
 	}, nil
 }
 
-// WithSecondaryClusterResourceKey acquires exclusive promotion admission
-// and verifies the cluster is secondary. The header still carries ExclusiveCluster.
-// Returns error if the cluster is primary.
+// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
+// and verifies the cluster is secondary. Returns error if the cluster is primary.
 // This is used for force promote operations that should only be executed on secondary clusters.
 func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error) {
 	// Resolved before any lock is taken, see WithResourceKeys.
@@ -211,10 +186,9 @@ func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Cont
 	}
 
 	startLockInstant := time.Now()
-	// Exclude ordinary logical broadcasts, but allow local flushes to retain
-	// their resource locks while ForcePromote resolves unfinished replication.
-	bm.promotionLocker.Lock()
-	guards := newPromotionLockGuards(bm.promotionLocker)
+	// Acquire an exclusive cluster resource key to block all other broadcasts
+	resourceKeys := []message.ResourceKey{message.NewExclusiveClusterResourceKey()}
+	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
 
 	// Check if the cluster is secondary
 	if err := bm.checkClusterRoleSecondary(ctx); err != nil {

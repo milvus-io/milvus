@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 const interceptorName = "replicate"
@@ -70,7 +71,17 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 	defer func() {
 		acker.Ack(err)
 	}()
-	return appendOp(ctx, msg)
+	msgID, err = appendOp(ctx, msg)
+	if err == nil && message.IsLocalFlush(msg) {
+		// Both the WAL lock and replicate manager guard are still held. Release
+		// segment/proof references before the acker clears the replication prefix.
+		if msg.MessageType() == message.MessageTypeFlushAll {
+			impl.txnManager.AbortTxnAtVChannel("")
+		} else if !funcutil.IsControlChannel(msg.VChannel()) {
+			impl.txnManager.AbortTxnAtVChannel(msg.VChannel())
+		}
+	}
+	return msgID, err
 }
 
 func (impl *replicateInterceptor) Close() {

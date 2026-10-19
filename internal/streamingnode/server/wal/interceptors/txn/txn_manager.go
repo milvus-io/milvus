@@ -126,17 +126,30 @@ func (m *TxnManager) buildTxnContext(ctx context.Context, msg message.MutableBeg
 	}, nil
 }
 
-// FailTxnAtVChannel fails locally originated transactions at the specified vchannel.
-// An empty vchannel covers all local transactions. Replicated transactions are
-// drained before local flush, or explicitly rolled back by ForcePromote.
+// FailTxnAtVChannel fails locally originated transactions for ordinary exclusive
+// operations. Replicated transactions are resolved by local flush or promotion.
 func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
+	m.failTxnAtVChannel(vchannel, false)
+}
+
+// AbortTxnAtVChannel aborts all receiving sessions after a durable local flush.
+// An empty vchannel covers the whole PChannel.
+func (m *TxnManager) AbortTxnAtVChannel(vchannel string) {
+	m.failTxnAtVChannel(vchannel, true)
+}
+
+func (m *TxnManager) failTxnAtVChannel(vchannel string, includeReplicated bool) {
 	// avoid the txn to be committed.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ids := make([]int64, 0, len(m.sessions))
 	for id, session := range m.sessions {
-		if !session.replicated && (vchannel == "" || session.VChannel() == vchannel) {
-			session.Cleanup()
+		if (includeReplicated || !session.replicated) && (vchannel == "" || session.VChannel() == vchannel) {
+			if includeReplicated {
+				session.abort()
+			} else {
+				session.Cleanup()
+			}
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)
 			ids = append(ids, int64(id))
@@ -144,6 +157,9 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	}
 	if len(ids) > 0 {
 		m.Logger().Info(context.TODO(), "transaction interrupted", mlog.FieldVChannel(vchannel), mlog.Int64s("txnIDs", ids))
+	}
+	if len(m.sessions) == 0 && m.closed != nil {
+		m.closed.Close()
 	}
 	m.notifyRecoverDone()
 }

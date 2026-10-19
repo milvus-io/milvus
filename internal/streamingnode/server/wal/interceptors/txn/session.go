@@ -146,11 +146,6 @@ func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64) 
 
 	select {
 	case <-ctx.Done():
-		// getDoneChan succeeded, so this attempt owns the OnCommit transition.
-		// Replication serializes appends; the next attempt must reuse this session.
-		if s.replicated {
-			s.RetryCommit()
-		}
 		return ctx.Err()
 	case <-waitCh:
 		return nil
@@ -168,20 +163,6 @@ func (s *TxnSession) CommitDone() {
 	}
 	s.state = message.TxnStateCommitted
 	s.cleanup()
-}
-
-// RetryCommit preserves the transaction and its segment references after a failed
-// replicated commit. Call only after this attempt transitioned to OnCommit;
-// replication serializes appends and the WAL lock excludes ForcePromote.
-func (s *TxnSession) RetryCommit() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.state != message.TxnStateOnCommit {
-		panic("invalid state for commit retry")
-	}
-	s.state = message.TxnStateInFlight
-	s.doneWait = nil
 }
 
 // RejectCommit marks the transaction as rollbacked after commit admission rejects it.
@@ -244,6 +225,18 @@ func (s *TxnSession) Cleanup() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.cleanup()
+}
+
+// abort terminates a session under the exclusive WAL lock. Marking the outcome
+// is necessary for LastConfirmedMessageID to pass an infinite-lease replica txn.
+func (s *TxnSession) abort() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.state != message.TxnStateCommitted {
+		s.state = message.TxnStateRollbacked
+	}
 	s.cleanup()
 }
 

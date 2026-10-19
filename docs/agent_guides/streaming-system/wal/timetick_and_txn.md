@@ -36,10 +36,10 @@ See [Transaction Messages](../message/message-semantic-txn.md) for message types
 5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
 6. **Force-fail**: The [Lock](lock.md) interceptor force-fails locally originated active transactions at a VChannel when an exclusive operation is appended.
 
-Replicated Commit append failures restore InFlight without releasing segment
-references, allowing retry. Local Flush waits for successful commit, as described
-in [Local Flush Control](local-flush.md). ForcePromote remains the explicit path
-for rolling back unfinished replicated transactions.
+A final replicated Commit failure after preparation fences the writer and retains
+segment references until teardown/recovery; ordinary backend errors retry below
+the interceptor. Local Flush durably aborts scoped receiving sessions, allowing
+CDC to replay the full transaction. See [Local Flush Control](local-flush.md).
 
 ## LastConfirmedMessageID
 

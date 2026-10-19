@@ -331,7 +331,7 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	}
 }
 
-func TestSecondaryReplicateManagerRecoveredTxnCommitFailurePreservesDeduplication(t *testing.T) {
+func TestSecondaryReplicateManagerCommitFailureRecoversPrefix(t *testing.T) {
 	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	recovered := newReplicateTxnMessage("test1", "test2", 2)
 	for _, msg := range []message.MutableMessage{recovered[0], recovered[2]} {
@@ -373,6 +373,14 @@ func TestSecondaryReplicateManagerRecoveredTxnCommitFailurePreservesDeduplicatio
 	require.NoError(t, err)
 	require.EqualValues(t, 1, checkpoint.TimeTick)
 
+	// A final append failure fences the writer. Reopen from the durable prefix.
+	rm, err = RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 2},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("test2", "test1"), checkpoint, txnBuffer.Snapshot()),
+	})
+	require.NoError(t, err)
 	accepted := make([]message.MessageType, 0, 3)
 	for _, msg := range newReplicateTxnMessage("test1", "test2", 2) {
 		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
@@ -385,7 +393,7 @@ func TestSecondaryReplicateManagerRecoveredTxnCommitFailurePreservesDeduplicatio
 		acker.Ack(nil)
 	}
 	// A failed local Commit retains the recovered transaction and its body.
-	// Reconnection must deduplicate Begin/body and retry only Commit.
+	// Recovery must deduplicate Begin/body and append only Commit.
 	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, accepted)
 	checkpoint, err = rm.GetReplicateCheckpoint()
 	require.NoError(t, err)

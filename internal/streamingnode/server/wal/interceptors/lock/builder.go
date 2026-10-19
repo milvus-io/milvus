@@ -5,21 +5,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
-// NewInterceptorBuilder creates a new lock interceptor builder.
+// NewInterceptorBuilder creates a new redo interceptor builder.
 func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 	return &interceptorBuilder{}
 }
 
-// interceptorBuilder is the builder for the lock interceptor.
+// interceptorBuilder is the builder for redo interceptor.
 type interceptorBuilder struct{}
 
-// Build creates a new lock interceptor.
+// Build creates a new redo interceptor.
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	return &lockAppendInterceptor{
 		channel:        param.ChannelInfo,
 		vchannelLocker: lock.NewKeyLock[string](),
 		txnManager:     param.TxnManager,
 		buildParam:     param,
-		replicateOrder: newReplicateAppendOrder(param.InitialRecoverSnapshot),
 	}
 }

@@ -19,13 +19,12 @@ import (
 func newBroadcasterScheduler(pendings []*pendingBroadcastTask, logger *mlog.Logger) *broadcasterScheduler {
 	b := &broadcasterScheduler{
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+		pendings:               pendings,
 		backoffs:               typeutil.NewHeap[*pendingBroadcastTask](&pendingBroadcastTaskArray{}),
 		pendingChan:            make(chan *pendingBroadcastTask),
 		backoffChan:            make(chan *pendingBroadcastTask),
 		workerChan:             make(chan *pendingBroadcastTask),
-		promotionChan:          make(chan *pendingBroadcastTask),
 	}
-	b.enqueue(pendings, false)
 	b.SetLogger(logger)
 	go b.execute()
 	return b
@@ -41,8 +40,6 @@ type broadcasterScheduler struct {
 	pendingChan            chan *pendingBroadcastTask
 	backoffChan            chan *pendingBroadcastTask
 	workerChan             chan *pendingBroadcastTask
-	promotionPendings      []*pendingBroadcastTask
-	promotionChan          chan *pendingBroadcastTask
 }
 
 func (b *broadcasterScheduler) AddTask(ctx context.Context, task *pendingBroadcastTask) (*types.BroadcastAppendResult, error) {
@@ -97,17 +94,9 @@ func (b *broadcasterScheduler) execute() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			b.worker(i, b.workerChan)
+			b.worker(i)
 		}()
 	}
-	// Flush can occupy every ordinary worker while waiting for a replicated
-	// transaction. Promotion must still append to roll that transaction back.
-	// Its dedicated queue also keeps retries and recovered tasks off that pool.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		b.worker(workers, b.promotionChan)
-	}()
 	defer wg.Wait()
 
 	b.dispatch()
@@ -117,17 +106,11 @@ func (b *broadcasterScheduler) dispatch() {
 	for {
 		var workerChan chan *pendingBroadcastTask
 		var nextTask *pendingBroadcastTask
-		var promotionChan chan *pendingBroadcastTask
-		var nextPromotion *pendingBroadcastTask
 		var nextBackOff <-chan time.Time
 		// Wait for new task.
 		if len(b.pendings) > 0 {
 			workerChan = b.workerChan
 			nextTask = b.pendings[0]
-		}
-		if len(b.promotionPendings) > 0 {
-			promotionChan = b.promotionChan
-			nextPromotion = b.promotionPendings[0]
 		}
 		if b.backoffs.Len() > 0 {
 			var nextInterval time.Duration
@@ -139,7 +122,7 @@ func (b *broadcasterScheduler) dispatch() {
 		case <-b.backgroundTaskNotifier.Context().Done():
 			return
 		case task := <-b.pendingChan:
-			b.enqueue([]*pendingBroadcastTask{task}, false)
+			b.pendings = append(b.pendings, task)
 		case task := <-b.backoffChan:
 			// task is backoff, push it into backoff queue to make a delay retry.
 			b.backoffs.Push(task)
@@ -151,36 +134,16 @@ func (b *broadcasterScheduler) dispatch() {
 			}
 			if len(newPops) > 0 {
 				// Push the backoff task into pendings front.
-				b.enqueue(newPops, true)
+				b.pendings = append(newPops, b.pendings...)
 			}
 		case workerChan <- nextTask:
 			// The task is sent to worker, remove it from pending list.
 			b.pendings = b.pendings[1:]
-		case promotionChan <- nextPromotion:
-			b.promotionPendings = b.promotionPendings[1:]
 		}
 	}
 }
 
-func (b *broadcasterScheduler) enqueue(tasks []*pendingBroadcastTask, front bool) {
-	var ordinary, promotions []*pendingBroadcastTask
-	for _, task := range tasks {
-		if task.IsForcePromoteMessage() {
-			promotions = append(promotions, task)
-		} else {
-			ordinary = append(ordinary, task)
-		}
-	}
-	if front {
-		b.pendings = append(ordinary, b.pendings...)
-		b.promotionPendings = append(promotions, b.promotionPendings...)
-	} else {
-		b.pendings = append(b.pendings, ordinary...)
-		b.promotionPendings = append(b.promotionPendings, promotions...)
-	}
-}
-
-func (b *broadcasterScheduler) worker(no int, tasks <-chan *pendingBroadcastTask) {
+func (b *broadcasterScheduler) worker(no int) {
 	logger := b.Logger().With(mlog.Int("workerNo", no))
 	defer func() {
 		logger.Info(context.TODO(), "broadcaster worker exit")
@@ -190,7 +153,7 @@ func (b *broadcasterScheduler) worker(no int, tasks <-chan *pendingBroadcastTask
 		select {
 		case <-b.backgroundTaskNotifier.Context().Done():
 			return
-		case task := <-tasks:
+		case task := <-b.workerChan:
 			if err := task.Execute(b.backgroundTaskNotifier.Context()); err != nil {
 				// If the task is not done, repush it into pendings and retry infinitely.
 				select {
