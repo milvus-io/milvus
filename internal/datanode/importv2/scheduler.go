@@ -77,7 +77,7 @@ func (s *scheduler) Start() {
 }
 
 func (s *scheduler) scheduleTasks() {
-	s.reapCompletedTasks()
+	s.collectCompletedTasks()
 
 	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
 	sort.Slice(tasks, func(i, j int) bool {
@@ -96,14 +96,14 @@ func (s *scheduler) scheduleTasks() {
 	for _, task := range tasks {
 		// Execute marks the task InProgress and returns its file futures.
 		s.futures[task.GetTaskID()] = task.Execute()
-		// Reap completed tasks after each submission.
-		s.reapCompletedTasks()
+		// Collect completed tasks after each submission.
+		s.collectCompletedTasks()
 	}
 }
 
-// reapCompletedTasks marks successful tasks Completed and removes failed or
+// collectCompletedTasks marks successful tasks Completed and removes failed or
 // deleted tasks from tracking without waiting for unfinished futures.
-func (s *scheduler) reapCompletedTasks() {
+func (s *scheduler) collectCompletedTasks() {
 	for taskID, fs := range s.futures {
 		task := s.manager.Get(taskID)
 		if task == nil {

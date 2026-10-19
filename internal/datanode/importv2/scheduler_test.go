@@ -1354,7 +1354,7 @@ func (s *SchedulerSuite) TestScheduler_ScheduleWithoutBatchBlocking() {
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
-func (s *SchedulerSuite) TestScheduler_ReapCompletedTasks() {
+func (s *SchedulerSuite) TestScheduler_CollectCompletedTasks() {
 	doneTask := newFakeImportTask(2001, s.manager, nil)
 	blockedTask := newFakeImportTask(2002, s.manager, nil)
 	s.manager.Add(doneTask)
@@ -1372,7 +1372,7 @@ func (s *SchedulerSuite) TestScheduler_ReapCompletedTasks() {
 
 	s.Eventually(func() bool { return doneFuture.Done() }, 5*time.Second, 10*time.Millisecond)
 
-	s.scheduler.reapCompletedTasks()
+	s.scheduler.collectCompletedTasks()
 
 	_, ok := s.scheduler.futures[2001]
 	s.False(ok)
@@ -1382,7 +1382,7 @@ func (s *SchedulerSuite) TestScheduler_ReapCompletedTasks() {
 	s.Equal(datapb.ImportTaskStateV2_Pending, s.manager.Get(2002).GetState())
 }
 
-func (s *SchedulerSuite) TestScheduler_ReapDropsFailedAndRemovedTasks() {
+func (s *SchedulerSuite) TestScheduler_CollectDropsFailedAndRemovedTasks() {
 	failedTask := newFakeImportTask(3001, s.manager, nil)
 	removedTask := newFakeImportTask(3002, s.manager, nil)
 	s.manager.Add(failedTask)
@@ -1404,7 +1404,7 @@ func (s *SchedulerSuite) TestScheduler_ReapDropsFailedAndRemovedTasks() {
 	s.manager.Update(3001, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason("mock failure"))
 	s.manager.Remove(3002)
 
-	s.scheduler.reapCompletedTasks()
+	s.scheduler.collectCompletedTasks()
 
 	s.Empty(s.scheduler.futures)
 	s.Equal(datapb.ImportTaskStateV2_Failed, s.manager.Get(3001).GetState())
@@ -1427,7 +1427,7 @@ func (s *SchedulerSuite) TestScheduler_FailedTaskWithNoFuturesStaysFailed() {
 	s.Equal("validation failed", s.manager.Get(3003).GetReason())
 }
 
-func (s *SchedulerSuite) TestScheduler_ReapBetweenTasks() {
+func (s *SchedulerSuite) TestScheduler_CollectBetweenTasks() {
 	// Schedule a completed future followed by an unfinished one.
 	doneTask := newFakeImportTask(4001, s.manager, func() []*conc.Future[any] {
 		f := conc.Go(func() (any, error) { return nil, nil })
