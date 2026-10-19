@@ -1915,9 +1915,10 @@ func TestImportV2(t *testing.T) {
 		// normal case
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
-				JobID:  0,
-				Schema: &schemapb.CollectionSchema{},
-				State:  internalpb.ImportJobState_Failed,
+				JobID:        0,
+				CollectionID: 42,
+				Schema:       &schemapb.CollectionSchema{},
+				State:        internalpb.ImportJobState_Failed,
 			},
 		}
 		err = s.importMeta.AddJob(context.TODO(), job)
@@ -1929,6 +1930,7 @@ func TestImportV2(t *testing.T) {
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 		assert.Equal(t, int64(0), resp.GetProgress())
 		assert.Equal(t, internalpb.ImportJobState_Failed, resp.GetState())
+		assert.Equal(t, int64(42), resp.GetCollectionId())
 	})
 
 	t.Run("ListImports", func(t *testing.T) {
@@ -1976,6 +1978,7 @@ func TestImportV2(t *testing.T) {
 		assert.Equal(t, 1, len(resp.GetStates()))
 		assert.Equal(t, 1, len(resp.GetReasons()))
 		assert.Equal(t, 1, len(resp.GetProgresses()))
+		assert.Equal(t, []int64{1}, resp.GetCollectionIds())
 	})
 }
 
