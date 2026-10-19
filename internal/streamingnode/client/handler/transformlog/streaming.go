@@ -132,12 +132,13 @@ func (s *EventStream) Subscribe(ctx context.Context, opt wal.TransformLogSubscri
 	)
 	select {
 	case <-sub.ready:
+		if sub.readyErr != nil {
+			return nil, sub.readyErr
+		}
 		if err := sub.Error(); err != nil {
 			return nil, err
 		}
 		return sub, nil
-	case <-sub.done:
-		return nil, sub.Error()
 	case <-ctx.Done():
 		_ = s.sendCloseSubscription(sub.subscriptionID)
 		s.removeSubscription(sub.subscriptionID)

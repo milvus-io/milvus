@@ -68,12 +68,13 @@ func (s *resumableStream) Subscribe(ctx context.Context, opt wal.TransformLogSub
 	s.wakeResume()
 	select {
 	case <-sub.ready:
+		if sub.readyErr != nil {
+			return nil, sub.readyErr
+		}
 		if err := sub.Error(); err != nil {
 			return nil, err
 		}
 		return sub, nil
-	case <-sub.done:
-		return nil, sub.Error()
 	case <-ctx.Done():
 		s.removeSubscription(sub, ctx.Err())
 		return nil, ctx.Err()

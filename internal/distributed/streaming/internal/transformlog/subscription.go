@@ -20,8 +20,11 @@ type resumableSubscription struct {
 	remote         wal.TransformLogSubscription
 	handler        *checkpointEventHandler
 
-	done       chan struct{}
-	ready      chan struct{}
+	done  chan struct{}
+	ready chan struct{}
+	// readyErr is the immutable creation result, published by closing ready.
+	// It is separate from err: a normal Close can abort pending creation.
+	readyErr   error
 	errMu      sync.Mutex
 	err        error
 	closeOnce  sync.Once
@@ -94,10 +97,8 @@ func (s *resumableSubscription) advance(timetick uint64) {
 }
 
 func (s *resumableSubscription) markReady(err error) {
-	if err != nil {
-		s.setError(err)
-	}
 	s.readyOnce.Do(func() {
+		s.readyErr = err
 		close(s.ready)
 	})
 }
@@ -107,7 +108,11 @@ func (s *resumableSubscription) finish(err error) {
 		if err != nil {
 			s.setError(err)
 		}
-		s.markReady(err)
+		readyErr := err
+		if readyErr == nil {
+			readyErr = status.NewOnShutdownError("transform stream closed before subscription was ready")
+		}
+		s.markReady(readyErr)
 		s.handler.Close()
 		close(s.done)
 	})

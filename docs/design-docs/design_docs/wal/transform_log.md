@@ -399,6 +399,11 @@ which deliver retained Entries before SyncUp. GrowingRuntime consumes the same
 ordered query barrier to advance its observed query frontier.
 
 A query waits for the requested timestamp, not a later publication timestamp.
+Before registering a scoped sync, planning waits for the TSO allocator to reach
+the requested timestamp under the caller and WAL-owner contexts. An unallocated
+future timestamp therefore cannot occupy the PChannel's shared sync operation
+or prevent ordinary and durable confirmations. The request keeps its exact
+timestamp; cancellation during this allocator wait does not enqueue the target.
 Owner shutdown cancels pending planning and permits replanning on the new owner;
 caller cancellation remains caller cancellation. Barrier state belongs to one
 WAL registration and is rebuilt after owner replacement.
@@ -422,6 +427,10 @@ SubscriptionError response use the existing shutdown code; exact legacy UNKNOWN
 cancellation causes remain accepted by clients. This response is distinct from
 canceling the RPC. A completed RPC is observed through the physical stream's
 Done signal; explicit logical stream Close stops resuming.
+Subscription creation has a separate result from normal stream shutdown. Closing
+before creation completes returns a shutdown error to Subscribe, while Close
+itself can succeed. A successfully created subscription may subsequently close
+without retroactively changing its creation result.
 
 Handlers must independently abort blocked delivery before their caller waits
 for subscription/stream Close; Close on a handler only signals completion.

@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 )
 
 type eventSubscription struct {
@@ -13,6 +14,9 @@ type eventSubscription struct {
 	handler        wal.TransformLogEventHandler
 	done           chan struct{}
 	ready          chan struct{}
+	// readyErr is the immutable creation result, published by closing ready.
+	// It is separate from err: a normal Close can abort pending creation.
+	readyErr error
 
 	errMu      sync.Mutex
 	err        error
@@ -67,10 +71,8 @@ func (s *eventSubscription) handle(event wal.TransformLogStreamEvent) error {
 }
 
 func (s *eventSubscription) markReady(err error) {
-	if err != nil {
-		s.setError(err)
-	}
 	s.readyOnce.Do(func() {
+		s.readyErr = err
 		close(s.ready)
 	})
 }
@@ -80,7 +82,11 @@ func (s *eventSubscription) finish(err error) {
 		if err != nil {
 			s.setError(err)
 		}
-		s.markReady(err)
+		readyErr := err
+		if readyErr == nil {
+			readyErr = status.NewOnShutdownError("transform stream closed before subscription was ready")
+		}
+		s.markReady(readyErr)
 		s.handler.Close()
 		close(s.done)
 		s.stream.onSubscriptionFinished(s.subscriptionID)

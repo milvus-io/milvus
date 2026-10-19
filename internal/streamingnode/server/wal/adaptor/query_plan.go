@@ -182,6 +182,13 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 		}
 		current := w.param.MVCCManager.GetQueryMVCCOfVChannel(vchannel)
 		if !current.Confirmed || current.GrowingTimetick < mvcc.BarrierMvcc || current.TransformingTimetick < mvcc.BarrierMvcc {
+			// Wait for the allocator before registering shared sync work. An
+			// unallocated future timestamp must only hold this request, not the
+			// PChannel's ordinary or persisted TimeTick sync. GetQueryPlan merges
+			// caller and WAL-owner cancellation into ctx; keep the requested B intact.
+			if err := resource.Resource().TSOAllocator().BarrierUntil(ctx, mvcc.BarrierMvcc); err != nil {
+				return nil, err
+			}
 			if err := resource.Resource().TimeTickInspector().EnsureBarrier(ctx, w.Channel(), vchannel, mvcc.BarrierMvcc); err != nil {
 				if se := status.AsStreamingError(err); se.IsOnShutdown() || se.IsFenced() {
 					return nil, viewerror.NewOnShutdownError("query barrier WAL is unavailable")

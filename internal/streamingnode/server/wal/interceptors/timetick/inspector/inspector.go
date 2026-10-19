@@ -31,6 +31,8 @@ type TimeTickSyncOperator interface {
 type TimeTickSyncInspector interface {
 	// EnsureBarrier returns when a confirmation covering the VChannel target
 	// has been published into WAB. It never waits for downstream consumption.
+	// Callers must first pass the target through TSOAllocator.BarrierUntil with
+	// their request context, so unallocated targets cannot stall shared syncs.
 	EnsureBarrier(ctx context.Context, channel types.PChannelInfo, vchannel string, timetick uint64) error
 
 	// TriggerSync adds a pchannel info and notify the sync operation.
