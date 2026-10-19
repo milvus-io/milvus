@@ -1345,6 +1345,109 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	return nil
 }
 
+// ReleasePartitions releases every segment of the given partitions that this delegator serves,
+// without waiting for a target sync. QueryCoord calls it from a partition release once the
+// partitions have left its meta and targets. The segment checker only releases their segments
+// after the delegator's readable view has moved on to a target without them, and a delegator
+// that lags behind the current target -- because it cannot load a newer segment, say -- would
+// keep returning the released rows, and keep their memory, until it catches up; with the serving
+// guard in ReleaseSegments it would refuse every release of them in the meantime.
+//
+// The distribution and the readable view are updated first, under the distribution lock, so the
+// shard stays serviceable and nothing is left for ReleaseSegments to refuse. Once the in-flight
+// reads on the old snapshots have finished, the BM25 stats are dropped and the segments released
+// on their workers: the sealed ones on the nodes that hold them, the growing ones on this node.
+// A worker that cannot be reached leaves its segment loaded but out of the view; the next
+// ReleaseSegments QueryCoord issues for it is not refused, so the memory is reclaimed then.
+//
+// Idempotent, as the DDL callback that drives it may run again: a partition the delegator no
+// longer holds removes nothing and no worker is called. L0 segments are not in the distribution
+// but in the delete buffer, and are released with the channel as before.
+func (sd *shardDelegator) ReleasePartitions(ctx context.Context, partitionIDs []int64) error {
+	log := sd.getLogger(ctx).With(mlog.Int64s("partitionIDs", partitionIDs))
+
+	sealed, growing, signal := sd.distribution.RemovePartitions(partitionIDs...)
+	if len(sealed) == 0 && len(growing) == 0 {
+		log.Info(ctx, "delegator holds no segment of the released partitions")
+		return nil
+	}
+	sealedIDs := lo.Map(sealed, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })
+	growingIDs := lo.Map(growing, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })
+	log.Info(ctx, "delegator start to release partitions",
+		mlog.Int64s("sealed", sealedIDs),
+		mlog.Int64s("growing", growingIDs))
+
+	// wait for the reads on the snapshots that still contain the segments, outside the lock
+	<-signal
+
+	if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+		// best effort: the segments have left the readable set either way, and the next target
+		// sync drops the sealed stats that are no longer in the target
+		if err := idfOracle.RemoveSegments(sealedIDs, growingIDs); err != nil {
+			log.Warn(ctx, "failed to drop the bm25 stats of the released partitions", mlog.Err(err))
+		}
+	}
+
+	var errs []error
+	for nodeID, entries := range lo.GroupBy(sealed, func(entry SegmentEntry) int64 { return entry.NodeID }) {
+		segmentIDs := lo.Map(entries, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })
+		if err := sd.releaseOnWorker(ctx, nodeID, segmentIDs, querypb.DataScope_Historical); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(growing) > 0 {
+		sd.growingSegmentLock.Lock()
+		// in case the pipeline consumes a released growing segment again
+		sd.AddExcludedSegments(lo.SliceToMap(growingIDs, func(segmentID int64) (int64, uint64) {
+			return segmentID, typeutil.MaxTimestamp
+		}))
+		err := sd.releaseOnWorker(ctx, paramtable.GetNodeID(), growingIDs, querypb.DataScope_Streaming)
+		sd.growingSegmentLock.Unlock()
+		if err != nil {
+			errs = append(errs, err)
+		} else if sd.growingSourceProvider != nil {
+			for _, segmentID := range growingIDs {
+				sd.growingSourceProvider.ClearReleasePrepared(segmentID)
+			}
+		}
+	}
+	if err := merr.Combine(errs...); err != nil {
+		log.Warn(ctx, "delegator failed to release every segment of the released partitions", mlog.Err(err))
+		return err
+	}
+	log.Info(ctx, "delegator release partitions done")
+	return nil
+}
+
+// releaseOnWorker releases segments this delegator no longer references on the worker that holds them.
+func (sd *shardDelegator) releaseOnWorker(ctx context.Context, nodeID int64, segmentIDs []int64, scope querypb.DataScope) error {
+	log := sd.getLogger(ctx).With(
+		mlog.FieldNodeID(nodeID),
+		mlog.Int64s("segmentIDs", segmentIDs),
+		mlog.String("scope", scope.String()))
+	worker, err := sd.workerManager.GetWorker(ctx, nodeID)
+	if err != nil {
+		log.Warn(ctx, "delegator failed to find worker", mlog.Err(err))
+		return err
+	}
+	err = worker.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ReleaseSegments),
+			commonpbutil.WithTargetID(nodeID),
+		),
+		NodeID:       nodeID,
+		CollectionID: sd.collectionID,
+		SegmentIDs:   segmentIDs,
+		Scope:        scope,
+		Shard:        sd.vchannelName,
+		NeedTransfer: false,
+	})
+	if err != nil {
+		log.Warn(ctx, "worker failed to release segments", mlog.Err(err))
+	}
+	return err
+}
+
 func (sd *shardDelegator) SyncTargetVersion(action *querypb.SyncAction, partitions []int64) {
 	sd.distribution.SyncTargetVersion(action, partitions)
 	// clean delete buffer after distribution becomes serviceable

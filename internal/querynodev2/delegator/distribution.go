@@ -597,6 +597,94 @@ func (d *distribution) RemoveDistributionsIfNotServed(sealedSegments []SegmentEn
 	return nil, d.removeDistributionsLocked(sealedSegments, growingSegments)
 }
 
+// RemovePartitions drops every sealed and growing entry of the given partitions from the
+// distribution and from the readable query view, and returns the removed entries together with
+// the signal that closes once no in-flight read still uses a snapshot containing them.
+//
+// It is the delegator's half of a partition release. QueryCoord has already removed the
+// partitions from its meta and targets, so no later target sync carries them back; what it
+// cannot do is wait for that sync to reach a delegator that lags behind the current target. The
+// partitions are therefore taken out of the view as well (partitions, sealedSegmentRowCount,
+// growingSegments), not only out of the segment maps: a readable segment that is no longer
+// loaded would drag loadedRatio below 1.0 and make the shard unserviceable, and a segment still
+// in the view is one ReleaseSegments refuses to release.
+//
+// The view is replaced, not mutated in place: GetQueryView hands the pointer to readers that do
+// not hold the lock, so a published view's maps and sets must stay immutable, as with
+// SyncTargetVersion. A segment ID that the view lists but the distribution has no entry for (not
+// loaded yet) carries no partition and stays in the view; such a shard was not serviceable before
+// this call either, and the next target sync rewrites the view.
+func (d *distribution) RemovePartitions(partitionIDs ...int64) (sealed []SegmentEntry, growing []SegmentEntry, signal chan struct{}) {
+	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
+
+	d.mut.Lock()
+	for _, entry := range d.sealedSegments {
+		if partitionSet.Contain(entry.PartitionID) {
+			sealed = append(sealed, entry)
+		}
+	}
+	for _, entry := range d.growingSegments {
+		if partitionSet.Contain(entry.PartitionID) {
+			growing = append(growing, entry)
+		}
+	}
+	inView := lo.SomeBy(partitionIDs, func(partitionID int64) bool { return d.queryView.partitions.Contain(partitionID) })
+	if len(sealed) == 0 && len(growing) == 0 && !inView {
+		d.mut.Unlock()
+		return nil, nil, getClosedCh()
+	}
+
+	var toRefund []pkoracle.Candidate
+	for _, entry := range sealed {
+		if entry.Candidate != nil {
+			toRefund = append(toRefund, entry.Candidate)
+		}
+		delete(d.sealedSegments, entry.SegmentID)
+	}
+	for _, entry := range growing {
+		delete(d.growingSegments, entry.SegmentID)
+	}
+
+	old := d.queryView
+	sealedSegmentRowCount := make(map[int64]int64, len(old.sealedSegmentRowCount))
+	for segmentID, rowCount := range old.sealedSegmentRowCount {
+		sealedSegmentRowCount[segmentID] = rowCount
+	}
+	for _, entry := range sealed {
+		delete(sealedSegmentRowCount, entry.SegmentID)
+	}
+	growingSegments := old.growingSegments.Clone()
+	for _, entry := range growing {
+		growingSegments.Remove(entry.SegmentID)
+	}
+	partitions := old.partitions.Clone()
+	partitions.Remove(partitionIDs...)
+	d.queryView = &channelQueryView{
+		growingSegments:       growingSegments,
+		sealedSegmentRowCount: sealedSegmentRowCount,
+		partitions:            partitions,
+		version:               old.version,
+		loadedRatio:           atomic.NewFloat64(0),
+		syncedByCoord:         old.syncedByCoord,
+	}
+
+	mlog.Info(context.TODO(), "remove partitions from distribution",
+		mlog.String("channelName", d.channelName),
+		mlog.Int64s("partitionIDs", partitionIDs),
+		mlog.Int64s("sealed", lo.Map(sealed, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),
+		mlog.Int64s("growing", lo.Map(growing, func(s SegmentEntry, _ int) int64 { return s.SegmentID })),
+		mlog.Int64("version", old.version),
+	)
+
+	d.updateServiceable("RemovePartitions")
+	signal = d.genSnapshot()
+	d.mut.Unlock()
+
+	refundCandidates(toRefund)
+
+	return sealed, growing, signal
+}
+
 // removeDistributionsLocked removes the distributions; d.mut must be write-locked by the caller and
 // is released before it returns.
 func (d *distribution) removeDistributionsLocked(sealedSegments []SegmentEntry, growingSegments []SegmentEntry) chan struct{} {

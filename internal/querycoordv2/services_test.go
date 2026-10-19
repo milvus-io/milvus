@@ -224,6 +224,8 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+	// a partition release asks the delegators' nodes to release the partitions before waiting for the target sync
+	suite.cluster.EXPECT().ReleasePartitions(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.targetObserver = observers.NewTargetObserver(
 		suite.meta,
 		suite.targetMgr,

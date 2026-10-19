@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -944,6 +945,73 @@ func (s *DistributionSuite) TestRemoveDistributionsIfNotServed() {
 		// subtest covers.
 		s.False(s.dist.Serviceable())
 	})
+}
+
+// A partition release takes the partition's segments out of the distribution and out of the
+// readable view in one step: the shard stays serviceable on what is left, the released segments
+// are neither readable nor refused on a later release, and releasing again removes nothing.
+func (s *DistributionSuite) TestRemovePartitions() {
+	s.dist.AddDistributions(
+		SegmentEntry{NodeID: 1, SegmentID: 1000, PartitionID: 1},
+		SegmentEntry{NodeID: 2, SegmentID: 1001, PartitionID: 2},
+	)
+	s.dist.AddGrowing(
+		SegmentEntry{NodeID: 1, SegmentID: 2000, PartitionID: 1},
+		SegmentEntry{NodeID: 1, SegmentID: 2001, PartitionID: 2},
+	)
+	s.dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2000,
+		GrowingInTarget:       []int64{2000, 2001},
+		SealedInTarget:        []int64{1000, 1001},
+		SealedSegmentRowCount: map[int64]int64{1000: 100, 1001: 100},
+	}, []int64{1, 2})
+	s.Require().True(s.dist.Serviceable())
+	segmentIDs := func(entries []SegmentEntry) []int64 {
+		return lo.Map(entries, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })
+	}
+
+	sealed, growing, signal := s.dist.RemovePartitions(1)
+	s.Equal([]int64{1000}, segmentIDs(sealed))
+	s.Equal(int64(1), sealed[0].NodeID)
+	s.Equal([]int64{2000}, segmentIDs(growing))
+	select {
+	case <-signal:
+	case <-time.After(time.Second):
+		s.FailNow("no read pins the old snapshot, the signal must close")
+	}
+
+	s.True(s.dist.Serviceable())
+	view := s.dist.GetQueryView()
+	s.False(view.partitions.Contain(1))
+	s.True(view.partitions.Contain(2))
+	_, readable := view.sealedSegmentRowCount[1000]
+	s.False(readable)
+	s.False(view.growingSegments.Contain(2000))
+	s.True(view.growingSegments.Contain(2001))
+	s.Equal(int64(2000), view.GetVersion())
+
+	readSealed, readGrowing, _, version, err := s.dist.PinReadableSegments(1.0)
+	s.Require().NoError(err)
+	s.Equal([]int64{1001}, lo.FlatMap(readSealed, func(item SnapshotItem, _ int) []int64 { return segmentIDs(item.Segments) }))
+	s.Equal([]int64{2001}, segmentIDs(readGrowing))
+	s.dist.Unpin(version)
+	_, _, _, _, err = s.dist.PinReadableSegments(1.0, 1)
+	s.ErrorIs(err, merr.ErrPartitionNotLoaded)
+
+	// no longer served, so a release of it is not refused
+	stillServing, _ := s.dist.RemoveDistributionsIfNotServed([]SegmentEntry{{NodeID: 1, SegmentID: 1000}}, nil)
+	s.Empty(stillServing)
+
+	// idempotent
+	sealed, growing, signal = s.dist.RemovePartitions(1)
+	s.Empty(sealed)
+	s.Empty(growing)
+	select {
+	case <-signal:
+	default:
+		s.FailNow("nothing removed, the signal must be closed already")
+	}
+	s.True(s.dist.Serviceable())
 }
 
 func TestDistributionSuite(t *testing.T) {
