@@ -130,9 +130,34 @@ JsonInvertedIndex<T>::ComparableValueBitset() {
 }
 
 template <typename T>
+void
+JsonInvertedIndex<T>::MaterializeValidBitmap() {
+    if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+        InvertedIndexTantivy<T>::MaterializeValidBitmap();
+        return;
+    }
+    if (this->is_growing_ || this->valid_bitmap_ != nullptr) {
+        return;
+    }
+
+    // Persisted null offsets only describe whole-field nulls. Recover the
+    // comparable set once, before publishing this immutable sealed reader.
+    auto bitmap = ComparableValueBitset();
+    if (bitmap.all()) {
+        static const auto all_valid_bitmap =
+            std::make_shared<const TargetBitmap>();
+        this->valid_bitmap_ = all_valid_bitmap;
+    } else {
+        this->valid_bitmap_ =
+            std::make_shared<const TargetBitmap>(std::move(bitmap));
+    }
+}
+
+template <typename T>
 TargetBitmap
 JsonInvertedIndex<T>::IsNotNull() {
-    if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
+    if (!this->is_growing_ ||
+        cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
         return InvertedIndexTantivy<T>::IsNotNull();
     }
     return ComparableValueBitset();
