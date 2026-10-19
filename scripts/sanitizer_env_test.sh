@@ -68,6 +68,7 @@ done
 (
     unset USE_ASAN GOFLAGS LD_PRELOAD
     export USE_TSAN=ON OMP_TOOL=disabled OMP_TOOL_LIBRARIES=/wrong/tool.so
+    export TSAN_OPTIONS=suppressions=/custom.supp
     printf 'llvm-20\n' > "${test_root}/tsan/lib/milvus-archer"
     if milvus_sanitizer_env "${test_root}/tsan"; then
         echo 'Expected missing Archer libraries to fail' >&2
@@ -81,6 +82,7 @@ done
     [[ "${OMP_TOOL}" == enabled ]]
     [[ "${OMP_TOOL_LIBRARIES}" == "${test_root}/tsan/lib/libarcher.so" ]]
     [[ "${TSAN_OPTIONS}" == suppressions="${test_root}/tsan/lib/tsan.supp":* ]]
+    [[ "${TSAN_OPTIONS}" == *:suppressions=/custom.supp:* ]]
     [[ "${TSAN_OPTIONS}" != *ignore_noninstrumented_modules* ]]
 )
 
