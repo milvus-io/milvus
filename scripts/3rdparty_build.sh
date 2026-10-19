@@ -26,7 +26,7 @@ usage() {
   echo "Usage: $0 [-t BUILD_TYPE] [-h]"
   echo "  -t BUILD_TYPE     Set build type (Debug/Release/RelWithDebInfo/MinSizeRel, default: Release)"
   echo "  -h                Show this help message"
-  echo "  CONAN_HOST_PROFILE: optional host profile (e.g. internal/core/conan/profiles/tsan)"
+  echo "  CONAN_HOST_PROFILE: optional host profile (generate the full TSan profile with milvus_tsan.py profile --all)"
   echo ""
   echo "Examples:"
   echo "  $0                          # Build with default settings (Release)"

@@ -75,6 +75,7 @@ class ArtifactTests(unittest.TestCase):
         ]:
             (self.lib / name).touch()
         (self.lib / "tsan-symbolizer").mkdir()
+        (self.lib / "tsan.supp").write_text("called_from_lib:libomp.so\n")
         for name in ["llvm-symbolizer", "tsan-symbolizer/llvm-symbolizer"]:
             (self.lib / name).touch(mode=0o755)
         with patch.object(
@@ -229,6 +230,13 @@ class ConanIdentityTests(unittest.TestCase):
             )
             profile = root / "tsan.profile"
             profile.write_text(tsan.profile())
+            full_profile = root / "tsan-all.profile"
+            with patch.dict(os.environ, {"MILVUS_LLVM_ROOT": "/custom/llvm"}):
+                full_profile.write_text(tsan.profile(all_dependencies=True))
+            self.assertIn("/custom/llvm/bin/clang", full_profile.read_text())
+            self.assertIn(
+                "user.milvus:tsan_runtime_dependencies=True", full_profile.read_text()
+            )
 
             def identities(extra):
                 data = json.loads(
@@ -243,6 +251,9 @@ class ConanIdentityTests(unittest.TestCase):
 
             normal = identities([])
             sanitized = identities(["-pr:h", "default", "-pr:h", str(profile)])
+            fully_sanitized = identities(
+                ["-pr:h", str(full_profile), "-pr:b", "default"]
+            )
             self.assertNotEqual(
                 normal[("folly", "host")]["package_id"],
                 sanitized[("folly", "host")]["package_id"],
@@ -258,6 +269,15 @@ class ConanIdentityTests(unittest.TestCase):
                 self.assertEqual(settings["compiler.version"], "20")
                 self.assertEqual(settings["compiler.cppstd"], "20")
                 self.assertEqual(settings["compiler.libcxx"], "libstdc++11")
+            for name in ("folly", "ordinary"):
+                self.assertNotEqual(
+                    normal[(name, "host")]["package_id"],
+                    fully_sanitized[(name, "host")]["package_id"],
+                )
+            self.assertEqual(
+                normal[("folly", "build")]["package_id"],
+                fully_sanitized[("folly", "build")]["package_id"],
+            )
 
 
 if __name__ == "__main__":

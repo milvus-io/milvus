@@ -83,7 +83,9 @@ instrumentation, opt into the provided full host profile (this broader profile
 still requires validation of each recipe):
 
 ```bash
-CONAN_HOST_PROFILE="$PWD/internal/core/conan/profiles/tsan" \
+mkdir -p cmake_build
+python3 internal/core/milvus_tsan.py profile --all > cmake_build/tsan-all.profile
+CONAN_HOST_PROFILE="$PWD/cmake_build/tsan-all.profile" \
     make USE_TSAN=ON mode=RelWithDebInfo build-cpp-with-unittest
 ```
 
@@ -122,15 +124,14 @@ CMake also installs `libomp.so.5`, `libarcher.so`, the shared compiler-rt and a
 `milvus-archer` marker. Launchers activate OMPT through `OMP_TOOL=enabled` and
 an absolute `OMP_TOOL_LIBRARIES` path.
 
-Archer's upstream configuration uses `ignore_noninstrumented_modules=1` to
-exclude runtime internals. This reduces coverage of accesses originating in
-uninstrumented dependencies; it is not a declaration that those dependencies
-are race-free. No project-wide race suppression is installed. Both synchronized
-and deliberately racy OpenMP probes run with the same setting.
+The installed `tsan.supp` suppresses reports originating in uninstrumented
+`libomp` internals by library name. Interceptor reports from Milvus and other
+libraries remain enabled. A memcpy race probe checks this along with the
+existing ordinary load/store and OpenMP probes.
 
 External image builders must set `MILVUS_JEMALLOC_LIB` to an empty build
 argument, `MILVUS_ARCHER_LIB=/milvus/lib/libarcher.so`, and `MILVUS_TSAN_OPTIONS`
-to `halt_on_error=1:exitcode=66:ignore_noninstrumented_modules=1:external_symbolizer_path=/milvus/lib/llvm-symbolizer`.
+to `halt_on_error=1:exitcode=66:suppressions=/milvus/lib/tsan.supp:external_symbolizer_path=/milvus/lib/llvm-symbolizer`.
 CMake installs the matching LLVM symbolizer and its dependencies in
 `lib/tsan-symbolizer`, with a `lib/llvm-symbolizer` launcher that isolates its
 library search path from Core's Conan libraries. Preserve this directory and
@@ -169,15 +170,16 @@ UT build. `ctest --test-dir <build-dir> -L tsan --output-on-failure` runs:
 - A mutex-protected C/C++ shared-library access case that must pass.
 - An intentional C data race in a shared library that must report and exit 66.
 - An intentional C++ data race in a shared library with the same requirement.
+- An intentional memcpy race that must remain visible through TSan interceptors.
 - OpenMP lock, barrier and task-depend cases that must be race-free.
 - An intentionally racy OpenMP case that must report and exit 66.
 
 The report checker rejects initialization crashes, silent success, wrong exit
 codes, missing symbolized access functions, and a missing Archer startup banner. The intentionally racy probe is
-not installed among ordinary UT executables. No suppressions are enabled by
-default. `bash scripts/sanitizer_env_test.sh` checks allocator handling, parser
+not installed among ordinary UT executables. Only reports originating in
+`libomp` are suppressed by default. `bash scripts/sanitizer_env_test.sh` checks allocator handling, parser
 and image command propagation, and configuration conflicts without compiling
-Milvus. `python scripts/test_tsan_conan_profile.py` (with Conan 2.25.1 installed
+Milvus. `python -m unittest scripts.tests.test_tsan_dependencies` (with Conan 2.25.1 installed
 in the development virtual environment) checks distinct host package IDs and
 unchanged build-tool IDs offline, without compiling dependencies or modifying
 the user's Conan cache.
