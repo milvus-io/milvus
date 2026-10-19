@@ -38,8 +38,13 @@ type Scheduler interface {
 type scheduler struct {
 	manager TaskManager
 
+	// futuresMu protects futures during submission and collection.
+	futuresMu sync.Mutex
 	// futures tracks in-flight file futures by task ID.
 	futures map[int64][]*conc.Future[any]
+
+	// submitMu allows only one goroutine to submit tasks at a time.
+	submitMu sync.Mutex
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -70,6 +75,7 @@ func (s *scheduler) Start() {
 			return
 		case <-exeTicker.C:
 			s.scheduleTasks()
+			s.collectCompletedTasks()
 		case <-logTicker.C:
 			LogStats(s.manager)
 		}
@@ -77,7 +83,9 @@ func (s *scheduler) Start() {
 }
 
 func (s *scheduler) scheduleTasks() {
-	s.collectCompletedTasks()
+	if !s.submitMu.TryLock() {
+		return
+	}
 
 	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
 	sort.Slice(tasks, func(i, j int) bool {
@@ -85,6 +93,7 @@ func (s *scheduler) scheduleTasks() {
 	})
 
 	if len(tasks) == 0 {
+		s.submitMu.Unlock()
 		return
 	}
 
@@ -93,17 +102,26 @@ func (s *scheduler) scheduleTasks() {
 	})
 	mlog.Info(context.TODO(), "processing tasks...", mlog.Int64s("taskIDs", taskIDs))
 
-	for _, task := range tasks {
-		// Execute marks the task InProgress and returns its file futures.
-		s.futures[task.GetTaskID()] = task.Execute()
-		// Collect completed tasks after each submission.
-		s.collectCompletedTasks()
-	}
+	go func() {
+		defer s.submitMu.Unlock()
+
+		for _, task := range tasks {
+			// Execute may block, so do not hold futuresMu while submitting.
+			fs := task.Execute()
+
+			s.futuresMu.Lock()
+			s.futures[task.GetTaskID()] = fs
+			s.futuresMu.Unlock()
+		}
+	}()
 }
 
 // collectCompletedTasks marks successful tasks Completed and removes failed or
 // deleted tasks from tracking without waiting for unfinished futures.
 func (s *scheduler) collectCompletedTasks() {
+	s.futuresMu.Lock()
+	defer s.futuresMu.Unlock()
+
 	for taskID, fs := range s.futures {
 		task := s.manager.Get(taskID)
 		if task == nil {
