@@ -348,12 +348,10 @@ func (it *UpsertTask) prepareUpsert(ctx context.Context) error {
 		if !fullAutoID {
 			return genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, false)
 		}
-		if fullAutoID {
-			// Validate lookup PKs before querying; complete-payload validation stays
-			// in insertPreExecute, without inheriting omitted fields from old rows.
-			if _, err := checkUpsertPrimaryFieldData(it.schema, it.upsertMsg.InsertMsg.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), nil); err != nil {
-				return err
-			}
+		// Validate lookup PKs before querying; complete-payload validation stays
+		// in insertPreExecute, without inheriting omitted fields from old rows.
+		if _, err := checkUpsertPrimaryFieldData(it.schema, it.upsertMsg.InsertMsg.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), nil); err != nil {
+			return err
 		}
 	}
 	missingRows, err := it.queryPreExecute(ctx)

@@ -57,7 +57,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -2581,14 +2580,14 @@ func TestHandleIfSearchByPKRejectsHybridSearch(t *testing.T) {
 		SubReqs: []*milvuspb.SubSearchRequest{{}},
 	}
 
-	_, _, err := handleIfSearchByPKForTest(context.Background(), &Proxy{}, req)
+	_, err := handleIfSearchByPKForTest(context.Background(), &Proxy{}, req)
 	require.ErrorContains(t, err, "search by IDs is not supported for hybrid search")
 }
 
-func handleIfSearchByPKForTest(ctx context.Context, node *Proxy, request *milvuspb.SearchRequest) ([]bool, *planpb.Expr, error) {
+func handleIfSearchByPKForTest(ctx context.Context, node *Proxy, request *milvuspb.SearchRequest) ([]bool, error) {
 	preflight, err := node.preflightSearchByPK(ctx, request)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	return node.transformSearchByPK(ctx, request, preflight)
 }
@@ -2685,7 +2684,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
 
 		// caller asks in a different order
 		req := searchByPKRequest([]int64{3, 1, 2})
-		_, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		_, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		pb := &commonpb.PlaceholderGroup{}
@@ -2739,7 +2738,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
 				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"c", "a", "b"}}},
 			},
 		}
-		_, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		_, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		pb := &commonpb.PlaceholderGroup{}
@@ -2779,7 +2778,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
 		}).Build()
 
 		req := searchByPKRequest([]int64{3, 1, 2})
-		validData, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		validData, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		// ids are 3, 1, 2 and only PK 1 is null
@@ -2822,7 +2821,7 @@ func TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch(t *testing.T) {
 		}).Build()
 
 		req := searchByPKRequest([]int64{3, 1, 2})
-		validData, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		validData, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		assert.Equal(t, []bool{false, false, false}, validData)
@@ -2925,7 +2924,7 @@ func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
 
 		req := searchByPKRequest([]int64{3, 1, 2})
 		req.SearchParams = []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "sparse"}}
-		validData, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		validData, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		// ids are 3, 1, 2 and only PK 1 is null
@@ -2960,7 +2959,7 @@ func TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch(t *testing.T) {
 
 		req := searchByPKRequest([]int64{2, 1})
 		req.SearchParams = []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "sparse"}}
-		validData, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		validData, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		assert.Equal(t, []bool{false, false}, validData)
