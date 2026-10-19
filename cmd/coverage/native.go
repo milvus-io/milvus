@@ -20,13 +20,15 @@ package coverage
 
 /*
 #cgo pkg-config: milvus_core
-void MilvusDumpCoverage(void);
+int MilvusDumpCoverage(void);
 */
 import "C"
 
 import (
 	"context"
 	"os"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Start enables local coverage snapshots only when MILVUS_COVERAGE_DIR is set.
@@ -36,5 +38,10 @@ func Start(ctx context.Context) error {
 	if root == "" {
 		return nil
 	}
-	return start(ctx, root, func() { C.MilvusDumpCoverage() })
+	return start(ctx, root, func() error {
+		if C.MilvusDumpCoverage() != 0 {
+			return merr.WrapErrServiceInternalMsg("failed to flush native coverage diagnostics")
+		}
+		return nil
+	})
 }
