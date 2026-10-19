@@ -1098,6 +1098,16 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName)
 					}
 					var vectorArray []float32
+					// Sonic grows a nil slice while decoding. Every JSON number in
+					// an array needs at least one digit and (except the last) a
+					// comma, so skip reserving a full row for clearly short input.
+					dataLength := int64(len(dataString))
+					if fieldValue.IsArray() {
+						if dim, dimErr := getDim(field); dimErr == nil &&
+							dim > 0 && dataLength > 0 && dim <= (dataLength-1)/2 {
+							vectorArray = make([]float32, 0, int(dim))
+						}
+					}
 					err := json.UnmarshalFromString(dataString, &vectorArray)
 					if err != nil {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
