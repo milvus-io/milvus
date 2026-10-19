@@ -515,7 +515,7 @@ func CopySegmentAndIndexFiles(
 		if err != nil {
 			return nil, copiedFiles, merr.Wrap(err, "failed to republish copied manifest indexes")
 		}
-		if targetManifestPath != copiedManifestPath {
+		if !packed.SameManifestPath(targetManifestPath, copiedManifestPath) {
 			revisionFile, err := packed.ManifestFilePath(targetManifestPath)
 			if err != nil {
 				return nil, copiedFiles, err
@@ -641,11 +641,7 @@ func republishCopiedManifestIndexes(
 		return "", nil, err
 	}
 
-	basePath, version, err := packed.UnmarshalManifestPath(targetManifestPath)
-	if err != nil {
-		return "", nil, merr.Wrap(err, "failed to parse copied manifest path")
-	}
-	republished, err := packed.CommitManifestUpdates(basePath, version, targetStorageConfig,
+	republished, err := packed.CommitManifestUpdates(targetManifestPath, targetStorageConfig,
 		&packed.ManifestUpdates{DropIndexes: drops, Indexes: adds})
 	if err != nil {
 		return "", nil, merr.Wrap(err, "failed to commit copied manifest indexes")

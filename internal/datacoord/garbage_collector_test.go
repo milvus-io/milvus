@@ -5819,7 +5819,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_BatchCommitsOnlyDeletedFiles(t
 	}, nil).Build().UnPatch()
 	defer mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build().UnPatch()
 	defer mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+		func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			require.Equal(t, []packed.DropIndexEntry{{IndexID: 400, ExpectedBuildID: 4100}}, updates.DropIndexes)
 			return mockManifestUpdateResult(newManifest, updates), nil
 		}).Build().UnPatch()

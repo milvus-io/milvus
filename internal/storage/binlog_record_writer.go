@@ -567,7 +567,8 @@ func (pw *PackedManifestRecordWriter) Close() error {
 	if err := pw.appendV3Stats(updates); err != nil {
 		return err
 	}
-	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig, updates)
+	newManifest, err := packed.CommitManifestUpdates(
+		packed.MarshalManifestPath(pw.basePath, packed.ManifestEarliest), pw.storageConfig, updates)
 	if err != nil {
 		return merr.Wrap(err, "PackedManifestRecordWriter.Close commit")
 	}
@@ -802,8 +803,8 @@ func (pw *PackedTextManifestRecordWriter) Close() error {
 	if err := pw.appendV3Stats(updates); err != nil {
 		return err
 	}
-	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig,
-		updates)
+	newManifest, err := packed.CommitManifestUpdates(
+		packed.MarshalManifestPath(pw.basePath, packed.ManifestEarliest), pw.storageConfig, updates)
 	if err != nil {
 		return merr.Wrap(err, "PackedTextManifestRecordWriter.Close commit")
 	}

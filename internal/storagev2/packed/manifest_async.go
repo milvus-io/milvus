@@ -450,17 +450,24 @@ type ManifestUpdateResult struct {
 }
 
 // SubmitManifestUpdates waits only for admission, then chains native open and
-// commit on io's executor. An accepted submission calls complete exactly once,
-// possibly before returning; rejection returns an error without a callback.
-// Updates must remain immutable until completion. The callback must not block,
-// submit more work, or close its own IO context. Close drains accepted work.
-func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates, complete func(ManifestUpdateResult, error)) error {
+// commit on io's executor at the revision named by baseManifestPath. An
+// accepted submission calls complete exactly once, possibly before returning;
+// rejection returns an error without a callback. With no effective changes the
+// result is baseManifestPath itself, like CommitManifestUpdates: a pointer that
+// did not move keeps its exact text. Updates must remain immutable until
+// completion. The callback must not block, submit more work, or close its own
+// IO context. Close drains accepted work.
+func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManifestPath string, config *indexpb.StorageConfig, updates *ManifestUpdates, complete func(ManifestUpdateResult, error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if updates.isEmpty() {
-		complete(ManifestUpdateResult{ManifestPath: MarshalManifestPath(base, version)}, nil)
+		complete(ManifestUpdateResult{ManifestPath: baseManifestPath}, nil)
 		return nil
+	}
+	base, version, parseErr := UnmarshalManifestPath(baseManifestPath)
+	if parseErr != nil {
+		return merr.WrapErrDataIntegrity(parseErr, "parse base manifest path %q", baseManifestPath)
 	}
 	if err := io.acquire(ctx); err != nil {
 		return err
@@ -477,14 +484,13 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, base stri
 			finish(ManifestUpdateResult{}, result.err)
 			return
 		}
-		manifestPath := MarshalManifestPath(base, version)
-		changed, hasIndexes, err := applyAsyncManifestUpdates(result.transaction, manifestPath, updates)
+		changed, hasIndexes, err := applyAsyncManifestUpdates(result.transaction, baseManifestPath, updates)
 		if err != nil {
 			finish(ManifestUpdateResult{}, err)
 			return
 		}
 		if !changed {
-			finish(ManifestUpdateResult{manifestPath, hasIndexes}, nil)
+			finish(ManifestUpdateResult{baseManifestPath, hasIndexes}, nil)
 			return
 		}
 		// Keep the original admission slot and transaction until commit completes.
@@ -555,13 +561,13 @@ func manifestIndexesAfterUpdates(indexes []ManifestIndexInfo, updates *ManifestU
 }
 
 // CommitManifestUpdatesWithResultAsync also returns the index-marker change.
-func CommitManifestUpdatesWithResultAsync(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates) (ManifestUpdateResult, error) {
+func CommitManifestUpdatesWithResultAsync(ctx context.Context, io *ManifestIOContext, baseManifestPath string, config *indexpb.StorageConfig, updates *ManifestUpdates) (ManifestUpdateResult, error) {
 	type commitResult struct {
 		result ManifestUpdateResult
 		err    error
 	}
 	done := make(chan commitResult, 1)
-	if err := SubmitManifestUpdates(ctx, io, base, version, config, updates, func(result ManifestUpdateResult, err error) {
+	if err := SubmitManifestUpdates(ctx, io, baseManifestPath, config, updates, func(result ManifestUpdateResult, err error) {
 		done <- commitResult{result, err}
 	}); err != nil {
 		return ManifestUpdateResult{}, err
