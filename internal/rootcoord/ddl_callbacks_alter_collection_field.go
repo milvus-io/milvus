@@ -72,6 +72,48 @@ func validateAlterCollectionFieldAnalyzerMutation(schema *schemapb.CollectionSch
 	return nil
 }
 
+// applyStructFieldAlter applies an alter_collection_field request whose target
+// is a struct field or a struct sub-field. The keys were checked by
+// validateStructFieldAlterKeys.
+func applyStructFieldAlter(schema *schemapb.CollectionSchema, req *milvuspb.AlterCollectionFieldRequest, props []*commonpb.KeyValuePair, desc *commonpb.KeyValuePair) error {
+	name := req.GetFieldName()
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetName() == name {
+			structField.TypeParams = props
+			if desc != nil {
+				structField.Description = desc.GetValue()
+			}
+			return nil
+		}
+		for _, sub := range structField.GetFields() {
+			if sub.GetName() == name {
+				sub.TypeParams = props
+				if desc != nil {
+					sub.Description = desc.GetValue()
+				}
+				return nil
+			}
+		}
+	}
+	return merr.WrapErrParameterInvalidMsg("field %s does not exist in collection", name)
+}
+
+// validateStructFieldAlterKeys rejects keys outside
+// schemautil.StructFieldAlterableKeys when the request targets a struct field
+// or a struct sub-field.
+func validateStructFieldAlterKeys(schema *schemapb.CollectionSchema, req *milvuspb.AlterCollectionFieldRequest) error {
+	target := schemautil.StructAlterTarget(schema, req.GetFieldName())
+	if target == "" {
+		return nil
+	}
+	keys := make([]string, 0, len(req.GetProperties())+len(req.GetDeleteKeys()))
+	for _, prop := range req.GetProperties() {
+		keys = append(keys, prop.GetKey())
+	}
+	keys = append(keys, req.GetDeleteKeys()...)
+	return schemautil.ValidateStructFieldAlterKeys(target, req.GetFieldName(), keys)
+}
+
 func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Context, req *milvuspb.AlterCollectionFieldRequest) error {
 	broadcastAPI, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -98,6 +140,12 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	if err := schemautil.RejectStructSubFieldOriginMarkerKeys(req.GetFieldName(), propertyKeys...); err != nil {
 		return err
 	}
+	// Check struct targets before the no-change shortcut below, so a rejected
+	// key is reported even when it would not change anything.
+	schema := coll.ToCollectionSchemaPB()
+	if err := validateStructFieldAlterKeys(schema, req); err != nil {
+		return err
+	}
 	oldFieldPropertiesMap := common.CloneKeyValuePairs(oldFieldProperties).ToMap()
 	var desc *commonpb.KeyValuePair = nil
 	for _, prop := range req.GetProperties() {
@@ -121,7 +169,6 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 
 	// build new collection schema.
-	schema := coll.ToCollectionSchemaPB()
 	schema.Version = coll.SchemaVersion + 1
 	var targetField *schemapb.FieldSchema
 	for _, field := range schema.Fields {
@@ -141,6 +188,11 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 				field.Description = desc.GetValue()
 			}
 			break
+		}
+	}
+	if targetField == nil {
+		if err := applyStructFieldAlter(schema, req, newFieldProperties, desc); err != nil {
+			return err
 		}
 	}
 	if err := validateSchemaEvolution(coll, schema); err != nil {
