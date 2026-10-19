@@ -1132,3 +1132,51 @@ func TestReplicateRoleRecoveredAndReadWithoutLock(t *testing.T) {
 		t.Fatal("ReplicateRole waited for the channel manager lock")
 	}
 }
+
+// An assignment carries no pchannel stats, so it is served before rootcoord
+// recovers them; and the balancer view waits for them outside the manager lock,
+// so it holds up no assignment meanwhile.
+func TestChannelAssignmentDoesNotWaitForPChannelStats(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	t.Cleanup(func() {
+		if !StaticPChannelStatsManager.Ready() {
+			RecoverPChannelStatsManager([]string{})
+		}
+	})
+
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "test-channel"}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{{
+		Channel: &streamingpb.PChannelInfo{Name: "test-channel", Term: 1},
+		Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
+	}}, nil)
+	m, err := RecoverChannelManager(context.Background())
+	require.NoError(t, err)
+
+	balancerView := make(chan *PChannelView, 1)
+	go func() { balancerView <- m.CurrentPChannelsView() }()
+	// Let the balancer view reach its wait for the stats first.
+	time.Sleep(100 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		param, err := m.GetLatestChannelAssignment()
+		assert.NoError(t, err)
+		assert.Contains(t, param.PChannelView.Channels, newChannelID("test-channel"))
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		RecoverPChannelStatsManager([]string{})
+		<-done
+		t.Fatal("the assignment waited for the pchannel stats")
+	}
+
+	RecoverPChannelStatsManager([]string{})
+	assert.Contains(t, (<-balancerView).Stats, newChannelID("test-channel"))
+}

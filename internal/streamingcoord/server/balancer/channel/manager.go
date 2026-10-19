@@ -42,7 +42,7 @@ type (
 		StreamingVersion       *streamingpb.StreamingVersion
 		Version                typeutil.VersionInt64Pair
 		CChannelAssignment     *streamingpb.CChannelAssignment
-		PChannelView           *PChannelView
+		PChannelView           *PChannelView // channel metas only, Stats is nil
 		Relations              []types.PChannelInfoAssigned
 		ReplicateConfiguration *commonpb.ReplicateConfiguration
 	}
@@ -382,8 +382,9 @@ func (cm *ChannelManager) MarkStreamingVersion(ctx context.Context, version int6
 // CurrentPChannelsView returns the current view of pchannels.
 func (cm *ChannelManager) CurrentPChannelsView() *PChannelView {
 	cm.cond.L.Lock()
-	view := newPChannelView(cm.channels)
+	view := newPChannelMetaView(cm.channels)
 	cm.cond.L.Unlock()
+	view.fillStats()
 
 	for _, channel := range view.Channels {
 		cm.metrics.UpdateVChannelTotal(channel)
@@ -727,7 +728,7 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 	}
 	version := cm.version
 	cchannelAssignment := proto.Clone(cm.cchannelMeta).(*streamingpb.CChannelMeta)
-	pchannelViews := newPChannelView(cm.channels)
+	pchannelViews := newPChannelMetaView(cm.channels)
 	cm.cond.L.Unlock()
 
 	var replicateConfig *commonpb.ReplicateConfiguration

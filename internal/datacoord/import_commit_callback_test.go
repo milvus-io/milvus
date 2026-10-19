@@ -24,12 +24,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -189,24 +191,39 @@ func TestImportCommitCallbackRetriesCommitPhasePersistence(t *testing.T) {
 }
 
 func TestImportCallbackExcludesControlFromJobChannels(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	type ackAllocator struct{ allocator.Allocator }
+	type ackHandler struct{ Handler }
+	allocate := mockey.Mock((*ackAllocator).AllocN).Return(int64(10), int64(11), nil).Build()
+	defer allocate.UnPatch()
+	collection := mockey.Mock((*ackHandler).GetCollection).Return(
+		&collectionInfo{ID: 100, VChannelNames: []string{"v1"}}, nil).Build()
+	defer collection.UnPatch()
+	catalog := &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()}
+	imports, err := NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+	callbacks := &DDLCallbacks{Server: &Server{
+		allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: imports,
+	}}
+	callbacks.stateCode.Store(commonpb.StateCode_Healthy)
+
 	control := funcutil.GetControlChannel("test")
 	msg := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&message.ImportMsg{JobID: 1, CollectionID: 100}).
 		WithBroadcast([]string{"v1", control}).MustBuildBroadcast()
-	patch := mockey.Mock((*Server).createImportJobFromAck).To(func(_ *Server, _ context.Context, req *internalpb.ImportRequestInternal, commitByCoordinator bool) (*internalpb.ImportResponse, error) {
-		require.False(t, commitByCoordinator)
-		require.Equal(t, []string{"v1"}, req.GetChannelNames())
-		require.Equal(t, int64(1), req.GetJobID())
-		return &internalpb.ImportResponse{Status: merr.Success()}, nil
-	}).Build()
-	defer patch.UnPatch()
-	callbacks := &DDLCallbacks{Server: &Server{}}
-	err := callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
+	// Routing belongs to job creation; do not mock away the ACK-to-job path.
+	err = callbacks.importV1AckCallback(ctx, message.BroadcastResultImportMessageV1{
 		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *message.ImportMsg](msg),
 		Results: map[string]*message.AppendResult{"v1": {TimeTick: 100}, control: {TimeTick: 900}},
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1, patch.Times())
+	job := imports.GetJob(ctx, 1)
+	require.NotNil(t, job)
+	require.False(t, job.GetCommitByCoordinator())
+	require.Equal(t, []string{"v1"}, job.GetReadyVchannels())
+	require.Equal(t, int64(1), job.GetJobID())
+	require.EqualValues(t, 900, job.GetDataTs())
 }
 
 func TestLegacyImportCommitSurvivesRetiredBroadcast(t *testing.T) {

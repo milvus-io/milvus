@@ -346,6 +346,11 @@ func WriteYaml(w io.Writer) {
 # Any configuration related to the streaming node server.`,
 		},
 		{
+			name: "queryView",
+			header: `
+# Any configuration related to query views.`,
+		},
+		{
 			name: "streaming",
 			header: `
 # Any configuration related to the streaming service.`,

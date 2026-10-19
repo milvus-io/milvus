@@ -702,7 +702,9 @@ func writeIdempotencyChunk(
 	}))
 	require.NoError(t, err)
 	manager.mu.Lock()
-	recordChunk(manager.manifest, chunkIndexEntryFromFooter(footer, objectSize))
+	index := chunkIndexEntryFromFooter(footer, objectSize)
+	recordChunk(manager.manifest, index)
+	manager.chunkIndex.chunks = append(manager.chunkIndex.chunks, manager.chunkIndex.newChunk(index, nil))
 	manager.mu.Unlock()
 }
 
@@ -957,9 +959,8 @@ func TestObserveStagesTxnIdempotencyRecord(t *testing.T) {
 	assert.Equal(t, []int64{1, 2, 3}, sections.Inserts[0].GetIds().GetIntId().GetData())
 }
 
-// A txn whose commit carries no key is not an idempotent write; it must stage
-// nothing and stay on the keyless path.
-func TestObserveIgnoresKeylessTxn(t *testing.T) {
+// A keyless transaction still contributes one committed insert fact.
+func TestObserveStagesKeylessTxn(t *testing.T) {
 	manager, _ := newTestManagerWithStore(t)
 	ctx := context.Background()
 	require.NoError(t, manager.Restore(ctx))
@@ -969,7 +970,9 @@ func TestObserveIgnoresKeylessTxn(t *testing.T) {
 
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	assert.Empty(t, manager.pending)
+	require.Len(t, manager.pending, 1)
+	assert.Empty(t, manager.pending[0].idempotency.GetKey())
+	assert.Equal(t, txnMsg.TimeTick(), manager.pending[0].insert.GetSourceTimetick())
 }
 
 func observeMessage(t *testing.T, manager *Manager, msg message.ImmutableMessage) {
@@ -983,15 +986,14 @@ func TestObserveMessageStagesIdempotentInserts(t *testing.T) {
 	vchannel := "by-dev-rootcoord-dml_0_40451v0"
 
 	observeMessage(t, manager, newTestIdempotentInsertMessage(t, vchannel, 100, "key-a", []int64{1, 2}, []uint32{0, 1}))
-	// An insert without a client key materializes nothing for any consumer and
-	// must not be staged, or every insert's primary keys would reach storage.
+	// Keyless writes retain their position between keyed writes.
 	observeMessage(t, manager, newTestIdempotentInsertMessage(t, vchannel, 101, "", []int64{3}, nil))
 	observeMessage(t, manager, newTestIdempotentInsertMessage(t, vchannel, 102, "key-b", []int64{4}, []uint32{0}))
 
 	manager.mu.Lock()
 	staged := len(manager.pending)
 	manager.mu.Unlock()
-	require.Equal(t, 2, staged, "only the keyed inserts are staged")
+	require.Equal(t, 3, staged, "all committed inserts are staged")
 
 	sc := manager.seal()
 	require.NotNil(t, sc)
@@ -1002,11 +1004,13 @@ func TestObserveMessageStagesIdempotentInserts(t *testing.T) {
 	require.NoError(t, err)
 	records, err := idempotencyview.RecordsFromSections(got.Idempotency, got.Inserts)
 	require.NoError(t, err)
-	require.Len(t, records, 2)
+	require.Len(t, records, 3)
 	assert.Equal(t, "key-a", records[0].IdempotencyKey)
 	assert.Equal(t, []int64{1, 2}, records[0].InsertResult.GetIds().GetIntId().GetData())
 	assert.Equal(t, []uint32{0, 1}, records[0].InsertResult.GetRowOffsets())
-	assert.Equal(t, "key-b", records[1].IdempotencyKey)
+	assert.Empty(t, records[1].IdempotencyKey)
+	assert.Equal(t, uint64(101), records[1].SourceTimeTick)
+	assert.Equal(t, "key-b", records[2].IdempotencyKey)
 
 	_ = store
 }
@@ -1037,9 +1041,12 @@ func TestIdempotencyKeyOfIsGatedByOriginAndType(t *testing.T) {
 		WithLastConfirmed(walimplstest.NewTestMessageID(101)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(102))
 	assert.Empty(t, idempotencyKeyOf(replicated))
-	keys, insert := idempotencyHalvesOf(replicated)
-	assert.Nil(t, keys)
-	assert.Nil(t, insert)
+	keys, insert := insertSummaryOf(replicated)
+	require.NotNil(t, keys)
+	assert.Empty(t, keys.GetKey())
+	require.NotNil(t, insert)
+	assert.Equal(t, replicated.TimeTick(), insert.GetSourceTimetick())
+	assert.Nil(t, insert.GetIds())
 
 	// The key property alone must not materialize a record for a type the
 	// append path never deduplicates.
@@ -1053,7 +1060,7 @@ func TestStagedRecordSizeChargesTheRecordNotTheMessage(t *testing.T) {
 	// orders of magnitude too early.
 	vchannel := "by-dev-rootcoord-dml_0_40451v0"
 	msg := newTestIdempotentInsertMessage(t, vchannel, 100, "key-a", []int64{1, 2}, []uint32{0, 1})
-	keys, insert := idempotencyHalvesOf(msg)
+	keys, insert := insertSummaryOf(msg)
 	require.NotNil(t, insert)
 
 	record := &stagedRecord{idempotency: keys, insert: insert}

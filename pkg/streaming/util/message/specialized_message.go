@@ -233,7 +233,14 @@ func (m *specializedImmutableMessageImpl[H, B]) Header() H {
 
 // Body returns the message body.
 func (m *specializedImmutableMessageImpl[H, B]) Body(ctx context.Context) (B, error) {
-	return decodeProtoB[B](ctx, m)
+	body, err := globalBodyCache().get(ctx, m.bodyCache, func() (proto.Message, error) {
+		return decodeProtoB[B](ctx, m)
+	})
+	if err != nil {
+		var empty B
+		return empty, err
+	}
+	return body.(B), nil
 }
 
 // Must Body returns the message body.
