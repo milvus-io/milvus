@@ -19,7 +19,38 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestManifestIndexProjection(t *testing.T) {
+	for _, fault := range []string{"empty", "valid", "minimal", "indexes", "column", "type", "path", "file keys", "property keys", "property values", "property key", "property value", "file key"} {
+		t.Run(fault, func(t *testing.T) {
+			indexes, err := testManifestIndexProjection(fault)
+			switch fault {
+			case "empty":
+				require.NoError(t, err)
+				require.Empty(t, indexes)
+			case "valid", "minimal":
+				require.NoError(t, err)
+				require.Len(t, indexes, 1)
+				require.Equal(t, "value", indexes[0].ColumnName)
+				if fault == "valid" {
+					require.Equal(t, "value", indexes[0].IndexName)
+					require.Equal(t, []string{"value"}, indexes[0].IndexFileKeys)
+					require.Equal(t, map[string]string{"value": "value"}, indexes[0].Properties)
+				} else {
+					require.Empty(t, indexes[0].IndexName)
+					require.Empty(t, indexes[0].IndexFileKeys)
+					require.Empty(t, indexes[0].Properties)
+				}
+			default:
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.Nil(t, indexes)
+			}
+		})
+	}
+}
 
 // indexEntry builds a manifest index entry whose Path is expressed the way
 // DataCoord expresses it: relative to <basePath>/_index, walking back out to
@@ -194,7 +225,7 @@ func TestReplaceCopiedManifestIndexes(t *testing.T) {
 				require.Equal(t, MarshalManifestPath(base, 0), got)
 				return
 			}
-			files, err := ReadManifestFiles(got, cfg)
+			files, err := snapshotstorage.ReadNativeManifestFiles(got, cfg)
 			require.NoError(t, err)
 			require.Len(t, files.StatsFiles, 1, "other manifest sections survive replacement")
 			if mode == "replace" {

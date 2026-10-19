@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -206,7 +207,7 @@ func TestCommitManifestUpdates_AllSections(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), version,
 		"inserts + delta + stats together must bump version exactly once")
-	inventory, err := ReadManifestFiles(got, cfg)
+	inventory, err := snapshotstorage.ReadNativeManifestFiles(got, cfg)
 	require.NoError(t, err)
 	require.NotEmpty(t, inventory.ColumnFiles)
 	require.Equal(t, []string{deltaPath}, inventory.DeltaFiles)
@@ -385,21 +386,21 @@ func TestReadManifestFilesPinnedRevision(t *testing.T) {
 		Stats: []StatEntry{{Key: "text.101", Files: []string{path.Join(base, "_stats/text/second")}}},
 	})
 	require.NoError(t, err)
-	files, err := ReadManifestFiles(first, cfg)
+	files, err := snapshotstorage.ReadNativeManifestFiles(first, cfg)
 	require.NoError(t, err)
 	require.Equal(t, []string{firstStat}, files.StatsFiles)
 	require.Len(t, files.Indexes, 1)
 	require.Equal(t, path.Join(cfg.RootPath, "index_v1/1/2/3/500/1"), files.Indexes[0].Path)
 	for _, descriptor := range []string{"invalid", MarshalManifestPath("", 1), MarshalManifestPath(base, ManifestLatest), MarshalManifestPath(base, 999)} {
-		_, err := ReadManifestFiles(descriptor, cfg)
+		_, err := snapshotstorage.ReadNativeManifestFiles(descriptor, cfg)
 		require.Error(t, err)
 	}
 	corruptPath, err := ManifestFilePath(MarshalManifestPath(base, 99))
 	require.NoError(t, err)
 	require.NoError(t, WriteFile(cfg, corruptPath, []byte("invalid avro")))
-	_, err = ReadManifestFiles(MarshalManifestPath(base, 99), cfg)
+	_, err = snapshotstorage.ReadNativeManifestFiles(MarshalManifestPath(base, 99), cfg)
 	require.Error(t, err)
-	empty, err := ReadManifestFiles(MarshalManifestPath(base, ManifestEarliest), cfg)
+	empty, err := snapshotstorage.ReadNativeManifestFiles(MarshalManifestPath(base, ManifestEarliest), cfg)
 	require.NoError(t, err)
 	require.Empty(t, empty.ManifestFile)
 	require.Empty(t, empty.ColumnFiles)

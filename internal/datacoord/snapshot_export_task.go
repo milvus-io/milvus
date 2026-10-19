@@ -26,8 +26,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -64,7 +65,7 @@ func (m *snapshotExportManager) prepareWorkerRequest(ctx context.Context, job *d
 	if info.GetId() <= 0 || info.GetS3Location() == "" || info.GetCollectionId() != job.GetCollectionId() {
 		return nil, merr.WrapErrDataIntegrityMsg("snapshot export source identity is incomplete")
 	}
-	req := &datapb.SnapshotExportCopyRequest{TaskSlot: Params.DataCoordCfg.SnapshotTaskSlotUsage.GetAsInt64(), CopyConcurrency: Params.DataCoordCfg.SnapshotCopyConcurrency.GetAsInt32(), ClusterId: Params.CommonCfg.ClusterPrefix.GetValue(), JobId: job.GetJobId(), DeadlineTime: job.GetDeadlineTime(), TargetUri: job.GetTargetS3Path(), ExternalSpec: job.GetExternalSpec(), SourceStorageConfig: snapshotstorage.StorageConfigFromInstance(Params), SnapshotMetadataPath: info.GetS3Location(), SnapshotId: info.GetId(), CollectionId: info.GetCollectionId()}
+	req := &datapb.SnapshotExportCopyRequest{TaskSlot: Params.DataCoordCfg.SnapshotTaskSlotUsage.GetAsInt64(), CopyConcurrency: Params.DataCoordCfg.SnapshotCopyConcurrency.GetAsInt32(), ClusterId: Params.CommonCfg.ClusterPrefix.GetValue(), JobId: job.GetJobId(), DeadlineTime: job.GetDeadlineTime(), TargetUri: job.GetTargetS3Path(), ExternalSpec: job.GetExternalSpec(), SourceStorageConfig: snapshotadapter.StorageConfigFromInstance(Params), SnapshotMetadataPath: info.GetS3Location(), SnapshotId: info.GetId(), CollectionId: info.GetCollectionId()}
 	if proto.Size(req)+32 > snapshotstorage.SnapshotExportMaxRequestBytes {
 		return nil, merr.WrapErrServiceInternalMsg("snapshot export request exceeds size limit")
 	}

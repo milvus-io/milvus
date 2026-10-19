@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -147,7 +148,7 @@ func TestBM25ReaderPreservesRetryableFailure(t *testing.T) {
 	cm := storage.NewLocalChunkManager()
 	path := t.TempDir() + "/stats"
 	require.NoError(t, cm.Write(ctx, path, []byte("test")))
-	failure := storage.ToMilvusIoError(path, io.ErrUnexpectedEOF)
+	failure := objectstorage.ToMilvusIoError(path, io.ErrUnexpectedEOF)
 	patch := mockey.Mock((*storage.BM25Stats).DeserializeFromReader).Return(failure).Build()
 	_, err := readBM25Stats(ctx, cm, path)
 	patch.UnPatch()
