@@ -521,6 +521,8 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 // the internal origin marker. It is not part of checkStructArrayFieldSchema
 // because that check also runs on an existing struct merged with an added
 // sub-field, whose earlier added sub-fields carry the marker legitimately.
+// schemautil.RejectStructSubFieldTextMatch stays out of it for the same
+// reason: stored sub-fields may carry enable_match or enable_analyzer.
 func rejectStructSubFieldOriginMarkers(schemas []*schemapb.StructArrayFieldSchema) error {
 	for _, structField := range schemas {
 		for _, field := range structField.GetFields() {
@@ -611,11 +613,10 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 
 func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema) (int64, error) {
 	typeParams := field.GetTypeParams()
-	maxArrayCapacity := int64(defaultMaxArrayCapacity)
 	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 		typeParams = field.GetTypeSchema().GetTypeParams()
-		maxArrayCapacity = Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
 	}
+	maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
 	for _, param := range typeParams {
 		if param.GetKey() != common.MaxCapacityKey {
 			continue
