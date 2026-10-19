@@ -136,10 +136,10 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
-		if errors.Is(err, ErrPKRangeTooSmall) {
-			// The one assemble failure a retry cannot fix: the reservation was
-			// sized from an upper bound and preimport produced a larger exact
-			// count. Neither number changes by rescheduling, so fail the job now
+		if errors.Is(err, ErrPKRangeTooSmall) || errors.Is(err, errSnapshotTaskSource) {
+			// Immutable source mismatches and insufficient reservations cannot
+			// be repaired by retrying. Neither the source nor the per-file range
+			// and row count changes by rescheduling, so fail the job now
 			// and keep the precise reason -- otherwise the job stays Importing
 			// (checkImportingJob only advances once every task is Completed) until
 			// tryTimeoutJob overwrites the reason with a generic timeout message.

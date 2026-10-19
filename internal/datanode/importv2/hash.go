@@ -152,6 +152,16 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 	}
 
 	rowNum, _ := GetInsertDataRowCount(rows, schema)
+	if partitionNum > 1 && partKeyField.GetDefaultValue() != nil {
+		// Snapshot/backup readers may omit a target-only column with a default.
+		// PreImport needs its partition key before hashing, whereas Import fills
+		// defaults before HashData. Reuse that rule for just the routing column;
+		// single-partition imports and unrelated optional columns stay unchanged.
+		partitionSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{partKeyField}}
+		if err := AppendNullableDefaultFieldsData(partitionSchema, rows, rowNum); err != nil {
+			return nil, err
+		}
+	}
 	if pkField.GetAutoID() {
 		fn := hashByPartition(int64(partitionNum), partKeyField)
 		rows.Data = lo.PickBy(rows.Data, func(fieldID int64, _ storage.FieldData) bool {

@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -43,6 +44,13 @@ type MemoryAllocator interface {
 	// BlockingAllocate blocks until memory is available and then allocates
 	// This method will block until memory becomes available
 	BlockingAllocate(taskID int64, size int64)
+	// Allocate reserves snapshot row/delete budgets atomically and returns the
+	// admitted row buffer, shrinking it if needed to retain the full delete budget.
+	Allocate(ctx context.Context, taskID, preferredRowBuffer, deleteBudget int64) (int64, error)
+	// AllocateSnapshotTask atomically admits a delete batch, a bounded number
+	// of row buffers and a bitmap pool (one delete budget per admitted reader).
+	// No task holds a partial lease; the existing slot estimate stays conservative.
+	AllocateSnapshotTask(ctx context.Context, taskID, preferredRowBuffer, deleteBudget int64, readers int) (int64, int, error)
 
 	// Release releases memory of the specified size
 	Release(taskID int64, size int64)
@@ -92,6 +100,83 @@ func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
 		mlog.Int64("allocatedSize", size),
 		mlog.Int64("usedMemory", ma.usedMemory),
 		mlog.Int64("availableMemory", memoryLimit-ma.usedMemory))
+}
+
+// Allocate reserves row and delete-map memory atomically for a typed snapshot
+// source. Keep BlockingAllocate and all legacy callers' behavior unchanged.
+func (ma *memoryAllocator) Allocate(ctx context.Context, taskID, preferredRowBuffer, deleteBudget int64) (int64, error) {
+	ma.mutex.Lock()
+	defer ma.mutex.Unlock()
+	limit := int64(float64(ma.systemTotalMemory) * paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat() / 100)
+	if preferredRowBuffer <= 0 || deleteBudget <= 0 || deleteBudget >= limit {
+		return 0, merr.Wrapf(merr.ErrServiceResourceInsufficient,
+			"snapshot import task %d cannot reserve row buffer %d and delete budget %d, allowance %d",
+			taskID, preferredRowBuffer, deleteBudget, limit)
+	}
+	// GetBufferSize may already consume the whole allowance. Rows can be read
+	// in smaller batches; the delete map must retain its full budget. Clamp
+	// against the total allowance, not its currently free portion, so concurrent
+	// readers wait without changing each other's batch sizes. Subtracting before
+	// adding also avoids overflow for a very large preferred row buffer.
+	rowBuffer := min(preferredRowBuffer, limit-deleteBudget)
+	size := rowBuffer + deleteBudget
+	if err := ma.waitForMemory(ctx, size, limit); err != nil {
+		return 0, err
+	}
+	return rowBuffer, nil
+}
+
+func (ma *memoryAllocator) AllocateSnapshotTask(ctx context.Context, taskID, preferredRowBuffer, deleteBudget int64, readers int) (int64, int, error) {
+	ma.mutex.Lock()
+	defer ma.mutex.Unlock()
+	limit := int64(float64(ma.systemTotalMemory) * paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat() / 100)
+	if limit <= 0 || preferredRowBuffer <= 0 || readers <= 0 || deleteBudget <= 0 || deleteBudget > (limit-1)/2 {
+		return 0, 0, merr.Wrapf(merr.ErrServiceResourceInsufficient,
+			"snapshot import task %d cannot reserve delete batch/bitmaps %d and rows %d for %d readers, allowance %d",
+			taskID, deleteBudget, preferredRowBuffer, readers, limit)
+	}
+	rowBuffer := min(preferredRowBuffer, limit-2*deleteBudget)
+	admitted := min(int64(readers), (limit-deleteBudget)/(rowBuffer+deleteBudget))
+	size := deleteBudget + admitted*(rowBuffer+deleteBudget)
+	if err := ma.waitForMemory(ctx, size, limit); err != nil {
+		return 0, 0, err
+	}
+	return rowBuffer, int(admitted), nil
+}
+
+// Caller holds ma.mutex. Waiting acquires no partial reservation, and releasing
+// any existing reservation or canceling the context wakes the waiter.
+func (ma *memoryAllocator) waitForMemory(ctx context.Context, size, limit int64) error {
+	// Acquiring the same lock in the callback prevents a lost wakeup between
+	// checking ctx.Err and Cond.Wait. Stop need not wait for the callback.
+	stop := context.AfterFunc(ctx, func() {
+		ma.mutex.Lock()
+		defer ma.mutex.Unlock()
+		ma.cond.Broadcast()
+	})
+	defer stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if size <= limit-ma.usedMemory {
+			ma.usedMemory += size
+			return nil
+		}
+		ma.cond.Wait()
+	}
+}
+
+// Return the exact budgets to pass to the reader and capture them for release;
+// neither the reader nor cleanup should recompute them after a config refresh.
+func reserveSnapshotRead(ctx context.Context, taskID, preferredRowBuffer int64) (int64, int64, func(), error) {
+	budget := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt64()
+	allocator := GetMemoryAllocator()
+	rowBuffer, err := allocator.Allocate(ctx, taskID, preferredRowBuffer, budget)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	return rowBuffer, budget, func() { allocator.Release(taskID, rowBuffer+budget) }, nil
 }
 
 // Release releases memory of the specified size
