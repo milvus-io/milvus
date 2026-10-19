@@ -12,7 +12,7 @@ The ordinary broadcast entrance rejects non-primary clusters with `ErrNotPrimary
 
 1. **Lock**: Acquire ResourceKey locks in sorted order (Domain, then Key). SharedCluster is added automatically.
 2. **Persist**: Stamp BroadcastID, ResourceKeys and the CChannel into the broadcast header, create task in PENDING state, persist to catalog. Once persisted, the broadcast is guaranteed to eventually complete even across crashes.
-3. **Append**: `broadcastScheduler` dispatches the task to a worker that calls `AppendMessages()` to write to all target PChannels. ForcePromote has a reserved worker and queue, including retries and recovery, so Flush waiters cannot exhaust its execution capacity.
+3. **Append**: `broadcastScheduler` dispatches the task to a worker that calls `AppendMessages()` to write to all target PChannels. Local Flush aborts incomplete receiving transactions instead of waiting for their source Commit, so ForcePromote uses the existing worker pool.
 4. **FastAck**: If `AckSyncUp` is not set, the broadcaster immediately self-acks all VChannels using the append results (no need to wait for consumer-side ACK). Otherwise, waits for StreamingNode consumers to ACK each VChannel.
 5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`; a broadcast without CChannel is enqueued when all target VChannels have ACKed. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
 6. **Tombstone & GC**: After callbacks complete, task transitions to TOMBSTONE. `tombstoneScheduler` removes checkpoint-eligible tasks when their TTL expires or their count exceeds `maxCount`, evicting smaller BroadcastIDs first for count pressure (see below).
@@ -201,6 +201,13 @@ Domains: `Cluster`, `DBName`, `CollectionName`, `Privilege`, `SnapshotName`.
 ForcePromote retains ExclusiveCluster in the same resource-lock domain as other
 broadcasts. Local Flush does not wait for source transactions, so promotion needs
 no separate admission lock or worker. See [Local Flush Control](../wal/local-flush.md).
+
+Reuse these keys for local API concurrency: the collection key serializes local
+Flushes on the same collection, and ExclusiveCluster excludes FlushAll/ForcePromote
+from other local broadcasts. No extra FIFO order is promised between independent
+collections. Replicated DDL bypasses these entrance locks, so cross-cluster races
+still require WAL lifecycle ordering and consuming ACKs; adding another local
+admission lock cannot substitute for that protocol.
 
 See [Message Semantic Docs](../message/message.md) for per-message ResourceKey usage.
 

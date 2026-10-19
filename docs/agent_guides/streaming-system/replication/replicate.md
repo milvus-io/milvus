@@ -33,6 +33,31 @@ The secondary maintains a `ReplicateCheckpoint` per PChannel: `{ClusterID, PChan
 
 The checkpoint is persisted in the [WALCheckpoint](../wal/recovery-storage.md) and can be queried by the primary via `GetReplicateInfo` to resume replication from the correct position after restart.
 
+## Transaction ordering and replay identity
+
+CDC receives an assembled, committed source transaction and sends Begin, every body
+in that transaction's source order, then Commit. The pending queue retains the
+whole transaction until acknowledgment; reconnect replays it from Begin. The Proxy
+waits for each append before processing the next message on that stream, and the
+SN ReplicatesManager holds its mutex through append and acker completion, including
+across overlapping connections. One current receiving transaction per PChannel
+is sufficient; the transaction itself still belongs to a single VChannel.
+
+Source MessageIDs identify the immutable bodies across every replay and CDC restart.
+An auto-commit message can be deduplicated by the source TimeTick checkpoint, but
+the Begin, bodies and Commit of an assembled transaction share its Commit TimeTick.
+The receiving prefix therefore needs its existing source-ID set, not TimeTick-only
+body deduplication. A nonzero Commit body count equal to that set's size establishes
+completeness because the accepted IDs are drawn from the same source transaction.
+No complete ID manifest, predecessor chain, per-attempt key or ReplicateTerm is needed.
+
+A duplicate Begin preserves an intact prefix. A durable local Flush clears both
+the receiving session and prefix under the WAL lock, so the next replayed Begin
+starts fresh. Repeated Commit is covered by the checkpoint once committed. CDC
+restart resumes from the existing checkpoint and immutable source WAL; there is no
+additional replication-term high-water mark to allocate or recover. Existing WAL
+assignment terms and fencing retain their separate writer-ownership role.
+
 ## Recovery
 
 On WAL open, `RecoverReplicateManager` loads the `ReplicateConfig` and `ReplicateCheckpoint` from the [RecoveryStorage](../wal/recovery-storage.md) snapshot. For SECONDARY clusters, it also recovers in-progress transaction state from the `TxnBuffer` (uncommitted replicated transactions), so that the secondary can continue receiving body/commit messages for the interrupted transaction.

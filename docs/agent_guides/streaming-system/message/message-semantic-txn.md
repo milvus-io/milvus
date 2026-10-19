@@ -23,7 +23,7 @@ Messages managing transactions on a single VChannel.
 - The producer sets `CommitTxnMessageHeader.body_cnt` to the logical body count. Both primary and secondary reject nonzero mismatches before appending Commit; consumers validate again after physical deduplication. `body_cnt == 0` always skips validation, including for nonempty legacy transactions.
 - The consumer assembles Begin + body messages into a single ImmutableTxnMessage using **CommitTxn's TimeTick and LastConfirmedMessageID** as the transaction's overall TimeTick and LastConfirmedMessageID.
 - On RollbackTxn, the consumer discards the corresponding Begin + body messages.
-- Replicated transactions use an infinite lease. Local Flush aborts receiving sessions after durable append; CDC replays the complete source transaction with the same TxnID. A nonzero `CommitTxnMessageHeader.body_cnt` proves completeness against the accepted source-ID set before Commit; zero skips validation for compatibility. Ordinary exclusive cleanup skips replicated sessions. Final post-prepare Commit failures require WAL recovery. See [Local Flush Control](../wal/local-flush.md).
+- Replicated transactions use an infinite lease. Local Flush aborts receiving sessions after durable append; CDC replays the complete source transaction with the same TxnID. A nonzero `CommitTxnMessageHeader.body_cnt` proves completeness against the accepted source-ID set before Commit; zero skips validation for compatibility. Ordinary exclusive cleanup skips replicated sessions. WAL cancellation/fencing requires recovery rather than reopening a prepared Commit on the old writer. See [Local Flush Control](../wal/local-flush.md).
 
 ```
 BeginTxn@tt=10 → Insert@tt=11 → Insert@tt=12 → CommitTxn@tt=15

@@ -40,6 +40,26 @@ Primary cluster A  -- CDC replication -->  Standby cluster B
 
 A standby cluster rejects direct write requests. This prevents split brain and keeps the topology consistent.
 
+## Flush on Replicating Clusters
+
+Flush and FlushAll control persistence on the cluster receiving the request. They
+can be called on either the primary or a standby without changing replication roles.
+A Flush on the primary no longer triggers a Flush on the standby.
+
+Before taking a backup that requires persisted standby data, call Flush on that
+standby explicitly. Success confirms local persistence; it does not mean the
+standby has caught up with the primary. Check replication progress separately when
+the operation requires a particular source boundary. Flush does not replace the
+planned-switchover protocol.
+
+A local Flush can interrupt an incomplete receiving transaction. CDC automatically
+replays the complete transaction, so that transaction may become visible after the
+Flush completes. Flush does not wait for a disconnected source to finish it.
+
+Upgrade all participating CDC, Proxy, StreamingNode and consumer processes before
+using local Flush on a standby. Operators coordinate this rollout across clusters;
+there is no automatic cross-cluster version gate.
+
 ## Failover Options
 
 Milvus provides two ways to move service traffic from the primary to a standby cluster.

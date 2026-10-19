@@ -209,10 +209,6 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	// Execute the interceptor and wal append.
 	var extraAppendResult utility.ExtraAppendResult
 	ctx = utility.WithExtraAppendResult(ctx, &extraAppendResult)
-	ctx = utility.WithAppendFailureHandler(ctx, func(err error) {
-		w.isFenced.Store(true)
-		w.markUnavailable(err)
-	})
 	messageID, err := w.interceptorBuildResult.Interceptor.DoAppend(ctx, msg,
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 			// The lock interceptor still holds its lock while this callback runs, so
@@ -232,11 +228,6 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 			msgID, err := w.appendWithOptionalChunking(ctx, msg)
 			metricsGuard.FinishWALImplAppend()
 			if err != nil {
-				if msg.ReplicateHeader() != nil || message.IsLocalFlush(msg) {
-					// The backend may have persisted this record. Do not let a
-					// later flush/replay race ahead of recovery of that outcome.
-					utility.FailWALAppend(ctx, err)
-				}
 				return msgID, err
 			}
 

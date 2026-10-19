@@ -36,10 +36,35 @@ See [Transaction Messages](../message/message-semantic-txn.md) for message types
 5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
 6. **Force-fail**: The [Lock](lock.md) interceptor force-fails locally originated active transactions at a VChannel when an exclusive operation is appended.
 
-A final replicated Commit failure after preparation fences the writer and retains
-segment references until teardown/recovery; ordinary backend errors retry below
-the interceptor. Local Flush durably aborts scoped receiving sessions, allowing
-CDC to replay the full transaction. See [Local Flush Control](local-flush.md).
+A replicated Commit interrupted by WAL cancellation/fencing stays unresolved until
+recovery; it is neither marked committed nor reset for retry on the old writer.
+Ordinary backend errors retry below the interceptor. See
+[Append retry and writer lifetime](../walbackend/walbackend.md#append-retry-and-writer-lifetime).
+Local Flush durably aborts scoped receiving sessions, allowing CDC to replay the
+full transaction. See [Local Flush Control](local-flush.md).
+
+### Scope and duplicate handling
+
+A transaction belongs to one VChannel even if it writes multiple segments. Local
+ManualFlush therefore resolves only that business VChannel's transactions; FlushAll
+resolves the whole PChannel. Incomplete replicated transactions need not finish
+before a local Flush: its durable abort boundary allows the complete transaction
+to be replayed with new local segment assignments.
+
+Distinguish three kinds of duplicate when reasoning about `body_cnt`:
+
+| Duplicate | Existing protection |
+| --- | --- |
+| A backend retries one logical append | Same local TimeTick; scanner physical deduplication removes retry copies before transaction assembly. |
+| CDC replays a source body | Same immutable source MessageID; the receiver deduplicates before append and does not increase the accepted-body count. |
+| A primary producer retries a body as another logical append | A new TimeTick can reach the WAL; the producer's expected body count detects excess successful appends at Commit. |
+
+Count equality proves completeness only with the producer contract: all intended
+bodies have succeeded before Commit, or, on a replica, accepted distinct source IDs
+are a subset of one immutable source transaction. A count alone cannot establish
+message identity. Zero deliberately skips validation for compatibility. These
+preconditions do not remove the local transaction's mutex or in-flight wait: primary
+body appends can be concurrent even though replicated appends are serialized.
 
 ## LastConfirmedMessageID
 

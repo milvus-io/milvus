@@ -358,12 +358,15 @@ func TestSecondaryReplicateManagerCommitFailureRecoversPrefix(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	walCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	firstReplay := newReplicateTxnMessage("test1", "test2", 2)
 	for _, msg := range firstReplay {
-		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
+		acker, appendErr := rm.BeginReplicateMessage(walCtx, msg)
 		if msg.MessageType() == message.MessageTypeCommitTxn && acker != nil {
 			require.NoError(t, appendErr)
-			acker.Ack(context.DeadlineExceeded)
+			cancel()
+			acker.Ack(walCtx.Err())
 			continue
 		}
 		require.Nil(t, acker)
@@ -373,7 +376,7 @@ func TestSecondaryReplicateManagerCommitFailureRecoversPrefix(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 1, checkpoint.TimeTick)
 
-	// A final append failure fences the writer. Reopen from the durable prefix.
+	// WAL cancellation ends the old writer. Reopen from the durable prefix.
 	rm, err = RecoverReplicateManager(&ReplicateManagerRecoverParam{
 		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 2},
 		CurrentClusterID: "test1",

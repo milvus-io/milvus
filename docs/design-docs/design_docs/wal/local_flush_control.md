@@ -113,14 +113,18 @@ existing sequential CDC channel stream; no concurrent-attempt map is introduced.
 
 ## Failure, recovery and promotion
 
-Ordinary backend failures retry inside the WAL adaptor. There is no RetryCommit
-state restoration. A final failure after replicated Commit preparation retains the
-session and segment references and fences the WAL before releasing append locks.
-A final backend failure for any replicated append or local flush also fences the
-writer: the record may already exist, so memory cannot safely resume from an
-assumed failed append. WAL recovery resolves the durable outcome before retry.
-A replicated body-count mismatch is rejected before Commit preparation and does not fence a
-healthy WAL. Caller RPC cancellation is not a transaction rollback protocol.
+Ordinary backend failures retry indefinitely inside the WAL adaptor with the same
+local TimeTick; physical retry copies are deduplicated by the scanner. Caller RPC
+cancellation is removed from the append context. WAL context cancellation denotes
+failure recovery, and fencing ends the old writer's authority. Neither permits a
+new attempt against the old in-memory state: WAL replay resolves the durable outcome
+before writes resume. See [Append retry and writer lifetime](../../../agent_guides/streaming-system/walbackend/walbackend.md#append-retry-and-writer-lifetime).
+
+There is no RetryCommit state restoration or extra failure-handler callback.
+A replicated Commit interrupted after preparation remains unresolved with its
+session references retained for teardown/recovery. A body-count mismatch is a
+definite rejection before backend append; on a replica it is checked before Commit
+preparation, allowing the missing source bodies to be supplied by replay.
 
 Recovery reconstructs the accepted source-ID set and successful body count from the uncommitted
 TxnBuffer, and the session from the same snapshot. A replayed Flush removes the
@@ -134,6 +138,30 @@ ForcePromote retains ExclusiveCluster, successful-append rollback, salvage
 checkpoints and callback ordering. It needs no separate execution lane to rescue
 Flush from a disconnected source. Coordinator resource keys serialize local APIs;
 replicated DDL still relies on WAL ordering and consuming ACKs.
+
+## Preconditions that keep the protocol small
+
+- **Use transaction scope:** a transaction is confined to one VChannel. ManualFlush
+  needs only that scope; an unrelated VChannel's transaction is not a reason to wait.
+- **Use the complete source transaction:** CDC retains and replays Begin/body/Commit
+  in source transaction order. Source MessageIDs remain stable across attempts and
+  restarts, so the accepted-ID set plus `body_cnt` proves completeness without a
+  per-attempt term, owner key or full body-ID list in Commit. See
+  [Transaction ordering and replay identity](../../../agent_guides/streaming-system/replication/replicate.md#transaction-ordering-and-replay-identity).
+- **Use existing serialization:** ReplicatesManager serializes replica append through
+  acker completion. This permits one current receiving slot; it does not imply that
+  primary transactions or their concurrent bodies can drop their locks.
+- **Use existing resource locks:** local collection and cluster operations already
+  have their required mutual exclusion. Independent collections need no Flush FIFO;
+  replicated DDL needs the separate WAL/ACK protocol described above.
+- **Prefer abort and replay to waiting:** an incomplete receiving transaction may be
+  discarded at durable Flush and retried by CDC. The operation does not promise to
+  include that incomplete transaction or catch up to the source. This concession
+  removes the source-dependent wait and promotion rescue machinery; it does not
+  weaken AckSyncUp or permit success without the required local persistence.
+- **Use WAL recovery:** a cancelled writer is reconstructed from WAL. Do not add
+  live-writer retry or failure callbacks based on a cancellation that already ends
+  that writer's lifecycle.
 
 ## Operational behavior
 
@@ -176,5 +204,5 @@ understand the durable local-flush abort boundary.
 - `internal/streamingnode/server/wal/interceptors/replicate/` — deduplicated body counting and durable-flush abort
 - `internal/streamingnode/server/wal/interceptors/txn/` — scoped session cleanup
 - `internal/streamingnode/server/wal/interceptors/timetick/` — Commit outcome handling
-- `internal/streamingnode/server/wal/adaptor/` — backend retry and failure fencing
+- `internal/streamingnode/server/wal/adaptor/` — backend retry and writer lifecycle
 - `internal/streamingnode/server/wal/utility/` — consuming and recovering the abort boundary

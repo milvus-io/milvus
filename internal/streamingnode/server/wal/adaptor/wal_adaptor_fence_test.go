@@ -31,15 +31,19 @@ import (
 
 const fenceTestTimeout = 5 * time.Second
 
-func TestUncertainReplicaOrFlushAppendFencesWriter(t *testing.T) {
+func TestReplicaOrFlushAppendStopsOnWALCancellation(t *testing.T) {
 	for _, replicated := range []bool{false, true} {
 		t.Run(strconv.FormatBool(replicated), func(t *testing.T) {
 			var persisted atomic.Int32
-			walImpls := newFirstTimeTickWALImpls(func(context.Context, message.MutableMessage) (message.MessageID, error) {
-				persisted.Add(1) // Simulate persistence followed by a lost backend response.
-				return nil, context.DeadlineExceeded
+			var cancelWAL context.CancelFunc
+			walImpls := newFirstTimeTickWALImpls(func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+				persisted.Add(1)
+				cancelWAL() // Recovery will determine the durable outcome.
+				<-ctx.Done()
+				return nil, ctx.Err()
 			})
 			w := newFenceTestWAL(t, walImpls)
+			cancelWAL = w.availableCancel
 			var msg message.MutableMessage
 			if replicated {
 				msg = message.CreateTestEmptyInsertMesage(1, nil).WithReplicateHeader(&message.ReplicateHeader{
@@ -50,8 +54,7 @@ func TestUncertainReplicaOrFlushAppendFencesWriter(t *testing.T) {
 			}
 			msg.WithTimeTick(100).WithLastConfirmedUseMessageID()
 			_, err := w.Append(context.Background(), msg)
-			require.ErrorIs(t, err, context.DeadlineExceeded)
-			require.True(t, w.isFenced.Load())
+			require.ErrorIs(t, err, context.Canceled)
 			require.Error(t, w.availableCtx.Err())
 			_, err = w.Append(context.Background(), message.CreateTestEmptyInsertMesage(1, nil))
 			require.Error(t, err)

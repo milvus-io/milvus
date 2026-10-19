@@ -85,27 +85,23 @@ func TestTimeTickCommitInnerErrorPreservesExistingStateTransition(t *testing.T) 
 	requireCommitAckerError(t, impl, expectedErr)
 }
 
-func TestReplicatedCommitFinalFailureFencesBeforeReleasingReferences(t *testing.T) {
+func TestReplicatedCommitCancellationKeepsReferencesForRecovery(t *testing.T) {
 	impl := newTestTimeTickAppendInterceptor(t)
 	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
 	commit = commit.WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", MessageID: walimplstest.NewTestMessageID(3), LastConfirmedMessageID: walimplstest.NewTestMessageID(0), TimeTick: 100, VChannel: "v1"})
 	cleaned := false
 	session.RegisterCleanup(func() { cleaned = true }, 0)
-	fenced := false
-	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	ctx = utility.WithAppendFailureHandler(ctx, func(err error) {
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.Equal(t, message.TxnStateOnCommit, session.State())
-		require.False(t, cleaned)
-		fenced = true
+	walCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := utility.WithExtraAppendResult(walCtx, &utility.ExtraAppendResult{})
+	_, err := impl.DoAppend(ctx, commit, func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+		cancel() // The WAL lifecycle ends; this session is not reused for retry.
+		return nil, ctx.Err()
 	})
-	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-		return nil, context.DeadlineExceeded // Final backend result, after its retry loop.
-	})
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.True(t, fenced)
+	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, message.TxnStateOnCommit, session.State())
 	require.False(t, cleaned)
+	requireCommitAckerError(t, impl, err)
 	impl.txnManager.RollbackAllInFlightTransactions() // WAL teardown releases held references.
 	require.True(t, cleaned)
 }

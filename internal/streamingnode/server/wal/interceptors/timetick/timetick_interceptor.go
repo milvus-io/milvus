@@ -86,10 +86,9 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 		}
 		defer func() {
 			if err != nil && msg.ReplicateHeader() != nil {
-				// Backend retries happen below us. A final failure after prepare
-				// must be recovered before this transaction can be replayed; its
-				// segment references remain live until the WAL is closed.
-				utility.FailWALAppend(ctx, err)
+				// Backend errors retry below us; cancellation/fencing ends this
+				// writer's lifecycle. Keep the session unresolved for WAL recovery
+				// instead of committing it or reopening it for another attempt.
 				return
 			}
 			if txn.IsCommitAdmissionRejected(err) {

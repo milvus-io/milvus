@@ -18,20 +18,7 @@ var (
 	notPersistedValue      walCtxKey = 2
 	metricsValue           walCtxKey = 3
 	flushFromOldArchValue  walCtxKey = 4
-	appendFailureValue     walCtxKey = 5
 )
-
-// WithAppendFailureHandler installs a non-blocking writer fence. Interceptors
-// call it before releasing their locks when a failed append needs recovery.
-func WithAppendFailureHandler(ctx context.Context, handler func(error)) context.Context {
-	return context.WithValue(ctx, appendFailureValue, handler)
-}
-
-func FailWALAppend(ctx context.Context, err error) {
-	if handler, ok := ctx.Value(appendFailureValue).(func(error)); ok {
-		handler(err)
-	}
-}
 
 // ExtraAppendResult is the extra append result.
 type ExtraAppendResult struct {
