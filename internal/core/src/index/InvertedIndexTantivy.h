@@ -373,9 +373,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // bitmap is the sealed all-valid sentinel.
     std::shared_ptr<const TargetBitmap> valid_bitmap_{};
 
-    // Build valid_bitmap_ from null_offset_. FinalizeSealed() calls this after
-    // the tantivy reader exists (Count() reads through wrapper_).
-    void
+    // Build valid_bitmap_ from null_offset_ by default. JSON path indexes
+    // override this because their persisted offsets omit failed casts and
+    // missing paths. FinalizeSealed() calls this after the reader is ready.
+    virtual void
     MaterializeValidBitmap();
 
     // Mask a query result without cloning the immutable sealed bitmap.
