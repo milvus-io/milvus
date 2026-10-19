@@ -112,7 +112,7 @@ func newLocalPackedFixture(t *testing.T, displaced bool) *legacyLocalPackedFixtu
 			FieldID: 101, LobBasePath: filepath.Join(legacyRoot, "insert_log/1/2/lobs/101"),
 			InlineThreshold: 1, MaxLobFileBytes: 1 << 20, FlushThresholdBytes: 1 << 20,
 		}},
-	}, cfg)
+	}, cfg, nil)
 	require.NoError(t, err)
 	closed := false
 	t.Cleanup(func() {
