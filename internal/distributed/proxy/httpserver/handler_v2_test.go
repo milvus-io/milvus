@@ -29,6 +29,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -103,6 +104,64 @@ func captureHTTPServerLogs(t *testing.T) *mlog.TestSink {
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
 	})
+}
+
+func TestRESTV2MutationFailureOmitsExplicitPayloadLogFields(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.TraceLogMode.Key, "0"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(proxy.Params.CommonCfg.TraceLogMode.Key))
+	})
+
+	cases := []struct {
+		name   string
+		body   string
+		schema *schemapb.CollectionSchema
+		rows   bool
+	}{
+		{
+			name:   "row conversion",
+			body:   `{"collectionName":"book","data":[0],"debug":"REST_BODY_SECRET_SENTINEL"}`,
+			schema: &schemapb.CollectionSchema{Name: "book"},
+		},
+		{
+			name: "column conversion",
+			body: `{"collectionName":"book","data":[{"id":"REST_BODY_SECRET_SENTINEL"}]}`,
+			schema: &schemapb.CollectionSchema{Name: "book", Fields: []*schemapb.FieldSchema{
+				{FieldID: common.StartOfUserFieldID, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_VarChar},
+			}},
+			rows: true,
+		},
+	}
+	for _, action := range []string{InsertAction, UpsertAction} {
+		for _, test := range cases {
+			t.Run(action+"/"+test.name, func(t *testing.T) {
+				describePatch := mockey.Mock((*mockProxyComponent).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+					Schema: test.schema,
+					Status: merr.Success(),
+				}, nil).Build()
+				defer describePatch.UnPatch()
+
+				logs := captureHTTPServerLogs(t)
+				body := []byte(test.body)
+				engine := initHTTPServerV2(&mockProxyComponent{}, false)
+				request := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), bytes.NewReader(body))
+				response := httptest.NewRecorder()
+				engine.ServeHTTP(response, request)
+
+				var result ReturnErrMsg
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &result))
+				assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), result.Code)
+				if !test.rows {
+					assert.Contains(t, result.Message, "data[0] must be a JSON object")
+				}
+				assert.Contains(t, logs.String(), "bodyBytes")
+				if test.rows {
+					assert.Contains(t, logs.String(), "rows")
+				}
+				assert.NotContains(t, logs.String(), "REST_BODY_SECRET_SENTINEL")
+			})
+		}
+	}
 }
 
 func TestRESTV2PathReplaceRejectsNullOperandInCompatibilityMode(t *testing.T) {
@@ -7117,6 +7176,83 @@ func TestInsertMalformedBodyNeverReachesProxy(t *testing.T) {
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
 			assert.NotEqual(t, int32(0), returnBody.Code,
 				"a malformed body must not be accepted: %s", tt.body)
+		})
+	}
+}
+
+func TestWrapperPostCollectionDataKeepsRowsRaw(t *testing.T) {
+	paramtable.Init()
+	body := []byte(`{"dbName":"db","collectionName":"book","partitionName":"part","data":[{"vector":[1.5,2.5]}]}`)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/insert", bytes.NewReader(body))
+	c.Set(ContextUsername, "root")
+
+	called := false
+	wrapperPost(func() any { return &CollectionDataReq{} }, func(_ context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+		called = true
+		dataReq := req.(*CollectionDataReq)
+		assert.Equal(t, "db", dbName)
+		assert.Equal(t, "book", dataReq.CollectionName)
+		assert.Equal(t, "part", dataReq.PartitionName)
+		assert.Nil(t, dataReq.Data, "row objects should not be materialized before schema-aware conversion")
+		cachedBody, ok := c.Get(gin.BodyBytesKey)
+		assert.True(t, ok)
+		assert.Equal(t, body, cachedBody)
+		return nil, nil
+	})(c)
+	require.True(t, called)
+}
+
+func TestBindCollectionDataMetadataRequiredData(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "missing data", body: `{"collectionName":"book"}`, wantErr: true},
+		{name: "null data", body: `{"collectionName":"book","data":null}`, wantErr: true},
+		{name: "object data", body: `{"collectionName":"book","data":{}}`, wantErr: true},
+		{name: "empty array", body: `{"collectionName":"book","data":[]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/insert", strings.NewReader(test.body))
+			req := &CollectionDataReq{}
+			err := bindCollectionDataMetadata(c, req)
+			if test.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Nil(t, req.Data)
+			}
+		})
+	}
+}
+
+func BenchmarkCollectionDataBinding(b *testing.B) {
+	vector := "[" + strings.TrimSuffix(strings.Repeat("0.125,", 768), ",") + "]"
+	row := `{"v1":` + vector + `,"v2":` + vector + `,"v3":` + vector + `,"v4":` + vector + `,"v5":` + vector + `}`
+	body := []byte(`{"collectionName":"book","data":[` + strings.TrimSuffix(strings.Repeat(row+",", 100), ",") + `]}`)
+	for _, test := range []struct {
+		name string
+		bind func(*gin.Context, *CollectionDataReq) error
+	}{
+		{name: "generic", bind: func(c *gin.Context, req *CollectionDataReq) error {
+			return c.ShouldBindBodyWith(req, binding.JSON)
+		}},
+		{name: "metadata", bind: bindCollectionDataMetadata},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(body)))
+			for i := 0; i < b.N; i++ {
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/insert", bytes.NewReader(body))
+				if err := test.bind(c, &CollectionDataReq{}); err != nil {
+					b.Fatal(err)
+				}
+			}
 		})
 	}
 }
