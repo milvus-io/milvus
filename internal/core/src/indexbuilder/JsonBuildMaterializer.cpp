@@ -42,6 +42,7 @@
 #include "index/contracts/Registry.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/scalar/json/JsonProjectedIndexArtifact.h"
+#include "index/JsonNullOffsets.h"
 #include "index/scalar/ngram/JsonProjectedString.h"
 #include "simdjson/dom/array.h"
 #include "simdjson/dom/element.h"
@@ -57,6 +58,7 @@ struct ProjectionParams {
     JsonCastType cast_type;
     JsonCastFunction cast_function;
     bool emit_legacy_non_exist_sidecar{true};
+    bool complete_inverted_null_offsets{false};
 };
 
 enum class RowPresence {
@@ -178,7 +180,8 @@ ParseProjectionParams(DataType value_type,
             cast_type,
             JsonCastFunction::FromString(
                 ReadString(params, JSON_CAST_FUNCTION, false)),
-            family != index::families::kNgram};
+            family != index::families::kNgram,
+            scalar && family == index::families::kInverted};
 }
 
 index::BuildParams
@@ -257,8 +260,13 @@ std::optional<T>
 ExtractScalar(const Json& document, const ProjectionParams& params) {
     if constexpr (std::is_same_v<T, double>) {
         if (params.cast_function.match<double>()) {
-            return JsonCastFunction::CastJsonValue<double>(
+            auto value = JsonCastFunction::CastJsonValue<double>(
                 params.cast_function, document, params.json_path);
+            if (value && params.complete_inverted_null_offsets &&
+                !index::IsJsonComparableScalar(*value)) {
+                return std::nullopt;
+            }
+            return value;
         }
     }
     auto value = document.at<T>(params.json_path);
@@ -329,7 +337,8 @@ class ProjectedBase : public BuildInputMaterializer {
                 params_.cast_type,
                 row_count_,
                 std::move(non_exist_offsets_),
-                params_.emit_legacy_non_exist_sidecar);
+                params_.emit_legacy_non_exist_sidecar,
+                params_.complete_inverted_null_offsets);
         } catch (...) {
             builder.reset();
             throw;

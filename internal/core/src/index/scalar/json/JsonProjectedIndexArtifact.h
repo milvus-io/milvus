@@ -38,7 +38,8 @@ class JsonProjectedIndexArtifact final : public storage::Artifact {
                                JsonCastType cast_type,
                                int64_t row_count,
                                std::vector<size_t> non_exist_offsets,
-                               bool emit_legacy_non_exist_sidecar);
+                               bool emit_legacy_non_exist_sidecar,
+                               bool complete_inverted_null_offsets = false);
 
     ~JsonProjectedIndexArtifact() override;
 
@@ -57,6 +58,7 @@ class JsonProjectedIndexArtifact final : public storage::Artifact {
     JsonProjectedIndexSpec spec_;
     std::vector<size_t> non_exist_offsets_;
     bool emit_legacy_non_exist_sidecar_{true};
+    bool complete_inverted_null_offsets_{false};
 };
 
 }  // namespace milvus::index

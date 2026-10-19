@@ -80,9 +80,12 @@ CompleteJsonParams(std::string cast,
 
 std::function<storage::ArtifactPtr(storage::ArtifactPtr,
                                    const BackendCaseMetadata&)>
-WrapJsonProjection(std::string cast, std::string default_path = "/a") {
+WrapJsonProjection(std::string cast,
+                   std::string default_path = "/a",
+                   bool complete_inverted_null_offsets = false) {
     return [cast = JsonCastType::FromString(cast),
-            default_path = std::move(default_path)](
+            default_path = std::move(default_path),
+            complete_inverted_null_offsets](
                storage::ArtifactPtr inner,
                const BackendCaseMetadata& metadata) mutable {
         std::vector<size_t> non_exist_offsets;
@@ -96,7 +99,8 @@ WrapJsonProjection(std::string cast, std::string default_path = "/a") {
             cast,
             static_cast<int64_t>(metadata.row_count),
             std::move(non_exist_offsets),
-            true);
+            true,
+            complete_inverted_null_offsets);
     };
 }
 
@@ -604,7 +608,12 @@ AddProjectedProfileVariants(BackendCatalog& catalog,
             spec.value_type = value_type;
             spec.array_element_type = array_element_type;
             spec.complete_load_params = CompleteJsonParams(cast, "/a", false);
-            spec.wrap_artifact = WrapJsonProjection(cast);
+            spec.wrap_artifact = WrapJsonProjection(
+                cast,
+                "/a",
+                family == families::kInverted &&
+                    JsonCastType::FromString(cast).data_type() !=
+                        JsonCastType::DataType::ARRAY);
             catalog.Add<InputT>(std::move(spec));
         }
     }

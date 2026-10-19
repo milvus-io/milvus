@@ -94,7 +94,8 @@ InvertedIndexReader<T>::InvertedIndexReader(
     bool nested,
     bool mmap,
     size_t engine_bytes,
-    size_t engine_path_bytes)
+    size_t engine_path_bytes,
+    std::optional<TargetBitmap> recovered_validity)
     : directory_(std::move(directory)),
       engine_(std::move(engine)),
       value_type_(value_type),
@@ -126,7 +127,14 @@ InvertedIndexReader<T>::InvertedIndexReader(
 
     // See the valid_bitmap_ declaration: materialize validity once here so no
     // query replays the offsets, and keep the all-valid case allocation-free.
-    if (nested_ || null_offsets->empty()) {
+    if (recovered_validity) {
+        AssertInfo(!nested_ && recovered_validity->size() == count_,
+                   "recovered inverted validity must match the row domain");
+        all_valid_ = recovered_validity->all();
+        if (!all_valid_) {
+            valid_bitmap_ = std::move(*recovered_validity);
+        }
+    } else if (nested_ || null_offsets->empty()) {
         all_valid_ = true;
     } else {
         valid_bitmap_ = TargetBitmap(count_, true);

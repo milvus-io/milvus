@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -63,7 +64,8 @@ class InvertedIndexReader final
         bool nested,
         bool mmap,
         size_t engine_bytes,
-        size_t engine_path_bytes);
+        size_t engine_path_bytes,
+        std::optional<TargetBitmap> recovered_validity = std::nullopt);
 
     ~InvertedIndexReader() override;
 

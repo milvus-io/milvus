@@ -22,6 +22,7 @@
 
 #include "common/EasyAssert.h"
 #include "index/Meta.h"
+#include "index/JsonNullOffsets.h"
 #include "nlohmann/json.hpp"
 
 namespace milvus::index {
@@ -46,11 +47,13 @@ JsonProjectedIndexArtifact::JsonProjectedIndexArtifact(
     JsonCastType cast_type,
     int64_t row_count,
     std::vector<size_t> non_exist_offsets,
-    bool emit_legacy_non_exist_sidecar)
+    bool emit_legacy_non_exist_sidecar,
+    bool complete_inverted_null_offsets)
     : inner_(std::move(inner)),
       spec_(std::move(json_path), cast_type, row_count),
       non_exist_offsets_(std::move(non_exist_offsets)),
-      emit_legacy_non_exist_sidecar_(emit_legacy_non_exist_sidecar) {
+      emit_legacy_non_exist_sidecar_(emit_legacy_non_exist_sidecar),
+      complete_inverted_null_offsets_(complete_inverted_null_offsets) {
     AssertInfo(inner_ != nullptr,
                "typed JSON projection artifact requires an inner artifact");
     spec_.ValidateNonExistOffsets(non_exist_offsets_);
@@ -77,6 +80,9 @@ JsonProjectedIndexArtifact::SerializeImpl(Output& sink) const {
     inner_->Serialize(sink);
 
     if constexpr (std::is_same_v<Output, storage::IndexEntryWriter>) {
+        if (complete_inverted_null_offsets_) {
+            sink.PutMeta(kJsonNullOffsetsComplete, true);
+        }
         const auto has_non_exist = !non_exist_offsets_.empty();
         sink.PutMeta(std::string(kHasNonExistMeta),
                      nlohmann::json(has_non_exist));

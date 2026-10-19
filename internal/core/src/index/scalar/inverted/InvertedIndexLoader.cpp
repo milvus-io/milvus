@@ -47,6 +47,7 @@
 #include "common/Slice.h"
 #include "index/Families.h"
 #include "index/Meta.h"
+#include "index/JsonNullOffsets.h"
 #include "index/Utils.h"
 #include "index/contracts/Registry.h"
 #include "index/scalar/inverted/InvertedIndexArtifact.h"
@@ -313,6 +314,7 @@ struct InvertedLoadState {
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine;
     std::shared_ptr<const std::vector<size_t>> null_offsets;
     RuntimeParams params;
+    std::optional<TargetBitmap> recovered_validity;
     bool mmap{false};
     size_t engine_bytes{0};
 };
@@ -415,7 +417,7 @@ LoadState(bool use_async,
 // Share initialized state with the reader; retain the directory only for
 // file-backed use.
 std::unique_ptr<IIndexReaderBase>
-MakeReader(const InvertedLoadState& state) {
+MakeReader(InvertedLoadState&& state) {
     AssertInfo(state.directory != nullptr,
                "inverted load state requires a directory owner");
     AssertInfo(state.engine != nullptr,
@@ -432,7 +434,8 @@ MakeReader(const InvertedLoadState& state) {
             state.params.nested,
             state.mmap,
             state.engine_bytes,
-            engine_path_bytes);
+            engine_path_bytes,
+            std::move(state.recovered_validity));
     };
     switch (state.params.value_type) {
         case DataType::BOOL:
@@ -469,7 +472,22 @@ struct PackedInvertedState {
     RuntimeParams runtime;
     EffectiveLoadOptions effective;
     JsonProjectedOpenPlan projection;
+    bool recover_json_null_offsets{false};
 };
+
+TargetBitmap
+RecoverJsonValidity(milvus::tantivy::TantivyIndexWrapper& engine,
+                    JsonCastType cast_type) {
+    if (cast_type.data_type() == JsonCastType::DataType::BOOL) {
+        return QueryJsonComparableValues<bool>(engine, engine.count());
+    }
+    if (cast_type.data_type() == JsonCastType::DataType::DOUBLE) {
+        return QueryJsonComparableValues<double>(engine, engine.count());
+    }
+    AssertInfo(cast_type.data_type() == JsonCastType::DataType::VARCHAR,
+               "JSON null recovery requires a validated scalar cast");
+    return QueryJsonComparableValues<std::string_view>(engine, engine.count());
+}
 
 }  // namespace
 
@@ -517,7 +535,7 @@ InvertedIndexLoader::LoadLegacy(storage::FileSource& source,
         PrepareJsonProjectedOpen(families::kInverted, source, opts);
     auto state = (co_await LoadState(
         use_async, source, opts, ParseRuntimeParams(opts.params)));
-    auto reader = MakeReader(state);
+    auto reader = MakeReader(std::move(state));
     co_return (co_await FinishJsonProjectedOpenAsync(
         use_async, std::move(projection), source, std::move(reader)));
 }
@@ -533,6 +551,13 @@ InvertedIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     state->effective = ResolveLoadOptions(opts);
     state->projection = PreparePackedJsonProjectedOpen(
         kFamily, directory, metadata, opts, plan);
+    state->recover_json_null_offsets =
+        state->projection.cast_type.has_value() &&
+        opts.params.at(INDEX_TYPE) == INVERTED_INDEX_TYPE &&
+        state->projection.cast_type->data_type() !=
+            JsonCastType::DataType::ARRAY &&
+        (!metadata.contains(kJsonNullOffsetsComplete) ||
+         !ReadRequiredIndexMeta<bool>(metadata, kJsonNullOffsetsComplete));
     state->targets.directory =
         CreateInvertedIndexDirectory(state->effective.directory_parent);
     const std::array<std::string_view, 2> reserved{
@@ -561,6 +586,8 @@ InvertedIndexLoader::FinishPacked(IndexLoadPlan& plan,
             ? proto::common::LoadPriority::LOW
             : proto::common::LoadPriority::HIGH;
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine;
+    std::shared_ptr<const std::vector<size_t>> null_offsets;
+    std::optional<TargetBitmap> recovered_validity;
     size_t materialized_bytes = 0;
     auto local_io = [&] {
         if (!tantivy_index_exist(directory->Path().c_str())) {
@@ -572,25 +599,32 @@ InvertedIndexLoader::FinishPacked(IndexLoadPlan& plan,
 
         materialized_bytes =
             MaterializedBytes(state->targets.paths, !state->effective.mmap);
+        null_offsets =
+            FinishPackedNullOffsets(state->targets,
+                                    static_cast<size_t>(engine->count()),
+                                    state->runtime.nested);
+        if (state->recover_json_null_offsets) {
+            // Recovery can fault in mmap pages. Keep it on the local I/O
+            // executor along with opening Tantivy, before reader publication.
+            recovered_validity =
+                RecoverJsonValidity(*engine, *state->projection.cast_type);
+        }
     };
     if (use_async) {
         co_await storage::RunLocalFileIOAsync(local_io, priority);
     } else {
         local_io();
     }
-    auto null_offsets =
-        FinishPackedNullOffsets(state->targets,
-                                static_cast<size_t>(engine->count()),
-                                state->runtime.nested);
     InvertedLoadState loaded;
     loaded.directory = directory;
     loaded.engine = engine;
-    loaded.null_offsets = null_offsets;
+    loaded.null_offsets = std::move(null_offsets);
+    loaded.recovered_validity = std::move(recovered_validity);
     loaded.params = state->runtime;
     loaded.mmap = state->effective.mmap;
     loaded.engine_bytes = materialized_bytes;
     co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            MakeReader(loaded));
+                                            MakeReader(std::move(loaded)));
 }
 
 namespace {

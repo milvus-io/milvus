@@ -116,6 +116,7 @@ set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/inverted/InvertedIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/inverted/InvertedIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/json/JsonProjectedHybridIndexBuilderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/json/JsonPackedNullOffsetsTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/marisa/MarisaIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/marisa/MarisaIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/ngram/NgramIndexReaderTest.cpp
