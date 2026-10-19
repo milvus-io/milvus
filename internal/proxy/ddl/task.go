@@ -541,6 +541,11 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
+	// RootCoord skips this check when preserve_field_ids is set, as for a
+	// snapshot restore, which does not go through proxy.
+	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
+		return err
+	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
 		return err
 	}
@@ -1203,6 +1208,9 @@ func validateAddStructSubFieldRequest(schema *schemapb.CollectionSchema, structP
 	}
 	if !field.GetElementNullable() {
 		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", field.GetName(), structPath)
+	}
+	if err := schemautil.FillAddedStructSubFieldMaxCapacity(parent, field); err != nil {
+		return err
 	}
 	if field.GetIsDynamic() {
 		return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
@@ -2597,6 +2605,18 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.Properties = updatePropertiesKeys(t.Properties)
+	if target := schemautil.StructAlterTarget(collSchema.CollectionSchema, t.FieldName); target != "" {
+		keys := make([]string, 0, len(t.Properties)+len(t.DeleteKeys))
+		for _, prop := range t.Properties {
+			keys = append(keys, prop.GetKey())
+		}
+		for _, key := range t.DeleteKeys {
+			keys = append(keys, updateKey(key))
+		}
+		if err := schemautil.ValidateStructFieldAlterKeys(target, t.FieldName, keys); err != nil {
+			return err
+		}
+	}
 	for _, prop := range t.Properties {
 		if !IsKeyAllowAlter(prop.Key) {
 			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
@@ -2636,16 +2656,14 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 		case common.MaxLengthKey:
 			IsStringType := false
-			fieldName := ""
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
 					IsStringType = true
-					fieldName = field.GetName()
 					break
 				}
 			}
 			if !IsStringType {
-				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", t.FieldName)
 			}
 			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
@@ -2658,21 +2676,19 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 		case common.MaxCapacityKey:
 			IsArrayType := false
-			fieldName := ""
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && typeutil.IsArrayType(field.DataType) {
 					IsArrayType = true
-					fieldName = field.GetName()
 					break
 				}
 			}
 			if !IsArrayType {
-				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", t.FieldName)
 			}
 
 			maxCapacityPerRow, err := strconv.ParseInt(prop.Value, 10, 64)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, t.FieldName)
 			}
 			maxArrayCapacity := paramtable.Get().ProxyCfg.MaxArrayCapacity.GetAsInt64()
 			if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {

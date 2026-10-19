@@ -5408,6 +5408,68 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
+func TestAlterCollectionFieldOnStruct(t *testing.T) {
+	paramtable.Init()
+
+	qc := NewMixCoordMock()
+	cache, err := initMetaCache(context.Background(), qc)
+	assert.NoError(t, err)
+	collectionName := "test_alter_collection_field_on_struct"
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 101,
+			Name:    "profile",
+			Fields: []*schemapb.FieldSchema{{
+				FieldID: 102, Name: "profile[tags]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}, {Key: common.MaxLengthKey, Value: "32"}},
+			}},
+		}},
+	}
+	schemaBytes, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+	qc.CreateCollection(context.Background(), &milvuspb.CreateCollectionRequest{
+		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection, MsgID: 100, Timestamp: 100},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+		ShardsNum:      1,
+	})
+	qc.ShowLoadCollectionsFunc = func(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+		return &querypb.ShowCollectionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
+	}
+
+	preExecute := func(fieldName string, props []*commonpb.KeyValuePair, deleteKeys ...string) error {
+		task := &AlterCollectionFieldTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: collectionName,
+				FieldName:      fieldName,
+				Properties:     props,
+				DeleteKeys:     deleteKeys,
+			},
+			mixCoord: qc,
+		}
+		return task.PreExecute(context.Background())
+	}
+
+	assert.NoError(t, preExecute("profile", []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}}))
+	assert.NoError(t, preExecute("profile[tags]", []*commonpb.KeyValuePair{{Key: common.FieldDescriptionKey, Value: "tags"}}))
+	assert.NoError(t, preExecute("profile[tags]", nil, MmapEnabledKey))
+	for _, key := range []string{common.MaxCapacityKey, common.MaxLengthKey, common.EnableAnalyzerKey} {
+		assert.ErrorContains(t, preExecute("profile[tags]", []*commonpb.KeyValuePair{{Key: key, Value: "64"}}),
+			key+" can not be altered on struct sub-field profile[tags]")
+	}
+	assert.ErrorContains(t, preExecute("profile", nil, common.EnableAnalyzerKey),
+		"enable_analyzer can not be altered on struct field profile")
+	assert.ErrorContains(t, preExecute("missing", []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}),
+		"missing can not modify the maxlength for non-string types")
+}
+
 func TestAlterCollectionField(t *testing.T) {
 	paramtable.Init()
 
@@ -5851,6 +5913,38 @@ func constructCollectionSchemaWithStructArrayField(collectionName string, struct
 		AutoID:            autoID,
 		Fields:            []*schemapb.FieldSchema{pkField, vecField},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArrayField},
+	}
+}
+
+func TestCreateCollectionTaskRejectsStructSubFieldTextMatch(t *testing.T) {
+	ctx := context.Background()
+	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
+		t.Run(key, func(t *testing.T) {
+			mockCache := NewMockCache(t)
+			mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+			collectionName := "TestCreateCollectionTaskRejectsStructSubFieldTextMatch" + funcutil.GenRandomStr()
+			schema := constructCollectionSchemaWithStructArrayField(collectionName, testStructArrayField, false)
+			schema.StructArrayFields[0].Fields[0].TypeParams = append(schema.StructArrayFields[0].Fields[0].TypeParams,
+				&commonpb.KeyValuePair{Key: key, Value: "true"})
+			marshaledSchema, err := proto.Marshal(schema)
+			require.NoError(t, err)
+
+			task := &CreateCollectionTask{
+				Condition: NewTaskCondition(ctx),
+				CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+					CollectionName: collectionName,
+					Schema:         marshaledSchema,
+					ShardsNum:      common.DefaultShardsNum,
+				},
+				ctx:      ctx,
+				mixCoord: NewMixCoordMock(),
+			}
+			task.MetaCache = mockCache
+			require.NoError(t, task.OnEnqueue())
+			err = task.PreExecute(ctx)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, key+" is not supported on struct sub-field sub_text_array")
+		})
 	}
 }
 
@@ -8018,6 +8112,14 @@ func TestAlterCollectionSchemaTask_StructSubFieldAdd(t *testing.T) {
 			require.NoError(t, preExecute(structSubFieldDDLTestSchema(true), "profile", newField(name), nil, ""), name)
 		}
 	})
+	t.Run("omitted max_capacity comes from the struct", func(t *testing.T) {
+		field := newField("c")
+		field.TypeParams = nil
+		require.NoError(t, preExecute(structSubFieldDDLTestSchema(true), "profile", field, nil, ""))
+		value, ok := common.GetStringValue(field.GetTypeParams(), common.MaxCapacityKey)
+		assert.True(t, ok)
+		assert.Equal(t, "16", value)
+	})
 	t.Run("nested array nullability propagation", func(t *testing.T) {
 		for _, nullable := range []bool{false, true} {
 			field := newField("nested")
@@ -8057,7 +8159,7 @@ func TestAlterCollectionSchemaTask_StructSubFieldAdd(t *testing.T) {
 		{"external", "profile", "does not support external field mapping", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.ExternalField = "source" }},
 		{"duplicate raw name", "profile", "duplicated field name", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.Name = "a" }},
 		{"duplicate stored name", "profile", "duplicated field name", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.Name = "profile[a]" }},
-		{"capacity mismatch", "profile", "same max_capacity", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.TypeParams[0].Value = "32" }},
+		{"capacity mismatch", "profile", "but struct field profile uses 16", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.TypeParams[0].Value = "32" }},
 		{"nullable child of non nullable parent", "profile", "cannot be nullable individually", func(s *schemapb.CollectionSchema, f *schemapb.FieldSchema) {
 			s.StructArrayFields[0].Nullable = false
 			s.StructArrayFields[0].Fields[0].Nullable = false
