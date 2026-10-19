@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/minio/MinioChunkManager.h"
+#include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
 #include "storage/minio/GuardedS3EndpointProvider.h"
 
 #include <aws/core/auth/AWSCredentials.h>
@@ -243,8 +244,14 @@ MinioChunkManager::BuildS3Client(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
     if (storage_config.useIAM) {
-        auto provider =
-            std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
+        auto provider_result = milvus_storage::CreateAWSCredentialsProvider(
+            storage_config.iam_credential_source, storage_config.region);
+        if (!provider_result.ok()) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "{}",
+                      provider_result.status().ToString());
+        }
+        auto provider = provider_result.ValueOrDie();
         auto aws_credentials = provider->GetAWSCredentials();
         if (!(!aws_credentials.GetAWSAccessKeyId().empty())) {
             ThrowInfo(ErrorCode::ConfigInvalid,

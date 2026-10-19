@@ -47,6 +47,7 @@ func InstanceConfigFromParamtable(params *paramtable.ComponentParam) *objectstor
 	cfg.UseIAM = params.MinioCfg.UseIAM.GetAsBool()
 	cfg.CloudProvider = params.MinioCfg.CloudProvider.GetValue()
 	cfg.IAMEndpoint = params.MinioCfg.IAMEndpoint.GetValue()
+	cfg.IAMCredentialSource = params.MinioCfg.IAMCredentialSource.GetValue()
 	cfg.UseVirtualHost = params.MinioCfg.UseVirtualHost.GetAsBool()
 	cfg.Region = params.MinioCfg.Region.GetValue()
 	cfg.RequestTimeoutMs = params.MinioCfg.RequestTimeoutMs.GetAsInt64()
@@ -419,23 +420,24 @@ func storageConfigFromObjectConfig(cfg *objectstorage.Config, storageType string
 		storageType = "remote"
 	}
 	return &indexpb.StorageConfig{
-		Address:           cfg.Address,
-		AccessKeyID:       cfg.AccessKeyID,
-		SecretAccessKey:   cfg.SecretAccessKeyID,
-		UseSSL:            cfg.UseSSL,
-		BucketName:        cfg.BucketName,
-		RootPath:          cfg.RootPath,
-		UseIAM:            cfg.UseIAM,
-		IAMEndpoint:       cfg.IAMEndpoint,
-		StorageType:       storageType,
-		UseVirtualHost:    cfg.UseVirtualHost,
-		Region:            cfg.Region,
-		CloudProvider:     cfg.CloudProvider,
-		RequestTimeoutMs:  cfg.RequestTimeoutMs,
-		SslCACert:         cfg.SslCACert,
-		GcpCredentialJSON: cfg.GcpCredentialJSON,
-		SslTlsMinVersion:  cfg.SslTLSMinVersion,
-		UseCrc32CChecksum: paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
+		Address:             cfg.Address,
+		AccessKeyID:         cfg.AccessKeyID,
+		SecretAccessKey:     cfg.SecretAccessKeyID,
+		UseSSL:              cfg.UseSSL,
+		BucketName:          cfg.BucketName,
+		RootPath:            cfg.RootPath,
+		UseIAM:              cfg.UseIAM,
+		IAMEndpoint:         cfg.IAMEndpoint,
+		IAMCredentialSource: cfg.IAMCredentialSource,
+		StorageType:         storageType,
+		UseVirtualHost:      cfg.UseVirtualHost,
+		Region:              cfg.Region,
+		CloudProvider:       cfg.CloudProvider,
+		RequestTimeoutMs:    cfg.RequestTimeoutMs,
+		SslCACert:           cfg.SslCACert,
+		GcpCredentialJSON:   cfg.GcpCredentialJSON,
+		SslTlsMinVersion:    cfg.SslTLSMinVersion,
+		UseCrc32CChecksum:   paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
 	}
 }
 

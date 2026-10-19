@@ -68,6 +68,7 @@ message StorageConfig {
   uint32 talon_block_size = 22;
   uint32 talon_max_idle_per_addr = 23;
   bool talon_enable_for_external_table = 24;
+  string IAMCredentialSource = 25;
 }
 
 // Synchronously modify OptionalFieldInfo in index_coord.proto file

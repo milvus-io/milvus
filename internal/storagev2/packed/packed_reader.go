@@ -163,6 +163,7 @@ func NewPackedReaderWithExtfs(
 			storage_type:                    C.CString(storageConfig.GetStorageType()),
 			cloud_provider:                  C.CString(storageConfig.GetCloudProvider()),
 			iam_endpoint:                    C.CString(storageConfig.GetIAMEndpoint()),
+			iam_credential_source:           C.CString(storageConfig.GetIAMCredentialSource()),
 			log_level:                       C.CString("warn"),
 			useSSL:                          C.bool(storageConfig.GetUseSSL()),
 			sslCACert:                       C.CString(storageConfig.GetSslCACert()),
@@ -190,6 +191,7 @@ func NewPackedReaderWithExtfs(
 		defer C.free(unsafe.Pointer(cStorageConfig.storage_type))
 		defer C.free(unsafe.Pointer(cStorageConfig.cloud_provider))
 		defer C.free(unsafe.Pointer(cStorageConfig.iam_endpoint))
+		defer C.free(unsafe.Pointer(cStorageConfig.iam_credential_source))
 		defer C.free(unsafe.Pointer(cStorageConfig.log_level))
 		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 		defer C.free(unsafe.Pointer(cStorageConfig.region))

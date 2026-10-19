@@ -48,6 +48,9 @@ StorageV2FSCache::Get(const Key& key) {
     props[PROPERTY_FS_STORAGE_TYPE] = key.storage_type;
     props[PROPERTY_FS_CLOUD_PROVIDER] = key.cloud_provider;
     props[PROPERTY_FS_IAM_ENDPOINT] = key.iam_endpoint;
+    if (!key.iam_credential_source.empty()) {
+        props[PROPERTY_FS_IAM_CREDENTIAL_SOURCE] = key.iam_credential_source;
+    }
     props[PROPERTY_FS_LOG_LEVEL] = key.log_level;
     props[PROPERTY_FS_REGION] = key.region;
     props[PROPERTY_FS_USE_SSL] = key.useSSL;

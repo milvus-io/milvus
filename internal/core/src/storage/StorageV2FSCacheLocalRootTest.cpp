@@ -102,3 +102,23 @@ TEST(StorageV2FSCacheLocalRootTest, InternalPropertiesUseSlashForLocal) {
     ASSERT_TRUE(remote_root.ok());
     EXPECT_EQ(remote_root.ValueOrDie(), "files");
 }
+
+TEST(StorageV2FSCacheLocalRootTest,
+     InternalPropertiesPreserveIAMCredentialSource) {
+    CStorageConfig config{};
+    config.storage_type = "remote";
+    config.cloud_provider = "aws";
+    config.useIAM = true;
+    config.iam_credential_source = "web_identity";
+    auto props = MakeInternalPropertiesFromStorageConfig(config);
+    auto source = milvus_storage::api::GetValue<std::string>(
+        *props, PROPERTY_FS_IAM_CREDENTIAL_SOURCE);
+    ASSERT_TRUE(source.ok());
+    EXPECT_EQ(source.ValueOrDie(), "web_identity");
+    config.iam_credential_source = nullptr;
+    props = MakeInternalPropertiesFromStorageConfig(config);
+    source = milvus_storage::api::GetValue<std::string>(
+        *props, PROPERTY_FS_IAM_CREDENTIAL_SOURCE);
+    ASSERT_TRUE(source.ok());
+    EXPECT_EQ(source.ValueOrDie(), "default");
+}

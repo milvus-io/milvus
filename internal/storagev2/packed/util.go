@@ -64,6 +64,7 @@ func GetCStorageConfig(storageConfig *indexpb.StorageConfig) C.CStorageConfig {
 		storage_type:                    C.CString(storageConfig.GetStorageType()),
 		cloud_provider:                  C.CString(storageConfig.GetCloudProvider()),
 		iam_endpoint:                    C.CString(storageConfig.GetIAMEndpoint()),
+		iam_credential_source:           C.CString(storageConfig.GetIAMCredentialSource()),
 		log_level:                       C.CString("warn"),
 		useSSL:                          C.bool(storageConfig.GetUseSSL()),
 		sslCACert:                       C.CString(storageConfig.GetSslCACert()),
@@ -95,6 +96,7 @@ func DeleteCStorageConfig(cStorageConfig C.CStorageConfig) {
 	C.free(unsafe.Pointer(cStorageConfig.storage_type))
 	C.free(unsafe.Pointer(cStorageConfig.cloud_provider))
 	C.free(unsafe.Pointer(cStorageConfig.iam_endpoint))
+	C.free(unsafe.Pointer(cStorageConfig.iam_credential_source))
 	C.free(unsafe.Pointer(cStorageConfig.log_level))
 	C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 	C.free(unsafe.Pointer(cStorageConfig.region))

@@ -151,6 +151,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			RootPath:                    paramtable.Get().MinioCfg.RootPath.GetValue(),
 			UseIAM:                      paramtable.Get().MinioCfg.UseIAM.GetAsBool(),
 			IAMEndpoint:                 paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
+			IAMCredentialSource:         paramtable.Get().MinioCfg.IAMCredentialSource.GetValue(),
 			StorageType:                 paramtable.Get().CommonCfg.StorageType.GetValue(),
 			Region:                      paramtable.Get().MinioCfg.Region.GetValue(),
 			UseVirtualHost:              paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool(),

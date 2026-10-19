@@ -128,6 +128,10 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		keys = append(keys, PropertyFSIAMEndpoint)
 		values = append(values, storageConfig.GetIAMEndpoint())
 	}
+	if source := storageConfig.GetIAMCredentialSource(); source != "" {
+		keys = append(keys, "fs.iam_credential_source")
+		values = append(values, source)
+	}
 	keys = append(keys, PropertyFSLogLevel)
 	values = append(values, "warn")
 

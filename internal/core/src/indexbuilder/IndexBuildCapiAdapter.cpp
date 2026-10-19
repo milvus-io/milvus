@@ -56,6 +56,7 @@ AdaptStorageConfig(const proto::indexcgo::StorageConfig& config) {
     result.storage_type = config.storage_type();
     result.cloud_provider = config.cloud_provider();
     result.iam_endpoint = config.iamendpoint();
+    result.iam_credential_source = config.iamcredentialsource();
     result.useSSL = config.usessl();
     result.sslCACert = config.sslcacert();
     result.useIAM = config.useiam();

@@ -63,6 +63,9 @@ func ResolveCloudProvider(c *Config) string {
 }
 
 func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
+	if err := validateIAMCredentialSource(c); err != nil {
+		return nil, err
+	}
 	var creds *credentials.Credentials
 	newMinioFn := minio.New
 	bucketLookupType := minio.BucketLookupAuto
@@ -99,7 +102,12 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		}
 	default: // aws, minio
 		if c.UseIAM {
-			creds = credentials.NewIAM("")
+			var err error
+			// Preserve the legacy endpoint behavior in default mode.
+			creds, err = NewAWSCredentials(c.IAMCredentialSource, c.Region, "")
+			if err != nil {
+				return nil, err
+			}
 		} else {
 			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}

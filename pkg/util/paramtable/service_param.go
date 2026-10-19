@@ -2018,26 +2018,27 @@ Set an easy-to-identify root key prefix for Milvus if etcd service already exist
 // /////////////////////////////////////////////////////////////////////////////
 // --- minio ---
 type MinioConfig struct {
-	Address            ParamItem `refreshable:"false"`
-	Port               ParamItem `refreshable:"false"`
-	AccessKeyID        ParamItem `refreshable:"false"`
-	SecretAccessKey    ParamItem `refreshable:"false"`
-	UseSSL             ParamItem `refreshable:"false"`
-	SslCACert          ParamItem `refreshable:"false"`
-	SslTLSMinVersion   ParamItem `refreshable:"false"`
-	BucketName         ParamItem `refreshable:"false"`
-	RootPath           ParamItem `refreshable:"false"`
-	UseIAM             ParamItem `refreshable:"false"`
-	CloudProvider      ParamItem `refreshable:"false"`
-	GcpCredentialJSON  ParamItem `refreshable:"false"`
-	IAMEndpoint        ParamItem `refreshable:"false"`
-	LogLevel           ParamItem `refreshable:"false"`
-	Region             ParamItem `refreshable:"false"`
-	UseVirtualHost     ParamItem `refreshable:"false"`
-	RequestTimeoutMs   ParamItem `refreshable:"false"`
-	MaxConnections     ParamItem `refreshable:"false"`
-	ListObjectsMaxKeys ParamItem `refreshable:"true"`
-	UseCRC32C          ParamItem `refreshable:"false"`
+	Address             ParamItem `refreshable:"false"`
+	Port                ParamItem `refreshable:"false"`
+	AccessKeyID         ParamItem `refreshable:"false"`
+	SecretAccessKey     ParamItem `refreshable:"false"`
+	UseSSL              ParamItem `refreshable:"false"`
+	SslCACert           ParamItem `refreshable:"false"`
+	SslTLSMinVersion    ParamItem `refreshable:"false"`
+	BucketName          ParamItem `refreshable:"false"`
+	RootPath            ParamItem `refreshable:"false"`
+	UseIAM              ParamItem `refreshable:"false"`
+	CloudProvider       ParamItem `refreshable:"false"`
+	GcpCredentialJSON   ParamItem `refreshable:"false"`
+	IAMEndpoint         ParamItem `refreshable:"false"`
+	IAMCredentialSource ParamItem `refreshable:"false"`
+	LogLevel            ParamItem `refreshable:"false"`
+	Region              ParamItem `refreshable:"false"`
+	UseVirtualHost      ParamItem `refreshable:"false"`
+	RequestTimeoutMs    ParamItem `refreshable:"false"`
+	MaxConnections      ParamItem `refreshable:"false"`
+	ListObjectsMaxKeys  ParamItem `refreshable:"true"`
+	UseCRC32C           ParamItem `refreshable:"false"`
 
 	MultipartCopyThreshold    ParamItem `refreshable:"true"`
 	DisableAWSChunkedEncoding ParamItem `refreshable:"false"`
@@ -2233,6 +2234,15 @@ Used only for the "gcpnative" cloud provider.`,
 		Sensitivity: Sensitive,
 	}
 	p.GcpCredentialJSON.Init(base.mgr)
+
+	p.IAMCredentialSource = ParamItem{
+		Key:          "minio.iamCredentialSource",
+		Version:      "3.0.0",
+		DefaultValue: "default",
+		Export:       true,
+		Doc:          "AWS IAM credential source: default (legacy chain), web_identity (IRSA), or instance_profile (EC2). Explicit sources require useIAM=true and cloudProvider=aws and never fall back to another identity. Applies to Milvus object storage, not the independent Woodpecker WAL client. Restart required.",
+	}
+	p.IAMCredentialSource.Init(base.mgr)
 
 	p.IAMEndpoint = ParamItem{
 		Key:          "minio.iamEndpoint",

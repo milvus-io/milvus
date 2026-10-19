@@ -1834,6 +1834,7 @@ func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath stri
 		objectstorage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
 		objectstorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
 		objectstorage.IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
+		objectstorage.IAMCredentialSource(params.MinioCfg.IAMCredentialSource.GetValue()),
 		objectstorage.CreateBucket(true))
 }
 
