@@ -103,6 +103,7 @@ func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 		RootPath:                    req.GetStorageConfig().GetRootPath(),
 		UseIAM:                      req.GetStorageConfig().GetUseIAM(),
 		IAMEndpoint:                 req.GetStorageConfig().GetIAMEndpoint(),
+		IAMCredentialSource:         req.GetStorageConfig().GetIAMCredentialSource(),
 		StorageType:                 req.GetStorageConfig().GetStorageType(),
 		UseVirtualHost:              req.GetStorageConfig().GetUseVirtualHost(),
 		Region:                      req.GetStorageConfig().GetRegion(),

@@ -313,6 +313,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		RootPath:                    it.req.GetStorageConfig().GetRootPath(),
 		UseIAM:                      it.req.GetStorageConfig().GetUseIAM(),
 		IAMEndpoint:                 it.req.GetStorageConfig().GetIAMEndpoint(),
+		IAMCredentialSource:         it.req.GetStorageConfig().GetIAMCredentialSource(),
 		StorageType:                 it.req.GetStorageConfig().GetStorageType(),
 		UseVirtualHost:              it.req.GetStorageConfig().GetUseVirtualHost(),
 		Region:                      it.req.GetStorageConfig().GetRegion(),

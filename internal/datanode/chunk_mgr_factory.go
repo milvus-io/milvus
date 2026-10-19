@@ -52,6 +52,7 @@ func (m *chunkMgrFactory) NewChunkManager(ctx context.Context, config *indexpb.S
 		objectstorage.UseIAM(config.GetUseIAM()),
 		objectstorage.CloudProvider(config.GetCloudProvider()),
 		objectstorage.IAMEndpoint(config.GetIAMEndpoint()),
+		objectstorage.IAMCredentialSource(config.GetIAMCredentialSource()),
 		objectstorage.UseVirtualHost(config.GetUseVirtualHost()),
 		objectstorage.RequestTimeout(config.GetRequestTimeoutMs()),
 		objectstorage.Region(config.GetRegion()),

@@ -48,6 +48,7 @@ get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
     storage_config.storage_type = config.storage_type();
     storage_config.cloud_provider = config.cloud_provider();
     storage_config.iam_endpoint = config.iamendpoint();
+    storage_config.iam_credential_source = config.iamcredentialsource();
     storage_config.useSSL = config.usessl();
     storage_config.sslCACert = config.sslcacert();
     storage_config.useIAM = config.useiam();
@@ -126,6 +127,7 @@ Analyze(CAnalyze* res_analyze,
             storage_config.talon_coordinator,
             storage_config.talon_block_size,
             storage_config.talon_max_idle_per_addr,
+            storage_config.iam_credential_source,
         });
 
         milvus::storage::FileManagerContext fileManagerContext(

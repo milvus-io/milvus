@@ -93,6 +93,10 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
         storage_config.useSSL = c_storage_config.useSSL;
         storage_config.sslCACert = std::string(c_storage_config.sslCACert);
         storage_config.useIAM = c_storage_config.useIAM;
+        if (c_storage_config.iam_credential_source != nullptr) {
+            storage_config.iam_credential_source =
+                c_storage_config.iam_credential_source;
+        }
         storage_config.useVirtualHost = c_storage_config.useVirtualHost;
         storage_config.region = c_storage_config.region;
         storage_config.requestTimeoutMs = c_storage_config.requestTimeoutMs;

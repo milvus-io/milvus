@@ -195,6 +195,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	cRootPath := C.CString(params.MinioCfg.RootPath.GetValue())
 	cStorageType := C.CString(params.CommonCfg.StorageType.GetValue())
 	cIamEndPoint := C.CString(params.MinioCfg.IAMEndpoint.GetValue())
+	cIAMCredentialSource := C.CString(params.MinioCfg.IAMCredentialSource.GetValue())
 	cCloudProvider := C.CString(params.MinioCfg.CloudProvider.GetValue())
 	cLogLevel := C.CString(params.MinioCfg.LogLevel.GetValue())
 	cRegion := C.CString(params.MinioCfg.Region.GetValue())
@@ -210,6 +211,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cRootPath))
 	defer C.free(unsafe.Pointer(cStorageType))
 	defer C.free(unsafe.Pointer(cIamEndPoint))
+	defer C.free(unsafe.Pointer(cIAMCredentialSource))
 	defer C.free(unsafe.Pointer(cLogLevel))
 	defer C.free(unsafe.Pointer(cRegion))
 	defer C.free(unsafe.Pointer(cCloudProvider))
@@ -224,6 +226,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		root_path:                       cRootPath,
 		storage_type:                    cStorageType,
 		iam_endpoint:                    cIamEndPoint,
+		iam_credential_source:           cIAMCredentialSource,
 		cloud_provider:                  cCloudProvider,
 		useSSL:                          C.bool(params.MinioCfg.UseSSL.GetAsBool()),
 		sslCACert:                       cSslCACert,
@@ -270,6 +273,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	}
 	cStorageType := C.CString(params.CommonCfg.StorageType.GetValue())
 	cIamEndPoint := C.CString(params.MinioCfg.IAMEndpoint.GetValue())
+	cIAMCredentialSource := C.CString(params.MinioCfg.IAMCredentialSource.GetValue())
 	cCloudProvider := C.CString(params.MinioCfg.CloudProvider.GetValue())
 	cLogLevel := C.CString(params.MinioCfg.LogLevel.GetValue())
 	cRegion := C.CString(params.MinioCfg.Region.GetValue())
@@ -285,6 +289,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cRootPath))
 	defer C.free(unsafe.Pointer(cStorageType))
 	defer C.free(unsafe.Pointer(cIamEndPoint))
+	defer C.free(unsafe.Pointer(cIAMCredentialSource))
 	defer C.free(unsafe.Pointer(cLogLevel))
 	defer C.free(unsafe.Pointer(cRegion))
 	defer C.free(unsafe.Pointer(cCloudProvider))
@@ -299,6 +304,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		root_path:                       cRootPath,
 		storage_type:                    cStorageType,
 		iam_endpoint:                    cIamEndPoint,
+		iam_credential_source:           cIAMCredentialSource,
 		cloud_provider:                  cCloudProvider,
 		useSSL:                          C.bool(params.MinioCfg.UseSSL.GetAsBool()),
 		sslCACert:                       cSslCACert,

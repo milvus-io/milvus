@@ -218,12 +218,14 @@ func applySnapshotExternalSpecToConfig(
 		cfg.AccessKeyID = ""
 		cfg.SecretAccessKeyID = ""
 		cfg.UseIAM = false
+		cfg.IAMCredentialSource = "default"
 	}
 	if accessKeyID != "" || secretKey != "" {
 		cfg.AccessKeyID = accessKeyID
 		cfg.SecretAccessKeyID = secretKey
 		cfg.GcpCredentialJSON = ""
 		cfg.UseIAM = false
+		cfg.IAMCredentialSource = "default"
 		if strings.EqualFold(cfg.CloudProvider, objectstorage.CloudProviderAzure) {
 			cfg.IgnoreAzureConnectionString = true
 		}

@@ -143,6 +143,10 @@ minio:
   # gcp: https://cloud.google.com/storage/docs/access-control/iam
   # aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control
   # aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
+  # AWS credential source: default, web_identity (IRSA), instance_profile (EC2).
+  # Explicit sources require useIAM and cloudProvider: aws; no identity fallback.
+  # Applies to Milvus object storage; Woodpecker WAL has a separate client.
+  iamCredentialSource: default
   useIAM: false
   # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
   # Cloud Provider of Google Cloud Storage. Supports: "gcpnative".

@@ -28,21 +28,24 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 type config struct {
-	address           string
-	bucketName        string
-	accessKeyID       string
-	secretAccessKeyID string
-	useSSL            bool
-	sslCACert         string
-	createBucket      bool
-	useIAM            bool
-	iamEndpoint       string
+	address             string
+	bucketName          string
+	accessKeyID         string
+	secretAccessKeyID   string
+	useSSL              bool
+	sslCACert           string
+	createBucket        bool
+	useIAM              bool
+	iamEndpoint         string
+	iamCredentialSource string
+	region              string
 }
 
 // minIO client for upload access log
@@ -74,15 +77,17 @@ func NewMinioHandler(ctx context.Context, cfg *paramtable.MinioConfig, rootPath 
 	}
 
 	handlerCfg := config{
-		address:           cfg.Address.GetValue(),
-		bucketName:        cfg.BucketName.GetValue(),
-		accessKeyID:       cfg.AccessKeyID.GetValue(),
-		secretAccessKeyID: cfg.SecretAccessKey.GetValue(),
-		useSSL:            cfg.UseSSL.GetAsBool(),
-		sslCACert:         cfg.SslCACert.GetValue(),
-		createBucket:      true,
-		useIAM:            cfg.UseIAM.GetAsBool(),
-		iamEndpoint:       cfg.IAMEndpoint.GetValue(),
+		address:             cfg.Address.GetValue(),
+		bucketName:          cfg.BucketName.GetValue(),
+		accessKeyID:         cfg.AccessKeyID.GetValue(),
+		secretAccessKeyID:   cfg.SecretAccessKey.GetValue(),
+		useSSL:              cfg.UseSSL.GetAsBool(),
+		sslCACert:           cfg.SslCACert.GetValue(),
+		createBucket:        true,
+		useIAM:              cfg.UseIAM.GetAsBool(),
+		iamEndpoint:         cfg.IAMEndpoint.GetValue(),
+		iamCredentialSource: cfg.IAMCredentialSource.GetValue(),
+		region:              cfg.Region.GetValue(),
 	}
 
 	client, err := newMinioClient(ctx, handlerCfg)
@@ -102,7 +107,11 @@ func NewMinioHandler(ctx context.Context, cfg *paramtable.MinioConfig, rootPath 
 func newMinioClient(ctx context.Context, cfg config) (*minio.Client, error) {
 	var creds *credentials.Credentials
 	if cfg.useIAM {
-		creds = credentials.NewIAM(cfg.iamEndpoint)
+		var err error
+		creds, err = objectstorage.NewAWSCredentials(cfg.iamCredentialSource, cfg.region, cfg.iamEndpoint)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		creds = credentials.NewStaticV4(cfg.accessKeyID, cfg.secretAccessKeyID, "")
 	}

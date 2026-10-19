@@ -762,3 +762,14 @@ func TestWALMessageSizeMinimum(t *testing.T) {
 		}
 	})
 }
+
+func TestMinioIAMCredentialSource(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true))
+	var params MinioConfig
+	params.Init(base)
+	assert.Equal(t, "default", params.IAMCredentialSource.GetValue())
+	for _, source := range []string{"web_identity", "instance_profile"} {
+		base.Save(params.IAMCredentialSource.Key, source)
+		assert.Equal(t, source, params.IAMCredentialSource.GetValue())
+	}
+}

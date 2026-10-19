@@ -85,6 +85,8 @@ get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
     storage_config.storage_type = std::string(config.storage_type());
     storage_config.cloud_provider = std::string(config.cloud_provider());
     storage_config.iam_endpoint = std::string(config.iamendpoint());
+    storage_config.iam_credential_source =
+        std::string(config.iamcredentialsource());
     storage_config.useSSL = config.usessl();
     storage_config.sslCACert = config.sslcacert();
     storage_config.useIAM = config.useiam();

@@ -1272,6 +1272,15 @@ CreateLegacyChunkManager(const StorageConfig& storage_config) {
 
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config) {
+    const auto& source = storage_config.iam_credential_source;
+    if (!source.empty() && source != "default") {
+        if ((source != "web_identity" && source != "instance_profile") ||
+            !storage_config.useIAM || storage_config.cloud_provider != "aws") {
+            ThrowInfo(
+                ConfigInvalid,
+                "Invalid explicit AWS IAM credential source configuration");
+        }
+    }
     // The ArrowFileSystem backed chunk manager (when enabled) handles every
     // storage type; try it once up front and fall back to the legacy managers
     // when it declines (switch off, or no producer for the provider).
@@ -1302,6 +1311,7 @@ ToStorageV2FSCacheKey(const StorageConfig& storage_config) {
                                 : std::string(storage_config.storage_type);
         conf.cloud_provider = std::string(storage_config.cloud_provider);
         conf.iam_endpoint = std::string(storage_config.iam_endpoint);
+        conf.iam_credential_source = storage_config.iam_credential_source;
         conf.log_level = std::string(storage_config.log_level);
         conf.region = std::string(storage_config.region);
         conf.useSSL = storage_config.useSSL;

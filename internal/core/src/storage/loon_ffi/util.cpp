@@ -96,6 +96,12 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
                                       PROPERTY_FS_CLOUD_PROVIDER,
                                       c_storage_config.cloud_provider);
     }
+    if (c_storage_config.iam_credential_source != nullptr &&
+        c_storage_config.iam_credential_source[0] != '\0') {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_IAM_CREDENTIAL_SOURCE,
+                                      c_storage_config.iam_credential_source);
+    }
     if (c_storage_config.iam_endpoint != nullptr) {
         milvus_storage::api::SetValue(*properties_map,
                                       PROPERTY_FS_IAM_ENDPOINT,
@@ -894,7 +900,8 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.talon_coordinator.c_str(),
                           config.talon_block_size,
                           config.talon_max_idle_per_addr,
-                          config.talon_enable_for_external_table};
+                          config.talon_enable_for_external_table,
+                          config.iam_credential_source.c_str()};
 }
 
 std::shared_ptr<milvus_storage::api::Manifest>

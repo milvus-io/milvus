@@ -105,6 +105,7 @@ func objectstorageConfigFromIndexConfig(config *indexpb.StorageConfig) *objectst
 	cfg.UseIAM = config.GetUseIAM()
 	cfg.CloudProvider = config.GetCloudProvider()
 	cfg.IAMEndpoint = config.GetIAMEndpoint()
+	cfg.IAMCredentialSource = config.GetIAMCredentialSource()
 	cfg.UseVirtualHost = config.GetUseVirtualHost()
 	cfg.Region = config.GetRegion()
 	cfg.RequestTimeoutMs = config.GetRequestTimeoutMs()

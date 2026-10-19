@@ -16,6 +16,7 @@ type Config struct {
 	UseIAM               bool
 	CloudProvider        string
 	IAMEndpoint          string
+	IAMCredentialSource  string
 	UseVirtualHost       bool
 	Region               string
 	RequestTimeoutMs     int64
@@ -123,6 +124,10 @@ func CloudProvider(cloudProvider string) Option {
 	return func(c *Config) {
 		c.CloudProvider = cloudProvider
 	}
+}
+
+func IAMCredentialSource(source string) Option {
+	return func(c *Config) { c.IAMCredentialSource = source }
 }
 
 func IAMEndpoint(iamEndpoint string) Option {

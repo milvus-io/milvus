@@ -168,6 +168,10 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 		keys = append(keys, propIAMEndpoint)
 		values = append(values, v)
 	}
+	if source := storageConfig.GetIAMCredentialSource(); source != "" {
+		keys = append(keys, "fs.iam_credential_source")
+		values = append(values, source)
+	}
 	keys = append(keys, propLogLevel)
 	values = append(values, "warn")
 	if v := storageConfig.GetRegion(); v != "" {

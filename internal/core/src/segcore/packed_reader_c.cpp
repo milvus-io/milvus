@@ -114,6 +114,9 @@ NewPackedReaderWithStorageConfig(char** paths,
                 : "",
             c_storage_config.talon_block_size,
             c_storage_config.talon_max_idle_per_addr,
+            c_storage_config.iam_credential_source
+                ? c_storage_config.iam_credential_source
+                : "default",
         });
         if (!trueFs) {
             return milvus::FailureCStatus(
