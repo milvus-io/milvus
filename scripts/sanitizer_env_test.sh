@@ -76,10 +76,12 @@ done
     touch "${test_root}/tsan/lib/libarcher.so" "${test_root}/tsan/lib/libomp.so.5"
     touch "${test_root}/tsan/lib/llvm-symbolizer"
     chmod +x "${test_root}/tsan/lib/llvm-symbolizer"
+    printf 'called_from_lib:libomp.so\n' > "${test_root}/tsan/lib/tsan.supp"
     milvus_sanitizer_env "${test_root}/tsan"
     [[ "${OMP_TOOL}" == enabled ]]
     [[ "${OMP_TOOL_LIBRARIES}" == "${test_root}/tsan/lib/libarcher.so" ]]
-    [[ "${TSAN_OPTIONS}" == *ignore_noninstrumented_modules=1* ]]
+    [[ "${TSAN_OPTIONS}" == suppressions="${test_root}/tsan/lib/tsan.supp":* ]]
+    [[ "${TSAN_OPTIONS}" != *ignore_noninstrumented_modules* ]]
 )
 
 # Verify configure-time guards without compiling C/C++ or resolving dependencies.
@@ -186,5 +188,26 @@ for mode in none thread; do
         exit 1
     fi
 done
+
+# An Archer image must check dependency hashes and runtime closure before Docker.
+printf 'llvm-20\n' > "${test_root}/repo/lib/milvus-archer"
+touch "${test_root}/repo/lib/libarcher.so" "${test_root}/repo/lib/libomp.so.5"
+touch "${test_root}/repo/lib/llvm-symbolizer"
+chmod +x "${test_root}/repo/lib/llvm-symbolizer"
+printf 'called_from_lib:libomp.so\n' > "${test_root}/repo/lib/tsan.supp"
+cat > "${test_root}/bin/python3" <<'EOF'
+#!/usr/bin/env bash
+printf 'python %s\n' "$*" >> "${TEST_LOG}"
+EOF
+chmod +x "${test_root}/bin/python3"
+printf 'thread\n' > "${test_root}/repo/lib/milvus-sanitizer"
+log="${test_root}/image-archer.log"
+env -u USE_TSAN -u USE_ASAN -u LD_PRELOAD GOFLAGS= \
+    IMAGE_ARCH=amd64 BUILD_ARGS='--build-arg TARGETARCH=amd64' \
+    PATH="${test_root}/bin:${PATH}" TEST_LOG="${log}" \
+    bash "${test_root}/repo/build/build_image.sh" > "${test_root}/image-output.log" 2>&1
+grep -q 'milvus_tsan.py verify ' "${log}"
+grep -q 'milvus_tsan.py verify-runtime ' "${log}"
+grep -q -- 'suppressions=/milvus/lib/tsan.supp' "${log}"
 
 echo 'Sanitizer environment, parser commands and configuration guards passed'

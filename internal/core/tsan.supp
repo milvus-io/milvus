@@ -1,0 +1,3 @@
+# Licensed under the Apache License, Version 2.0.
+# Ignore reports originating inside the uninstrumented LLVM OpenMP runtime.
+called_from_lib:libomp.so

@@ -46,6 +46,7 @@ install(FILES "${MILVUS_OPENMP_LIBRARY}" DESTINATION lib RENAME libomp.so.5)
 install(FILES "${MILVUS_OPENMP_LIBRARY}" DESTINATION lib RENAME libomp.so)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/milvus-archer" "llvm-20\n")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/milvus-archer" DESTINATION lib)
+install(FILES "${CMAKE_CURRENT_LIST_DIR}/../tsan.supp" DESTINATION lib)
 
 # A system addr2line can recognize functions while losing Clang DWARF line tables.
 # Package the matching LLVM symbolizer and isolate its dependencies from Conan.
