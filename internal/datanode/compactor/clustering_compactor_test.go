@@ -223,6 +223,19 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInitRejectsMissingPrimaryK
 	}
 }
 
+func (s *ClusteringCompactionTaskSuite) TestCompactionRejectsMissingClusteringKey() {
+	s.plan.Schema = genCollectionSchema()
+	s.plan.ClusteringKeyField = 999
+	defer s.task.cleanUp(context.Background())
+
+	var result *datapb.CompactionPlanResult
+	var err error
+	s.Require().NotPanics(func() { result, err = s.task.Compact() })
+	s.Nil(result)
+	s.Require().ErrorIs(err, merr.ErrServiceInternal)
+	s.Require().ErrorContains(err, "clustering key field 999")
+}
+
 func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	dblobs, err := getInt64DeltaBlobs(
 		1,

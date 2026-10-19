@@ -294,7 +294,7 @@ func (t *clusteringCompactionTask) init() error {
 	t.logIDAlloc = logIDAlloc
 	t.segIDAlloc = segIDAlloc
 
-	var pkField *schemapb.FieldSchema
+	var pkField, clusteringKeyField *schemapb.FieldSchema
 	if t.plan.Schema == nil {
 		return merr.WrapErrIllegalCompactionPlan("empty schema in compactionPlan")
 	}
@@ -303,11 +303,14 @@ func (t *clusteringCompactionTask) init() error {
 			pkField = field
 		}
 		if field.GetFieldID() == t.plan.GetClusteringKeyField() {
-			t.clusteringKeyField = field
+			clusteringKeyField = field
 		}
 	}
 	if pkField == nil {
 		return merr.WrapErrServiceInternalMsg("no primary key field found")
+	}
+	if clusteringKeyField == nil {
+		return merr.WrapErrServiceInternalMsg("clustering key field %d not found in compaction schema", t.plan.GetClusteringKeyField())
 	}
 
 	for _, function := range t.plan.Schema.Functions {
@@ -317,6 +320,7 @@ func (t *clusteringCompactionTask) init() error {
 	}
 
 	t.primaryKeyField = pkField
+	t.clusteringKeyField = clusteringKeyField
 	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTime = time.Now()
