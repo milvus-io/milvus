@@ -25,9 +25,7 @@ PyYAML==6.0.2
 pytest-sugar==0.9.5
 pytest-random-order
 
-# pymilvus
-pymilvus==3.1.0rc95
-pymilvus[bulk_writer]==3.1.0rc95
+pymilvus[bulk_writer]==3.1.0rc96
 # for protobuf
 protobuf>=5.29.5
 

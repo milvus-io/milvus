@@ -23,6 +23,10 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    proxy:
+      rls:
+        # CI deploys one build for every component; enable the RLS import contract.
+        importEnforcementEnabled: true
     grpc:
       client:
         compressionEnabled: true
