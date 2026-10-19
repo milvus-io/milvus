@@ -8346,7 +8346,9 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                           !diff.column_groups_to_replace.empty() ||
                           !diff.column_groups_to_lazyload.empty() ||
                           !diff.column_groups_to_lazyreplace.empty();
-    if (diff.rebuild_manifest_reader || has_cg_changes) {
+    // Preserve the internal manifest loader's task-driven Reader lifecycle.
+    // Schema/default-only changes publish their state without replacing it.
+    if (has_cg_changes) {
         auto properties = std::make_shared<milvus_storage::api::Properties>(
             *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                  .GetProperties());

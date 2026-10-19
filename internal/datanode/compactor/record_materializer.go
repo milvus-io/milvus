@@ -392,8 +392,8 @@ func newMinHashFunctionMaterializer(schema *schemapb.CollectionSchema, runner fu
 		if inputField == nil || typeutil.GetField(schema, inputField.GetFieldID()) == nil {
 			return nil, merr.WrapErrFunctionFailedMsg("input field not found in schema")
 		}
-		if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_Text {
-			return nil, merr.WrapErrFunctionFailedMsg("input field data type must be varchar or text for minhash function materialization")
+		if inputField.GetDataType() != schemapb.DataType_VarChar {
+			return nil, merr.WrapErrFunctionFailedMsg("input field data type must be varchar for minhash function materialization")
 		}
 		inputFieldIDs = append(inputFieldIDs, inputField.GetFieldID())
 	}
@@ -613,7 +613,7 @@ func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error)
 		}
 	case *array.Binary:
 		// Missing nullable TEXT fields use the storage binary representation.
-		// No LOB decoding is needed for all-NULL input; BM25/MinHash use empty text.
+		// No LOB decoding is needed for all-NULL input; BM25 uses empty text.
 		if values.NullN() == values.Len() {
 			return inputs, nil
 		}

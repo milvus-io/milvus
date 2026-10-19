@@ -151,21 +151,21 @@ func fetchRowCountsConcurrently(
 	for k, idx := range needInfo {
 		idx := idx
 		futures[k] = pool.Submit(func() (struct{}, error) {
-			if fileInfos[idx].NumRows > 0 {
-				columns, err := GetExternalFileColumns(format, fileInfos[idx].FilePath, storageConfig, extfs)
+			if fileInfos[idx].NumRows <= 0 {
+				fetchedInfo, err := GetFileInfo(format, fileInfos[idx].FilePath, storageConfig, extfs)
+				if err != nil {
+					return struct{}{}, merr.Wrapf(err, "failed to get file info for %s", fileInfos[idx].FilePath)
+				}
+				// Distinct indexes across workers -> no race on rowCounts.
+				rowCounts[idx] = fetchedInfo.NumRows
+			}
+			if fileInfos[idx].Columns == nil {
+				columns, err := GetExternalFileColumns(format, fileInfos[idx].FilePath, fileInfos[idx].Properties, storageConfig, extfs)
 				if err != nil {
 					return struct{}{}, merr.Wrapf(err, "read columns for %s", fileInfos[idx].FilePath)
 				}
 				fileInfos[idx].Columns = columns
-				return struct{}{}, nil
 			}
-			fetchedInfo, err := GetFileInfo(format, fileInfos[idx].FilePath, storageConfig, extfs)
-			if err != nil {
-				return struct{}{}, merr.Wrapf(err, "failed to get file info for %s", fileInfos[idx].FilePath)
-			}
-			// Distinct indexes across workers -> no race on rowCounts.
-			rowCounts[idx] = fetchedInfo.NumRows
-			fileInfos[idx].Columns = fetchedInfo.Columns
 			return struct{}{}, nil
 		})
 	}

@@ -1919,6 +1919,7 @@ TEST_F(StorageTest, UnifiedManifestLoadHistoricalDefaultsAndReopen) {
             EXPECT_TRUE(results.output_fields_data_.empty());
 
             auto before_schema = segment->TestGetPublishedStateSnapshot();
+            ASSERT_NE(before_schema->runtime->reader, nullptr);
             auto later_proto = schema_proto;
             auto* later_field = later_proto.add_fields();
             later_field->set_fieldid(103);
@@ -1931,7 +1932,7 @@ TEST_F(StorageTest, UnifiedManifestLoadHistoricalDefaultsAndReopen) {
             later_schema->set_schema_version(schema->get_schema_version() + 1);
             ASSERT_NO_THROW(segment->Reopen(later_schema));
             auto after_schema = segment->TestGetPublishedStateSnapshot();
-            EXPECT_NE(before_schema->runtime->reader,
+            EXPECT_EQ(before_schema->runtime->reader,
                       after_schema->runtime->reader);
             EXPECT_EQ(before_schema->runtime->fields.at(FieldId(100)),
                       after_schema->runtime->fields.at(FieldId(100)));
@@ -1939,6 +1940,22 @@ TEST_F(StorageTest, UnifiedManifestLoadHistoricalDefaultsAndReopen) {
                 after_schema->load_info->GetFieldsFilledWithDefault().count(
                     FieldId(103)));
             check_c_api_retrieve();
+
+            auto later_values =
+                segment->bulk_subscript(&ctx, FieldId(103), offsets, N);
+            const auto& later_valid = GetFieldDataRowValidData(*later_values);
+            ASSERT_EQ(later_valid.size(), N);
+            for (int i = 0; i < N; ++i) {
+                EXPECT_FALSE(later_valid[i]);
+            }
+
+            // The load-info Reopen path also receives a freshly parsed schema.
+            auto same_schema = Schema::ParseFrom(later_proto);
+            same_schema->set_schema_version(later_schema->get_schema_version());
+            ASSERT_NO_THROW(segment->Reopen(&ctx, info, same_schema));
+            EXPECT_EQ(
+                after_schema->runtime->reader,
+                segment->TestGetPublishedStateSnapshot()->runtime->reader);
 
             // Replace default with physical data, then back to the old snapshot.
             auto next = info;
@@ -1973,6 +1990,9 @@ TEST_F(StorageTest, UnifiedManifestLoadHistoricalDefaultsAndReopen) {
                 check_defaults();
             }
             ASSERT_NO_THROW(segment->Reopen(&ctx, next));
+            EXPECT_NE(
+                after_schema->runtime->reader,
+                segment->TestGetPublishedStateSnapshot()->runtime->reader);
             auto loaded_column =
                 segment->TestGetPublishedStateSnapshot()->runtime->fields.at(
                     revision_id);

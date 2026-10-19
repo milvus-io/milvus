@@ -498,7 +498,13 @@ Schema::GetPhysicalColumnName(FieldId field_id) const {
 
 FieldId
 Schema::ResolveColumnFieldId(const std::string& column_name) const {
-    return ResolveColumnFieldIds(column_name).front();
+    auto field_ids = ResolveColumnFieldIds(column_name);
+    if (field_ids.empty()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "external column '{}' not found in schema",
+                  column_name);
+    }
+    return field_ids.front();
 }
 
 std::vector<FieldId>
@@ -525,9 +531,9 @@ Schema::ResolveColumnFieldIds(const std::string& column_name) const {
             field_id.has_value()) {
             return {field_id.value()};
         }
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "external column '{}' not found in schema",
-                  column_name);
+        // A historical manifest may retain named columns after their mapped
+        // fields are dropped. Batch planning has no logical fields to load.
+        return {};
     }
     if (auto field_id = ParseFieldIdColumnName(column_name);
         field_id.has_value()) {

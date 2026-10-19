@@ -3170,7 +3170,7 @@ MakeManifestProto(const std::string& manifest_path) {
 }
 
 SchemaPtr
-MakeNamedExternalSchema() {
+MakeNamedExternalSchema(bool include_tenant = true) {
     auto schema = std::make_shared<Schema>();
     schema->AddField(FieldMeta(FieldName("pk"),
                                FieldId(100),
@@ -3186,12 +3186,14 @@ MakeNamedExternalSchema() {
                                false,
                                std::nullopt,
                                "vector"));
-    schema->AddField(FieldMeta(FieldName("tenant"),
-                               FieldId(102),
-                               DataType::INT64,
-                               true,
-                               std::nullopt,
-                               "tenant"));
+    if (include_tenant) {
+        schema->AddField(FieldMeta(FieldName("tenant"),
+                                   FieldId(102),
+                                   DataType::INT64,
+                                   true,
+                                   std::nullopt,
+                                   "tenant"));
+    }
     schema->set_primary_field_id(FieldId(100));
     schema->set_external_source("s3://external-bucket/table");
     return schema;
@@ -3361,6 +3363,39 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDropsManifestFieldRemovedFromSchema) {
     EXPECT_TRUE(diff.column_groups_to_lazyreplace.empty());
 }
 
+TEST_F(SegmentLoadInfoTest, ExternalDroppedNamedColumnIsIgnored) {
+    auto groups = MakeExternalColumnGroups(
+        {{{"id"}, {"/id"}}, {{"vector", "tenant"}, {"/data"}}});
+    SegmentLoadInfo current(MakeManifestProto("/v1"),
+                            MakeNamedExternalSchema());
+    current.SetColumnGroupsForTesting(groups);
+    SegmentLoadInfo next(MakeManifestProto("/v1"),
+                         MakeNamedExternalSchema(false));
+    next.SetColumnGroupsForTesting(groups);
+
+    // Schema-only drop leaves the physical column in the unchanged manifest.
+    LoadDiff diff;
+    ASSERT_NO_THROW(diff = current.ComputeDiff(next));
+    EXPECT_EQ(diff.field_data_to_drop,
+              (std::unordered_set<FieldId>{FieldId(102)}));
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+    EXPECT_TRUE(ReplacedManifestFields(diff).empty());
+    EXPECT_TRUE(diff.fields_to_fill_default.empty());
+
+    // Later diffs scan the retained column with the new schema on both sides.
+    EXPECT_FALSE(next.ComputeDiff(next).HasChanges());
+
+    // A fresh load must also ignore it, while keeping the surviving sibling.
+    LoadDiff load;
+    ASSERT_NO_THROW(load = next.GetLoadDiff());
+    auto loaded = TaskFields(load.column_groups_to_load);
+    auto lazy = TaskFields(load.column_groups_to_lazyload);
+    loaded.insert(lazy.begin(), lazy.end());
+    EXPECT_EQ(loaded, (std::set<FieldId>{FieldId(100), FieldId(101)}));
+    EXPECT_TRUE(load.fields_to_fill_default.empty());
+}
+
 TEST_F(SegmentLoadInfoTest, SchemaReopenLoadsNewFieldWithBinlog) {
     proto::segcore::SegmentLoadInfo current_proto;
     current_proto.set_segmentid(100);
@@ -3468,14 +3503,14 @@ TEST_F(SegmentLoadInfoTest,
     index_param->set_key("index_type");
     index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
 
-    SegmentLoadInfo new_info(new_proto, schema_);
+    // Public Reopen parses a fresh schema even when its contents are unchanged.
+    SegmentLoadInfo new_info(new_proto, MakeNamedExternalSchema());
     new_info.SetColumnGroupsForTesting(cgs);
 
     LoadDiff diff;
     EXPECT_NO_THROW({ diff = current_info.ComputeDiff(new_info); });
     ASSERT_EQ(diff.indexes_to_load.size(), 1);
     EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
-    EXPECT_FALSE(diff.rebuild_manifest_reader);
     EXPECT_TRUE(diff.column_groups_to_load.empty());
     EXPECT_TRUE(diff.column_groups_to_replace.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
@@ -3534,7 +3569,6 @@ TEST_F(SegmentLoadInfoTest,
     EXPECT_NO_THROW({ diff = current_info.ComputeDiff(new_info); });
     EXPECT_TRUE(diff.manifest_updated);
     EXPECT_EQ(diff.new_manifest_path, "/manifest/v2");
-    EXPECT_TRUE(diff.rebuild_manifest_reader);
     EXPECT_TRUE(diff.column_groups_to_load.empty());
     EXPECT_EQ(ReplacedManifestFields(diff),
               (std::set<FieldId>{FieldId(100), FieldId(101), FieldId(102)}));
@@ -3595,12 +3629,12 @@ TEST_F(SegmentLoadInfoTest,
 
     SegmentLoadInfo current_info(MakeManifestProto("/manifest/v1"), schema_);
     current_info.SetColumnGroupsForTesting(cgs);
-    SegmentLoadInfo new_info(MakeManifestProto("/manifest/v1"), schema_);
+    SegmentLoadInfo new_info(MakeManifestProto("/manifest/v2"), schema_);
     new_info.SetColumnGroupsForTesting(cgs);
 
     auto diff = current_info.ComputeDiff(new_info);
 
-    EXPECT_FALSE(diff.manifest_updated);
+    EXPECT_TRUE(diff.manifest_updated);
     EXPECT_TRUE(diff.column_groups_to_load.empty());
     EXPECT_TRUE(diff.column_groups_to_replace.empty());
     EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
@@ -4032,7 +4066,8 @@ TEST_F(SegmentLoadInfoTest, ExternalHistoricalMissingColumnIgnoresFakeBinlogs) {
     SegmentLoadInfo info(proto, schema);
     info.SetColumnGroupsForTesting(MakeColumnGroups({{{101}, {"/value"}}}));
     auto diff = info.GetLoadDiff();
-    EXPECT_TRUE(diff.rebuild_manifest_reader);
+    EXPECT_TRUE(ColumnGroupFieldPresent(diff.column_groups_to_load, 101) ||
+                ColumnGroupFieldPresent(diff.column_groups_to_lazyload, 101));
     EXPECT_EQ(diff.fields_to_fill_default,
               (std::vector<FieldId>{FieldId(102)}));
     EXPECT_TRUE(info.GetDefaultFilledFieldsForNewInfo(info).empty());
@@ -4072,7 +4107,7 @@ TEST_F(SegmentLoadInfoTest, ExternalPhysicalToDefaultIsNotDroppedAfterPrepare) {
               (std::set<FieldId>{FieldId(102)}));
 }
 
-TEST_F(SegmentLoadInfoTest, ExternalSchemaOnlyDefaultAdditionRebuildsReader) {
+TEST_F(SegmentLoadInfoTest, ExternalSchemaOnlyDefaultAdditionHasNoColumnLoads) {
     auto groups = MakeColumnGroups({{{101}, {"/value"}}});
     SegmentLoadInfo old(MakeManifestProto("/v1"),
                         MakeHistoricalExternalSchema(false));
@@ -4081,7 +4116,6 @@ TEST_F(SegmentLoadInfoTest, ExternalSchemaOnlyDefaultAdditionRebuildsReader) {
                          MakeHistoricalExternalSchema());
     next.SetColumnGroupsForTesting(groups);
     auto diff = old.ComputeDiff(next);
-    EXPECT_TRUE(diff.rebuild_manifest_reader);
     EXPECT_EQ(diff.fields_to_fill_default,
               (std::vector<FieldId>{FieldId(102)}));
     EXPECT_TRUE(diff.column_groups_to_load.empty());
@@ -4150,6 +4184,20 @@ TEST_F(SegmentLoadInfoTest, ExternalRequiredSourceFieldCannotBecomeDefault) {
     SegmentLoadInfo info(MakeManifestProto("/v1"), schema);
     info.SetColumnGroupsForTesting(MakeColumnGroups({{{102}, {"/revision"}}}));
     EXPECT_THROW(info.GetLoadDiff(), SegcoreError);
+
+    // Ignoring an unmapped column must not hide a missing required mapping.
+    SegmentLoadInfo named(MakeManifestProto("/v1"),
+                          MakeNamedExternalSchema(false));
+    named.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"id", "tenant"}, {"/data"}}}));
+    try {
+        named.GetLoadDiff();
+        FAIL() << "Expected missing required vector column to fail";
+    } catch (const SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find(
+                      "required manifest column vector is missing"),
+                  std::string::npos);
+    }
 }
 
 TEST_F(SegmentLoadInfoTest,
