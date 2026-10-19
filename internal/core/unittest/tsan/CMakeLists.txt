@@ -16,7 +16,7 @@ add_executable(tsan_probe probe.cpp)
 target_compile_features(tsan_probe PRIVATE cxx_std_11)
 target_link_libraries(tsan_probe PRIVATE tsan_probe_access Threads::Threads)
 
-foreach(mode clean race-c race-cxx)
+foreach(mode clean race-c race-cxx race-memcpy)
     add_test(NAME tsan-${mode}
         COMMAND "${CMAKE_COMMAND}"
             "-DPROBE=$<TARGET_FILE:tsan_probe>"
