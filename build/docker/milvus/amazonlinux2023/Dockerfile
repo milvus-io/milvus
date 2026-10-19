@@ -27,7 +27,9 @@ RUN yum install -y wget libgomp libaio libatomic tzdata && \
     rm -rf /var/cache/yum/*
 
 RUN uv --no-cache python install 3.12.13 && \
-    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        --upgrade setuptools msgpack urllib3
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
