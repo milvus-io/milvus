@@ -261,7 +261,7 @@ func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 	prop := m.properties.Clone()
 	return &immutableMessageImpl{
 		id:        id,
-		bodyCache: &bodyCacheSlot{},
+		bodyCache: newBodyCacheSlot(),
 		messageImpl: messageImpl{
 			payload:    m.payload,
 			properties: prop,

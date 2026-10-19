@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"strconv"
 	"testing"
 	"testing/iotest"
 
@@ -418,4 +419,39 @@ func TestBM25StatsAtomicDeltaAndVocabularyCleanup(t *testing.T) {
 	corrupt := NewBM25Stats()
 	corrupt.rowsWithToken[9000] = 2
 	require.Error(t, aggregate.ValidateDelta(NewBM25Stats(), corrupt))
+}
+
+// The optimized decoder preserves the original binary.Read field boundaries.
+func TestBM25DeserializeTruncatedBoundaries(t *testing.T) {
+	data := make([]byte, 36)
+	common.Endian.PutUint64(data[4:12], 2)
+	common.Endian.PutUint64(data[12:20], 3)
+	common.Endian.PutUint32(data[20:24], 7)
+	common.Endian.PutUint32(data[24:28], 2)
+	for n := 0; n <= len(data); n++ {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			want := error(nil)
+			if n < 20 {
+				want = io.ErrUnexpectedEOF
+				if n == 0 || n == 4 || n == 12 {
+					want = io.EOF
+				}
+			} else if remainder := (n - 20) % 8; remainder != 0 {
+				want = io.ErrUnexpectedEOF
+				if remainder == 4 {
+					want = io.EOF
+				}
+			}
+			stats := NewBM25Stats()
+			assert.Equal(t, want, stats.DeserializeFromReader(bytes.NewReader(data[:n])))
+			if n >= 28 {
+				assert.Equal(t, int32(2), stats.rowsWithToken[7])
+			}
+			// Slice deserialization historically ignores an incomplete tail.
+			if n >= 20 {
+				want = nil
+			}
+			assert.Equal(t, want, NewBM25Stats().Deserialize(data[:n]))
+		})
+	}
 }
