@@ -97,6 +97,16 @@ func (it *indexBuildTask) parseParams() {
 }
 
 func (it *indexBuildTask) Reset() {
+	// Reset runs from processTask's deferred cleanup on every exit path, including
+	// the canceled one where PostExecute -- the only other place that releases the
+	// index -- is skipped. Without this the native index built by Execute is never
+	// freed. Delete is idempotent, so releasing here after a normal PostExecute is
+	// a no-op.
+	if it.index != nil {
+		if err := it.index.Delete(); err != nil {
+			mlog.Warn(it.ctx, "failed to release index object on task reset", mlog.Err(err))
+		}
+	}
 	it.ident = ""
 	it.cancel = nil
 	it.ctx = nil

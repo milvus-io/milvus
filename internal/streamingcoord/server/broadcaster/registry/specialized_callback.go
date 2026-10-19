@@ -30,6 +30,8 @@ var (
 	RegisterTruncateCollectionV2AckCallback = registerMessageAckCallback[*message.TruncateCollectionMessageHeader, *message.TruncateCollectionMessageBody]
 	RegisterAlterLoadConfigV2AckCallback    = registerMessageAckCallback[*message.AlterLoadConfigMessageHeader, *message.AlterLoadConfigMessageBody]
 	RegisterDropLoadConfigV2AckCallback     = registerMessageAckCallback[*message.DropLoadConfigMessageHeader, *message.DropLoadConfigMessageBody]
+	RegisterAlterRLSMetadataV2AckCallback   = registerMessageAckCallback[*message.AlterRLSMetadataMessageHeader, *message.AlterRLSMetadataMessageBody]
+	RegisterDropRLSMetadataV2AckCallback    = registerMessageAckCallback[*message.DropRLSMetadataMessageHeader, *message.DropRLSMetadataMessageBody]
 
 	// Partition
 	RegisterCreatePartitionV1AckCallback = registerMessageAckCallback[*message.CreatePartitionMessageHeader, *message.CreatePartitionRequest]
@@ -100,6 +102,8 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeTruncateCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeAlterLoadConfigV2:    syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropLoadConfigV2:     syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterRLSMetadataV2:   syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropRLSMetadataV2:    syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Partition
 		message.MessageTypeCreatePartitionV1: syncutil.NewFuture[messageInnerAckCallback](),

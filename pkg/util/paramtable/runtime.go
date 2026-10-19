@@ -21,6 +21,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -32,9 +33,12 @@ const (
 )
 
 var (
-	once         sync.Once
-	params       ComponentParam
-	runtimeParam = runtimeConfig{
+	once               sync.Once
+	params             ComponentParam
+	fastPBEnabledState atomic.Bool
+	fastPBUpdateMu     sync.Mutex
+	paramsInitialized  atomic.Bool
+	runtimeParam       = runtimeConfig{
 		components: typeutil.ConcurrentSet[string]{},
 	}
 	hookParams   hookConfig
@@ -55,6 +59,7 @@ func Init() {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		paramsInitialized.Store(true)
 	})
 }
 
@@ -64,12 +69,62 @@ func InitWithBaseTable(baseTable *BaseTable) {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		paramsInitialized.Store(true)
 	})
 }
 
 func Get() *ComponentParam {
 	Init()
 	return &params
+}
+
+// GetIfInitialized returns the global configuration without initializing it.
+// A nil result lets early RPC decoding retain its default behavior without
+// starting configuration loading as a side effect.
+func GetIfInitialized() *ComponentParam {
+	if !paramsInitialized.Load() {
+		return nil
+	}
+	return &params
+}
+
+// FastPBEnabled returns the lock-free snapshot of common.enableFastPB. Before
+// paramtable finishes initialization, fast protobuf decoding remains enabled.
+func FastPBEnabled() bool {
+	if GetIfInitialized() == nil {
+		return true
+	}
+	return fastPBEnabledState.Load()
+}
+
+func updateFastPBEnabled() {
+	// Serialize the read and publication so concurrent refreshes cannot publish
+	// an older snapshot after a newer one. RPC decoding only reads the atomic.
+	fastPBUpdateMu.Lock()
+	defer fastPBUpdateMu.Unlock()
+	// Exact-key handlers run before typed-cache eviction. Read the uncached
+	// effective value, including runtime overrides and the default after DELETE.
+	fastPBEnabledState.Store(getAsBool(params.CommonCfg.EnableFastPB.GetValue()))
+}
+
+// RefreshRemoteConfigsLinearizable makes the etcd config source re-read every key with a
+// linearizable read, so a value committed to etcd immediately before this call is visible to
+// this process at once instead of only on the next periodic refresh.
+//
+// The boolean reports whether a remote source was there to refresh: with no etcd config
+// source (embedded milvus, unit tests) the file source is already authoritative and carries
+// no propagation delay, so (false, nil) means "nothing to refresh", not a failure. A failed
+// read leaves the last polled snapshot in place, so a caller that cannot tolerate a stale
+// value must still validate what it subsequently reads.
+func (bt *BaseTable) RefreshRemoteConfigsLinearizable() (refreshed bool, err error) {
+	etcdSource, ok := bt.Manager().GetEtcdSource()
+	if !ok {
+		return false, nil
+	}
+	if err := etcdSource.RefreshConfigurationsLinearizable(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func GetBaseTable() *BaseTable {

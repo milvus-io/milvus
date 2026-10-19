@@ -50,9 +50,14 @@ func TestSortCompactionTaskSuite(t *testing.T) {
 func TestSortInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	textFieldIDs := []int64{101, 102}
+	params := compaction.GenParams()
+	collectionID, partitionID := int64(10), int64(20)
 	task := &sortCompactionTask{
-		segmentID: 100,
-		manifest:  "manifest-100",
+		collectionID: collectionID,
+		partitionID:  partitionID,
+		segmentID:    100,
+		manifest: packed.MarshalManifestPath(
+			storage.SegmentManifestBasePath(params.StorageConfig.GetRootPath(), collectionID, partitionID, 100), 1),
 		plan: &datapb.CompactionPlan{
 			Type: datapb.CompactionType_SortCompaction,
 			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -60,7 +65,7 @@ func TestSortInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *tes
 				{FieldID: textFieldIDs[1], Name: "text_2", DataType: schemapb.DataType_Text},
 			}},
 		},
-		compactionParams: compaction.GenParams(),
+		compactionParams: params,
 	}
 	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(map[int64][]packed.LobFileInfo{
 		100: {},
@@ -76,6 +81,37 @@ func TestSortInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *tes
 		for _, fieldID := range textFieldIDs {
 			assert.Equal(t, compaction.LOBStrategyReuseAll, task.lobContext.Decisions[fieldID].Strategy)
 		}
+	}
+}
+
+func TestSortInitLOBCompactionContextRewritesAcrossPartitionBases(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	params := compaction.GenParams()
+	task := &sortCompactionTask{
+		collectionID: 10,
+		partitionID:  20,
+		segmentID:    100,
+		manifest: packed.MarshalManifestPath(
+			params.StorageConfig.GetRootPath()+"/files/insert_log/10/20/100", 1),
+		plan: &datapb.CompactionPlan{
+			Type: datapb.CompactionType_SortCompaction,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			}},
+		},
+		compactionParams: params,
+	}
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{100: {{FieldID: 101, TotalRows: 1, ValidRows: 1}}}, nil,
+	).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	assert.NoError(t, err)
+	if assert.NotNil(t, task.lobContext) {
+		assert.False(t, task.lobContext.HasReuseAllFields())
+		assert.True(t, task.lobContext.ShouldRewriteAnyField())
+		assert.Equal(t, compaction.LOBStrategyRewriteAll, task.lobContext.GetStrategy(101))
 	}
 }
 

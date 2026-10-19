@@ -20,6 +20,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestCheckJSONDepth(t *testing.T) {
+	for _, tc := range []struct {
+		name, document string
+		valid          bool
+	}{
+		{"empty_containers_at_limit", strings.Repeat("[", MaxJSONDepth) + strings.Repeat("]", MaxJSONDepth), true},
+		{"scalar_at_limit", strings.Repeat("[", MaxJSONDepth-1) + "0" + strings.Repeat("]", MaxJSONDepth-1), true},
+		{"scalar_past_limit", strings.Repeat("[", MaxJSONDepth) + "0" + strings.Repeat("]", MaxJSONDepth), false},
+		{"container_past_limit", strings.Repeat("[", MaxJSONDepth+1) + strings.Repeat("]", MaxJSONDepth+1), false},
+		{"object_at_limit", strings.Repeat(`{"x":`, MaxJSONDepth-1) + `{}` + strings.Repeat("}", MaxJSONDepth-1), true},
+		{"object_value_past_limit", strings.Repeat(`{"x":`, MaxJSONDepth) + `null` + strings.Repeat("}", MaxJSONDepth), false},
+		{"brackets_in_strings", `{"x":"[[{\\\"","large":9007199254740993}`, true},
+		{"invalid_json", `{"x":?}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckJSONDepth("metadata", []byte(tc.document))
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
+			}
+		})
+	}
+}
+
 func autoGenDynamicFieldData(schema *schemapb.CollectionSchema, data [][]byte) *schemapb.FieldData {
 	fd := &schemapb.FieldData{
 		FieldName: common.MetaFieldName,
@@ -7985,6 +8011,7 @@ func Test_ValidateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 						VectorArray: &schemapb.VectorArray{
 							Data: []*schemapb.VectorField{
 								{
+									Dim: 3,
 									Data: &schemapb.VectorField_FloatVector{
 										FloatVector: &schemapb.FloatArray{
 											Data: []float32{1.0, 2.0, float32(math.NaN())},
@@ -8016,6 +8043,7 @@ func Test_ValidateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 						VectorArray: &schemapb.VectorArray{
 							Data: []*schemapb.VectorField{
 								{
+									Dim: 1,
 									Data: &schemapb.VectorField_FloatVector{
 										FloatVector: &schemapb.FloatArray{
 											Data: []float32{float32(math.NaN())},
@@ -8046,6 +8074,7 @@ func Test_ValidateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 						VectorArray: &schemapb.VectorArray{
 							Data: []*schemapb.VectorField{
 								{
+									Dim: 2,
 									Data: &schemapb.VectorField_FloatVector{
 										FloatVector: &schemapb.FloatArray{
 											Data: []float32{1.0, 2.0},
@@ -8053,6 +8082,7 @@ func Test_ValidateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 									},
 								},
 								{
+									Dim: 2,
 									Data: &schemapb.VectorField_FloatVector{
 										FloatVector: &schemapb.FloatArray{
 											Data: []float32{3.0, 4.0},
@@ -8084,6 +8114,7 @@ func Test_ValidateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 						VectorArray: &schemapb.VectorArray{
 							Data: []*schemapb.VectorField{
 								{
+									Dim: 2,
 									Data: &schemapb.VectorField_FloatVector{
 										FloatVector: &schemapb.FloatArray{
 											Data: []float32{1.0, 2.0, 3.0, 4.0},
@@ -8119,6 +8150,7 @@ func Test_ValidateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 						VectorArray: &schemapb.VectorArray{
 							Data: []*schemapb.VectorField{
 								{
+									Dim: 2,
 									Data: &schemapb.VectorField_FloatVector{
 										FloatVector: &schemapb.FloatArray{
 											Data: []float32{1.0, 2.0, 3.0},
@@ -8141,6 +8173,59 @@ func Test_ValidateUtil_checkArrayOfVectorFieldData(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "divisible")
 	})
+}
+
+func Test_ValidateUtil_ArrayOfVectorRowDimensions(t *testing.T) {
+	cases := []struct {
+		elementType schemapb.DataType
+		row         *schemapb.VectorField
+	}{
+		{schemapb.DataType_FloatVector, &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}},
+		{schemapb.DataType_BinaryVector, &schemapb.VectorField{Dim: 16, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2}}}},
+		{schemapb.DataType_Float16Vector, &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_Float16Vector{Float16Vector: make([]byte, 8)}}},
+		{schemapb.DataType_BFloat16Vector, &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: make([]byte, 8)}}},
+		{schemapb.DataType_Int8Vector, &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.elementType.String(), func(t *testing.T) {
+			dim := tc.row.GetDim()
+			schema := &schemapb.FieldSchema{
+				FieldID: 100, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+				ElementType: tc.elementType, Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: fmt.Sprint(dim)}},
+			}
+			helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{schema}})
+			require.NoError(t, err)
+			newField := func() *schemapb.FieldData {
+				return &schemapb.FieldData{
+					FieldId: 100, FieldName: "vectors", Type: schemapb.DataType_ArrayOfVector,
+					ValidData: []bool{true, false},
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim: dim,
+						Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+							Dim: dim, ElementType: tc.elementType, Data: []*schemapb.VectorField{tc.row},
+						}},
+					}},
+				}
+			}
+			v := NewValidateUtil()
+			for _, invalidDim := range []int64{0, -1, dim - 1, dim + 1} {
+				t.Run(fmt.Sprint(invalidDim), func(t *testing.T) {
+					tc.row.Dim = invalidDim
+					err := v.Validate([]*schemapb.FieldData{newField()}, helper, 2)
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					assert.Contains(t, err.Error(), "row 0 has dim")
+				})
+			}
+			tc.row.Dim = dim
+			field := newField()
+			require.NoError(t, v.Validate([]*schemapb.FieldData{field}, helper, 2))
+			rows := field.GetVectors().GetVectorArray().GetData()
+			require.Len(t, rows, 2)
+			assert.Equal(t, dim, rows[0].GetDim())
+			assert.Equal(t, dim, rows[1].GetDim())
+		})
+	}
 }
 
 func Test_ValidateUtil_checkAligned_ArrayOfVector(t *testing.T) {

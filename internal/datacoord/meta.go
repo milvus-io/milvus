@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -110,6 +111,19 @@ type meta struct {
 	broker                        broker.Broker
 	// Snapshot Meta
 	snapshotMeta *snapshotMeta
+
+	// segmentChangeGroups is the in-memory table of SegmentChangeGroup, keyed by
+	// groupID and guarded by segMu (the group record composes into the same
+	// catalog txn as segment writes, so it shares the segment lock). The reverse
+	// indexes map an ALIVE (STAGED/READY) group's referenced segments to their
+	// owning group for cheap "is this segment claimed" lookups and to enforce
+	// the anti-duplication invariant (an L1/L2 segment may be referenced — as a
+	// member or a superseded parent — by at most one alive group):
+	//   - stagedSegmentToGroup:    new_segment (member)     -> groupID
+	//   - supersededSegmentToGroup: superseded (parent)      -> groupID
+	segmentChangeGroups      map[int64]*model.SegmentChangeGroup
+	stagedSegmentToGroup     map[int64]int64
+	supersededSegmentToGroup map[int64]int64
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -264,13 +278,16 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
 	mt := &meta{
-		ctx:          ctx,
-		catalog:      catalog,
-		collections:  typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:     NewSegmentsInfo(),
-		channelCPs:   newChannelCps(),
-		chunkManager: chunkManager,
-		broker:       broker,
+		ctx:                      ctx,
+		catalog:                  catalog,
+		collections:              typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:                 NewSegmentsInfo(),
+		channelCPs:               newChannelCps(),
+		chunkManager:             chunkManager,
+		broker:                   broker,
+		segmentChangeGroups:      make(map[int64]*model.SegmentChangeGroup),
+		stagedSegmentToGroup:     make(map[int64]int64),
+		supersededSegmentToGroup: make(map[int64]int64),
 	}
 
 	g, _ := errgroup.WithContext(ctx)
@@ -323,6 +340,12 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return err
 	})
 
+	var (
+		scg  map[int64]*model.SegmentChangeGroup
+		stag map[int64]int64
+		sup  map[int64]int64
+	)
+
 	// reloadFromKV (ListSegments, ListChannelCheckpoint) runs in parallel with sub-meta loading.
 	// It only uses mt.catalog/mt.segments/mt.channelCPs, which are independent of sub-metas.
 	g.Go(func() error {
@@ -341,6 +364,18 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.statsTaskMeta = stm
 	mt.externalCollectionRefreshMeta = ecrm
 	mt.snapshotMeta = spm
+
+	// Segment change groups load AFTER segments are in memory: the recovery
+	// index build exempts L0 superseded parents, which requires segment levels
+	// (m.segments must be populated by reloadFromKV above).
+	var loadErr error
+	scg, stag, sup, loadErr = mt.loadSegmentChangeGroups(ctx)
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	mt.segmentChangeGroups = scg
+	mt.stagedSegmentToGroup = stag
+	mt.supersededSegmentToGroup = sup
 
 	return mt, nil
 }
@@ -375,9 +410,23 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 	metrics.DataCoordNumSegments.Reset()
 	numStoredRows := int64(0)
 	numSegments := 0
+	local, localStorage := m.chunkManager.(*storage.LocalChunkManager)
 	for _, segments := range collectionSegments {
 		numSegments += len(segments)
 		for _, segment := range segments {
+			if localStorage && segment.GetStorageVersion() == storage.StorageV3 {
+				manifestPath, err := normalizeLocalManifestPath(segment.GetManifestPath(), local.RootPath(),
+					Params.MinioCfg.RootPath.GetValue(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+				if err != nil {
+					return err
+				}
+				if manifestPath != segment.GetManifestPath() {
+					// Resolve only the loaded view. Startup does not write the
+					// catalog; a later ordinary update can persist the new path.
+					segment = proto.Clone(segment).(*datapb.SegmentInfo)
+					segment.ManifestPath = manifestPath
+				}
+			}
 			// segments from catalog.ListSegments will not have logPath
 			m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
 			metrics.DataCoordNumSegments.WithLabelValues(segmentMetricLabelValues(NewSegmentInfo(segment))...).Inc()
@@ -1265,12 +1314,20 @@ func updateManifestPathIfNewer(segment *SegmentInfo, manifestPath string) error 
 	return nil
 }
 
+// l0ManifestCommit is task-local retry state, not a durable deduplication record.
+// Reuse requires the original base or the already-adopted result to be current.
+type l0ManifestCommit struct {
+	baseManifest string
+	manifestPath string
+}
+
 type l0ManifestUpdate struct {
 	segmentID            int64
 	deltalogs            []*datapb.FieldBinlog
 	storageConfig        *indexpb.StorageConfig
-	committedV3Manifests map[int64]string
+	committedV3Manifests map[int64]l0ManifestCommit
 	segment              *SegmentInfo
+	baseManifest         string
 	manifestPath         string
 	entries              []packed.DeltaLogEntry
 }
@@ -1282,6 +1339,13 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 			mlog.Int64("segmentID", u.segmentID))
 		return false
 	}
+	u.baseManifest = u.segment.GetManifestPath()
+	// Work on owned copies: failed publication must leave the worker result's
+	// paths available for a fresh-base retry.
+	u.deltalogs = filterDuplicateFieldBinlogs(u.segment.GetDeltalogs(), u.deltalogs)
+	u.deltalogs = lo.Map(u.deltalogs, func(fb *datapb.FieldBinlog, _ int) *datapb.FieldBinlog {
+		return proto.Clone(fb).(*datapb.FieldBinlog)
+	})
 	if len(u.deltalogs) == 0 {
 		return false
 	}
@@ -1293,8 +1357,12 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 		return true
 	}
 
-	if u.committedV3Manifests != nil {
-		u.manifestPath = u.committedV3Manifests[u.segmentID]
+	if cached, ok := u.committedV3Manifests[u.segmentID]; ok {
+		if cached.baseManifest == u.baseManifest || cached.manifestPath == u.baseManifest {
+			u.manifestPath = cached.manifestPath
+		} else {
+			delete(u.committedV3Manifests, u.segmentID)
+		}
 	}
 	if u.manifestPath != "" {
 		return true
@@ -1357,7 +1425,7 @@ func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
 	err := conc.BlockOnAll(futures...)
 	for _, update := range updates {
 		if update.committedV3Manifests != nil && update.manifestPath != "" {
-			update.committedV3Manifests[update.segmentID] = update.manifestPath
+			update.committedV3Manifests[update.segmentID] = l0ManifestCommit{baseManifest: update.baseManifest, manifestPath: update.manifestPath}
 		}
 	}
 	return err
@@ -1398,7 +1466,7 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 	segmentID int64,
 	deltalogs []*datapb.FieldBinlog,
 	storageConfig *indexpb.StorageConfig,
-	committedV3Manifests map[int64]string,
+	committedV3Manifests map[int64]l0ManifestCommit,
 ) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		update := &l0ManifestUpdate{
@@ -1851,10 +1919,9 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 				// Recovery from here is out of band. The job is already
 				// Committing by the time this runs -- commitImportV2AckCallback
 				// persists that state on the broadcast FastAck, independent of
-				// this fence -- and Committing is terminal for AbortImport while
-				// tryTimeoutJob never reaches it (TimeoutTs defaults to
-				// math.MaxUint64). Validating earlier does not change that: the
-				// ack path flips the state regardless of what this check says.
+				// this fence -- and Committing cannot be failed by any writer
+				// (UnfailableJobStates). Validating earlier does not change that:
+				// the ack path flips the state regardless of what this check says.
 				return modPack.fail(merr.WrapErrImportSysFailedMsg(
 					"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
 					ts, maxTsTo, segmentID))
@@ -1914,31 +1981,47 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
+// L0 operators and their companion input-retirement operators must be safe to
+// re-evaluate against fresh segment clones after manifest I/O. Segment and
+// metric changes remain staged until publication below.
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
-	updatePack := &updateSegmentPack{
-		meta:       m,
-		segments:   make(map[int64]*SegmentInfo),
-		increments: make(map[int64]metastore.BinlogsIncrement),
-		metricMutation: &segMetricMutation{
-			stateChange:             make(segmentMetricStateChange),
-			deferSegmentLabelChange: true,
-		},
+	updatePack := m.prepareSegmentUpdates(operators)
+	if updatePack.err != nil {
+		return updatePack.err
 	}
-
-	for _, operator := range operators {
-		operator(updatePack)
+	if len(updatePack.l0ManifestUpdates) > 0 {
+		prepared := updatePack.l0ManifestUpdates
+		// The pack owns its segment clones. Neither object-store I/O nor the
+		// wait for the commit pool may hold the global metadata lock.
+		m.segMu.Unlock()
+		err := commitL0ManifestUpdates(prepared)
+		m.segMu.Lock()
+		if err != nil {
+			return err
+		}
+		paths := make(map[int64]string, len(prepared))
+		for _, update := range prepared {
+			current := m.segments.GetSegment(update.segmentID)
+			if current == nil || current.GetState() != update.segment.GetState() || current.GetManifestPath() != update.baseManifest {
+				delete(update.committedV3Manifests, update.segmentID)
+				return merr.WrapErrServiceUnavailableMsg("L0 manifest base changed during commit, segmentID=%d", update.segmentID)
+			}
+			paths[update.segmentID] = update.manifestPath
+		}
+		// Re-evaluate the operators against the latest records, preserving
+		// ordinary metadata changes made while manifest I/O was in progress.
+		// Input retirement remains in this same catalog publication.
+		updatePack = m.prepareSegmentUpdates(operators)
 		if updatePack.err != nil {
 			return updatePack.err
 		}
-	}
-	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
-		return err
-	}
-	for _, update := range updatePack.l0ManifestUpdates {
-		if !update.apply(updatePack) {
-			return updatePack.err
+		for _, update := range updatePack.l0ManifestUpdates {
+			update.manifestPath = paths[update.segmentID]
+			if !update.apply(updatePack) && updatePack.err != nil {
+				return updatePack.err
+			}
 		}
 	}
 
@@ -1977,6 +2060,27 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	}
 	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
 	return nil
+}
+
+// prepareSegmentUpdates must be called with segMu held. Operators prepare only
+// cloned metadata; all persistence and metric publication happens afterwards.
+func (m *meta) prepareSegmentUpdates(operators []UpdateOperator) *updateSegmentPack {
+	pack := &updateSegmentPack{
+		meta:       m,
+		segments:   make(map[int64]*SegmentInfo),
+		increments: make(map[int64]metastore.BinlogsIncrement),
+		metricMutation: &segMetricMutation{
+			stateChange:             make(segmentMetricStateChange),
+			deferSegmentLabelChange: true,
+		},
+	}
+	for _, operator := range operators {
+		operator(pack)
+		if pack.err != nil {
+			break
+		}
+	}
+	return pack
 }
 
 // UpdateDropChannelSegmentInfo updates segment checkpoints and binlogs before drop

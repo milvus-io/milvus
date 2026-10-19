@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -57,6 +59,47 @@
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
 
+namespace {
+// QueryNode supplies a snapshot of server settings. These are Milvus-only
+// controls and must not be forwarded to the backend.
+void
+ParseStrictGroupSettings(SearchInfo& info) {
+    auto& params = info.search_params_;
+    if (auto it = params.find(kStrictGroupSkipRefine); it != params.end()) {
+        if (!it->is_boolean()) {
+            ThrowInfo(InvalidParameter,
+                      "strict group skip refine must be boolean");
+        }
+        info.strict_group_skip_refine_ = it->get<bool>();
+        params.erase(it);
+    }
+    if (auto it = params.find(kStrictGroupPhase1CandidateWeight);
+        it != params.end()) {
+        if (!it->is_number_integer() ||
+            (it->is_number_unsigned() &&
+             it->get<uint64_t>() >
+                 static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) ||
+            it->get<int64_t>() < 0) {
+            ThrowInfo(InvalidParameter,
+                      "strict group phase-one candidate weight must be a "
+                      "nonnegative int64");
+        }
+        info.strict_group_phase1_candidate_weight_ = it->get<int64_t>();
+        params.erase(it);
+    }
+    if (auto it = params.find(kStrictGroupStrategy); it != params.end()) {
+        if (!it->is_string() || (*it != "original" && *it != "per_group")) {
+            ThrowInfo(InvalidParameter,
+                      "strict group strategy must be original or per_group");
+        }
+        info.strict_group_strategy_ = *it == "per_group"
+                                          ? StrictGroupStrategy::PerGroup
+                                          : StrictGroupStrategy::Original;
+        params.erase(it);
+    }
+}
+}  // namespace
+
 void
 ProtoParser::PlanOptionsFromProto(
     const proto::plan::PlanOption& plan_option_proto,
@@ -97,6 +140,7 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
     search_info.round_decimal_ = query_info_proto.round_decimal();
     search_info.search_params_ =
         nlohmann::json::parse(query_info_proto.search_params());
+    ParseStrictGroupSettings(search_info);
     search_info.materialized_view_involved =
         query_info_proto.materialized_view_involved();
     // currently, iterative filter does not support range search
@@ -455,11 +499,9 @@ BuildProjectAndAggregationNodes(
     // filtered rows, so AggregationNode always receives input where
     // size() == number of existing rows (needed for count(*)).
     {
-        auto project_field_id_list = std::vector<FieldId>(
-            project_id_list.begin(), project_id_list.end());
         plannode = std::make_shared<plan::ProjectNode>(
             milvus::plan::GetNextPlanNodeId(),
-            std::move(project_field_id_list),
+            std::move(project_id_list),
             std::move(project_name_list),
             std::move(project_type_list),
             sources);
@@ -473,7 +515,7 @@ BuildProjectAndAggregationNodes(
         std::move(groupingKeys),
         std::move(agg_names),
         std::move(aggregates),
-        agg_sources);
+        std::move(agg_sources));
 }
 // Helper function to build ProjectNode for ORDER BY queries.
 // Returns {ProjectNode, deferred_field_ids, pipeline_field_ids}.
@@ -1288,7 +1330,7 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
         expr::ColumnInfo(column_info),
         expr_pb.op(),
         expr_pb.value(),
-        extra_values);
+        std::move(extra_values));
 }
 
 expr::TypedExprPtr
@@ -1510,7 +1552,7 @@ ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
         values.emplace_back(expr_pb.values(i));
     }
     return std::make_shared<expr::TermFilterExpr>(
-        columnInfo, values, expr_pb.is_in_field());
+        columnInfo, std::move(values), expr_pb.is_in_field());
 }
 
 expr::TypedExprPtr
@@ -1785,7 +1827,7 @@ ProtoParser::ExtractFilterOnlyPlan(
             return nullptr;
         }
         if (std::dynamic_pointer_cast<plan::VectorSearchNode>(node)) {
-            auto sources = node->sources();
+            const auto& sources = node->sources();
             if (sources.empty()) {
                 return nullptr;
             }

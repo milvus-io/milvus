@@ -17,14 +17,94 @@
 package paramtable
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 )
+
+func TestDataNodeConcurrencyAndImportMemoryFallbacks(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.DataNodeCfg
+	for _, invalid := range []string{"0", "-1"} {
+		params.Save(cfg.MaxParallelSyncMgrTasksPerCPUCore.Key, invalid)
+		require.Equal(t, 16, cfg.MaxParallelSyncMgrTasksPerCPUCore.GetAsInt())
+	}
+	for _, invalid := range []string{"0", "-1", "101"} {
+		params.Save(cfg.ImportMemoryLimitPercentage.Key, invalid)
+		require.Equal(t, float64(10), cfg.ImportMemoryLimitPercentage.GetAsFloat())
+	}
+}
+
+func TestQueryNodeStrictGroupSettings(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.QueryNodeCfg
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	params.Save(cfg.StrictGroupPhase1CandidateWeight.Key, "50")
+	params.Save(cfg.StrictGroupSkipRefine.Key, "true")
+	assert.Equal(t, int64(50), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.True(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	params.Reset(cfg.StrictGroupPhase1CandidateWeight.Key)
+	params.Reset(cfg.StrictGroupSkipRefine.Key)
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	for _, name := range []string{"StrictGroupPhase1CandidateWeight", "StrictGroupSkipRefine"} {
+		field, ok := reflect.TypeOf(cfg).Elem().FieldByName(name)
+		assert.True(t, ok)
+		assert.Equal(t, "true", field.Tag.Get("refreshable"))
+	}
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+	params.Save(cfg.StrictGroupStrategy.Key, "per_group")
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+	params.Save(cfg.StrictGroupStrategy.Key, "original")
+	assert.Equal(t, "original", cfg.StrictGroupStrategy.GetValue())
+	params.Reset(cfg.StrictGroupStrategy.Key)
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+}
+
+func TestComponentParamDerivedLocalStoragePathsUseCanonicalFrozenValue(t *testing.T) {
+	workingDir := t.TempDir()
+	t.Chdir(workingDir)
+	configDir := t.TempDir()
+	t.Setenv("MILVUSCONF", configDir)
+	configFile := filepath.Join(configDir, "local-storage.yaml")
+	root := filepath.Join(t.TempDir(), "canonical")
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: \"  "+root+"/./  \"\n"), 0o600))
+
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{filepath.Base(configFile)}), Interval(10*time.Millisecond))
+	t.Cleanup(bt.mgr.Close)
+	params := &ComponentParam{}
+	params.Init(bt)
+
+	wantRoot := filepath.Clean(root)
+	require.Equal(t, wantRoot, params.LocalStorageCfg.Path.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "pprof"), params.ProfileCfg.PprofPath.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "mmap"), params.QueryNodeCfg.MmapDirPath.GetValue())
+	initialDiskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetValue()
+
+	// File/config-center updates replace the raw source value before the
+	// Forbidden handler rejects them. Derived paths must keep using the same
+	// canonical startup root as LocalStorageCfg.Path, not that rejected raw value.
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: relative/data\n"), 0o600))
+	require.Eventually(t, func() bool {
+		return bt.Get("localStorage.path") == "relative/data"
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, wantRoot, params.LocalStorageCfg.Path.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "pprof"), params.ProfileCfg.PprofPath.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "mmap"), params.QueryNodeCfg.MmapDirPath.GetValue())
+	require.Equal(t, initialDiskCapacity, params.QueryNodeCfg.DiskCapacityLimit.GetValue())
+	require.NoDirExists(t, filepath.Join(workingDir, "relative"))
+}
 
 func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()
@@ -177,6 +257,21 @@ func TestMembershipFilterSizeFallbackKeys(t *testing.T) {
 		assert.Equal(t, int64(64*1024*1024), params.ProxyCfg.MaxMembershipFilterSize.GetAsInt64())
 		assert.Equal(t, int64(128*1024*1024), params.ProxyCfg.MaxMembershipFilterPlanSize.GetAsInt64())
 	})
+}
+
+func TestComponentParam_TieredLazyColumnGroupEnabled(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
+
+	item := &params.QueryNodeCfg.TieredLazyColumnGroupEnabled
+	assert.Equal(t, "queryNode.segcore.tieredStorage.lazyColumnGroupEnabled", item.Key)
+	assert.Equal(t, "3.0.3", item.Version)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, params.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, params.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
 }
 
 func TestComponentParam(t *testing.T) {
@@ -478,6 +573,38 @@ func TestComponentParam(t *testing.T) {
 		params.Reset(Params.MaxSearchAggregationResultEntries.Key)
 		assert.Equal(t, int64(10000), Params.MaxSearchAggregationResultEntries.GetAsInt64())
 
+		assert.Equal(t, 100, Params.RLSMaxPoliciesPerCollection.GetAsInt())
+		assert.Equal(t, 50, Params.RLSMaxTagsPerPrincipal.GetAsInt())
+		assert.Equal(t, 4096, Params.RLSMaxExpressionLength.GetAsInt())
+		assert.Equal(t, 16384, Params.RLSMaxCombinedExpressionLength.GetAsInt())
+		assert.Equal(t, 255, Params.RLSMaxPolicyNameLength.GetAsInt())
+		assert.Equal(t, 1024, Params.RLSMaxPolicyDescriptionLength.GetAsInt())
+		assert.Equal(t, 255, Params.RLSMaxPrincipalNameLength.GetAsInt())
+		assert.Equal(t, 128, Params.RLSMaxTagKeyLength.GetAsInt())
+		assert.Equal(t, 1024, Params.RLSMaxTagValueLength.GetAsInt())
+		assert.Equal(t, 1024, Params.RLSMaxArrayLiteralElements.GetAsInt())
+		assert.Equal(t, 65536, Params.RLSMaxPrincipalCacheEntries.GetAsInt())
+		assert.Equal(t, int64(64*1024*1024), Params.RLSMaxPrincipalCacheBytes.GetAsInt64())
+		assert.Equal(t, time.Hour, Params.RLSMetaRefreshInterval.GetAsDuration(time.Second))
+		params.Save(Params.RLSMaxPoliciesPerCollection.Key, "2")
+		assert.Equal(t, 2, Params.RLSMaxPoliciesPerCollection.GetAsInt())
+		params.Save(Params.RLSMaxPoliciesPerCollection.Key, "0")
+		assert.Equal(t, 100, Params.RLSMaxPoliciesPerCollection.GetAsInt())
+		params.Reset(Params.RLSMaxPoliciesPerCollection.Key)
+		params.Save(Params.RLSMaxPrincipalCacheEntries.Key, "2")
+		assert.Equal(t, 2, Params.RLSMaxPrincipalCacheEntries.GetAsInt())
+		params.Save(Params.RLSMaxPrincipalCacheEntries.Key, "0")
+		assert.Equal(t, 65536, Params.RLSMaxPrincipalCacheEntries.GetAsInt())
+		params.Reset(Params.RLSMaxPrincipalCacheEntries.Key)
+		params.Save(Params.RLSMaxPrincipalCacheBytes.Key, "1024")
+		assert.Equal(t, int64(1024), Params.RLSMaxPrincipalCacheBytes.GetAsInt64())
+		params.Save(Params.RLSMaxPrincipalCacheBytes.Key, "0")
+		assert.Equal(t, int64(64*1024*1024), Params.RLSMaxPrincipalCacheBytes.GetAsInt64())
+		params.Reset(Params.RLSMaxPrincipalCacheBytes.Key)
+		params.Save(Params.RLSMetaRefreshInterval.Key, "60")
+		assert.Equal(t, time.Minute, Params.RLSMetaRefreshInterval.GetAsDuration(time.Second))
+		params.Reset(Params.RLSMetaRefreshInterval.Key)
+
 		assert.Equal(t, int64(16), Params.DDLConcurrency.GetAsInt64())
 		assert.Equal(t, int64(16), Params.DCLConcurrency.GetAsInt64())
 
@@ -652,6 +779,19 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.BalanceCheckCollectionMaxCount.GetAsInt())
 		assert.Equal(t, 30, Params.ResourceExhaustionPenaltyDuration.GetAsInt())
 		assert.Equal(t, 10, Params.ResourceExhaustionCleanupInterval.GetAsInt())
+
+		assert.False(t, Params.AutoscalePrecheckEnabled.GetAsBool())
+		assert.False(t, Params.AutoscaleEnabled.GetAsBool())
+		assert.Equal(t, int64(0), Params.AutoscaleMaxMemoryLimit.GetAsInt64())
+		assert.Equal(t, int64(0), Params.AutoscaleMaxDiskLimit.GetAsInt64())
+		params.Save("queryCoord.autoscale.precheckEnabled", "true")
+		params.Save("queryCoord.autoscale.enabled", "true")
+		params.Save("queryCoord.autoscale.maxMemoryLimit", "1024")
+		params.Save("queryCoord.autoscale.maxDiskLimit", "2048")
+		assert.True(t, Params.AutoscalePrecheckEnabled.GetAsBool())
+		assert.True(t, Params.AutoscaleEnabled.GetAsBool())
+		assert.Equal(t, int64(1024), Params.AutoscaleMaxMemoryLimit.GetAsInt64())
+		assert.Equal(t, int64(2048), Params.AutoscaleMaxDiskLimit.GetAsInt64())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -828,7 +968,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
 		assert.Equal(t, 2, Params.FilesPerPreImportTask.GetAsInt())
-		assert.Equal(t, 10800*time.Second, Params.ImportTaskRetention.GetAsDuration(time.Second))
+		assert.Equal(t, 172800*time.Second, Params.ImportTaskRetention.GetAsDuration(time.Second))
 		assert.Equal(t, 16384, Params.MaxSizeInMBPerImportTask.GetAsInt())
 		assert.Equal(t, 2*time.Second, Params.ImportScheduleInterval.GetAsDuration(time.Second))
 		assert.Equal(t, 2*time.Second, Params.ImportCheckIntervalHigh.GetAsDuration(time.Second))
@@ -951,7 +1091,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4, Params.ImportConcurrencyPerCPUCore.GetAsInt())
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
 		assert.Equal(t, 16*1024*1024, Params.ImportBaseBufferSize.GetAsInt())
+		assert.Equal(t, 128*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
+		params.Save(Params.ImportDeleteBufferSize.Key, "16")
 		assert.Equal(t, 16*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
+		params.Reset(Params.ImportDeleteBufferSize.Key)
+		assert.Equal(t, 128*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
 		assert.Equal(t, 10.0, Params.ImportMemoryLimitPercentage.GetAsFloat())
 		assert.Equal(t, 0, Params.ImportMaxWriteRetryAttempts.GetAsInt())
 		assert.Equal(t, time.Hour, Params.ImportCopyObjectTimeout.GetAsDuration(time.Second))
@@ -1017,6 +1161,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0.01, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.GetAsFloat())
 		assert.Equal(t, 3, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.GetAsInt())
 		assert.Equal(t, 30*time.Minute, params.StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse())
+		assert.Equal(t, 5*time.Second, params.StreamingCfg.WALBalancerNodeLostGracePeriod.GetAsDurationByParse())
 		assert.Equal(t, 4.0, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
 		assert.Equal(t, 5*time.Minute, params.StreamingCfg.WALBroadcasterTombstoneCheckInternal.GetAsDurationByParse())
 		assert.Equal(t, 8192, params.StreamingCfg.WALBroadcasterTombstoneMaxCount.GetAsInt())
@@ -1245,4 +1390,38 @@ func TestFallbackParam(t *testing.T) {
 	params.Save("common.chanNamePrefix.cluster", "foo")
 
 	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
+}
+
+func TestImportIdempotencyParams(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
+
+	// The advertised idempotency window is the tombstone retention, so an import
+	// job must outlive its tombstone. Otherwise a retry inside the window resolves
+	// to a jobID GetImportProgress can no longer find.
+	assert.Equal(t, 172800, params.DataCoordCfg.ImportTaskRetention.GetAsInt())
+
+	// Headroom, not equality. A tombstone's age is measured from the last
+	// StreamingCoord start, so a restart extends its remaining life by up to another
+	// maxLifetime while this retention keeps counting from the job's own completion.
+	// Equal defaults satisfy the >= above yet break on the first restart, which is
+	// how adversarial review on milvus#52544 found this; one restart per tombstone
+	// lifetime is what the 2x covers.
+	assert.GreaterOrEqual(t,
+		params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
+		2*params.StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse())
+}
+
+func TestPartialUpdateEnableCASConfig(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable())
+	item := &params.StreamingCfg.PartialUpdateEnableCAS
+	assert.Equal(t, "streaming.partialUpdate.enableCAS", item.Key)
+	assert.Equal(t, "3.0.4", item.Version)
+	assert.False(t, item.Export)
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, params.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
 }

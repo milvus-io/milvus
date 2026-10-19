@@ -40,8 +40,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -57,7 +59,12 @@ func TestMixCompactionTaskSuite(t *testing.T) {
 func TestMixInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	textFieldIDs := []int64{101, 102}
+	params := compaction.GenParams()
+	collectionID, partitionID := int64(10), int64(20)
+	partitionBase := storage.SegmentPartitionBasePath(params.StorageConfig.GetRootPath(), collectionID, partitionID)
 	task := &mixCompactionTask{
+		collectionID: collectionID,
+		partitionID:  partitionID,
 		plan: &datapb.CompactionPlan{
 			Type: datapb.CompactionType_MixCompaction,
 			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -65,11 +72,11 @@ func TestMixInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *test
 				{FieldID: textFieldIDs[1], Name: "text_2", DataType: schemapb.DataType_Text},
 			}},
 			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{SegmentID: 1, Manifest: "manifest-1"},
-				{SegmentID: 2, Manifest: "manifest-2"},
+				{SegmentID: 1, Manifest: packed.MarshalManifestPath(partitionBase+"/1", 1)},
+				{SegmentID: 2, Manifest: packed.MarshalManifestPath(partitionBase+"/2", 1)},
 			},
 		},
-		compactionParams:            compaction.GenParams(),
+		compactionParams:            params,
 		estimatedOutputSegmentCount: 1,
 	}
 	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(map[int64][]packed.LobFileInfo{
@@ -87,6 +94,41 @@ func TestMixInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *test
 		for _, fieldID := range textFieldIDs {
 			assert.Equal(t, compaction.LOBStrategyReuseAll, task.lobContext.Decisions[fieldID].Strategy)
 		}
+	}
+}
+
+func TestMixInitLOBCompactionContextRewritesAcrossPartitionBases(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	params := compaction.GenParams()
+	collectionID, partitionID := int64(10), int64(20)
+	task := &mixCompactionTask{
+		collectionID: collectionID,
+		partitionID:  partitionID,
+		plan: &datapb.CompactionPlan{
+			Type: datapb.CompactionType_MixCompaction,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			}},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+				SegmentID: 1,
+				Manifest: packed.MarshalManifestPath(
+					params.StorageConfig.GetRootPath()+"/files/insert_log/10/20/1", 1),
+			}},
+		},
+		compactionParams:            params,
+		estimatedOutputSegmentCount: 1,
+	}
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{1: {{FieldID: 101, TotalRows: 1, ValidRows: 1}}}, nil,
+	).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	assert.NoError(t, err)
+	if assert.NotNil(t, task.lobContext) {
+		assert.False(t, task.lobContext.HasReuseAllFields())
+		assert.True(t, task.lobContext.ShouldRewriteAnyField())
+		assert.Equal(t, compaction.LOBStrategyRewriteAll, task.lobContext.GetStrategy(101))
 	}
 }
 
@@ -135,6 +177,25 @@ func (s *MixCompactionTaskStorageV1Suite) prepareMissingBM25OutputSegments(isSor
 			IsSorted:     isSorted,
 		})
 	}
+}
+
+func TestMixCompactionDoesNotLogPluginContext(t *testing.T) {
+	s := newMixCompactionStorageV1SuiteForDirectTest(t)
+	s.prepareMissingBM25OutputSegments(false)
+	s.task.plan.PluginContext = []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "sentinel-ezk"},
+	}
+	s.task.plan.JsonParams = `{"storage_config":{"secret_access_key":"sentinel-sk"}}`
+
+	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug", DisableTimestamp: true})
+	_, err := s.task.Compact()
+	s.NoError(err)
+
+	logged := sink.String()
+	// segmentNum is emitted only by the rewritten "compact start" line.
+	s.Contains(logged, "segmentNum=3")
+	s.NotContains(logged, "sentinel-ezk")
+	s.NotContains(logged, "sentinel-sk")
 }
 
 func TestMixCompactionMaterializesMissingBM25OutputNoDelete(t *testing.T) {

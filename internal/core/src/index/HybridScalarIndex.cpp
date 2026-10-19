@@ -372,7 +372,8 @@ HybridScalarIndex<T>::SerializeIndexType() {
     index_binary_set.Append(index::INDEX_TYPE, index_type_buf, sizeof(uint8_t));
     this->file_manager_->AddFile(index_binary_set);
 
-    auto remote_paths_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        this->file_manager_->GetRemotePathsToFileSize();
     BinarySet ret_set;
     Assert(remote_paths_to_size.size() == 1);
     for (auto& file : remote_paths_to_size) {

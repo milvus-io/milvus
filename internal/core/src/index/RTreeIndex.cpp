@@ -263,7 +263,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     disk_file_manager_->CacheIndexToDisk(files, load_priority);
 
     // 4. Determine local base path (without extension) for RTreeIndexWrapper.
-    auto local_paths = disk_file_manager_->GetLocalFilePaths();
+    const auto& local_paths = disk_file_manager_->GetLocalFilePaths();
     AssertInfo(!local_paths.empty(),
                "RTreeIndex local files are empty after caching to disk");
 
@@ -402,12 +402,13 @@ RTreeIndex<T>::Upload(const Config& config) {
     }
 
     // 3. Collect remote paths to size mapping
-    auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        disk_file_manager_->GetRemotePathsToFileSize();
 
     // 4. Serialize and register in-memory null_offset if any
     auto binary_set = Serialize(config);
     mem_file_manager_->AddFile(binary_set);
-    auto remote_mem_path_to_size =
+    const auto& remote_mem_path_to_size =
         mem_file_manager_->GetRemotePathsToFileSize();
 
     // 5. Assemble IndexStats result

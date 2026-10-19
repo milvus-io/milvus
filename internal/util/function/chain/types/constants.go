@@ -80,6 +80,11 @@ const (
 	ElementIndicesFieldName = "$element_indices"
 )
 
+// Function Chain framework parameter keys.
+const (
+	InputDataTypesParam = "$input_data_types"
+)
+
 // =============================================================================
 // All Stages (for functions that support all stages)
 // =============================================================================

@@ -23,8 +23,10 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -34,6 +36,58 @@ import (
 
 type UtilSuite struct {
 	suite.Suite
+}
+
+func (suite *UtilSuite) TestCompactionMergeInfoEnums() {
+	types := map[datapb.CompactionType]commonpb.CompactionType{
+		datapb.CompactionType_UndefinedCompaction:                  commonpb.CompactionType_CompactionTypeUndefined,
+		datapb.CompactionType_MergeCompaction:                      commonpb.CompactionType_CompactionTypeMerge,
+		datapb.CompactionType_MixCompaction:                        commonpb.CompactionType_CompactionTypeMix,
+		datapb.CompactionType_SingleCompaction:                     commonpb.CompactionType_CompactionTypeSingle,
+		datapb.CompactionType_MinorCompaction:                      commonpb.CompactionType_CompactionTypeMinor,
+		datapb.CompactionType_MajorCompaction:                      commonpb.CompactionType_CompactionTypeMajor,
+		datapb.CompactionType_Level0DeleteCompaction:               commonpb.CompactionType_CompactionTypeLevel0Delete,
+		datapb.CompactionType_ClusteringCompaction:                 commonpb.CompactionType_CompactionTypeClustering,
+		datapb.CompactionType_SortCompaction:                       commonpb.CompactionType_CompactionTypeSort,
+		datapb.CompactionType_PartitionKeySortCompaction:           commonpb.CompactionType_CompactionTypePartitionKeySort,
+		datapb.CompactionType_ClusteringPartitionKeySortCompaction: commonpb.CompactionType_CompactionTypeClusteringPartitionKeySort,
+		datapb.CompactionType_BumpSchemaVersionCompaction:          commonpb.CompactionType_CompactionTypeBumpSchemaVersion,
+	}
+	states := map[datapb.CompactionTaskState]commonpb.CompactionTaskState{
+		datapb.CompactionTaskState_unknown:    commonpb.CompactionTaskState_CompactionTaskStateUnknown,
+		datapb.CompactionTaskState_executing:  commonpb.CompactionTaskState_CompactionTaskStateExecuting,
+		datapb.CompactionTaskState_pipelining: commonpb.CompactionTaskState_CompactionTaskStatePipelining,
+		datapb.CompactionTaskState_completed:  commonpb.CompactionTaskState_CompactionTaskStateCompleted,
+		datapb.CompactionTaskState_failed:     commonpb.CompactionTaskState_CompactionTaskStateFailed,
+		datapb.CompactionTaskState_timeout:    commonpb.CompactionTaskState_CompactionTaskStateTimeout,
+		datapb.CompactionTaskState_analyzing:  commonpb.CompactionTaskState_CompactionTaskStateAnalyzing,
+		datapb.CompactionTaskState_indexing:   commonpb.CompactionTaskState_CompactionTaskStateIndexing,
+		datapb.CompactionTaskState_cleaned:    commonpb.CompactionTaskState_CompactionTaskStateCleaned,
+		datapb.CompactionTaskState_meta_saved: commonpb.CompactionTaskState_CompactionTaskStateMetaSaved,
+		datapb.CompactionTaskState_statistic:  commonpb.CompactionTaskState_CompactionTaskStateStatistic,
+	}
+	// Adding an internal enum requires verifying its public wire equivalent.
+	suite.Len(types, len(datapb.CompactionType_name))
+	suite.Len(states, len(datapb.CompactionTaskState_name))
+	for internalType, publicType := range types {
+		for internalState, publicState := range states {
+			info := getCompactionMergeInfo(&datapb.CompactionTask{
+				Type: internalType, State: internalState,
+				InputSegments: []int64{1, 2}, ResultSegments: []int64{3, 4},
+				FailReason: "retained failure reason",
+			})
+			wire, err := proto.Marshal(info)
+			suite.Require().NoError(err)
+			decoded := &milvuspb.CompactionMergeInfo{}
+			suite.Require().NoError(proto.Unmarshal(wire, decoded))
+			suite.Equal(publicType, decoded.GetType(), internalType.String())
+			suite.Equal(publicState, decoded.GetState(), internalState.String())
+			suite.Equal([]int64{1, 2}, decoded.GetSources())
+			suite.Equal([]int64{3, 4}, decoded.GetTargets())
+			suite.Equal(int64(3), decoded.GetTarget())
+			suite.Equal("retained failure reason", decoded.GetFailureReason())
+		}
+	}
 }
 
 func (suite *UtilSuite) TestVerifyResponse() {

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"path"
 	"strconv"
 	"time"
 
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -76,8 +74,7 @@ func NewSyncTask(ctx context.Context,
 		}
 		// init first manifest path
 		if useLoonFFI {
-			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+			basePath := storage.SegmentManifestBasePath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID)
 			// ManifestEarliest for first write
 			segment.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 		}
@@ -457,7 +454,7 @@ func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData
 			strIDs := lo.Map(ids, func(id int64, _ int) string {
 				return strconv.FormatInt(id, 10)
 			})
-			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
+			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs, DataType: pkField.GetDataType()}
 		}
 	}
 	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, keep original rowID and ts

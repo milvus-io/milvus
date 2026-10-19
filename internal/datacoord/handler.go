@@ -172,11 +172,13 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
+		recoverable, err := isQueryRecoverableSegment(s)
+		if err != nil {
+			mlog.Warn(h.s.ctx, "skip segment with invalid manifest during query recovery",
+				mlog.FieldSegmentID(s.GetID()), mlog.Err(err))
 			continue
 		}
-		if s.GetIsImporting() {
-			// Skip bulk insert segments.
+		if !recoverable {
 			continue
 		}
 		validSegmentInfos[s.GetID()] = s
@@ -222,11 +224,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// unIndexed: c, d
 	// ================================================
 
-	segmentIndexed := func(segID UniqueID) bool {
-		return indexed.Contain(segID) || ((validSegmentInfos[segID].GetIsSorted() || validSegmentInfos[segID].GetIsSortedByNamespace()) && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
-	}
-
-	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed)
+	flushedIDs, droppedIDs = retrieveQuerySegments(validSegmentInfos, flushedIDs, droppedIDs, indexed)
 
 	seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
 	// if no l0 segment exist, use checkpoint as delete checkpoint
@@ -247,11 +245,42 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	}
 }
 
+// isQueryRecoverableSegment is the metadata admission shared by query recovery
+// and index readiness. Fake segments and unfinished imports cannot be loaded.
+func isQueryRecoverableSegment(info *SegmentInfo) (bool, error) {
+	if info == nil || info.GetIsFake() {
+		return false, nil
+	}
+	committed, err := hasCommittedManifest(info)
+	if err != nil {
+		return false, err
+	}
+	if !committed && info.GetStartPosition() == nil && info.GetDmlPosition() == nil && len(info.GetBinlogs()) == 0 {
+		return false, nil
+	}
+	return !info.GetIsImporting(), nil
+}
+
+// retrieveQuerySegments applies the query-side index readiness policy to the
+// shared frontier selector. Small sorted leaves may be loaded without indexes,
+// while compaction fallback preserves this branch's recursive query selector.
+func retrieveQuerySegments(validSegmentInfos map[int64]*SegmentInfo,
+	flushedIDs, droppedIDs, indexed typeutil.UniqueSet,
+) (typeutil.UniqueSet, typeutil.UniqueSet) {
+	segmentIndexed := func(segID UniqueID) bool {
+		segment := validSegmentInfos[segID]
+		return indexed.Contain(segID) || (segment != nil && (segment.GetIsSorted() || segment.GetIsSortedByNamespace()) && segment.GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
+	}
+	return retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed)
+}
+
 func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 	flushedIDs, droppedIDs typeutil.UniqueSet,
 	segmentIndexed func(segID UniqueID) bool,
 ) (typeutil.UniqueSet, typeutil.UniqueSet) {
 	newFlushedIDs := make(typeutil.UniqueSet)
+	initialFlushedIDs := typeutil.NewUniqueSet(flushedIDs.Collect()...)
+	initialDroppedIDs := typeutil.NewUniqueSet(droppedIDs.Collect()...)
 
 	isConditionMet := func(condition func(seg *SegmentInfo) bool, ids ...UniqueID) bool {
 		for _, id := range ids {
@@ -277,11 +306,17 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 	compactionFromExistWithCache := func(segID UniqueID) bool {
 		var compactionFromExist func(segID UniqueID) bool
 		compactionFromExistMap := make(map[UniqueID]bool)
+		visiting := make(typeutil.UniqueSet)
 
 		compactionFromExist = func(segID UniqueID) bool {
 			if exist, ok := compactionFromExistMap[segID]; ok {
 				return exist
 			}
+			if visiting.Contain(segID) {
+				return false
+			}
+			visiting.Insert(segID)
+			defer visiting.Remove(segID)
 			compactionFrom := validSegmentInfos[segID].GetCompactionFrom()
 			if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
 				compactionFromExistMap[segID] = false
@@ -322,7 +357,12 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 		return continueRetrieve
 	}
 
-	for retrieve() {
+	for rounds := 0; retrieve(); rounds++ {
+		// Acyclic ancestry has at most one expansion layer per segment.
+		// Preserve the original query frontier if malformed cycles cannot converge.
+		if rounds >= len(validSegmentInfos) {
+			return initialFlushedIDs, initialDroppedIDs
+		}
 		flushedIDs = newFlushedIDs
 		newFlushedIDs = make(typeutil.UniqueSet)
 	}
@@ -612,6 +652,15 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 	// clean collection info cache when meet drop collection info
 	h.s.meta.DropCollection(collectionID)
 
+	// tedxu: drop this collection's segment change group records together with
+	// its other metadata. Without this they would leak in etcd forever (and a
+	// reused collectionID could resurrect stale groups on recovery).
+	if err := h.s.meta.DropSegmentChangeGroupsOfCollection(h.s.ctx, collectionID); err != nil {
+		mlog.Warn(context.TODO(), "drop segment change groups of collection failed",
+			mlog.Int64("collectionID", collectionID), mlog.Err(err))
+		return err
+	}
+
 	return nil
 }
 
@@ -853,6 +902,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			JsonKeyIndexFiles: uncompressedJSONStats,
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
+			CommitTimestamp:   segInfo.GetCommitTimestamp(),
 		}
 	})
 

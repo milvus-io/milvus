@@ -105,14 +105,19 @@ GenIdsDataset(const int64_t count, const int64_t* ids) {
 inline DatasetPtr
 GenResultDataset(const int64_t nq,
                  const int64_t topk,
-                 const int64_t* ids,
-                 const float* distance) {
+                 std::unique_ptr<int64_t[]> ids,
+                 std::unique_ptr<float[]> distance) {
     auto ret_ds = std::make_shared<Dataset>();
+    // Dataset setters can allocate. Keep the arrays owned by the guards until
+    // every setter succeeds, including when only one pointer was installed.
+    ret_ds->SetIsOwner(false);
     ret_ds->SetRows(nq);
     ret_ds->SetDim(topk);
-    ret_ds->SetIds(ids);
-    ret_ds->SetDistance(distance);
+    ret_ds->SetIds(ids.get());
+    ret_ds->SetDistance(distance.get());
     ret_ds->SetIsOwner(true);
+    ids.release();
+    distance.release();
     return ret_ds;
 }
 
@@ -244,15 +249,18 @@ inline knowhere::sparse::SparseRow<SparseValueType>
 CopyAndWrapSparseRow(const void* data,
                      size_t size,
                      const bool validate = false) {
+    // Length is a memory-safety requirement even when value validation is off.
+    // Check before allocating a whole number of cells and copying all bytes.
+    if (size % knowhere::sparse::SparseRow<SparseValueType>::element_size() !=
+        0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Invalid size for sparse row data");
+    }
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
     milvus::fastmem::FastMemcpy(row.data(), data, size);
     if (validate) {
-        AssertInfo(size % knowhere::sparse::SparseRow<
-                              SparseValueType>::element_size() ==
-                       0,
-                   "Invalid size for sparse row data");
         for (size_t i = 0; i < num_elements; ++i) {
             auto element = row[i];
             AssertInfo(std::isfinite(element.val),

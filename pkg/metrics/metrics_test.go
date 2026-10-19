@@ -17,11 +17,16 @@
 package metrics
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 func TestRegisterMetrics(t *testing.T) {
@@ -42,6 +47,31 @@ func TestRegisterMetrics(t *testing.T) {
 	})
 }
 
+func TestRegisterQueryCoordInitializesLoadDemandMetrics(t *testing.T) {
+	QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+	QueryCoordLoadDemandDiskBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+	t.Cleanup(func() {
+		QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+		QueryCoordLoadDemandDiskBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+	})
+
+	registry := prometheus.NewRegistry()
+	RegisterQueryCoord(registry)
+
+	require.NoError(t, testutil.GatherAndCompare(
+		registry,
+		strings.NewReader(`# HELP milvus_querycoord_load_demand_disk_bytes cumulative estimated disk bytes required by load configuration changes successfully broadcast after resource precheck
+# TYPE milvus_querycoord_load_demand_disk_bytes counter
+milvus_querycoord_load_demand_disk_bytes{rg="__default_resource_group"} 0
+# HELP milvus_querycoord_load_demand_memory_bytes cumulative estimated memory bytes required by load configuration changes successfully broadcast after resource precheck
+# TYPE milvus_querycoord_load_demand_memory_bytes counter
+milvus_querycoord_load_demand_memory_bytes{rg="__default_resource_group"} 0
+`),
+		"milvus_querycoord_load_demand_memory_bytes",
+		"milvus_querycoord_load_demand_disk_bytes",
+	))
+}
+
 func TestGetRegisterer(t *testing.T) {
 	register := GetRegisterer()
 	assert.NotNil(t, register)
@@ -51,6 +81,48 @@ func TestGetRegisterer(t *testing.T) {
 	register = GetRegisterer()
 	assert.NotNil(t, register)
 	assert.Equal(t, r, register)
+}
+
+func TestPathReplaceMetricsCleanup(t *testing.T) {
+	for _, scope := range []string{"collection", "database"} {
+		t.Run(scope, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(ProxyPathReplaceParentOperations, ProxyPathReplaceMergeLatency)
+			const database = "path_replace_cleanup"
+			for _, node := range []string{"1", "2"} {
+				for _, db := range []string{database, "path_replace_keep"} {
+					for _, collection := range []string{"drop", "keep"} {
+						for _, parent := range []string{"array", "struct_array", "json"} {
+							ProxyPathReplaceParentOperations.WithLabelValues(node, db, collection, parent).Inc()
+						}
+						ProxyPathReplaceMergeLatency.WithLabelValues(node, db, collection).Observe(1)
+					}
+				}
+			}
+			t.Cleanup(func() {
+				for _, node := range []int64{1, 2} {
+					CleanupProxyDBMetrics(node, database)
+					CleanupProxyDBMetrics(node, "path_replace_keep")
+				}
+			})
+			wantSeries := 7
+			if scope == "database" {
+				CleanupProxyDBMetrics(1, database)
+				wantSeries = 6
+			} else {
+				CleanupProxyCollectionMetrics(1, database, "drop")
+			}
+			families, err := registry.Gather()
+			assert.NoError(t, err)
+			for _, family := range families {
+				want := wantSeries
+				if family.GetName() == "milvus_proxy_path_replace_parent_operations_total" {
+					want *= 3
+				}
+				assert.Len(t, family.GetMetric(), want)
+			}
+		})
+	}
 }
 
 func TestRegisterRuntimeInfo(t *testing.T) {

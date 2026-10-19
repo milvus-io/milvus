@@ -21,7 +21,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -61,8 +60,7 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 		return 0, merr.Wrap(err, "failed to allocate partition ID")
 	}
 
-	channels := make([]string, 0, collMeta.ShardsNum+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
+	channels := make([]string, 0, collMeta.ShardsNum)
 	for i := 0; i < int(collMeta.ShardsNum); i++ {
 		channels = append(channels, collMeta.VirtualChannelNames[i])
 	}

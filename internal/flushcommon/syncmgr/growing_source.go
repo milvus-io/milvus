@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -873,10 +872,24 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo,
 		return nil, merr.WrapErrDataIntegrityMsg("growing source flush requires StorageV3 segment, segmentID=%d storageVersion=%d",
 			t.segmentID, segment.GetStorageVersion())
 	}
-	segmentBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
-		metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID))
-	partitionBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
-		metautil.JoinIDPath(t.collectionID, t.partitionID))
+	// Same key rule as ordinary flush and the initial manifest: the chunk
+	// manager's root is the storage prefix on every backend.
+	rootPath := t.chunkManager.RootPath()
+	segmentBasePath := storage.SegmentManifestBasePath(rootPath, t.collectionID, t.partitionID, t.segmentID)
+	partitionBasePath := storage.SegmentPartitionBasePath(rootPath, t.collectionID, t.partitionID)
+	manifestBasePath, readVersion, err := growingSourceManifest(segment.ManifestPath(), columnGroups)
+	if err != nil {
+		return nil, err
+	}
+	if manifestBasePath != "" {
+		// A base and a read version identify one manifest together, so they must
+		// come from the same place on every backend: changing only the base would
+		// reopen that version somewhere it does not exist. A recovered local
+		// segment can still live under the legacy minio prefix, which is why the
+		// stored base wins over the recomputed one.
+		segmentBasePath = manifestBasePath
+		partitionBasePath = path.Dir(manifestBasePath)
+	}
 
 	allowedFieldIDs, allowedFieldSet := allowedFieldsFromColumnGroups(columnGroups)
 	var textFieldIDs []int64
@@ -912,10 +925,6 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo,
 	}
 	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 	schemaBasedPattern, err := t.schemaBasedPattern(columnGroups)
-	if err != nil {
-		return nil, err
-	}
-	readVersion, err := growingSourceReadVersion(segment.ManifestPath(), columnGroups)
 	if err != nil {
 		return nil, err
 	}
@@ -1018,24 +1027,24 @@ func (t *GrowingSourceSyncTask) fillPrimaryKeyStatsConfig(ctx context.Context, s
 	return nil
 }
 
-func growingSourceReadVersion(manifestPath string, columnGroups []storagecommon.ColumnGroup) (int64, error) {
+func growingSourceManifest(manifestPath string, columnGroups []storagecommon.ColumnGroup) (string, int64, error) {
 	if manifestPath == "" {
-		return packed.ManifestEarliest, nil
+		return "", packed.ManifestEarliest, nil
 	}
-	_, version, err := packedManifestVersion(manifestPath)
+	basePath, version, err := packedManifestVersion(manifestPath)
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 	if version == packed.ManifestEarliest {
-		return version, nil
+		return basePath, version, nil
 	}
 	for _, columnGroup := range columnGroups {
 		if columnGroup.Format == "" {
-			return 0, merr.WrapErrDataIntegrityMsg("column group %d fields %v missing format for existing manifest %s",
+			return "", 0, merr.WrapErrDataIntegrityMsg("column group %d fields %v missing format for existing manifest %s",
 				columnGroup.GroupID, columnGroup.Fields, manifestPath)
 		}
 	}
-	return version, nil
+	return basePath, version, nil
 }
 
 func allowedFieldsFromColumnGroups(columnGroups []storagecommon.ColumnGroup) ([]int64, map[int64]struct{}) {

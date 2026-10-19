@@ -27,7 +27,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -36,17 +38,24 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	mocks2 "github.com/milvus-io/milvus/internal/mocks"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -56,12 +65,320 @@ import (
 // Import Callbacks Test Suite
 // ================================
 
+func TestSnapshotPartitionTargetsValidation(t *testing.T) {
+	ctx := context.Background()
+	type mappingBroker struct{ broker.Broker }
+	s := &Server{broker: &mappingBroker{}}
+	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
+	require.NoError(t, s.validateSnapshotPartitionTargets(ctx, 1, nil, snapshotImportTestOptions()))
+	for _, tc := range []struct {
+		name      string
+		names     []string
+		ids, want []int64
+		readErr   error
+		wantErr   error
+	}{
+		{"valid", []string{"Y", "X"}, []int64{100, 200}, []int64{200, 100}, nil, nil},
+		{"recreated", []string{"Y", "X"}, []int64{100, 201}, []int64{200, 100}, nil, merr.ErrServiceUnavailable},
+		{"dropped", []string{"Y"}, []int64{100}, []int64{200, 100}, nil, merr.ErrServiceUnavailable},
+		{"bad_metadata", []string{"Y"}, nil, []int64{200, 100}, nil, merr.ErrServiceInternal},
+		{"bad_count", []string{"Y", "X"}, []int64{100, 200}, []int64{200}, nil, merr.ErrServiceInternal},
+		{"metadata_error", nil, nil, nil, merr.ErrServiceNotReady, merr.ErrServiceNotReady},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			show := mockey.Mock((*mappingBroker).ShowPartitions).Return(&milvuspb.ShowPartitionsResponse{PartitionNames: tc.names, PartitionIDs: tc.ids}, tc.readErr).Build()
+			defer show.UnPatch()
+			err := s.validateSnapshotPartitionTargets(ctx, 1, tc.want, opts)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
+	patchSnapshotImportInstance(t)
+	ctx := context.Background()
+	snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	snapshot.Collection.Partitions = map[string]int64{"A": 10, "B": 20}
+	snapshot.Segments[0].PartitionId = 20
+	for _, segment := range snapshot.Segments {
+		segment.ChannelName = "source"
+	}
+	snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
+		ChannelName: "source", PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV1,
+		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/files/delete"}}}},
+	})
+	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validation.UnPatch()
+	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer replication.UnPatch()
+	read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{
+		FormatVersion: int32(snapshotstorage.SnapshotFormatVersion), SnapshotInfo: snapshot.SnapshotInfo,
+		Collection: snapshot.Collection, Layout: snapshot.Layout,
+	}, nil).Build()
+	defer read.UnPatch()
+	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+	defer fileValidation.UnPatch()
+	api := newMockBroadcastAPIImpl()
+	locked := false
+	start := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+		locked = true
+		return api, nil
+	}).Build()
+	defer start.UnPatch()
+	type mappingBroker struct{ broker.Broker }
+	fake := &mappingBroker{}
+	describe := mockey.Mock((*mappingBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
+	defer describe.UnPatch()
+	show := mockey.Mock((*mappingBroker).ShowPartitions).To(func(_ *mappingBroker, _ context.Context, _ int64) (*milvuspb.ShowPartitionsResponse, error) {
+		require.True(t, locked, "target IDs must be revalidated under the broadcast lock")
+		return &milvuspb.ShowPartitionsResponse{PartitionNames: []string{"X", "Y"}, PartitionIDs: []int64{200, 100}}, nil
+	}).Build()
+	defer show.UnPatch()
+	called := false
+	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		called = true
+		decoded := message.MustAsBroadcastImportMessageV1(msg)
+		require.Equal(t, []int64{200, 100}, decoded.MustBody().GetPartitionIDs())
+		var options importutilv2.Options
+		for key, value := range decoded.MustBody().GetOptions() {
+			options = append(options, &commonpb.KeyValuePair{Key: key, Value: value})
+		}
+		files := importFilesFromMessage(decoded.MustBody().GetFiles(), options)
+		require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
+		require.True(t, importutilv2.IsSnapshotPreparation(files))
+		require.Equal(t, "s3://source/root/snapshots/1/metadata/2.json", decoded.MustBody().Options[importutilv2.SnapshotSourceURI])
+		return &types.BroadcastAppendResult{}, nil
+	}).Build()
+	defer transport.UnPatch()
+	s := &Server{broker: fake, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
+	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
+	_, _, err := s.broadcastImport(ctx, 100, []int64{200, 100},
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "", "", false)
+	require.NoError(t, err)
+	require.True(t, called)
+	require.True(t, api.closeCalled.Load())
+}
+
+func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
+	ctx := context.Background()
+	// Exercise the real broadcast path while replacing external validation,
+	// metadata I/O, and WAL transport. Source expansion does not select targets.
+	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validation.UnPatch()
+	expansion := mockey.Mock(prepareSnapshotImportFiles).Return(
+		[]*internalpb.ImportFile{{Paths: []string{"root/data/manifest"}}}, snapshotImportTestOptions(), nil).Build()
+	defer expansion.UnPatch()
+	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer replication.UnPatch()
+	api := newMockBroadcastAPIImpl()
+	start := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(api, nil).Build()
+	defer start.UnPatch()
+	type testBroker struct{ broker.Broker }
+	fakeBroker := &testBroker{}
+	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
+	defer describe.UnPatch()
+	var received []int64
+	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
+		func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			decoded, err := message.AsBroadcastImportMessageV1(msg)
+			require.NoError(t, err)
+			received = decoded.MustBody().GetPartitionIDs()
+			return &types.BroadcastAppendResult{}, nil
+		}).Build()
+	defer transport.UnPatch()
+	server := &Server{broker: fakeBroker}
+	partitionIDs := []int64{20, 10}
+	_, duplicated, err := server.broadcastImport(ctx, 100, partitionIDs,
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", "", false)
+	require.NoError(t, err)
+	require.False(t, duplicated)
+	require.Equal(t, partitionIDs, received)
+	require.True(t, api.closeCalled.Load())
+	expansion.UnPatch()
+	invalidExpansion := mockey.Mock(prepareSnapshotImportFiles).Return([]*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
+		Version: 5, ManifestPath: packed.MarshalManifestPath("root/data", 1), SourceChannel: "source", SourcePartitionId: 10,
+	}}}, snapshotImportTestOptions(), nil).Build()
+	defer invalidExpansion.UnPatch()
+	received = nil
+	_, _, err = server.broadcastImport(ctx, 100, partitionIDs,
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", "", false)
+	require.ErrorContains(t, err, "lost its shared L0 inventory")
+	require.Nil(t, received, "invalid source plans must fail before broadcast")
+}
+
+func TestBroadcastImportBoundaryFailures(t *testing.T) {
+	type boundaryBroker struct{ broker.Broker }
+	for _, stage := range []string{"public_options", "prepare", "replication", "partition_targets", "message_size", "auto_id"} {
+		t.Run(stage, func(t *testing.T) {
+			cause := merr.ErrServiceNotReady
+			errFor := func(name string) error {
+				if stage == name {
+					return cause
+				}
+				return nil
+			}
+			opts := snapshotImportTestOptions()
+			files := []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
+				Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1),
+			}}}
+			schema := &schemapb.CollectionSchema{Name: "target", Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			}}
+			if stage == "auto_id" {
+				opts = nil
+				files = []*internalpb.ImportFile{{Paths: []string{"rows.json"}}}
+				schema.Fields[0].AutoID = true
+			}
+			validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+			defer validation.UnPatch()
+			assign := mockey.Mock(assignPKRangesToFiles).To(func(_ context.Context, _ storage.ChunkManager,
+				_ *schemapb.CollectionSchema, input []*internalpb.ImportFile,
+				_ func(int64) (int64, int64, error), _ uint64,
+			) error {
+				input[0].PreAllocatedAutoIds = &commonpb.IDRange{Begin: 10, End: 20}
+				return nil
+			}).Build()
+			defer assign.UnPatch()
+			expansion := mockey.Mock(prepareSnapshotImportFiles).Return(files, opts, errFor("prepare")).Build()
+			defer expansion.UnPatch()
+			replication := mockey.Mock((*Server).validateImportReplication).Return(errFor("replication")).Build()
+			defer replication.UnPatch()
+			partitions := mockey.Mock((*Server).validateSnapshotPartitionTargets).Return(errFor("partition_targets")).Build()
+			defer partitions.UnPatch()
+			size := mockey.Mock(validateSnapshotImportMessageSize).Return(errFor("message_size")).Build()
+			defer size.UnPatch()
+			api := newMockBroadcastAPIImpl()
+			start := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(api, nil).Build()
+			defer start.UnPatch()
+			describe := mockey.Mock((*boundaryBroker).DescribeCollectionInternal).Return(
+				&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: schema}, nil).Build()
+			defer describe.UnPatch()
+			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
+				func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+					decoded := message.MustAsBroadcastImportMessageV1(msg)
+					// Preserve 3.0 reservations when rebuilding ordinary WAL files.
+					for _, file := range decoded.MustBody().GetFiles() {
+						if stage == "auto_id" {
+							require.Equal(t, &commonpb.IDRange{Begin: 10, End: 20}, file.GetPreAllocatedAutoIds())
+						} else {
+							require.Nil(t, file.GetPreAllocatedAutoIds())
+						}
+					}
+					// The broadcaster adds the control channel after this input boundary.
+					require.ElementsMatch(t, []string{"v1"}, msg.BroadcastHeader().VChannels)
+					return &types.BroadcastAppendResult{}, nil
+				}).Build()
+			defer transport.UnPatch()
+			if stage == "public_options" {
+				opts = append(opts, &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/metadata"})
+			}
+			type boundaryAllocator struct{ allocator.Allocator }
+			s := &Server{meta: &meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
+			_, _, err := s.broadcastImport(context.Background(), 100, []int64{10}, files,
+				opts, 1, []string{"v1"}, "", "", false)
+			if stage == "auto_id" {
+				require.NoError(t, err)
+				require.Equal(t, 1, transport.Times())
+			} else {
+				if stage == "public_options" {
+					require.ErrorIs(t, err, merr.ErrImportFailed)
+				} else {
+					require.ErrorIs(t, err, cause)
+				}
+				require.Zero(t, transport.Times(), "rejected requests must not reach the WAL")
+			}
+		})
+	}
+}
+
+func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
+	patchSnapshotImportInstance(t)
+	ctx := context.Background()
+	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validation.UnPatch()
+	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer replication.UnPatch()
+	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+	defer fileValidation.UnPatch()
+	api := newMockBroadcastAPIImpl()
+	start := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(api, nil).Build()
+	defer start.UnPatch()
+	type testBroker struct{ broker.Broker }
+	fakeBroker := &testBroker{}
+	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
+	defer describe.UnPatch()
+	server := &Server{broker: fakeBroker, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
+	for _, encrypted := range []bool{false, true} {
+		name, suppliedEZK := "plaintext", "not-base64"
+		if encrypted {
+			name, suppliedEZK = "encrypted", snapshotImportTestEZK(10)
+		}
+		t.Run(name, func(t *testing.T) {
+			snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			if encrypted {
+				snapshot.Collection.Schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "10"}}
+			}
+			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{
+				FormatVersion: int32(snapshotstorage.SnapshotFormatVersion), SnapshotInfo: snapshot.SnapshotInfo,
+				Collection: snapshot.Collection, Layout: snapshot.Layout,
+			}, nil).Build()
+			defer read.UnPatch()
+			var received map[string]string
+			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
+				func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+					decoded, err := message.AsBroadcastImportMessageV1(msg)
+					require.NoError(t, err)
+					// Decode the wire body used by ACK/replay, not the original
+					// request slice, to verify the durable options boundary.
+					restored := &msgpb.ImportMsg{}
+					require.NoError(t, proto.Unmarshal(decoded.Payload(), restored))
+					received = restored.GetOptions()
+					return &types.BroadcastAppendResult{}, nil
+				}).Build()
+			defer transport.UnPatch()
+			options := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.EZK, Value: suppliedEZK},
+				&commonpb.KeyValuePair{Key: importutilv2.AutoCommitKey, Value: "false"})
+			_, _, err := server.broadcastImport(ctx, 100, []int64{10},
+				[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
+				options, 1000, []string{"target_v1"}, "", "", false)
+			require.NoError(t, err)
+			require.Equal(t, "false", received[importutilv2.AutoCommitKey])
+			require.Equal(t, importutilv2.SourceTypeSnapshot, received[importutilv2.SourceType])
+			if encrypted {
+				require.Equal(t, suppliedEZK, received[importutilv2.EZK])
+			} else {
+				require.NotContains(t, received, importutilv2.EZK)
+			}
+			ezk, err := importutilv2.GetEZK(options)
+			require.NoError(t, err)
+			require.Equal(t, suppliedEZK, ezk, "the original request must not be mutated")
+		})
+	}
+}
+
 type ImportCallbacksSuite struct {
 	suite.Suite
 }
 
 func TestImportCallbacksSuite(t *testing.T) {
 	suite.Run(t, new(ImportCallbacksSuite))
+}
+
+// newTestMetaWithChunkManager returns a minimal meta carrying a chunk manager,
+// which validateImportRequest needs to resolve the storage root path when it
+// checks caller-supplied import paths against Milvus's internal directories.
+func newTestMetaWithChunkManager(t *testing.T) *meta {
+	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("files").Maybe()
+	return &meta{chunkManager: cm}
 }
 
 // --------------------------------
@@ -85,20 +402,20 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsEr
 	s.Contains(err.Error(), "timeout")
 }
 
-func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsError() {
+// TestValidateImportRequest_RejectsInternalStoragePath pins the datacoord side
+// of the path-confinement gate. ValidateImportFilePaths is covered on its own
+// (import_util_test.go), but every path the suite passed here was benign, so
+// deleting the call left this package green -- the same wiring standard the
+// PreExecute and duplicate-key tests already hold the other two gates to.
+func (s *ImportCallbacksSuite) TestValidateImportRequest_RejectsInternalStoragePath() {
 	ctx := context.Background()
 
-	mock := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-		return 2000 // Exceeds default MaxImportJobNum (1024)
-	}).Build()
-	defer mock.UnPatch()
-
 	server := &Server{
-		importMeta: &importMeta{},
+		meta: newTestMetaWithChunkManager(s.T()), // RootPath() == "files"
 	}
 
 	files := []*msgpb.ImportFile{
-		{Id: 1, Paths: []string{"/test/file1.json"}},
+		{Id: 1, Paths: []string{"files/insert_log/1/2/3/100/4"}},
 	}
 	options := []*commonpb.KeyValuePair{
 		{Key: "timeout", Value: "300s"},
@@ -107,10 +424,8 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsE
 	err := server.validateImportRequest(ctx, files, options)
 
 	s.Error(err)
-	// Job-count backpressure is a server-side condition -> ErrImportSysFailed
-	// (must not be bucketed as a user-caused failure).
-	s.True(errors.Is(err, merr.ErrImportSysFailed))
-	s.Contains(err.Error(), "The number of jobs has reached the limit")
+	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.Contains(err.Error(), "is a Milvus internal storage directory")
 }
 
 func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturnsError() {
@@ -129,6 +444,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturns
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -174,6 +490,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -222,6 +539,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 	files := []*msgpb.ImportFile{
 		{Id: 1, Paths: []string{"/test/file1.json"}},
@@ -265,6 +583,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -283,29 +602,31 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 // broadcastImport Tests
 // --------------------------------
 
+// A request that fails validateImportRequest is rejected before any broadcast wiring is
+// touched -- server.broker is nil here, so reaching it would panic or block. The trigger
+// is an unparsable timeout, i.e. a pure function of the request. The job-count limit is
+// admission over mutable cluster state rather than a pure function of the request, but
+// it runs in the same place -- validateImportRequest, before any resource key is taken;
+// see TestImportV2_JobLimitStillRejectsANewJob.
 func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError() {
 	ctx := context.Background()
 
-	// Mock validateImportRequest to fail
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-		return 2000 // Exceeds limit
-	}).Build()
-	defer mockCount.UnPatch()
-
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
-		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "not-a-duration"}},
 		1000,
 		[]string{"v1"},
+		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
@@ -335,29 +656,31 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to fail (called in startBroadcastWithCollectionID)
+	// Mock the canonical metadata read before file sizing.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(nil, errors.New("collection not found"))
 
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
-	s.Contains(err.Error(), "failed to start broadcast with collection id")
+	s.Contains(err.Error(), "failed to get collection metadata before import preparation")
 }
 
 func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsError() {
@@ -383,11 +706,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return dbName (called in startBroadcastWithCollectionID)
+	// Mock broker.DescribeCollectionInternal to return canonical metadata used
+	// before acquiring the collection resource key.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
 	}, nil)
 
 	// Mock StartBroadcastWithResourceKeys to fail
@@ -400,18 +725,20 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
@@ -449,12 +776,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: first DescribeCollectionInternal succeeds (in startBroadcastWithCollectionID),
-	// second call returns error status (in broadcastImport after getting broadcaster)
+	// The pre-lock canonical read succeeds; the revalidation under the
+	// collection lock observes that the collection disappeared.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
 	}, nil).Once()
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		Status: merr.Status(merr.ErrCollectionNotFound),
@@ -463,18 +791,20 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
@@ -513,29 +843,31 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// Mock broker: once before sizing and once under the collection lock.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
 	}, nil).Times(2)
 
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
@@ -565,40 +897,119 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock StartBroadcastWithResourceKeys to succeed
+	files := []*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}}
+	rowCounts := stubRowCounts(map[string]struct {
+		rows  int64
+		exact bool
+	}{"/test/file.json": {rows: 1, exact: true}})
+	defer rowCounts.UnPatch()
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(count int64) (int64, int64, error) {
+		return 100, 100 + count, nil
+	})
+
+	// Acquiring the collection lock must happen only after file sizing and ID
+	// reservation have completed.
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			s.NotNil(files[0].GetPreAllocatedAutoIds())
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// Mock broker: once before sizing and once under the collection lock.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
-		CollectionName: "test_collection",
+		CollectionName: "canonical_collection",
+		Schema: &schemapb.CollectionSchema{
+			Name:    "canonical_collection",
+			Version: 2,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: int64(common.RowIDField), Name: common.RowIDFieldName},
+				{
+					FieldID:      common.StartOfUserFieldID,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
+			},
+		},
 	}, nil).Times(2)
 
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
+		allocator:  mockAllocator,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
-		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
-		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
+		files,
+		[]*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: importutilv2.RLSPrincipal, Value: "mallory"},
+			{Key: importutilv2.SkipRLS, Value: "true"},
+		},
 		1000,
 		[]string{"v1"},
+		"",
+		"alice",
+		false,
 	)
 
 	s.NoError(err)
+	// The caller supplies data channels; Broadcaster adds the control channel.
+	s.ElementsMatch([]string{"v1"}, mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
+	msg, err := message.AsBroadcastImportMessageV1(mockBroadcastAPI.capturedMsg)
+	s.NoError(err)
+	body, err := msg.Body()
+	s.NoError(err)
+	version, ok := mockBroadcastAPI.capturedMsg.Properties().Get(importRLSContextVersionProperty)
+	s.True(ok)
+	s.Equal(importRLSContextVersion, version)
+	s.Equal("alice", body.GetOptions()[importutilv2.RLSPrincipal])
+	_, hasSkipRLS := body.GetOptions()[importutilv2.SkipRLS]
+	s.False(hasSkipRLS)
+	s.Equal("canonical_collection", body.GetCollectionName())
+	s.Equal(int32(2), body.GetSchema().GetVersion())
+	s.Require().Len(body.GetSchema().GetFields(), 1)
+	s.Equal(int64(common.StartOfUserFieldID), body.GetSchema().GetFields()[0].GetFieldID())
+}
+
+func TestBroadcastImport_RejectsChangedCanonicalSnapshot(t *testing.T) {
+	ctx := context.Background()
+	validate := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validate.UnPatch()
+	validateReplication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer validateReplication.UnPatch()
+
+	api := newMockBroadcastAPIImpl()
+	startBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(api, nil).Build()
+	defer startBroadcast.UnPatch()
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection", Version: 1},
+	}, nil).Once()
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection", Version: 2},
+	}, nil).Once()
+
+	server := &Server{broker: mockBroker}
+	_, _, err := server.broadcastImport(ctx, 100, nil, nil, nil, 1000, []string{"v1"}, "", "", false)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	assert.Nil(t, api.capturedMsg)
 }
 
 // --------------------------------
@@ -634,6 +1045,9 @@ type mockBroadcastAPIImpl struct {
 	broadcastResult *types.BroadcastAppendResult
 	broadcastErr    error
 	closeCalled     atomic.Bool
+	// capturedMsg is the last message handed to Broadcast, for assertions on what the
+	// caller actually put on the wire.
+	capturedMsg message.BroadcastMutableMessage
 }
 
 func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
@@ -656,6 +1070,7 @@ func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.Broadc
 	if msg == nil {
 		return nil, errors.New("message is nil")
 	}
+	m.capturedMsg = msg
 	if m.broadcastErr != nil {
 		return nil, m.broadcastErr
 	}
@@ -1186,6 +1601,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
+	// Import messages target the job's data vchannels; the broadcaster adds the
+	// control-channel copy that anchors the ack-callback order.
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -1213,7 +1630,7 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	assert.NoError(t, err)
 	assert.NotNil(t, capture.captured, "Broadcast must have been called")
 	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
-		"broadcast must target the job's data vchannels, not the control channel")
+		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 }
 
 // TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
@@ -1256,4 +1673,165 @@ func TestBroadcastCommitImportMessage_RequiresVchannels(t *testing.T) {
 
 func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
 	testBroadcastRequiresVchannels(t, (*Server).broadcastRollbackImportMessage)
+}
+
+func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(100, "run-1")).
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	jobID, err := jobIDFromDuplicatedBroadcast(msg, 100)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(4242), jobID)
+}
+
+// The collectionID comparison is an invariant check, not a semantic guard: the key is
+// scoped to a collection ID, so a hit already means both broadcasts targeted the same
+// collection. A mismatch can only come from an encoding or scoping bug, which must fail
+// loudly rather than hand back another collection's jobID.
+func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) {
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(100, "run-1")).
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	_, err := jobIDFromDuplicatedBroadcast(msg, 101)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+}
+
+// TestValidateImportRequest_RejectsDuplicateOptionKeys guards the bypass found
+// by adversarial review on milvus#51894: every check reads options as a
+// repeated KV (first match wins) while the broadcast body folds them into a map
+// (last value wins), so [{backup,false},{backup,true}] used to validate as an
+// ordinary import -- skipping the ImportBinlog privilege check -- and then
+// execute as a binlog import.
+func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
+	paramtable.Init()
+
+	s := &Server{}
+
+	err := s.validateImportRequest(context.Background(),
+		[]*msgpb.ImportFile{{Paths: []string{"staging/a.json"}}},
+		[]*commonpb.KeyValuePair{
+			{Key: "backup", Value: "false"},
+			{Key: "backup", Value: "true"},
+		})
+
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "backup")
+}
+
+// TestImportAckCallback_DropsControlChannelFromJobChannels exercises the real
+// ACK-to-job path: the broadcaster's control-channel entry must not become a
+// ready data vchannel, while its time tick still contributes to DataTs.
+func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
+	paramtable.Init()
+	type ackAllocator struct{ allocator.Allocator }
+	type ackHandler struct{ Handler }
+	type ackMeta struct{ ImportMeta }
+	allocate := mockey.Mock((*ackAllocator).AllocN).Return(int64(10), int64(11), nil).Build()
+	defer allocate.UnPatch()
+	getCollection := mockey.Mock((*ackHandler).GetCollection).Return(
+		&collectionInfo{ID: 100, VChannelNames: []string{"vchannel1"}}, nil).Build()
+	defer getCollection.UnPatch()
+	var saved ImportJob
+	saveJob := mockey.Mock((*ackMeta).AddJob).To(func(_ *ackMeta, _ context.Context, job ImportJob) error {
+		saved = job
+		return nil
+	}).Build()
+	defer saveJob.UnPatch()
+	var rlsPrincipal string
+	var skipRLS bool
+	resolve := mockey.Mock((*Server).resolveImportRLSPredicate).To(func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*planpb.Expr, error) {
+		// The real resolver consumes the request synchronously. Mockey does
+		// not change its escape analysis, so copy values while in is valid.
+		rlsPrincipal = in.GetRlsPrincipal()
+		skipRLS = in.GetSkipRls()
+		return nil, nil
+	}).Build()
+	defer resolve.UnPatch()
+
+	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
+	broadcastMsg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{
+			CollectionID: 100,
+			JobID:        1,
+			Options: map[string]string{
+				importutilv2.RLSPrincipal: "alice",
+				importutilv2.SkipRLS:      "true",
+			},
+		}).
+		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
+		WithBroadcast([]string{"vchannel1"}).
+		MustBuildBroadcast().
+		OverwriteBroadcastHeader(1)
+	broadcastMsg = message.WithBroadcastControlChannel(broadcastMsg, cchannel)
+	result := message.BroadcastResultImportMessageV1{
+		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
+		Results: map[string]*message.AppendResult{
+			"vchannel1": {TimeTick: 100},
+			cchannel:    {TimeTick: 200},
+		},
+	}
+
+	server := &Server{allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: &ackMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	callbacks := &DDLCallbacks{Server: server}
+	require.NoError(t, callbacks.importV1AckCallback(context.Background(), result))
+	require.NotNil(t, saved)
+	assert.Equal(t, int64(1), saved.GetJobID())
+	assert.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
+	assert.Equal(t, []string{"vchannel1"}, saved.GetReadyVchannels())
+	assert.Equal(t, uint64(200), saved.GetDataTs())
+	require.Equal(t, 1, resolve.Times())
+	assert.Equal(t, "alice", rlsPrincipal)
+	assert.True(t, skipRLS)
+	assert.NotContains(t, funcutil.KeyValuePair2Map(saved.GetOptions()), importutilv2.RLSPrincipal)
+	assert.NotContains(t, funcutil.KeyValuePair2Map(saved.GetOptions()), importutilv2.SkipRLS)
+}
+
+func TestImportAckCallback_IgnoresUntrustedLegacyRLSOptions(t *testing.T) {
+	paramtable.Init()
+	type ackAllocator struct{ allocator.Allocator }
+	type ackHandler struct{ Handler }
+	type ackMeta struct{ ImportMeta }
+	allocate := mockey.Mock((*ackAllocator).AllocN).Return(int64(10), int64(11), nil).Build()
+	defer allocate.UnPatch()
+	get := mockey.Mock((*ackHandler).GetCollection).Return(
+		&collectionInfo{ID: 100, VChannelNames: []string{"vchannel1"}}, nil).Build()
+	defer get.UnPatch()
+	save := mockey.Mock((*ackMeta).AddJob).Return(nil).Build()
+	defer save.UnPatch()
+	resolve := mockey.Mock((*Server).resolveImportRLSPredicate).To(func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*planpb.Expr, error) {
+		assert.Empty(t, in.GetRlsPrincipal())
+		assert.False(t, in.GetSkipRls())
+		options := funcutil.KeyValuePair2Map(in.GetOptions())
+		assert.NotContains(t, options, importutilv2.RLSPrincipal)
+		assert.NotContains(t, options, importutilv2.SkipRLS)
+		return nil, nil
+	}).Build()
+	defer resolve.UnPatch()
+	server := &Server{allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: &ackMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	callbacks := &DDLCallbacks{Server: server}
+	for _, skipRLS := range []string{"true", "not-a-bool"} {
+		wal := message.NewImportMessageBuilderV1().
+			WithHeader(&message.ImportMessageHeader{}).
+			WithBody(&msgpb.ImportMsg{
+				CollectionID: 100, JobID: 1,
+				Options: map[string]string{importutilv2.RLSPrincipal: "legacy", importutilv2.SkipRLS: skipRLS},
+			}).WithBroadcast([]string{"vchannel1"}).MustBuildBroadcast().OverwriteBroadcastHeader(1)
+		require.NoError(t, callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
+			Message: message.MustAsBroadcastImportMessageV1(wal),
+			Results: map[string]*message.AppendResult{"vchannel1": {TimeTick: 100}},
+		}))
+	}
+	require.Equal(t, 2, resolve.Times())
 }

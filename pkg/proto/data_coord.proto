@@ -10,6 +10,7 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "plan.proto";
 
 // TODO: import google/protobuf/empty.proto
 message Empty {}
@@ -390,7 +391,10 @@ message SegmentInfo {
   int64 num_of_rows = 5;
   common.SegmentState state = 6;
   int64 max_row_num = 7 [deprecated = true]; // deprecated, we use the binary size to control the segment size but not a estimate rows.
-  uint64 last_expire_time = 8;
+  // Legacy allocation lease expiry, retained for allocation RPC, recovery,
+  // and empty-segment cleanup compatibility. Do not use for index readiness
+  // or data age; use effective segment data timestamps instead.
+  uint64 last_expire_time = 8 [deprecated = true];
   msg.MsgPosition start_position = 9;
   msg.MsgPosition dml_position = 10;
   // binlogs consist of insert binlogs
@@ -1048,6 +1052,7 @@ message PreImportRequest {
   index.StorageConfig storage_config = 10;
   int64 task_slot = 11;
   repeated common.KeyValuePair plugin_context = 12;
+  internal.SnapshotImportL0Source snapshot_l0_source = 13;
 }
 
 message IDRange {
@@ -1079,6 +1084,8 @@ message ImportRequest {
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
   bool use_loon_ffi = 17;
+  plan.Expr rls_check_predicate = 18;
+  internal.SnapshotImportL0Source snapshot_l0_source = 19;
 }
 
 message QueryPreImportRequest {
@@ -1403,6 +1410,8 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
+  plan.Expr rls_check_predicate = 22;
+  repeated internal.SnapshotImportL0Source snapshot_l0_sources = 23;
 }
 
 enum ImportTaskStateV2 {

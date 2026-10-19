@@ -95,6 +95,23 @@ namespace milvus::segcore {
 
 namespace {
 
+// Call only after selecting raw storage: index APIs must keep logical IDs even
+// if an interim index takes over between NULL filtering and vector retrieval.
+std::vector<int64_t>
+MapValidVectorOffsets(const VectorBase& vec,
+                      const int64_t* logical_offsets,
+                      int64_t count) {
+    std::vector<int64_t> physical_offsets;
+    if (vec.is_mapping_storage()) {
+        auto valid_data = std::make_unique<bool[]>(count);
+        vec.get_offset_mapping().FilterValidLogicalOffsets(
+            logical_offsets, count, valid_data.get(), physical_offsets);
+        AssertInfo(physical_offsets.size() == count,
+                   "Valid vector offsets must map to stored rows");
+    }
+    return physical_offsets;
+}
+
 int64_t
 GetLoadedFieldRows(
     const std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>&
@@ -1015,7 +1032,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         if (total != info.row_count) {
             AssertInfo(total <= info.row_count,
                        "binlog number should less than or equal row_count");
-            auto field_meta = (*schema)[field_id];
+            const auto& field_meta = (*schema)[field_id];
             AssertInfo(field_meta.is_nullable(),
                        "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
@@ -1098,7 +1115,7 @@ SegmentGrowingImpl::load_field_data_common(
         return;
     }
 
-    auto field_meta = (*schema)[field_id];
+    const auto& field_meta = (*schema)[field_id];
 
     if (insert_record_.is_valid_data_exist(field_id)) {
         insert_record_.get_valid_data(field_id)->set_data_raw(field_data);
@@ -1448,6 +1465,46 @@ SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
 }
 
 void
+SegmentGrowingImpl::ApplyFieldValidDataByRange(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t logical_offset,
+    int64_t count,
+    TargetBitmapView valid_result) const {
+    (void)op_ctx;
+    if (count == 0) {
+        return;
+    }
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type()) &&
+        indexing_record_.SyncDataWithIndex(field_id)) {
+        const auto& field_indexing =
+            indexing_record_.get_vec_field_indexing(field_id);
+        auto indexing = field_indexing.get_segment_indexing();
+        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+        if (vec_index != nullptr && vec_index->HasValidData()) {
+            vec_index->ApplyValidDataByRange(
+                logical_offset, count, valid_result);
+            return;
+        }
+    }
+
+    auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    std::unique_ptr<bool[]> valid_data(new bool[count]);
+    valid_vec_ptr->bulk_is_valid_range(logical_offset, count, valid_data.get());
+    for (int64_t i = 0; i < count; ++i) {
+        if (!valid_data[i]) {
+            valid_result[i] = false;
+        }
+    }
+}
+
+void
 SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1464,9 +1521,23 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
         return;
     }
 
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type()) &&
+        indexing_record_.SyncDataWithIndex(field_id)) {
+        const auto& field_indexing =
+            indexing_record_.get_vec_field_indexing(field_id);
+        auto indexing = field_indexing.get_segment_indexing();
+        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+        if (vec_index != nullptr && vec_index->HasValidData()) {
+            vec_index->ApplyValidDataByOffsets(offsets, count, valid_result);
+            return;
+        }
+    }
+
     auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    std::unique_ptr<bool[]> valid_data(new bool[count]);
+    valid_vec_ptr->bulk_is_valid(offsets, count, valid_data.get());
     for (int64_t i = 0; i < count; ++i) {
-        if (!valid_vec_ptr->is_valid(offsets[i])) {
+        if (!valid_data[i]) {
             valid_result[i] = false;
         }
     }
@@ -1797,7 +1868,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
     if (field_meta.is_vector()) {
         int64_t valid_count = count;
         const bool* valid_data = nullptr;
-        const int64_t* valid_offsets = seg_offsets;
+        const int64_t* valid_logical_offsets = seg_offsets;
         ValidResult filter_result;
 
         if (field_meta.is_nullable()) {
@@ -1805,7 +1876,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 FilterVectorValidOffsets(op_ctx, field_id, seg_offsets, count);
             valid_count = filter_result.valid_count;
             valid_data = filter_result.valid_data.get();
-            valid_offsets = filter_result.valid_offsets.data();
+            valid_logical_offsets = filter_result.valid_logical_offsets.data();
         }
 
         auto result = CreateEmptyVectorDataArray(
@@ -1818,7 +1889,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              field_id,
                                              field_meta.get_sizeof(),
                                              vec_ptr,
-                                             valid_offsets,
+                                             valid_logical_offsets,
                                              valid_count,
                                              result->mutable_vectors()
                                                  ->mutable_float_vector()
@@ -1830,7 +1901,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_binary_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
@@ -1839,7 +1910,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_float16_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_BFLOAT16) {
@@ -1848,7 +1919,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_bfloat16_vector()->data());
         } else if (field_meta.get_data_type() ==
@@ -1857,7 +1928,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 op_ctx,
                 field_id,
                 (const ConcurrentVector<SparseFloatVector>*)vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_sparse_float_vector());
             result->mutable_vectors()->set_dim(
@@ -1868,7 +1939,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_int8_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
@@ -2073,10 +2144,13 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     // concurrent retrieves against each other for a read-only operation.
     auto chunks = vec_raw->acquire_chunks();
     if (!chunks.empty() && !indexing_record_.HasRawData(field_id)) {
-        // copy from raw data
+        const auto physical_offsets =
+            MapValidVectorOffsets(*vec_raw, seg_offsets, count);
+        const auto* raw_offsets =
+            physical_offsets.empty() ? seg_offsets : physical_offsets.data();
         SparseRowsToProto(
             [&](size_t i) {
-                auto offset = seg_offsets[i];
+                auto offset = raw_offsets[i];
                 return offset != INVALID_SEG_OFFSET
                            ? vec_raw->get_physical_element(chunks, offset)
                            : nullptr;
@@ -2151,10 +2225,14 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     // for why the snapshot replaces the chunk lock here.
     auto chunks = vec.acquire_chunks();
     if (!chunks.empty() && !indexing_record_.HasRawData(field_id)) {
+        const auto physical_offsets =
+            MapValidVectorOffsets(vec, seg_offsets, count);
+        const auto* raw_offsets =
+            physical_offsets.empty() ? seg_offsets : physical_offsets.data();
         auto output_base = reinterpret_cast<char*>(output_raw);
         for (int i = 0; i < count; ++i) {
             auto dst = output_base + i * element_sizeof;
-            auto offset = seg_offsets[i];
+            auto offset = raw_offsets[i];
             auto src = (const uint8_t*)vec.get_physical_element(chunks, offset);
             milvus::fastmem::FastMemcpy(dst, src, element_sizeof);
         }
@@ -3323,11 +3401,12 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 int64_t num_rows) {
     // Rows are written at their reserved ABSOLUTE offsets
     // (SimpleGeometryCache::AppendDataAt), matching how readers address the
-    // cache (GetByOffsetUnsafe) and how the R-Tree index path's AddGeometry
+    // cache (GetByOffset) and how the R-Tree index path's AddGeometry
     // works. This makes the write idempotent: a batch retried after a
     // mid-batch retriable failure (e.g. a transient GEOS allocation throw)
-    // overwrites its own slots instead of re-appending after the partial
-    // prefix and shifting every later row to the wrong offset. It also
+    // addresses its own slots instead of re-appending after the partial
+    // prefix and shifting every later row to the wrong offset (the slots it
+    // already published are simply skipped -- first writer wins). It also
     // removes the old tail-append ORDERING DEPENDENCY on strictly serialized,
     // in-order Insert() batches.
     try {
@@ -3410,7 +3489,7 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
                     segment_instance_uid(), get_segment_id(), field_id);
 
         // Process each field data chunk, writing rows at their reserved
-        // absolute offsets so a retried load overwrites in place (see
+        // absolute offsets so a retried load lands on the same slots (see
         // BuildGeometryCacheForInsert).
         int64_t absolute_offset = reserved_offset;
         for (const auto& data : field_data) {
@@ -3470,60 +3549,22 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
                                              FieldId field_id,
                                              const int64_t* seg_offsets,
                                              int64_t count) const {
+    AssertInfo(count >= 0, "Vector offset count must be nonnegative");
     ValidResult result;
-    result.valid_count = count;
+    result.valid_data = std::make_unique<bool[]>(count);
+    result.valid_logical_offsets.reserve(count);
 
-    if (indexing_record_.SyncDataWithIndex(field_id)) {
-        const auto& field_indexing =
-            indexing_record_.get_vec_field_indexing(field_id);
-        auto indexing = field_indexing.get_segment_indexing();
-        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
-
-        if (vec_index != nullptr && vec_index->HasValidData()) {
-            result.valid_data = std::make_unique<bool[]>(count);
-            result.valid_offsets.reserve(count);
-            for (int64_t i = 0; i < count; ++i) {
-                result.valid_data[i] = vec_index->IsRowValid(seg_offsets[i]);
-                if (result.valid_data[i]) {
-                    result.valid_offsets.push_back(seg_offsets[i]);
-                }
-            }
-            result.valid_count = result.valid_offsets.size();
-        }
-    } else {
-        auto vec_base = insert_record_.get_data_base(field_id);
-        if (vec_base != nullptr) {
-            // Avoid vec_base->get_valid_data(): it materializes a flat copy of
-            // the WHOLE validity bitmap (O(segment rows)) while this path only
-            // needs `count` offsets (and, on the mapping-storage branch, only
-            // an emptiness check).
-            auto valid_data_ptr = insert_record_.is_valid_data_exist(field_id)
-                                      ? insert_record_.get_valid_data(field_id)
-                                      : nullptr;
-            bool is_mapping_storage = vec_base->is_mapping_storage();
-            if (valid_data_ptr != nullptr && !valid_data_ptr->empty()) {
-                result.valid_data = std::make_unique<bool[]>(count);
-
-                if (is_mapping_storage) {
-                    vec_base->get_offset_mapping().FilterValidLogicalOffsets(
-                        seg_offsets,
-                        count,
-                        result.valid_data.get(),
-                        result.valid_offsets);
-                } else {
-                    result.valid_offsets.reserve(count);
-                    valid_data_ptr->bulk_is_valid(
-                        seg_offsets, count, result.valid_data.get());
-                    for (int64_t i = 0; i < count; ++i) {
-                        if (result.valid_data[i]) {
-                            result.valid_offsets.push_back(seg_offsets[i]);
-                        }
-                    }
-                }
-                result.valid_count = result.valid_offsets.size();
-            }
+    // Insert/Load maintain this bitmap even after a raw-owning index takes
+    // over and the raw chunks are reclaimed. Filtering must not depend on
+    // index state or change the coordinate space of the offsets it returns.
+    const auto valid_data = insert_record_.get_valid_data(field_id);
+    valid_data->bulk_is_valid(seg_offsets, count, result.valid_data.get());
+    for (int64_t i = 0; i < count; ++i) {
+        if (result.valid_data[i]) {
+            result.valid_logical_offsets.push_back(seg_offsets[i]);
         }
     }
+    result.valid_count = result.valid_logical_offsets.size();
     return result;
 }
 

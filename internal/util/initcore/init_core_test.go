@@ -70,13 +70,19 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 
 	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
+}
 
-	defer func() {
-		assert.NoError(t, pt.Reset(pt.QueryNodeCfg.TakeForOutputResultCountLimit.Key))
-		SyncTakeForOutputResultCountLimit(pt)
-	}()
-	assert.NoError(t, pt.Save(pt.QueryNodeCfg.TakeForOutputResultCountLimit.Key, "2048"))
-	assert.Equal(t, int64(2048), getTakeForOutputResultCountLimit())
+func TestLazyColumnGroupHotUpdate(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	SetupCoreConfigChangelCallback()
+	key := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.Key
+	previous := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetValue()
+	t.Cleanup(func() { assert.NoError(t, pt.Save(key, previous)) })
+	for _, value := range []string{"false", "true", "false"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.Equal(t, value == "true", getLazyColumnGroupEnabled())
+	}
 }
 
 // TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers

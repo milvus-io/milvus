@@ -445,7 +445,7 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
 class PhyJsonContainsFilterExpr : public SegmentExpr {
  public:
     PhyJsonContainsFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::JsonContainsExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,

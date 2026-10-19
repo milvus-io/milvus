@@ -1249,7 +1249,6 @@ class TestUpsertVector(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("id_type", ["Int64", "VarChar"])
-    @pytest.mark.xfail(reason="currently not support auto_id for upsert")
     def test_upsert_vector_pk_auto_id(self, nb, dim, insert_round, id_type):
         # create a collection
         name = gen_collection_name()
@@ -1283,7 +1282,6 @@ class TestUpsertVector(TestBase):
             data = []
             for j in range(nb):
                 tmp = {
-                    "book_id": i * nb + j if id_type == "Int64" else f"{i * nb + j}",
                     "user_id": i * nb + j,
                     "word_count": i * nb + j,
                     "book_describe": f"book_{i * nb + j}",
@@ -1322,15 +1320,20 @@ class TestUpsertVector(TestBase):
             body_size = sys.getsizeof(json.dumps(payload))
             logger.info(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_upsert(payload)
+            assert rsp["code"] == 0
+            assert rsp["data"]["upsertCount"] == nb
+            assert rsp["data"]["upsertIds"] == ids[i * nb : (i + 1) * nb]
         # query data to make sure the data is updated
         if id_type == "Int64":
             rsp = self.vector_client.vector_query({"collectionName": name, "filter": "book_id > 0"})
         if id_type == "VarChar":
             rsp = self.vector_client.vector_query({"collectionName": name, "filter": "book_id > '0'"})
+        expected_index_by_id = {str(pk): index for index, pk in enumerate(ids)}
         for data in rsp["data"]:
-            assert data["user_id"] == int(data["book_id"]) + 1
-            assert data["word_count"] == int(data["book_id"]) + 2
-            assert data["book_describe"] == f"book_{int(data['book_id']) + 3}"
+            expected_index = expected_index_by_id[str(data["book_id"])]
+            assert data["user_id"] == expected_index + 1
+            assert data["word_count"] == expected_index + 2
+            assert data["book_describe"] == f"book_{expected_index + 3}"
         res = utility.get_query_segment_info(name)
         logger.info(f"res: {res}")
 

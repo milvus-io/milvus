@@ -27,9 +27,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/fips"
@@ -57,12 +59,12 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
-	// DefaultMaxMembershipFilterPlanSize is the request-wide membership resource
-	// budget. It independently bounds aggregate serialized membership-plan bytes
-	// and aggregate estimated decoded bytes in one Search, HybridSearch, Query, or
-	// complex Delete request. It is deliberately below the default 256 MiB proxy
-	// gRPC client send limit so placeholders and the rest of the internal request
-	// retain ample headroom.
+	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for the
+	// aggregate serialized size of membership-filter-bearing plans and
+	// RLS-bearing HybridSearch plans, and for the aggregate estimated decoded
+	// size of Roaring filters. The serialized and decoded totals are checked
+	// independently. It is deliberately below the default 256 MiB proxy gRPC
+	// client send limit so the rest of the internal request retains headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
 	DefaultMaxDegree                     = 56
@@ -81,6 +83,11 @@ type ComponentParam struct {
 	ServiceParam
 	once      sync.Once
 	baseTable *BaseTable
+
+	// versionGates drives the version-gated config items (e.g. write-before
+	// function materialization). It is created and started by the MixCoord
+	// role after the role has been set; see StartVersionGateSwitcher.
+	versionGates *confirmator
 
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
@@ -153,7 +160,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.MixCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
 	p.QueryCoordCfg.init(bt)
-	p.QueryNodeCfg.init(bt)
+	p.QueryNodeCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
@@ -189,13 +196,91 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.IntegrationTestCfg.init(bt)
 }
 
+// versionGateItems returns every version-gated config item of the param table.
+// Gate registration follows paramtable initialization: a single confirmator
+// (a paramtable-level capability) drives all of them together.
+func (p *ComponentParam) versionGateItems() []*ParamItem {
+	return []*ParamItem{
+		&p.FunctionCfg.EnableWriteBeforeMaterialization,
+		&p.ProxyCfg.RLSImportEnforcementEnabled,
+	}
+}
+
+// startVersionGateSwitcherOnce guards the one-shot global version-gate
+// switcher: only the MixCoord role calls StartVersionGateSwitcher, but the
+// once keeps the driving logic idempotent however it is reached.
+var startVersionGateSwitcherOnce sync.Once
+
+// StartVersionGateSwitcher drives every version-gated config item of the
+// process, exactly once. It is only called by the MixCoord role (the single
+// coordinator per cluster) after the role has been set; other roles observe
+// the flipped config value through the regular config refresh. Embedded-etcd
+// deployments are single-process (service_param.go enforces "embedded etcd
+// can not be used under distributed mode"): the local process is the whole
+// cluster, so when the local version already satisfies a gate there is
+// nothing to coordinate across nodes — resolve the gate directly and skip the
+// confirmator (there is no usable etcd client anyway). Otherwise the cluster
+// confirmator is created and started; it runs in the background and stops
+// itself once every gate is resolved. It is a no-op when remote config is
+// skipped (e.g. tests) or there is no usable etcd.
+func StartVersionGateSwitcher() {
+	startVersionGateSwitcherOnce.Do(func() {
+		Get().startVersionGates()
+	})
+}
+
+// startVersionGates implements StartVersionGateSwitcher on a param table.
+func (p *ComponentParam) startVersionGates() {
+	if p == nil || p.baseTable == nil || p.baseTable.config.skipRemote {
+		return
+	}
+	if p.EtcdCfg.UseEmbedEtcd.GetAsBool() {
+		for _, item := range p.versionGateItems() {
+			if item == nil || item.VersionGateSwitcher == nil {
+				continue
+			}
+			gv, err := semver.Parse(item.VersionGateSwitcher.GateVersion)
+			if err != nil {
+				// Validate() at Init already rejected malformed versions; on any
+				// residual parse issue keep the gate unresolved (PreSwitchValue).
+				continue
+			}
+			if common.Version.GE(gv) {
+				item.VersionGateSwitcher.localSatisfied = true
+				// GetAs* accessors short-circuit on the value cache, which is
+				// keyed by config key only and is blind to the runtime
+				// localSatisfied hint, so evict the cached entry to make the
+				// resolved value observable immediately.
+				p.baseTable.mgr.EvictCachedValue(item.Key)
+				mlog.Info(context.TODO(), "version gate: embedded-etcd deployment, local version satisfies the gate",
+					mlog.String("key", item.Key), mlog.String("localVersion", common.Version.String()),
+					mlog.String("gateVersion", item.VersionGateSwitcher.GateVersion))
+			}
+		}
+		return
+	}
+	// The confirmator shares the etcd client created for the config etcd
+	// source: when remote config is disabled or there is no usable etcd, no
+	// client exists and there is nothing to confirm against.
+	if p.baseTable.etcdClient == nil {
+		return
+	}
+	vg, err := recoverConfirmator(p.baseTable.etcdClient,
+		p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue(), p.versionGateItems())
+	if err != nil {
+		mlog.Warn(context.TODO(), "recover version gate confirmator failed", mlog.Err(err))
+		return
+	}
+	p.versionGates = vg
+}
+
 func (p *ComponentParam) GetComponentConfigurations(componentName string, sub string) map[string]string {
 	allownPrefixs := append(globalConfigPrefixs(), componentName+".")
-	return p.baseTable.mgr.GetBy(config.WithSubstr(sub), config.WithOneOfPrefixs(allownPrefixs...))
+	return p.baseTable.mgr.ProjectBy(config.WithSubstr(sub), config.WithOneOfPrefixs(allownPrefixs...))
 }
 
 func (p *ComponentParam) GetAll() map[string]string {
-	return p.baseTable.mgr.GetConfigs()
+	return p.baseTable.mgr.ProjectConfigs()
 }
 
 func (p *ComponentParam) GetConfigsView() map[string]string {
@@ -283,6 +368,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	AdminAuthEnabled      ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -353,6 +439,8 @@ type commonConfig struct {
 
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
+
+	EnableFastPB ParamItem `refreshable:"true"`
 
 	PreferIPv6LocalIP ParamItem `refreshable:"false"`
 
@@ -967,6 +1055,35 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
 
+	p.AdminAuthEnabled = ParamItem{
+		Key:          "common.security.adminAuthEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether the metrics port (default 9091) requires root HTTP Basic authentication
+for /management/*, /log/level, /eventlog, /debug/pprof/* and the web console.
+Probes and scrapes remain open; the retired /api/v1/health endpoint is no longer served.
+Requests without Origin or Fetch Metadata must include X-Milvus-Admin-Request: true.
+Use HTTPS for the browser console and preserve Fetch Metadata at the reverse proxy.
+Root hashes are cached for 10 seconds; a failed refresh may reuse the last hash for
+up to 10 minutes after its last fetch, including a password rotated during an outage.
+A Proxy receiving a root credential notification revokes that cached hash and any
+in-flight verification results; it returns 503 if the current hash cannot be fetched.
+Other nodes and Proxies that have not received the notification retain the TTL policy.
+Update graceful-shutdown and profiling clients before enabling. The eventlog gRPC
+stream becomes loopback-only. This port remains plaintext: use a trusted network
+or TLS proxy and rotate root with UpdateCredential, not defaultRootPassword.
+Not settable through /management/config/alter. Watch milvus_admin_auth_total.`,
+		Export: true,
+		// Deliberately NOT Immutable. ProcessImmutableConfigs persists an
+		// Immutable key's value into etcd on first startup, and the etcd source
+		// outranks file and env, so the first boot of any cluster would pin
+		// "false" there and an operator later setting adminAuthEnabled: true in
+		// yaml would get no gate and no warning. /management/config/alter
+		// instead rejects this key unconditionally, including while the gate
+		// is off, so an anonymous request cannot persist a disabling value.
+	}
+	p.AdminAuthEnabled.Init(base.mgr)
+
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
 		Version: "2.2.1",
@@ -974,6 +1091,16 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 like the old password verification when updating the credential`,
 		DefaultValue: "",
 		Export:       true,
+		// A list of user names, not a credential: knowing who the superusers are
+		// does not let anyone authenticate as one, so it stays readable through
+		// ShowConfigurations and /management/config/get as reviewed access
+		// metadata. Sensitivity does not change the management write contract;
+		// authentication and authorization are handled separately.
+		//
+		// The metadata records that decision for TestSensitiveParamItemsMarked; no
+		// runtime fallback pattern matches this key, so it changes nothing by
+		// itself.
+		Sensitivity: NonSensitive,
 	}
 	p.SuperUsers.Init(base.mgr)
 
@@ -984,6 +1111,12 @@ like the old password verification when updating the credential`,
 Large numeric passwords require double quotes to avoid yaml parsing precision issues.`,
 		DefaultValue: "Milvus",
 		Export:       true,
+		// Sensitive but deliberately NOT Immutable: ProcessImmutableConfigs
+		// persists every Immutable key's current value into etcd on first
+		// startup, so marking a credential Immutable would copy it into etcd in
+		// cleartext -- the opposite of what redacting it from a configuration
+		// projection is for. See TestNoCredentialIsImmutable.
+		Sensitivity: Sensitive,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
 
@@ -1472,6 +1605,28 @@ The default matches the milvus-storage default.`,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
 
+	p.EnableFastPB = ParamItem{
+		Key:          "common.enableFastPB",
+		Version:      "3.0",
+		DefaultValue: "true",
+		Doc:          "Enable fast protobuf decoding for RPC and internal search results. Set false to use the official protobuf decoder.",
+		Export:       true,
+	}
+	p.EnableFastPB.Init(base.mgr)
+	// Only mirror the process-global ParamItem used by RPC decoding.
+	// Standalone ComponentParam instances in tests must not change that state.
+	if p == &params.CommonCfg {
+		// The dispatcher matches normalized aliases, including etcd's key without
+		// separators. Refresh from the effective config rather than event.Value.
+		base.mgr.Dispatcher.Register(p.EnableFastPB.Key, config.NewHandler("common.enableFastPB.atomic", func(event *config.Event) {
+			switch event.EventType {
+			case config.CreateType, config.UpdateType, config.DeleteType:
+				updateFastPBEnabled()
+			}
+		}))
+		updateFastPBEnabled()
+	}
+
 	p.PreferIPv6LocalIP = ParamItem{
 		Key:          "common.preferIPv6",
 		Version:      "2.5.10",
@@ -1763,18 +1918,20 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.SampleFraction.Init(base.mgr)
 
 	t.JaegerURL = ParamItem{
-		Key:     "trace.jaeger.url",
-		Version: "2.3.0",
-		Doc:     "when exporter is jaeger should set the jaeger's URL",
-		Export:  true,
+		Key:         "trace.jaeger.url",
+		Version:     "2.3.0",
+		Doc:         "when exporter is jaeger should set the jaeger's URL",
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	t.JaegerURL.Init(base.mgr)
 
 	t.OtlpEndpoint = ParamItem{
-		Key:     "trace.otlp.endpoint",
-		Version: "2.3.0",
-		Doc:     `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
-		Export:  true,
+		Key:         "trace.otlp.endpoint",
+		Version:     "2.3.0",
+		Doc:         `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
 
@@ -1792,6 +1949,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Version:      "2.4.0",
 		DefaultValue: "true",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	t.OtlpSecure.Init(base.mgr)
 
@@ -1801,6 +1959,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		DefaultValue: "",
 		Doc:          "otlp header that encoded in base64",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	t.OtlpHeaders.Init(base.mgr)
 
@@ -1947,7 +2106,8 @@ It is recommended to use debug level under test and development environments, an
 The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
 If this parameter is set to a valid local path, Milvus writes and stores log files in this path.
 Set this parameter as the path that you have permission to write.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: NonSensitive,
 	}
 	l.RootPath.Init(base.mgr)
 
@@ -2028,10 +2188,9 @@ Faster the logging writes can be seen by the underlying file system.`,
 		Key:          "log.asyncWrite.droppedTimeout",
 		DefaultValue: "100ms",
 		Version:      "2.6.7",
-		Doc: `The timeout to drop the write operation if the buffer is full.
-Once the underlying buffered writer is blocked or too slow and
-the pending length is larger than the pending length threshold,
-the new incoming write operation will be dropped if it exceeds the timeout.`,
+		Doc: `The maximum time a log below nonDroppableLevel waits for queue space.
+If the underlying buffered writer is blocked or too slow and the pending queue
+remains full when this timeout expires, the incoming log is dropped.`,
 		Export: false,
 	}
 	l.AsyncWriteDroppedTimeout.Init(base.mgr)
@@ -2040,9 +2199,10 @@ the new incoming write operation will be dropped if it exceeds the timeout.`,
 		Key:          "log.asyncWrite.nonDroppableLevel",
 		DefaultValue: "error",
 		Version:      "2.6.7",
-		Doc: `The level that will not be dropped when the buffer is full.
-Once the level is greater or equal to the non-droppable level, 
-the write operation will not be dropped because the buffer is full`,
+		Doc: `The level at which a log uses a best-effort extended wait for queue space.
+At or above this level, a log waits at most max(droppedTimeout, stopTimeout).
+The name is retained for compatibility; it does not guarantee delivery, and these
+logs are dropped if the queue remains full when that timeout expires.`,
 		Export: false,
 	}
 	l.AsyncWriteNonDroppableLevel.Init(base.mgr)
@@ -2051,10 +2211,11 @@ the write operation will not be dropped because the buffer is full`,
 		Key:          "log.asyncWrite.stopTimeout",
 		DefaultValue: "1s",
 		Version:      "2.6.7",
-		Doc: `The timeout to stop the async write.
-When the milvus is on shutdown, 
-the async writer of logger will try to flush all the pending write operations 
-to the underlying file system until reaching the timeout.`,
+		Doc: `The maximum time to wait for async logging to stop. It also contributes to
+the maximum enqueue wait for logs at or above nonDroppableLevel: their limit is
+max(droppedTimeout, stopTimeout).
+When Milvus shuts down, the async logger tries to flush pending writes to the
+underlying file system until this timeout expires.`,
 		Export: false,
 	}
 	l.AsyncWriteStopTimeout.Init(base.mgr)
@@ -2292,6 +2453,20 @@ type proxyConfig struct {
 	MaxResultEntries                  ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
+	RLSMaxPoliciesPerCollection       ParamItem `refreshable:"true"`
+	RLSMaxTagsPerPrincipal            ParamItem `refreshable:"true"`
+	RLSMaxExpressionLength            ParamItem `refreshable:"true"`
+	RLSMaxCombinedExpressionLength    ParamItem `refreshable:"true"`
+	RLSMaxPolicyNameLength            ParamItem `refreshable:"true"`
+	RLSMaxPolicyDescriptionLength     ParamItem `refreshable:"true"`
+	RLSMaxPrincipalNameLength         ParamItem `refreshable:"true"`
+	RLSMaxTagKeyLength                ParamItem `refreshable:"true"`
+	RLSMaxTagValueLength              ParamItem `refreshable:"true"`
+	RLSMaxArrayLiteralElements        ParamItem `refreshable:"true"`
+	RLSMaxPrincipalCacheEntries       ParamItem `refreshable:"true"`
+	RLSMaxPrincipalCacheBytes         ParamItem `refreshable:"true"`
+	RLSMetaRefreshInterval            ParamItem `refreshable:"true"`
+	RLSImportEnforcementEnabled       ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2306,6 +2481,15 @@ type proxyConfig struct {
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+}
+
+func positiveProxyLimitFormatter(defaultValue string) func(string) string {
+	return func(v string) string {
+		if getAsInt64(v) <= 0 {
+			return defaultValue
+		}
+		return v
+	}
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -2365,6 +2549,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: "6",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
+		Sensitivity:  NonSensitive,
 	}
 	p.MinPasswordLength.Init(base.mgr)
 
@@ -2388,6 +2573,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Key:          "proxy.maxPasswordLength",
 		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		Sensitivity:  NonSensitive,
 		Formatter: func(v string) string {
 			n := getAsInt(v)
 			if n <= 0 || n > 72 {
@@ -2475,10 +2661,11 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: strconv.Itoa(DefaultMaxMembershipFilterPlanSize),
 		FallbackKeys: []string{"proxy.maxBloomFilterPlanSize"},
 		Version:      "3.0.0",
-		Doc: "The request-wide membership-filter resource budget in one Search, HybridSearch, Query, or " +
-			"complex Delete request. The proxy independently checks aggregate serialized membership-plan bytes " +
-			"and aggregate estimated decoded bytes against this value; hybrid sub-searches and scorer filters " +
-			"share the configured budget. Must be positive; invalid values fall back to 128 MiB.",
+		Doc: "The request-wide large-filter budget in bytes. It independently limits the aggregate " +
+			"serialized size of membership-filter-bearing plans and RLS-bearing HybridSearch plans, " +
+			"and the aggregate estimated decoded size of Roaring filters. The proxy " +
+			"checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer " +
+			"filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.",
 		Export:       true,
 		PanicIfEmpty: true,
 		Formatter: func(v string) string {
@@ -2889,6 +3076,169 @@ Disabled if the value is less or equal to 0.`,
 	}
 	p.MaxSearchAggregationResultEntries.Init(base.mgr)
 
+	p.RLSMaxPoliciesPerCollection = ParamItem{
+		Key:          "proxy.rls.maxPoliciesPerCollection",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of row policies allowed on one collection.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("100"),
+	}
+	p.RLSMaxPoliciesPerCollection.Init(base.mgr)
+
+	p.RLSMaxTagsPerPrincipal = ParamItem{
+		Key:          "proxy.rls.maxTagsPerPrincipal",
+		Version:      "3.0.0",
+		DefaultValue: "50",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of tags allowed on one collection-scoped RLS principal.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("50"),
+	}
+	p.RLSMaxTagsPerPrincipal.Init(base.mgr)
+
+	p.RLSMaxExpressionLength = ParamItem{
+		Key:          "proxy.rls.maxExpressionLength",
+		Version:      "3.0.0",
+		DefaultValue: "4096",
+		PanicIfEmpty: true,
+		Doc:          "Maximum length of one RLS using_expr or check_expr in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("4096"),
+	}
+	p.RLSMaxExpressionLength.Init(base.mgr)
+
+	p.RLSMaxCombinedExpressionLength = ParamItem{
+		Key:          "proxy.rls.maxCombinedExpressionLength",
+		Version:      "3.0.0",
+		DefaultValue: "16384",
+		PanicIfEmpty: true,
+		Doc:          "Maximum length of the final combined RLS expression in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("16384"),
+	}
+	p.RLSMaxCombinedExpressionLength.Init(base.mgr)
+
+	p.RLSMaxPolicyNameLength = ParamItem{
+		Key:          "proxy.rls.maxPolicyNameLength",
+		Version:      "3.0.0",
+		DefaultValue: "255",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS policy name length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("255"),
+	}
+	p.RLSMaxPolicyNameLength.Init(base.mgr)
+
+	p.RLSMaxPolicyDescriptionLength = ParamItem{
+		Key:          "proxy.rls.maxPolicyDescriptionLength",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS policy description length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxPolicyDescriptionLength.Init(base.mgr)
+
+	p.RLSMaxPrincipalNameLength = ParamItem{
+		Key:          "proxy.rls.maxPrincipalNameLength",
+		Version:      "3.0.0",
+		DefaultValue: "255",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal name length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("255"),
+	}
+	p.RLSMaxPrincipalNameLength.Init(base.mgr)
+
+	p.RLSMaxTagKeyLength = ParamItem{
+		Key:          "proxy.rls.maxTagKeyLength",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal tag key length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("128"),
+	}
+	p.RLSMaxTagKeyLength.Init(base.mgr)
+
+	p.RLSMaxTagValueLength = ParamItem{
+		Key:          "proxy.rls.maxTagValueLength",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal string tag value or array string element length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxTagValueLength.Init(base.mgr)
+
+	p.RLSMaxArrayLiteralElements = ParamItem{
+		Key:          "proxy.rls.maxArrayLiteralElements",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum elements for RLS array tags and in or array_contains* predicates.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxArrayLiteralElements.Init(base.mgr)
+
+	p.RLSMaxPrincipalCacheEntries = ParamItem{
+		Key:          "proxy.rls.maxPrincipalCacheEntries",
+		Version:      "3.0.0",
+		DefaultValue: "65536",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("65536"),
+	}
+	p.RLSMaxPrincipalCacheEntries.Init(base.mgr)
+
+	p.RLSMaxPrincipalCacheBytes = ParamItem{
+		Key:          "proxy.rls.maxPrincipalCacheBytes",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		PanicIfEmpty: true,
+		Doc:          "Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+	}
+	p.RLSMaxPrincipalCacheBytes.Init(base.mgr)
+
+	p.RLSMetaRefreshInterval = ParamItem{
+		Key:          "proxy.rls.metaRefreshInterval",
+		Version:      "3.0.0",
+		DefaultValue: "3600",
+		PanicIfEmpty: true,
+		Doc:          "Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("3600"),
+	}
+	p.RLSMetaRefreshInterval.Init(base.mgr)
+
+	// Import RLS spans Proxy, DataCoord, and DataNode. Keep it fail-closed until
+	// every live component is new enough to preserve and enforce the predicate.
+	p.RLSImportEnforcementEnabled = ParamItem{
+		Key:          "proxy.rls.importEnforcementEnabled",
+		Version:      "3.0.3",
+		DefaultValue: "auto",
+		Export:       false,
+		Doc: "Whether RLS enforcement is available for bulk import. auto: enable after every live " +
+			"cluster component reaches the gate version; false: reject RLS-enforced imports; true: " +
+			"force enable and bypass the mixed-version safety gate.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.0.3",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+	}
+	p.RLSImportEnforcementEnabled.Init(base.mgr)
+
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",
 		Version:      "2.6.0",
@@ -3053,6 +3403,11 @@ type queryCoordConfig struct {
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+
+	AutoscalePrecheckEnabled ParamItem `refreshable:"true"`
+	AutoscaleEnabled         ParamItem `refreshable:"true"`
+	AutoscaleMaxMemoryLimit  ParamItem `refreshable:"true"`
+	AutoscaleMaxDiskLimit    ParamItem `refreshable:"true"`
 
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
@@ -3351,9 +3706,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.ChannelTaskTimeout = ParamItem{
 		Key:          "queryCoord.channelTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "60000",
+		DefaultValue: "120000",
 		PanicIfEmpty: true,
-		Doc:          "1 minute",
+		Doc:          "2 minutes",
 		Export:       true,
 	}
 	p.ChannelTaskTimeout.Init(base.mgr)
@@ -3361,9 +3716,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.SegmentTaskTimeout = ParamItem{
 		Key:          "queryCoord.segmentTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "120000",
+		DefaultValue: "300000",
 		PanicIfEmpty: true,
-		Doc:          "2 minute",
+		Doc:          "5 minutes",
 		Export:       true,
 	}
 	p.SegmentTaskTimeout.Init(base.mgr)
@@ -3763,6 +4118,42 @@ Set to 0 to disable the penalty period.`,
 	}
 	p.ResourceExhaustionCleanupInterval.Init(base.mgr)
 
+	p.AutoscalePrecheckEnabled = ParamItem{
+		Key:          "queryCoord.autoscale.precheckEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.",
+		Export:       true,
+	}
+	p.AutoscalePrecheckEnabled.Init(base.mgr)
+
+	p.AutoscaleEnabled = ParamItem{
+		Key:          "queryCoord.autoscale.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.",
+		Export:       true,
+	}
+	p.AutoscaleEnabled.Init(base.mgr)
+
+	p.AutoscaleMaxMemoryLimit = ParamItem{
+		Key:          "queryCoord.autoscale.maxMemoryLimit",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.",
+		Export:       true,
+	}
+	p.AutoscaleMaxMemoryLimit.Init(base.mgr)
+
+	p.AutoscaleMaxDiskLimit = ParamItem{
+		Key:          "queryCoord.autoscale.maxDiskLimit",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.",
+		Export:       true,
+	}
+	p.AutoscaleMaxDiskLimit.Init(base.mgr)
+
 	p.UpdateTargetNeedSegmentDataReady = ParamItem{
 		Key:          "queryCoord.updateTargetNeedSegmentDataReady",
 		Version:      "2.6.8",
@@ -3786,7 +4177,10 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	SoPath ParamItem `refreshable:"false"`
+	StrictGroupStrategy              ParamItem `refreshable:"true"`
+	StrictGroupPhase1CandidateWeight ParamItem `refreshable:"true"`
+	StrictGroupSkipRefine            ParamItem `refreshable:"true"`
+	SoPath                           ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -3833,6 +4227,7 @@ type queryNodeConfig struct {
 	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
 	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
 	TieredRejectRemoteVectorOutput  ParamItem `refreshable:"true"`
+	TieredLazyColumnGroupEnabled    ParamItem `refreshable:"true"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -4006,7 +4401,25 @@ func formatDurationWithMillisecondFallback(v string) string {
 	return v
 }
 
-func (p *queryNodeConfig) init(base *BaseTable) {
+func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
+	p.StrictGroupStrategy = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupStrategy",
+		Version: "2.6.23", DefaultValue: "per_group", Export: true,
+		Doc: "Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.",
+	}
+	p.StrictGroupStrategy.Init(base.mgr)
+	p.StrictGroupPhase1CandidateWeight = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupPhase1CandidateWeight",
+		Version: "2.6.23", DefaultValue: "0", Export: true,
+		Doc: "Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.",
+	}
+	p.StrictGroupPhase1CandidateWeight.Init(base.mgr)
+	p.StrictGroupSkipRefine = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupSkipRefine",
+		Version: "2.6.23", DefaultValue: "false", Export: true,
+		Doc: "Skip query-time refinement consistently in both phases of single-query strict grouping with group size greater than one. May reduce recall.",
+	}
+	p.StrictGroupSkipRefine.Init(base.mgr)
 	p.IDFPreload = ParamItem{
 		Key:          "queryNode.idfOracle.preload",
 		Version:      "2.6.8",
@@ -4118,6 +4531,15 @@ Defaults to "sync".`,
 		Export:       true,
 	}
 	p.TieredWarmupVectorIndex.Init(base.mgr)
+
+	p.TieredLazyColumnGroupEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.lazyColumnGroupEnabled",
+		Version:      "3.0.3",
+		DefaultValue: "false",
+		Doc:          "When enabled, Storage V3 manifest fields with warmup=disable and no load-time side effects defer projected ChunkReader, translator, and cache creation until first access.",
+		Export:       true,
+	}
+	p.TieredLazyColumnGroupEnabled.Init(base.mgr)
 
 	p.TieredEvictionEnabled = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictionEnabled",
@@ -4645,7 +5067,6 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Doc:          "Deprecated: The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				localStoragePath := getLocalStoragePath(base)
 				return path.Join(localStoragePath, "mmap")
 			}
 			return v
@@ -4918,7 +5339,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Formatter: func(v string) string {
 			if len(v) == 0 {
 				// use local storage path to check correct device
-				localStoragePath := getLocalStoragePath(base)
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
 					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
 						mlog.Fatal(context.TODO(), "failed to mkdir", mlog.String("localStoragePath", localStoragePath), mlog.Err(err))
@@ -5443,7 +5863,7 @@ user-task-polling:
 		Key:          "queryNode.takeForOutput.resultCountLimit",
 		Version:      "3.0.0",
 		DefaultValue: defaultTakeForOutputResultCountLimit,
-		Doc:          `Maximum search topK, unique search offset count, or retrieve result row count that can use take() for output fields. Set to 0 to disable the limit`,
+		Doc:          `Maximum request-level output result count allowed to use take() for output fields. Set to 0 to disable the limit`,
 		Export:       false,
 		Formatter: func(v string) string {
 			limit, err := strconv.ParseInt(v, 10, 64)
@@ -6152,6 +6572,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "3",
 		Doc:          "The storage version compaction tokens per period, applying rate limit",
 		Export:       false,
+		Sensitivity:  NonSensitive,
 	}
 	p.StorageVersionCompactionRateLimitTokens.Init(base.mgr)
 
@@ -6599,7 +7020,8 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 			"server-side cross-bucket copy with custom object storage endpoints. " +
 			"Canonical cloud endpoints derived from cloud_provider and region are " +
 			"allowed without this list.",
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.SnapshotCrossBucketEndpointAllowlist.Init(base.mgr)
 
@@ -6725,6 +7147,7 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Version:      "2.0.0",
 		DefaultValue: "localhost:22930",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.IndexNodeAddress.Init(base.mgr)
 
@@ -6733,6 +7156,7 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Version:      "2.0.0",
 		DefaultValue: "false",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.WithCredential.Init(base.mgr)
 
@@ -6880,10 +7304,26 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.FilesPerPreImportTask.Init(base.mgr)
 
 	p.ImportTaskRetention = ParamItem{
-		Key:          "dataCoord.import.taskRetention",
-		Version:      "2.4.0",
-		Doc:          "The retention period in seconds for tasks in the Completed or Failed state.",
-		DefaultValue: "10800",
+		Key:     "dataCoord.import.taskRetention",
+		Version: "2.4.0",
+		Doc: `The retention period in seconds for tasks in the Completed or Failed state.
+Nothing else bounds the terminal set -- maxImportJobNum counts only jobs that are
+neither Completed nor Failed -- so this value alone decides how many finished
+importJob entries stay in etcd, each carrying its schema, file list and options
+plus every preimport and import task under it.
+The 48h default exists for BulkImport idempotency and only for it: the idempotency
+window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+earlier than its tombstone lets an in-window retry resolve to a jobID that
+GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
+as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
+age is measured from the last StreamingCoord start: every restart extends its
+remaining life by up to another maxLifetime, while this retention keeps counting
+from the job's own completion. Equal values hold only for a window with no restart,
+which is not a property a default may assume. Raise it further if StreamingCoord
+restarts more than once inside one tombstone lifetime.
+A cluster whose clients never send an Idempotency-Key is under no such requirement
+and can lower this freely; 10800 was the default before idempotency keys existed.`,
+		DefaultValue: "172800",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -7775,8 +8215,8 @@ if this parameter <= 0, will set it as 10`,
 	p.ImportDeleteBufferSize = ParamItem{
 		Key:          "dataNode.import.readDeleteBufferSizeInMB",
 		Version:      "2.5.14",
-		Doc:          "The delete buffer size (in MB) during import.",
-		DefaultValue: "16",
+		Doc:          "The delete memory budget (in MB) used for legacy L0 import slot estimation and typed snapshot delete maps. Shared-L0 snapshot tasks use bounded delete batches and pool the per-reader delete allowances for bitmaps in both phases; admission also reserves row buffers and requires an import memory allowance greater than twice this budget.",
+		DefaultValue: "128",
 		Formatter: func(v string) string {
 			bufferSize := getAsFloat(v)
 			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
@@ -8071,6 +8511,7 @@ type streamingConfig struct {
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
 	WALBalancerBackoffMaxInterval     ParamItem `refreshable:"true"`
 	WALBalancerOperationTimeout       ParamItem `refreshable:"true"`
+	WALBalancerNodeLostGracePeriod    ParamItem `refreshable:"true"`
 
 	// balancer Policy
 	WALBalancerPolicyName                               ParamItem `refreshable:"true"`
@@ -8090,6 +8531,9 @@ type streamingConfig struct {
 	WALBroadcasterTombstoneMaxCount      ParamItem `refreshable:"true"`
 	WALBroadcasterTombstoneMaxLifetime   ParamItem `refreshable:"true"`
 
+	// idempotency
+	IdempotencyMaxKeyLength ParamItem `refreshable:"true"`
+
 	// txn
 	TxnDefaultKeepaliveTimeout ParamItem `refreshable:"true"`
 
@@ -8104,6 +8548,7 @@ type streamingConfig struct {
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
 
 	// partial update
+	PartialUpdateEnableCAS            ParamItem `refreshable:"false"`
 	PartialUpdateVersionIndexMaxBytes ParamItem `refreshable:"false"`
 
 	// memory usage control
@@ -8249,6 +8694,18 @@ If the operation exceeds this timeout, it will be canceled.`,
 	}
 	p.WALBalancerOperationTimeout.Init(base.mgr)
 
+	p.WALBalancerNodeLostGracePeriod = ParamItem{
+		Key:     "streaming.walBalancer.nodeLostGracePeriod",
+		Version: "3.0.2",
+		Doc: `The wait time before assigning the pchannels of a streaming node that has left the session view to another streaming node, 5s by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+It gives the old streaming node time to exit before another streaming node writes to the same wal.
+It lowers the chance of two writers on one wal but does not rule it out. 0 disables the wait.`,
+		DefaultValue: "5s",
+		Export:       true,
+	}
+	p.WALBalancerNodeLostGracePeriod.Init(base.mgr)
+
 	p.WALBalancerPolicyName = ParamItem{
 		Key:          "streaming.walBalancer.balancePolicy.name",
 		Version:      "2.6.0",
@@ -8392,6 +8849,19 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	}
 	p.WALBroadcasterTombstoneMaxLifetime.Init(base.mgr)
 
+	p.IdempotencyMaxKeyLength = ParamItem{
+		Key:     "streaming.idempotency.maxKeyLength",
+		Version: "2.6.6",
+		Doc: `The max length in bytes of a client-supplied idempotency key, 256 by default.
+The key is stored in the message properties of every write it guards, so an
+oversized key inflates both the WAL entry and the in-memory dedup index.
+A value of 0 rejects every non-empty key, disabling idempotency keys entirely;
+requests that carry no key are accepted at any value.`,
+		DefaultValue: "256",
+		Export:       false,
+	}
+	p.IdempotencyMaxKeyLength.Init(base.mgr)
+
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
 		Key:          "streaming.txn.defaultKeepaliveTimeout",
@@ -8439,6 +8909,15 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 		Export:       true,
 	}
 	p.LoggingAppendSlowThreshold.Init(base.mgr)
+
+	p.PartialUpdateEnableCAS = ParamItem{
+		Key:          "streaming.partialUpdate.enableCAS",
+		Version:      "3.0.4",
+		DefaultValue: "true",
+		Export:       false,
+		Doc:          "Enable partial-update CAS conflict detection. Disabling it allows concurrent updates based on stale rows to overwrite each other. Requires StreamingNode restart.",
+	}
+	p.PartialUpdateEnableCAS.Init(base.mgr)
 
 	p.PartialUpdateVersionIndexMaxBytes = ParamItem{
 		Key:          "streaming.partialUpdate.versionIndexMaxBytes",
@@ -8928,13 +9407,4 @@ func (params *ComponentParam) Reset(key string) error {
 
 func (params *ComponentParam) GetWithDefault(key string, dft string) string {
 	return params.baseTable.GetWithDefault(key, dft)
-}
-
-func getLocalStoragePath(base *BaseTable) string {
-	localStoragePath := base.Get("localStorage.path")
-	if len(localStoragePath) == 0 {
-		localStoragePath = defaultLocalStoragePath
-		mlog.Warn(context.TODO(), "localStorage.path is not set, using default value", mlog.String("localStorage.path", localStoragePath))
-	}
-	return localStoragePath
 }

@@ -182,6 +182,19 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithUseLoonFFI(t.useLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
+	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
+		lobBasePath := storage.SegmentPartitionBasePath(
+			t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
+		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
+			lobBasePath,
+			t.compactionParams.TextInlineThreshold,
+			t.compactionParams.TextMaxLobFileBytes,
+			t.compactionParams.TextFlushThresholdBytes,
+		)
+		if len(textColumnConfigs) > 0 {
+			writerOpts = append(writerOpts, storage.WithTextColumnConfigs(textColumnConfigs))
+		}
+	}
 	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
 		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())
 	}
@@ -249,7 +262,12 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 
 	phaseStart = time.Now()
-	rr, existingFields, err := newCompactionSegmentRecordReader(ctx, t.plan.GetSegmentBinlogs()[0], t.plan.Schema, t.compactionParams.StorageConfig,
+	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(t.manifest)
+	if err != nil {
+		srw.Close()
+		return nil, err
+	}
+	rr, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, t.plan.GetSegmentBinlogs()[0], t.plan.Schema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithVersion(t.segmentStorageVersion),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
@@ -563,9 +581,9 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 }
 
 // initLOBCompactionContext initializes the LOB compaction context for TEXT columns.
-// For sort compaction, data is reordered but not redistributed, so TEXT columns
-// use REUSE_ALL strategy (LOB references remain valid after reordering).
-// The LOB file references need to be copied to the output segment's manifest.
+// Sort compaction normally reuses TEXT references because data is reordered but
+// not redistributed. If the output uses a different partition base, references
+// must instead be rewritten because they do not encode their source namespace.
 func (t *sortCompactionTask) initLOBCompactionContext(ctx context.Context) error {
 	// check if there are TEXT fields in schema
 	textFieldIDs := compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())
@@ -616,12 +634,28 @@ func (t *sortCompactionTask) initLOBCompactionContext(ctx context.Context) error
 
 	// compute strategies (will use forced REUSE_ALL for all TEXT fields)
 	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+	outputPartitionBase := storage.SegmentPartitionBasePath(
+		t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
+	partitionBaseMismatch, err := compaction.LOBSourcePartitionBaseMismatch(sourceManifests, outputPartitionBase)
+	if err != nil {
+		return err
+	}
+	if partitionBaseMismatch {
+		t.lobContext.ForceRewriteAllAcrossPartitionBases(textFieldIDs)
+		log.Info(ctx, "forcing TEXT LOB rewrite across partition namespaces",
+			mlog.String("outputPartitionBase", outputPartitionBase))
+	}
 
 	// log strategy decisions
 	for fieldID, decision := range t.lobContext.Decisions {
 		log.Info(ctx, "LOB compaction strategy decided",
 			mlog.FieldFieldID(fieldID),
-			mlog.String("strategy", "REUSE_ALL"),
+			mlog.String("strategy", func() string {
+				if decision.Strategy == compaction.LOBStrategyRewriteAll {
+					return "REWRITE_ALL"
+				}
+				return "REUSE_ALL"
+			}()),
 			mlog.Bool("isForced", t.lobContext.IsForced),
 			mlog.Float64("holeRatio", decision.OverallHoleRatio),
 		)

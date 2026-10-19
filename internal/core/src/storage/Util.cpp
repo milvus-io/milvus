@@ -157,7 +157,14 @@ ReadMediumType(BinlogReaderPtr reader) {
     int32_t magic_num;
     auto ret = reader->Read(sizeof(magic_num), &magic_num);
     AssertInfo(ret.ok(), "read binlog failed: {}", ret.what());
-    AssertInfo(magic_num == MAGIC_NUM, "invalid magic num: {}", magic_num);
+    if (!(magic_num == MAGIC_NUM)) {
+        // A wrong magic number means the object is not the binlog format this
+        // reader expects (e.g. a v2 parquet file behind v1 meta). The bytes do
+        // not change between attempts, so it must not surface as the generic
+        // UnexpectedError, which the build scheduler keeps retrying.
+        ThrowInfo(
+            ErrorCode::DataFormatBroken, "invalid magic num: {}", magic_num);
+    }
 }
 
 void
@@ -626,10 +633,10 @@ CreateArrowBuilder(DataType data_type,
 
 std::shared_ptr<arrow::Scalar>
 CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
-    auto default_var = field_meta.default_value();
+    const auto& default_var = field_meta.default_value();
     AssertInfo(default_var.has_value(),
                "cannot create Arrow Scalar from empty default value");
-    auto default_value = default_var.value();
+    const auto& default_value = default_var.value();
     switch (field_meta.get_data_type()) {
         case DataType::BOOL:
             return std::make_shared<arrow::BooleanScalar>(
@@ -1611,7 +1618,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             reader->file_metadata()->GetRowGroupMetadataVector().size();
         std::vector<int64_t> all_row_groups(row_group_num);
         std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
-        row_group_lists.push_back(all_row_groups);
+        row_group_lists.push_back(std::move(all_row_groups));
 
         // create a schema with only the field id
         auto field_schema = reader->schema()->field(col_offset)->Copy();

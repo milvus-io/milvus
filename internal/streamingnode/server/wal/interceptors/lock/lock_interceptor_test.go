@@ -10,11 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -24,6 +27,7 @@ const (
 
 func newTestInterceptor() *lockAppendInterceptor {
 	return &lockAppendInterceptor{
+		enableCAS:      true,
 		channel:        types.PChannelInfo{Name: testPChannelName},
 		vchannelLocker: lock.NewKeyLock[string](),
 		txnManager:     new(txn.TxnManager),
@@ -31,6 +35,30 @@ func newTestInterceptor() *lockAppendInterceptor {
 }
 
 func TestAcquireLockGuard(t *testing.T) {
+	t.Run("PChannelLevelOnControlChannel", func(t *testing.T) {
+		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
+		defer mocker.UnPatch()
+
+		interceptor := newTestInterceptor()
+		controlChannel := funcutil.GetControlChannel(testPChannelName)
+		broadcast := message.NewFlushAllMessageBuilderV2().
+			WithHeader(&message.FlushAllMessageHeader{}).
+			WithBody(&message.FlushAllMessageBody{}).
+			WithClusterLevelBroadcast(message.ClusterChannels{
+				Channels:       []string{testPChannelName},
+				ControlChannel: controlChannel,
+			}).
+			MustBuildBroadcast()
+		broadcast.WithBroadcastID(1)
+		msg := broadcast.SplitIntoMutableMessage()[0]
+
+		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		assert.False(t, interceptor.glock.TryRLock(), "pchannel-level message should hold the global write lock")
+		guard()
+		assert.True(t, interceptor.glock.TryRLock())
+		interceptor.glock.RUnlock()
+	})
+
 	// Test: Exclusive message with pchannel name as vchannel should acquire global write lock (existing behavior).
 	t.Run("ExclusiveWithPChannelName", func(t *testing.T) {
 		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
@@ -102,6 +130,31 @@ func TestAcquireLockGuard(t *testing.T) {
 		guard()
 		assert.Equal(t, 0, failCalls)
 	})
+
+	t.Run("ExclusiveOnControlChannel", func(t *testing.T) {
+		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
+		defer mocker.UnPatch()
+
+		interceptor := newTestInterceptor()
+		controlChannel := funcutil.GetControlChannel(testPChannelName)
+		msg := message.NewCreateCollectionMessageBuilderV1().
+			WithVChannel(controlChannel).
+			WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: 1}).
+			WithBody(&msgpb.CreateCollectionRequest{}).
+			MustBuildMutable()
+
+		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		// A control-channel copy of collection DDL uses shared locks so another
+		// non-conflicting DDL can append concurrently.
+		assert.False(t, interceptor.glock.TryLock(), "global read lock should be held")
+		assert.True(t, interceptor.glock.TryRLock(), "another global read lock should succeed")
+		interceptor.glock.RUnlock()
+		assert.False(t, interceptor.vchannelLocker.TryLock(controlChannel), "control channel read lock should be held")
+		assert.True(t, interceptor.vchannelLocker.TryRLock(controlChannel), "another control channel read lock should succeed")
+		interceptor.vchannelLocker.RUnlock(controlChannel)
+		guard()
+	})
+
 	// Test: Non-exclusive message on regular vchannel should acquire read locks on both glock and vchannel.
 	t.Run("NonExclusiveOnRegularVChannel", func(t *testing.T) {
 		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
@@ -284,4 +337,57 @@ func newLockTestCASCommit(t *testing.T, vchannel string) message.MutableMessage 
 		MustBuildMutable()
 	require.NoError(t, message.MarkPartialUpdateCASCommit(msg))
 	return msg
+}
+
+func TestCASDisabledCommitSharesVChannelLock(t *testing.T) {
+	interceptor := newTestInterceptor()
+	interceptor.enableCAS = false
+	guard := interceptor.acquireLockGuard(context.Background(), newLockTestInsertMessage(testVChannel))
+	defer guard()
+	done := make(chan struct{})
+	commit := newLockTestCASCommit(t, testVChannel)
+	go func() {
+		unlock := interceptor.acquireLockGuard(context.Background(), commit)
+		unlock()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("disabled CAS commit blocked behind a shared writer")
+	}
+}
+
+func TestLockInterceptorCachesCASConfig(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	key := params.StreamingCfg.PartialUpdateEnableCAS.Key
+	old := params.StreamingCfg.PartialUpdateEnableCAS.GetValue()
+	defer params.Save(key, old)
+	builder := NewInterceptorBuilder()
+	for _, value := range []string{"true", "false"} {
+		require.NoError(t, params.Save(key, value))
+		interceptor := builder.Build(&interceptors.InterceptorBuildParam{}).(*lockAppendInterceptor)
+		next := "true"
+		if value == "true" {
+			next = "false"
+		}
+		require.NoError(t, params.Save(key, next))
+		require.Equal(t, value == "true", interceptor.enableCAS)
+	}
+}
+
+func TestCASDisabledPreservesStructuralExclusiveLock(t *testing.T) {
+	patch := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
+	defer patch.UnPatch()
+	interceptor := newTestInterceptor()
+	interceptor.enableCAS = false
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithVChannel(testVChannel).
+		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		MustBuildMutable()
+	guard := interceptor.acquireLockGuard(context.Background(), msg)
+	defer guard()
+	require.False(t, interceptor.vchannelLocker.TryRLock(testVChannel))
 }

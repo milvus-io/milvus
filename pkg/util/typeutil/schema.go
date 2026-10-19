@@ -479,6 +479,11 @@ func (helper *SchemaHelper) GetTimezone() string {
 	return helper.timezone
 }
 
+// GetVersion returns the version of the collection schema used to build this helper.
+func (helper *SchemaHelper) GetVersion() int32 {
+	return helper.schema.GetVersion()
+}
+
 // GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
@@ -1724,23 +1729,9 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 					if baseFieldData.GetIsDynamic() {
 						// dynamic field is a json with only 1 level nested struct,
 						// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
-						var baseMap map[string]interface{}
-						var updateMap map[string]interface{}
-						// unmarshal base and update
-						if err := json.Unmarshal(baseData.Data[baseIdx], &baseMap); err != nil {
-							return merr.Wrap(err, "failed to unmarshal base json")
-						}
-						if err := json.Unmarshal(updateData.Data[updateIdx], &updateMap); err != nil {
-							return merr.Wrap(err, "failed to unmarshal update json")
-						}
-						// merge
-						for k, v := range updateMap {
-							baseMap[k] = v
-						}
-						// marshal back
-						newJSON, err := json.Marshal(baseMap)
+						newJSON, err := mergeDynamicJSON(baseData.Data[baseIdx], updateData.Data[updateIdx])
 						if err != nil {
-							return merr.Wrap(err, "failed to marshal merged json")
+							return err
 						}
 						baseScalar.GetJsonData().Data[baseIdx] = newJSON
 					} else {
@@ -1860,17 +1851,24 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 	return nil
 }
 
-// UpdateArrayFieldByColumnWithOp merges an Array field's update rows into
-// the base rows while applying a FieldPartialUpdateOp. Non-Array field
-// types or a REPLACE op fall back to UpdateFieldDataByColumn's behavior.
+// UpdateArrayFieldByColumnWithOp merges mapped Array rows in place. REPLACE
+// delegates whole-field replacement, including field-level nulls, to
+// UpdateFieldDataByColumn. The other ops share row traversal, not null semantics:
+//   - APPEND/REMOVE skip a null operand row without changing the base or its
+//     validity. A successful merge marks the base row valid.
+//   - PATH_REPLACE requires non-null base and operand rows. It replaces one
+//     existing element; it never creates a parent, extends an array, or skips
+//     a null operand. A null Array row is distinct from an Array element null.
 //
-// maxCapacity caps ARRAY_APPEND's post-merge length; pass -1 to skip the
-// check (proxy should pass the schema-declared max_capacity).
+// maxCapacity only caps APPEND's result (-1 disables that check). PATH_REPLACE
+// requires exactly one zero-based pathIndex, shared by all mapped rows. Other
+// ops omit pathIndex, preserving their existing call form.
 func UpdateArrayFieldByColumnWithOp(
 	base, update *schemapb.FieldData,
 	baseIndices, updateIndices []int64,
 	op schemapb.FieldPartialUpdateOp_OpType,
 	maxCapacity int,
+	pathIndex ...int,
 ) error {
 	if op == schemapb.FieldPartialUpdateOp_REPLACE {
 		return UpdateFieldDataByColumn(base, update, baseIndices, updateIndices)
@@ -1892,23 +1890,52 @@ func UpdateArrayFieldByColumnWithOp(
 	baseData := baseScalar.GetArrayData().Data
 	updateData := updateScalar.GetArrayData().Data
 	elementType := baseScalar.GetArrayData().GetElementType()
+	isPathReplace := op == schemapb.FieldPartialUpdateOp_PATH_REPLACE
+	if isPathReplace {
+		if update.GetType() != schemapb.DataType_Array {
+			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires Array field data")
+		}
+		// REST omits operand ElementType until insertPreExecute, after this
+		// merge. Use the schema-validated base type without changing the operand;
+		// ApplyArrayRowOp still checks the concrete row payload.
+		if got := updateScalar.GetArrayData().GetElementType(); got != schemapb.DataType_None && got != elementType {
+			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE element type mismatch: %s vs %s", elementType.String(), got.String())
+		}
+	}
+	baseValidData := base.GetValidData()
+	updateValidData := update.GetValidData()
 	for i, baseIdx := range baseIndices {
 		updateIdx := updateIndices[i]
-		// If the upsert payload row is explicitly null, there is nothing to
-		// append/remove; leave the existing base row untouched.
-		if len(update.ValidData) > 0 && !update.ValidData[updateIdx] {
+		if isPathReplace {
+			if baseIdx < 0 || baseIdx >= int64(len(baseData)) || updateIdx < 0 || updateIdx >= int64(len(updateData)) {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE row index is out of range")
+			}
+			if len(baseValidData) > 0 && baseIdx >= int64(len(baseValidData)) {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE base valid_data is shorter than its row mapping")
+			}
+			if len(updateValidData) > 0 && updateIdx >= int64(len(updateValidData)) {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand valid_data is shorter than its row mapping")
+			}
+			if len(baseValidData) > 0 && !baseValidData[baseIdx] {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE cannot target a null parent Array row")
+			}
+		}
+		if len(updateValidData) > 0 && !updateValidData[updateIdx] {
+			if isPathReplace {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand Array row must not be null")
+			}
+			// APPEND/REMOVE retain their existing null-operand no-op semantics.
 			continue
 		}
-		merged, err := ApplyArrayRowOp(baseData[baseIdx], updateData[updateIdx], op, elementType, maxCapacity)
+		merged, err := ApplyArrayRowOp(baseData[baseIdx], updateData[updateIdx], op, elementType, maxCapacity, pathIndex...)
 		if err != nil {
 			return err
 		}
 		baseData[baseIdx] = merged
-		// After a successful merge the base row carries concrete data and
-		// must be marked valid, otherwise downstream readers keep treating
-		// it as null and drop the merged payload silently.
-		if len(base.ValidData) > 0 {
-			base.ValidData[baseIdx] = true
+		// APPEND/REMOVE can materialize a previously-null row. PATH_REPLACE
+		// requires a valid parent and leaves its validity representation untouched.
+		if !isPathReplace && len(baseValidData) > 0 {
+			baseValidData[baseIdx] = true
 		}
 	}
 	return nil
@@ -1990,23 +2017,9 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 				// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
 				for i, baseIdx := range baseIndices {
 					updateIdx := updateIndices[i]
-					var baseMap map[string]interface{}
-					var updateMap map[string]interface{}
-					// unmarshal base and update
-					if err := json.Unmarshal(baseData[baseIdx], &baseMap); err != nil {
-						return merr.Wrap(err, "failed to unmarshal base json")
-					}
-					if err := json.Unmarshal(updateData[updateIdx], &updateMap); err != nil {
-						return merr.Wrap(err, "failed to unmarshal update json")
-					}
-					// merge
-					for k, v := range updateMap {
-						baseMap[k] = v
-					}
-					// marshal back
-					newJSON, err := json.Marshal(baseMap)
+					newJSON, err := mergeDynamicJSON(baseData[baseIdx], updateData[updateIdx])
 					if err != nil {
-						return merr.Wrap(err, "failed to marshal merged json")
+						return err
 					}
 					baseData[baseIdx] = newJSON
 				}
@@ -2313,6 +2326,40 @@ func countValid(validData []bool) int {
 		}
 	}
 	return validCount
+}
+
+// mergeDynamicJSON merges an update document over a base document without
+// decoding the values.
+//
+// Decoding into map[string]interface{} rounds every number to float64, so a
+// partial update of one key silently rewrote every other key in the row:
+// 9007199254740993 came back as ...992 even though the caller never touched it.
+// json.RawMessage keeps each value as the bytes it already was.
+func mergeDynamicJSON(base []byte, update []byte) ([]byte, error) {
+	baseMap := make(map[string]json.RawMessage)
+	updateMap := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(base, &baseMap); err != nil {
+		return nil, merr.Wrap(err, "failed to unmarshal base json")
+	}
+	if err := json.Unmarshal(update, &updateMap); err != nil {
+		return nil, merr.Wrap(err, "failed to unmarshal update json")
+	}
+	// A literal null unmarshals into a map as nil with no error -- the one
+	// non-object document the error paths above do not catch -- and writing
+	// into the nil map then panics. Such a row is insertable through the
+	// dynamic-field validation, so merging over it must work: an empty base
+	// lets the update repair the row, and a null update simply says nothing.
+	if baseMap == nil {
+		baseMap = make(map[string]json.RawMessage, len(updateMap))
+	}
+	for k, v := range updateMap {
+		baseMap[k] = v
+	}
+	merged, err := json.Marshal(baseMap)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to marshal merged json")
+	}
+	return merged, nil
 }
 
 // MergeFieldData appends fields data to dst
@@ -3474,7 +3521,7 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 }
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
-	if field.GetValidData() != nil {
+	if len(field.GetValidData()) > 0 {
 		validData := field.GetValidData()
 		if IsCompactNullableVectorFieldData(field) {
 			idxs, _ := BuildNullableVectorDataIndices(validData)
@@ -3775,7 +3822,7 @@ func ValidateSparseFloatRows(rows ...[]byte) error {
 			return merr.WrapErrParameterInvalidMsg("nil sparse float vector")
 		}
 		if len(row)%8 != 0 {
-			return merr.WrapErrParameterInvalidMsg("invalid data length in sparse float vector: %d", len(row))
+			return merr.WrapErrParameterInvalidMsg("invalid data length in sparse float vector: %d (must be 8-byte aligned)", len(row))
 		}
 		for i := 0; i < SparseFloatRowElementCount(row); i++ {
 			idx := SparseFloatRowIndexAt(row, i)
@@ -4153,19 +4200,24 @@ func ExtractStructFieldName(fieldName string) (string, error) {
 
 // ApplyArrayRowOp applies a FieldPartialUpdateOp to a single Array-field row.
 //
-// base and update are per-row ScalarField values (as stored in
-// ArrayArray.Data[i]). elementType is the Array field's declared element type,
-// used to dispatch the concrete typed-array handling. maxCapacity caps the
-// resulting array length for ARRAY_APPEND; pass -1 to skip the check (the
-// proxy is expected to enforce the schema-declared max_capacity).
+// base and update are per-row values from ArrayArray.Data. elementType is the
+// schema-validated base element type. This helper does not modify either input:
+//   - REPLACE returns update as-is, replacing the entire row (it may alias update).
+//   - APPEND concatenates elements and checks maxCapacity (-1 disables the check).
+//   - REMOVE removes all matching values; it may return base unchanged.
+//   - PATH_REPLACE copies base and overwrites exactly one existing element with
+//     the singleton update. It preserves length and order and ignores maxCapacity.
 //
-// Returned ScalarField is a newly constructed value; base/update are not
-// mutated. Nil base or update is treated as an empty row for that side.
+// APPEND/REMOVE treat nil payloads as empty arrays; PATH_REPLACE rejects them and
+// element valid_data. Field-level null bits belong to FieldData and are handled
+// by UpdateArrayFieldByColumnWithOp, not by this per-row primitive.
+// Only PATH_REPLACE consumes pathIndex and requires exactly one index.
 func ApplyArrayRowOp(
 	base, update *schemapb.ScalarField,
 	op schemapb.FieldPartialUpdateOp_OpType,
 	elementType schemapb.DataType,
 	maxCapacity int,
+	pathIndex ...int,
 ) (*schemapb.ScalarField, error) {
 	switch op {
 	case schemapb.FieldPartialUpdateOp_REPLACE:
@@ -4174,9 +4226,74 @@ func ApplyArrayRowOp(
 		return appendArrayRow(base, update, elementType, maxCapacity)
 	case schemapb.FieldPartialUpdateOp_ARRAY_REMOVE:
 		return removeArrayRow(base, update, elementType)
+	case schemapb.FieldPartialUpdateOp_PATH_REPLACE:
+		if len(pathIndex) != 1 {
+			return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires exactly one array index")
+		}
+		return replaceArrayRowElement(base, update, elementType, pathIndex[0])
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported FieldPartialUpdateOp: %s", op.String())
 	}
+}
+
+func replaceArrayRowElement(base, update *schemapb.ScalarField, elementType schemapb.DataType, index int) (*schemapb.ScalarField, error) {
+	if base == nil || update == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires non-nil Array rows")
+	}
+
+	// Keep row metadata and unknown protobuf fields, and never mutate request
+	// operands or a query result that still shares the original base payload.
+	out := proto.Clone(base).(*schemapb.ScalarField)
+	var err error
+	switch elementType {
+	case schemapb.DataType_Bool:
+		if out.GetBoolData() == nil || update.GetBoolData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetBoolData().GetData(), update.GetBoolData().GetData(), index)
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		if out.GetIntData() == nil || update.GetIntData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetIntData().GetData(), update.GetIntData().GetData(), index)
+	case schemapb.DataType_Int64:
+		if out.GetLongData() == nil || update.GetLongData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetLongData().GetData(), update.GetLongData().GetData(), index)
+	case schemapb.DataType_Float:
+		if out.GetFloatData() == nil || update.GetFloatData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetFloatData().GetData(), update.GetFloatData().GetData(), index)
+	case schemapb.DataType_Double:
+		if out.GetDoubleData() == nil || update.GetDoubleData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetDoubleData().GetData(), update.GetDoubleData().GetData(), index)
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		if out.GetStringData() == nil || update.GetStringData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetStringData().GetData(), update.GetStringData().GetData(), index)
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element type %s", elementType.String())
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func replaceArrayElement[T any](dst, update []T, index int) error {
+	if index < 0 || index >= len(dst) {
+		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE index %d is out of range for Array length %d", index, len(dst))
+	}
+	if len(update) != 1 {
+		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand must contain exactly one Array element")
+	}
+	dst[index] = update[0]
+	return nil
 }
 
 func appendArrayRow(

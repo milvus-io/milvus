@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -57,9 +58,10 @@ func (s *ClusteringCompactionTaskStorageV2Suite) SetupTest() {
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
-	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
-	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
-	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "stats_log")
+	localStoragePath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	os.RemoveAll(filepath.Join(localStoragePath, "insert_log"))
+	os.RemoveAll(filepath.Join(localStoragePath, "delta_log"))
+	os.RemoveAll(filepath.Join(localStoragePath, "stats_log"))
 	s.ClusteringCompactionTaskSuite.TearDownTest()
 }
 

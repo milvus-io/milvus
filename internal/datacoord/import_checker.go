@@ -73,6 +73,14 @@ type importChecker struct {
 
 	closeOnce sync.Once
 	closeChan chan struct{}
+
+	// Preparation owns no worker tasks until its complete plan is durable.
+	// Bound source I/O separately from the state-machine loop and stop all
+	// attempts before releasing this checker on leadership loss/shutdown.
+	prepareMu     sync.Mutex
+	preparing     map[int64]context.CancelFunc
+	prepareWG     sync.WaitGroup
+	prepareClosed bool
 }
 
 func NewImportChecker(ctx context.Context,
@@ -120,6 +128,7 @@ func (c *importChecker) runStateMachineLoop() {
 			mlog.Info(c.ctx, "import checker state-machine loop exited")
 			return
 		case <-ticker.C:
+			c.cancelInactiveSnapshotPreparations()
 			jobs := c.importMeta.GetJobBy(c.ctx)
 			for _, job := range jobs {
 				if !funcutil.SliceSetEqual[string](job.GetVchannels(), job.GetReadyVchannels()) {
@@ -181,7 +190,14 @@ func (c *importChecker) runGCLoop() {
 
 func (c *importChecker) Close() {
 	c.closeOnce.Do(func() {
+		c.prepareMu.Lock()
+		c.prepareClosed = true
+		for _, cancel := range c.preparing {
+			cancel()
+		}
 		close(c.closeChan)
+		c.prepareMu.Unlock()
+		c.prepareWG.Wait()
 	})
 }
 
@@ -228,7 +244,7 @@ func (c *importChecker) getLackFilesForPreImports(job ImportJob) []*internalpb.I
 	lacks := lo.KeyBy(job.GetFiles(), func(file *internalpb.ImportFile) int64 {
 		return file.GetId()
 	})
-	exists := c.importMeta.GetTaskBy(c.ctx, WithType(PreImportTaskType), WithJob(job.GetJobID()))
+	exists := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithType(PreImportTaskType))
 	for _, task := range exists {
 		for _, file := range task.GetFileStats() {
 			delete(lacks, file.GetImportFile().GetId())
@@ -238,14 +254,14 @@ func (c *importChecker) getLackFilesForPreImports(job ImportJob) []*internalpb.I
 }
 
 func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFileStats {
-	preimports := c.importMeta.GetTaskBy(c.ctx, WithType(PreImportTaskType), WithJob(job.GetJobID()))
+	preimports := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithType(PreImportTaskType))
 	lacks := make(map[int64]*datapb.ImportFileStats, 0)
 	for _, t := range preimports {
 		for _, stat := range t.GetFileStats() {
 			lacks[stat.GetImportFile().GetId()] = stat
 		}
 	}
-	exists := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
+	exists := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithType(ImportTaskType))
 	for _, task := range exists {
 		for _, file := range task.GetFileStats() {
 			delete(lacks, file.GetImportFile().GetId())
@@ -255,12 +271,16 @@ func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFi
 }
 
 func (c *importChecker) checkPendingJob(job ImportJob) {
+	if importutilv2.IsSnapshotPreparation(job.GetFiles()) {
+		c.scheduleSnapshotPreparation(job)
+		return
+	}
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 	lacks := c.getLackFilesForPreImports(job)
 	if len(lacks) == 0 {
 		return
 	}
-	fileGroups := lo.Chunk(lacks, Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt())
+	fileGroups := groupPreImportFiles(lacks, Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt())
 
 	newTasks, err := NewPreImportTasks(fileGroups, job, c.alloc, c.importMeta)
 	if err != nil {
@@ -289,7 +309,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 
-	preimports := c.importMeta.GetTaskBy(c.ctx, WithType(PreImportTaskType), WithJob(job.GetJobID()))
+	preimports := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithType(PreImportTaskType))
 	totalRows := int64(0)
 	for _, t := range preimports {
 		if t.GetState() != datapb.ImportTaskStateV2_Completed {
@@ -360,7 +380,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
-	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()), WithRequestSource())
+	tasks := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithType(ImportTaskType), WithRequestSource())
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportTaskStateV2_Completed {
 			return
@@ -401,7 +421,7 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 		taskCnt = 0
 		doneCnt = 0
 	)
-	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
+	tasks := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithType(ImportTaskType))
 	for _, task := range tasks {
 		originSegmentIDs := task.(*importTask).GetSegmentIDs()
 		sortSegmentIDs := task.(*importTask).GetSortedSegmentIDs()
@@ -451,7 +471,7 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 
 func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
-	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
+	tasks := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithType(ImportTaskType))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
@@ -545,7 +565,7 @@ func (c *importChecker) checkFailedJob(job ImportJob) {
 }
 
 func (c *importChecker) tryFailingTasks(job ImportJob) {
-	tasks := c.importMeta.GetTaskBy(c.ctx, WithJob(job.GetJobID()), WithStates(datapb.ImportTaskStateV2_Pending,
+	tasks := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithStates(datapb.ImportTaskStateV2_Pending,
 		datapb.ImportTaskStateV2_InProgress, datapb.ImportTaskStateV2_Completed, datapb.ImportTaskStateV2_Retry))
 	if len(tasks) == 0 {
 		return
@@ -563,8 +583,11 @@ func (c *importChecker) tryFailingTasks(job ImportJob) {
 }
 
 func (c *importChecker) tryTimeoutJob(job ImportJob) {
-	if job.GetState() == internalpb.ImportJobState_Failed ||
-		job.GetState() == internalpb.ImportJobState_Completed {
+	switch job.GetState() {
+	case internalpb.ImportJobState_Failed, internalpb.ImportJobState_Completed,
+		internalpb.ImportJobState_Committing:
+		// Fast path on this tick's snapshot only; UpdateJobState enforces the
+		// rule against the current state under importMeta's lock.
 		return
 	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
@@ -616,7 +639,7 @@ func (c *importChecker) checkGC(job ImportJob) {
 		GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 		log.Info(c.ctx, "job has reached the GC retention",
 			mlog.Time("cleanupTime", cleanupTime), mlog.Duration("GCRetention", GCRetention))
-		tasks := c.importMeta.GetTaskBy(c.ctx, WithJob(job.GetJobID()))
+		tasks := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID())
 		shouldRemoveJob := true
 		for _, task := range tasks {
 			if job.GetState() == internalpb.ImportJobState_Failed && task.GetType() == ImportTaskType {

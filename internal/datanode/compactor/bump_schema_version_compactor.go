@@ -333,7 +333,7 @@ func (t *bumpSchemaVersionCompactionTask) schemaBumpDecision() (*schemaBumpPhysi
 	}
 	schema := t.plan.GetSchema()
 
-	functionOutputFields, err := declaredFunctionOutputFields(schema)
+	functionOutputFields, err := validateSchemaBumpIntegrity(schema, existingFields)
 	if err != nil {
 		return nil, err
 	}
@@ -349,28 +349,6 @@ func (t *bumpSchemaVersionCompactionTask) schemaBumpDecision() (*schemaBumpPhysi
 		missingOutputFields:  missingOutputFields,
 		missingFunctions:     missingFunctions,
 	}, nil
-}
-
-// declaredFunctionOutputFields returns the field IDs declared as outputs by the
-// schema's functions. A field marked IsFunctionOutput that no function declares
-// is persisted-schema corruption: fail instead of silently backfilling a
-// non-nullable vector as an ordinary field.
-func declaredFunctionOutputFields(schema *schemapb.CollectionSchema) (map[int64]struct{}, error) {
-	declared := make(map[int64]struct{})
-	for _, functionSchema := range schema.GetFunctions() {
-		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
-			declared[outputFieldID] = struct{}{}
-		}
-	}
-	for _, field := range typeutil.GetAllFieldSchemas(schema) {
-		if field.GetIsFunctionOutput() {
-			if _, hasProducer := declared[field.GetFieldID()]; !hasProducer {
-				return nil, merr.WrapErrDataIntegrityMsg(
-					"function output field %d has no producing function", field.GetFieldID())
-			}
-		}
-	}
-	return declared, nil
 }
 
 // missingFunctionMaterializations derives, from the manifest-backed
@@ -653,12 +631,36 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	_, ttlFieldPhysicallyPresent := existingFields[ttlFieldID]
 	sourceHasTTLField := ttlFieldID >= common.StartOfUserFieldID && ttlFieldPhysicallyPresent
 	preMaterializeFilter := len(delta) > 0 || t.plan.GetCollectionTtl() > 0 || sourceHasTTLField
-	reader, _, err := newCompactionSegmentRecordReaderWithFields(t.ctx, segment, t.plan.GetSchema(), t.compactionParams.StorageConfig, existingFields,
-		storage.WithCollectionID(collectionID),
-		storage.WithVersion(segment.GetStorageVersion()),
-		storage.WithDownloader(t.chunkManager.MultiRead),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-	)
+
+	// Prepare LOB (TEXT) handling before opening the source reader: a legacy
+	// partition namespace needs a TEXT-decoding reader rooted at the source.
+	if err := t.initLOBCompactionContext(t.ctx); err != nil {
+		return nil, err
+	}
+	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(segment.GetManifest())
+	if err != nil {
+		return nil, err
+	}
+	var reader storage.RecordReader
+	if len(textDecodeConfigs) > 0 {
+		reader, err = storage.NewTextDecodedManifestRecordReader(
+			t.ctx,
+			segment.GetManifest(),
+			compactionReadSchema(t.plan.GetSchema(), existingFields),
+			textDecodeConfigs,
+			storage.WithPresentFields(existingFields),
+			storage.WithCollectionID(collectionID),
+			storage.WithVersion(segment.GetStorageVersion()),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		)
+	} else {
+		reader, _, err = newCompactionSegmentRecordReaderWithFields(t.ctx, segment, t.plan.GetSchema(), t.compactionParams.StorageConfig, existingFields,
+			storage.WithCollectionID(collectionID),
+			storage.WithVersion(segment.GetStorageVersion()),
+			storage.WithDownloader(t.chunkManager.MultiRead),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -670,14 +672,6 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}
 	defer materializer.Close()
 
-	// Prepare LOB (TEXT) handling: a schema bump keeps existing TEXT LOB data
-	// unchanged, so REUSE_ALL — the writer preserves the encoded LOB reference
-	// bytes (WithTextRefsAsBinary) and the source LOB files are merged into the
-	// output manifest afterwards (applyLOBCompaction). Mirrors sort compaction.
-	if err := t.initLOBCompactionContext(t.ctx); err != nil {
-		return nil, err
-	}
-
 	alloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	writerOpts := []storage.RwOption{
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
@@ -687,6 +681,19 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithCollectionID(collectionID),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+	}
+	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
+		lobBasePath := storage.SegmentPartitionBasePath(
+			t.compactionParams.StorageConfig.GetRootPath(), collectionID, segment.GetPartitionID())
+		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
+			lobBasePath,
+			t.compactionParams.TextInlineThreshold,
+			t.compactionParams.TextMaxLobFileBytes,
+			t.compactionParams.TextFlushThresholdBytes,
+		)
+		if len(textColumnConfigs) > 0 {
+			writerOpts = append(writerOpts, storage.WithTextColumnConfigs(textColumnConfigs))
+		}
 	}
 	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
 		// Existing TEXT columns arrive from the reader as encoded binary LOB refs;
@@ -713,7 +720,8 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		}
 	}()
 
-	var totalRows int64
+	var readRows int64
+	var writtenRows int64
 	for {
 		record, err := reader.Next()
 		if err != nil {
@@ -722,6 +730,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			}
 			return nil, err
 		}
+		readRows += int64(record.Len())
 
 		var selection *recordSelection
 		if preMaterializeFilter {
@@ -752,8 +761,22 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			out.Release()
 		}
 
-		totalRows += int64(wrapped.Len())
+		writtenRows += int64(wrapped.Len())
 		cleanupMaterializedRecord(wrapped)
+	}
+
+	if readRows != t.plan.GetTotalRows() {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"schema bump full rewrite segment %d read %d rows, expected %d",
+			segment.GetSegmentID(), readRows, t.plan.GetTotalRows(),
+		)
+	}
+	filteredRows := int64(entityFilter.GetDeletedCount() + entityFilter.GetExpiredCount())
+	if writtenRows+filteredRows != readRows {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"schema bump full rewrite segment %d row count mismatch: read %d, wrote %d, filtered %d",
+			segment.GetSegmentID(), readRows, writtenRows, filteredRows,
+		)
 	}
 
 	if err := writer.Close(); err != nil {
@@ -764,16 +787,11 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	// Update per-LOB-file valid_rows for REUSE_ALL fields: rows dropped by
 	// delete/TTL during the rewrite reduce the number of live LOB references.
 	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
-		inputRows := t.plan.GetTotalRows()
-		deletedRows := inputRows - totalRows
-		if deletedRows < 0 {
-			deletedRows = 0
-		}
-		t.lobContext.SetSegmentRowStats(segment.GetSegmentID(), inputRows, deletedRows)
+		t.lobContext.SetSegmentRowStats(segment.GetSegmentID(), t.plan.GetTotalRows(), filteredRows)
 	}
 
 	insertLogs, statsLog, bm25StatsLogs, manifestPath, expirQuantiles := writer.GetLogs()
-	if totalRows > 0 && manifestPath == "" {
+	if writtenRows > 0 && manifestPath == "" {
 		return nil, merr.WrapErrServiceInternal("schema bump full rewrite produced empty manifest")
 	}
 	statEntries := make([]packed.StatEntry, 0, len(bm25StatsLogs)+1)
@@ -799,7 +817,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 
 	resultSegment := &datapb.CompactionSegment{
 		SegmentID:           newSegmentID,
-		NumOfRows:           totalRows,
+		NumOfRows:           writtenRows,
 		InsertLogs:          sortedInsertLogs,
 		Channel:             segment.GetInsertChannel(),
 		StorageVersion:      segment.GetStorageVersion(),
@@ -825,7 +843,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		return nil, err
 	}
 
-	if totalRows > 0 {
+	if writtenRows > 0 {
 		// Text stats are built explicitly, matching sort compaction.
 		textStatsLogs, err := createTextIndex(t.ctx, t.chunkManager, t.plan, t.compactionParams, segment.GetStorageVersion(), collectionID, segment.GetPartitionID(), newSegmentID, t.plan.GetPlanID(), resultSegment)
 		if err != nil {
@@ -849,11 +867,9 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}, nil
 }
 
-// initLOBCompactionContext prepares REUSE_ALL LOB handling for the (single) input
-// segment's TEXT columns. A schema bump is 1->1 and never changes existing TEXT LOB
-// data, so all TEXT fields are forced REUSE_ALL (GetForcedStrategy): the source LOB
-// files stay in place and only their references are merged into the output manifest.
-// No-op when the schema has no TEXT fields. Mirrors sort compaction.
+// initLOBCompactionContext prepares LOB handling for the full-rewrite path. A
+// schema bump normally reuses references, unless its new output segment has a
+// different partition base from the source manifest.
 func (t *bumpSchemaVersionCompactionTask) initLOBCompactionContext(ctx context.Context) error {
 	textFieldIDs := compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())
 	if len(textFieldIDs) == 0 {
@@ -876,9 +892,20 @@ func (t *bumpSchemaVersionCompactionTask) initLOBCompactionContext(ctx context.C
 	// schema-bump is always 1 source -> 1 output; forced REUSE_ALL.
 	t.lobContext.SetCompactionType(datapb.CompactionType_BumpSchemaVersionCompaction, 1, 1)
 	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
-	mlog.Info(ctx, "schema bump: initialized LOB compaction context (REUSE_ALL)",
+	outputPartitionBase := storage.SegmentPartitionBasePath(
+		t.compactionParams.StorageConfig.GetRootPath(), segment.GetCollectionID(), segment.GetPartitionID())
+	partitionBaseMismatch, err := compaction.LOBSourcePartitionBaseMismatch(sourceManifests, outputPartitionBase)
+	if err != nil {
+		return err
+	}
+	if partitionBaseMismatch {
+		t.lobContext.ForceRewriteAllAcrossPartitionBases(textFieldIDs)
+	}
+	mlog.Info(ctx, "schema bump: initialized LOB compaction context",
 		mlog.Int64("planID", t.GetPlanID()),
 		mlog.FieldSegmentID(segment.GetSegmentID()),
+		mlog.Bool("partitionBaseMismatch", partitionBaseMismatch),
+		mlog.String("outputPartitionBase", outputPartitionBase),
 		mlog.Int64s("textFieldIDs", textFieldIDs),
 	)
 	return nil

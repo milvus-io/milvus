@@ -450,6 +450,8 @@ func (req *ExportSnapshotReq) GetDbName() string { return req.DbName }
 type QueryReqV2 struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
+	RlsPrincipal   string   `json:"rlsPrincipal"`
+	SkipRls        bool     `json:"skipRls"`
 	PartitionNames []string `json:"partitionNames"`
 	OutputFields   []string `json:"outputFields"`
 	Filter         string   `json:"filter"`
@@ -460,9 +462,9 @@ type QueryReqV2 struct {
 	OrderByFields []string `json:"orderByFields"`
 	// GroupByFields groups query results by scalar fields; used together with
 	// aggregation expressions (e.g. count(*), sum(price)) in outputFields.
-	GroupByFields    []string               `json:"groupByFields"`
-	ExprParams       map[string]interface{} `json:"exprParams"`
-	ConsistencyLevel string                 `json:"consistencyLevel"`
+	GroupByFields    []string                   `json:"groupByFields"`
+	ExprParams       map[string]json.RawMessage `json:"exprParams"`
+	ConsistencyLevel string                     `json:"consistencyLevel"`
 }
 
 func (req *QueryReqV2) GetDbName() string         { return req.DbName }
@@ -471,6 +473,8 @@ func (req *QueryReqV2) GetCollectionName() string { return req.CollectionName }
 type CollectionIDReq struct {
 	DbName           string      `json:"dbName"`
 	CollectionName   string      `json:"collectionName" binding:"required"`
+	RlsPrincipal     string      `json:"rlsPrincipal"`
+	SkipRls          bool        `json:"skipRls"`
 	PartitionName    string      `json:"partitionName"`
 	PartitionNames   []string    `json:"partitionNames"`
 	OutputFields     []string    `json:"outputFields"`
@@ -482,11 +486,13 @@ func (req *CollectionIDReq) GetDbName() string         { return req.DbName }
 func (req *CollectionIDReq) GetCollectionName() string { return req.CollectionName }
 
 type CollectionFilterReq struct {
-	DbName         string                 `json:"dbName"`
-	CollectionName string                 `json:"collectionName" binding:"required"`
-	PartitionName  string                 `json:"partitionName"`
-	Filter         string                 `json:"filter" binding:"required"`
-	ExprParams     map[string]interface{} `json:"exprParams"`
+	DbName         string                     `json:"dbName"`
+	CollectionName string                     `json:"collectionName" binding:"required"`
+	RlsPrincipal   string                     `json:"rlsPrincipal"`
+	SkipRls        bool                       `json:"skipRls"`
+	PartitionName  string                     `json:"partitionName"`
+	Filter         string                     `json:"filter" binding:"required"`
+	ExprParams     map[string]json.RawMessage `json:"exprParams"`
 }
 
 func (req *CollectionFilterReq) GetDbName() string         { return req.DbName }
@@ -495,6 +501,8 @@ func (req *CollectionFilterReq) GetCollectionName() string { return req.Collecti
 type CollectionDataReq struct {
 	DbName         string                    `json:"dbName"`
 	CollectionName string                    `json:"collectionName" binding:"required"`
+	RlsPrincipal   string                    `json:"rlsPrincipal"`
+	SkipRls        bool                      `json:"skipRls"`
 	PartitionName  string                    `json:"partitionName"`
 	Data           []map[string]interface{}  `json:"data" binding:"required"`
 	PartialUpdate  bool                      `json:"partialUpdate"`
@@ -507,25 +515,51 @@ func (req *CollectionDataReq) GetCollectionName() string { return req.Collection
 type FieldPartialUpdateOpReq struct {
 	FieldName string `json:"fieldName"`
 	Op        string `json:"op"`
+	Path      string `json:"path"`
 }
 
 func buildFieldPartialUpdateOps(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb.FieldPartialUpdateOp, error) {
+	return buildFieldPartialUpdateOpsWithParser(fieldOps, parseFieldPartialUpdateOp, false)
+}
+
+func buildFieldPartialUpdateOpsV2(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb.FieldPartialUpdateOp, error) {
+	return buildFieldPartialUpdateOpsWithParser(fieldOps, parseFieldPartialUpdateOpV2, true)
+}
+
+func buildFieldPartialUpdateOpsWithParser(
+	fieldOps []FieldPartialUpdateOpReq,
+	parseOp func(string) (schemapb.FieldPartialUpdateOp_OpType, error),
+	includePath bool,
+) ([]*schemapb.FieldPartialUpdateOp, error) {
 	if len(fieldOps) == 0 {
 		return nil, nil
 	}
 
 	ops := make([]*schemapb.FieldPartialUpdateOp, 0, len(fieldOps))
 	for _, fieldOp := range fieldOps {
-		op, err := parseFieldPartialUpdateOp(fieldOp.Op)
+		op, err := parseOp(fieldOp.Op)
 		if err != nil {
 			return nil, err
 		}
-		ops = append(ops, &schemapb.FieldPartialUpdateOp{
+		partialUpdateOp := &schemapb.FieldPartialUpdateOp{
 			FieldName: fieldOp.FieldName,
 			Op:        op,
-		})
+		}
+		if includePath {
+			partialUpdateOp.Path = fieldOp.Path
+		}
+		ops = append(ops, partialUpdateOp)
 	}
 	return ops, nil
+}
+
+func hasNonReplaceFieldPartialUpdateOp(fieldOps []*schemapb.FieldPartialUpdateOp) bool {
+	for _, fieldOp := range fieldOps {
+		if fieldOp.GetOp() != schemapb.FieldPartialUpdateOp_REPLACE {
+			return true
+		}
+	}
+	return false
 }
 
 func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType, error) {
@@ -542,26 +576,35 @@ func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType,
 	}
 }
 
+func parseFieldPartialUpdateOpV2(op string) (schemapb.FieldPartialUpdateOp_OpType, error) {
+	if strings.EqualFold(strings.TrimSpace(op), "PATH_REPLACE") {
+		return schemapb.FieldPartialUpdateOp_PATH_REPLACE, nil
+	}
+	return parseFieldPartialUpdateOp(op)
+}
+
 type SearchReqV2 struct {
-	DbName            string                 `json:"dbName"`
-	CollectionName    string                 `json:"collectionName" binding:"required"`
-	Data              []interface{}          `json:"data"`
-	Ids               []interface{}          `json:"ids"`
-	AnnsField         string                 `json:"annsField"`
-	PartitionNames    []string               `json:"partitionNames"`
-	Filter            string                 `json:"filter"`
-	GroupByField      string                 `json:"groupingField"`
-	GroupSize         int32                  `json:"groupSize"`
-	StrictGroupSize   bool                   `json:"strictGroupSize"`
-	Limit             int32                  `json:"limit"`
-	Offset            int32                  `json:"offset"`
-	OutputFields      []string               `json:"outputFields"`
-	SearchParams      map[string]interface{} `json:"searchParams"`
-	ConsistencyLevel  string                 `json:"consistencyLevel"`
-	ExprParams        map[string]interface{} `json:"exprParams"`
-	FunctionScore     FunctionScore          `json:"functionScore"`
-	FunctionChains    []FunctionChainReq     `json:"functionChains"`
-	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
+	DbName            string                     `json:"dbName"`
+	CollectionName    string                     `json:"collectionName" binding:"required"`
+	RlsPrincipal      string                     `json:"rlsPrincipal"`
+	SkipRls           bool                       `json:"skipRls"`
+	Data              []interface{}              `json:"data"`
+	Ids               []json.RawMessage          `json:"ids"`
+	AnnsField         string                     `json:"annsField"`
+	PartitionNames    []string                   `json:"partitionNames"`
+	Filter            string                     `json:"filter"`
+	GroupByField      string                     `json:"groupingField"`
+	GroupSize         int32                      `json:"groupSize"`
+	StrictGroupSize   bool                       `json:"strictGroupSize"`
+	Limit             int32                      `json:"limit"`
+	Offset            int32                      `json:"offset"`
+	OutputFields      []string                   `json:"outputFields"`
+	SearchParams      map[string]interface{}     `json:"searchParams"`
+	ConsistencyLevel  string                     `json:"consistencyLevel"`
+	ExprParams        map[string]json.RawMessage `json:"exprParams"`
+	FunctionScore     FunctionScore              `json:"functionScore"`
+	FunctionChains    []FunctionChainReq         `json:"functionChains"`
+	SearchAggregation *SearchAggregationReq      `json:"searchAggregation"`
 	// OrderByFields re-sorts the final search results by scalar fields; each item
 	// is "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
 	OrderByFields []string `json:"orderByFields"`
@@ -608,21 +651,24 @@ type Rand struct {
 }
 
 type SubSearchReq struct {
-	Data              []interface{}          `json:"data" binding:"required"`
-	AnnsField         string                 `json:"annsField"`
-	Filter            string                 `json:"filter"`
-	GroupByField      string                 `json:"groupingField"`
-	MetricType        string                 `json:"metricType"`
-	Limit             int32                  `json:"limit"`
-	Offset            int32                  `json:"offset"`
-	SearchParams      map[string]interface{} `json:"params"`
-	ExprParams        map[string]interface{} `json:"exprParams"`
-	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
+	Data              []interface{}              `json:"data" binding:"required"`
+	AnnsField         string                     `json:"annsField"`
+	Filter            string                     `json:"filter"`
+	GroupByField      string                     `json:"groupingField"`
+	MetricType        string                     `json:"metricType"`
+	Limit             int32                      `json:"limit"`
+	Offset            int32                      `json:"offset"`
+	SearchParams      map[string]interface{}     `json:"params"`
+	ExprParams        map[string]json.RawMessage `json:"exprParams"`
+	SearchAggregation *SearchAggregationReq      `json:"searchAggregation"`
+	FunctionChains    []FunctionChainReq         `json:"functionChains"`
 }
 
 type HybridSearchReq struct {
 	DbName            string                `json:"dbName"`
 	CollectionName    string                `json:"collectionName" binding:"required"`
+	RlsPrincipal      string                `json:"rlsPrincipal"`
+	SkipRls           bool                  `json:"skipRls"`
 	PartitionNames    []string              `json:"partitionNames"`
 	Search            []SubSearchReq        `json:"search"`
 	Rerank            Rand                  `json:"rerank"`
@@ -1150,10 +1196,6 @@ func wrapperReturnRowCount(pairs []*commonpb.KeyValuePair) gin.H {
 
 func wrapperReturnDefault() gin.H {
 	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}}
-}
-
-func wrapperReturnDefaultWithCost(cost int) gin.H {
-	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}, HTTPReturnCost: cost}
 }
 
 type ResourceGroupNodeFilter struct {

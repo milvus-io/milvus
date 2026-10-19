@@ -43,7 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
-	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -60,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
-	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
@@ -689,273 +688,6 @@ func constructSearchRequest(
 		TravelTimestamp:    0,
 		GuaranteeTimestamp: 0,
 	}
-}
-
-func TestTranslateOutputFields(t *testing.T) {
-	const (
-		idFieldName                = "id"
-		tsFieldName                = "timestamp"
-		floatVectorFieldName       = "float_vector"
-		binaryVectorFieldName      = "binary_vector"
-		float16VectorFieldName     = "float16_vector"
-		bfloat16VectorFieldName    = "bfloat16_vector"
-		sparseFloatVectorFieldName = "sparse_float_vector"
-	)
-	var outputFields []string
-	var userOutputFields []string
-	var userDynamicFields []string
-	var requestedPK bool
-	var err error
-
-	collSchema := &schemapb.CollectionSchema{
-		Name:        "TestTranslateOutputFields",
-		Description: "TestTranslateOutputFields",
-		AutoID:      false,
-		Fields: []*schemapb.FieldSchema{
-			{Name: idFieldName, FieldID: 0, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: tsFieldName, FieldID: 1, DataType: schemapb.DataType_Int64},
-			{Name: floatVectorFieldName, FieldID: 100, DataType: schemapb.DataType_FloatVector},
-			{Name: binaryVectorFieldName, FieldID: 101, DataType: schemapb.DataType_BinaryVector},
-			{Name: float16VectorFieldName, FieldID: 102, DataType: schemapb.DataType_Float16Vector},
-			{Name: bfloat16VectorFieldName, FieldID: 103, DataType: schemapb.DataType_BFloat16Vector},
-			{Name: sparseFloatVectorFieldName, FieldID: 104, DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
-		},
-		Functions: []*schemapb.FunctionSchema{
-			{
-				Name:             "bm25",
-				Type:             schemapb.FunctionType_BM25,
-				OutputFieldNames: []string{sparseFloatVectorFieldName},
-				// omit other fields for brevity
-			},
-		},
-	}
-	schema := mustNewSchemaInfo(collSchema)
-
-	// Test empty output fields
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{}, schema, false)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{}, outputFields)
-	assert.ElementsMatch(t, []string{}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.False(t, requestedPK)
-
-	// Test single field
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName}, schema, false)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{idFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	// Test multiple fields
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName}, schema, false)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	// Test with vector field
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName, floatVectorFieldName}, schema, false)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	// Test without id field
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{tsFieldName, floatVectorFieldName}, schema, false)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.False(t, requestedPK)
-
-	// Test wildcard - should not include function output fields
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*"}, schema, false)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	// Test wildcard with spaces
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{" * "}, schema, false)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	_, _, _, _, _, err = translateOutputFields([]string{"*", sparseFloatVectorFieldName}, schema, false)
-	assert.Error(t, err)
-	_, _, _, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, false)
-	assert.Error(t, err)
-	_, _, _, _, _, err = translateOutputFields([]string{sparseFloatVectorFieldName}, schema, true)
-	assert.Error(t, err)
-
-	// Test with removePkField=true
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{}, schema, true)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{}, outputFields)
-	assert.ElementsMatch(t, []string{}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.False(t, requestedPK)
-
-	// if removePkField is true, pk field should be removed from output fields
-
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*"}, schema, true)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName}, schema, true)
-	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{tsFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{tsFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{idFieldName, tsFieldName, floatVectorFieldName}, schema, true)
-	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*"}, schema, true)
-	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*", tsFieldName}, schema, true)
-	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, true)
-	assert.Equal(t, nil, err)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, outputFields)
-	assert.ElementsMatch(t, []string{tsFieldName, floatVectorFieldName, binaryVectorFieldName, float16VectorFieldName, bfloat16VectorFieldName}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.True(t, requestedPK)
-
-	// Test non-existent field, dynamic field not enabled
-	_, _, _, _, _, err = translateOutputFields([]string{"A"}, schema, true)
-	assert.Error(t, err)
-
-	t.Run("enable dynamic schema", func(t *testing.T) {
-		collSchema := &schemapb.CollectionSchema{
-			Name:               "TestTranslateOutputFields",
-			Description:        "TestTranslateOutputFields",
-			AutoID:             false,
-			EnableDynamicField: true,
-			Fields: []*schemapb.FieldSchema{
-				{Name: idFieldName, FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{Name: tsFieldName, FieldID: 2, DataType: schemapb.DataType_Int64},
-				{Name: floatVectorFieldName, FieldID: 100, DataType: schemapb.DataType_FloatVector},
-				{Name: binaryVectorFieldName, FieldID: 101, DataType: schemapb.DataType_BinaryVector},
-				{Name: common.MetaFieldName, FieldID: 102, DataType: schemapb.DataType_JSON, IsDynamic: true},
-			},
-		}
-		schema := mustNewSchemaInfo(collSchema)
-
-		outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"A", idFieldName}, schema, true)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{common.MetaFieldName}, outputFields)
-		assert.ElementsMatch(t, []string{"A"}, userOutputFields)
-		assert.ElementsMatch(t, []string{"A"}, userDynamicFields)
-		assert.True(t, requestedPK)
-
-		outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"$meta[\"A\"]", idFieldName}, schema, true)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{common.MetaFieldName}, outputFields)
-		assert.ElementsMatch(t, []string{"$meta[\"A\"]"}, userOutputFields)
-		assert.ElementsMatch(t, []string{"A"}, userDynamicFields)
-		assert.True(t, requestedPK)
-
-		// Test invalid dynamic field expressions
-		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, `$meta["A"]["B"]`}, schema, true)
-		assert.Error(t, err)
-
-		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[\"\"]"}, schema, true)
-		assert.Error(t, err)
-
-		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta[]"}, schema, true)
-		assert.Error(t, err)
-
-		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "$meta["}, schema, true)
-		assert.Error(t, err)
-
-		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "[]"}, schema, true)
-		assert.Error(t, err)
-
-		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, "A > 1"}, schema, true)
-		assert.Error(t, err)
-
-		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, ""}, schema, true)
-		assert.Error(t, err)
-	})
-}
-
-func TestTranslateOutputFields_StructArrayField(t *testing.T) {
-	const (
-		idFieldName                = "id"
-		tsFieldName                = "timestamp"
-		floatVectorFieldName       = "float_vector"
-		binaryVectorFieldName      = "binary_vector"
-		float16VectorFieldName     = "float16_vector"
-		bfloat16VectorFieldName    = "bfloat16_vector"
-		sparseFloatVectorFieldName = "sparse_float_vector"
-	)
-	var outputFields []string
-	var userOutputFields []string
-	var userDynamicFields []string
-	var requestedPK bool
-	var err error
-
-	collSchema := &schemapb.CollectionSchema{
-		Name:        "TestTranslateOutputFields",
-		Description: "TestTranslateOutputFields",
-		AutoID:      false,
-		Fields: []*schemapb.FieldSchema{
-			{Name: idFieldName, FieldID: 0, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: tsFieldName, FieldID: 1, DataType: schemapb.DataType_Int64},
-			{Name: floatVectorFieldName, FieldID: 100, DataType: schemapb.DataType_FloatVector},
-		},
-		StructArrayFields: []*schemapb.StructArrayFieldSchema{
-			{
-				FieldID: 101,
-				Name:    "struct_array_field",
-				Fields: []*schemapb.FieldSchema{
-					{Name: "sub_field", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
-					{Name: "sub_vector_field", FieldID: 103, DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector},
-				},
-			},
-		},
-	}
-	schema := mustNewSchemaInfo(collSchema)
-
-	// Test struct array field
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"sub_vector_field"}, schema, false)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{"sub_vector_field"}, outputFields)
-	assert.ElementsMatch(t, []string{"sub_vector_field"}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.False(t, requestedPK)
-
-	outputFields, userOutputFields, userDynamicFields, _, requestedPK, err = translateOutputFields([]string{"struct_array_field", "sub_field"}, schema, false)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{"sub_vector_field", "sub_field"}, outputFields)
-	assert.ElementsMatch(t, []string{"sub_vector_field", "sub_field"}, userOutputFields)
-	assert.ElementsMatch(t, []string{}, userDynamicFields)
-	assert.False(t, requestedPK)
 }
 
 func TestAddFieldTask(t *testing.T) {
@@ -4154,6 +3886,24 @@ func TestLoadCollectionTaskExecuteTextRequiresStorageV3(t *testing.T) {
 	assert.Contains(t, err.Error(), "TEXT field requires StorageV3")
 }
 
+func TestLoadCollectionTaskPostExecuteSkipsFailedStatus(t *testing.T) {
+	task := &loadCollectionTask{
+		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
+			DbName:         "db",
+			CollectionName: "collection",
+		},
+		result: &commonpb.Status{
+			Code:   merr.Code(merr.ErrServiceResourceInsufficient),
+			Reason: "insufficient resource",
+			ExtraInfo: map[string]string{
+				"suggested_expand_percent": "10",
+			},
+		},
+	}
+
+	assert.NoError(t, task.PostExecute(context.Background()))
+}
+
 func Test_loadPartitionTask_Execute(t *testing.T) {
 	qc := NewMixCoordMock()
 
@@ -5033,47 +4783,6 @@ func TestPartitionKey(t *testing.T) {
 		assert.NoError(t, dt.Execute(ctx))
 		assert.NoError(t, dt.PostExecute(ctx))
 	})
-
-	t.Run("search", func(t *testing.T) {
-		searchTask := &searchTask{
-			baseTask: baseTask{MetaCache: cache},
-			ctx:      ctx,
-			SearchRequest: &internalpb.SearchRequest{
-				Base: &commonpb.MsgBase{},
-			},
-			request: &milvuspb.SearchRequest{
-				CollectionName: collectionName,
-				Nq:             1,
-			},
-			mixCoord: qc,
-			tr:       timerecord.NewTimeRecorder("test-search"),
-		}
-
-		// don't support specify partition name if use partition key
-		searchTask.request.PartitionNames = partitionNames
-		err = searchTask.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("query", func(t *testing.T) {
-		queryTask := &queryTask{
-			baseTask: baseTask{MetaCache: cache},
-			ctx:      ctx,
-			RetrieveRequest: &internalpb.RetrieveRequest{
-				QueryLabel: "query",
-				Base:       &commonpb.MsgBase{},
-			},
-			request: &milvuspb.QueryRequest{
-				CollectionName: collectionName,
-			},
-			mixCoord: qc,
-		}
-
-		// don't support specify partition name if use partition key
-		queryTask.request.PartitionNames = partitionNames
-		err = queryTask.PreExecute(ctx)
-		assert.Error(t, err)
-	})
 }
 
 func TestDefaultPartition(t *testing.T) {
@@ -5531,6 +5240,8 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	cache, err := initMetaCache(context.Background(), qc)
 	assert.NoError(t, err)
 	collectionName := "test_alter_collection_check_loaded"
+	marshaledSchema, err := proto.Marshal(&schemapb.CollectionSchema{Name: collectionName})
+	require.NoError(t, err)
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
@@ -5539,7 +5250,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 		},
 		DbName:         dbName,
 		CollectionName: collectionName,
-		Schema:         nil,
+		Schema:         marshaledSchema,
 		ShardsNum:      1,
 	}
 	qc.CreateCollection(context.Background(), createColReq)
@@ -6319,6 +6030,252 @@ func TestCollectionNamespaceShardingEnabledValidation(t *testing.T) {
 		err = alterTask.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot delete namespace.sharding.enabled")
+	})
+}
+
+func TestCollectionRLSEnabledValidation(t *testing.T) {
+	qc := NewMixCoordMock()
+	ctx := context.Background()
+	cache := mustInitMetaCacheForTest(ctx, qc)
+	prefix := "TestRLSEnabled"
+
+	getSchemaBytes := func(colName string) []byte {
+		fieldName2Type := map[string]schemapb.DataType{
+			"fvec_field":  schemapb.DataType_FloatVector,
+			"int64_field": schemapb.DataType_Int64,
+		}
+		schema := constructCollectionSchemaByDataType(colName, fieldName2Type, "int64_field", false)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		return marshaledSchema
+	}
+
+	createCollection := func(colName string) {
+		createColReq := &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+				Timestamp: Timestamp(time.Now().UnixNano()),
+			},
+			DbName:         dbName,
+			CollectionName: colName,
+			Schema:         getSchemaBytes(colName),
+			ShardsNum:      1,
+		}
+		status, err := qc.CreateCollection(ctx, createColReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	}
+
+	t.Run("create rejects invalid rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: colName,
+				Schema:         getSchemaBytes(colName),
+				ShardsNum:      1,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "invalid"}},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
+		}
+		err := createTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid rls.enabled")
+	})
+
+	t.Run("alter accepts rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter accepts standard boolean rls.enabled spelling", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "True"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter accepts deleting rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{common.RLSEnabledKey},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter rejects wrong case rls.enabled delete key", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{"RLS.Enabled"},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "did you mean")
+	})
+
+	t.Run("alter accepts rls.force", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter rls properties requires ManageRLS", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		Params.Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
+		t.Cleanup(func() {
+			Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+			Params.Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
+		})
+
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		requests := []*milvuspb.AlterCollectionRequest{
+			{CollectionName: colName, Properties: []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}}},
+			{CollectionName: colName, DeleteKeys: []string{common.RLSForceKey}},
+			{CollectionName: colName, Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}}},
+			{CollectionName: colName, DeleteKeys: []string{common.RLSEnabledKey}},
+		}
+		for _, request := range requests {
+			alterTask := &alterCollectionTask{
+				baseTask:               baseTask{MetaCache: cache},
+				AlterCollectionRequest: request,
+				mixCoord:               qc,
+			}
+			err := alterTask.PreExecute(GetContext(context.Background(), "alice:123456"))
+			assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		}
+
+		initPrivileges := func(policyDB, policyCollection string) {
+			coord := mocks.NewMockMixCoordClient(t)
+			coord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+				Status: merr.Success(),
+				PolicyInfos: []string{funcutil.PolicyForPrivilege("rls_admin", commonpb.ObjectType_Collection.String(),
+					policyCollection, commonpb.ObjectPrivilege_PrivilegeManageRLS.String(), policyDB)},
+				UserRoles: []string{funcutil.EncodeUserRoleCache("alice", "rls_admin")},
+			}, nil)
+			require.NoError(t, privilege.InitPrivilegeCache(context.Background(), coord))
+		}
+
+		request := &milvuspb.AlterCollectionRequest{
+			DbName:         "default",
+			CollectionName: colName,
+			Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}},
+		}
+		initPrivileges(request.GetDbName(), colName)
+		assert.NoError(t, (&alterCollectionTask{
+			baseTask:               baseTask{MetaCache: cache},
+			AlterCollectionRequest: request,
+			mixCoord:               qc,
+		}).PreExecute(GetContext(context.Background(), "alice:123456")))
+
+		for _, scope := range [][2]string{{"other_db", colName}, {request.GetDbName(), "other_collection"}} {
+			initPrivileges(scope[0], scope[1])
+			err := (&alterCollectionTask{
+				baseTask:               baseTask{MetaCache: cache},
+				AlterCollectionRequest: request,
+				mixCoord:               qc,
+			}).PreExecute(GetContext(context.Background(), "alice:123456"))
+			assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		}
+
+		initPrivileges("source_db", "moving_alias")
+		aliasCache := NewMockCache(t)
+		aliasCache.EXPECT().GetCollectionID(mock.Anything, "source_db", "moving_alias").Return(int64(100), nil).Once()
+		aliasCache.EXPECT().GetCollectionInfo(mock.Anything, "source_db", "moving_alias", int64(100)).Return(&collectionInfo{
+			CollID: int64(100),
+			DBName: "target_db",
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "canonical_collection"}},
+		}, nil).Once()
+		err := (&alterCollectionTask{
+			baseTask: baseTask{MetaCache: aliasCache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				DbName:         "source_db",
+				CollectionName: "moving_alias",
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}},
+			},
+			mixCoord: qc,
+		}).PreExecute(GetContext(context.Background(), "alice:123456"))
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+		assert.NoError(t, (&alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: "unrelated.property", Value: "value"}},
+			},
+			mixCoord: qc,
+		}).PreExecute(GetContext(context.Background(), "alice:123456")))
+	})
+
+	t.Run("alter rejects wrong case rls.force delete key", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{"RLS.Force"},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "did you mean")
 	})
 }
 
@@ -7183,240 +7140,6 @@ func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
 	err = task.PreExecute(ctx)
 	assert.Error(t, err)
 	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), merr.Code(err))
-}
-
-func TestHighlightTask(t *testing.T) {
-	paramtable.Init()
-	ctx := context.Background()
-
-	t.Run("basic methods", func(t *testing.T) {
-		task := &HighlightTask{
-			ctx: ctx,
-			GetHighlightRequest: &querypb.GetHighlightRequest{
-				Base: commonpbutil.NewMsgBase(),
-			},
-			Condition: NewTaskCondition(ctx),
-		}
-
-		t.Run("traceCtx", func(t *testing.T) {
-			traceCtx := task.TraceCtx()
-			assert.NotNil(t, traceCtx)
-			assert.Equal(t, ctx, traceCtx)
-		})
-
-		t.Run("id", func(t *testing.T) {
-			id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-			task.SetID(id)
-			assert.Equal(t, id, task.ID())
-		})
-
-		t.Run("name", func(t *testing.T) {
-			assert.Equal(t, HighlightTaskName, task.Name())
-		})
-
-		t.Run("type", func(t *testing.T) {
-			assert.Equal(t, commonpb.MsgType_Undefined, task.Type())
-		})
-
-		t.Run("ts", func(t *testing.T) {
-			ts := Timestamp(time.Now().UnixNano())
-			task.SetTs(ts)
-			assert.Equal(t, ts, task.BeginTs())
-			assert.Equal(t, ts, task.EndTs())
-		})
-	})
-
-	t.Run("OnEnqueue", func(t *testing.T) {
-		task := &HighlightTask{
-			ctx:                 ctx,
-			GetHighlightRequest: &querypb.GetHighlightRequest{},
-			Condition:           NewTaskCondition(ctx),
-		}
-
-		err := task.OnEnqueue()
-		assert.NoError(t, err)
-		assert.NotNil(t, task.Base)
-		assert.Equal(t, commonpb.MsgType_Undefined, task.Base.MsgType)
-		assert.Equal(t, paramtable.GetNodeID(), task.Base.SourceID)
-	})
-
-	t.Run("PreExecute", func(t *testing.T) {
-		task := &HighlightTask{
-			ctx: ctx,
-			GetHighlightRequest: &querypb.GetHighlightRequest{
-				Base: commonpbutil.NewMsgBase(),
-			},
-			Condition: NewTaskCondition(ctx),
-		}
-
-		err := task.PreExecute(ctx)
-		assert.NoError(t, err)
-	})
-
-	t.Run("getHighlightOnShardleader success", func(t *testing.T) {
-		task := &HighlightTask{
-			ctx: ctx,
-			GetHighlightRequest: &querypb.GetHighlightRequest{
-				Base:  commonpbutil.NewMsgBase(),
-				Topks: []int64{10},
-				Tasks: []*querypb.HighlightTask{
-					{},
-				},
-			},
-			Condition: NewTaskCondition(ctx),
-		}
-
-		mockQN := mocks.NewMockQueryNodeClient(t)
-		expectedResp := &querypb.GetHighlightResponse{
-			Status: merr.Success(),
-			Results: []*querypb.HighlightResult{
-				{
-					Fragments: []*querypb.HighlightFragment{
-						{
-							StartOffset: 0,
-							EndOffset:   10,
-							Offsets:     []int64{0, 5, 5, 10},
-						},
-					},
-				},
-			},
-		}
-
-		mockQN.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(expectedResp, nil)
-
-		err := task.getHighlightOnShardleader(ctx, 1, mockQN, "test_channel")
-		assert.NoError(t, err)
-		assert.NotNil(t, task.result)
-		assert.Equal(t, expectedResp, task.result)
-		assert.Equal(t, "test_channel", task.Channel)
-	})
-
-	t.Run("getHighlightOnShardleader rpc error", func(t *testing.T) {
-		task := &HighlightTask{
-			ctx: ctx,
-			GetHighlightRequest: &querypb.GetHighlightRequest{
-				Base: commonpbutil.NewMsgBase(),
-			},
-			Condition: NewTaskCondition(ctx),
-		}
-
-		mockQN := mocks.NewMockQueryNodeClient(t)
-		mockQN.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
-
-		err := task.getHighlightOnShardleader(ctx, 1, mockQN, "test_channel")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "rpc error")
-	})
-
-	t.Run("getHighlightOnShardleader status error", func(t *testing.T) {
-		task := &HighlightTask{
-			ctx: ctx,
-			GetHighlightRequest: &querypb.GetHighlightRequest{
-				Base: commonpbutil.NewMsgBase(),
-			},
-			Condition: NewTaskCondition(ctx),
-		}
-
-		mockQN := mocks.NewMockQueryNodeClient(t)
-		expectedResp := &querypb.GetHighlightResponse{
-			Status: merr.Status(errors.New("status error")),
-		}
-
-		mockQN.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(expectedResp, nil)
-
-		err := task.getHighlightOnShardleader(ctx, 1, mockQN, "test_channel")
-		assert.Error(t, err)
-	})
-
-	t.Run("Execute success", func(t *testing.T) {
-		task := &HighlightTask{
-			ctx:            ctx,
-			collectionName: "test_collection",
-			collectionID:   100,
-			dbName:         "default",
-			GetHighlightRequest: &querypb.GetHighlightRequest{
-				Base:  commonpbutil.NewMsgBase(),
-				Topks: []int64{10, 20},
-				Tasks: []*querypb.HighlightTask{
-					{},
-					{},
-				},
-			},
-			Condition: NewTaskCondition(ctx),
-		}
-
-		mockLB := shardclient.NewMockLBPolicy(t)
-		mockQN := mocks.NewMockQueryNodeClient(t)
-
-		expectedResp := &querypb.GetHighlightResponse{
-			Status: merr.Success(),
-			Results: []*querypb.HighlightResult{
-				{
-					Fragments: []*querypb.HighlightFragment{
-						{
-							StartOffset: 0,
-							EndOffset:   10,
-							Offsets:     []int64{0, 5, 5, 10},
-						},
-					},
-				},
-			},
-		}
-
-		mockQN.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(expectedResp, nil)
-
-		mockLB.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Run(
-			func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
-				assert.Equal(t, "default", workload.Db)
-				assert.Equal(t, "test_collection", workload.CollectionName)
-				assert.Equal(t, int64(100), workload.CollectionID)
-				assert.Equal(t, int64(4), workload.Nq) // len(topks) * len(tasks) = 2 * 2 = 4
-				err := workload.Exec(ctx, 1, mockQN, "test_channel")
-				assert.NoError(t, err)
-			},
-		).Return(nil)
-
-		task.lb = mockLB
-
-		err := task.Execute(ctx)
-		assert.NoError(t, err)
-		assert.NotNil(t, task.result)
-	})
-
-	t.Run("Execute lb error", func(t *testing.T) {
-		task := &HighlightTask{
-			ctx:            ctx,
-			collectionName: "test_collection",
-			collectionID:   100,
-			dbName:         "default",
-			GetHighlightRequest: &querypb.GetHighlightRequest{
-				Base: commonpbutil.NewMsgBase(),
-			},
-			Condition: NewTaskCondition(ctx),
-		}
-
-		mockLB := shardclient.NewMockLBPolicy(t)
-		mockLB.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Return(errors.New("lb error"))
-
-		task.lb = mockLB
-
-		err := task.Execute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "lb error")
-	})
-
-	t.Run("PostExecute", func(t *testing.T) {
-		task := &HighlightTask{
-			ctx: ctx,
-			GetHighlightRequest: &querypb.GetHighlightRequest{
-				Base: commonpbutil.NewMsgBase(),
-			},
-			Condition: NewTaskCondition(ctx),
-		}
-
-		err := task.PostExecute(ctx)
-		assert.NoError(t, err)
-	})
 }
 
 func TestValidateCollectionTTL(t *testing.T) {

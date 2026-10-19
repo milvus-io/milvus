@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -206,7 +207,7 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 
 		case common.EncryptionRootKeyKey:
 			defaultRootKey = property.Value
-			mlog.Info(context.TODO(), "User explicitly set rootKey", mlog.Int64("ezID", ezID), mlog.String("value", property.GetValue()))
+			mlog.Info(context.TODO(), "User explicitly set rootKey", mlog.Int64("ezID", ezID))
 		}
 	}
 
@@ -445,11 +446,11 @@ func InitOnceCipher() {
 	initCipherOnce.Do(func() {
 		err := initCipher()
 		if err != nil {
-			mlog.Panic(context.TODO(),
-				fmt.Sprintf("fail to init cipher plugin, go_so_path=%s, cpp_so_path=%s, error=%v",
-					paramtable.GetCipherParams().SoPathGo.GetValue(),
-					paramtable.GetCipherParams().SoPathCpp.GetValue(),
-					err))
+			// Init receives credentials and topology; its error can echo either.
+			mlog.Panic(context.TODO(), "fail to init cipher plugin",
+				mlog.String("go_so_path", config.RedactedValue),
+				mlog.String("cpp_so_path", config.RedactedValue),
+				mlog.String("error", config.RedactedValue))
 		}
 	})
 }
@@ -471,7 +472,7 @@ func registerCallback() {
 	mlog.Info(context.TODO(), "cipher config callbacks registered")
 }
 
-func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) error {
+func reloadCipherConfig(ctx context.Context, key, _, _ string) error {
 	cipher := GetCipher()
 	if cipher == nil {
 		mlog.Warn(ctx, "cipher plugin not loaded, skip config reload", mlog.String("key", key))
@@ -481,16 +482,13 @@ func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) err
 	cipherReloadMutex.Lock()
 	defer cipherReloadMutex.Unlock()
 
-	mlog.Info(ctx, "reloading cipher plugin config",
-		mlog.String("key", key),
-		mlog.String("oldValue", oldValue),
-		mlog.String("newValue", newValue))
+	mlog.Info(ctx, "reloading cipher plugin config", mlog.String("key", key))
 
 	initConfigs := buildCipherInitConfig()
 	if err := cipher.Init(initConfigs); err != nil {
 		mlog.Error(ctx, "fail to reload cipher plugin config",
 			mlog.String("key", key),
-			mlog.Err(err))
+			mlog.String("error", config.RedactedValue))
 		return err
 	}
 

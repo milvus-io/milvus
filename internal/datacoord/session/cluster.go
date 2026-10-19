@@ -18,6 +18,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -250,22 +251,31 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 			ret = rst
 			break
 		}
-		return ret, err
+		if ret == nil {
+			return nil, nil
+		}
+		return ret, nil
 	}
 
 	switch state {
 	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return defaultResult, nil
 	case taskcommon.InProgress:
-		if resp.GetPayload() != nil {
+		if len(resp.GetPayload()) > 0 {
 			return payloadResultF()
 		}
 		return defaultResult, nil
-	case taskcommon.Finished, taskcommon.Failed:
-		if resp.GetPayload() != nil {
+	case taskcommon.Finished:
+		if len(resp.GetPayload()) > 0 {
 			return payloadResultF()
 		}
-		panic("the compaction result payload must not be empty with Finished/Failed state")
+		return nil, merr.WrapErrCompactionResultNotFound(fmt.Sprintf(
+			"compaction task %d on node %d finished without result payload", in.GetPlanID(), nodeID))
+	case taskcommon.Failed:
+		if len(resp.GetPayload()) > 0 {
+			return payloadResultF()
+		}
+		return defaultResult, nil
 	default:
 		panic("should not happen")
 	}

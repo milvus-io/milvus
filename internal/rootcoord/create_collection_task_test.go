@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1961,6 +1962,31 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		assert.Contains(t, err.Error(), "read milvus-table snapshot metadata")
 	})
 
+	for _, tc := range []struct {
+		name    string
+		data    string
+		readErr error
+		wantErr error
+	}{
+		{"corrupt metadata", `{`, nil, merr.ErrDataIntegrity},
+		{"unsupported snapshot version", `{"format_version":99999}`, nil, merr.ErrOperationNotSupported},
+		{"metadata read timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, parseErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(tc.data))
+			if tc.readErr != nil {
+				parseErr = tc.readErr
+			}
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, parseErr).Build()
+			defer read.UnPatch()
+
+			err := baseTask(baseSchema()).prepareMilvusTableSnapshotSchema(context.Background())
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Status(err).GetCode())
+			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		})
+	}
+
 	t.Run("missing source schema", func(t *testing.T) {
 		mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
 			Return(&datapb.SnapshotMetadata{
@@ -2220,6 +2246,52 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		err := task.Prepare(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid namespace.mode")
+	})
+
+	t.Run("reject invalid rls enabled property", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
+			Name: "foo",
+			ID:   1,
+		}, nil).Twice()
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
+			util.DefaultDBID: {1, 2},
+		}).Once()
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
+		defer cleanTestEnv()
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+
+		ticker := newRocksMqTtSynchronizer()
+		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
+
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{Name: field1, DataType: schemapb.DataType_Int64},
+			},
+		}
+
+		task := createCollectionTask{
+			Core: core,
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				ShardsNum:      common.DefaultShardsNum,
+				Properties: []*commonpb.KeyValuePair{
+					{Key: common.RLSEnabledKey, Value: "yes"},
+				},
+			},
+			header: &message.CreateCollectionMessageHeader{},
+			body: &message.CreateCollectionRequest{
+				CollectionSchema: schema,
+			},
+		}
+
+		err := task.Prepare(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid rls.enabled")
 	})
 
 	t.Run("persist valid namespace mode", func(t *testing.T) {

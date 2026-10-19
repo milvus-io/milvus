@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,6 +60,9 @@ import (
 // AssembleImportRequest never returns.
 var ErrPKRangeTooSmall = errors.New("reserved PK range too small")
 
+// An immutable job/task source mismatch cannot be repaired by rescheduling.
+var errSnapshotTaskSource = errors.New("invalid snapshot task source")
+
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -74,6 +79,9 @@ func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 	job ImportJob, alloc allocator.Allocator, importMeta ImportMeta,
 ) ([]ImportTask, error) {
+	fileGroups = splitImportFileGroupsByPartition(fileGroups, func(file *internalpb.ImportFile) int64 {
+		return file.GetSnapshotSource().GetTargetPartitionId()
+	})
 	idStart, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
 		return nil, err
@@ -107,6 +115,9 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	job ImportJob, alloc allocator.Allocator, meta *meta, importMeta ImportMeta, segmentMaxSize int,
 ) ([]ImportTask, error) {
+	fileGroups = splitImportFileGroupsByPartition(fileGroups, func(file *datapb.ImportFileStats) int64 {
+		return file.GetImportFile().GetSnapshotSource().GetTargetPartitionId()
+	})
 	idBegin, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
 		return nil, err
@@ -146,6 +157,41 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 		tasks = append(tasks, task)
 	}
 	return tasks, nil
+}
+
+// Split within the existing size/count limits, without merging groups. A zero
+// destination is the unchanged ordinary/partition-key routing contract. Mapped
+// files retain their destination through WAL, catalog reload, and both phases.
+func splitImportFileGroupsByPartition[T any](groups [][]T, destination func(T) int64) [][]T {
+	result := make([][]T, 0, len(groups))
+	for _, group := range groups {
+		if len(group) == 0 {
+			result = append(result, group)
+			continue
+		}
+		byPartition := make(map[int64]int)
+		for _, file := range group {
+			id := destination(file)
+			index, ok := byPartition[id]
+			if !ok {
+				index = len(result)
+				byPartition[id] = index
+				result = append(result, nil)
+			}
+			result[index] = append(result[index], file)
+		}
+	}
+	return result
+}
+
+func importTaskPartitionIDs(task ImportTask, job ImportJob) []int64 {
+	files := task.GetFileStats()
+	if len(files) != 0 {
+		if id := files[0].GetImportFile().GetSnapshotSource().GetTargetPartitionId(); id != 0 {
+			return []int64{id}
+		}
+	}
+	return job.GetPartitionIDs()
 }
 
 func GetSegmentMaxSize(job ImportJob, meta *meta) int {
@@ -295,30 +341,42 @@ func AllocImportSegment(ctx context.Context,
 	return segment, nil
 }
 
-func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
+func AssemblePreImportRequest(task ImportTask, job ImportJob) (*datapb.PreImportRequest, error) {
 	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStats.GetImportFile()
 		})
 
+	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
+	if err != nil {
+		return nil, err
+	}
 	req := &datapb.PreImportRequest{
-		JobID:         task.GetJobID(),
-		TaskID:        task.GetTaskID(),
-		CollectionID:  task.GetCollectionID(),
-		PartitionIDs:  job.GetPartitionIDs(),
-		Vchannels:     job.GetVchannels(),
-		Schema:        job.GetSchema(),
-		ImportFiles:   importFiles,
-		Options:       job.GetOptions(),
-		TaskSlot:      task.GetTaskSlot(),
-		StorageConfig: createStorageConfig(),
-		PluginContext: GetReadPluginContext(job.GetOptions()),
+		JobID:            task.GetJobID(),
+		TaskID:           task.GetTaskID(),
+		CollectionID:     task.GetCollectionID(),
+		PartitionIDs:     importTaskPartitionIDs(task, job),
+		Vchannels:        job.GetVchannels(),
+		Schema:           job.GetSchema(),
+		ImportFiles:      importFiles,
+		Options:          job.GetOptions(),
+		TaskSlot:         task.GetTaskSlot(),
+		StorageConfig:    createStorageConfig(),
+		PluginContext:    GetReadPluginContext(job.GetOptions()),
+		SnapshotL0Source: l0Source,
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
-	return req
+	return req, nil
 }
 
 func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator.Allocator) (*datapb.ImportRequest, error) {
+	importFiles := lo.Map(task.GetFileStats(), func(stat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
+		return stat.GetImportFile()
+	})
+	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
+	if err != nil {
+		return nil, merr.Mark(err, errSnapshotTaskSource)
+	}
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
 		segment := meta.GetSegment(context.TODO(), segmentID)
@@ -334,7 +392,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ts := job.GetDataTs()
-	var err error
 	if ts == 0 {
 		ts, err = alloc.AllocTimestamp(ctx)
 		if err != nil {
@@ -368,10 +425,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		mlog.Uint64("ts", ts))...,
 	)
 
-	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
-		return fileStat.GetImportFile()
-	})
-
 	// The PK reservation was sized at broadcast from an upper bound; pre-import has
 	// since produced the exact row count. Compare them here, before any segment is
 	// written, instead of letting pkCursor.take trip mid-import on the datanode.
@@ -394,35 +447,78 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	useLoonFFI := importUseLoonFFI(isL0Import)
 
 	req := &datapb.ImportRequest{
-		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
-		JobID:           task.GetJobID(),
-		TaskID:          task.GetTaskID(),
-		CollectionID:    task.GetCollectionID(),
-		PartitionIDs:    job.GetPartitionIDs(),
-		Vchannels:       job.GetVchannels(),
-		Schema:          job.GetSchema(),
-		Files:           importFiles,
-		Options:         job.GetOptions(),
-		Ts:              ts,
-		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
-		RequestSegments: requestSegments,
-		StorageConfig:   createStorageConfig(),
-		TaskSlot:        task.GetTaskSlot(),
-		StorageVersion:  storageVersion,
-		PluginContext:   GetReadPluginContext(job.GetOptions()),
-		UseLoonFfi:      useLoonFFI,
+		ClusterID:         Params.CommonCfg.ClusterPrefix.GetValue(),
+		JobID:             task.GetJobID(),
+		TaskID:            task.GetTaskID(),
+		CollectionID:      task.GetCollectionID(),
+		PartitionIDs:      importTaskPartitionIDs(task, job),
+		Vchannels:         job.GetVchannels(),
+		Schema:            job.GetSchema(),
+		Files:             importFiles,
+		Options:           job.GetOptions(),
+		Ts:                ts,
+		IDRange:           &datapb.IDRange{Begin: idBegin, End: idEnd},
+		RequestSegments:   requestSegments,
+		StorageConfig:     createStorageConfig(),
+		TaskSlot:          task.GetTaskSlot(),
+		StorageVersion:    storageVersion,
+		PluginContext:     GetReadPluginContext(job.GetOptions()),
+		UseLoonFfi:        useLoonFFI,
+		RlsCheckPredicate: job.GetRlsCheckPredicate(),
+		SnapshotL0Source:  l0Source,
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
 }
 
 func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {
-	if len(files) == 0 {
-		return nil
+	var groups [][]*datapb.ImportFileStats
+	for _, scope := range groupSnapshotImportFiles(files, func(stat *datapb.ImportFileStats) *internalpb.ImportFile { return stat.GetImportFile() }) {
+		groups = append(groups, regroupImportFilesBySize(job, scope, segmentMaxSize)...)
 	}
+	return groups
+}
 
+// Group by the immutable source scope before applying phase-specific limits.
+// Descriptors without shared L0 and ordinary files retain their existing grouping.
+func groupSnapshotImportFiles[T any](files []T, getFile func(T) *internalpb.ImportFile) [][]T {
+	type scope struct {
+		channel     string
+		partitionID int64
+	}
+	indices := make(map[scope]int)
+	var groups [][]T
+	for _, file := range files {
+		key := scope{}
+		if source := getFile(file).GetSnapshotSource(); importutilv2.SnapshotSourceUsesSharedL0(source) {
+			key = scope{source.GetSourceChannel(), source.GetSourcePartitionId()}
+		}
+		index, ok := indices[key]
+		if !ok {
+			index = len(groups)
+			indices[key] = index
+			groups = append(groups, nil)
+		}
+		groups[index] = append(groups[index], file)
+	}
+	return groups
+}
+
+func groupPreImportFiles(files []*internalpb.ImportFile, count int) [][]*internalpb.ImportFile {
+	var groups [][]*internalpb.ImportFile
+	for _, scope := range groupSnapshotImportFiles(files, func(file *internalpb.ImportFile) *internalpb.ImportFile { return file }) {
+		groups = append(groups, lo.Chunk(scope, count)...)
+	}
+	return groups
+}
+
+func regroupImportFilesBySize(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {
 	threshold := paramtable.Get().DataCoordCfg.MaxSizeInMBPerImportTask.GetAsInt() * 1024 * 1024
-	maxSizePerFileGroup := segmentMaxSize * len(job.GetPartitionIDs()) * len(job.GetVchannels())
+	partitionNum := len(job.GetPartitionIDs())
+	if files[0].GetImportFile().GetSnapshotSource().GetTargetPartitionId() != 0 {
+		partitionNum = 1
+	}
+	maxSizePerFileGroup := segmentMaxSize * partitionNum * len(job.GetVchannels())
 	if maxSizePerFileGroup > threshold {
 		maxSizePerFileGroup = threshold
 	}
@@ -475,7 +571,7 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 	quotaInfo := meta.GetQuotaInfo()
 	totalUsage, collectionsUsage := quotaInfo.TotalBinlogSize, quotaInfo.CollectionBinlogSize
 
-	tasks := importMeta.GetTaskBy(ctx, WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, job.GetJobID(), WithType(PreImportTaskType))
 	files := make([]*datapb.ImportFileStats, 0)
 	for _, task := range tasks {
 		files = append(files, task.GetFileStats()...)
@@ -509,7 +605,7 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 }
 
 func getPendingProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
-	tasks := importMeta.GetTaskBy(context.TODO(), WithJob(jobID), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskByJob(context.TODO(), jobID, WithType(PreImportTaskType))
 	preImportingFiles := lo.SumBy(tasks, func(task ImportTask) int {
 		return len(task.GetFileStats())
 	})
@@ -521,7 +617,7 @@ func getPendingProgress(ctx context.Context, jobID int64, importMeta ImportMeta)
 }
 
 func getPreImportingProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(PreImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(PreImportTaskType))
 	completedTasks := lo.Filter(tasks, func(task ImportTask, _ int) bool {
 		return task.GetState() == datapb.ImportTaskStateV2_Completed
 	})
@@ -532,7 +628,7 @@ func getPreImportingProgress(ctx context.Context, jobID int64, importMeta Import
 }
 
 func getImportRowsInfo(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) (importedRows, totalRows int64) {
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	segmentIDs := make([]int64, 0)
 	for _, task := range tasks {
 		totalRows += lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
@@ -556,7 +652,7 @@ func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, m
 	if !enableSortCompaction() {
 		return 1
 	}
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSortedSegmentIDs()
 	})
@@ -578,7 +674,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
 		return 1
 	}
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
 	})
@@ -661,7 +757,7 @@ func GetJobProgress(ctx context.Context, jobID int64,
 
 func GetTaskProgresses(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) []*internalpb.ImportTaskProgress {
 	progresses := make([]*internalpb.ImportTaskProgress, 0)
-	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	for _, task := range tasks {
 		totalRows := lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
 			return file.GetTotalRows()
@@ -699,15 +795,22 @@ func DropImportTask(task ImportTask, cluster session.Cluster, tm ImportMeta) err
 	return tm.UpdateTask(context.TODO(), task.GetTaskID(), UpdateNodeID(NullNodeID))
 }
 
+func validateBinlogImportPaths(paths []string) error {
+	if len(paths) == 0 {
+		return merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+	if len(paths) > 2 {
+		return merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", paths)
+	}
+	return nil
+}
+
 func ListBinlogsAndGroupBySegment(ctx context.Context,
 	cm storage.ChunkManager, importFile *internalpb.ImportFile,
 ) ([]*internalpb.ImportFile, error) {
-	if len(importFile.GetPaths()) == 0 {
-		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
-	}
-	if len(importFile.GetPaths()) > 2 {
-		return nil, merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
-			"Valid paths length should be one or two, but got paths:%s", importFile.GetPaths())
+	if err := validateBinlogImportPaths(importFile.GetPaths()); err != nil {
+		return nil, err
 	}
 
 	insertPrefix := importFile.GetPaths()[0]
@@ -786,6 +889,192 @@ func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
 		mlog.Int64("totalRows", totalRows), mlog.Int64("totalSize", totalSize))
 }
 
+// normalizeStorageKey folds a storage key into a single namespace so that a
+// candidate path and a deny-list entry are always comparable.
+//
+// Rooting at "/" before cleaning does three things at once:
+//   - an absolute storage root (localStorage.path, e.g. /var/lib/milvus/data)
+//     and a relative one (minio.rootPath, e.g. files) end up in the same
+//     namespace, so the deny list applies to both;
+//   - any number of leading slashes collapses to one, so "//files/insert_log"
+//     cannot dodge an entry that "/files/insert_log" matches;
+//   - a leading ".." is resolved away rather than preserved, which path.Clean
+//     cannot do for a relative path. This matters because LocalChunkManager
+//     opens the caller's path with os.Open, where "../files/insert_log/x"
+//     resolves against the process working directory.
+//
+// Applying POSIX cleaning to REMOTE object keys is deliberate, not an oversight.
+// An S3/MinIO key is an opaque string and RemoteChunkManager passes it through
+// verbatim, so literal prefix matching would describe what a single backend does
+// more precisely -- and would let "files/../files/insert_log/x" and every other
+// syntactic variant of an internal prefix through. RemoteChunkManager fronts
+// MinIO, S3, GCS, Azure Blob, OSS and COS, whose key normalization is not uniform
+// and has historically included key-to-filesystem-path mappings; on any backend
+// that does normalize, those variants read real internal data. The deny list
+// therefore compares the cleaned form on purpose, accepting that a caller key
+// which cleans onto an internal prefix (say "files//insert_log/x", a distinct
+// object on a literal backend) is over-rejected. Over-rejecting is recoverable;
+// under-rejecting is not, and no syntax distinguishes an accidental doubled
+// slash from a deliberate one.
+func normalizeStorageKey(key string) string {
+	return path.Clean("/" + key)
+}
+
+// comparableStorageKey returns the form of key that the deny list compares.
+// Under local storage the read is os.Open, which follows symlinks and /proc
+// magic links such as /proc/self/root, so the key is resolved first. A key
+// that cannot be resolved is an error, which rejects the import.
+//
+// This resolve and the later open are not atomic, and the datanode opens the
+// caller's original string rather than what was resolved here. A caller who can
+// write to the staging directory can swap a symlink in between. Closing that
+// needs O_NOFOLLOW or a resolve-and-recheck at the read.
+func comparableStorageKey(key string, localStorage bool) (string, error) {
+	if localStorage {
+		resolved, err := filepath.EvalSymlinks(key)
+		if err != nil {
+			// Classified by the caller: a candidate path is caller-supplied,
+			// while the storage root is the server's own configuration.
+			return "", err
+		}
+		key = resolved
+	}
+	return normalizeStorageKey(key), nil
+}
+
+// appendDenied adds one internal directory to the deny list.
+//
+// Under local storage it adds the resolved form as well. rootPath is already
+// resolved, but a directory below it can itself be a symlink -- an operator
+// moving the cache subtree onto another disk is the ordinary case. Candidate
+// paths are compared after full resolution, so an entry that exists only in
+// its unresolved spelling would never match one. Both forms are kept: the
+// unresolved one still matches a caller who spells the alias, and a segment
+// that does not exist yet cannot be resolved and cannot be read either.
+func appendDenied(denied []string, dir string, localStorage bool) []string {
+	lexical := normalizeStorageKey(dir)
+	denied = append(denied, lexical)
+	if !localStorage {
+		return denied
+	}
+	resolved, err := filepath.EvalSymlinks(lexical)
+	if err != nil {
+		return denied
+	}
+	if key := normalizeStorageKey(resolved); key != lexical {
+		denied = append(denied, key)
+	}
+	return denied
+}
+
+// ValidateImportFilePaths rejects ordinary imports whose caller-supplied paths
+// point into Milvus's own internal storage layout under the storage root path.
+//
+// RBAC authorizes an import against the target collection name only; the file
+// paths never participate in that decision. Refusing Milvus's own data
+// directories keeps an ordinary import inside caller-supplied staging data.
+//
+// Binlog import (backup=true) and L0 import are exempt: reading insert_log and
+// delta_log is exactly what they do. They are gated instead by the cluster-level
+// ImportBinlog privilege, checked in the proxy.
+func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	if importutilv2.IsBackup(options) || importutilv2.IsL0Import(options) {
+		return nil
+	}
+
+	// Segments rooted at localStorage.path share the ChunkManager root only when
+	// the storage type is local. Denying them on a MinIO-backed cluster would
+	// reject caller paths Milvus never writes -- <minio.rootPath>/tmp/... being
+	// the one people actually stage imports under.
+	localStorage := paramtable.Get().CommonCfg.StorageType.GetValue() == "local"
+
+	segments := make([]string, 0,
+		len(common.InternalStorageRootSegments)+len(common.LocalOnlyStorageRootSegments))
+	segments = append(segments, common.InternalStorageRootSegments...)
+	if localStorage {
+		segments = append(segments, common.LocalOnlyStorageRootSegments...)
+	}
+
+	rootPath, err := comparableStorageKey(cm.RootPath(), localStorage)
+	if err != nil {
+		// localStorage.path is operator-owned, so an unresolvable root is a
+		// server-side fault: a dropped mount or a missing directory. Reporting
+		// it as an InputError would bucket it as a bad caller path and stop
+		// retry.Do from retrying a recoverable condition.
+		return merr.WrapErrImportSysFailedMsg(
+			"cannot resolve storage root %s: %v", cm.RootPath(), err)
+	}
+	denied := make([]string, 0, 2*len(segments)+2)
+	for _, segment := range segments {
+		denied = appendDenied(denied, path.Join(rootPath, segment), localStorage)
+	}
+	if localStorage {
+		// Legacy StorageV3 segments stay at <localStorage.path>/<minio.rootPath>/insert_log
+		// across an upgrade and are read in place: migration protects exactly that
+		// directory (storage/localmigrate/migrate.go legacyNamespace) and an update to
+		// a legacy manifest keeps its base. An empty or "." prefix collapses onto the
+		// <root>/insert_log entry above.
+		legacyInsertLog := path.Join(rootPath,
+			paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath)
+		denied = appendDenied(denied, legacyInsertLog, localStorage)
+	} else {
+		// Explore planning manifests live at the bucket root on remote storage,
+		// outside minio.rootPath (external_collection_refresh_manager.go
+		// exploreDirForChunkManager), so no root-anchored entry can reach them.
+		// They are milvus-table-explore.json, which the import extension
+		// whitelist accepts, so nothing else bounds them either.
+		denied = appendDenied(denied, common.ExploreTempRootPath, localStorage)
+	}
+
+	for _, file := range files {
+		for _, filePath := range file.GetPaths() {
+			// The deny entries are anchored at the storage root, but under local
+			// storage the read is os.Open, which resolves a relative key against
+			// the datanode's working directory instead. The two namespaces never
+			// meet, so a relative key can never match a deny entry no matter how
+			// it is normalized -- with WORKDIR /milvus and
+			// localStorage.path=/milvus/data, "data/snapshots/..." reads the
+			// snapshot directory while comparing as "/data/snapshots/...".
+			// Every legitimate local staging path is absolute, so refuse the rest.
+			if localStorage && !path.IsAbs(filePath) {
+				return merr.WrapErrImportFailedMsg(
+					"import path %s must be absolute under common.storageType=local", filePath)
+			}
+
+			cleaned, err := comparableStorageKey(filePath, localStorage)
+			if err != nil {
+				return merr.WrapErrImportFailedMsg(
+					"cannot resolve import path %s: %v", filePath, err)
+			}
+			// Compare both forms of the candidate. The resolved one catches an
+			// alias of the path as a whole -- /proc/self/root, a staging symlink
+			// into the root. The lexical one catches a symlink at any depth
+			// BELOW a registered segment: with <root>/cache/1 -> /nvme/cache-1
+			// the resolved form leaves the root's namespace entirely, so no
+			// root-anchored entry can match it, while the lexical form still
+			// reads <root>/cache/... and hits the entry. A caller who spells the
+			// relocated directory directly is out of reach of either form; that
+			// needs canonicalization at the read, see Known limitations.
+			forms := []string{cleaned}
+			if lexical := normalizeStorageKey(filePath); lexical != cleaned {
+				forms = append(forms, lexical)
+			}
+			for _, deniedPath := range denied {
+				for _, form := range forms {
+					// Boundary match, not a raw prefix match: a raw prefix would also
+					// reject a caller's own "files/insert_logs_2026/a.json".
+					if form == deniedPath || strings.HasPrefix(form, deniedPath+"/") {
+						return merr.WrapErrImportFailedMsg(
+							"import path %s is not allowed: %s is a Milvus internal storage directory",
+							filePath, deniedPath)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // ValidateBinlogImportRequest validates the binlog import request.
 func ValidateBinlogImportRequest(ctx context.Context, cm storage.ChunkManager,
 	reqFiles []*msgpb.ImportFile, options []*commonpb.KeyValuePair,
@@ -805,6 +1094,13 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	isBackup := importutilv2.IsBackup(options)
 	if !isBackup {
 		return reqFiles, nil
+	}
+	// Validate the whole request before listing so storage failures cannot
+	// mask invalid path counts in later files.
+	for _, importFile := range reqFiles {
+		if err := validateBinlogImportPaths(importFile.GetPaths()); err != nil {
+			return nil, err
+		}
 	}
 	resFiles := make([]*internalpb.ImportFile, 0)
 	pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
@@ -826,7 +1122,10 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	}
 	err := conc.AwaitAll(futures...)
 	if err != nil {
-		return nil, merr.WrapErrServiceUnavailableMsg("list binlogs failed, err=%s", err)
+		if !errors.Is(err, merr.ErrImportFailed) {
+			err = merr.WrapErrServiceUnavailableErr(err, "list binlogs failed")
+		}
+		return nil, err
 	}
 
 	resFiles = lo.Filter(resFiles, func(file *internalpb.ImportFile, _ int) bool {
@@ -876,7 +1175,7 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
 	if task.GetType() == ImportTaskType {
 		// ImportTask use dynamic buffer size calculated by vchannels and partitions
-		taskBufferSize = baseBufferSize * len(job.GetVchannels()) * len(job.GetPartitionIDs())
+		taskBufferSize = baseBufferSize * len(job.GetVchannels()) * len(importTaskPartitionIDs(task, job))
 	} else {
 		// PreImportTask use fixed buffer size
 		taskBufferSize = baseBufferSize
@@ -887,6 +1186,23 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 		taskBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
 	}
 	memoryLimitPerSlot := paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt()
+	if files := task.GetFileStats(); !isL0Import && len(files) > 0 && files[0].GetImportFile().GetSnapshotSource() != nil {
+		// Typed tasks are homogeneous. Before selecting a worker we do not know
+		// its pool size or memory allowance, so use the file count as an upper
+		// bound on concurrent readers. The DN allocator remains authoritative
+		// and may admit fewer readers or smaller row buffers.
+		deleteBudget := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
+		taskBufferSize = len(files) * (taskBufferSize + deleteBudget)
+		if importutilv2.SnapshotSourceUsesSharedL0(files[0].GetImportFile().GetSnapshotSource()) {
+			// One delete batch is reserved per task. The per-reader delete
+			// allowances above become the shared task's bitmap pool on the DN.
+			taskBufferSize += deleteBudget
+		}
+		// Round up only for the new snapshot accounting. Keep the existing
+		// ordinary/legacy L0 slot calculation unchanged.
+		memoryBasedSlots := (taskBufferSize-1)/memoryLimitPerSlot + 1
+		return max(cpuBasedSlots, memoryBasedSlots)
+	}
 	memoryBasedSlots := taskBufferSize / memoryLimitPerSlot
 
 	// Return the larger value to ensure both CPU and memory constraints are satisfied

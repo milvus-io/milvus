@@ -40,6 +40,7 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -209,6 +210,35 @@ func createTestSnapshotData() *snapshotstorage.SnapshotData {
 				},
 			},
 		},
+	}
+}
+
+func TestSnapshotCommitTimestampRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	for _, commit := range []uint64{0, 300} {
+		for _, layout := range []datapb.SnapshotLayout{datapb.SnapshotLayout_SnapshotLayoutReferenced, datapb.SnapshotLayout_SnapshotLayoutSelfContained} {
+			t.Run(fmt.Sprintf("%s/%d", layout, commit), func(t *testing.T) {
+				root := t.TempDir()
+				cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+				data := &snapshotstorage.SnapshotData{
+					SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 2},
+					Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}, Partitions: map[string]int64{"default": 10}},
+					Segments: []*datapb.SegmentDescription{
+						{SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: commit},
+						{SegmentId: 30, PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0},
+					},
+				}
+				uri, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, data, root, layout)
+				require.NoError(t, err)
+				read, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, uri, true)
+				require.NoError(t, err)
+				commits := make(map[int64]uint64)
+				for _, segment := range read.Segments {
+					commits[segment.SegmentId] = segment.CommitTimestamp
+				}
+				require.Equal(t, map[int64]uint64{20: commit, 30: 0}, commits)
+			})
+		}
 	}
 }
 
@@ -832,6 +862,22 @@ func TestSnapshotReader_ReadSnapshot_RejectsSensitivePathInReferencedManifest(t 
 	assert.True(t, errors.Is(err, merr.ErrDataIntegrity))
 	assert.NotContains(t, err.Error(), "TOPSECRET")
 	assert.NotContains(t, err.Error(), "X-Amz-Signature")
+}
+
+func TestSnapshotReader_CapturedMetadataErrors(t *testing.T) {
+	reader := snapshotstorage.NewSnapshotReader(nil)
+	ctx := context.Background()
+	_, err := reader.ReadMetadata(ctx, "s3://user:secret@source/key")
+	require.Error(t, err)
+	for _, metadata := range []*datapb.SnapshotMetadata{
+		nil,
+		{},
+		{SnapshotInfo: &datapb.SnapshotInfo{}},
+		{SnapshotInfo: &datapb.SnapshotInfo{}, Collection: &datapb.CollectionDescription{}, ManifestList: []string{"s3://user:secret@source/key"}},
+	} {
+		_, err := reader.ReadSnapshotFromMetadata(ctx, "root/snapshots/1/metadata/2.json", metadata, false)
+		require.Error(t, err)
+	}
 }
 
 func TestSnapshotReader_ReadSnapshot_EmptyPath(t *testing.T) {
@@ -1525,6 +1571,10 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	basePath := path.Join(tempDir, "files/insert_log/100/20/1001")
 	require.NoError(t, cm.Write(ctx, path.Join(basePath, "manifest"), []byte("manifest")))
 	require.NoError(t, cm.Write(ctx, path.Join(basePath, "_data/cg0.parquet"), []byte("data")))
+	deltaPath := path.Join(basePath, "_delta/7")
+	require.NoError(t, cm.Write(ctx, deltaPath, []byte("delta")))
+	pathlessDeltaPath := path.Join(basePath, "_delta/8")
+	require.NoError(t, cm.Write(ctx, pathlessDeltaPath, []byte("pathless delta")))
 	siblingPath := basePath + "0/manifest"
 	require.NoError(t, cm.Write(ctx, siblingPath, []byte("sibling")))
 
@@ -1552,7 +1602,15 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		},
 	}
 	segment.Statslogs = nil
-	segment.Deltalogs = nil
+	// StorageV3 delta metadata: one entry with a complete key and one
+	// compressed summary placeholder without a path (the manifest owns the
+	// physical file, which the manifest walk lists).
+	segment.Deltalogs = []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{
+			{LogPath: deltaPath},
+			{LogID: 8},
+		},
+	}}
 	segment.Bm25Statslogs = nil
 	segment.IndexFiles = nil
 
@@ -1560,12 +1618,20 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		BucketName: "foreign-bucket",
 		RootPath:   "foreign-root",
 	}
+	getLobCalls := 0
 	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).To(
 		func(gotManifestPath string, gotStorageConfig *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
 			assert.Equal(t, segment.GetManifestPath(), gotManifestPath)
-			assert.Same(t, foreignStorageConfig, gotStorageConfig)
+			// Listing passes the caller's storage config through; the rewrite
+			// below calls again with its own config.
+			if getLobCalls == 0 {
+				assert.Same(t, foreignStorageConfig, gotStorageConfig)
+			}
+			getLobCalls++
+			// Manifest-expanded LOB paths are complete keys, so on local
+			// storage they are absolute like the manifest base.
 			return []packed.LobFileInfo{
-				{Path: "files/insert_log/100/20/lobs/30/_data/lob.vx", FieldID: 30},
+				{Path: path.Join(tempDir, "files/insert_log/100/20/lobs/30/_data/lob.vx"), FieldID: 30},
 			}, nil
 		}).Build()
 	defer mockGetLobFiles.UnPatch()
@@ -1581,11 +1647,32 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestRoot, byPath[basePath].Type)
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(basePath, "manifest")].Type)
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(basePath, "_data/cg0.parquet")].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3LOBFile, byPath["files/insert_log/100/20/lobs/30/_data/lob.vx"].Type)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3LOBFile, byPath[path.Join(tempDir, "files/insert_log/100/20/lobs/30/_data/lob.vx")].Type)
 	assert.NotContains(t, byPath, "files/text_index/100/12/1001/7002/posting")
 	assert.NotContains(t, byPath, "files/json_index/100/13/1001/7003/key")
 	assert.NotContains(t, byPath, siblingPath)
-	assert.Len(t, byPath, 4)
+	assert.Contains(t, byPath, deltaPath)
+	assert.Contains(t, byPath, pathlessDeltaPath)
+	assert.Len(t, byPath, 6)
+
+	// Rewriting keeps the pathless summary pathless instead of failing on a
+	// missing mapping for "".
+	mappings := make(map[string]string, len(refs)*2)
+	for _, ref := range refs {
+		destination := snapshotstorage.ExportedSnapshotPath(cm, ref.NormalizedPath, "bundle")
+		mappings[ref.Path] = destination
+		mappings[ref.NormalizedPath] = destination
+	}
+	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(
+		snapshot,
+		mappings,
+		"bundle",
+		"s3://bucket/bundle/snapshots/100/metadata/1.json",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, mappings[deltaPath], rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+	assert.Empty(t, rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogPath())
+	assert.Equal(t, int64(8), rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogID())
 }
 
 func validateSnapshotDataFiles(
@@ -2637,6 +2724,26 @@ func TestSnapshotReader_ReadSnapshot_RebasesRelocatedSelfContainedBundleBeforeMa
 	assert.Equal(t, newBinlogPath, got.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
 	assert.Contains(t, readPaths, newManifestPath)
 	assert.NotContains(t, readPaths, oldManifestPath)
+	// Capturing metadata and retrying preparation must not mutate its original
+	// root or reopen the top-level object after Create has returned.
+	frozen := proto.Clone(metadata).(*datapb.SnapshotMetadata)
+	readPaths = nil
+	for attempt := 0; attempt < 2; attempt++ {
+		got, err = reader.ReadSnapshotFromMetadata(ctx, newMetadataPath, metadata, true)
+		require.NoError(t, err)
+		require.Equal(t, newBinlogPath, got.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+		require.True(t, proto.Equal(frozen, metadata))
+	}
+	require.Equal(t, []string{newManifestPath, newManifestPath}, readPaths)
+	rebaseMetadata := mockey.Mock(snapshotstorage.RebaseSelfContainedSnapshotMetadata).Return(merr.ErrIoFailed).Build()
+	defer rebaseMetadata.UnPatch()
+	_, err = reader.ReadSnapshotFromMetadata(ctx, newMetadataPath, metadata, true)
+	require.ErrorIs(t, err, merr.ErrIoFailed)
+	rebaseMetadata.UnPatch()
+	rebaseData := mockey.Mock(snapshotstorage.RebaseSelfContainedSnapshotData).Return(merr.ErrIoFailed).Build()
+	defer rebaseData.UnPatch()
+	_, err = reader.ReadSnapshotFromMetadata(ctx, newMetadataPath, metadata, true)
+	require.ErrorIs(t, err, merr.ErrIoFailed)
 }
 
 func TestSnapshotReader_ReadSnapshot_AcceptsSelfContainedBundleAtBucketRoot(t *testing.T) {

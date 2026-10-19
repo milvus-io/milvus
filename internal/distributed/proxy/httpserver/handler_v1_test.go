@@ -715,6 +715,69 @@ func genGetRequest() *http.Request {
 	return req
 }
 
+func TestRESTV1ForwardsRLSFields(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
+	})
+
+	matchesRLS := func(req interface {
+		GetRlsPrincipal() string
+		GetSkipRls() bool
+	},
+	) bool {
+		return req.GetRlsPrincipal() == "alice" && req.GetSkipRls()
+	}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&DefaultDescCollectionResp, nil).Times(4)
+	mp.EXPECT().Query(mock.Anything, mock.MatchedBy(func(req *milvuspb.QueryRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.QueryResults{Status: &StatusSuccess}, nil).Twice()
+	mp.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(req *milvuspb.DeleteRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{Status: &StatusSuccess}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{
+		Status: &StatusSuccess, IDs: genIDs(schemapb.DataType_Int64), InsertCnt: 1,
+	}, nil).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpsertRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{
+		Status: &StatusSuccess, IDs: genIDs(schemapb.DataType_Int64), UpsertCnt: 1,
+	}, nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.SearchResults{
+		Status: &StatusSuccess, Results: &schemapb.SearchResultData{},
+	}, nil).Once()
+
+	engine := initHTTPServer(mp, false)
+	send := func(path, body string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versional(path), strings.NewReader(body)))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+	row := generateSearchResult(schemapb.DataType_Int64)[0]
+	data, err := json.Marshal(map[string]interface{}{
+		HTTPCollectionName: DefaultCollectionName,
+		HTTPReturnData:     row,
+		"rlsPrincipal":     "alice",
+		"skipRls":          true,
+	})
+	require.NoError(t, err)
+
+	send(VectorQueryPath, `{"collectionName":"book","filter":"book_id > 0","rlsPrincipal":"alice","skipRls":true}`)
+	send(VectorGetPath, `{"collectionName":"book","id":[1],"rlsPrincipal":"alice","skipRls":true}`)
+	send(VectorDeletePath, `{"collectionName":"book","filter":"book_id in [1]","rlsPrincipal":"alice","skipRls":true}`)
+	// Object-form data exercises the single-row Insert/Upsert fallback copies.
+	send(VectorInsertPath, string(data))
+	send(VectorUpsertPath, string(data))
+	send(VectorSearchPath, `{"collectionName":"book","vector":[0.1,0.2],"rlsPrincipal":"alice","skipRls":true}`)
+}
+
 func TestDelete(t *testing.T) {
 	paramtable.Init()
 	testCases := []testCase{}
@@ -995,6 +1058,99 @@ func TestInsertForDataType(t *testing.T) {
 			assert.Equal(t, true, CheckErrCode(w.Body.String(), merr.ErrInvalidInsertData))
 		})
 	}
+}
+
+func TestNarrowIntegerOverflowV1(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateNarrowIntegerCollectionSchema(schemapb.DataType_Int8),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	testEngine := initHTTPServer(mp, true)
+	body := []byte(`{"collectionName":"book","data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"narrow_int":128}]}`)
+
+	for _, path := range []string{VectorInsertPath, VectorUpsertPath} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versional(path), bytes.NewReader(body))
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "actual=128")
+			assert.Contains(t, returnBody.Message, "field narrow_int value must be an integer in range [-128, 127]")
+		})
+	}
+}
+
+func TestStructArrayIntegerExponentV1(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         buildStructArrayTestSchema(),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	testEngine := initHTTPServer(mp, true)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":1e-999999,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+
+	for _, path := range []string{VectorInsertPath, VectorUpsertPath} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versional(path), bytes.NewReader(body))
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "sub-field sub_int")
+			assert.Contains(t, returnBody.Message, "value=1e-999999")
+		})
+	}
+}
+
+func TestStructArrayExactInt64V1(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	schema := buildStructArrayTestSchema()
+	schema.GetStructArrayFields()[0].GetFields()[0].ElementType = schemapb.DataType_Int64
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
+		return hasStructArrayInt64Value(req.GetFieldsData(), "my_struct", "sub_int", 9007199254740993)
+	})).Return(&milvuspb.MutationResult{
+		Status:    &StatusSuccess,
+		InsertCnt: 1,
+		IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1}},
+		}},
+	}, nil).Once()
+	testEngine := initHTTPServer(mp, true)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":9007199254740993.0,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bytes.NewReader(body))
+	req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.Equal(t, int32(http.StatusOK), returnBody.Code)
 }
 
 func TestReturnInt64(t *testing.T) {

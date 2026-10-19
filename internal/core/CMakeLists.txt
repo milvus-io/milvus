@@ -84,19 +84,6 @@ endif ()
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( Utils )
 
-# ---- Split DWARF (Linux only) ----
-# Moves debug info into .dwo files, dramatically reducing .o file sizes
-# and link time. Requires GCC 4.8+ or Clang 3.7+.
-if (LINUX AND NOT USE_ASAN STREQUAL "ON")
-    check_cxx_compiler_flag("-gsplit-dwarf" HAS_SPLIT_DWARF)
-    if (HAS_SPLIT_DWARF)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gsplit-dwarf")
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -gsplit-dwarf")
-        message(STATUS "Using -gsplit-dwarf for faster linking")
-    endif ()
-endif ()
-
-
 # **************************** Build time, type and code version ****************************
 get_current_time( BUILD_TIME )
 message( STATUS "Build time = ${BUILD_TIME}" )
@@ -201,6 +188,18 @@ find_package(Azure REQUIRED)
 include( CTest )
 include( BuildUtils )
 include( DefineOptions )
+
+# ---- Split DWARF (Linux only) ----
+# Keep this opt-in: .dwo files stay in the build tree and are not included in
+# installed artifacts or the published debug image by default.
+if (LINUX AND MILVUS_USE_SPLIT_DWARF AND NOT USE_ASAN STREQUAL "ON")
+    check_cxx_compiler_flag("-gsplit-dwarf" HAS_SPLIT_DWARF)
+    if (HAS_SPLIT_DWARF)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gsplit-dwarf")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -gsplit-dwarf")
+        message(STATUS "Using -gsplit-dwarf for faster linking")
+    endif ()
+endif ()
 
 include( ExternalProject )
 include( GNUInstallDirs )

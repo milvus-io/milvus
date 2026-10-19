@@ -68,7 +68,8 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
                       exec::SegmentExpr* segment,
                       const TargetBitmap* pre_filter = nullptr);
 
-    // Check if literal can be handled by ngram index (length >= min_gram)
+    // Check if literal can be handled by ngram index: every wildcard-free
+    // part has >= min_gram UTF-8 characters.
     bool
     CanHandleLiteral(const std::string& literal,
                      proto::plan::OpType op_type) const;

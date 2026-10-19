@@ -94,6 +94,49 @@ NextSegmentInstanceUid() {
     return counter.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
+// Request-scoped read snapshot for sealed segments. Captured exactly once per
+// search/retrieve request while the request read lease is held; it reads the
+// immutable published state without locks or per-chunk re-capture. Growing
+// segments and non-pinned paths return nullptr and fall back to per-call
+// segment access with identical semantics.
+class SegmentReadSnapshot {
+ public:
+    virtual ~SegmentReadSnapshot() = default;
+
+    virtual int64_t
+    chunk_size(FieldId f, int64_t c) const = 0;
+
+    virtual int64_t
+    num_rows_until_chunk(FieldId f, int64_t c) const = 0;
+
+    virtual std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId f, int64_t off) const = 0;
+
+    virtual int64_t
+    num_chunk_data(FieldId f) const = 0;
+
+    virtual int64_t
+    get_row_count() const = 0;
+
+    // Returns the immutable field column from the frozen snapshot state, or
+    // nullptr when the field is not present. Reads (including validity data)
+    // served from this column come from the same generation as the chunk
+    // boundaries above.
+    virtual std::shared_ptr<ChunkedColumnInterface>
+    GetDataScanResources(FieldId field_id) const = 0;
+
+    // Column-only accessor for the per-chunk hot loop. Returns a borrowed
+    // column pointer owned by the published state; callers must not retain it
+    // past the request. Default implementation routes through
+    // GetDataScanResources so test snapshots that only override the accessor
+    // keep working; sealed snapshots override this with a zero ref-count
+    // lookup.
+    virtual const ChunkedColumnInterface*
+    GetColumn(FieldId field_id) const {
+        return GetDataScanResources(field_id).get();
+    }
+};
+
 // common interface of SegmentSealed and SegmentGrowing used by C API
 class SegmentInterface {
  public:
@@ -288,6 +331,10 @@ class SegmentInterface {
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
+    // Reports whether JSON stats are registered without initializing them.
+    virtual bool
+    HasJsonStats(FieldId field_id) const = 0;
+
     // Compute exact distances from the index for given query vectors and candidate IDs.
     // Used for refine step in reduce phase. Returns false if not supported (e.g., no index).
     virtual bool
@@ -418,6 +465,14 @@ class SegmentInternalInterface : public SegmentInterface {
                         int64_t size,
                         TargetBitmapView valid_result) const = 0;
 
+    // Applies validity for a contiguous segment-level logical-row range.
+    virtual void
+    ApplyFieldValidDataByRange(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               int64_t logical_offset,
+                               int64_t count,
+                               TargetBitmapView valid_result) const = 0;
+
     // Offsets are segment-level row offsets. valid_result must have count bits.
     virtual void
     ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
@@ -425,6 +480,11 @@ class SegmentInternalInterface : public SegmentInterface {
                                  const int64_t* offsets,
                                  int64_t count,
                                  TargetBitmapView valid_result) const = 0;
+
+    virtual std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field_id) const {
+        return nullptr;
+    }
 
     template <typename T>
     PinWrapper<Span<T>>
@@ -598,6 +658,7 @@ class SegmentInternalInterface : public SegmentInterface {
     int64_t
     get_real_count() const override;
 
+    // The caller must hold mutex_ when concurrent updates are possible.
     int64_t
     get_field_avg_size(FieldId field_id) const override;
 
@@ -657,6 +718,13 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
+    bool
+    HasJsonStats(FieldId field_id) const override {
+        std::shared_lock lock(mutex_);
+        auto iter = json_stats_.find(field_id);
+        return iter != json_stats_.end() && iter->second != nullptr;
+    }
+
  public:
     // `query_offsets` is not null only for vector array (embedding list) search
     // where it denotes the number of vectors in each embedding list. The length
@@ -703,6 +771,14 @@ class SegmentInternalInterface : public SegmentInterface {
     // element size in each chunk
     virtual int64_t
     size_per_chunk() const = 0;
+
+    // Capture a request-scoped read snapshot, or return nullptr when the
+    // segment does not use an immutable published snapshot (growing segments).
+    // Called once per request; see SegmentReadSnapshot.
+    virtual std::shared_ptr<const SegmentReadSnapshot>
+    CaptureReadSnapshot() const {
+        return nullptr;
+    }
 
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
@@ -916,6 +992,23 @@ class SegmentInternalInterface : public SegmentInterface {
     // Assigned once per constructed object; never reused within a process.
     const uint64_t segment_instance_uid_ = NextSegmentInstanceUid();
 };
+
+// Shared result-fill dispatch: reads one output field through the
+// request-pinned sealed snapshot when the segment is a sealed segment that
+// owns it, otherwise falls back to the per-call segment path (growing /
+// non-pinned / not-loaded field). Centralizes the
+// dynamic_cast -> ToPublishedState -> field-exists -> bulk_subscript dispatch
+// so callers never name the segment's concrete published-state type.
+std::unique_ptr<milvus::DataArray>
+BulkSubscriptWithSnapshot(
+    const SegmentInternalInterface* segment,
+    const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const milvus::FieldMeta& field_meta,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>* dynamic_field_names = nullptr);
 
 }  // namespace milvus::segcore
 

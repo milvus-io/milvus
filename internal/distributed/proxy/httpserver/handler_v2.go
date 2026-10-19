@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -559,13 +560,13 @@ func hasExprParams(subReqs []SubSearchReq) bool {
 	return false
 }
 
-func redactExprParams(params map[string]interface{}) map[string]interface{} {
+func redactExprParams(params map[string]json.RawMessage) map[string]json.RawMessage {
 	if len(params) == 0 {
 		return params
 	}
-	redacted := make(map[string]interface{}, len(params))
+	redacted := make(map[string]json.RawMessage, len(params))
 	for name := range params {
-		redacted[name] = proxy.RedactedValue
+		redacted[name] = json.RawMessage(strconv.Quote(proxy.RedactedValue))
 	}
 	return redacted
 }
@@ -589,6 +590,15 @@ func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 		redactedReq := *request
 		redactedReq.ExternalSource = externalspec.RedactExternalSource(request.ExternalSource)
 		redactedReq.ExternalSpec = externalspec.RedactExternalSpecForLog(request.ExternalSpec)
+		return mlog.Any("request", &redactedReq)
+	case *ImportReq:
+		if request == nil || len(request.Options) == 0 {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		redactedReq := *request
+		// Reuse import option redaction on a logging-only copy. The handler
+		// still needs the original external_spec and ezk to read source data.
+		redactedReq.Options = funcutil.KeyValuePair2Map(importutilv2.RedactOptions(funcutil.Map2KeyValuePair(request.Options)))
 		return mlog.Any("request", &redactedReq)
 	case *PasswordReq:
 		if request == nil {
@@ -1551,6 +1561,8 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
+		RlsPrincipal:   httpReq.RlsPrincipal,
+		SkipRls:        httpReq.SkipRls,
 		Expr:           httpReq.Filter,
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
@@ -1570,7 +1582,16 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		})
 		return nil, err
 	}
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.ExprTemplateValues = templateValues
 	c.Set(ContextRequest, req)
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
@@ -1631,7 +1652,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+	filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -1640,11 +1661,14 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	req := &milvuspb.QueryRequest{
-		DbName:         dbName,
-		CollectionName: httpReq.CollectionName,
-		OutputFields:   httpReq.OutputFields,
-		PartitionNames: httpReq.PartitionNames,
-		Expr:           filter,
+		DbName:             dbName,
+		CollectionName:     httpReq.CollectionName,
+		RlsPrincipal:       httpReq.RlsPrincipal,
+		SkipRls:            httpReq.SkipRls,
+		OutputFields:       httpReq.OutputFields,
+		PartitionNames:     httpReq.PartitionNames,
+		Expr:               filter,
+		ExprTemplateValues: idTemplateValues,
 	}
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
@@ -1701,14 +1725,25 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
+		RlsPrincipal:   httpReq.RlsPrincipal,
+		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		Expr:           httpReq.Filter,
 	}
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.ExprTemplateValues = templateValues
 	c.Set(ContextRequest, req)
 	if req.Expr == "" {
 		body, _ := c.Get(gin.BodyBytesKey)
-		filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+		filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 		if err != nil {
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -1717,6 +1752,7 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 			return nil, err
 		}
 		req.Expr = filter
+		req.ExprTemplateValues = idTemplateValues
 	}
 	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Delete", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Delete(reqCtx, req.(*milvuspb.DeleteRequest))
@@ -1736,6 +1772,8 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
+		RlsPrincipal:   httpReq.RlsPrincipal,
+		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		// PartitionName:  "_default",
 	}
@@ -1810,11 +1848,13 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
+		RlsPrincipal:   httpReq.RlsPrincipal,
+		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		PartialUpdate:  httpReq.PartialUpdate,
 		// PartitionName:  "_default",
 	}
-	fieldOps, err := buildFieldPartialUpdateOps(httpReq.FieldOps)
+	fieldOps, err := buildFieldPartialUpdateOpsV2(httpReq.FieldOps)
 	if err != nil {
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
@@ -1823,6 +1863,9 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	req.FieldOps = fieldOps
+	if hasNonReplaceFieldPartialUpdateOp(fieldOps) {
+		req.PartialUpdate = true
+	}
 	c.Set(ContextRequest, req)
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
@@ -1830,8 +1873,17 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
+	requestSchema, err := schemaForPathReplaceOperands(body.([]byte), collSchema, fieldOps)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, fail to resolve PATH_REPLACE operand", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
+			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
+		})
+		return nil, err
+	}
 	var validDataMap map[string][]bool
-	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
+	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), requestSchema, req.GetPartialUpdate(), fieldOps...)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("body", body), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1842,7 +1894,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, false, httpReq.PartialUpdate)
+	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, requestSchema, false, req.GetPartialUpdate())
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -2004,6 +2056,8 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
+		RlsPrincipal:   httpReq.RlsPrincipal,
+		SkipRls:        httpReq.SkipRls,
 		Dsl:            httpReq.Filter,
 		DslType:        commonpb.DslType_BoolExprV1,
 		OutputFields:   httpReq.OutputFields,
@@ -2179,7 +2233,16 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.SearchParams = searchParams
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.ExprTemplateValues = templateValues
 	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
@@ -2277,6 +2340,8 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
+		RlsPrincipal:   httpReq.RlsPrincipal,
+		SkipRls:        httpReq.SkipRls,
 		PartitionNames: httpReq.PartitionNames,
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
@@ -2295,11 +2360,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 
 	if httpReq.SearchAggregation != nil {
 		err := merr.WrapErrParameterInvalidMsg("searchAggregation is not supported for hybrid search")
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
-	}
-	if len(httpReq.FunctionChains) != 0 {
-		err := merr.WrapErrParameterInvalidMsg("functionChains is not supported for hybrid search yet")
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
@@ -2352,18 +2412,42 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			PartitionNames: httpReq.PartitionNames,
 			SearchParams:   searchParams,
 		}
-		searchReq.ExprTemplateValues = generateExpressionTemplate(subReq.ExprParams)
+		if len(subReq.FunctionChains) > 0 {
+			if searchReq.FunctionChains, err = genFunctionChains(subReq.FunctionChains); err != nil {
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+		}
+		subTemplateValues, err := generateExpressionTemplate(subReq.ExprParams)
+		if err != nil {
+			mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		searchReq.ExprTemplateValues = subTemplateValues
 		req.Requests = append(req.Requests, searchReq)
 	}
 
 	bs, _ := json.Marshal(httpReq.Rerank.Params)
-	// leave the rerank check to proxy side
+	// Leave the rerank check to proxy side.
 	req.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: httpReq.Rerank.Strategy},
 		{Key: proxy.ParamsKey, Value: string(bs)},
 		{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
 		{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)},
 		{Key: ParamRoundDecimal, Value: "-1"},
+	}
+	if len(httpReq.FunctionChains) > 0 {
+		if req.FunctionChains, err = genFunctionChains(httpReq.FunctionChains); err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
 	}
 	if httpReq.GroupByField != "" {
 		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})

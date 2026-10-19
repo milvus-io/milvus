@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -63,10 +64,10 @@ ReGenRangeSearchResult(DatasetPtr data_set,
     auto dist = GetDatasetDistance(data_set);
 
     // use p_id and p_dist to GenResultDataset after sorted
-    auto p_id = new int64_t[topk * nq];
-    auto p_dist = new float[topk * nq];
-    std::fill_n(p_id, topk * nq, -1);
-    std::fill_n(p_dist, topk * nq, std::numeric_limits<float>::max());
+    std::unique_ptr<int64_t[]> p_id(new int64_t[topk * nq]);
+    std::unique_ptr<float[]> p_dist(new float[topk * nq]);
+    std::fill_n(p_id.get(), topk * nq, -1);
+    std::fill_n(p_dist.get(), topk * nq, std::numeric_limits<float>::max());
 
     /*
      *   get result for one nq
@@ -111,7 +112,7 @@ ReGenRangeSearchResult(DatasetPtr data_set,
             pq.pop();
         }
     }
-    return GenResultDataset(nq, topk, p_id, p_dist);
+    return GenResultDataset(nq, topk, std::move(p_id), std::move(p_dist));
 }
 
 void

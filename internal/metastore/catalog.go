@@ -100,6 +100,16 @@ type RootCoordCatalog interface {
 	SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error
 	ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
 
+	SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
+	DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error
+	ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error)
+	SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
+	// GetRLSPrincipal and ListRLSPrincipals return caller-owned results,
+	// including nested tag maps.
+	GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error)
+	DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
+	ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error)
+
 	// File resource related
 	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
 	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
@@ -269,6 +279,19 @@ type DataCoordCatalog interface {
 	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
 	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
 	DropExportSnapshotJob(ctx context.Context, jobID int64) error
+
+	// Update applies a composite set of UpdateActions as a single write. Each
+	// action is dispatched on its (Entry, Type) into a kv encoding, accumulated
+	// into a txn.Builder, and committed atomically - or via the caller-ordered
+	// chunked fallback when the op set exceeds the store's txn limit.
+	Update(ctx context.Context, actions ...UpdateAction) error
+
+	// SegmentChangeGroup persistence. Per-record writes go through the
+	// composite Update (metastore.SaveSegmentChangeGroup / DeleteSegmentChangeGroup)
+	// so they can be composed atomically with segment and DataView actions;
+	// List/Drop provide recovery scanning and collection-drop cleanup.
+	ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error)
+	DropSegmentChangeGroups(ctx context.Context, collectionID int64) error
 }
 
 type QueryCoordCatalog interface {

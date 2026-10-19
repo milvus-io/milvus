@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -36,9 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
@@ -65,7 +62,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -120,30 +116,6 @@ func restoreStructFieldNames(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-// extractOriginalFieldName extracts the original field name from structName[fieldName] format
-// This function should only be called on transformed struct field names
-func extractOriginalFieldName(transformedName string) (string, error) {
-	idx := strings.Index(transformedName, "[")
-	if idx == -1 {
-		return "", merr.WrapErrParameterInvalidMsg("not a transformed struct field name: %s", transformedName)
-	}
-
-	if !strings.HasSuffix(transformedName, "]") {
-		return "", merr.WrapErrParameterInvalidMsg("invalid struct field format: %s, missing closing bracket", transformedName)
-	}
-
-	if idx == 0 {
-		return "", merr.WrapErrParameterInvalidMsg("invalid struct field format: %s, missing struct name", transformedName)
-	}
-
-	fieldName := transformedName[idx+1 : len(transformedName)-1]
-	if fieldName == "" {
-		return "", merr.WrapErrParameterInvalidMsg("invalid struct field format: %s, empty field name", transformedName)
-	}
-
-	return fieldName, nil
-}
-
 // isAlpha check if c is alpha.
 func isAlpha(c uint8) bool {
 	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
@@ -177,25 +149,6 @@ func validateRunAnalyzer(req *milvuspb.RunAnalyzerRequest) error {
 		}
 	}
 
-	return nil
-}
-
-func validateMaxQueryResultWindow(offset int64, limit int64, largeTopKEnabled bool) error {
-	if offset < 0 {
-		return merr.WrapErrParameterInvalidMsg("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
-	}
-	if limit <= 0 {
-		return merr.WrapErrParameterInvalidMsg("%s [%d] is invalid, should be greater than 0", LimitKey, limit)
-	}
-
-	depth := offset + limit
-	maxQueryResultWindow := Params.QuotaConfig.MaxQueryResultWindow.GetAsInt64()
-	if largeTopKEnabled {
-		maxQueryResultWindow = Params.QuotaConfig.LargeMaxQueryResultWindow.GetAsInt64()
-	}
-	if depth <= 0 || depth > maxQueryResultWindow {
-		return merr.WrapErrParameterInvalidMsg("(offset+limit) should be in range [1, %d], but got %d", maxQueryResultWindow, depth)
-	}
 	return nil
 }
 
@@ -1512,7 +1465,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
 	credInfo, err := privilege.GetPrivilegeCache().GetCredentialInfo(ctx, username)
 	if err != nil {
-		mlog.Error(context.TODO(), "found no credential", mlog.String("username", username), mlog.Err(err))
+		mlog.Error(ctx, "found no credential", mlog.String("username", username), mlog.Err(err))
 		return false
 	}
 
@@ -1522,9 +1475,12 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 		return sha256Pwd == credInfo.Sha256Password
 	}
 
-	// miss cache, verify against encrypted password from etcd
-	if err := bcrypt.CompareHashAndPassword([]byte(credInfo.EncryptedPassword), []byte(rawPwd)); err != nil {
-		mlog.Error(context.TODO(), "Verify password failed", mlog.Err(err))
+	// Miss cache: verify against the encrypted password from etcd. Shared with
+	// the management-plane verifier rather than calling bcrypt here, so the
+	// stored-credential format, the cost parameter and the "wrong password"
+	// versus "unusable hash" split cannot drift between the two.
+	if err := crypto.VerifyStoredPassword(credInfo.EncryptedPassword, rawPwd); err != nil {
+		mlog.Error(ctx, "Verify password failed", mlog.Err(err))
 		return false
 	}
 
@@ -1625,167 +1581,6 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported pk type")
 	}
-}
-
-// Support wildcard in output fields:
-//
-//	"*" - all fields
-//
-// For example, A and B are scalar fields, C and D are vector fields, duplicated fields will automatically be removed.
-//
-//	output_fields=["*"] 	 ==> [A,B,C,D]
-//	output_fields=["*",A] 	 ==> [A,B,C,D]
-//	output_fields=["*",C]    ==> [A,B,C,D]
-//
-// 4th return value is true if user requested pk field explicitly or using wildcard.
-// if removePkField is true, pk field will not be include in the first(resultFieldNames)/second(userOutputFields)
-// return value.
-func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, []agg.AggregateBase, bool, error) {
-	var primaryFieldName string
-	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
-	resultFieldNameMap := make(map[string]bool)
-	resultFieldNames := make([]string, 0)
-	userOutputFieldsMap := make(map[string]bool)
-	userOutputFields := make([]string, 0)
-	userDynamicFieldsMap := make(map[string]bool)
-	userDynamicFields := make([]string, 0)
-	useAllDyncamicFields := false
-	aggregates := make([]agg.AggregateBase, 0)
-	for _, field := range schema.Fields {
-		if field.IsPrimaryKey {
-			primaryFieldName = field.Name
-		}
-		allFieldNameMap[field.Name] = field
-	}
-
-	// User may specify a struct array field or some specific fields in the struct array field
-	for _, subStruct := range schema.StructArrayFields {
-		for _, field := range subStruct.Fields {
-			allFieldNameMap[field.Name] = field
-		}
-	}
-
-	structArrayNameToFields := make(map[string][]*schemapb.FieldSchema)
-	for _, subStruct := range schema.StructArrayFields {
-		structArrayNameToFields[subStruct.Name] = subStruct.Fields
-	}
-
-	userRequestedPkFieldExplicitly := false
-
-	for _, outputFieldName := range outputFields {
-		outputFieldName = strings.TrimSpace(outputFieldName)
-		if outputFieldName == primaryFieldName {
-			userRequestedPkFieldExplicitly = true
-		}
-		if outputFieldName == "*" {
-			userRequestedPkFieldExplicitly = true
-			for fieldName, field := range allFieldNameMap {
-				if schema.CanRetrieveRawFieldData(field) {
-					resultFieldNameMap[fieldName] = true
-					userOutputFieldsMap[fieldName] = true
-				}
-			}
-			useAllDyncamicFields = true
-		} else {
-			if isAgg, aggregateName, aggFieldName := agg.MatchAggregationExpression(outputFieldName); isAgg {
-				if aggField, ok := allFieldNameMap[aggFieldName]; ok {
-					aggFuncs, aggErr := agg.NewAggregate(aggregateName, aggField.GetFieldID(), outputFieldName, aggField.GetDataType())
-					if aggErr != nil {
-						return nil, nil, nil, nil, false, aggErr
-					}
-					aggregates = append(aggregates, aggFuncs...)
-				} else if aggFieldName == "*" {
-					// only count(*) is allowed
-					if aggregateName != "count" {
-						return nil, nil, nil, nil, false, merr.WrapErrParameterInvalidMsg("%s(*) is not supported, only count(*) is allowed", aggregateName)
-					}
-					if err := agg.ValidateAggFieldType(aggregateName, schemapb.DataType_None); err != nil {
-						return nil, nil, nil, nil, false, err
-					}
-					aggFuncs, aggErr := agg.NewAggregate(aggregateName, 0, outputFieldName, schemapb.DataType_None)
-					if aggErr != nil {
-						return nil, nil, nil, nil, false, aggErr
-					}
-					aggregates = append(aggregates, aggFuncs...)
-				} else {
-					return nil, nil, nil, nil, false, merr.WrapErrParameterInvalidMsg("target field %s for aggregation:%s does not exist", aggFieldName, aggregateName)
-				}
-				userOutputFieldsMap[outputFieldName] = true
-				continue
-			}
-
-			if structArrayField, ok := structArrayNameToFields[outputFieldName]; ok {
-				for _, field := range structArrayField {
-					if schema.CanRetrieveRawFieldData(field) {
-						resultFieldNameMap[field.Name] = true
-						userOutputFieldsMap[field.Name] = true
-					}
-				}
-				continue
-			}
-			if field, ok := allFieldNameMap[outputFieldName]; ok {
-				if !schema.CanRetrieveRawFieldData(field) {
-					return nil, nil, nil, nil, false, merr.WrapErrParameterInvalidMsg("not allowed to retrieve raw data of field %s", outputFieldName)
-				}
-				resultFieldNameMap[outputFieldName] = true
-				userOutputFieldsMap[outputFieldName] = true
-			} else {
-				if schema.EnableDynamicField {
-					dynamicNestedPath := outputFieldName
-					err := planparserv2.ParseIdentifier(schema.SchemaHelper, outputFieldName, func(expr *planpb.Expr) error {
-						columnInfo := expr.GetColumnExpr().GetInfo()
-						// there must be no error here
-						dynamicField, _ := schema.SchemaHelper.GetDynamicField()
-						// only $meta["xxx"] is allowed for now
-						if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
-							return merr.WrapErrParameterInvalidMsg("not support getting subkeys of json field yet")
-						}
-						nestedPaths := columnInfo.GetNestedPath()
-						// $meta["A"]["B"] not allowed for now
-						if len(nestedPaths) != 1 {
-							return merr.WrapErrParameterInvalidMsg("not support getting multiple level of dynamic field for now")
-						}
-						// $meta["dyn_field"], output field name could be:
-						// 1. "dyn_field", outputFieldName == nestedPath
-						// 2. `$meta["dyn_field"]` explicit form
-						if nestedPaths[0] != outputFieldName {
-							// use "dyn_field" as userDynamicFieldsMap when outputField = `$meta["dyn_field"]`
-							dynamicNestedPath = nestedPaths[0]
-						}
-						return nil
-					})
-					if err != nil {
-						mlog.Info(context.TODO(), "parse output field name failed", mlog.String("field name", outputFieldName), mlog.Err(err))
-						return nil, nil, nil, nil, false, merr.WrapErrParameterInvalidMsg("parse output field name failed: %s", outputFieldName)
-					}
-					resultFieldNameMap[common.MetaFieldName] = true
-					userOutputFieldsMap[outputFieldName] = true
-					userDynamicFieldsMap[dynamicNestedPath] = true
-				} else {
-					return nil, nil, nil, nil, false, merr.WrapErrParameterInvalidMsg("field %s not exist", outputFieldName)
-				}
-			}
-		}
-	}
-
-	if removePkField {
-		delete(resultFieldNameMap, primaryFieldName)
-		delete(userOutputFieldsMap, primaryFieldName)
-	}
-
-	for fieldName := range resultFieldNameMap {
-		resultFieldNames = append(resultFieldNames, fieldName)
-	}
-	for fieldName := range userOutputFieldsMap {
-		userOutputFields = append(userOutputFields, fieldName)
-	}
-	if !useAllDyncamicFields {
-		for fieldName := range userDynamicFieldsMap {
-			userDynamicFields = append(userDynamicFields, fieldName)
-		}
-	}
-
-	return resultFieldNames, userOutputFields, userDynamicFields, aggregates, userRequestedPkFieldExplicitly, nil
 }
 
 func validCharInIndexName(c byte) bool {
@@ -1921,6 +1716,24 @@ func subFieldHasData(subField *schemapb.FieldData) bool {
 	}
 }
 
+// vectorArrayElementWidth counts underlying slice entries per vector: float32
+// entries for FloatVector, bytes for the other supported vector types.
+func vectorArrayElementWidth(elementType schemapb.DataType, dim int64) (int, error) {
+	if dim <= 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("invalid dim %d", dim)
+	}
+	switch elementType {
+	case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
+		return int(dim), nil
+	case schemapb.DataType_BinaryVector:
+		return int((dim + 7) / 8), nil
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return int(dim * 2), nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported array-of-vector element type %s", elementType.String())
+	}
+}
+
 // checkAndFlattenStructFieldData verifies the array length of the struct array field data in the insert message
 // and then flattens the data so that data node and query node have not to handle the struct array field data.
 func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
@@ -2037,20 +1850,11 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			if err != nil {
 				return 0, merr.WrapErrParameterInvalidErr(err, "sub-field '%s' in struct '%s'", subField.GetFieldName(), structName)
 			}
-			if dim <= 0 {
-				return 0, merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s': invalid dim %d", subField.GetFieldName(), structName, dim)
+			width, err := vectorArrayElementWidth(subFieldSchema.GetElementType(), dim)
+			if err != nil {
+				return 0, merr.Wrapf(err, "sub-field '%s' in struct '%s'", subField.GetFieldName(), structName)
 			}
-			switch subFieldSchema.GetElementType() {
-			case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
-				return int(dim), nil
-			case schemapb.DataType_BinaryVector:
-				return int((dim + 7) / 8), nil
-			case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-				return int(dim * 2), nil
-			default:
-				return 0, merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s': unsupported array-of-vector element type %s",
-					subField.GetFieldName(), structName, subFieldSchema.GetElementType().String())
-			}
+			return width, nil
 		}
 
 		// Check the payload row count and, while those rows are in hand, verify the
@@ -2329,7 +2133,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 			}
 
 			log.Info(context.TODO(), "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
-			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg("missing required field %q", fieldSchema.GetName())
 		}
 	}
 	for _, structSchema := range schema.GetStructArrayFields() {
@@ -2338,7 +2142,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 		}
 		if _, ok := dataNameMap[structSchema.GetName()]; !ok {
 			log.Info(context.TODO(), "no corresponding struct fieldData pass in", mlog.String("structFieldSchema", structSchema.GetName()))
-			return merr.WrapErrParameterInvalidMsg("structFieldSchema(%s) has no corresponding fieldData pass in", structSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg("missing required struct field %q", structSchema.GetName())
 		}
 	}
 
@@ -2387,74 +2191,78 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 	return nil
 }
 
+// checkUpsertPrimaryFieldData validates and returns the PKs, applying only
+// caller-allocated AutoIDs. allocatedIDs maps zero-based row offsets in the
+// supplied field data to IDs; a nil or empty map leaves the input fields unchanged.
+// A PK column is required; non-PK fields are neither validated nor filled, so
+// partial patches are accepted. When IDs are supplied, the PK column is replaced
+// only after validation, collision checking, and parsing succeed. Allocation and
+// retry state remain the caller's responsibility.
 func checkUpsertPrimaryFieldData(
-	ctx context.Context,
-	allFields []*schemapb.FieldSchema,
-	schema *schemapb.CollectionSchema,
-	insertMsg *msgstream.InsertMsg,
-	preserveAutoIDPrimaryKey bool,
-) (*schemapb.IDs, *schemapb.IDs, error) {
-	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
-	rowNums := uint32(insertMsg.NRows())
-	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	if insertMsg.NRows() <= 0 {
-		return nil, nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
+	schema *schemaInfo,
+	fields []*schemapb.FieldData,
+	numRows uint64,
+	allocatedIDs map[int]int64,
+) (*schemapb.IDs, error) {
+	if numRows == 0 {
+		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(numRows), "num_rows should be greater than 0")
 	}
-
-	if err := checkFieldsDataBySchema(ctx, allFields, schema, insertMsg, false); err != nil {
-		return nil, nil, err
-	}
-
-	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
+	pkSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
 	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.FieldSchema(schema), mlog.Err(err))
-		return nil, nil, err
+		return nil, err
 	}
-	if primaryFieldSchema.GetNullable() {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
+	if pkSchema.GetNullable() {
+		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
 	}
-	// get primaryFieldData whether autoID is true or not
-	var primaryFieldData *schemapb.FieldData
-	var newPrimaryFieldData *schemapb.FieldData
-
-	primaryFieldID := primaryFieldSchema.FieldID
-	primaryFieldName := primaryFieldSchema.Name
-	for i, field := range insertMsg.GetFieldsData() {
-		if field.FieldId == primaryFieldID || field.FieldName == primaryFieldName {
-			primaryFieldData = field
-			if primaryFieldSchema.AutoID && !preserveAutoIDPrimaryKey {
-				// Normal AutoID upsert deletes the supplied PK and inserts a new PK.
-				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
-				if err != nil {
-					log.Info(ctx, "generate new primary field data failed when upsert", mlog.Err(err))
-					return nil, nil, err
-				}
-				insertMsg.FieldsData = append(insertMsg.GetFieldsData()[:i], insertMsg.GetFieldsData()[i+1:]...)
-				insertMsg.FieldsData = append(insertMsg.FieldsData, newPrimaryFieldData)
+	primaryField, err := typeutil.GetPrimaryFieldData(fields, pkSchema)
+	if err != nil {
+		return nil, err
+	}
+	pk := proto.Clone(primaryField).(*schemapb.FieldData)
+	if err := fieldvalidator.NewValidateUtil().Validate([]*schemapb.FieldData{pk}, schema.SchemaHelper, numRows); err != nil {
+		return nil, err
+	}
+	if len(allocatedIDs) > 0 {
+		ids := make([]int64, 0, len(allocatedIDs))
+		rows := make([]int64, 0, len(allocatedIDs))
+		indices := make([]int64, 0, len(allocatedIDs))
+		for row, id := range allocatedIDs {
+			if row < 0 || row >= typeutil.GetPKSize(pk) {
+				return nil, merr.WrapErrServiceInternalMsg("upsert allocated AutoID row %d is out of range", row)
 			}
-			break
+			indices = append(indices, int64(len(ids)))
+			ids = append(ids, id)
+			rows = append(rows, int64(row))
+		}
+		generated, err := autoGenPrimaryFieldData(pkSchema, ids)
+		if err != nil {
+			return nil, err
+		}
+		if err := typeutil.UpdateFieldDataByColumn(pk, generated, rows, indices); err != nil {
+			return nil, err
+		}
+		// Supplied PKs can contain arbitrary values, including a generated ID.
+		duplicate, err := CheckDuplicatePkExist(pkSchema, []*schemapb.FieldData{pk})
+		if err != nil {
+			return nil, err
+		}
+		if duplicate {
+			return nil, merr.WrapErrServiceInternalMsg("upsert: duplicate primary keys after applying allocated AutoIDs")
 		}
 	}
-	// must assign primary field data when upsert
-	if primaryFieldData == nil {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("must assign pk when upsert, primary field: %v", primaryFieldName)
-	}
-
-	// parse primaryFieldData to result.IDs, and as returned primary keys
-	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
+	ids, err := parsePrimaryFieldData2IDs(pk)
 	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
-		return nil, nil, err
+		return nil, err
 	}
-	if !primaryFieldSchema.GetAutoID() || preserveAutoIDPrimaryKey {
-		return ids, ids, nil
+	if len(allocatedIDs) > 0 {
+		for index, field := range fields {
+			if field == primaryField {
+				fields[index] = pk
+				break
+			}
+		}
 	}
-	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
-	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
-		return nil, nil, err
-	}
-	return newIDs, ids, nil
+	return ids, nil
 }
 
 func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {
@@ -2667,18 +2475,13 @@ func assignChannelsByChannel(channelID uint32, channelNames []string, insertMsg 
 	return channel2RowOffsets
 }
 
-func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
+func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, collName string, schema *schemapb.CollectionSchema, keys []*planpb.GenericValue) ([]string, error) {
 	partitionNames, err := metaCache.GetPartitionsIndex(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}
 
-	schema, err := metaCache.GetCollectionSchema(ctx, dbName, collName)
-	if err != nil {
-		return nil, err
-	}
-
-	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema.CollectionSchema)
+	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
@@ -2687,12 +2490,12 @@ func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, co
 	return hashedPartitionNames, err
 }
 
-func assignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, namespace *string) ([]string, error) {
+func assignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, schema *schemapb.CollectionSchema, namespace *string) ([]string, error) {
 	if namespace == nil {
 		return nil, nil
 	}
 
-	return assignPartitionKeys(ctx, metaCache, dbName, collName, []*planpb.GenericValue{
+	return assignPartitionKeys(ctx, metaCache, dbName, collName, schema, []*planpb.GenericValue{
 		{Val: &planpb.GenericValue_StringVal{StringVal: *namespace}},
 	})
 }
@@ -3046,7 +2849,8 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 	return scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, true
 }
 
-// GetRequestInfo returns collection name and rateType of request and return tokens needed.
+// GetRequestInfo returns the quota scope, rate type, and tokens needed by a request.
+// Zero tokens bypass rate limiting and its metrics; the rate type is unused in that case.
 func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	if metaCache == nil {
 		return util.InvalidDBID, map[int64][]int64{}, 0, 0, merr.WrapErrServiceNotReady(paramtable.GetRole(), paramtable.GetNodeID(), "meta cache initialization")
@@ -3080,23 +2884,13 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 	case *milvuspb.CreateCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest, *milvuspb.PinSnapshotDataRequest:
-		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
-		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.RestoreSnapshotRequest:
-		targetDBName := r.GetTargetDbName()
-		if targetDBName == "" {
-			targetDBName = GetCurDBNameFromContextOrDefault(ctx)
-		}
-		return getDatabaseID(metaCache, targetDBName), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.UnpinSnapshotDataRequest:
-		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
+	case *milvuspb.CreateSnapshotRequest, *milvuspb.DropSnapshotRequest,
+		*milvuspb.PinSnapshotDataRequest, *milvuspb.UnpinSnapshotDataRequest,
+		*milvuspb.ExportSnapshotRequest, *milvuspb.RestoreSnapshotRequest,
+		*milvuspb.RestoreExternalSnapshotRequest:
+		// Snapshot operations do not consume quota or honor DDL force-deny.
+		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
 	case *milvuspb.RefreshExternalCollectionRequest:
-		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
-		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.RestoreExternalSnapshotRequest:
-		return getDatabaseID(metaCache, r.GetDbName()), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.ExportSnapshotRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
@@ -3276,104 +3070,6 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	return uint64(ttl)
 }
 
-// reconstructStructFieldData regroups flattened sub-fields (named "structName[fieldName]")
-// back into StructArrayField entries, restoring original field names for the user-facing response.
-// It modifies sub-field FieldName in place; callers must not reuse the input slice afterwards.
-func reconstructStructFieldData(
-	fieldsData []*schemapb.FieldData,
-	outputFields []string,
-	schema *schemapb.CollectionSchema,
-) ([]*schemapb.FieldData, []string) {
-	if len(outputFields) == 1 && outputFields[0] == "count(*)" {
-		return fieldsData, outputFields
-	}
-
-	if len(schema.StructArrayFields) == 0 {
-		return fieldsData, outputFields
-	}
-
-	regularFieldIDs := make(map[int64]interface{})
-	subFieldToStructMap := make(map[int64]int64)
-	groupedStructFields := make(map[int64][]*schemapb.FieldData)
-	structFieldNames := make(map[int64]string)
-	reconstructedOutputFields := make([]string, 0, len(fieldsData))
-
-	// record all regular field IDs
-	for _, field := range schema.Fields {
-		regularFieldIDs[field.GetFieldID()] = nil
-	}
-
-	// build the mapping from sub-field ID to struct field ID
-	for _, structField := range schema.StructArrayFields {
-		for _, subField := range structField.GetFields() {
-			subFieldToStructMap[subField.GetFieldID()] = structField.GetFieldID()
-		}
-		structFieldNames[structField.GetFieldID()] = structField.GetName()
-	}
-
-	newFieldsData := make([]*schemapb.FieldData, 0, len(fieldsData))
-	for _, field := range fieldsData {
-		fieldID := field.GetFieldId()
-		if _, ok := regularFieldIDs[fieldID]; ok {
-			newFieldsData = append(newFieldsData, field)
-			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
-		} else if structFieldID, ok := subFieldToStructMap[fieldID]; ok {
-			groupedStructFields[structFieldID] = append(groupedStructFields[structFieldID], field)
-		} else {
-			newFieldsData = append(newFieldsData, field)
-			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
-		}
-	}
-
-	for structFieldID, fields := range groupedStructFields {
-		// Restore original field names (from "structName[fieldName]" to "fieldName")
-		// for the user-facing response.
-		for _, field := range fields {
-			originalName, err := extractOriginalFieldName(field.FieldName)
-			if err != nil {
-				mlog.Error(context.TODO(), "failed to extract original field name from struct field",
-					mlog.String("fieldName", field.FieldName),
-					mlog.Err(err))
-			} else {
-				field.FieldName = originalName
-			}
-		}
-
-		newFieldsData = append(newFieldsData, &schemapb.FieldData{
-			FieldName: structFieldNames[structFieldID],
-			FieldId:   structFieldID,
-			Type:      schemapb.DataType_ArrayOfStruct,
-			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
-		})
-		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
-	}
-
-	return newFieldsData, reconstructedOutputFields
-}
-
-func reconstructStructFieldDataForQuery(results *milvuspb.QueryResults, schema *schemapb.CollectionSchema) {
-	fieldsData, outputFields := reconstructStructFieldData(
-		results.FieldsData,
-		results.OutputFields,
-		schema,
-	)
-	results.FieldsData = fieldsData
-	results.OutputFields = outputFields
-}
-
-func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema *schemapb.CollectionSchema) {
-	if results.Results == nil {
-		return
-	}
-	fieldsData, outputFields := reconstructStructFieldData(
-		results.Results.FieldsData,
-		results.Results.OutputFields,
-		schema,
-	)
-	results.Results.FieldsData = fieldsData
-	results.Results.OutputFields = outputFields
-}
-
 func getColTimezone(colInfo *collectionInfo) string {
 	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, colInfo.Properties)
 	if timezone == "" {
@@ -3382,141 +3078,8 @@ func getColTimezone(colInfo *collectionInfo) string {
 	return timezone
 }
 
-// timestamptzUTC2IsoStr converts Timestamptz (Unix Microsecond) data
-// within FieldData results into ISO-8601 strings, applying the correct
-// timezone offset and using the optimized format (microsecond precision, no trailing zeros).
-func timestamptzUTC2IsoStr(results []*schemapb.FieldData, colTimezone string) error {
-	location, err := time.LoadLocation(colTimezone)
-	if err != nil {
-		mlog.Error(context.TODO(), "invalid timezone", mlog.String("timezone", colTimezone), mlog.Err(err))
-		return merr.WrapErrParameterInvalidMsg("got invalid default timezone: %s", colTimezone)
-	}
-
-	for _, fieldData := range results {
-		if fieldData.GetType() != schemapb.DataType_Timestamptz {
-			continue
-		}
-
-		scalarField := fieldData.GetScalars()
-
-		// Guard against nil scalars or missing timestamp data
-		if scalarField == nil || scalarField.GetTimestamptzData() == nil {
-			if longData := scalarField.GetLongData(); longData != nil && len(longData.GetData()) > 0 {
-				mlog.Warn(context.TODO(), "field data is not Timestamptz data", mlog.String("fieldName", fieldData.GetFieldName()))
-				return merr.WrapErrParameterInvalidMsg("field data for '%s' is not Timestamptz data", fieldData.GetFieldName())
-			}
-			// Handle the case of an empty field (e.g., all nulls), skip if no data to process.
-			continue
-		}
-
-		utcTimestamps := scalarField.GetTimestamptzData().GetData()
-		isoStrings := make([]string, len(utcTimestamps))
-
-		// CORE CHANGE: Use the optimized formatting function
-		for i, ts := range utcTimestamps {
-			// 1. Convert Unix Microsecond (UTC) to a time.Time object (still in UTC).
-			t := time.UnixMicro(ts).UTC()
-
-			// 2. Adjust the time object to the target location.
-			localTime := t.In(location)
-
-			// 3. Format using the optimized logic (max 6 digits, no trailing zeros)
-			isoStrings[i] = timestamptz.FormatTimeMicroWithoutTrailingZeros(localTime)
-		}
-
-		// Replace the TimestamptzData with the new StringData in place.
-		fieldData.GetScalars().Data = &schemapb.ScalarField_StringData{
-			StringData: &schemapb.StringArray{
-				Data: isoStrings,
-			},
-		}
-	}
-	return nil
-}
-
-// extractFields is a helper function to extract specific integer fields from a time.Time object.
-// Supported fields are: "year", "month", "day", "hour", "minute", "second", "microsecond", "nanosecond".
-func extractFields(t time.Time, fieldList []string) ([]int64, error) {
-	extractedValues := make([]int64, 0, len(fieldList))
-	for _, field := range fieldList {
-		var val int64
-		switch strings.ToLower(field) {
-		case common.TszYear:
-			val = int64(t.Year())
-		case common.TszMonth:
-			val = int64(t.Month())
-		case common.TszDay:
-			val = int64(t.Day())
-		case common.TszHour:
-			val = int64(t.Hour())
-		case common.TszMinute:
-			val = int64(t.Minute())
-		case common.TszSecond:
-			val = int64(t.Second())
-		case common.TszMicrosecond:
-			val = int64(t.Nanosecond() / 1000)
-		default:
-			return nil, merr.WrapErrParameterInvalidMsg("unsupported field for extraction: %s, fields should be seprated by ',' or ' '", field)
-		}
-		extractedValues = append(extractedValues, val)
-	}
-	return extractedValues, nil
-}
-
-func extractFieldsFromResults(results []*schemapb.FieldData, timezone string, fieldList []string) error {
-	targetLocation, err := time.LoadLocation(timezone)
-	if err != nil {
-		mlog.Error(context.TODO(), "invalid timezone", mlog.String("timezone", timezone), mlog.Err(err))
-		return merr.WrapErrParameterInvalidMsg("got invalid timezone: %s", timezone)
-	}
-
-	for _, fieldData := range results {
-		if fieldData.GetType() != schemapb.DataType_Timestamptz {
-			continue
-		}
-
-		scalarField := fieldData.GetScalars()
-		if scalarField == nil || scalarField.GetTimestamptzData() == nil {
-			if longData := scalarField.GetLongData(); longData != nil && len(longData.GetData()) > 0 {
-				mlog.Warn(context.TODO(), "field data is not Timestamptz data, but found LongData instead", mlog.String("fieldName", fieldData.GetFieldName()))
-				return merr.WrapErrParameterInvalidMsg("field data for '%s' is not Timestamptz data", fieldData.GetFieldName())
-			}
-			continue
-		}
-
-		utcTimestamps := scalarField.GetTimestamptzData().GetData()
-		extractedResults := make([]*schemapb.ScalarField, 0, len(fieldList))
-
-		for _, ts := range utcTimestamps {
-			t := time.UnixMicro(ts).UTC()
-			localTime := t.In(targetLocation)
-
-			values, err := extractFields(localTime, fieldList)
-			if err != nil {
-				return err
-			}
-			valuesScalarField := &schemapb.ScalarField_LongData{
-				LongData: &schemapb.LongArray{
-					Data: values,
-				},
-			}
-			extractedResults = append(extractedResults, &schemapb.ScalarField{
-				Data: valuesScalarField,
-			})
-		}
-
-		fieldData.GetScalars().Data = &schemapb.ScalarField_ArrayData{
-			ArrayData: &schemapb.ArrayArray{
-				Data:        extractedResults,
-				ElementType: schemapb.DataType_Int64,
-			},
-		}
-		fieldData.Type = schemapb.DataType_Array
-	}
-	return nil
-}
-
 func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, schema *schemaInfo, partialUpdate bool) error {
+	functions := schema.GetFunctions()
 	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
 	fieldIDs := lo.Map(insertMsg.FieldsData, func(fieldData *schemapb.FieldData, _ int) int64 {
 		id, _ := schema.MapFieldID(fieldData.FieldName)
@@ -3524,13 +3087,13 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 	})
 
 	// Since PartialUpdate is supported, the field_data here may not be complete
-	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, partialUpdate)
+	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, functions, allowNonBM25Outputs, partialUpdate)
 	if err != nil {
 		mlog.Warn(context.TODO(), "Check upsert field error,", mlog.String("collectionName", schema.Name), mlog.Err(err))
 		return err
 	}
 
-	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
+	if embedding.HasNonBM25AndMinHashFunctions(functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: insertMsg.GetDbName()})

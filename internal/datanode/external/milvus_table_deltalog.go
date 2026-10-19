@@ -587,6 +587,7 @@ func (t *RefreshExternalCollectionTask) newMilvusTableSourceDeltalogReader(
 ) (storage.RecordReader, error) {
 	if packed.IsMilvusTableStorageV3DeltalogPath(ref.sourcePath) {
 		return storage.NewDeltalogReader(
+			ctx,
 			sourcePKType,
 			[]string{ref.sourcePath},
 			storage.WithVersion(storage.StorageV3),
@@ -598,6 +599,7 @@ func (t *RefreshExternalCollectionTask) newMilvusTableSourceDeltalogReader(
 		return nil, err
 	}
 	return storage.NewDeltalogReader(
+		ctx,
 		sourcePKType,
 		[]string{ref.sourcePath},
 		storage.WithVersion(storage.StorageV1),

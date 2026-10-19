@@ -389,7 +389,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         return {};
     }
 
-    LOG_INFO(
+    LOG_DEBUG(
         "[StorageV2] LoadCellBatchAsync: {} cells -> {} batches "
         "(memory_limit={}MB, budget_capacity={}MB, read_window={}MB)",
         cell_specs.size(),

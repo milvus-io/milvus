@@ -199,6 +199,17 @@ func TestSegcoreCodeTableCoverage(t *testing.T) {
 		cls, ok := segcoreCodeTable[c]
 		assert.True(t, ok && cls.retriable, "code %d must stay registered as retriable", c)
 	}
+	// permanent is the narrowest class: only codes whose every C++ producer is
+	// deterministic, so the index/stats scheduler may give up on them.
+	wantPermanent := []int32{2016, 2017, 2024}
+	for _, c := range wantPermanent {
+		cls, ok := segcoreCodeTable[c]
+		assert.True(t, ok && cls.permanent, "code %d must stay classified as permanent", c)
+	}
+	for _, c := range []int32{2000, 2001, 2002, 2004, 2044} {
+		cls := segcoreCodeTable[c]
+		assert.False(t, cls.permanent, "code %d must not be permanent: a broad producer also emits it", c)
+	}
 
 	// Drift guard: every C++ ErrorCode must be classified explicitly. A new
 	// enum value added on the C++ side without a segcoreCodeTable entry fails
@@ -212,4 +223,20 @@ func TestSegcoreCodeTableCoverage(t *testing.T) {
 	}
 	assert.Empty(t, unregistered, "segcore C++ codes not classified in segcoreCodeTable; "+
 		"register each explicitly (input / retriable / system) in pkg/util/merr/segcore.go: %v", unregistered)
+}
+
+// TestIsPermanentSegcoreErr pins which codes the index/stats scheduler is
+// allowed to give up on. The generic 2000/2001/2002 fallbacks must stay out:
+// their cause is unknown, so callers keep the retrying default.
+func TestIsPermanentSegcoreErr(t *testing.T) {
+	for _, code := range []int32{2016, 2017, 2024} {
+		assert.Truef(t, IsPermanentSegcoreErr(SegcoreError(code, "x")), "code %d must be permanent", code)
+		assert.Falsef(t, IsRetryableErr(SegcoreError(code, "x")), "code %d must not be retriable", code)
+	}
+	for _, code := range []int32{2000, 2001, 2002, 2003, 2004, 2025, 2033, 2044, 2045, 2099} {
+		assert.Falsef(t, IsPermanentSegcoreErr(SegcoreError(code, "x")), "code %d must not be permanent", code)
+	}
+	assert.True(t, IsPermanentSegcoreErr(errors.Wrap(SegcoreError(2017, "object not exist"), "failed to create index")))
+	assert.False(t, IsPermanentSegcoreErr(errors.New("plain error")))
+	assert.False(t, IsPermanentSegcoreErr(nil))
 }

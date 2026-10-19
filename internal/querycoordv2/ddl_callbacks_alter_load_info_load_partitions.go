@@ -63,7 +63,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
 		Meta:           s.meta,
 		CollectionInfo: coll,
-		Current:        s.getCurrentLoadConfig(ctx, req.GetCollectionID()),
+		Current:        currentLoadConfig,
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             partitionIDsSet.Collect(),
 			ExpectedReplicaNumber:            expectedReplicasNumber,
@@ -87,6 +87,14 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 			mlog.Int64s("partitionIDs", req.GetPartitionIDs()))
 		return nil
 	}
+	requiredByRG, err := s.checkLoadResource(ctx, alterLoadConfigReq)
+	if err != nil {
+		return err
+	}
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	if err != nil {
+		return err
+	}
+	recordLoadResourceDemand(requiredByRG)
+	return nil
 }

@@ -1,5 +1,6 @@
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -8,7 +9,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from ml_dtypes import bfloat16
-from pymilvus import DataType
+from pymilvus import DataType, MilvusException
 from pymilvus.client.embedding_list import EmbeddingList
 from utils.util_log import test_log as log
 
@@ -643,8 +644,8 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientSnapshotBase):
         # Create target collection (should cause conflict)
         self.create_collection(client, target_collection_name, default_dim)
 
-        error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
-        self.restore_snapshot(
+        error = {ct.err_code: 1100, ct.err_msg: "already exists in database"}
+        res, _ = self.restore_snapshot(
             client,
             snapshot_name,
             collection_name,
@@ -652,6 +653,7 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientSnapshotBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert res.code == error[ct.err_code], f"Unexpected restore error: {res}"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -3523,6 +3525,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientSnapshotBase):
     - Concurrent snapshot creation with same name
     - Snapshot consistency during concurrent writes
     - Concurrent restore operations from same snapshot
+    - Competing restores to the same target collection
     """
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3728,6 +3731,85 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientSnapshotBase):
         self.drop_snapshot(client, snapshot_name, collection_name)
         for name in restored_names:
             self.drop_collection(client, name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_concurrent_restore_same_target(self):
+        """
+        target: reject competing restores to the same database and collection
+        method: release two restore RPCs together, then inspect jobs and data
+        expected: one success, one target-exists error, one job, unchanged data
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_name = cf.gen_unique_str(prefix + "_same_target")
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [
+            {
+                "id": i,
+                "vector": rng.random(default_dim).astype(np.float32).tolist(),
+                "value": i * 3,
+                "tag": f"row_{i}",
+                "active": i % 2 == 0,
+            }
+            for i in range(256)
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, snapshot_name, collection_name)
+        # Register the target even if an assertion or RPC fails after creation.
+        self.tear_down_collection_names.append(restored_name)
+        start = threading.Barrier(2)
+
+        def restore():
+            start.wait(timeout=10)
+            try:
+                return client.restore_snapshot(
+                    snapshot_name,
+                    collection_name,
+                    restored_name,
+                    target_db_name="default",
+                    timeout=120,
+                )
+            except MilvusException as exc:
+                return exc
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(restore) for _ in range(2)]
+                results = [future.result(timeout=150) for future in futures]
+            job_ids = [result for result in results if isinstance(result, int) and result > 0]
+            errors = [result for result in results if isinstance(result, MilvusException)]
+            # Let every accepted job finish, including duplicate jobs on a buggy
+            # server, so the snapshot pin is released before cleanup.
+            for job_id in job_ids:
+                wait_for_restore_complete(self, client, job_id, timeout=120)
+            assert len(job_ids) == 1 and len(errors) == 1, f"Unexpected restore results: {results}"
+            assert errors[0].code == 1100, f"Unexpected restore error: {errors[0]}"
+            assert "already exists" in errors[0].message and restored_name in errors[0].message
+
+            jobs, _ = self.list_restore_snapshot_jobs(client, collection_name=restored_name)
+            assert [job.job_id for job in jobs] == job_ids, f"Unexpected restore jobs: {jobs}"
+            self.load_collection(client, restored_name)
+            count, _ = self.query(client, restored_name, filter="", output_fields=["count(*)"])
+            assert count[0]["count(*)"] == len(rows)
+            restored, _ = self.query(
+                client,
+                restored_name,
+                filter="id >= 0",
+                output_fields=["id", "vector", "value", "tag", "active"],
+                limit=len(rows),
+            )
+            assert len(restored) == len(rows)
+            assert {row["id"] for row in restored} == set(range(len(rows)))
+            for row in restored:
+                expected = rows[row["id"]]
+                for field in ("value", "tag", "active"):
+                    assert row[field] == expected[field], f"Mismatch at id={row['id']}, field={field}"
+                np.testing.assert_allclose(row["vector"], expected["vector"], rtol=1e-6, atol=1e-7)
+        finally:
+            self.drop_snapshot(client, snapshot_name, collection_name)
 
 
 class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):
@@ -3962,8 +4044,8 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):
         self.create_collection(client, existing_collection, default_dim)
 
         # 3. Restore to existing collection - should fail
-        error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
-        self.restore_snapshot(
+        error = {ct.err_code: 1100, ct.err_msg: "already exists in database"}
+        res, _ = self.restore_snapshot(
             client,
             snapshot_name,
             collection_name,
@@ -3971,6 +4053,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert res.code == error[ct.err_code], f"Unexpected restore error: {res}"
 
         # 4. Verify the existing collection is untouched
         self.load_collection(client, existing_collection)
@@ -4605,10 +4688,10 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
                 an existing alias should fail (alias and collection share a namespace)
         method: create col_src + snapshot -> create alias A pointing to col_src
                 -> restore snapshot to target_collection_name=A
-        expected: restore is synchronously rejected with an alias-conflict error;
+        expected: restore is synchronously rejected with a target-already-exists error;
                   source collection, snapshot, and alias all remain intact
-        note: the rejection happens in datacoord's broker.CreateCollection path
-              during RestoreCollection (snapshot_manager.go:833)
+        note: restore admission resolves aliases and rejects an occupied target name
+              before creating the target collection
         """
         client = self._client()
         col_src = cf.gen_collection_name_by_testcase_name()
@@ -4621,8 +4704,8 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
         self.create_alias(client, col_src, alias_name)
 
         # 2. Restore with target_collection_name = existing alias name must fail
-        error = {ct.err_code: 1601, ct.err_msg: "alias and collection name conflict"}
-        self.restore_snapshot(
+        error = {ct.err_code: 1100, ct.err_msg: "already exists in database"}
+        res, _ = self.restore_snapshot(
             client,
             snapshot_name,
             col_src,
@@ -4630,6 +4713,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert res.code == error[ct.err_code], f"Unexpected restore error: {res}"
 
         # 3. Verify source, snapshot, and alias are all untouched
         snapshots, _ = self.list_snapshots(client, collection_name=col_src)

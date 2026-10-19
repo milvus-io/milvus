@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -47,7 +48,7 @@ type l0CompactionTask struct {
 	meta      CompactionMeta
 
 	times                *taskcommon.Times
-	committedV3Manifests map[int64]string
+	committedV3Manifests map[int64]l0ManifestCommit
 }
 
 func (t *l0CompactionTask) GetTaskID() int64 {
@@ -151,6 +152,12 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
 	if err != nil || result == nil {
+		if errors.Is(err, merr.ErrCompactionResultNotFound) {
+			if dropErr := cluster.DropCompaction(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID()); dropErr != nil {
+				log.Warn(context.TODO(), "l0CompactionTask failed to drop task with unavailable result", mlog.Err(dropErr))
+				return
+			}
+		}
 		log.Warn(context.TODO(), "l0CompactionTask failed to get compaction result", mlog.Err(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
@@ -180,7 +187,7 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
 		return
 	case datapb.CompactionTaskState_timeout:
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout), setFailReason("DataNode reported compaction timeout"))
 		if err != nil {
 			log.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
@@ -192,7 +199,8 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		}
 	default:
 		log.Error(context.TODO(), "not support compaction task state", mlog.String("state", result.GetState().String()))
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(fmt.Sprintf("DataNode returned unsupported compaction state: %s", result.GetState().String())))
 		if err != nil {
 			log.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
@@ -222,7 +230,7 @@ func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator
 		allocator:            allocator,
 		meta:                 meta,
 		times:                taskcommon.NewTimes(),
-		committedV3Manifests: make(map[int64]string),
+		committedV3Manifests: make(map[int64]l0ManifestCommit),
 	}
 	task.taskProto.Store(t)
 	return task

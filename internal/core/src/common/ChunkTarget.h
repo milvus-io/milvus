@@ -40,7 +40,9 @@ class ChunkTarget {
     write(const void* data, size_t size) = 0;
 
     /**
-     * @brief release the data pointer to the caller
+     * @brief finish writing and return the data pointer to the caller
+     * @note owning targets retain fallback cleanup until TransferOwnership()
+     *       is called after the caller has installed its own owner
      * @note no write() should be called after release()
      * @return the data pointer
      */
@@ -115,9 +117,15 @@ class MemChunkTarget : public ChunkTarget {
         AssertInfo(m != MAP_FAILED,
                    "failed to map: {}, map_size={}",
                    strerror(errno),
-                   size_);
+                   cap_);
         data_ = reinterpret_cast<char*>(m);
     }
+
+    ~MemChunkTarget() override;
+
+    MemChunkTarget(const MemChunkTarget&) = delete;
+    MemChunkTarget&
+    operator=(const MemChunkTarget&) = delete;
 
     void
     write(const void* data, size_t size) override;
@@ -125,11 +133,15 @@ class MemChunkTarget : public ChunkTarget {
     char*
     release() override;
 
+    // Disarm fallback cleanup only after ChunkMmapGuard owns the mapping.
+    void
+    TransferOwnership() noexcept;
+
     size_t
     tell() override;
 
  private:
-    char* data_;  // no need to delete in destructor, will be deleted by Chunk
+    char* data_{nullptr};
     size_t cap_;
     size_t size_ = 0;
 };

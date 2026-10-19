@@ -118,11 +118,11 @@ func GetEtcdClient(
 	minVersion string,
 	opts ...ClientOption,
 ) (*clientv3.Client, error) {
+	// Also used while initializing configuration sources: connection targets
+	// and transport/auth settings must not appear in constructor diagnostics.
 	mlog.Info(context.TODO(), "create etcd client",
 		mlog.Bool("useEmbedEtcd", useEmbedEtcd),
-		mlog.Bool("useSSL", useSSL),
-		mlog.Any("endpoints", endpoints),
-		mlog.String("minVersion", minVersion))
+		mlog.Int("endpointCount", len(endpoints)))
 	if useEmbedEtcd {
 		return GetEmbedEtcdClient()
 	}
@@ -224,10 +224,9 @@ func CreateEtcdClient(
 	if !enableAuth || useEmbedEtcd {
 		return GetEtcdClient(useEmbedEtcd, useSSL, endpoints, certFile, keyFile, caCertFile, minVersion, opts...)
 	}
-	mlog.Info(context.TODO(), "create etcd client(enable auth)",
-		mlog.Bool("useSSL", useSSL),
-		mlog.Any("endpoints", endpoints),
-		mlog.String("minVersion", minVersion))
+	mlog.Info(context.TODO(), "create etcd client",
+		mlog.Bool("useEmbedEtcd", useEmbedEtcd),
+		mlog.Int("endpointCount", len(endpoints)))
 	if useSSL {
 		return GetRemoteEtcdSSLClientWithCfg(endpoints, certFile, keyFile, caCertFile, minVersion, clientv3.Config{Username: userName, Password: password}, opts...)
 	}

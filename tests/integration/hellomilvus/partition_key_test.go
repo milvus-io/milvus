@@ -371,22 +371,6 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 		return queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
 	}
 
-	// Helper: query that should fail with an error
-	queryExpectError := func(expr string) {
-		queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
-			DbName:         dbName,
-			CollectionName: collectionName,
-			Expr:           expr,
-			OutputFields:   []string{"count(*)"},
-		})
-		s.NoError(err)
-		s.NotEqual(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode(),
-			"expr %q should fail under partition key isolation", expr)
-		mlog.Info(context.TODO(), "partition key isolation: correctly rejected",
-			mlog.String("expr", expr),
-			mlog.String("reason", queryResult.GetStatus().GetReason()))
-	}
-
 	// Helper: search that should fail with an error
 	searchExpectError := func(expr string) {
 		nq := 10
@@ -405,9 +389,9 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 			mlog.String("reason", searchResult.GetStatus().GetReason()))
 	}
 
-	// ── Valid expressions (only == on partition key) ──
+	// ── Equality filters supported by both Query and Search ──
 
-	// Test 1: pid == 1 (single equality — the only supported form)
+	// Test 1: pid == 1 (single equality)
 	count := queryCount("pid == 1")
 	s.Equal(int64(rowNum), count, "pid == 1 should return %d rows", rowNum)
 	mlog.Info(context.TODO(), "partition key isolation: pid == 1", mlog.Int64("count", count))
@@ -434,20 +418,19 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 			mlog.Int("numResults", len(searchResult.GetResults().GetScores())))
 	}
 
-	// ── Invalid expressions (IN and OR are rejected under isolation) ──
+	// Partition key isolation restricts Search, while Query supports general filters.
 
-	// Test 4: pid in [1, 10] — rejected (IN not supported)
-	queryExpectError("pid in [1, 10]")
+	// Test 4: Query with IN returns both partition key values
+	s.Equal(int64(2*rowNum), queryCount("pid in [1, 10]"))
 
-	// Test 5: pid == 1 || pid == 10 — rejected (OR not supported;
-	// rewriter may merge to IN, which is also rejected)
-	queryExpectError("pid == 1 || pid == 10")
+	// Test 5: Query with OR returns both partition key values
+	s.Equal(int64(2*rowNum), queryCount("pid == 1 || pid == 10"))
 
-	// Test 6: pid in [1, 10, 100] — rejected
-	queryExpectError("pid in [1, 10, 100]")
+	// Test 6: Query with IN returns all three partition key values
+	s.Equal(int64(3*rowNum), queryCount("pid in [1, 10, 100]"))
 
-	// Test 7: pid == 1 || pid == 10 || pid == 100 — rejected
-	queryExpectError("pid == 1 || pid == 10 || pid == 100")
+	// Test 7: Query with OR returns all three partition key values
+	s.Equal(int64(3*rowNum), queryCount("pid == 1 || pid == 10 || pid == 100"))
 
 	// Test 8: search with pid in [1, 10] — rejected
 	searchExpectError("pid in [1, 10]")
@@ -457,16 +440,16 @@ func (s *HelloMilvusSuite) TestPartitionKeyIsolation() {
 
 	// ── Edge cases ──
 
-	// Test 10: pid == 1 && pid in [1, 10] — rejected (contains IN on partition key)
-	queryExpectError("pid == 1 && pid in [1, 10]")
+	// Test 10: Query with equality AND IN returns the matching partition key value
+	s.Equal(int64(rowNum), queryCount("pid == 1 && pid in [1, 10]"))
 
 	// Test 11: pid == 1 && pid == 1 — redundant equality, should still be valid
 	count = queryCount("pid == 1 && pid == 1")
 	s.Equal(int64(rowNum), count, "pid == 1 && pid == 1 should return %d rows", rowNum)
 	mlog.Info(context.TODO(), "partition key isolation: pid == 1 && pid == 1", mlog.Int64("count", count))
 
-	// Test 12: no partition key filter at all — rejected under isolation
-	queryExpectError(fmt.Sprintf("%s >= 0", integration.Int64Field))
+	// Test 12: Query without a partition key filter returns all rows
+	s.Equal(int64(3*rowNum), queryCount(fmt.Sprintf("%s >= 0", integration.Int64Field)))
 
 	// Test 13: search without partition key filter — rejected under isolation
 	searchExpectError(fmt.Sprintf("%s >= 0", integration.Int64Field))

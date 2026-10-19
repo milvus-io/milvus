@@ -10,6 +10,8 @@ Faker==19.2.0
 pymilvus
 scikit-learn>=1.5.2
 pytest-xdist==2.5.0
+# Required by pytest-xdist 2.5.0 for parallel execution.
+py==1.11.0
 minio==7.2.0
 tenacity>=8.2.3
 # for bf16 datatype

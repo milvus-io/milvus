@@ -9,7 +9,7 @@ Milvus supports multi-cluster WAL replication via a star topology: one PRIMARY c
 ## Roles
 
 - **PRIMARY**: Accepts client writes (DML/DDL/DCL). The Replicate Interceptor **rejects** any message carrying a replicate header.
-- **SECONDARY**: Only accepts replicated messages forwarded from the primary. The Replicate Interceptor **rejects** any message without a replicate header (except WAL self-controlled messages like TimeTick/CreateSegment/Flush, which bypass the interceptor entirely since they are locally generated regardless of role).
+- **SECONDARY**: Only accepts replicated messages forwarded from the primary. The Replicate Interceptor **rejects** any message without a replicate header, with two exceptions: WAL self-controlled messages like TimeTick/CreateSegment/Flush, which bypass the interceptor entirely since they are locally generated regardless of role, and messages carrying the `Unreplicable` (`_ur`) property, which are local to the cluster: the secondary WAL appends them and CDC never forwards them. The broadcaster issues them through `StartUnreplicableBroadcastWithResourceKeys`, which skips the primary check (used for resource group DDL, see [Cluster Messages](../message/message-semantic-cluster.md)).
 
 ## Data Flow
 

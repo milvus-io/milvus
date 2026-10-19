@@ -20,7 +20,6 @@ package hookutil
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -87,13 +86,17 @@ func initHook() error {
 	}
 	storeHook((hookVal))
 	paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
-		mlog.Info(context.TODO(), "receive the hook refresh event", mlog.Any("event", event))
+		mlog.Info(context.TODO(), "receive the hook refresh event",
+			mlog.String("eventSource", event.EventSource),
+			mlog.String("eventType", event.EventType))
 		go func() {
 			hookVal := GetHook()
 			soConfig := paramtable.GetHookParams().SoConfig.GetValue()
-			mlog.Info(context.TODO(), "refresh hook configs", mlog.Any("config", soConfig))
-			if err = hookVal.Init(soConfig); err != nil {
-				mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing", mlog.Err(err))
+			mlog.Info(context.TODO(), "refresh hook configs", mlog.Int("entries", len(soConfig)))
+			if err := hookVal.Init(soConfig); err != nil {
+				// Plugin errors can echo the opaque, sensitive initialization map.
+				mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing",
+					mlog.String("error", config.RedactedValue))
 			}
 			storeHook(hookVal)
 		}()
@@ -123,9 +126,11 @@ func InitOnceHook() {
 		if err != nil {
 			soPath := paramtable.Get().ProxyCfg.SoPath.GetValue()
 			if paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
-				mlog.Panic(context.TODO(), fmt.Sprintf("fail to init hook, so_path=%s, error=%v", soPath, err))
+				mlog.Panic(context.TODO(), "fail to init hook",
+					mlog.String("so_path", soPath), mlog.String("error", config.RedactedValue))
 			}
-			mlog.Warn(context.TODO(), "fail to init hook", mlog.String("so_path", soPath), mlog.Err(err))
+			mlog.Warn(context.TODO(), "fail to init hook", mlog.String("so_path", soPath),
+				mlog.String("error", config.RedactedValue))
 		}
 	})
 }

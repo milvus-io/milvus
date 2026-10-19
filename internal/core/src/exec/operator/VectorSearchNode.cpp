@@ -34,6 +34,7 @@
 #include "exec/expression/Utils.h"
 #include "exec/operator/Utils.h"
 #include "monitor/Monitor.h"
+#include "query/Utils.h"
 #include "opentelemetry/trace/span.h"
 #include "plan/PlanNode.h"
 #include "prometheus/histogram.h"
@@ -163,7 +164,7 @@ PhyVectorSearchNode::GetOutput() {
             std::vector<VectorPtr> col_res;
             col_res.push_back(std::make_shared<ColumnVector>(
                 std::move(element_bitset), std::move(valid_element_bitset)));
-            input_ = std::make_shared<RowVector>(col_res);
+            input_ = std::make_shared<RowVector>(std::move(col_res));
             query_context_->set_bitset_is_element_level(true);
         }
 
@@ -186,6 +187,10 @@ PhyVectorSearchNode::GetOutput() {
 
     // Single search + metrics path
     milvus::SearchResult search_result;
+    if (query::CanUseStrictGroupSearch(search_info_, num_queries) &&
+        !search_view.empty()) {
+        search_result.vector_search_filter_owner_ = GetColumnVector(input_);
+    }
     auto op_context = query_context_->get_op_context();
     segment_->vector_search(search_info_,
                             src_data,

@@ -584,7 +584,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 	}
 
-	rr, existingFields, err := newCompactionSegmentRecordReader(ctx, segment, t.plan.Schema, t.compactionParams.StorageConfig,
+	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(segment.GetManifest())
+	if err != nil {
+		return err
+	}
+	rr, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, segment, t.plan.Schema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
@@ -871,7 +875,11 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	readSchema.Fields = selectedFields
 	readSchema.StructArrayFields = nil
 
-	rr, _, err := newCompactionSegmentRecordReader(ctx, segment, readSchema, t.compactionParams.StorageConfig,
+	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(segment.GetManifest())
+	if err != nil {
+		return nil, err
+	}
+	rr, _, err := newTextDecodedCompactionSegmentRecordReader(ctx, segment, readSchema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
@@ -1032,9 +1040,10 @@ func (t *clusteringCompactionTask) getWriterOpts() []storage.RwOption {
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
-		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
-		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
-			common.SegmentInsertLogPath, metautil.JoinIDPath(t.collectionID, t.partitionID))
+		// LOB base path at partition level, sharing the manifest root rule so
+		// the reader (which reconstructs lobs/ from the manifest base) resolves
+		// the same files (see #53051).
+		lobBasePath := storage.SegmentPartitionBasePath(t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
 		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
 			lobBasePath,
 			t.compactionParams.TextInlineThreshold,
@@ -1088,6 +1097,25 @@ func (t *clusteringCompactionTask) initLOBCompactionContext(ctx context.Context)
 
 	// compute strategies (will use forced REWRITE_ALL for all TEXT fields)
 	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+	sourceManifests := make(map[int64]string)
+	for _, segment := range t.plan.GetSegmentBinlogs() {
+		if segment.GetManifest() != "" {
+			sourceManifests[segment.GetSegmentID()] = segment.GetManifest()
+		}
+	}
+	outputPartitionBase := storage.SegmentPartitionBasePath(
+		t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
+	partitionBaseMismatch, err := compaction.LOBSourcePartitionBaseMismatch(sourceManifests, outputPartitionBase)
+	if err != nil {
+		return err
+	}
+	if partitionBaseMismatch {
+		t.lobContext.ForceRewriteAllAcrossPartitionBases(textFieldIDs)
+		mlog.Info(ctx, "forcing source-side TEXT LOB decoding across partition namespaces",
+			mlog.Int64("planID", t.GetPlanID()),
+			mlog.String("outputPartitionBase", outputPartitionBase),
+			mlog.Int64s("textFieldIDs", textFieldIDs))
+	}
 
 	// log strategy decisions
 	for fieldID, decision := range t.lobContext.Decisions {

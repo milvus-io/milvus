@@ -879,7 +879,7 @@ func (s *RerankBuilderTestSuite) createTestDataFrameForRerankWithTimestamp(ids [
 			},
 		},
 	}
-	df, err := FromSearchResultData(resultData, s.pool, []string{"category", "timestamp"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "category", "timestamp"))
 	s.Require().NoError(err)
 	return df
 }
@@ -910,7 +910,7 @@ func (s *RerankBuilderTestSuite) createTestDataFrameForRerank(ids []int64, score
 			},
 		},
 	}
-	df, err := FromSearchResultData(resultData, s.pool, []string{"category"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "category"))
 	s.Require().NoError(err)
 	return df
 }

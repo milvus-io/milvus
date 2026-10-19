@@ -2682,7 +2682,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         )
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"fieldSchema({default_vector_field_name}) has no corresponding fieldData pass in: invalid parameter",
+            ct.err_msg: f'missing required field "{default_vector_field_name}": invalid parameter',
         }
         self.upsert(
             client, collection_name, rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error
@@ -2826,7 +2826,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         )
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"fieldSchema({default_int32_field_name}) has no corresponding fieldData pass in: invalid parameter",
+            ct.err_msg: f'missing required field "{default_int32_field_name}": invalid parameter',
         }
         self.upsert(
             client, collection_name, new_rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error
@@ -2928,7 +2928,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         )
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"fieldSchema({default_int32_field_name}) has no corresponding fieldData pass in: invalid parameter",
+            ct.err_msg: f'missing required field "{default_int32_field_name}": invalid parameter',
         }
         self.upsert(
             client,
@@ -3044,7 +3044,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         ]
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"fieldSchema({default_vector_field_name}) has no corresponding fieldData pass in: invalid parameter",
+            ct.err_msg: f'missing required field "{default_vector_field_name}": invalid parameter',
         }
         self.upsert(
             client, collection_name, mixed_rows, partial_update=True, check_task=CheckTasks.err_res, check_items=error

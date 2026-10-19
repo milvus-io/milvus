@@ -17,8 +17,11 @@
 package importutilv2
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +47,12 @@ const (
 
 	// CSVNullKey specifies the null key used when importing CSV files.
 	CSVNullKey = "nullkey"
+
+	// RLSPrincipal is the application principal used to evaluate import RLS policies.
+	RLSPrincipal = "rls_principal"
+
+	// SkipRLS requests an authorized RLS bypass for an import.
+	SkipRLS = "skip_rls"
 )
 
 // AutoCommitKey is the option key for enabling/disabling auto-commit of import jobs.
@@ -53,6 +62,25 @@ const AutoCommitKey = "auto_commit"
 const (
 	// BackupFlag indicates whether the import is in backup-restore mode, default to false.
 	BackupFlag = "backup"
+
+	// SourceType selects a metadata source contract for backup import.
+	SourceType = "source_type"
+
+	// SourceTypeSnapshot makes ImportFile.paths[0] an exact snapshot metadata path.
+	SourceTypeSnapshot = "snapshot"
+
+	// PartitionMapping maps every source snapshot partition name to an existing
+	// target partition name. It does not select or omit source data.
+	PartitionMapping = "partition_mapping"
+
+	// ExternalSpec supplies request-scoped source credentials for snapshot import.
+	ExternalSpec = "external_spec"
+
+	// SnapshotSourceURI is coordinator-owned: expanded manifests contain object
+	// keys, so retries need the original storage identity without rereading metadata.
+	SnapshotSourceURI = "_snapshot_source_uri"
+	// SnapshotLayout freezes the path boundary for both worker phases.
+	SnapshotLayout = "_snapshot_layout"
 
 	// L0Import indicates whether to import l0 segments only.
 	L0Import = "l0_import"
@@ -74,6 +102,75 @@ const (
 )
 
 type Options []*commonpb.KeyValuePair
+
+// foldMatchedKeys are the only option keys any reader on the import path matches
+// case-insensitively: ParseTimeRange's getTimestamp compares against exactly these
+// (option.go's getTimestamp is the sole strings.EqualFold on the path). Every other
+// reader matches byte-exactly, so two keys differing only in case are distinct to
+// them and need no dedup.
+var foldMatchedKeys = []string{StartTs, StartTs2, EndTs, EndTs2}
+
+// ValidateNoDuplicateKeys rejects an option list carrying the same key twice.
+//
+// Import options are read in two incompatible ways. Every check reads them as a
+// repeated KV list via funcutil.GetAttrByKeyFromRepeatedKV, which returns the
+// FIRST match, while the broadcast body folds them into a map via
+// funcutil.KeyValuePair2Map, where the LAST value wins. A duplicate key
+// therefore lets a request be validated under one value and executed under
+// another: options=[{backup,false},{backup,true}] passes as an ordinary import,
+// skipping the ImportBinlog privilege check, then runs as a binlog import.
+//
+// Keys are compared with strings.EqualFold, not byte equality, because
+// ParseTimeRange matches its keys that way (see getTimestamp, the only
+// fold-matching reader on the import path). Under byte equality
+// [{start_ts,A},{START_TS,B}] would pass here and then resolve to A or B
+// depending on map iteration order, so a restore would filter different files
+// by different time windows. strings.ToLower is not a substitute:
+// EqualFold("ſtart_ts", "start_ts") is true while ToLower leaves U+017F alone.
+//
+// Call this before any option is read.
+func ValidateNoDuplicateKeys(options Options) error {
+	seen := make(map[string]struct{}, len(options))
+	// Which fold-matched key each request key has already claimed. Comparing every
+	// pair would also be correct but quadratic, and nothing bounds how many options
+	// a request may carry: the only ceiling is the 256 MiB gRPC body, and 20k keys
+	// fit in 352 KB. Scanning the fixed foldMatchedKeys per option keeps it linear.
+	claimed := make(map[string]string, len(foldMatchedKeys))
+	for _, kv := range options {
+		key := kv.GetKey()
+		if _, ok := seen[key]; ok {
+			return merr.WrapErrParameterInvalidMsg("duplicate import option key: %s", key)
+		}
+		seen[key] = struct{}{}
+		for _, target := range foldMatchedKeys {
+			if !strings.EqualFold(key, target) {
+				continue
+			}
+			if prev, ok := claimed[target]; ok {
+				return merr.WrapErrParameterInvalidMsg(
+					"duplicate import option key: %s, which matches %s case-insensitively", key, prev)
+			}
+			claimed[target] = key
+		}
+	}
+	return nil
+}
+
+func GetRLSOptions(options Options) (string, bool, error) {
+	principal, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(RLSPrincipal, options)
+	skip, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(SkipRLS, options)
+	if !ok {
+		return principal, false, nil
+	}
+	switch strings.ToLower(skip) {
+	case "true":
+		return principal, true, nil
+	case "false":
+		return principal, false, nil
+	default:
+		return "", false, merr.WrapErrParameterInvalidMsg("import option %s must be true or false", SkipRLS)
+	}
+}
 
 func GetTimeoutTs(options Options) (uint64, error) {
 	var timeoutTs uint64 = math.MaxUint64
@@ -130,6 +227,195 @@ func IsBackup(options Options) bool {
 		return false
 	}
 	return true
+}
+
+// IsSnapshotSource reports whether the request uses snapshot metadata as its
+// backup source. The option is intentionally opt-in so StorageV1 and StorageV2
+// path-based backup imports retain their existing behavior.
+func IsSnapshotSource(options Options) bool {
+	sourceType, err := funcutil.GetAttrByKeyFromRepeatedKV(SourceType, options)
+	return err == nil && strings.EqualFold(strings.TrimSpace(sourceType), SourceTypeSnapshot)
+}
+
+// ValidateSnapshotSourceOptions rejects combinations that would make the
+// source contract ambiguous. Snapshot metadata is the sole authority for the
+// source storage version. L0 import remains a separate contract; CMEK content
+// is validated later against the source schema and supplied EZK.
+func ValidateSnapshotSourceOptions(options Options) error {
+	contractKeys := []string{SourceType, BackupFlag, L0Import, StorageVersion, EZK, ExternalSpec, SnapshotSourceURI, SnapshotLayout, PartitionMapping}
+	counts := make(map[string]int, len(contractKeys))
+	hasSnapshotContractOption := false
+	for _, option := range options {
+		if option == nil {
+			// Attribute lookups below dereference each entry. Reject malformed
+			// option lists before they reach those shared helpers.
+			return merr.WrapErrImportFailedMsg("import option must not be nil")
+		}
+		if option.GetKey() == SourceType || option.GetKey() == ExternalSpec || option.GetKey() == SnapshotSourceURI || option.GetKey() == SnapshotLayout || option.GetKey() == PartitionMapping {
+			hasSnapshotContractOption = true
+		}
+		if lo.Contains(contractKeys, option.GetKey()) {
+			counts[option.GetKey()]++
+		}
+	}
+	if hasSnapshotContractOption {
+		for _, key := range contractKeys {
+			if counts[key] > 1 {
+				return merr.WrapErrImportFailedMsg("duplicate snapshot-source option: %s", key)
+			}
+		}
+	}
+	if _, err := GetPartitionMapping(options); err != nil {
+		return err
+	}
+
+	sourceType, sourceTypeErr := funcutil.GetAttrByKeyFromRepeatedKV(SourceType, options)
+	if value, err := funcutil.GetAttrByKeyFromRepeatedKV(ExternalSpec, options); err == nil {
+		if !IsSnapshotSource(options) {
+			return merr.WrapErrImportFailedMsg("external_spec requires source_type=snapshot")
+		}
+		if strings.TrimSpace(value) == "" || len(value) > 64*1024 {
+			return merr.WrapErrImportFailedMsg("external_spec must be nonempty and at most 64 KiB")
+		}
+	}
+	if _, err := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options); err == nil && !IsSnapshotSource(options) {
+		return merr.WrapErrImportFailedMsg("snapshot source URI requires source_type=snapshot")
+	}
+	if layout, err := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotLayout, options); err == nil {
+		uri, uriErr := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
+		if !IsSnapshotSource(options) || uriErr != nil || strings.TrimSpace(uri) == "" || (layout != "referenced" && layout != "self-contained") {
+			return merr.WrapErrServiceInternalMsg("invalid snapshot path boundary")
+		}
+	}
+	if sourceTypeErr != nil {
+		if IsBackup(options) {
+			storageVersion, err := GetStorageVersion(options)
+			if err != nil {
+				return err
+			}
+			if storageVersion == storage.StorageV3 {
+				return merr.WrapErrImportFailedMsg(
+					"StorageV3 backup import requires %s=%s and must not specify %s",
+					SourceType,
+					SourceTypeSnapshot,
+					StorageVersion,
+				)
+			}
+		}
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(sourceType), SourceTypeSnapshot) {
+		return merr.WrapErrImportFailedMsg("unsupported %s: %s", SourceType, sourceType)
+	}
+	if !IsBackup(options) {
+		return merr.WrapErrImportFailedMsg("%s=%s requires %s=true",
+			SourceType, SourceTypeSnapshot, BackupFlag)
+	}
+	if IsL0Import(options) {
+		return merr.WrapErrImportFailedMsg("%s=%s does not support %s=true",
+			SourceType, SourceTypeSnapshot, L0Import)
+	}
+	if _, err := funcutil.GetAttrByKeyFromRepeatedKV(StorageVersion, options); err == nil {
+		return merr.WrapErrImportFailedMsg("%s must not be specified with %s=%s",
+			StorageVersion, SourceType, SourceTypeSnapshot)
+	}
+	return nil
+}
+
+// GetPartitionMapping returns nil when absent. Decode tokens rather than directly
+// into a map so duplicate source names cannot silently overwrite a destination.
+func GetPartitionMapping(options Options) (map[string]string, error) {
+	value, err := funcutil.GetAttrByKeyFromRepeatedKV(PartitionMapping, options)
+	if err != nil {
+		return nil, nil
+	}
+	if !IsSnapshotSource(options) {
+		return nil, merr.WrapErrImportFailedMsg("partition_mapping requires source_type=snapshot")
+	}
+	if len(value) > 64*1024 {
+		return nil, merr.WrapErrImportFailedMsg("partition_mapping must be at most 64 KiB")
+	}
+	decoder := json.NewDecoder(strings.NewReader(value))
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') {
+		return nil, merr.WrapErrImportFailedMsg("partition_mapping must be a nonempty JSON object of partition names")
+	}
+	mapping := make(map[string]string)
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return nil, merr.WrapErrImportFailedMsg("partition_mapping contains an invalid source name")
+		}
+		source, ok := key.(string)
+		var target string
+		if !ok || strings.TrimSpace(source) == "" || decoder.Decode(&target) != nil || strings.TrimSpace(target) == "" {
+			return nil, merr.WrapErrImportFailedMsg("partition_mapping requires nonempty source and target names")
+		}
+		if _, exists := mapping[source]; exists {
+			return nil, merr.WrapErrImportFailedMsg("duplicate source partition in partition_mapping: %s", source)
+		}
+		mapping[source] = target
+	}
+	end, err := decoder.Token()
+	if err != nil || end != json.Delim('}') || len(mapping) == 0 {
+		return nil, merr.WrapErrImportFailedMsg("partition_mapping must be a nonempty JSON object")
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, merr.WrapErrImportFailedMsg("partition_mapping contains trailing JSON data")
+	}
+	return mapping, nil
+}
+
+// PartitionMappingTargets defines the stable name order shared by Proxy and
+// DataCoord. Explicit many-to-one mappings use one destination ID only.
+func PartitionMappingTargets(mapping map[string]string) []string {
+	set := make(map[string]struct{}, len(mapping))
+	for _, name := range mapping {
+		set[name] = struct{}{}
+	}
+	names := lo.Keys(set)
+	sort.Strings(names)
+	return names
+}
+
+func HasExternalSource(options Options) bool {
+	_, err := funcutil.GetAttrByKeyFromRepeatedKV(ExternalSpec, options)
+	return err == nil
+}
+
+// ValidateSnapshotSourceRequest additionally rejects internal routing options
+// supplied by a public caller. Persisted tasks use ValidateSnapshotSourceOptions.
+func ValidateSnapshotSourceRequest(options Options) error {
+	// Do not silently broaden a request written for the earlier partition
+	// selector. Already-expanded tasks still use ValidateSnapshotSourceOptions
+	// and keep their immutable file inventory rather than re-expanding it.
+	for _, option := range options {
+		// GetKey tolerates nil entries; the common validator rejects them below.
+		switch option.GetKey() {
+		case "source_partition_name":
+			return merr.WrapErrImportFailedMsg("source_partition_name is not supported; snapshot import reads all source partitions")
+		case SnapshotSourceURI, SnapshotLayout:
+			return merr.WrapErrImportFailedMsg("%s is reserved for internal use", option.GetKey())
+		}
+	}
+	return ValidateSnapshotSourceOptions(options)
+}
+
+// RedactOptions returns a logging-only copy; never mutate credentials in live
+// task options, which are also used by retries and the second import phase.
+func RedactOptions(options Options) Options {
+	result := make(Options, 0, len(options))
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		value := option.GetValue()
+		if strings.EqualFold(option.GetKey(), ExternalSpec) || strings.EqualFold(option.GetKey(), EZK) {
+			value = "<redacted>"
+		}
+		result = append(result, &commonpb.KeyValuePair{Key: option.GetKey(), Value: value})
+	}
+	return result
 }
 
 func IsL0Import(options Options) bool {

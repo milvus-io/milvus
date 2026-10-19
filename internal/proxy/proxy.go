@@ -29,11 +29,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -88,7 +92,14 @@ type Proxy struct {
 
 	metaCacheMu sync.RWMutex
 	metaCache   Cache
-	chMgr       channelmgr.ChannelsMgr
+
+	// managementRootVerifier backs the management-plane HTTP basic-auth gate.
+	// Set in Init, unregistered and dropped in Stop. On the node rather than in
+	// a package variable, so two Proxy instances in one process cannot share a
+	// cached root hash.
+	managementRootVerifier *adminauth.CachedRootVerifier
+
+	chMgr channelmgr.ChannelsMgr
 
 	sched *scheduler.TaskScheduler
 
@@ -121,11 +132,18 @@ type Proxy struct {
 	slowQueries *expirable.LRU[Timestamp, *metricsinfo.SlowQuery]
 }
 
+// Compile-time assertions that *Proxy satisfies the task-model contracts the
+// extracted task packages consume through the composition root.
+var (
+	_ taskmodel.TaskNode    = (*Proxy)(nil)
+	_ taskmodel.QueryRunner = (*Proxy)(nil)
+)
+
 // NewProxy returns a Proxy struct.
 func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
-	ctx1, cancel := context.WithCancel(ctx)
-	n := 1024 // better to be configurable
+	ctx1, cancel := context.WithCancel(ctx) //nolint:gosec // cancel is stored below and called in Stop
+	n := 1024                               // better to be configurable
 	resourceManager := resource.NewManager(10*time.Second, 20*time.Second, make(map[string]time.Duration))
 	node := &Proxy{
 		ctx:            ctx1,
@@ -173,6 +191,42 @@ func (node *Proxy) GetMetaCache() Cache {
 	return node.getMetaCache()
 }
 
+// MixCoord returns the MixCoord client consumed by concrete tasks through the
+// taskmodel.TaskNode contract.
+func (node *Proxy) MixCoord() types.MixCoordClient {
+	return node.mixCoord
+}
+
+// LBPolicy returns the replica load-balance policy consumed by concrete tasks
+// through the taskmodel.TaskNode contract.
+func (node *Proxy) LBPolicy() shardclient.LBPolicy {
+	return node.lbPolicy
+}
+
+// ShardMgr returns the shard client manager consumed by concrete tasks through
+// the taskmodel.TaskNode contract.
+func (node *Proxy) ShardMgr() shardclient.ShardClientMgr {
+	return node.shardMgr
+}
+
+// ChMgr returns the channel manager consumed by concrete tasks through the
+// taskmodel.TaskNode contract.
+func (node *Proxy) ChMgr() channelmgr.ChannelsMgr {
+	return node.chMgr
+}
+
+// TsoAllocator returns the timestamp allocator consumed by concrete tasks
+// through the taskmodel.TaskNode contract.
+func (node *Proxy) TsoAllocator() taskmodel.TsoAllocator {
+	return node.tsoAllocator
+}
+
+// ResolveRLSEnforcement applies the proxy-owned SkipRLS authorization rules
+// for tasks implemented outside the root proxy package.
+func (node *Proxy) ResolveRLSEnforcement(ctx context.Context, cache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
+	return resolveRLSEnforcement(ctx, cache, rlsEnabled, rlsForce, skipRLS, dbName, collectionName, operation)
+}
+
 // IsDQLQueueFull reports whether the next DQL enqueue would be rejected with
 // TooManyRequests. The REST layer probes it (via interface assertion, like
 // GetMetaCache) to reject search/query before paying for body decoding.
@@ -185,6 +239,7 @@ func (node *Proxy) Register() error {
 	node.session.Register()
 	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.ProxyRole).Inc()
 	mlog.Info(node.ctx, "Proxy Register Finished")
+
 	// TODO Reset the logger
 	// Params.initLogCfg()
 	return nil
@@ -299,6 +354,15 @@ func (node *Proxy) Init() error {
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	mlog.Debug(node.ctx, "create metrics cache manager done", mlog.String("role", typeutil.ProxyRole))
 
+	if err := rls.Init(node.ctx, node.mixCoord); err != nil {
+		mlog.Warn(node.ctx, "failed to init RLS metadata manager", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
+		return err
+	}
+	mlog.Debug(node.ctx, "init RLS metadata manager done", mlog.String("role", typeutil.ProxyRole))
+
+	node.managementRootVerifier = newManagementRootVerifier(node.mixCoord)
+	internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotProxy, node.managementRootVerifier.Verify)
+
 	node.shardMgr = shardclient.NewShardClientMgr(node.mixCoord)
 	node.lbPolicy = shardclient.NewLBPolicyImpl(node.shardMgr)
 
@@ -355,6 +419,16 @@ func (node *Proxy) Start() error {
 
 // Stop stops a proxy node.
 func (node *Proxy) Stop() error {
+	// Deferred for the same reason mixCoordImpl.Stop defers its own: a drain is
+	// driven through /management/*.
+	defer func() {
+		internalhttp.RegisterPasswordVerifyFunc(nil)
+		internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotProxy, nil)
+		if node.managementRootVerifier != nil {
+			node.managementRootVerifier.Forget()
+		}
+	}()
+
 	if node.rowIDAllocator != nil {
 		node.rowIDAllocator.Close()
 		mlog.Info(node.ctx, "close id allocator", mlog.String("role", typeutil.ProxyRole))

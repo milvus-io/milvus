@@ -21,13 +21,18 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -37,70 +42,94 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const (
+	importRLSContextVersionProperty = "_irv"
+	importRLSContextVersion         = "1"
+)
+
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
-	body := result.Message.MustBody()
-
-	// Ensure Schema.DbName is populated from the broadcast message's DbName,
-	// matching the behavior in master where this was set before calling ImportV2.
-	if body.Schema != nil {
-		body.Schema.DbName = body.DbName
-	}
-
-	// Process each vchannel with its own TimeTick (not deprecated MsgBase)
-	// Each vchannel gets its own import job with the corresponding TimeTick
-	vchannels := make([]string, 0, len(result.Results))
-	for vchannel := range result.Results {
-		if funcutil.IsControlChannel(vchannel) {
-			continue
-		}
-		vchannels = append(vchannels, vchannel)
-	}
-
 	// Call createImportJobFromAck directly instead of ImportV2
 	// ImportV2 is only for proxy broadcast, not for ack callback
-	importResp, err := c.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
-		DbID:           0, // already deprecated.
-		CollectionID:   body.GetCollectionID(),
-		CollectionName: body.GetCollectionName(),
-		PartitionIDs:   body.GetPartitionIDs(),
-		ChannelNames:   vchannels,
-		Schema:         body.GetSchema(),
-		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-			// Carry the primary-allocated PK range (nil for legacy/non-autoID/backup)
-			// so both clusters derive identical autoID primary keys.
-			return &internalpb.ImportFile{
-				Id:                  file.GetId(),
-				Paths:               file.GetPaths(),
-				PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
-			}
-		}),
-		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
-		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
-		JobID:         body.GetJobID(),
-	})
+	importResp, err := c.createImportJobFromAck(ctx, result)
 
 	err = merr.CheckRPCCall(importResp, err)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		mlog.Warn(ctx, "import job creation failed because of collection not found, skip it",
-			mlog.Strings("vchannels", vchannels),
+			mlog.Strings("channels", lo.Keys(result.Results)),
 			mlog.String("job_id", importResp.GetJobID()), mlog.Err(err))
 		return nil
 	}
 	return err
 }
 
+// Snapshot WAL bodies contain one empty file and coordinator-owned reference
+// options. Reconstruct only the Pending marker, without source I/O or a second
+// positional array. ACK validates the complete reference before persisting it.
+func importFilesFromMessage(msgFiles []*msgpb.ImportFile, options importutilv2.Options) []*internalpb.ImportFile {
+	files := lo.Map(msgFiles, func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+		// Preserve the 3.0 broadcast-time reservation for ordinary autoID
+		// imports. Backup imports, including snapshots, carry no reservation.
+		return &internalpb.ImportFile{
+			Id: file.GetId(), Paths: file.GetPaths(),
+			PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
+		}
+	})
+	if importutilv2.IsSnapshotSource(options) && len(files) == 1 && len(files[0].GetPaths()) == 0 {
+		files[0].SnapshotSource = &internalpb.SnapshotImportSource{Version: importutilv2.SnapshotPreparationVersion}
+	}
+	return files
+}
+
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
+//
+// All of this runs before the broadcaster's idempotency lookup, which cannot happen
+// until the resource keys are held inside Broadcast. A retry therefore has to pass
+// these checks again before it can resolve to its original jobID, and not all of them
+// are a pure function of the request: ValidateMaxImportJobExceed counts in-flight jobs,
+// ValidateBinlogImportRequest lists the backup files in object storage, and
+// validateImportReplication reads the replication topology. A retry sent while the job
+// limit is saturated -- by the original request among others -- or after the backup
+// files or the replication topology changed is rejected here rather than returning the
+// original jobID. Retrying the same key once the limit frees up resolves normally;
+// minting a fresh key instead is what would import the data twice.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	// Must run before any option is read: checks read options as a repeated KV
+	// (first match wins) while the broadcast body folds them into a map (last
+	// value wins), so a duplicate key would validate under one value and
+	// execute under another.
+	if err := importutilv2.ValidateNoDuplicateKeys(options); err != nil {
+		return err
+	}
+
+	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
+		return err
+	}
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
 		return err
 	}
 
+	// Keep ordinary imports out of Milvus's own storage directories.
+	//
+	// Deliberately NOT re-checked in createImportJobFromAck, unlike the L0 gate
+	// there, because this check is root-relative. It denies paths under THIS
+	// cluster's ChunkManager.RootPath(), and nothing ties a CDC pair's storage
+	// roots together (ReplicateConfiguration carries connection params and
+	// pchannels only). With the same root on both sides -- the default, and the
+	// normal deployment -- the primary's check covers the secondary exactly;
+	// only under differing roots does the same key mean something different on
+	// each side. Recorded in the PR's Known limitations rather than guarded
+	// here, since reaching it also requires enableInReplicatingCluster=true,
+	// which defaults to false and refuses every import on a replicating cluster.
+	if err := ValidateImportFilePaths(s.meta.chunkManager, files, options); err != nil {
+		return err
+	}
+
 	// Validate binlog import files if it's a backup
-	if importutilv2.IsBackup(options) {
+	if importutilv2.IsBackup(options) && !importutilv2.IsSnapshotSource(options) {
 		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, files, options)
 		if err != nil {
 			return err
@@ -170,18 +199,53 @@ func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 	return isReplicatingCluster(assignment.ReplicateConfiguration), nil
 }
 
+// jobIDFromDuplicatedBroadcast recovers the original import jobID from the broadcast
+// message the broadcaster returned on an idempotency hit. The broadcaster does not
+// know about import-specific structures, so the decode happens here.
+//
+// The request payload is deliberately NOT compared against the original: keeping the
+// key unique per logical request is the client's contract, and enforcing it
+// server-side would mean inventing an equality predicate over file lists whose false
+// mismatches would reject legitimate retries -- pushing the caller to mint a new key
+// and import the data twice, the very outcome this feature exists to prevent.
+//
+// The collectionID comparison is not such a predicate and is not a semantic guard: the
+// idempotency key is scoped to this collection's ID, so a hit already means both
+// broadcasts targeted it. It is checked as an invariant, to fail loudly on an encoding
+// or scoping bug rather than hand back a jobID for another collection's import.
+func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage, collectionID int64) (int64, error) {
+	importMsg, err := message.AsBroadcastImportMessageV1(msg)
+	if err != nil {
+		return 0, merr.Wrap(err, "malformed duplicated import broadcast message")
+	}
+	body, err := importMsg.Body()
+	if err != nil {
+		return 0, merr.Wrap(err, "malformed duplicated import broadcast message body")
+	}
+	if body.GetCollectionID() != collectionID {
+		return 0, merr.WrapErrServiceInternalMsg(
+			"idempotency scope resolved to an import into collection %d, not %d",
+			body.GetCollectionID(), collectionID)
+	}
+	return body.GetJobID(), nil
+}
+
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
-	collectionName string,
 	collectionID int64,
 	partitionIDs []int64,
 	files []*internalpb.ImportFile,
 	options []*commonpb.KeyValuePair,
-	schema *schemapb.CollectionSchema,
 	jobID int64,
 	vchannels []string,
-) error {
+	idempotencyKey string,
+	rlsPrincipal string,
+	skipRLS bool,
+) (duplicatedJobID int64, duplicated bool, err error) {
+	if err := importutilv2.ValidateSnapshotSourceRequest(options); err != nil {
+		return 0, false, err
+	}
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
@@ -192,28 +256,26 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Validate the request before broadcasting
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
-		return merr.Wrap(err, "failed to validate import request")
+		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
-	// Per-file PK ranges are the default path for every autoID import. The
-	// coordinator allocates each file a range once and ships it on the ImportMsg, so
-	// the datanode derives primary keys from literal values instead of allocating
-	// them locally. On a replicating cluster that is what makes both clusters produce
-	// identical primary keys; elsewhere it costs a little ID space and keeps one
-	// well-exercised code path instead of a rarely-taken special case.
-	//
-	// The local-allocator path in the datanode remains only for compatibility:
-	// backup imports keep their embedded PKs (UnsetAutoID), L0 imports carry no
-	// autoID PKs, non-autoID collections never allocate, and jobs created before
-	// this version carry no range. A schema without a resolvable primary key is
-	// left to normal validation.
-	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
+	// Size autoID files from a canonical schema snapshot before taking the
+	// collection lock: sizing may perform object-store I/O for every file.
+	preparedColl, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err := merr.CheckRPCCall(preparedColl, err); err != nil {
+		return 0, false, merr.Wrap(err, "failed to get collection metadata before import preparation")
+	}
+	preparedSchema := preparedColl.GetSchema()
+	if preparedSchema == nil || preparedSchema.GetName() == "" {
+		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
+	}
+	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(preparedSchema); pkErr == nil &&
 		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
-		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
+		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, preparedSchema, files,
 			s.allocator.AllocN,
 			Params.CommonCfg.ClusterID.GetAsUint64(),
 		); err != nil {
-			return merr.Wrap(err, "failed to assign per-file PK ranges")
+			return 0, false, merr.Wrap(err, "failed to assign per-file PK ranges")
 		}
 		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
 		// pairing stays provable rather than assumed.
@@ -222,27 +284,74 @@ func (s *Server) broadcastImport(ctx context.Context,
 		}
 	}
 
-	// Get database name from collection metadata via broker
-	// This is safer than extracting from schema which may be stale
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(preparedColl.GetDbName()),
+		message.NewExclusiveCollectionNameResourceKey(preparedColl.GetDbName(), preparedColl.GetCollectionName()))
 	if err != nil {
-		return merr.Wrap(err, "failed to start broadcast with collection id")
+		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
 	defer broadcaster.Close()
 
 	// Re-check the replication state now that the broadcast holds the shared-cluster
 	// resource key. AlterReplicateConfig takes the exclusive-cluster key, so it cannot
 	// change the replication topology while this lock is held. The pre-lock check in
-	// validateImportRequest can go stale during the sizing I/O above: if CDC was enabled
+	// validateImportRequest can go stale before the lock is acquired: if CDC was enabled
 	// in that window, an auto_commit / non-enableInReplicatingCluster import would
 	// otherwise be broadcast into a replicating topology and diverge.
 	if err := s.validateImportReplication(ctx, options); err != nil {
-		return merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
+		return 0, false, merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
+	}
+	if err := s.validateSnapshotPartitionTargets(ctx, collectionID, partitionIDs, options); err != nil {
+		return 0, false, err
 	}
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
-		return err
+		return 0, false, err
+	}
+	schema := coll.GetSchema()
+	if schema == nil || schema.GetName() == "" {
+		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
+	}
+	// The collection changed during the lock-free sizing window. Fail retriably
+	// instead of publishing ranges computed from a different schema snapshot.
+	if preparedColl.GetDbName() != coll.GetDbName() ||
+		preparedColl.GetCollectionName() != coll.GetCollectionName() ||
+		!proto.Equal(preparedSchema, schema) {
+		return 0, false, merr.WrapErrServiceUnavailableMsg(
+			"collection %d changed while preparing import; retry the request", collectionID)
+	}
+	schema.Fields = lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return !common.IsSystemField(field.GetFieldID())
+	})
+	var chunkManager storage.ChunkManager
+	if s.meta != nil {
+		chunkManager = s.meta.chunkManager
+	}
+	files, options, err = prepareSnapshotImportFiles(ctx, partitionIDs, chunkManager, schema, files, options)
+	if err != nil {
+		return 0, false, merr.Wrap(err, "failed to capture snapshot import source")
+	}
+	if err := importutilv2.ValidateSnapshotImportPlan(files, options, nil); err != nil {
+		return 0, false, err
+	}
+	// Snapshot preparation is pinned by body options. Empty legacy paths make
+	// old coordinators reject it instead of treating metadata as row data.
+	msgFiles = lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
+		return &msgpb.ImportFile{
+			Id:                  file.GetId(),
+			Paths:               file.GetPaths(),
+			PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
+		}
+	})
+	msgOptions := funcutil.KeyValuePair2Map(options)
+	delete(msgOptions, importutilv2.RLSPrincipal)
+	delete(msgOptions, importutilv2.SkipRLS)
+	if rlsPrincipal != "" {
+		msgOptions[importutilv2.RLSPrincipal] = rlsPrincipal
+	}
+	if skipRLS {
+		msgOptions[importutilv2.SkipRLS] = "true"
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
@@ -253,20 +362,71 @@ func (s *Server) broadcastImport(ctx context.Context,
 				Timestamp: 0,
 			},
 			DbName:         coll.DbName,
-			CollectionName: collectionName,
+			CollectionName: schema.GetName(),
 			CollectionID:   collectionID,
 			PartitionIDs:   partitionIDs,
-			Options:        funcutil.KeyValuePair2Map(options),
+			Options:        msgOptions,
 			Files:          msgFiles,
-			Schema:         schema, // TODO: should we use the schema from the collection?
+			Schema:         schema,
 			JobID:          jobID,
 		}).
+		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
+		// Scoped to the collection by ID, so the same client key stays a distinct
+		// operation against another collection, and a rename does not move the key off
+		// the collection it was bound to: a retry naming the renamed collection still
+		// resolves to its original job. A retry still naming the OLD collection never
+		// reaches here -- the proxy resolves the name first -- so it fails rather than
+		// importing twice. The broadcaster adds the message type; everything else about
+		// the dedup identity is this scope.
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
+	if importutilv2.IsSnapshotSource(options) {
+		if err := validateSnapshotImportMessageSize(msg); err != nil {
+			return 0, false, err
+		}
+	}
 
 	// Broadcast the message
-	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	result, err := broadcaster.Broadcast(ctx, msg)
+	if err != nil {
+		return 0, false, err
+	}
+	if result.Duplicated == nil {
+		return 0, false, nil
+	}
+	// The broadcaster resolved this idempotency key to an earlier broadcast, so no
+	// new job was created; recover what that broadcast carried.
+	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated, collectionID)
+	if err != nil {
+		return 0, false, err
+	}
+	// Never log the raw key: it is client-controlled and may carry sensitive data.
+	keyFingerprint := mlog.String("idempotencyKeyFingerprint", message.IdempotencyKeyFingerprint(idempotencyKey))
+
+	mlog.Info(ctx, "import broadcast deduplicated by idempotency key",
+		mlog.FieldCollectionID(collectionID),
+		mlog.FieldJobID(originalJobID),
+		keyFingerprint)
+	return originalJobID, true, nil
+}
+
+func validateSnapshotImportMessageSize(msg message.BroadcastMutableMessage) error {
+	// Count the complete encoded reference message, including schema/options
+	// and header properties. The portable ceiling leaves headroom in the default
+	// catalog/RPC envelopes. Also respect smaller configured WAL limits, using
+	// the shared selector so mq.type=default is resolved exactly as at startup.
+	limit := 512 * 1024
+	switch streamingutil.MustSelectWALName() {
+	case message.WALNamePulsar:
+		limit = min(limit, Params.PulsarCfg.MaxMessageSize.GetAsInt()/2)
+	case message.WALNameKafka:
+		limit = min(limit, Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()/2)
+	}
+	if msg.EstimateSize() > limit {
+		return merr.WrapErrImportFailedMsg("encoded snapshot Import message exceeds admission limit %d bytes", limit)
+	}
+	return nil
 }
 
 func (c *DDLCallbacks) registerImportCallbacks() {

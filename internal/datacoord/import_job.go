@@ -24,11 +24,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ImportJobFilter func(job ImportJob) bool
@@ -65,10 +68,39 @@ type UpdateJobAction func(job ImportJob)
 
 const importJobReasonAbortedByUser = "aborted by user"
 
+// UnfailableJobStates are the committed states: the commit fence is out and
+// HandleCommitVchannel may already have made segments visible, so failing the
+// job would drop committed data.
+var UnfailableJobStates = typeutil.NewSet(
+	internalpb.ImportJobState_Committing,
+	internalpb.ImportJobState_Completed,
+)
+
+// isIllegalJobTransition reports whether moving job to state must be refused.
+func isIllegalJobTransition(job ImportJob, state internalpb.ImportJobState) bool {
+	return state == internalpb.ImportJobState_Failed && UnfailableJobStates.Contain(job.GetState())
+}
+
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 	return func(job ImportJob) {
+		if isIllegalJobTransition(job, state) {
+			mlog.Warn(context.TODO(), "refused illegal import job state transition",
+				mlog.FieldJobID(job.GetJobID()),
+				mlog.String("from", job.GetState().String()), mlog.String("to", state.String()))
+			return
+		}
 		job.(*importJob).State = state
 		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
+			// Credentials are needed through both phases and retries, but not
+			// after a terminal transition. This clears the retained job record;
+			// historical WAL entries remain subject to normal WAL retention.
+			options := make([]*commonpb.KeyValuePair, 0, len(job.GetOptions()))
+			for _, option := range job.GetOptions() {
+				if option.GetKey() != importutilv2.ExternalSpec && option.GetKey() != importutilv2.SnapshotSourceURI {
+					options = append(options, option)
+				}
+			}
+			job.(*importJob).Options = options
 			// releases requested disk resource
 			job.(*importJob).RequestedDiskSize = 0
 			// set cleanup ts
@@ -117,8 +149,10 @@ type ImportJob interface {
 	GetCreateTime() string
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
+	GetSnapshotL0Sources() []*internalpb.SnapshotImportL0Source
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
+	GetRlsCheckPredicate() *planpb.Expr
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
 	Clone() ImportJob

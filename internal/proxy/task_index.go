@@ -269,7 +269,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsSparseFloatVectorType(cit.fieldSchema.ElementType)) {
 				// override sparse float vector index params by autoindex
-				for k, v := range Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap() {
+				for k, v := range indexparamcheck.GetSparseAutoIndexParams(metricType, cit.functionSchema.GetType()) {
 					indexParamsMap[k] = v
 				}
 			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) ||
@@ -362,7 +362,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsSparseFloatVectorType(cit.fieldSchema.ElementType)) {
 				// override sparse float vector index params by autoindex
-				config = Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
+				config = indexparamcheck.GetSparseAutoIndexParams(metricType, cit.functionSchema.GetType())
 			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsBinaryVectorType(cit.fieldSchema.ElementType)) {
 				if metricTypeExist && funcutil.SliceContain(indexparamcheck.DeduplicateMetrics, metricType) {

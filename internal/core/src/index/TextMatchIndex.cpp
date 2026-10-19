@@ -138,11 +138,12 @@ TextMatchIndex::Upload(const Config& config) {
         }
     }
 
-    auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        disk_file_manager_->GetRemotePathsToFileSize();
 
     auto binary_set = Serialize(config);
     this->file_manager_->AddTextLog(binary_set);
-    auto remote_mem_path_to_size =
+    const auto& remote_mem_path_to_size =
         this->file_manager_->GetRemotePathsToFileSize();
 
     // Strip the remote basePath prefix to return relative file paths.

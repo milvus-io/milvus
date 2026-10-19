@@ -62,6 +62,21 @@ type RecordMaterializer struct {
 }
 
 func NewRecordMaterializer(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, existingFields map[int64]struct{}) (*RecordMaterializer, error) {
+	// Output ownership is a construction invariant. Validate it before creating
+	// any function runner so corrupted metadata cannot reach the record hot path.
+	outputOwners := make(map[int64]string)
+	for _, functionSchema := range functions {
+		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
+			if owner, ok := outputOwners[outputFieldID]; ok {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"function output field %d is declared by both function %s and function %s",
+					outputFieldID, owner, functionSchema.GetName(),
+				)
+			}
+			outputOwners[outputFieldID] = functionSchema.GetName()
+		}
+	}
+
 	materializer := &RecordMaterializer{schema: schema}
 	materializedFields := make(map[int64]struct{})
 	for _, functionSchema := range functions {
@@ -366,8 +381,8 @@ func newMinHashFunctionMaterializer(schema *schemapb.CollectionSchema, runner fu
 		if inputField == nil || typeutil.GetField(schema, inputField.GetFieldID()) == nil {
 			return nil, merr.WrapErrFunctionFailedMsg("input field not found in schema")
 		}
-		if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_Text {
-			return nil, merr.WrapErrFunctionFailedMsg("input field data type must be varchar or text for minhash function materialization")
+		if inputField.GetDataType() != schemapb.DataType_VarChar {
+			return nil, merr.WrapErrFunctionFailedMsg("input field data type must be varchar for minhash function materialization; text input requires LOB decoding")
 		}
 		inputFieldIDs = append(inputFieldIDs, inputField.GetFieldID())
 	}
@@ -413,8 +428,8 @@ func newBM25FunctionMaterializer(schema *schemapb.CollectionSchema, runner funct
 		if inputField == nil || typeutil.GetField(schema, inputField.GetFieldID()) == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
 		}
-		if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_Text {
-			return nil, merr.WrapErrParameterInvalidMsg("input field data type must be varchar or text for bm25 function materialization")
+		if inputField.GetDataType() != schemapb.DataType_VarChar {
+			return nil, merr.WrapErrParameterInvalidMsg("input field data type must be varchar for bm25 function materialization; text input requires LOB decoding")
 		}
 		inputFieldIDs = append(inputFieldIDs, inputField.GetFieldID())
 	}

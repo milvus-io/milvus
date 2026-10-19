@@ -672,7 +672,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     struct ValidResult {
         int64_t valid_count = 0;
         std::unique_ptr<bool[]> valid_data;
-        std::vector<int64_t> valid_offsets;
+        // NULL filtering preserves logical segment offsets and their order.
+        std::vector<int64_t> valid_logical_offsets;
     };
 
     ValidResult
@@ -707,6 +708,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
                         int64_t offset,
                         int64_t size,
                         TargetBitmapView valid_result) const override;
+
+    void
+    ApplyFieldValidDataByRange(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               int64_t logical_offset,
+                               int64_t count,
+                               TargetBitmapView valid_result) const override;
 
     void
     ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,

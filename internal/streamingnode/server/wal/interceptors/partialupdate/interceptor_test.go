@@ -271,6 +271,24 @@ func TestPartialUpdateChainRecoveredLocalCASReturnsRetry(t *testing.T) {
 	require.Equal(t, message.TxnStateRollbacked, session.State())
 }
 
+func TestPartialUpdateChainHistoryRejectionRollsBackBeforeAppend(t *testing.T) {
+	env := newPartialUpdateChainTestEnv(t)
+	readTS := env.allocateReadTS(t)
+	env.partial.state.historyStartTs = readTS + 1
+	txnContext := env.prepareCASTxn(t, readTS, 10)
+	appended := false
+	_, err := env.append(newChainTestCASCommit(t, txnContext), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return env.nextMessageID(), nil
+	})
+	requirePartialUpdateRetryable(t, err)
+	require.True(t, txn.IsCommitAdmissionRejected(err))
+	require.False(t, appended)
+	session, err := env.txnManager.GetSessionOfTxn(txnContext.TxnID)
+	require.NoError(t, err)
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+}
+
 func TestPartialUpdateInterceptorRecordsTxnWriteAndMetaAfterAppend(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
 	meta := validCASMeta(100, 1)
@@ -932,14 +950,48 @@ func appendCASTxnBody(
 func newTestAppendInterceptor(channel types.PChannelInfo) *appendInterceptor {
 	state := newPartialUpdateState(30*time.Second, versionIndexBudgetForEntries(100))
 	state.channel = channel
+	state.historyStartTs = 1
 	return &appendInterceptor{
-		state: state,
+		enableCAS: true,
+		state:     state,
 		pkDescriptorGetter: &staticPrimaryKeyDescriptorGetter{
 			descriptor: shards.PrimaryKeyDescriptor{
 				FieldID:  100,
 				DataType: schemapb.DataType_Int64,
 			},
 		},
+	}
+}
+
+func TestPartialUpdateBuilderReestablishesHistoryOnReopen(t *testing.T) {
+	paramtable.Init()
+	builder := NewInterceptorBuilder()
+	for _, floor := range []uint64{90, 110} {
+		firstTick := streamingtimetick.NewTimeTickMsg(floor, walimplstest.NewTestMessageID(0), 0, true).
+			IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		interceptor := builder.Build(&interceptors.InterceptorBuildParam{
+			ChannelInfo:         types.PChannelInfo{Name: "p1", Term: 2},
+			LastTimeTickMessage: firstTick,
+		}).(*appendInterceptor)
+		require.Equal(t, floor, interceptor.state.historyStartTs)
+		interceptor.state.recordTxnBegin(1)
+		require.NoError(t, interceptor.state.recordTxnCAS(1, validCASMeta(100, 2), validCASScope()))
+		interceptor.state.recordTxnWrites(1, []any{int64(10)})
+		appended := false
+		_, err := interceptor.DoAppend(context.Background(), newCASCommitTxnMessage(t, "v1", 1, 120),
+			func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				appended = true
+				return walimplstest.NewTestMessageID(2), nil
+			})
+		if floor > 100 {
+			requirePartialUpdateRetryable(t, err)
+			require.True(t, txn.IsCommitAdmissionRejected(err))
+			require.False(t, appended)
+		} else {
+			require.NoError(t, err)
+			require.True(t, appended)
+		}
+		interceptor.Close()
 	}
 }
 
@@ -988,4 +1040,88 @@ func withRawPartialUpdateCAS(msg message.MutableMessage, raw string) message.Mut
 	}
 	props["_puc"] = ""
 	return message.NewMutableMessageBeforeAppend(msg.Payload(), props)
+}
+
+func TestPartialUpdateDisabledBypassesCASAdmission(t *testing.T) {
+	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
+	interceptor.enableCAS = false
+	defer interceptor.Close()
+	// No runtime proof exists: enabled CAS would reject this commit.
+	msg := newCASCommitTxnMessage(t, "v1", 1, 120)
+	id := walimplstest.NewTestMessageID(2)
+	failure := errors.New("backend failure")
+	for _, backendErr := range []error{nil, failure} {
+		gotID, err := interceptor.DoAppend(context.Background(), msg,
+			func(_ context.Context, got message.MutableMessage) (message.MessageID, error) {
+				require.Same(t, msg, got)
+				return id, backendErr
+			})
+		require.Equal(t, id, gotID)
+		require.Equal(t, backendErr, err)
+		require.Empty(t, interceptor.state.txns)
+	}
+}
+
+func TestPartialUpdateInterceptorCachesCASConfig(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	key := params.StreamingCfg.PartialUpdateEnableCAS.Key
+	old := params.StreamingCfg.PartialUpdateEnableCAS.GetValue()
+	defer params.Save(key, old)
+	builder := NewInterceptorBuilder()
+	for _, value := range []string{"true", "false"} {
+		require.NoError(t, params.Save(key, value))
+		interceptor := builder.Build(&interceptors.InterceptorBuildParam{}).(*appendInterceptor)
+		next := "true"
+		if value == "true" {
+			next = "false"
+		}
+		require.NoError(t, params.Save(key, next))
+		require.Equal(t, value == "true", interceptor.enableCAS)
+		interceptor.Close()
+	}
+}
+
+func TestPartialUpdateDisabledChainAllowsStaleCASCommits(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	key := params.StreamingCfg.PartialUpdateEnableCAS.Key
+	old := params.StreamingCfg.PartialUpdateEnableCAS.GetValue()
+	require.NoError(t, params.Save(key, "false"))
+	defer params.Save(key, old)
+	env := newPartialUpdateChainTestEnv(t)
+	readTS := env.allocateReadTS(t)
+	first := newChainTestCASCommit(t, env.prepareCASTxn(t, readTS, 10))
+	second := newChainTestCASCommit(t, env.prepareCASTxn(t, readTS, 10))
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := env.append(first, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			close(entered)
+			<-release
+			return env.nextMessageID(), nil
+		})
+		firstDone <- err
+	}()
+	<-entered
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := env.append(second, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return env.nextMessageID(), nil
+		})
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		close(release)
+		require.NoError(t, <-firstDone)
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		close(release)
+		<-firstDone
+		<-secondDone
+		t.Fatal("disabled CAS commits were serialized")
+	}
+	require.Empty(t, env.partial.state.txns)
 }

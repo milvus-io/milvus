@@ -290,6 +290,50 @@ func TestCluster_Compaction(t *testing.T) {
 		assert.Equal(t, "files/insert_log/1/2/3/_delta/not-log-id-suffix", result.GetSegments()[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	})
 
+	for _, tc := range []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "nil", payload: nil},
+		{name: "empty slice", payload: []byte{}},
+	} {
+		t.Run("query finished compaction without payload/"+tc.name, func(t *testing.T) {
+			mockNodeManager := NewMockNodeManager(t)
+			cluster := NewCluster(mockNodeManager)
+			mockClient := mocks.NewMockDataNodeClient(t)
+			mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+			properties := taskcommon.NewProperties(nil)
+			properties.AppendTaskState(taskcommon.Finished)
+			mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+				Status:     merr.Success(),
+				Properties: properties,
+				Payload:    tc.payload,
+			}, nil)
+			result, err := cluster.QueryCompaction(1, &datapb.CompactionStateRequest{PlanID: 10})
+			assert.Nil(t, result)
+			assert.ErrorIs(t, err, merr.ErrCompactionResultNotFound)
+			assert.ErrorContains(t, err, "task 10")
+		})
+
+		t.Run("query failed compaction without payload/"+tc.name, func(t *testing.T) {
+			mockNodeManager := NewMockNodeManager(t)
+			cluster := NewCluster(mockNodeManager)
+			mockClient := mocks.NewMockDataNodeClient(t)
+			mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+			properties := taskcommon.NewProperties(nil)
+			properties.AppendTaskState(taskcommon.Failed)
+			mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+				Status:     merr.Success(),
+				Properties: properties,
+				Payload:    tc.payload,
+			}, nil)
+			result, err := cluster.QueryCompaction(1, &datapb.CompactionStateRequest{PlanID: 10})
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
+			assert.Equal(t, datapb.CompactionTaskState_failed, result.GetState())
+		})
+	}
+
 	t.Run("drop compaction", func(t *testing.T) {
 		mockNodeManager := NewMockNodeManager(t)
 		cluster := NewCluster(mockNodeManager)

@@ -74,11 +74,15 @@ type rwOptions struct {
 	neededFields        typeutil.Set[int64]
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
-	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
-	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
-	externalReader      packed.ExternalReaderContext
-	writerFormat        string
-	presentFields       map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
+	// pluginContextSet distinguishes an explicit plaintext source from
+	// destination-schema fallback.
+	pluginContextSet  bool
+	textColumnConfigs []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	textRefsAsBinary  bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
+	resolveTextLob    bool                      // decode manifest TEXT LOB refs into ordinary UTF8 values
+	externalReader    packed.ExternalReaderContext
+	writerFormat      string
+	presentFields     map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
 }
 
 func (o *rwOptions) validate() error {
@@ -202,9 +206,13 @@ func WithUseLoonFFI(useLoonFFI bool) RwOption {
 	}
 }
 
+// WithPluginContext supplies an already-resolved storage encryption context.
+// For manifest readers, calling it with nil explicitly marks a plaintext
+// source and disables fallback to the destination schema's CMEK properties.
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
+		options.pluginContextSet = true
 	}
 }
 
@@ -223,6 +231,15 @@ func WithTextColumnConfigs(configs []packed.TextColumnConfig) RwOption {
 func WithTextRefsAsBinary() RwOption {
 	return func(options *rwOptions) {
 		options.textRefsAsBinary = true
+	}
+}
+
+// WithResolveTextLob makes a manifest reader resolve internal TEXT LOB
+// references into ordinary UTF8 values. It is opt-in because compaction paths
+// need the physical binary references for reuse and rewrite strategies.
+func WithResolveTextLob() RwOption {
+	return func(options *rwOptions) {
+		options.resolveTextLob = true
 	}
 }
 
@@ -395,11 +412,25 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}
+	// WithResolveTextLob selects milvus-storage SegmentReader, whose current C
+	// API cannot receive the source backup's key-retriever context. Reject the
+	// explicit source key here even when cluster encryption is disabled; letting
+	// it fall through would silently discard the key before opening the backup.
+	// CMEK sources without TEXT/LOB use PackedReader and remain supported.
+	if rwOptions.resolveTextLob && rwOptions.pluginContext != nil {
+		return nil, merr.WrapErrOperationNotSupportedMsg(
+			"CMEK-protected StorageV3 import does not support TEXT/LOB fields",
+		)
+	}
 
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
-		if rwOptions.pluginContext != nil {
+	// In snapshot-source import, neededSchema describes the destination
+	// collection. WithPluginContext marks that the source context has already
+	// been resolved, including an explicit nil for a plaintext source, so target
+	// CMEK properties are never reused to read the source. Destination encryption
+	// is applied independently by the import write path.
+	if hookutil.IsClusterEncryptionEnabled() && !rwOptions.resolveTextLob {
+		if rwOptions.pluginContextSet {
 			pluginContext = rwOptions.pluginContext
 		} else {
 			ez := hookutil.GetEzByCollProperties(neededSchema.GetProperties(), rwOptions.collectionID)
@@ -437,6 +468,48 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	}
 	inner, err := NewRecordReaderFromManifest(manifestPath, presentSchema,
 		rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, option...)
+	if err != nil {
+		return nil, err
+	}
+	return NewAbsentFieldFillRecordReader(inner, neededSchema, present), nil
+}
+
+// NewTextDecodedManifestRecordReader resolves persisted TEXT references through
+// source-specific LOB paths and returns logical UTF8 columns. It is intended for
+// compaction that must rewrite LOB payloads into a different partition namespace.
+func NewTextDecodedManifestRecordReader(
+	_ context.Context,
+	manifestPath string,
+	neededSchema *schemapb.CollectionSchema,
+	textColumnConfigs []packed.TextColumnConfig,
+	option ...RwOption,
+) (RecordReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+	present := rwOptions.presentFields
+	if present == nil {
+		var err error
+		present, err = packed.GetManifestFieldIDs(manifestPath, rwOptions.storageConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+	presentSchema, err := filterSchemaToPresentFields(neededSchema, present)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := NewTextDecodedManifestReader(
+		manifestPath,
+		presentSchema,
+		rwOptions.bufferSize,
+		rwOptions.storageConfig,
+		textColumnConfigs,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -629,6 +702,7 @@ func NewDeltalogWriter(
 }
 
 func NewDeltalogReader(
+	ctx context.Context,
 	pkType schemapb.DataType,
 	paths []string,
 	option ...RwOption,
@@ -649,7 +723,7 @@ func NewDeltalogReader(
 
 	switch rwOptions.version {
 	case StorageV1:
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
@@ -664,6 +738,11 @@ func NewDeltalogReader(
 		}
 		return &IterativeRecordReader{
 			iterate: func() (RecordReader, error) {
+				// The per-file FFI read below cannot be interrupted; honor
+				// cancellation at the file boundary at least.
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if pathPos >= len(paths) {
 					return nil, io.EOF
 				}
@@ -681,6 +760,7 @@ func NewDeltalogReader(
 // each binlog's EntriesNum. StorageV3 FFI readers need those row counts to
 // build column groups with stable start/end row offsets.
 func NewDeltalogReaderFromBinlogs(
+	ctx context.Context,
 	pkType schemapb.DataType,
 	binlogs []*datapb.Binlog,
 	option ...RwOption,
@@ -708,8 +788,12 @@ func NewDeltalogReaderFromBinlogs(
 			}
 			paths = append(paths, binlog.GetLogPath())
 		}
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
+		// Unlike NewDeltalogReader, this path builds the FFI reader from all
+		// fragments up front rather than iterating file-by-file, so there is
+		// no per-file boundary to check ctx at; ctx is accepted for signature
+		// symmetry with the V1 branch above but does not bound this call.
 		fragments, err := buildDeltalogFragmentsFromBinlogs(binlogs)
 		if err != nil {
 			return nil, err

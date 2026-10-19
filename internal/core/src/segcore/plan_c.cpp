@@ -128,6 +128,18 @@ GetTopK(CSearchPlan plan) {
     return res;
 }
 
+int64_t
+GetGroupSize(CSearchPlan plan) {
+    auto search_plan = static_cast<milvus::query::Plan*>(plan);
+    return search_plan->plan_node_->search_info_.group_size_;
+}
+
+void
+SetSearchPlanTakeForOutputAllowed(CSearchPlan plan, bool allowed) {
+    auto search_plan = static_cast<milvus::query::Plan*>(plan);
+    search_plan->take_for_output_allowed_ = allowed;
+}
+
 CStatus
 GetFieldID(CSearchPlan plan, int64_t* field_id) {
     try {
@@ -210,6 +222,12 @@ void
 DeleteRetrievePlan(CRetrievePlan c_plan) {
     auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
     delete plan;
+}
+
+void
+SetRetrievePlanTakeForOutputAllowed(CRetrievePlan c_plan, bool allowed) {
+    auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
+    plan->take_for_output_allowed_ = allowed;
 }
 
 bool

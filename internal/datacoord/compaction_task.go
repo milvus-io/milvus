@@ -82,6 +82,15 @@ func setTmpSegments(segments []int64) compactionTaskOpt {
 func setState(state datapb.CompactionTaskState) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.State = state
+		if task.FailReason != "" {
+			return
+		}
+		switch state {
+		case datapb.CompactionTaskState_failed:
+			task.FailReason = "compaction task failed"
+		case datapb.CompactionTaskState_timeout:
+			task.FailReason = "compaction task timed out"
+		}
 	}
 }
 

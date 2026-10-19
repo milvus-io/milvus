@@ -3128,6 +3128,21 @@ func TestGetDataIterator(t *testing.T) {
 			want: []any{int64(1), int64(2), int64(3)},
 		},
 		{
+			name: "ints with empty validity",
+			field: &schemapb.FieldData{
+				Type:      schemapb.DataType_Int64,
+				ValidData: []bool{},
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{1}},
+						},
+					},
+				},
+			},
+			want: []any{int64(1)},
+		},
+		{
 			name: "ints with nulls",
 			field: &schemapb.FieldData{
 				Type: schemapb.DataType_Int64,
@@ -3192,6 +3207,36 @@ func TestGetDataIterator(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A literal null unmarshals into a map as nil with no error, and the merge
+// then wrote into a nil map and panicked. A row whose dynamic field holds null
+// is insertable, so merging over it has to work rather than crash the proxy.
+func TestMergeDynamicJSONNullDocuments(t *testing.T) {
+	t.Run("null base is repaired by the update", func(t *testing.T) {
+		merged, err := mergeDynamicJSON([]byte(`null`), []byte(`{"a":1}`))
+		assert.NoError(t, err)
+		assert.JSONEq(t, `{"a":1}`, string(merged))
+	})
+
+	t.Run("null update says nothing", func(t *testing.T) {
+		merged, err := mergeDynamicJSON([]byte(`{"a":1}`), []byte(`null`))
+		assert.NoError(t, err)
+		assert.JSONEq(t, `{"a":1}`, string(merged))
+	})
+
+	t.Run("non-object documents still error", func(t *testing.T) {
+		_, err := mergeDynamicJSON([]byte(`[1]`), []byte(`{"a":1}`))
+		assert.Error(t, err)
+		_, err = mergeDynamicJSON([]byte(`{"a":1}`), []byte(`"x"`))
+		assert.Error(t, err)
+	})
+
+	t.Run("large integers survive an untouched key", func(t *testing.T) {
+		merged, err := mergeDynamicJSON([]byte(`{"big":9007199254740993}`), []byte(`{"b":2}`))
+		assert.NoError(t, err)
+		assert.Contains(t, string(merged), "9007199254740993")
+	})
 }
 
 func TestUpdateFieldData(t *testing.T) {
@@ -7120,4 +7165,16 @@ func TestGetTotalFieldsNumIncludesStructParent(t *testing.T) {
 
 	assert.Equal(t, 5, GetTotalFieldsNum(schema))
 	assert.Len(t, GetAllFieldSchemas(schema), 4)
+}
+
+// Decoding a dynamic field into map[string]interface{} rounds every number to
+// float64, so a partial update of one key silently rewrote the others.
+func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
+	merged, err := mergeDynamicJSON(
+		[]byte(`{"untouched":9007199254740993,"big":12345678901234567890,"tag":"old"}`),
+		[]byte(`{"tag":"new"}`))
+	require.NoError(t, err)
+	assert.Contains(t, string(merged), `"untouched":9007199254740993`)
+	assert.Contains(t, string(merged), `"big":12345678901234567890`)
+	assert.Contains(t, string(merged), `"tag":"new"`)
 }

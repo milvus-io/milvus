@@ -63,8 +63,9 @@ const (
 
 	IdentifierKey = "identifier"
 
-	HeaderUserAgent = "user-agent"
-	HeaderDBName    = "dbName"
+	HeaderUserAgent      = "user-agent"
+	HeaderDBName         = "dbName"
+	HeaderIdempotencyKey = "idempotency-key"
 
 	RoleConfigPrivileges = "privileges"
 	RoleConfigObjectType = "object_type"
@@ -92,6 +93,9 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeInsert.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDelete.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpsert.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeViewRLS.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSkipRLS.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeManageRLS.String()),
 
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetStatistics.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateIndex.String()),
@@ -129,6 +133,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUnpinSnapshotData.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreExternalSnapshot.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeExportSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateCollection.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropCollection.String()),
@@ -282,6 +287,9 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeInsert.String(),
 		commonpb.ObjectPrivilege_PrivilegeDelete.String(),
 		commonpb.ObjectPrivilege_PrivilegeUpsert.String(),
+		commonpb.ObjectPrivilege_PrivilegeViewRLS.String(),
+		commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(),
+		commonpb.ObjectPrivilege_PrivilegeManageRLS.String(),
 		commonpb.ObjectPrivilege_PrivilegeImport.String(),
 		commonpb.ObjectPrivilege_PrivilegeFlush.String(),
 		commonpb.ObjectPrivilege_PrivilegeCompaction.String(),
@@ -319,6 +327,7 @@ var (
 		commonpb.ObjectPrivilege_PrivilegePinSnapshotData.String(),
 		commonpb.ObjectPrivilege_PrivilegeUnpinSnapshotData.String(),
 		commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String(),
 	}
 )
 
@@ -371,6 +380,9 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeCreateAlias.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropAlias.String(),
 			commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(),
+			commonpb.ObjectPrivilege_PrivilegeViewRLS.String(),
+			commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(),
+			commonpb.ObjectPrivilege_PrivilegeManageRLS.String(),
 		})...,
 	)
 
@@ -440,6 +452,7 @@ var (
 			PrivilegeExpr,
 			commonpb.ObjectPrivilege_PrivilegeRestoreExternalSnapshot.String(),
 			commonpb.ObjectPrivilege_PrivilegeExportSnapshot.String(),
+			commonpb.ObjectPrivilege_PrivilegeImportBinlog.String(),
 		})...,
 	)
 )

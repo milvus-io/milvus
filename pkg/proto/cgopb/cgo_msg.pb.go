@@ -317,6 +317,134 @@ func (x *SerializedIndexFileInfo) GetFileSize() int64 {
 	return 0
 }
 
+// Materialized Function Chain inputs passed from Go to segcore. This is an
+// in-process CGO payload, not a client or component RPC message.
+type FunctionChainInputPlan struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Inputs []*FunctionChainInput `protobuf:"bytes,1,rep,name=inputs,proto3" json:"inputs,omitempty"`
+}
+
+func (x *FunctionChainInputPlan) Reset() {
+	*x = FunctionChainInputPlan{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_cgo_msg_proto_msgTypes[3]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *FunctionChainInputPlan) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FunctionChainInputPlan) ProtoMessage() {}
+
+func (x *FunctionChainInputPlan) ProtoReflect() protoreflect.Message {
+	mi := &file_cgo_msg_proto_msgTypes[3]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FunctionChainInputPlan.ProtoReflect.Descriptor instead.
+func (*FunctionChainInputPlan) Descriptor() ([]byte, []int) {
+	return file_cgo_msg_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *FunctionChainInputPlan) GetInputs() []*FunctionChainInput {
+	if x != nil {
+		return x.Inputs
+	}
+	return nil
+}
+
+type FunctionChainInput struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	SourceFieldId  int64             `protobuf:"varint,1,opt,name=source_field_id,json=sourceFieldId,proto3" json:"source_field_id,omitempty"`
+	TargetDataType schemapb.DataType `protobuf:"varint,2,opt,name=target_data_type,json=targetDataType,proto3,enum=milvus.proto.schema.DataType" json:"target_data_type,omitempty"`
+	LogicalName    string            `protobuf:"bytes,3,opt,name=logical_name,json=logicalName,proto3" json:"logical_name,omitempty"`
+	NestedPath     []string          `protobuf:"bytes,4,rep,name=nested_path,json=nestedPath,proto3" json:"nested_path,omitempty"`
+	IsJsonPath     bool              `protobuf:"varint,5,opt,name=is_json_path,json=isJsonPath,proto3" json:"is_json_path,omitempty"`
+}
+
+func (x *FunctionChainInput) Reset() {
+	*x = FunctionChainInput{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_cgo_msg_proto_msgTypes[4]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *FunctionChainInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FunctionChainInput) ProtoMessage() {}
+
+func (x *FunctionChainInput) ProtoReflect() protoreflect.Message {
+	mi := &file_cgo_msg_proto_msgTypes[4]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FunctionChainInput.ProtoReflect.Descriptor instead.
+func (*FunctionChainInput) Descriptor() ([]byte, []int) {
+	return file_cgo_msg_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *FunctionChainInput) GetSourceFieldId() int64 {
+	if x != nil {
+		return x.SourceFieldId
+	}
+	return 0
+}
+
+func (x *FunctionChainInput) GetTargetDataType() schemapb.DataType {
+	if x != nil {
+		return x.TargetDataType
+	}
+	return schemapb.DataType(0)
+}
+
+func (x *FunctionChainInput) GetLogicalName() string {
+	if x != nil {
+		return x.LogicalName
+	}
+	return ""
+}
+
+func (x *FunctionChainInput) GetNestedPath() []string {
+	if x != nil {
+		return x.NestedPath
+	}
+	return nil
+}
+
+func (x *FunctionChainInput) GetIsJsonPath() bool {
+	if x != nil {
+		return x.IsJsonPath
+	}
+	return false
+}
+
 var File_cgo_msg_proto protoreflect.FileDescriptor
 
 var file_cgo_msg_proto_rawDesc = []byte{
@@ -392,11 +520,31 @@ var file_cgo_msg_proto_rawDesc = []byte{
 	0x65, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x1b, 0x0a, 0x09, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x6e, 0x61,
 	0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x66, 0x69, 0x6c, 0x65, 0x4e, 0x61,
 	0x6d, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x73, 0x69, 0x7a, 0x65, 0x18,
-	0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x66, 0x69, 0x6c, 0x65, 0x53, 0x69, 0x7a, 0x65, 0x42,
-	0x30, 0x5a, 0x2e, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70,
-	0x6b, 0x67, 0x2f, 0x76, 0x33, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x63, 0x67, 0x6f, 0x70,
-	0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x66, 0x69, 0x6c, 0x65, 0x53, 0x69, 0x7a, 0x65, 0x22,
+	0x56, 0x0a, 0x16, 0x46, 0x75, 0x6e, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x43, 0x68, 0x61, 0x69, 0x6e,
+	0x49, 0x6e, 0x70, 0x75, 0x74, 0x50, 0x6c, 0x61, 0x6e, 0x12, 0x3c, 0x0a, 0x06, 0x69, 0x6e, 0x70,
+	0x75, 0x74, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
+	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x67, 0x6f, 0x2e, 0x46, 0x75, 0x6e,
+	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x43, 0x68, 0x61, 0x69, 0x6e, 0x49, 0x6e, 0x70, 0x75, 0x74, 0x52,
+	0x06, 0x69, 0x6e, 0x70, 0x75, 0x74, 0x73, 0x22, 0xeb, 0x01, 0x0a, 0x12, 0x46, 0x75, 0x6e, 0x63,
+	0x74, 0x69, 0x6f, 0x6e, 0x43, 0x68, 0x61, 0x69, 0x6e, 0x49, 0x6e, 0x70, 0x75, 0x74, 0x12, 0x26,
+	0x0a, 0x0f, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x5f, 0x69,
+	0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0d, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x46,
+	0x69, 0x65, 0x6c, 0x64, 0x49, 0x64, 0x12, 0x47, 0x0a, 0x10, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74,
+	0x5f, 0x64, 0x61, 0x74, 0x61, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0e,
+	0x32, 0x1d, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x73, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x2e, 0x44, 0x61, 0x74, 0x61, 0x54, 0x79, 0x70, 0x65, 0x52,
+	0x0e, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x44, 0x61, 0x74, 0x61, 0x54, 0x79, 0x70, 0x65, 0x12,
+	0x21, 0x0a, 0x0c, 0x6c, 0x6f, 0x67, 0x69, 0x63, 0x61, 0x6c, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x6c, 0x6f, 0x67, 0x69, 0x63, 0x61, 0x6c, 0x4e, 0x61,
+	0x6d, 0x65, 0x12, 0x1f, 0x0a, 0x0b, 0x6e, 0x65, 0x73, 0x74, 0x65, 0x64, 0x5f, 0x70, 0x61, 0x74,
+	0x68, 0x18, 0x04, 0x20, 0x03, 0x28, 0x09, 0x52, 0x0a, 0x6e, 0x65, 0x73, 0x74, 0x65, 0x64, 0x50,
+	0x61, 0x74, 0x68, 0x12, 0x20, 0x0a, 0x0c, 0x69, 0x73, 0x5f, 0x6a, 0x73, 0x6f, 0x6e, 0x5f, 0x70,
+	0x61, 0x74, 0x68, 0x18, 0x05, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x69, 0x73, 0x4a, 0x73, 0x6f,
+	0x6e, 0x50, 0x61, 0x74, 0x68, 0x42, 0x30, 0x5a, 0x2e, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e,
+	0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x33, 0x2f, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2f, 0x63, 0x67, 0x6f, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -411,25 +559,30 @@ func file_cgo_msg_proto_rawDescGZIP() []byte {
 	return file_cgo_msg_proto_rawDescData
 }
 
-var file_cgo_msg_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_cgo_msg_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_cgo_msg_proto_goTypes = []interface{}{
 	(*LoadIndexInfo)(nil),              // 0: milvus.proto.cgo.LoadIndexInfo
 	(*IndexStats)(nil),                 // 1: milvus.proto.cgo.IndexStats
 	(*SerializedIndexFileInfo)(nil),    // 2: milvus.proto.cgo.SerializedIndexFileInfo
-	nil,                                // 3: milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
-	(*schemapb.FieldSchema)(nil),       // 4: milvus.proto.schema.FieldSchema
-	(indexpb.IndexStorePathVersion)(0), // 5: milvus.proto.index.IndexStorePathVersion
+	(*FunctionChainInputPlan)(nil),     // 3: milvus.proto.cgo.FunctionChainInputPlan
+	(*FunctionChainInput)(nil),         // 4: milvus.proto.cgo.FunctionChainInput
+	nil,                                // 5: milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
+	(*schemapb.FieldSchema)(nil),       // 6: milvus.proto.schema.FieldSchema
+	(indexpb.IndexStorePathVersion)(0), // 7: milvus.proto.index.IndexStorePathVersion
+	(schemapb.DataType)(0),             // 8: milvus.proto.schema.DataType
 }
 var file_cgo_msg_proto_depIdxs = []int32{
-	4, // 0: milvus.proto.cgo.LoadIndexInfo.field:type_name -> milvus.proto.schema.FieldSchema
-	3, // 1: milvus.proto.cgo.LoadIndexInfo.index_params:type_name -> milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
-	5, // 2: milvus.proto.cgo.LoadIndexInfo.index_store_path_version:type_name -> milvus.proto.index.IndexStorePathVersion
+	6, // 0: milvus.proto.cgo.LoadIndexInfo.field:type_name -> milvus.proto.schema.FieldSchema
+	5, // 1: milvus.proto.cgo.LoadIndexInfo.index_params:type_name -> milvus.proto.cgo.LoadIndexInfo.IndexParamsEntry
+	7, // 2: milvus.proto.cgo.LoadIndexInfo.index_store_path_version:type_name -> milvus.proto.index.IndexStorePathVersion
 	2, // 3: milvus.proto.cgo.IndexStats.serialized_index_infos:type_name -> milvus.proto.cgo.SerializedIndexFileInfo
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 4: milvus.proto.cgo.FunctionChainInputPlan.inputs:type_name -> milvus.proto.cgo.FunctionChainInput
+	8, // 5: milvus.proto.cgo.FunctionChainInput.target_data_type:type_name -> milvus.proto.schema.DataType
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_cgo_msg_proto_init() }
@@ -474,6 +627,30 @@ func file_cgo_msg_proto_init() {
 				return nil
 			}
 		}
+		file_cgo_msg_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*FunctionChainInputPlan); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_cgo_msg_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*FunctionChainInput); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -481,7 +658,7 @@ func file_cgo_msg_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_cgo_msg_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

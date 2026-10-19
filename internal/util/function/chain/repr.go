@@ -38,11 +38,12 @@ type ChainRepr struct {
 
 // OperatorRepr is the internal representation of an Operator.
 type OperatorRepr struct {
-	Type     string
-	Params   map[string]*schemapb.FunctionParamValue
-	Function *FunctionRepr // for map/filter operators that evaluate an expression
-	Inputs   []string      // input column names
-	Outputs  []string      // output column names
+	Type           string
+	Params         map[string]*schemapb.FunctionParamValue
+	Function       *FunctionRepr // for map/filter operators that evaluate an expression
+	Inputs         []string      // input column names, preserving occurrence order
+	InputDataTypes []schemapb.DataType
+	Outputs        []string // output column names
 }
 
 // FunctionRepr is the internal representation of a FunctionExpr.
@@ -133,7 +134,7 @@ func ProtoOpToRepr(pb *schemapb.FunctionChainOp) (*OperatorRepr, error) {
 
 	repr := &OperatorRepr{
 		Type:    opType,
-		Params:  pb.GetParams(),
+		Params:  cloneFunctionParamMap(pb.GetParams()),
 		Inputs:  inputs,
 		Outputs: outputs,
 	}
@@ -147,11 +148,18 @@ func ProtoOpToRepr(pb *schemapb.FunctionChainOp) (*OperatorRepr, error) {
 		repr.Inputs = exprInputs
 	}
 
+	inputDataTypes, err := parseInputDataTypes(repr.Params, len(repr.Inputs))
+	if err != nil {
+		return nil, err
+	}
+	repr.InputDataTypes = inputDataTypes
+	delete(repr.Params, types.InputDataTypesParam)
+
 	return repr, nil
 }
 
 // ProtoExprToRepr converts a public FunctionChainExpr proto to the internal function representation.
-// It also returns the column references in expr args, preserving first-seen order.
+// It also returns the column references in expr args, preserving occurrence order.
 func ProtoExprToRepr(pb *schemapb.FunctionChainExpr) (*FunctionRepr, []string, error) {
 	if pb == nil {
 		return nil, nil, nil
@@ -177,7 +185,6 @@ func ProtoExprToRepr(pb *schemapb.FunctionChainExpr) (*FunctionRepr, []string, e
 // ProtoExprArgsToInputs extracts column references from public FunctionChainExpr args.
 func ProtoExprArgsToInputs(args []*schemapb.FunctionChainExprArg) ([]string, error) {
 	inputs := make([]string, 0, len(args))
-	seenInputs := make(map[string]struct{})
 
 	for i, arg := range args {
 		input, err := FunctionChainExprArgInput(arg)
@@ -187,10 +194,6 @@ func ProtoExprArgsToInputs(args []*schemapb.FunctionChainExprArg) ([]string, err
 		if input == "" {
 			continue
 		}
-		if _, ok := seenInputs[input]; ok {
-			continue
-		}
-		seenInputs[input] = struct{}{}
 		inputs = append(inputs, input)
 	}
 
@@ -274,6 +277,13 @@ func (repr *ChainRepr) RefreshInfo() error {
 		repr.Operators[i].Type = opType
 		repr.Operators[i].Inputs = inputs
 		repr.Operators[i].Outputs = outputs
+		if repr.Operators[i].InputDataTypes == nil {
+			repr.Operators[i].InputDataTypes = make([]schemapb.DataType, len(inputs))
+		} else if len(repr.Operators[i].InputDataTypes) != len(inputs) {
+			return merr.WrapErrParameterInvalidMsg(
+				"op[%d]: input data types count %d does not match input count %d",
+				i, len(repr.Operators[i].InputDataTypes), len(inputs))
+		}
 
 		_, ok := GetOperatorFactory(opType)
 		if !ok {
@@ -411,8 +421,62 @@ func normalizeReprNames(names []string, label string) ([]string, error) {
 	return result, nil
 }
 
-// IsFunctionChainSystemName reports whether name uses the function-chain system-name prefix.
-// It does not validate whether the current caller or stage may provide that name.
+func cloneFunctionParamMap(params map[string]*schemapb.FunctionParamValue) map[string]*schemapb.FunctionParamValue {
+	if params == nil {
+		return nil
+	}
+	cloned := make(map[string]*schemapb.FunctionParamValue, len(params))
+	for key, value := range params {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func parseInputDataTypes(params map[string]*schemapb.FunctionParamValue, inputCount int) ([]schemapb.DataType, error) {
+	result := make([]schemapb.DataType, inputCount)
+	value, ok := params[types.InputDataTypesParam]
+	if !ok {
+		return result, nil
+	}
+	if value == nil || value.GetArrayValue() == nil {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"%s must be an array of data type enum values", types.InputDataTypesParam)
+	}
+
+	values := value.GetArrayValue().GetValues()
+	if len(values) != inputCount {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"%s count %d does not match input count %d",
+			types.InputDataTypesParam, len(values), inputCount)
+	}
+	for i, item := range values {
+		if item == nil {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"%s[%d] is nil", types.InputDataTypesParam, i)
+		}
+		intValue, ok := item.GetValue().(*schemapb.FunctionParamValue_Int64Value)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"%s[%d] must be an int64 data type enum value", types.InputDataTypesParam, i)
+		}
+		if int64(int32(intValue.Int64Value)) != intValue.Int64Value {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"%s[%d] has unknown data type value %d",
+				types.InputDataTypesParam, i, intValue.Int64Value)
+		}
+		if _, ok := schemapb.DataType_name[int32(intValue.Int64Value)]; !ok {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"%s[%d] has unknown data type value %d",
+				types.InputDataTypesParam, i, intValue.Int64Value)
+		}
+		result[i] = schemapb.DataType(intValue.Int64Value)
+	}
+	return result, nil
+}
+
+// IsFunctionChainSystemName reports whether name belongs to the function-chain
+// system namespace. The physical dynamic JSON root and its paths are schema
+// inputs, not system columns, despite using the '$' prefix.
 func IsFunctionChainSystemName(name string) bool {
-	return strings.HasPrefix(name, "$")
+	return strings.HasPrefix(name, "$") && !isExplicitMetaInput(name)
 }

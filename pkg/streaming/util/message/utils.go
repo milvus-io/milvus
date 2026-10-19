@@ -2,6 +2,7 @@ package message
 
 import (
 	"reflect"
+	"slices"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -59,6 +60,26 @@ type ReplicateHeader struct {
 	LastConfirmedMessageID MessageID
 	TimeTick               uint64
 	VChannel               string
+}
+
+// WithBroadcastControlChannel adds the control channel to the vchannels of the broadcast header
+// if it is not one of them.
+func WithBroadcastControlChannel(msg BroadcastMutableMessage, controlChannel string) BroadcastMutableMessage {
+	impl := msg.(*messageImpl)
+	bh := impl.broadcastHeader()
+	if bh == nil {
+		panic("there's a bug in the message codes, broadcast header lost in properties of broadcast message")
+	}
+	if slices.Contains(bh.Vchannels, controlChannel) {
+		return impl
+	}
+	bh.Vchannels = append(bh.Vchannels, controlChannel)
+	bhVal, err := EncodeProto(bh)
+	if err != nil {
+		panic("should not happen on broadcast header proto")
+	}
+	impl.properties.Set(messageBroadcastHeader, bhVal)
+	return impl
 }
 
 // ClearReplicateHeader removes replicate header from a mutable message.

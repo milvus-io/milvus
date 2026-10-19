@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -152,6 +153,14 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
 	if err != nil || result == nil {
+		if errors.Is(err, merr.ErrCompactionResultNotFound) {
+			if dropErr := cluster.DropCompaction(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID()); dropErr != nil {
+				mlog.Warn(context.TODO(), "clusteringCompactionTask failed to drop task with unavailable result", mlog.Err(dropErr))
+				// Keep querying this worker; retryOnError must not fail the task.
+				err = nil
+				return
+			}
+		}
 		mlog.Warn(context.TODO(), "clusteringCompactionTask failed to get compaction result", mlog.Err(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
@@ -213,14 +222,15 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 	case datapb.CompactionTaskState_timeout:
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout), setFailReason("DataNode reported compaction timeout"))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
 		}
 	default:
 		mlog.Error(context.TODO(), "not support compaction task state", mlog.String("state", result.GetState().String()))
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(fmt.Sprintf("DataNode returned unsupported compaction state: %s", result.GetState().String())))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return

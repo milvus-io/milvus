@@ -8,6 +8,8 @@ changing that subsystem.
   observability debugging.
 - [Streaming system](streaming-system/streaming-system.md): WAL, channels,
   DDL/DCL execution, recovery storage, and replication.
+- [Storage path contract](storage/path_contract.md): complete keys, local upgrade
+  compatibility, and GC ownership boundaries.
 
 Update these guides with the code when an invariant, interface, or ownership
 boundary changes.
