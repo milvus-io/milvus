@@ -22,14 +22,12 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -55,13 +53,9 @@ func TestDeleteRunner_ConcurrentProduceInitializesSharedRequest(t *testing.T) {
 			defer sched.Close()
 			queue := sched.DmQueue
 			queue.SetMaxTaskNum(producers)
-			cache := NewMockCache(t)
-			cache.On("GetCollectionID", mock.Anything, "", "test").Return(int64(10), nil)
-			chMgr := channelmgr.NewMockChannelsMgr(t)
-			chMgr.EXPECT().GetChannels(int64(10)).Return([]string{"p0"}, nil)
 			runner := &DeleteRunner{
 				req: req, queue: queue, collectionID: 10,
-				vChannels: []string{"p0_10v0"}, metaCache: cache, chMgr: chMgr,
+				vChannels: []string{"p0_10v0"},
 			}
 			start := make(chan struct{})
 			tasks := make([]*DeleteTask, producers)
@@ -86,7 +80,6 @@ func TestDeleteRunner_ConcurrentProduceInitializesSharedRequest(t *testing.T) {
 				require.Equal(t, Timestamp(task.ID()), task.BeginTs())
 				require.Equal(t, []int64{int64(i)}, task.primaryKeys.GetIntId().GetData())
 				require.Equal(t, runner.vChannels, task.vChannels)
-				require.Equal(t, []string{"p0"}, task.pChannels)
 			}
 		})
 	}
