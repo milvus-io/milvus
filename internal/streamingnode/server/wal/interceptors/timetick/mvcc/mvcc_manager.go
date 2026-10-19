@@ -4,6 +4,8 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // NewMVCCManager creates a new mvcc timestamp manager.
@@ -11,6 +13,8 @@ func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 	return &MVCCManager{
 		query:                  NewQueryMVCCManager(lastConfirmedTimeTick),
 		pchannelMVCCTimestamp:  lastConfirmedTimeTick,
+		recoveryTimeTick:       lastConfirmedTimeTick,
+		barrierTimeTick:        lastConfirmedTimeTick,
 		vchannelMVCCTimestamps: make(map[string]uint64),
 	}
 }
@@ -20,6 +24,9 @@ func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 type MVCCManager struct {
 	query                  *QueryMVCCManager
 	mu                     sync.Mutex
+	recoveryTimeTick       uint64            // fixed opening fence; never use zero for an unknown shard.
+	retiredTimeTick        uint64            // shared fence for retired/unknown identities, without per-shard tombstones.
+	barrierTimeTick        uint64            // latest relevant PChannel-wide operation, excluding ordinary ticks.
 	pchannelMVCCTimestamp  uint64            // the last confirmed timetick of the pchannel.
 	vchannelMVCCTimestamps map[string]uint64 // map the vchannel to the maximum timetick that is persisted into the wal.
 }
@@ -29,19 +36,21 @@ func (cm *MVCCManager) GetMVCCOfVChannel(vchannel string) VChannelMVCC {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	if tt, ok := cm.vchannelMVCCTimestamps[vchannel]; ok {
-		return VChannelMVCC{
-			Timetick:  tt,
-			Confirmed: false,
-		}
+	tt, live := cm.vchannelMVCCTimestamps[vchannel]
+	if !live {
+		// A query may already be in flight when Drop removes write admission.
+		// Do not lower its target just because the per-shard entry was reclaimed.
+		tt = cm.retiredTimeTick
 	}
-	// if the mvcc of vchannel is not found which means that
-	// the mvcc of vchannel is equal to the pchannel level lastConfirmedTimeTick.
-	// and that mvcc timestamp is already confirmed.
-	return VChannelMVCC{
-		Timetick:  cm.pchannelMVCCTimestamp,
-		Confirmed: true,
-	}
+	tt = max(cm.recoveryTimeTick, cm.barrierTimeTick, tt)
+	return VChannelMVCC{Timetick: tt, Confirmed: tt <= cm.pchannelMVCCTimestamp}
+}
+
+// GetConfirmedTimeTick returns physical WAL progress, independently of query targets.
+func (cm *MVCCManager) GetConfirmedTimeTick() uint64 {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.pchannelMVCCTimestamp
 }
 
 // UpdateMVCC updates the mvcc state by incoming message.
@@ -60,37 +69,44 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	if tt <= cm.pchannelMVCCTimestamp {
+	// Confirmation can race ahead of this callback: Acker.Ack runs before
+	// UpdateMVCC. Never discard a successful write merely because tt <= C.
+	if messageutil.IsTimeTickConfirmBarrier(msgType) {
+		cm.pchannelMVCCTimestamp = max(cm.pchannelMVCCTimestamp, tt)
+		if msgType == message.MessageTypeRecoveryBarrier {
+			cm.barrierTimeTick = max(cm.barrierTimeTick, tt)
+		}
 		return
 	}
 
-	if msgType == message.MessageTypeTimeTick {
-		cm.sync(tt)
-		return
-	}
-
-	// If the message is belong to a transaction.
-	// the mvcc timestamp cannot be push forward if the message is not committed.
-	// because of an unconfirmed transaction may be rollback and cannot be seen at read side.
+	// Only the commit makes a transaction visible, including bodies recovered
+	// from before this WAL's opening fence.
 	if isTxn && msgType != message.MessageTypeCommitTxn {
 		return
 	}
-	if exists, ok := cm.vchannelMVCCTimestamps[vchannel]; !ok || exists < tt {
-		cm.vchannelMVCCTimestamps[vchannel] = tt
+	if vchannel == "" || msg.IsPChannelLevel() {
+		cm.barrierTimeTick = max(cm.barrierTimeTick, tt)
+		return
 	}
-}
-
-// sync syncs the mvcc state by the incoming timetick message, push forward the wal mvcc state
-// and clear the vchannel mvcc state.
-func (cm *MVCCManager) sync(tt uint64) {
-	// clear all existing vchannel mvcc that are are confirmed.
-	// which means the mvcc of vchannel is equal to the pchannel level mvcc.
-	for vchannel, existTimeTick := range cm.vchannelMVCCTimestamps {
-		if existTimeTick <= tt {
-			delete(cm.vchannelMVCCTimestamps, vchannel)
+	if funcutil.IsControlChannel(vchannel) {
+		return
+	}
+	switch msgType {
+	case message.MessageTypeCreateCollection:
+		cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], tt, cm.recoveryTimeTick)
+	case message.MessageTypeDropCollection:
+		// The outer VChannel exclusive append lock covers this callback. Earlier
+		// appends have finished publishing their targets, and the shard has stopped
+		// accepting DML. Collection IDs in VChannel names are never reused.
+		cm.retiredTimeTick = max(cm.retiredTimeTick, cm.vchannelMVCCTimestamps[vchannel], tt)
+		delete(cm.vchannelMVCCTimestamps, vchannel)
+	default:
+		// Only recovery and CreateCollection register a live shard. In particular,
+		// late internal/control messages after Drop must not resurrect its entry.
+		if previous, live := cm.vchannelMVCCTimestamps[vchannel]; live {
+			cm.vchannelMVCCTimestamps[vchannel] = max(previous, tt)
 		}
 	}
-	cm.pchannelMVCCTimestamp = tt
 }
 
 // VChannelMVCC is a mvcc of one vchannel
@@ -106,6 +122,11 @@ func (cm *MVCCManager) GetQueryMVCCOfVChannel(vchannel string) QueryVChannelMVCC
 	return cm.query.GetQueryMVCCOfVChannel(vchannel)
 }
 
+// ApplyRecoveryBarrier registers live shards before WAL append admission opens.
+// It does not confirm a concurrent newer write or move the physical watermark.
 func (cm *MVCCManager) ApplyRecoveryBarrier(vchannel string, timetick uint64) {
+	cm.mu.Lock()
+	cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], timetick, cm.recoveryTimeTick)
+	cm.mu.Unlock()
 	cm.query.ApplyRecoveryBarrier(vchannel, timetick)
 }
