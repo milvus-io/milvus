@@ -11,6 +11,7 @@
 
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -53,6 +54,8 @@
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -68,6 +71,8 @@
 #include "query/PlanImpl.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/Collection.h"
+#include "segcore/segment_c.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
@@ -557,6 +562,193 @@ TEST(test_chunk_segment, PinnedFillTargetEntryMatchesUnpinned) {
               unpinned.search_storage_cost_.scanned_total_bytes);
 }
 
+TEST(test_chunk_segment, ViewReadStateRetainsColumnsAndSharesDeletes) {
+    constexpr int64_t row_count = 16;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto scalar_id = schema->AddDebugField("scalar", DataType::INT64);
+    auto vector_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+    auto segment = CreateColdVectorOutputSegment(schema, vector_id, row_count);
+    auto* primary =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(primary, nullptr);
+    auto retained = primary->PinReadState();
+    auto primary_state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(
+        primary->CaptureReadSnapshot());
+    auto retained_state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(
+        retained->CaptureReadSnapshot());
+    EXPECT_EQ(primary_state, retained_state);
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {pk_id, scalar_id};
+    auto before = MakeSearchResult({0, 3});
+    retained->TestFillTargetEntry(&plan, before);
+    primary->DropFieldData(scalar_id);
+    EXPECT_FALSE(primary->HasFieldData(scalar_id));
+    EXPECT_TRUE(retained->HasFieldData(scalar_id));
+    auto after = MakeSearchResult({0, 3});
+    retained->TestFillTargetEntry(&plan, after);
+    EXPECT_EQ(before.output_fields_data_.at(scalar_id)->SerializeAsString(),
+              after.output_fields_data_.at(scalar_id)->SerializeAsString());
+
+    proto::schema::IDs ids;
+    ids.mutable_int_id()->add_data(
+        before.output_fields_data_.at(pk_id)->scalars().long_data().data(0));
+    Timestamp delete_ts = primary->get_max_timestamp() + 100;
+    primary->Delete(1, &ids, &delete_ts);
+    EXPECT_EQ(primary->get_deleted_count(), 1);
+    EXPECT_EQ(retained->get_deleted_count(), 1);
+}
+
+TEST(test_chunk_segment, ViewScopeDoesNotExposePhysicalTTLDependency) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto ttl = schema->AddDebugField("ttl", DataType::TIMESTAMPTZ);
+    auto value = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_ttl_field_id(ttl);
+    auto layout = std::make_shared<const segcore::SealedFieldLayout>(
+        schema.get(), segcore::LoadScope({pk.get(), value.get()}));
+    segcore::ChunkedSegmentSealedImpl physical(
+        layout, nullptr, segcore::SegcoreConfig::default_config(), 1);
+    auto read = physical.PinReadState();
+    EXPECT_TRUE(layout->ShouldLoadField(ttl));
+    EXPECT_NO_THROW(read->ValidateLogicalFields({pk, value}));
+    EXPECT_THROW(read->ValidateLogicalFields({ttl}), SegcoreError);
+
+    // Sharing physical columns must not select the query's TTL policy.
+    auto no_ttl = std::make_shared<Schema>();
+    no_ttl->AddDebugField("pk", DataType::INT64);
+    no_ttl->AddDebugField("ttl", DataType::TIMESTAMPTZ);
+    no_ttl->AddDebugField("value", DataType::INT64);
+    no_ttl->set_primary_field_id(pk);
+    exec::QueryContext old_view("old", read.get(), 0, 100);
+    exec::QueryContext new_view("new", read.get(), 0, 100);
+    old_view.set_read_schema(no_ttl);
+    new_view.set_read_schema(schema);
+    EXPECT_EQ(exec::CreateTTLFieldFilterExpression(&old_view), nullptr);
+    EXPECT_NE(exec::CreateTTLFieldFilterExpression(&new_view), nullptr);
+}
+
+TEST(test_chunk_segment, SealedResourcesOutlivePreparingSchema) {
+    auto previous_snapshot_setting =
+        ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.exchange(true);
+    auto restore_snapshot_setting = folly::makeGuard([&] {
+        ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(
+            previous_snapshot_setting);
+    });
+    auto preparing = std::make_shared<Schema>();
+    auto pk = preparing->AddDebugField("pk", DataType::INT64);
+    auto vector = preparing->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    preparing->set_primary_field_id(pk);
+    auto query_schema = std::make_shared<Schema>(*preparing);
+    std::weak_ptr<Schema> retired = preparing;
+    auto segment = CreateColdVectorOutputSegment(preparing, vector, 16);
+    auto* physical =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto read = physical->PinReadState();
+    preparing.reset();
+    ASSERT_TRUE(retired.expired());
+
+    query::Plan plan(query_schema);
+    plan.target_entries_ = {pk};
+    auto result = MakeSearchResult({0});
+    read->TestFillTargetEntry(&plan, result);
+    proto::schema::IDs ids;
+    ids.mutable_int_id()->add_data(
+        result.output_fields_data_.at(pk)->scalars().long_data().data(0));
+    auto timestamp = physical->get_max_timestamp() + 100;
+    physical->Delete(1, &ids, &timestamp);
+    EXPECT_EQ(physical->get_real_count(), 15);
+    EXPECT_EQ(read->get_real_count(), 15);
+    // Replayed or repeated deletes count physical row offsets only once.
+    physical->Delete(1, &ids, &timestamp);
+    ++timestamp;
+    physical->Delete(1, &ids, &timestamp);
+    EXPECT_EQ(physical->get_real_count(), 15);
+    EXPECT_EQ(read->get_real_count(), 15);
+    EXPECT_TRUE(retired.expired());
+
+    // Historical replay after a streaming delete must be included immediately,
+    // even if a timestamped query bitmap snapshot predates the replay.
+    auto next = MakeSearchResult({1});
+    read->TestFillTargetEntry(&plan, next);
+    proto::schema::IDs historical;
+    historical.mutable_int_id()->add_data(
+        next.output_fields_data_.at(pk)->scalars().long_data().data(0));
+    LoadDeletedRecordInfo replay{&timestamp, &historical, 1};
+    physical->LoadDeletedRecord(replay);
+    physical->LoadDeletedRecord(replay);
+    EXPECT_EQ(physical->get_real_count(), 14);
+    EXPECT_EQ(read->get_real_count(), 14);
+
+    physical->ClearData();
+    EXPECT_EQ(physical->get_real_count(), 0);
+    EXPECT_EQ(read->get_real_count(), 14);
+}
+
+TEST(test_chunk_segment, ReadStateForkPreparesEarlierSchemaIndependently) {
+    auto newer = std::make_shared<Schema>();
+    auto pk = newer->AddDebugField("pk", DataType::INT64);
+    auto vec = newer->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    newer->set_primary_field_id(pk);
+    newer->set_schema_version(2);
+    auto segment = CreateColdVectorOutputSegment(newer, vec, 16);
+    auto* primary =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto retained = primary->PinReadState();
+    auto fork = retained->PinReadState();
+    auto older = std::make_shared<Schema>(*newer);
+    older->set_schema_version(1);
+    fork->Reopen(older);
+    EXPECT_EQ(fork->get_schema_snapshot()->get_schema_version(), 1);
+    EXPECT_EQ(retained->get_schema_snapshot()->get_schema_version(), 2);
+    EXPECT_EQ(primary->get_schema_snapshot()->get_schema_version(), 2);
+    EXPECT_EQ(fork->get_row_count(), primary->get_row_count());
+}
+
+TEST(test_chunk_segment, OlderPlanChecksOnlyItsOwnFieldRange) {
+    struct ReadinessSegment : segcore::ChunkedSegmentSealedImpl {
+        using ChunkedSegmentSealedImpl::check_search;
+        using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+    };
+    auto old_schema = std::make_shared<Schema>();
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+    auto new_schema = std::make_shared<Schema>(*old_schema);
+    auto added = new_schema->AddDebugField("added", DataType::INT64);
+
+    auto dataset = segcore::DataGen(new_schema, 5);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto segment =
+        std::make_unique<ReadinessSegment>(new_schema,
+                                           empty_index_meta,
+                                           segcore::SegcoreConfig::default_config(),
+                                           kSegmentID);
+    segment->LoadFieldData(PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm));
+
+    query::Plan plan(old_schema);
+    plan.extra_info_opt_.emplace(pk.get() - START_USER_FIELDID + 1);
+    plan.extra_info_opt_->add_involved_field(pk);
+    ASSERT_NO_THROW(segment->check_search(&plan));
+
+    // Enlarging the request must not accidentally mark unprepared columns ready.
+    auto missing = FieldId(added.get() + 1);
+    auto future_schema = std::make_shared<Schema>(*new_schema);
+    future_schema->AddField(
+        FieldName("missing"), missing, DataType::INT64, false, std::nullopt);
+    query::Plan future_plan(future_schema);
+    future_plan.extra_info_opt_.emplace(missing.get() - START_USER_FIELDID + 1);
+    future_plan.extra_info_opt_->add_involved_field(missing);
+    EXPECT_THROW(segment->check_search(&future_plan), SegcoreError);
+}
+
 TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
@@ -930,6 +1122,75 @@ TEST(test_chunk_segment,
     EXPECT_EQ(new_offsets->GetTotalElementCount(), 0);
     EXPECT_EQ(segment->GetStructElementOffsets(old_label), nullptr);
     EXPECT_EQ(segment->GetStructElementOffsets(old_score), nullptr);
+}
+
+TEST(test_chunk_segment, InitialSegmentsHavePrivateLoadScopes) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto left = schema->AddDebugField("left", DataType::INT64);
+    auto right = schema->AddDebugField("right", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto schema_proto = schema->ToProto();
+    segcore::Collection collection(&schema_proto);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(1);
+    info.set_num_of_rows(16);
+    auto blob = info.SerializeAsString();
+    for (const auto& fields : {std::vector<int64_t>{pk.get(), left.get()},
+                               std::vector<int64_t>{pk.get(), right.get()}}) {
+        CSegmentInterface raw = nullptr;
+        auto status = NewSegmentWithLoadInfoAndLoadFields(
+            &collection,
+            Sealed,
+            1,
+            &raw,
+            false,
+            reinterpret_cast<const uint8_t*>(blob.data()),
+            blob.size(),
+            fields.data(),
+            fields.size());
+        ASSERT_EQ(status.error_code, 0);
+        std::unique_ptr<segcore::SegmentInterface> segment(
+            static_cast<segcore::SegmentInterface*>(raw));
+        auto* sealed =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        auto loaded_schema = sealed->get_schema_snapshot();
+        EXPECT_TRUE(loaded_schema->IsFieldInLoadScope(FieldId(fields[1])));
+        EXPECT_FALSE(loaded_schema->IsFieldInLoadScope(
+            fields[1] == left.get() ? right : left));
+        EXPECT_TRUE(collection.get_schema()->IsFieldInLoadScope(left));
+        EXPECT_TRUE(collection.get_schema()->IsFieldInLoadScope(right));
+    }
+}
+
+TEST(test_chunk_segment, ReadStateLoadScopeReleasesStructOffsets) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto label =
+        schema->AddDebugArrayField("chunks[label]", DataType::VARCHAR, true);
+    auto score =
+        schema->AddDebugArrayField("chunks[score]", DataType::INT32, true);
+    auto dataset = segcore::DataGen(schema, 5, 42, 0, 1, 3);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* primary =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto old = primary->PinReadState();
+    auto offsets = old->GetStructElementOffsets(label);
+    ASSERT_NE(offsets, nullptr);
+    std::weak_ptr<typename decltype(offsets)::element_type> retired = offsets;
+    offsets.reset();
+
+    auto target = std::make_shared<Schema>(*schema);
+    target->UpdateLoadFields({pk.get()});
+    auto narrowed = primary->PinReadState();
+    narrowed->Reopen(target);
+    primary->AdoptReadState(*narrowed);
+    EXPECT_EQ(primary->GetStructElementOffsets(label), nullptr);
+    EXPECT_EQ(primary->GetStructElementOffsets(score), nullptr);
+    EXPECT_FALSE(retired.expired());  // the old View still owns its offsets
+    old.reset();
+    EXPECT_TRUE(retired.expired());
 }
 
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {
@@ -1821,7 +2082,8 @@ TEST_P(TestChunkSegment, TestPkRange) {
     using namespace milvus::segcore;
     using namespace milvus::test::consumer;
     bool pk_is_string = GetParam();
-    auto segment_impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    auto segment_impl =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
     // Test cases for sorted PK

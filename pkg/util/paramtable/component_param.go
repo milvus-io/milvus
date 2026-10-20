@@ -4368,10 +4368,11 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	StrictGroupStrategy              ParamItem `refreshable:"true"`
-	StrictGroupPhase1CandidateWeight ParamItem `refreshable:"true"`
-	StrictGroupSkipRefine            ParamItem `refreshable:"true"`
-	SoPath                           ParamItem `refreshable:"false"`
+	QueryViewTransformLogDrainConcurrency ParamItem `refreshable:"false"`
+	StrictGroupStrategy                   ParamItem `refreshable:"true"`
+	StrictGroupPhase1CandidateWeight      ParamItem `refreshable:"true"`
+	StrictGroupSkipRefine                 ParamItem `refreshable:"true"`
+	SoPath                                ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -6239,6 +6240,17 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionRawDataFactor.Init(base.mgr)
+	p.QueryViewTransformLogDrainConcurrency = ParamItem{
+		Key: "queryNode.queryView.transformLogDrainConcurrency", Version: "3.0.0", DefaultValue: "4", Export: true,
+		Doc: "Maximum concurrent QueryView transform backlog drains per QueryNode.",
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewTransformLogDrainConcurrency.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

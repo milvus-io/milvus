@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -70,19 +71,21 @@ import (
 var Params = params.Params
 
 type Server struct {
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	wg                  sync.WaitGroup
-	status              atomic.Int32
-	etcdCli             *clientv3.Client
-	tikvCli             *txnkv.Client
-	address             string
-	session             sessionutil.SessionInterface
-	sessionWatcher      sessionutil.SessionWatcher
-	sessionWatcherMu    sync.Mutex
-	kv                  kv.MetaKv
-	idAllocator         func() (int64, error)
-	metricsCacheManager *metricsinfo.MetricsCacheManager
+	segmentLoadInfoWatcher *queryViewSegmentLoadInfoWatcher
+	loadInfoCatalog        queryview.LoadInfoCatalog
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	wg                     sync.WaitGroup
+	status                 atomic.Int32
+	etcdCli                *clientv3.Client
+	tikvCli                *txnkv.Client
+	address                string
+	session                sessionutil.SessionInterface
+	sessionWatcher         sessionutil.SessionWatcher
+	sessionWatcherMu       sync.Mutex
+	kv                     kv.MetaKv
+	idAllocator            func() (int64, error)
+	metricsCacheManager    *metricsinfo.MetricsCacheManager
 
 	// Coordinators
 	mixCoord types.MixCoord
@@ -148,9 +151,10 @@ type FileResourceObserver interface {
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:            ctx,
-		cancel:         cancel,
-		metricsRequest: metricsinfo.NewMetricsRequest(),
+		segmentLoadInfoWatcher: newQueryViewSegmentLoadInfoWatcher(),
+		ctx:                    ctx,
+		cancel:                 cancel,
+		metricsRequest:         metricsinfo.NewMetricsRequest(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
@@ -381,6 +385,7 @@ func (s *Server) initMeta() error {
 
 	mlog.Info(s.ctx, "init meta")
 	s.store = querycoord.NewCatalog(s.kv)
+	s.loadInfoCatalog = queryview.NewLoadInfoCatalog(s.kv)
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr, s.metaView)
 
 	s.broker = meta.NewCoordinatorBroker(

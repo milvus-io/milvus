@@ -80,8 +80,9 @@ type IndexedFieldInfo struct {
 }
 
 type baseSegment struct {
-	collection *Collection
-	version    *atomic.Int64
+	collection     *Collection
+	sealedMetadata *sealedRuntimeMetadata
+	version        *atomic.Int64
 
 	segmentType   SegmentType
 	pkCandidate   pkoracle.Candidate // PK candidate: BloomFilterSet for regular collections, ExternalSegmentCandidate for external collections
@@ -132,10 +133,16 @@ func (s *baseSegment) Partition() int64 {
 }
 
 func (s *baseSegment) DatabaseName() string {
+	if s.sealedMetadata != nil {
+		return s.sealedMetadata.database
+	}
 	return s.collection.GetDBName()
 }
 
 func (s *baseSegment) ResourceGroup() string {
+	if s.sealedMetadata != nil {
+		return s.sealedMetadata.resourceGroup
+	}
 	return s.collection.GetResourceGroup()
 }
 
@@ -208,6 +215,14 @@ func compactSegmentLoadInfoForRuntime(loadInfo *querypb.SegmentLoadInfo) *queryp
 		UseTakeForOutput:     loadInfo.GetUseTakeForOutput(),
 		CommitTimestamp:      loadInfo.GetCommitTimestamp(),
 		EstimatedBytesPerRow: loadInfo.GetEstimatedBytesPerRow(),
+	}
+}
+
+// FinalizeLoad caches resource estimates and discards load-only metadata after
+// all data, index, delta and PK metadata consumers have finished.
+func FinalizeLoad(segment Segment) {
+	if local, ok := segment.(*LocalSegment); ok {
+		local.compactLoadInfoForRuntime()
 	}
 }
 
@@ -710,6 +725,17 @@ func (s *LocalSegment) HasFieldData(fieldID int64) bool {
 	return s.csegment.HasFieldData(fieldID)
 }
 
+func (s *LocalSegment) LoadIndex(ctx context.Context, loadInfo *querypb.SegmentLoadInfo) error {
+	if loadInfo == nil {
+		return merr.WrapErrParameterInvalidMsg("segment load info is nil")
+	}
+	// The current C API exposes index replacement through segment Reopen's
+	// load-diff path. Keep this as the Go-level LoadIndex entry so callers can
+	// distinguish index-only updates from data updates without depending on the
+	// lower-level implementation detail.
+	return s.Reopen(ctx, loadInfo)
+}
+
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 	var result []*IndexedFieldInfo
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
@@ -771,6 +797,10 @@ func (s *LocalSegment) syncFieldIndexes(indexInfos []*querypb.FieldIndexInfo) {
 // Search executes a search on the segment.
 // If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error) {
+	return s.searchWithSegment(ctx, searchReq, s.csegment)
+}
+
+func (s *LocalSegment) searchWithSegment(ctx context.Context, searchReq *segcore.SearchRequest, native segcore.CSegment) (*segcore.SearchResult, error) {
 	filterOnly := searchReq.FilterOnly()
 	log := mlog.WithLazy(
 		mlog.Uint64("mvcc", searchReq.MVCC()),
@@ -791,7 +821,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 	log.Debug(ctx, "search segment...")
 
 	tr := timerecord.NewTimeRecorder("cgoSearch")
-	result, err := s.csegment.Search(ctx, searchReq)
+	result, err := native.Search(ctx, searchReq)
 	if err != nil {
 		log.Warn(ctx, "Search failed")
 		return nil, err
@@ -806,6 +836,10 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 }
 
 func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan, log *mlog.Logger) (*segcore.RetrieveResult, error) {
+	return s.retrieveNative(ctx, plan, log, s.csegment)
+}
+
+func (s *LocalSegment) retrieveNative(ctx context.Context, plan *segcore.RetrievePlan, log *mlog.Logger, native segcore.CSegment) (*segcore.RetrieveResult, error) {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -819,7 +853,7 @@ func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan,
 		ctx,
 		s.segmentType,
 		func() (*segcore.RetrieveResult, error) {
-			return s.csegment.Retrieve(ctx, plan)
+			return native.Retrieve(ctx, plan)
 		},
 		waitSegmentReadGateRetry,
 	)
@@ -833,6 +867,10 @@ func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan,
 }
 
 func (s *LocalSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error) {
+	return s.retrieveWithSegment(ctx, plan, s.csegment)
+}
+
+func (s *LocalSegment) retrieveWithSegment(ctx context.Context, plan *segcore.RetrievePlan, native segcore.CSegment) (*segcorepb.RetrieveResults, error) {
 	log := mlog.WithLazy(
 		mlog.FieldCollectionID(s.Collection()),
 		mlog.FieldPartitionID(s.Partition()),
@@ -841,7 +879,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan)
 		mlog.String("segmentType", s.segmentType.String()),
 	)
 
-	result, err := s.retrieve(ctx, plan, log)
+	result, err := s.retrieveNative(ctx, plan, log, native)
 	if err != nil {
 		return nil, err
 	}
@@ -924,6 +962,10 @@ func (s *LocalSegment) RetrieveArrow(ctx context.Context, plan *segcore.Retrieve
 }
 
 func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets, log *mlog.Logger) (*segcore.RetrieveResult, error) {
+	return s.retrieveByOffsetsNative(ctx, plan, log, s.csegment)
+}
+
+func (s *LocalSegment) retrieveByOffsetsNative(ctx context.Context, plan *segcore.RetrievePlanWithOffsets, log *mlog.Logger, native segcore.CSegment) (*segcore.RetrieveResult, error) {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -936,7 +978,7 @@ func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.Retr
 		ctx,
 		s.segmentType,
 		func() (*segcore.RetrieveResult, error) {
-			return s.csegment.RetrieveByOffsets(ctx, plan)
+			return native.RetrieveByOffsets(ctx, plan)
 		},
 		waitSegmentReadGateRetry,
 	)
@@ -950,6 +992,10 @@ func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.Retr
 }
 
 func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
+	return s.retrieveByOffsetsWithSegment(ctx, plan, s.csegment)
+}
+
+func (s *LocalSegment) retrieveByOffsetsWithSegment(ctx context.Context, plan *segcore.RetrievePlanWithOffsets, native segcore.CSegment) (*segcorepb.RetrieveResults, error) {
 	log := mlog.WithLazy(mlog.FieldCollectionID(s.Collection()),
 		mlog.FieldPartitionID(s.Partition()),
 		mlog.FieldSegmentID(s.ID()),
@@ -958,7 +1004,7 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *segcore.Retr
 		mlog.Int("resultNum", len(plan.Offsets)),
 	)
 
-	result, err := s.retrieveByOffsets(ctx, plan, log)
+	result, err := s.retrieveByOffsetsNative(ctx, plan, log, native)
 	if err != nil {
 		return nil, err
 	}
@@ -1267,6 +1313,13 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 }
 
 func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+	return s.ReopenWithSchema(ctx, newLoadInfo, schema, schemaVersion)
+}
+
+// ReopenWithSchema prepares a QueryView target without changing the collection
+// from which older views compile plans.
+func (s *LocalSegment) ReopenWithSchema(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema, schemaVersion uint64) error {
 	if !s.ptrLock.PinIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
@@ -1279,7 +1332,6 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
 		Schema:        schema,

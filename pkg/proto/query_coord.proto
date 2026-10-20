@@ -39,6 +39,8 @@ service QueryCoord {
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
+    rpc WatchQueryViewSegmentLoadInfo(stream WatchQueryViewSegmentLoadInfoRequest)
+        returns (stream WatchQueryViewSegmentLoadInfoResponse) {}
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }
 
@@ -325,6 +327,47 @@ message GetSegmentInfoResponse {
     repeated SegmentInfo infos = 2;
 }
 
+message QueryViewSegmentLoadInfoRevision {
+    uint64 load_info_revision = 1;
+}
+
+message WatchQueryViewSegmentLoadInfoSubscription {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+    QueryViewSegmentLoadInfoRevision revision = 3;
+}
+
+message WatchQueryViewSegmentLoadInfoUnsubscription {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+}
+
+message WatchQueryViewSegmentLoadInfoRequest {
+    common.MsgBase base = 1;
+    repeated WatchQueryViewSegmentLoadInfoSubscription subscribe = 2;
+    repeated WatchQueryViewSegmentLoadInfoUnsubscription unsubscribe = 3;
+}
+
+message QueryViewSegmentLoadInfoSnapshot {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+    QueryViewSegmentLoadInfoRevision revision = 3;
+    SegmentLoadInfo load_info = 4;
+}
+
+// Shared once per collection within each response; snapshots in that response
+// resolve their collection's current index definitions from this table.
+message QueryViewCollectionIndexes {
+    int64 collectionID = 1;
+    repeated index.IndexInfo index_info_list = 2;
+}
+
+message WatchQueryViewSegmentLoadInfoResponse {
+    common.Status status = 1;
+    repeated QueryViewSegmentLoadInfoSnapshot snapshots = 2;
+    repeated QueryViewCollectionIndexes collection_indexes = 3;
+}
+
 message GetShardLeadersRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
@@ -463,6 +506,8 @@ message SegmentLoadInfo {
     repeated string child_manifest_paths = 29;
     // stats carries the durable segment aggregates used for resource estimation.
     data.Statistics stats = 30;
+    // Replay cursor of the exact physical base in this snapshot.
+    uint64 transform_start_after_timetick = 31;
 }
 
 message FieldIndexInfo {
@@ -1218,4 +1263,6 @@ message GetQueryViewLoadInfoResponse {
     repeated int64 partitionIDs = 4;
     repeated messages.LoadFieldConfig load_fields = 5;
     repeated index.IndexInfo index_info_list = 6;
+    repeated messages.LoadFieldConfig required_fields = 7;
+    bool skip_load_dynamic_field = 8;
 }

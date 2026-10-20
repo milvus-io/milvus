@@ -77,7 +77,8 @@ SegmentLoadInfo::HasManifestColumn(const std::string& column_name) const {
 LoadIndexInfo
 SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     const proto::segcore::FieldIndexInfo* field_index_info,
-    int64_t segment_id) const {
+    int64_t segment_id,
+    const SealedFieldLayoutPtr& fields) const {
     LoadIndexInfo load_index_info;
 
     load_index_info.segment_id = segment_id;
@@ -89,7 +90,7 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
     load_index_info.shard = GetInsertChannel();
 
     // Get field type from schema
-    const auto& field_meta = schema_->operator[](field_id);
+    const auto& field_meta = fields->operator[](field_id);
     load_index_info.field_type = field_meta.get_data_type();
     load_index_info.element_type = field_meta.get_element_type();
 
@@ -139,6 +140,11 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
         load_index_info.index_params[kv_pair.key()] = kv_pair.value();
     }
 
+    // Register every required index, but do not prewarm unhinted fields.
+    if (!fields->ShouldPreload(field_id)) {
+        load_index_info.warmup_policy = "disable";
+    }
+
     // Inject scalar index version into index_params for scalar indexes
     auto scalar_version = field_index_info->current_scalar_index_version();
     if (scalar_version > 0) {
@@ -164,7 +170,8 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
 std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>
 SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
     const proto::segcore::TextIndexStats& text_index_stats,
-    FieldId field_id) const {
+    FieldId field_id,
+    const SealedFieldLayoutPtr& fields) const {
     auto info = std::make_shared<proto::indexcgo::LoadTextIndexInfo>();
 
     info->set_fieldid(text_index_stats.fieldid());
@@ -174,7 +181,7 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
         info->add_files(f);
     }
 
-    const auto& field_meta = schema_->operator[](field_id);
+    const auto& field_meta = fields->operator[](field_id);
     *info->mutable_schema() = field_meta.ToProto();
 
     info->set_collectionid(GetCollectionID());
@@ -184,7 +191,7 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
     // Text match index mmap config is based on the scalar field mmap
     auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
     auto [field_has_setting, field_mmap_enabled] =
-        schema_->MmapEnabled(field_id);
+        fields->MmapEnabled(field_id);
     bool enable_mmap = field_has_setting
                            ? field_mmap_enabled
                            : mmap_config.GetScalarFieldEnableMmap();
@@ -194,8 +201,8 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
         text_index_stats.current_scalar_index_version());
 
     // Text match index warmup policy based on scalar field's warmup
-    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
-        field_id, /*is_vector=*/false, /*is_index=*/false);
+    auto [field_has_warmup, field_warmup_policy] =
+        fields->WarmupPolicy(field_id, /*is_vector=*/false, /*is_index=*/false);
     if (field_has_warmup) {
         info->set_warmup_policy(field_warmup_policy);
     }
@@ -211,7 +218,8 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
 std::shared_ptr<proto::indexcgo::LoadJsonKeyIndexInfo>
 SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
     const proto::segcore::JsonKeyStats& json_key_stats,
-    FieldId field_id) const {
+    FieldId field_id,
+    const SealedFieldLayoutPtr& fields) const {
     auto info = std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
 
     info->set_fieldid(json_key_stats.fieldid());
@@ -221,7 +229,7 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
         info->add_files(f);
     }
 
-    const auto& field_meta = schema_->operator[](field_id);
+    const auto& field_meta = fields->operator[](field_id);
     *info->mutable_schema() = field_meta.ToProto();
 
     info->set_collectionid(GetCollectionID());
@@ -233,8 +241,8 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
     info->set_enable_mmap(mmap_config.GetJsonStatsEnableMmap());
     info->set_mmap_dir_path(mmap_config.GetJsonStatsMmapPath());
 
-    auto [field_has_warmup, field_warmup_policy] = schema_->WarmupPolicy(
-        field_id, /*is_vector=*/false, /*is_index=*/false);
+    auto [field_has_warmup, field_warmup_policy] =
+        fields->WarmupPolicy(field_id, /*is_vector=*/false, /*is_index=*/false);
     if (field_has_warmup) {
         info->set_warmup_policy(field_warmup_policy);
     }
@@ -284,8 +292,8 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     for (const auto& [field_id, load_index_infos] :
          new_info.converted_field_index_cache_) {
         // Schema-driven: skip indexes for fields not in current schema.
-        // Use new_info's schema (the latest) since this->schema_ may still
-        // contain dropped fields from a prior load.
+        // Use the target field selection; the previous load may include
+        // fields dropped by this operation.
         if (!new_info.HasFieldInSchema(field_id)) {
             continue;
         }
@@ -345,7 +353,9 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         }
 
         for (auto child_id : child_fields) {
-            current_fields[child_id] = field_binlog.fieldid();
+            if (HasFieldInSchema(FieldId(child_id))) {
+                current_fields[child_id] = field_binlog.fieldid();
+            }
         }
     }
 
@@ -444,7 +454,8 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
 
 void
 SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
-                                         SegmentLoadInfo& new_info) {
+                                         SegmentLoadInfo& new_info,
+                                         const SealedFieldLayoutPtr& fields) {
     auto prefer_field_data =
         SegcoreConfig::default_config()
             .get_prefer_field_data_when_index_has_raw_data();
@@ -468,7 +479,9 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         }
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
-            cur_field_to_files[field_id] = &cg->files;
+            if (HasFieldInSchema(FieldId(field_id))) {
+                cur_field_to_files[field_id] = &cg->files;
+            }
         }
     }
 
@@ -498,7 +511,7 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         if (!cg) {
             continue;
         }
-        std::vector<FieldId> fields;
+        std::vector<FieldId> fields_to_load;
         std::vector<FieldId> replace_fields;
         std::vector<FieldId> lazy_fields;
         std::vector<FieldId> lazy_replace_fields;
@@ -525,8 +538,8 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             bool is_replace_field = was_default_filled || files_changed;
             bool index_has_raw_data =
                 new_info.field_index_has_raw_data_.count(fid) > 0;
-            bool is_vector_field = IsVectorDataType(
-                new_info.schema_->operator[](fid).get_data_type());
+            bool is_vector_field =
+                IsVectorDataType(fields->operator[](fid).get_data_type());
             // When a VECTOR field's index already carries the raw data
             // (IVF_FLAT / DiskANN / HNSW-with-raw), the separate raw vector
             // column is redundant and must NOT be made resident — neither eager
@@ -555,12 +568,12 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             // (we want to keep field data alongside index, OR index can't serve raw).
             bool should_eager_load =
                 field_id < START_USER_FIELDID ||
-                (new_info.schema_->ShouldLoadField(fid) &&
+                (fields->ShouldLoadField(fid) &&
                  (prefer_field_data || !index_has_raw_data));
             if (is_new_field) {
                 // Field not in current and not default-filled → new load
                 if (should_eager_load) {
-                    fields.emplace_back(field_id);
+                    fields_to_load.emplace_back(field_id);
                 } else {
                     lazy_fields.emplace_back(field_id);
                 }
@@ -578,8 +591,8 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             // resident copy instead of lazifying it (lazy still keeps it on
             // disk on top of the index — the double-footprint bug this fixes).
         }
-        if (!fields.empty()) {
-            diff.column_groups_to_load.emplace_back(i, fields);
+        if (!fields_to_load.empty()) {
+            diff.column_groups_to_load.emplace_back(i, fields_to_load);
         }
         if (!replace_fields.empty()) {
             diff.column_groups_to_replace.emplace_back(i, replace_fields);
@@ -668,7 +681,7 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
             }
         }
     } else {
-        if (schema_->is_external_collection()) {
+        if (external_) {
             diff.load_external_manifest = true;
         } else {
             // Manifest mode: collect fields per column group, emplace each
@@ -731,8 +744,7 @@ SegmentLoadInfo::CollectDataFields() const {
 std::set<FieldId>
 SegmentLoadInfo::GetDefaultFilledFieldsForNewInfo(
     const SegmentLoadInfo& new_info) const {
-    if (schema_->is_external_collection() ||
-        new_info.schema_->is_external_collection()) {
+    if (external_ || new_info.external_) {
         return {};
     }
 
@@ -752,7 +764,8 @@ SegmentLoadInfo::GetDefaultFilledFieldsForNewInfo(
 
 void
 SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
-                                          SegmentLoadInfo& new_info) {
+                                          SegmentLoadInfo& new_info,
+                                          const SealedFieldLayoutPtr& fields) {
     std::set<FieldId> new_info_fields = new_info.CollectDataFields();
     std::set<FieldId> current_fields = CollectDataFields();
 
@@ -764,8 +777,9 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
                            fields_filled_with_default_.end());
 
     // Compute: new schema fields - new_info_fields - current_handled
-    for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
-        if (field_id.get() < START_USER_FIELDID) {
+    for (const auto& [field_id, field_meta] : fields->get_fields()) {
+        if (field_id.get() < START_USER_FIELDID ||
+            !new_info.HasFieldInSchema(field_id)) {
             continue;
         }
 
@@ -777,7 +791,7 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
             continue;
         }
 
-        if (new_info.schema_->is_function_output(field_id)) {
+        if (fields->is_function_output(field_id)) {
             continue;
         }
 
@@ -822,11 +836,14 @@ JsonStatsLoadIdentityEqual(const proto::segcore::JsonKeyStats& lhs,
 
 void
 SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
-                                        SegmentLoadInfo& new_info) {
+                                        SegmentLoadInfo& new_info,
+                                        const SealedFieldLayoutPtr& fields) {
     // Build current text indexed fields (fields with loaded text index stats)
     std::set<FieldId> current_text_indexed;
     for (const auto& [field_id, stats] : GetTextStatsLogs()) {
-        current_text_indexed.insert(FieldId(field_id));
+        if (HasFieldInSchema(FieldId(field_id))) {
+            current_text_indexed.insert(FieldId(field_id));
+        }
     }
     // Also include text indexes created from raw data
     for (const auto& field_id : created_text_indexes_) {
@@ -854,14 +871,15 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
     for (const auto& [field_id, stats] : new_text_indexed) {
         if (current_text_indexed.find(field_id) == current_text_indexed.end()) {
             diff.text_indexes_to_load[field_id] =
-                new_info.ConvertTextIndexStatsToLoadTextIndexInfo(*stats,
-                                                                  field_id);
+                new_info.ConvertTextIndexStatsToLoadTextIndexInfo(
+                    *stats, field_id, fields);
         }
     }
 
     // Find text indexes to create: enable_match fields without pre-built index
-    for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
-        if (!field_meta.enable_match()) {
+    for (const auto& [field_id, field_meta] : fields->get_fields()) {
+        if (!field_meta.enable_match() ||
+            !new_info.HasFieldInSchema(field_id)) {
             continue;
         }
         // Skip if has pre-built index in new_info
@@ -879,7 +897,8 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
 
 void
 SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
-                                         SegmentLoadInfo& new_info) {
+                                         SegmentLoadInfo& new_info,
+                                         const SealedFieldLayoutPtr& fields) {
     if (!JSON_KEY_STATS_ENABLED.load()) {
         auto stats_count = GetJsonKeyStatsLogs().size() +
                            new_info.GetJsonKeyStatsLogs().size();
@@ -896,7 +915,9 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
     const auto expected_format = CurrentJsonStatsDataFormatVersion();
     std::set<FieldId> current_fields;
     for (const auto& [field_id, stats] : GetJsonKeyStatsLogs()) {
-        current_fields.insert(FieldId(field_id));
+        if (HasFieldInSchema(FieldId(field_id))) {
+            current_fields.insert(FieldId(field_id));
+        }
     }
 
     std::set<FieldId> new_fields;
@@ -906,7 +927,9 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
             continue;
         }
         new_fields.insert(fid);
-        auto current_stats = GetJsonKeyStatsLog(field_id);
+        auto current_stats = HasFieldInSchema(fid)
+                                 ? GetJsonKeyStatsLog(field_id)
+                                 : nullptr;
         if (stats.json_key_stats_data_format() != expected_format) {
             LOG_WARN(
                 "skip json key stats diff because data format is invalid, "
@@ -932,7 +955,8 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
 
         if (current_stats == nullptr) {
             diff.json_stats_to_load[fid] =
-                new_info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(stats, fid);
+                new_info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
+                    stats, fid, fields);
             LOG_INFO(
                 "json key stats diff load, segment:{}, field:{}, build:{}, "
                 "version:{}",
@@ -945,7 +969,8 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
 
         if (!JsonStatsLoadIdentityEqual(*current_stats, stats)) {
             diff.json_stats_to_replace[fid] =
-                new_info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(stats, fid);
+                new_info.ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
+                    stats, fid, fields);
             LOG_INFO(
                 "json key stats diff replace, segment:{}, field:{}, build:{}, "
                 "version:{}",
@@ -969,7 +994,8 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
 // std::unique_ptr<typename Tp>
 
 LoadDiff
-SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
+SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info,
+                             const SealedFieldLayoutPtr& fields) {
     LoadDiff diff;
 
     // Handle index changes
@@ -979,10 +1005,10 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     ComputeDiffReloadFields(diff, new_info);
 
     // Compute text index changes
-    ComputeDiffTextIndexes(diff, new_info);
+    ComputeDiffTextIndexes(diff, new_info, fields);
 
     // Compute JSON key stats changes
-    ComputeDiffJsonKeyStats(diff, new_info);
+    ComputeDiffJsonKeyStats(diff, new_info, fields);
 
     // Handle field data changes
     // Note: Updates can only happen within the same category:
@@ -996,12 +1022,19 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
             diff.manifest_updated = true;
             diff.new_manifest_path = new_info.GetManifestPath();
         }
-        if (schema_->is_external_collection()) {
+        if (external_) {
             if (diff.manifest_updated) {
                 diff.load_external_manifest = true;
             }
+            for (const auto& [field_id, field] : fields->get_fields()) {
+                if (new_info.HasFieldInSchema(field_id) &&
+                    !HasFieldInSchema(field_id)) {
+                    diff.load_external_manifest = true;
+                    break;
+                }
+            }
         } else {
-            ComputeDiffColumnGroups(diff, new_info);
+            ComputeDiffColumnGroups(diff, new_info, fields);
         }
     } else {
         AssertInfo(
@@ -1011,15 +1044,21 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     }
 
     // Compute fields that need default value filling (schema evolution)
-    if (!schema_->is_external_collection()) {
-        ComputeDiffDefaultFields(diff, new_info);
+    if (!external_) {
+        ComputeDiffDefaultFields(diff, new_info, fields);
+    }
+
+    for (auto field_id : fields_filled_with_default_) {
+        if (!new_info.HasFieldInSchema(field_id)) {
+            diff.field_data_to_drop.insert(field_id);
+        }
     }
 
     return diff;
 }
 
 LoadDiff
-SegmentLoadInfo::GetLoadDiff() {
+SegmentLoadInfo::GetLoadDiff(const SealedFieldLayoutPtr& fields) {
     // GetLoadDiff requires non-empty load info (must have data sources)
     AssertInfo(GetBinlogPathCount() > 0 || GetIndexInfoCount() > 0 ||
                    HasManifestPath(),
@@ -1029,16 +1068,16 @@ SegmentLoadInfo::GetLoadDiff() {
 
     milvus::proto::segcore::SegmentLoadInfo empty_load_info;
 
-    SegmentLoadInfo empty_info(empty_load_info, schema_);
+    SegmentLoadInfo empty_info(empty_load_info, fields);
 
     // Handle index changes
     empty_info.ComputeDiffIndexes(diff, *this);
 
     // Handle text index changes
-    empty_info.ComputeDiffTextIndexes(diff, *this);
+    empty_info.ComputeDiffTextIndexes(diff, *this, fields);
 
     // Handle JSON key stats changes
-    empty_info.ComputeDiffJsonKeyStats(diff, *this);
+    empty_info.ComputeDiffJsonKeyStats(diff, *this, fields);
 
     // Handle field data changes
     // Note: Updates can only happen within the same category:
@@ -1046,7 +1085,7 @@ SegmentLoadInfo::GetLoadDiff() {
     // - manifest -> manifest
     // Cross-category changes are not supported.
     if (HasManifestPath()) {
-        if (schema_->is_external_collection()) {
+        if (external_) {
             // External collections use parquet field names (e.g., "id",
             // "value") as column group column names, not numeric field IDs.
             // ComputeDiffColumnGroups calls std::stoll which would crash.
@@ -1057,7 +1096,7 @@ SegmentLoadInfo::GetLoadDiff() {
             empty_info.info_.set_manifest_path("mocked manifest path");
             empty_info.column_groups_ =
                 std::make_shared<milvus_storage::api::ColumnGroups>();
-            empty_info.ComputeDiffColumnGroups(diff, *this);
+            empty_info.ComputeDiffColumnGroups(diff, *this, fields);
         }
     } else {
         empty_info.ComputeDiffBinlogs(diff, *this);
@@ -1067,8 +1106,8 @@ SegmentLoadInfo::GetLoadDiff() {
     // Skip for external collections: collect_data_fields() calls std::stoll
     // on column group names, and external collections don't need default fills
     // (all fields are either external or virtual PK).
-    if (!schema_->is_external_collection()) {
-        empty_info.ComputeDiffDefaultFields(diff, *this);
+    if (!external_) {
+        empty_info.ComputeDiffDefaultFields(diff, *this, fields);
     }
 
     return diff;
