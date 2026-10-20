@@ -946,6 +946,15 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 		}
 		fieldNames = append(fieldNames, field.Name)
 	}
+	floatVectorDims := make([]int64, len(collSchema.Fields))
+	for i, field := range collSchema.Fields {
+		if field.DataType != schemapb.DataType_FloatVector {
+			continue
+		}
+		// The schema dimension is stable across rows; parse it once instead of
+		// looking it up and converting it for every vector value.
+		floatVectorDims[i], _ = getDim(field)
+	}
 	for _, structField := range collSchema.StructArrayFields {
 		fieldNames = append(fieldNames, structField.GetName())
 	}
@@ -991,7 +1000,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				}
 				reallyData[structField.GetName()] = structRow
 			}
-			for _, field := range collSchema.Fields {
+			for fieldIndex, field := range collSchema.Fields {
 				if field.IsDynamic {
 					continue
 				}
@@ -1101,12 +1110,12 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					// Sonic grows a nil slice while decoding. Every JSON number in
 					// an array needs at least one digit and (except the last) a
 					// comma, so skip reserving a full row for clearly short input.
+					// Keep the array and length guards: malformed short input must not
+					// trigger an allocation based only on the schema dimension.
 					dataLength := int64(len(dataString))
-					if fieldValue.IsArray() {
-						if dim, dimErr := getDim(field); dimErr == nil &&
-							dim > 0 && dataLength > 0 && dim <= (dataLength-1)/2 {
-							vectorArray = make([]float32, 0, int(dim))
-						}
+					dim := floatVectorDims[fieldIndex]
+					if fieldValue.IsArray() && dim > 0 && dim <= (dataLength-1)/2 {
+						vectorArray = make([]float32, 0, int(dim))
 					}
 					err := json.UnmarshalFromString(dataString, &vectorArray)
 					if err != nil {
