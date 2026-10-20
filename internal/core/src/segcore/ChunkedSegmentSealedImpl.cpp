@@ -63,6 +63,7 @@
 #include "query/SearchOnSealed.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
+#include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/ChunkedColumnGroup.h"
@@ -75,8 +76,10 @@
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/KeyRetriever.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "cachinglayer/CacheSlot.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
@@ -360,13 +363,25 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
         auto field_metas = schema_->get_field_metas(milvus_field_ids);
 
+        PreparedParquetFiles prepared_files;
+        prepared_files.reserve(insert_files.size());
+        for (const auto& file : insert_files) {
+            auto result = milvus_storage::PreparedParquetFile::Open(
+                fs, file, storage::GetReaderProperties());
+            AssertInfo(result.ok(),
+                       "[StorageV2] Failed to prepare file {}: {}",
+                       file,
+                       result.status().ToString());
+            prepared_files.push_back(std::move(result).ValueOrDie());
+        }
+
         auto translator =
             std::make_unique<storagev2translator::GroupChunkTranslator>(
                 get_segment_id(),
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
-                insert_files,
+                std::move(prepared_files),
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),
                 milvus_field_ids.size(),
