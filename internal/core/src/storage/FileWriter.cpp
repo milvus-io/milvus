@@ -353,6 +353,17 @@ FileWriter::Finish() {
         }
     }
 
+    // Detach before closing: even a failed close must not be retried by cleanup.
+    const auto fd = std::exchange(fd_, -1);
+    if (fd != -1 && close(fd) != 0) {
+        const auto saved_errno = errno;
+        Cleanup();
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "Failed to close file: {}, error: {}",
+                  filename_,
+                  strerror(saved_errno));
+    }
+
     // clean up the file writer
     Cleanup();
 
