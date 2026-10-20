@@ -145,7 +145,6 @@ func TestRewriteArrayContainsColumnVariants(t *testing.T) {
 		require.Equal(t, []int64{1, 2, 3}, arrayContainsIntegrationIntValues(contains.GetElements()))
 		require.True(t, contains.GetColumnInfo().GetNullable())
 	})
-
 }
 
 func TestRewriteArrayContainsFilledTemplates(t *testing.T) {

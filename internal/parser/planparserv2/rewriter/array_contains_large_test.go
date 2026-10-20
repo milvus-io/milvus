@@ -5,12 +5,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/stretchr/testify/require"
 )
 
 // Use the observed expression shape and sizes, with entirely synthetic values.

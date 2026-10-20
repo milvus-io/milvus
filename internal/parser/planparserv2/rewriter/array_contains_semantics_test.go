@@ -45,9 +45,13 @@ func TestArrayContainsNullableAndEmptyTruthTables(t *testing.T) {
 					// Evaluate independently using nullable membership/three-valued
 					// truth tables, including an invalid row and a valid empty array.
 					for _, row := range []arrayContainsRow{
-						{valid: false}, {valid: true}, {valid: true, values: []int64{0}},
-						{valid: true, values: []int64{1}}, {valid: true, values: []int64{2}},
-						{valid: true, values: []int64{1, 1, 2}}, {valid: true, values: []int64{1, 2, 3}},
+						{valid: false},
+						{valid: true},
+						{valid: true, values: []int64{0}},
+						{valid: true, values: []int64{1}},
+						{valid: true, values: []int64{2}},
+						{valid: true, values: []int64{1, 1, 2}},
+						{valid: true, values: []int64{1, 2, 3}},
 					} {
 						require.Equal(t, evalArrayContainsTruth(input, row), evalArrayContainsTruth(result, row))
 					}
