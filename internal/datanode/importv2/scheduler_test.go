@@ -690,7 +690,7 @@ func TestSnapshotReaderBudgetsAndCleanup(t *testing.T) {
 				}
 			}
 			if tc.pkRange {
-				file.PreAllocatedAutoIds = &commonpb.IDRange{Begin: 10, End: 20}
+				file.IdRange = &commonpb.IDRange{Begin: 10, End: 20}
 			}
 			fakeReader := &snapshotErrorReader{}
 			readPatch := mockey.Mock((*snapshotErrorReader).Read).Return(nil, readErr).Build()

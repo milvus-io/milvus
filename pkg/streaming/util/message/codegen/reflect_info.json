@@ -127,6 +127,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.UpdateImportMessageHeader",
+                "BodyType": "messagespb.UpdateImportMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeUpdateImport",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.RollbackImportMessageHeader",
                 "BodyType": "messagespb.RollbackImportMessageBody"
             },
