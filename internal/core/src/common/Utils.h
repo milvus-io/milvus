@@ -20,6 +20,7 @@
 
 #include <cstring>
 #include <cmath>
+#include <concepts>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -245,6 +246,69 @@ EscapeBraces(const std::string& input) {
     return result;
 }
 
+// Adds unsigned integers and clamps overflow to the result type's maximum
+// value. Operands may differ in type; the result uses their common type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingAdd(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
+    constexpr auto max = std::numeric_limits<T>::max();
+    return rhs > max - lhs ? max : lhs + rhs;
+}
+
+// Multiplies unsigned integers and clamps overflow to the result type's
+// maximum value. Operands may differ in type; the result uses their common
+// type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingMultiply(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
+    constexpr auto max = std::numeric_limits<T>::max();
+    return lhs != 0 && rhs > max / lhs ? max : lhs * rhs;
+}
+
+// Return nullptr for valid data, otherwise a static reason. Callers decide the
+// error code and context. Validation neither allocates nor copies the row.
+// When is_sorted is supplied, report ordering instead of rejecting it. The
+// caller must sort and reject duplicate indices before consuming such a row.
+[[nodiscard]] inline const char*
+ValidateSparseRow(const void* data, size_t size, bool* is_sorted = nullptr) {
+    if (is_sorted) {
+        *is_sorted = true;
+    }
+    const auto element_size =
+        knowhere::sparse::SparseRow<SparseValueType>::element_size();
+    if (size % element_size != 0) {
+        return "Invalid size for sparse row data";
+    }
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    uint32_t previous = 0;
+    for (size_t offset = 0; offset < size; offset += element_size) {
+        uint32_t index;
+        SparseValueType value;
+        // Arrow values need not be aligned for integer or float reads.
+        std::memcpy(&index, bytes + offset, sizeof(index));
+        std::memcpy(&value, bytes + offset + sizeof(index), sizeof(value));
+        if (!std::isfinite(value)) {
+            return "Invalid sparse row: NaN or Inf value";
+        }
+        if (value < 0) {
+            return "Invalid sparse row: negative value";
+        }
+        if (index == std::numeric_limits<uint32_t>::max()) {
+            return "Invalid sparse row: id should be smaller than uint32 max";
+        }
+        if (offset > 0 && index <= previous) {
+            if (!is_sorted) {
+                return "Invalid sparse row: id should be strict ascending";
+            }
+            *is_sorted = false;
+        }
+        previous = index;
+    }
+    return nullptr;
+}
+
 inline knowhere::sparse::SparseRow<SparseValueType>
 CopyAndWrapSparseRow(const void* data,
                      size_t size,
@@ -256,25 +320,15 @@ CopyAndWrapSparseRow(const void* data,
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "Invalid size for sparse row data");
     }
+    if (validate) {
+        if (const auto* error = ValidateSparseRow(data, size)) {
+            AssertInfo(false, "{}", error);
+        }
+    }
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
     milvus::fastmem::FastMemcpy(row.data(), data, size);
-    if (validate) {
-        for (size_t i = 0; i < num_elements; ++i) {
-            auto element = row[i];
-            AssertInfo(std::isfinite(element.val),
-                       "Invalid sparse row: NaN or Inf value");
-            AssertInfo(element.val >= 0, "Invalid sparse row: negative value");
-            AssertInfo(
-                element.id < std::numeric_limits<uint32_t>::max(),
-                "Invalid sparse row: id should be smaller than uint32 max");
-            if (i > 0) {
-                AssertInfo(row[i - 1].id < element.id,
-                           "Invalid sparse row: id should be strict ascending");
-            }
-        }
-    }
     return row;
 }
 
