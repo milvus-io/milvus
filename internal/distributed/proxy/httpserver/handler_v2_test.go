@@ -5619,6 +5619,50 @@ func TestFp16Bf16VectorsV2(t *testing.T) {
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
+func TestRESTSearchRejectsExplicitNonPositiveGroupSize(t *testing.T) {
+	paramtable.Init()
+	quotaKey := paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key
+	paramtable.Get().Save(quotaKey, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(quotaKey) })
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Maybe()
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+		Status: commonSuccessStatus,
+		Results: &schemapb.SearchResultData{
+			TopK: 0,
+		},
+	}, nil).Maybe()
+	testEngine := initHTTPServerV2(mp, false)
+
+	for _, groupSize := range []int32{0, -1} {
+		t.Run(fmt.Sprintf("groupSize_%d", groupSize), func(t *testing.T) {
+			body := fmt.Sprintf(`{
+				"collectionName": "book",
+				"data": [[0.1, 0.2]],
+				"annsField": "book_intro",
+				"limit": 10,
+				"groupingField": "word_count",
+				"groupSize": %d
+			}`, groupSize)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, SearchAction), strings.NewReader(body))
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			response := &ReturnErrMsg{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), response))
+			assert.Equal(t, merr.Code(merr.ErrParameterInvalid), response.Code)
+			assert.Contains(t, response.Message, "groupSize must be a positive integer")
+		})
+	}
+}
+
 func TestSearchV2(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
