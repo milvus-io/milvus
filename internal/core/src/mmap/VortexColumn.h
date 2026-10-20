@@ -248,8 +248,8 @@ class VortexColumn final : public ChunkedColumnInterface {
     std::unique_ptr<ColumnPlanner>
     BuildPlanner() const override;
 
-    // Same contract as ChunkedArrayColumn: array views of a field with null
-    // elements are not served to expressions yet.
+    // Same contract as ChunkedArrayColumn: the legacy ArrayView of a field
+    // with null elements is not served.
     void
     ValidateArrayViewTarget(TargetType target_type) const override;
 

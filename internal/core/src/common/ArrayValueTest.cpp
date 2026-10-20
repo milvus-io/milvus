@@ -1176,8 +1176,17 @@ TEST(ArrayValue, GrowingSegmentRetrievesNullableScalarElements) {
         segment->bulk_subscript(nullptr, array_field, &result_offset, 1);
     ASSERT_EQ(result->scalars().array_data().data_size(), 1);
     AssertProtoEqual(*row, result->scalars().array_data().data(0));
-    EXPECT_ANY_THROW(segment->chunk_view<ArrayValueView>(
-        nullptr, array_field, 0, std::make_pair(0, 1)));
+    // Row filters read element-nullable rows as ArrayValueView, which
+    // exposes element validity.
+    auto views = segment->chunk_view<ArrayValueView>(
+        nullptr, array_field, 0, std::make_pair(0, 1));
+    const auto& [view_rows, view_valid] = views.get();
+    ASSERT_EQ(view_rows.size(), 1);
+    ASSERT_EQ(view_rows[0].size(), 3);
+    EXPECT_TRUE(view_rows[0].is_valid(0));
+    EXPECT_FALSE(view_rows[0].is_valid(1));
+    EXPECT_TRUE(view_rows[0].is_valid(2));
+    EXPECT_EQ(view_rows[0].get_data_unchecked<int64_t>(2), 16);
     auto offsets = segment->GetStructElementOffsets(array_field);
     ASSERT_NE(offsets, nullptr);
     EXPECT_EQ(offsets->GetRowCount(), 1);
