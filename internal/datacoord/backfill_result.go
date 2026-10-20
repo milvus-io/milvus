@@ -312,7 +312,7 @@ func opsToManifestUpdates(entry *BackfillSegment, basePath string) (*packed.Mani
 // loon_transaction_add_column_group. Malformed ops are Input errors: they
 // violate the external (Spark) result contract and retrying cannot fix them.
 // basePath must be the segment's manifest base; every op file path is checked
-// to lie under it (see opsToManifestUpdates).
+// to be an absolute path under `<base>/_data/` (see opsToManifestUpdates).
 func buildManifestColumnGroup(op *BackfillManifestOp, basePath string) (*packed.ColumnGroupEntry, error) {
 	if len(op.Columns) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("backfill manifest op has no columns")
@@ -331,9 +331,18 @@ func buildManifestColumnGroup(op *BackfillManifestOp, basePath string) (*packed.
 		if f.Path == "" {
 			return nil, merr.WrapErrParameterInvalidMsg("backfill manifest op for columns %v has an empty file path", op.Columns)
 		}
-		if basePath != "" && !strings.HasPrefix(f.Path, basePath+"/") {
-			return nil, merr.WrapErrParameterInvalidMsg(
-				"backfill manifest file %q is outside segment manifest base %q", f.Path, basePath)
+		// milvus-storage only relativizes files under `<base>/_data/` (ToRelative
+		// with kDataPath); anything else is stored as-is, and on read ToAbsolute
+		// prepends `<base>/_data/` to a scheme-less key. Requiring the exact
+		// `<base>/_data/` prefix and a clean path rejects both a bare `<base>/x`
+		// (which would read from `<base>/_data/<base>/x`) and a `..` traversal
+		// (which normalizes to another segment's files and never gets collected).
+		if basePath != "" {
+			dataPrefix := basePath + "/_data/"
+			if !strings.HasPrefix(f.Path, dataPrefix) || path.Clean(f.Path) != f.Path {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"backfill manifest file %q is not an absolute path under the segment manifest data dir %q", f.Path, dataPrefix)
+			}
 		}
 		if f.EndIndex <= f.StartIndex {
 			return nil, merr.WrapErrParameterInvalidMsg(

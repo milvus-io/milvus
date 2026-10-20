@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"golang.org/x/sync/errgroup"
 )
 
 // CommitBackfillResult fetches the Spark-produced BackfillResult JSON from
@@ -129,7 +130,11 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		batch := v2Units[start:end]
 		if err := s.recheckBackfillSchemaVersion(ctx, result); err != nil {
 			lastErr = err
-			appendUnitStatuses(&statuses, batch, false, err.Error())
+			// Mark every V2 unit not yet committed (this batch and all later
+			// batches) as failed, plus all V3 units: on a schema-version mismatch
+			// nothing in the result may be applied, and the per-segment contract
+			// must account for every segment.
+			appendUnitStatuses(&statuses, v2Units[start:], false, err.Error())
 			appendUnitStatuses(&statuses, v3Units, false, err.Error())
 			committed, failed := countStatuses(statuses)
 			log.Warn(ctx, "CommitBackfillResult rejected by schema version fence before V2 commit",
@@ -192,9 +197,11 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	// Per-segment commits (replace of a dropped column): each goes through
 	// meta.CommitSegmentManifest so the SegmentIndexRemove lands in the same
 	// catalog transaction as the new manifest pointer. Each commit does manifest
-	// object-storage I/O; run them with bounded concurrency so a large replace
-	// result does not pay that latency serially inside the caller's request. A
-	// failed commit records its per-segment status; the others still run.
+	// object-storage I/O; run them with bounded concurrency (errgroup.SetLimit,
+	// not one goroutine per segment) so a large replace result neither pays that
+	// latency serially inside the caller's request nor parks a goroutine per
+	// segment. A failed commit records its per-segment status; the others still
+	// run.
 	if len(v3Single) > 0 {
 		if err := s.recheckBackfillSchemaVersion(ctx, result); err != nil {
 			log.Warn(ctx, "CommitBackfillResult rejected by schema version fence before commit",
@@ -202,35 +209,28 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			lastErr = err
 			appendUnitStatuses(&statuses, v3Single, false, err.Error())
 		} else {
-			sem := make(chan struct{}, backfillClassifyConcurrency)
-			var wg sync.WaitGroup
 			var mu sync.Mutex
+			g, gCtx := errgroup.WithContext(ctx)
+			g.SetLimit(backfillClassifyConcurrency)
 			for _, unit := range v3Single {
-				wg.Add(1)
-				go func(unit backfillCommitUnit) {
-					defer wg.Done()
-					select {
-					case sem <- struct{}{}:
-					case <-ctx.Done():
-						return
-					}
-					defer func() { <-sem }()
-					if err := s.meta.CommitSegmentManifest(ctx, unit.commit); err != nil {
+				g.Go(func() error {
+					if err := s.meta.CommitSegmentManifest(gCtx, unit.commit); err != nil {
 						log.Error(ctx, "CommitBackfillResult V3 manifest commit failed",
 							mlog.Err(err), mlog.FieldSegmentID(unit.segmentID))
 						mu.Lock()
 						lastErr = err
 						appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, false, err.Error())
 						mu.Unlock()
-						return
+						return nil
 					}
 					mu.Lock()
 					appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, true, "")
 					markV3Committed()
 					mu.Unlock()
-				}(unit)
+					return nil
+				})
 			}
-			wg.Wait()
+			_ = g.Wait()
 		}
 	}
 
@@ -412,29 +412,21 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 	// bounded concurrency so a large result does not pay the object-storage
 	// latency serially, while preserving the deterministic per-segment order in
 	// the returned units and statuses. Meta reads (GetSegment) take segMu.RLock;
-	// the per-segment body appends nothing to shared slices.
+	// the per-segment body appends nothing to shared slices. errgroup.SetLimit
+	// bounds the live goroutine count, so a result with hundreds of thousands of
+	// segments does not park one goroutine per segment.
 	results := make([]classifySegmentResult, len(segIDs))
-	workerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	sem := make(chan struct{}, backfillClassifyConcurrency)
-	var wg sync.WaitGroup
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(backfillClassifyConcurrency)
 	for i, segIDStr := range segIDs {
-		wg.Add(1)
-		go func(idx int, segIDStr string) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-workerCtx.Done():
-				results[idx] = classifySegmentResult{segIDStr: segIDStr, err: workerCtx.Err()}
-				return
-			}
-			defer func() { <-sem }()
-			res := s.classifyOneBackfillSegment(workerCtx, bucket, result, segIDStr)
+		g.Go(func() error {
+			res := s.classifyOneBackfillSegment(gCtx, bucket, result, segIDStr)
 			res.segIDStr = segIDStr
-			results[idx] = res
-		}(i, segIDStr)
+			results[i] = res
+			return nil
+		})
 	}
-	wg.Wait()
+	_ = g.Wait()
 
 	units := make([]backfillCommitUnit, 0, len(result.Segments))
 	statuses := make([]*datapb.CommitBackfillResultSegmentStatus, 0)
@@ -451,6 +443,15 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
 				SegmentId: segID, Ok: false, Kind: inferKindFromSegIDStr(result, res.segIDStr),
 				Reason: "classification cancelled: " + res.err.Error(),
+			})
+			continue
+		}
+		if res.segIDStr == "" {
+			// The errgroup never scheduled this segment (cancellation before its
+			// slot). Account for it as failed so the per-segment contract is not
+			// under-reported.
+			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: 0, Ok: false, Kind: "", Reason: "classification cancelled before scheduling",
 			})
 			continue
 		}
