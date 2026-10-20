@@ -77,11 +77,10 @@ This catches an upper-layer retry that appended an extra body with a new TimeTic
 Late appends cannot revive the rejected session. A backend retry retains its local
 TimeTick; the consumer's existing physical deduplication removes its extra copies.
 
-Consumers validate the count after chunk assembly and TimeTick deduplication,
-before publishing an assembled transaction. A nonzero mismatch in a durable
-Commit is a data-integrity failure and stops consumption/recovery rather than
-silently publishing or dropping an incomplete transaction. The source consumer
-performs this validation before CDC sees a transaction.
+Body-count validation is a write-side contract: both primary and secondary check
+it before persisting Commit. Consumption and recovery rely on that invariant and
+assemble transactions after chunk assembly and TimeTick deduplication, without
+rechecking the count or introducing a count-mismatch panic.
 
 CDC forwards the source Commit unchanged, including a zero count. Historical
 transactions deliberately remain unchecked: CDC does not backfill a count from
@@ -134,8 +133,8 @@ preparation, allowing the missing source bodies to be supplied by replay.
 Recovery reconstructs the accepted source-ID set and successful body count from the uncommitted
 TxnBuffer, and the session from the same snapshot. A replayed Flush removes the
 old builder; a durable Commit publishes the complete transaction. Recovered session
-references retain the existing RecoverDone barrier until resolved. TxnBuffer also
-checks the persisted nonzero Commit body count before assembling a transaction.
+references retain the existing RecoverDone barrier until resolved. Recovered counts
+are used for subsequent write-side Commit validation, not for rechecking a durable Commit.
 
 Flush has no wait-for-source gate, pending counter, FIFO queue or promotion lock.
 Broadcaster uses its existing resource keys and worker pool for all operations.
@@ -207,7 +206,7 @@ understand the durable local-flush abort boundary.
 
 - `internal/datacoord/` — local producers and resource keys
 - `internal/cdc/replication/replicatestream/` — full transaction forwarding with the original Commit count
-- `pkg/streaming/util/message/` — Commit body-count format and assembly validation
+- `pkg/streaming/util/message/` — Commit body-count format and transaction assembly
 - `internal/streamingnode/server/wal/interceptors/replicate/` — deduplicated body counting and durable-flush abort
 - `internal/streamingnode/server/wal/interceptors/txn/` — scoped session cleanup
 - `internal/streamingnode/server/wal/interceptors/timetick/` — Commit outcome handling

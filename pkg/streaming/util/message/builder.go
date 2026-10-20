@@ -539,9 +539,6 @@ func (b *ImmutableTxnMessageBuilder) Messages() (ImmutableBeginTxnMessageV2, []I
 
 // Build builds a txn message.
 func (b *ImmutableTxnMessageBuilder) Build(commit ImmutableCommitTxnMessageV2) (ImmutableTxnMessage, error) {
-	if err := CheckTxnBodyCount(commit.Header().BodyCnt, len(b.messages)); err != nil {
-		return nil, err
-	}
 	msg, err := newImmutableTxnMesasgeFromWAL(b.begin, b.messages, commit)
 	b.begin = nil
 	b.messages = nil

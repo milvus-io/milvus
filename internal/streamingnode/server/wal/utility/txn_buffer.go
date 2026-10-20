@@ -144,7 +144,6 @@ func (b *TxnBuffer) handleCommitTxn(msg message.ImmutableMessage) message.Immuta
 	}
 
 	// build the txn message and remove it from buffer.
-	checkTxnBodyCount(builder, commitMsg)
 	b.bytes -= builder.EstimateSize()
 	txnMsg, err := builder.Build(commitMsg)
 	delete(b.builders, commitMsg.TxnContext().TxnID)
@@ -202,15 +201,6 @@ func (b *TxnBuffer) handleTxnBodyMessage(msg message.ImmutableMessage) {
 	}
 	builder.Add(msg)
 	b.bytes += msg.EstimateSize()
-}
-
-// The writer verifies this before append. Violations in persisted messages must
-// stop recovery/consumption rather than silently publish a partial transaction.
-func checkTxnBodyCount(builder *message.ImmutableTxnMessageBuilder, commit message.ImmutableCommitTxnMessageV2) {
-	_, body := builder.Messages()
-	if err := message.CheckTxnBodyCount(commit.Header().BodyCnt, len(body)); err != nil {
-		panic(err)
-	}
 }
 
 // clearExpiredTxn clears the expired txn.

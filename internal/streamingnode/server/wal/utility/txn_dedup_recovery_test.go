@@ -12,8 +12,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
-func TestTxnCountAfterPhysicalDedupAndRecovery(t *testing.T) {
-	for _, expected := range []uint64{0, 1, 2} {
+func TestTxnPhysicalDedupAndRecovery(t *testing.T) {
+	for _, expected := range []uint64{0, 1} {
 		for _, replicated := range []bool{false, true} {
 			seal := func(msg message.MutableMessage, id int64, tt uint64) message.ImmutableMessage {
 				if replicated {
@@ -39,14 +39,9 @@ func TestTxnCountAfterPhysicalDedupAndRecovery(t *testing.T) {
 			require.Empty(t, buffer.HandleImmutableMessages(reorder.PopUtilTimeTick(2), 2))
 			buffer = buffer.Snapshot() // Resume from the durable logical bodies.
 			commit := seal(message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").WithHeader(&message.CommitTxnMessageHeader{BodyCnt: expected}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable(), 4, 3)
-			if expected == 2 {
-				require.Panics(t, func() { buffer.HandleImmutableMessages([]message.ImmutableMessage{commit}, 3) })
-				require.Len(t, buffer.GetUncommittedMessageBuilder(), 1, "integrity failure must not discard the builder")
-			} else {
-				out := buffer.HandleImmutableMessages([]message.ImmutableMessage{commit}, 3)
-				require.Len(t, out, 1)
-				require.Equal(t, 1, message.AsImmutableTxnMessage(out[0]).Size())
-			}
+			out := buffer.HandleImmutableMessages([]message.ImmutableMessage{commit}, 3)
+			require.Len(t, out, 1)
+			require.Equal(t, 1, message.AsImmutableTxnMessage(out[0]).Size())
 		}
 	}
 }

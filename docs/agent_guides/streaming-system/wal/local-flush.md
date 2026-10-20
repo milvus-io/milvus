@@ -17,7 +17,7 @@ for the protocol, Drop race, final append failures and operational upgrade bound
 
 - `internal/datacoord/` — local broadcast producers
 - `internal/cdc/replication/replicatestream/` — complete transaction replay
-- `pkg/streaming/util/message/` — Commit body-count format and assembly checks
+- `pkg/streaming/util/message/` — Commit body-count format and transaction assembly
 - `internal/streamingnode/server/wal/interceptors/replicate/` — prefix and abort handling
 - `internal/streamingnode/server/wal/interceptors/txn/` — scoped reference cleanup
 - `internal/streamingnode/server/wal/utility/` — transaction consumption and recovery
