@@ -611,3 +611,223 @@ TEST(ArrayInvertedIndexRegression,
         }
     }
 }
+
+namespace {
+struct ValidityCloneCounters {
+    size_t owned = 0;
+    std::vector<const uint8_t*> shared_buffers;
+};
+
+class TrackedArrayValidityIndex : public index::InvertedIndexTantivy<int64_t> {
+ public:
+    explicit TrackedArrayValidityIndex(
+        std::shared_ptr<ValidityCloneCounters> counters)
+        : counters_(std::move(counters)) {
+    }
+
+    void
+    SetNullOffsets(std::vector<size_t> offsets) {
+        null_offset_ = std::move(offsets);
+    }
+
+    TargetBitmap
+    IsNotNull() override {
+        ++counters_->owned;
+        return index::InvertedIndexTantivy<int64_t>::IsNotNull();
+    }
+
+    std::optional<BitsetView>
+    GetValidityView() override {
+        auto validity = index::InvertedIndexTantivy<int64_t>::GetValidityView();
+        if (validity) {
+            counters_->shared_buffers.push_back(validity->data());
+        }
+        return validity;
+    }
+
+ private:
+    std::shared_ptr<ValidityCloneCounters> counters_;
+};
+class SharedArrayValidityTest : public testing::TestWithParam<bool> {
+ protected:
+    void
+    SetUp() override {
+        previous_enabled_ = exec::ExprResCacheManager::IsEnabled();
+        auto& cache = exec::ExprResCacheManager::Instance();
+        exec::CacheConfig config;
+        config.mode = exec::CacheMode::Memory;
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = 0;
+        ASSERT_TRUE(cache.SetConfig(config));
+        cache.Clear();
+        exec::ExprResCacheManager::SetEnabled(GetParam());
+    }
+    void
+    TearDown() override {
+        exec::ExprResCacheManager::Instance().Clear();
+        exec::ExprResCacheManager::SetEnabled(previous_enabled_);
+    }
+    bool previous_enabled_ = false;
+};
+}  // namespace
+
+TEST_P(SharedArrayValidityTest, BatchOffsetAndWholeRange) {
+    test::ExprBatchSizeGuard batch_size_guard(7);
+    auto eval =
+        [](const expr::TypedExprPtr& expr, auto* segment, int64_t count) {
+            return test::EvalExprInBatches(expr, segment, count).result;
+        };
+    constexpr int64_t rows = 33;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto field = schema->AddDebugArrayField("array", DataType::INT64, true);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+    auto raw = DataGen(schema, rows, 42, 0, 1, 3);
+    proto::schema::FieldData* data = nullptr;
+    for (auto& f : *raw.raw_->mutable_fields_data()) {
+        if (f.field_id() == field.get()) {
+            data = &f;
+        }
+    }
+    ASSERT_NE(data, nullptr);
+    std::vector<boost::container::vector<int64_t>> arrays;
+    std::vector<size_t> nulls;
+    for (int64_t row = 0; row < rows; ++row) {
+        const bool valid = row % 5 != 0;
+        data->mutable_valid_data()->Set(row, valid);
+        auto* values = data->mutable_scalars()
+                           ->mutable_array_data()
+                           ->mutable_data(row)
+                           ->mutable_long_data()
+                           ->mutable_data();
+        values->Clear();
+        arrays.emplace_back();
+        if (valid) {
+            // Include empty arrays and both single/multiple matching elements.
+            if (row % 11 != 0) {
+                const auto value = row % 7 == 0 ? 100 : row % 3;
+                values->Add(value);
+                arrays.back().push_back(value);
+                if (row % 2 == 0) {
+                    values->Add(101);
+                    arrays.back().push_back(101);
+                }
+            }
+        } else {
+            nulls.push_back(row);
+        }
+    }
+    auto raw_segment = CreateSealedWithFieldDataLoaded(schema, raw);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
+    auto counters = std::make_shared<ValidityCloneCounters>();
+    auto idx = std::make_unique<TrackedArrayValidityIndex>(counters);
+    idx->SetNullOffsets(nulls);
+    Config config;
+    config["is_array"] = true;
+    idx->BuildWithRawDataForUT(rows, arrays.data(), config);
+    LoadIndexInfo info{};
+    info.field_id = field.get();
+    info.field_type = DataType::ARRAY;
+    info.element_type = DataType::INT64;
+    info.index_params = GenIndexParams(idx.get());
+    info.cache_index =
+        CreateTestCacheIndex("shared_array_validity", std::move(idx));
+    segment->LoadIndex(info);
+
+    expr::TypedExprPtr root;
+    for (int i = 0; i < 20; ++i) {
+        proto::plan::GenericValue value;
+        value.set_int64_val(100 + i);
+        auto leaf = std::make_shared<expr::JsonContainsExpr>(
+            expr::ColumnInfo(field, DataType::ARRAY, DataType::INT64, {}, true),
+            proto::plan::JSONContainsExpr_JSONOp_Contains,
+            true,
+            std::vector<proto::plan::GenericValue>{value});
+        root = root ? std::make_shared<expr::LogicalBinaryExpr>(
+                          expr::LogicalBinaryExpr::OpType::Or, root, leaf)
+                    : std::static_pointer_cast<const expr::ITypeExpr>(leaf);
+    }
+    auto expected = eval(root, raw_segment.get(), rows);
+    exec::ExprResCacheManager::Instance().Clear();
+    auto actual = eval(root, segment.get(), rows);
+    if (!GetParam()) {
+        ASSERT_EQ(counters->shared_buffers.size(), 20);
+        EXPECT_EQ(counters->owned, 0);
+        for (auto* owner : counters->shared_buffers) {
+            EXPECT_EQ(owner, counters->shared_buffers.front());
+        }
+    } else {
+        EXPECT_TRUE(counters->shared_buffers.empty());
+        EXPECT_EQ(counters->owned, 20);
+    }
+    TargetBitmapView values(actual->GetRawData(), rows);
+    TargetBitmapView valid(actual->GetValidRawData(), rows);
+    TargetBitmapView expected_values(expected->GetRawData(), rows);
+    TargetBitmapView expected_valid(expected->GetValidRawData(), rows);
+    for (int64_t row = 0; row < rows; ++row) {
+        EXPECT_EQ(valid[row], expected_valid[row]) << row;
+        if (valid[row]) {
+            EXPECT_EQ(values[row], expected_values[row]) << row;
+        }
+    }
+
+    // Full-range evaluation still needs writable validity output. Mutating
+    // that output must not damage the reader or a repeated cache hit.
+    auto query = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment.get(), rows, MAX_TIMESTAMP);
+    exec::ExecContext execution(query.get());
+    auto compiled = exec::CompileExpressions({root}, &execution, {}, false);
+    ASSERT_TRUE(compiled[0]->CanExecuteAllAtOnce());
+    compiled[0]->SetExecuteAllAtOnce();
+    exec::EvalCtx context(&execution);
+    VectorPtr output;
+    compiled[0]->Eval(context, output);
+    auto whole = std::dynamic_pointer_cast<ColumnVector>(output);
+    ASSERT_NE(whole, nullptr);
+    ASSERT_EQ(whole->size(), rows);
+    TargetBitmapView whole_values(whole->GetRawData(), rows);
+    TargetBitmapView whole_valid(whole->GetValidRawData(), rows);
+    for (int64_t row = 0; row < rows; ++row) {
+        EXPECT_EQ(whole_valid[row], expected_valid[row]);
+        if (whole_valid[row]) {
+            EXPECT_EQ(whole_values[row], expected_values[row]);
+        }
+    }
+    whole_valid.flip();
+    const auto owned_before_repeat = counters->owned;
+    auto repeated = eval(root, segment.get(), rows);
+    TargetBitmapView repeated_values(repeated->GetRawData(), rows);
+    TargetBitmapView repeated_valid(repeated->GetValidRawData(), rows);
+    for (int64_t row = 0; row < rows; ++row) {
+        EXPECT_EQ(repeated_valid[row], expected_valid[row]);
+        if (repeated_valid[row]) {
+            EXPECT_EQ(repeated_values[row], expected_values[row]);
+        }
+    }
+    EXPECT_EQ(counters->owned, owned_before_repeat);
+
+    // Null predicates exercise both sequential validity-only and offset reads.
+    auto non_null = std::make_shared<expr::NullExpr>(
+        expr::ColumnInfo(field, DataType::ARRAY, DataType::INT64, {}, true),
+        proto::plan::NullExpr_NullOp_IsNotNull);
+    auto null_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, non_null);
+    exec::OffsetVector offsets = {32, 0, 5, 7, 7, 1};
+    auto selected = test::gen_filter_res(
+        null_plan.get(), segment.get(), rows, MAX_TIMESTAMP, &offsets);
+    TargetBitmapView selected_values(selected->GetRawData(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_EQ(selected_values[i], offsets[i] % 5 != 0);
+    }
+    auto sequential = eval(non_null, segment.get(), rows);
+    TargetBitmapView sequential_values(sequential->GetRawData(), rows);
+    for (int64_t row = 0; row < rows; ++row) {
+        EXPECT_EQ(sequential_values[row], row % 5 != 0);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(CacheModes,
+                         SharedArrayValidityTest,
+                         testing::Values(false, true));

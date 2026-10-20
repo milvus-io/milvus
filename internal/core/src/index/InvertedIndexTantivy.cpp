@@ -468,6 +468,21 @@ InvertedIndexTantivy<T>::ApplyValidityMask(TargetBitmap& bitset) {
 }
 
 template <typename T>
+std::optional<BitsetView>
+InvertedIndexTantivy<T>::GetValidityView() {
+    if (is_growing_ || valid_bitmap_ == nullptr) {
+        return std::nullopt;
+    }
+    if (valid_bitmap_->size() == 0) {
+        return BitsetView{};
+    }
+    AssertInfo(static_cast<int64_t>(valid_bitmap_->size()) == Count(),
+               "sealed validity size does not match index count");
+    return BitsetView(reinterpret_cast<const uint8_t*>(valid_bitmap_->data()),
+                      valid_bitmap_->size());
+}
+
+template <typename T>
 TargetBitmap
 InvertedIndexTantivy<T>::IsNotNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNotNull",

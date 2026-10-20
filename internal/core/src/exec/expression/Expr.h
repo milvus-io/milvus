@@ -49,6 +49,40 @@ namespace exec {
 
 enum class FilterType { sequential = 0, random = 1 };
 
+// Copy only the requested validity window into writable output. The index pin
+// owns the source bytes; zero size is the explicit all-valid sentinel, never
+// Knowhere's broader empty() predicate.
+inline void
+AppendValidityView(TargetBitmap& result,
+                   const BitsetView& validity,
+                   int64_t coordinate_count,
+                   int64_t offset,
+                   int64_t count) {
+    AssertInfo(coordinate_count >= 0 && offset >= 0 && count >= 0 &&
+                   offset <= coordinate_count &&
+                   count <= coordinate_count - offset,
+               "validity range [{}, +{}) outside {} coordinates",
+               offset,
+               count,
+               coordinate_count);
+    AssertInfo(!validity.has_out_ids() && validity.id_offset() == 0 &&
+                   validity.num_bits() == validity.size() &&
+                   (validity.size() == 0 ||
+                    (validity.data() != nullptr &&
+                     validity.size() == static_cast<size_t>(coordinate_count))),
+               "validity view must be dense and cover the index coordinates");
+    const auto output_offset = result.size();
+    result.resize(output_offset + count, true);
+    if (count > 0 && validity.size() != 0) {
+        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+            validity.data(),
+            offset,
+            reinterpret_cast<uint8_t*>(result.data()),
+            output_offset,
+            count);
+    }
+}
+
 // Execution path for expression evaluation.
 // Determines how the expression result bitmap is produced.
 enum class ExprExecPath {
@@ -750,18 +784,46 @@ class SegmentExpr : public Expr {
         return std::max<int64_t>(elapsed_us, 1);
     }
 
-    // The IsNotNull() virtual rebuilds a segment-sized bitmap on every
-    // call (allocation + fill + AND); per-batch callers must reuse one
-    // copy. The all-valid flag short-circuits per-row bitmap reads.
     template <typename Index>
-    const TargetBitmap&
-    GetCachedIndexValidBitmap(Index* index_ptr) {
-        if (!cached_index_valid_res_) {
-            cached_index_valid_res_ =
-                std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
-            cached_index_all_valid_ = cached_index_valid_res_->all();
+    static BitsetView
+    GetIndexValidityView(Index* index_ptr,
+                         std::shared_ptr<TargetBitmap>& owned_fallback,
+                         int64_t& coordinate_count) {
+        if (auto validity = index_ptr->GetValidityView()) {
+            owned_fallback.reset();
+            coordinate_count = index_ptr->Count();
+            AssertInfo(
+                coordinate_count >= 0 &&
+                    (validity->size() == 0 ||
+                     validity->size() ==
+                         static_cast<size_t>(coordinate_count)) &&
+                    !validity->has_out_ids() && validity->id_offset() == 0 &&
+                    validity->num_bits() == validity->size() &&
+                    (validity->size() == 0 || validity->data() != nullptr),
+                "borrowed validity must cover the pinned index");
+            return *validity;
         }
-        return *cached_index_valid_res_;
+        owned_fallback = std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
+        coordinate_count = owned_fallback->size();
+        return BitsetView(
+            reinterpret_cast<const uint8_t*>(owned_fallback->data()),
+            owned_fallback->size());
+    }
+
+    template <typename Index>
+    const BitsetView&
+    GetCachedIndexValidBitmap(Index* index_ptr) {
+        if (!cached_index_valid_view_) {
+            cached_index_valid_view_ = GetIndexValidityView(
+                index_ptr, cached_index_valid_res_, cached_index_valid_count_);
+            cached_index_all_valid_ =
+                cached_index_valid_view_->size() == 0 ||
+                bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_all(
+                    cached_index_valid_view_->data(),
+                    0,
+                    cached_index_valid_view_->size());
+        }
+        return *cached_index_valid_view_;
     }
 
     int64_t
@@ -896,7 +958,10 @@ class SegmentExpr : public Expr {
             valid_res.set();
         } else {
             for (auto i = 0; i < input->size(); ++i) {
-                valid_res[i] = valid_result[(*input)[i]];
+                AssertInfo(
+                    (*input)[i] >= 0 && (*input)[i] < cached_index_valid_count_,
+                    "validity offset is outside the pinned index");
+                valid_res[i] = valid_result.test((*input)[i]);
             }
         }
         auto result = std::move(func.template operator()<FilterType::random>(
@@ -998,7 +1063,10 @@ class SegmentExpr : public Expr {
                 continue;
             }
             T raw_data = raw.value();
-            bool valid_data = all_valid || valid_result[offset];
+            AssertInfo(all_valid ||
+                           (offset >= 0 && offset < cached_index_valid_count_),
+                       "validity offset is outside the pinned index");
+            bool valid_data = all_valid || valid_result.test(offset);
             evaluate_batch.template operator()<FilterType::random>(
                 &raw_data,
                 ValidityView::FromExpanded(&valid_data),
@@ -1071,7 +1139,10 @@ class SegmentExpr : public Expr {
                 continue;
             }
             T raw_data = raw.value();
-            bool valid_data = all_valid || valid_result[offset];
+            AssertInfo(all_valid ||
+                           (offset >= 0 && offset < cached_index_valid_count_),
+                       "validity offset is outside the pinned index");
+            bool valid_data = all_valid || valid_result.test(offset);
             evaluate_batch.template operator()<FilterType::random>(
                 &raw_data,
                 ValidityView::FromExpanded(&valid_data),
@@ -2314,6 +2385,28 @@ class SegmentExpr : public Expr {
         return valid_result;
     }
 
+    int64_t
+    CachedIndexValiditySize() const {
+        return cached_index_chunk_validity_
+                   ? cached_index_chunk_validity_count_
+                   : cached_index_chunk_valid_res_->size();
+    }
+
+    void
+    AppendCachedIndexValidity(TargetBitmap& result,
+                              int64_t offset,
+                              int64_t count) const {
+        if (cached_index_chunk_validity_) {
+            AppendValidityView(result,
+                               *cached_index_chunk_validity_,
+                               cached_index_chunk_validity_count_,
+                               offset,
+                               count);
+        } else {
+            result.append(*cached_index_chunk_valid_res_, offset, count);
+        }
+    }
+
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunksImpl(FUNC func,
@@ -2369,64 +2462,84 @@ class SegmentExpr : public Expr {
             prepare_index();
             cached_is_nested_index_ = index_ptr->IsNestedIndex();
 
-            auto cached = ExprCacheHelper::GetOrCompute(
-                segment_,
-                this->ToString(),
-                active_count_,
-                [&]() -> ExprCacheHelper::ComputeResult {
-                    prepare_index();
-                    TargetBitmap res = func(index_ptr, values...);
+            // Keep expression-cache and JSON-flat validity owned. Nested
+            // predicates returning rows must use field validity, not the
+            // index's all-valid element-domain snapshot.
+            if (!ExprResCacheManager::IsEnabled() && executor == nullptr &&
+                !(cached_is_nested_index_ && func_returns_row_level)) {
+                cached_index_chunk_validity_ = index_ptr->GetValidityView();
+                if (cached_index_chunk_validity_) {
+                    cached_index_chunk_validity_count_ = index_ptr->Count();
+                }
+            }
+            if (cached_index_chunk_validity_) {
+                cached_index_chunk_res_ =
+                    std::make_shared<TargetBitmap>(func(index_ptr, values...));
+            } else {
+                auto cached = ExprCacheHelper::GetOrCompute(
+                    segment_,
+                    this->ToString(),
+                    active_count_,
+                    [&]() -> ExprCacheHelper::ComputeResult {
+                        prepare_index();
+                        TargetBitmap res = func(index_ptr, values...);
 
-                    TargetBitmap valid_res;
-                    std::optional<index::JsonValueType> json_value_type;
-                    if (executor != nullptr) {
-                        if (validity_mode == IndexValidityMode::JsonExactPath) {
-                            json_value_type = index::JsonValueType::Any;
-                        } else if constexpr (std::is_same_v<IndexInnerType,
-                                                            bool>) {
-                            json_value_type = index::JsonValueType::Bool;
-                        } else if constexpr (std::is_integral_v<
-                                                 IndexInnerType> ||
-                                             std::is_floating_point_v<
-                                                 IndexInnerType>) {
-                            json_value_type = index::JsonValueType::Numeric;
-                        } else if constexpr (std::is_same_v<IndexInnerType,
-                                                            std::string>) {
-                            json_value_type = index::JsonValueType::String;
+                        TargetBitmap valid_res;
+                        std::optional<index::JsonValueType> json_value_type;
+                        if (executor != nullptr) {
+                            if (validity_mode ==
+                                IndexValidityMode::JsonExactPath) {
+                                json_value_type = index::JsonValueType::Any;
+                            } else if constexpr (std::is_same_v<IndexInnerType,
+                                                                bool>) {
+                                json_value_type = index::JsonValueType::Bool;
+                            } else if constexpr (std::is_integral_v<
+                                                     IndexInnerType> ||
+                                                 std::is_floating_point_v<
+                                                     IndexInnerType>) {
+                                json_value_type = index::JsonValueType::Numeric;
+                            } else if constexpr (std::is_same_v<IndexInnerType,
+                                                                std::string>) {
+                                json_value_type = index::JsonValueType::String;
+                            }
                         }
-                    }
 
-                    if (json_value_type.has_value()) {
-                        const auto family =
-                            static_cast<unsigned int>(json_value_type.value());
-                        const auto signature = fmt::format(
-                            "json-flat-validity:v1:field={}:path-length={}:"
-                            "path={}:family={}",
-                            field_id_.get(),
-                            json_pointer.size(),
-                            json_pointer,
-                            family);
-                        if (ExprResCacheManager::IsEnabled()) {
-                            auto validity = ExprCacheHelper::GetOrComputeBitmap(
-                                segment_, signature, active_count_, [&]() {
-                                    return executor->ExactPathExists(
-                                        json_value_type.value());
-                                });
-                            valid_res = std::move(*validity);
-                        } else {
-                            valid_res = executor->ExactPathExists(
+                        if (json_value_type.has_value()) {
+                            const auto family = static_cast<unsigned int>(
                                 json_value_type.value());
+                            const auto signature = fmt::format(
+                                "json-flat-validity:v1:field={}:path-length={}:"
+                                "path={}:family={}",
+                                field_id_.get(),
+                                json_pointer.size(),
+                                json_pointer,
+                                family);
+                            if (ExprResCacheManager::IsEnabled()) {
+                                auto validity =
+                                    ExprCacheHelper::GetOrComputeBitmap(
+                                        segment_,
+                                        signature,
+                                        active_count_,
+                                        [&]() {
+                                            return executor->ExactPathExists(
+                                                json_value_type.value());
+                                        });
+                                valid_res = std::move(*validity);
+                            } else {
+                                valid_res = executor->ExactPathExists(
+                                    json_value_type.value());
+                            }
+                        } else if (cached_is_nested_index_ &&
+                                   func_returns_row_level) {
+                            valid_res = GetFieldRowValidity(active_count_);
+                        } else {
+                            valid_res = index_ptr->IsNotNull();
                         }
-                    } else if (cached_is_nested_index_ &&
-                               func_returns_row_level) {
-                        valid_res = GetFieldRowValidity(active_count_);
-                    } else {
-                        valid_res = index_ptr->IsNotNull();
-                    }
-                    return {std::move(res), std::move(valid_res)};
-                });
-            cached_index_chunk_res_ = cached.result;
-            cached_index_chunk_valid_res_ = cached.valid;
+                        return {std::move(res), std::move(valid_res)};
+                    });
+                cached_index_chunk_res_ = cached.result;
+                cached_index_chunk_valid_res_ = cached.valid;
+            }
             cached_index_chunk_id_ = 0;
         }
 
@@ -2451,14 +2564,12 @@ class SegmentExpr : public Expr {
             auto elem_count = elem_end - elem_start;
 
             result.append(*cached_index_chunk_res_, elem_start, elem_count);
-            valid_result.append(
-                *cached_index_chunk_valid_res_, elem_start, elem_count);
+            AppendCachedIndexValidity(valid_result, elem_start, elem_count);
 
             current_index_chunk_pos_ = data_pos + batch_rows;
         } else if (execute_all_at_once_ &&
                    int64_t(cached_index_chunk_res_->size()) == active_count_ &&
-                   int64_t(cached_index_chunk_valid_res_->size()) ==
-                       active_count_) {
+                   int64_t(CachedIndexValiditySize()) == active_count_) {
             // Fast path: the cached bitmap lines up exactly with the rows
             // this query emits, so move it out with no copy. The size guard
             // keeps this branch under the same invariant as the slicing
@@ -2469,6 +2580,14 @@ class SegmentExpr : public Expr {
             // through to the slicing branch, which bounds by active_count_
             // and asserts coverage.
             current_index_chunk_pos_ += cached_index_chunk_res_->size();
+            if (cached_index_chunk_validity_) {
+                // The final output is writable even for whole-range evaluation;
+                // never move the shared index validity into it.
+                AppendCachedIndexValidity(valid_result, 0, active_count_);
+                return std::make_shared<ColumnVector>(
+                    std::move(*cached_index_chunk_res_),
+                    std::move(valid_result));
+            }
             return std::make_shared<ColumnVector>(
                 std::move(*cached_index_chunk_res_),
                 std::move(*cached_index_chunk_valid_res_));
@@ -2504,15 +2623,14 @@ class SegmentExpr : public Expr {
                 data_pos,
                 data_pos + size);
             AssertInfo(
-                int64_t(cached_index_chunk_valid_res_->size()) >=
-                    data_pos + size,
+                int64_t(CachedIndexValiditySize()) >= data_pos + size,
                 "index valid bitmap covers {} rows, batch needs rows [{}, {})",
-                cached_index_chunk_valid_res_->size(),
+                CachedIndexValiditySize(),
                 data_pos,
                 data_pos + size);
 
             result.append(*cached_index_chunk_res_, data_pos, size);
-            valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
+            AppendCachedIndexValidity(valid_result, data_pos, size);
 
             current_index_chunk_pos_ = data_pos + size;
         }
@@ -2652,7 +2770,11 @@ class SegmentExpr : public Expr {
                 const auto& res = GetCachedIndexValidBitmap(index_ptr);
                 if (!cached_index_all_valid_) {
                     for (auto i = 0; i < batch_size; ++i) {
-                        valid_result[i] = res[input[i]];
+                        AssertInfo(
+                            input[i] >= 0 &&
+                                input[i] < cached_index_valid_count_,
+                            "validity offset is outside the pinned index");
+                        valid_result[i] = res.test(input[i]);
                     }
                 }  // else: valid_result is already all-set
             } else {
@@ -2750,8 +2872,10 @@ class SegmentExpr : public Expr {
                 index_ptr = const_cast<Index*>(scalar_index);
             }
 
-            cached_index_chunk_valid_res_ =
-                std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
+            cached_index_chunk_validity_ =
+                GetIndexValidityView(index_ptr,
+                                     cached_index_chunk_valid_res_,
+                                     cached_index_chunk_validity_count_);
             cached_index_chunk_id_ = 0;
         }
 
@@ -2772,13 +2896,13 @@ class SegmentExpr : public Expr {
         auto data_pos = current_index_chunk_pos_;
         auto size = std::min(active_count_ - data_pos, batch_size_);
         AssertInfo(
-            int64_t(cached_index_chunk_valid_res_->size()) >= data_pos + size,
+            int64_t(CachedIndexValiditySize()) >= data_pos + size,
             "index valid bitmap covers {} rows, batch needs rows [{}, {})",
-            cached_index_chunk_valid_res_->size(),
+            CachedIndexValiditySize(),
             data_pos,
             data_pos + size);
 
-        valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
+        AppendCachedIndexValidity(valid_result, data_pos, size);
 
         current_index_chunk_pos_ = data_pos + size;
 
@@ -3307,12 +3431,17 @@ class SegmentExpr : public Expr {
     // Cached scalar-index IsNotNull() bitmap for the ByOffsets paths
     // (single-index-chunk only); see GetCachedIndexValidBitmap().
     std::shared_ptr<TargetBitmap> cached_index_valid_res_{nullptr};
+    std::optional<BitsetView> cached_index_valid_view_;
+    int64_t cached_index_valid_count_{0};
     bool cached_index_all_valid_{false};
 
     // Legacy cache fields — TODO: remove after all subclasses migrated to cached_result_.
     int64_t cached_index_chunk_id_{-1};
     std::shared_ptr<TargetBitmap> cached_index_chunk_res_{nullptr};
     std::shared_ptr<TargetBitmap> cached_index_chunk_valid_res_{nullptr};
+    // Separate from writable raw/stats and expression-cache validity.
+    std::optional<BitsetView> cached_index_chunk_validity_;
+    int64_t cached_index_chunk_validity_count_{0};
     bool cached_is_nested_index_{false};
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};
 

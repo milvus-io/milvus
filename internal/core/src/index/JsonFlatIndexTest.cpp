@@ -398,6 +398,8 @@ TEST_F(JsonFlatIndexTest, TestComparableAndFieldValidityMasks) {
     std::string json_path = "/profile/name/preferred_name";
     auto comparable_executor =
         json_flat_index->create_executor<std::string>(json_path);
+    EXPECT_FALSE(json_flat_index->GetValidityView().has_value());
+    EXPECT_FALSE(comparable_executor->GetValidityView().has_value());
     auto comparable_mask = comparable_executor->IsNotNull();
     ASSERT_EQ(comparable_mask.size(), json_data_.size());
     ASSERT_TRUE(comparable_mask[0]);
@@ -406,6 +408,7 @@ TEST_F(JsonFlatIndexTest, TestComparableAndFieldValidityMasks) {
 
     auto field_valid_executor =
         json_flat_index->create_executor<std::string>(json_path, false);
+    EXPECT_FALSE(field_valid_executor->GetValidityView().has_value());
     auto field_valid_mask = field_valid_executor->IsNotNull();
     ASSERT_EQ(field_valid_mask.size(), json_data_.size());
     ASSERT_TRUE(field_valid_mask[0]);

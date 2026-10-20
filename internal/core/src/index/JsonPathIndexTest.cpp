@@ -313,6 +313,12 @@ template <typename IndexT>
 void
 AssertDoubleComparisonUnknowns(IndexT& idx) {
     auto known = idx.IsNotNull();
+    if (auto snapshot = idx.GetValidityView()) {
+        ASSERT_TRUE(snapshot->size() == 0 || snapshot->size() == known.size());
+        for (size_t i = 0; i < known.size(); ++i) {
+            EXPECT_EQ(snapshot->size() == 0 || snapshot->test(i), known[i]);
+        }
+    }
     ASSERT_EQ(known.size(), 6);
     EXPECT_TRUE(known[0]);
     EXPECT_TRUE(known[1]);
@@ -400,6 +406,7 @@ TEST(JsonPathIndexTest, InvertedDouble_ComparisonUnknowns) {
     idx.create_reader(milvus::index::SetBitsetSealed);
 
     EXPECT_EQ(idx.ValidityBitmapByteSize(), sizeof(uint64_t));
+    ASSERT_TRUE(idx.GetValidityView().has_value());
     AssertDoubleComparisonUnknowns(idx);
 }
 
@@ -631,4 +638,39 @@ TEST(JsonPathIndexTest, Factory_SortBool_Rejected) {
 
     EXPECT_THROW(IndexFactory::GetInstance().CreateJsonIndex(info, ctx),
                  std::exception);
+}
+
+TEST(JsonPathIndexTest, InvertedArrayImmutableValidityMatchesProjectedMask) {
+    auto json_fd = MakeJsonFieldData({R"({"a":[1,2]})",
+                                      R"({"a":[]})",
+                                      R"({"a":null})",
+                                      R"({"b":[1]})",
+                                      R"({"a":"wrong"})",
+                                      R"({"a":[3]})"});
+    auto schema = MakeJsonSchema();
+    auto ctx = MakeTestContext();
+    JsonScalarIndexWrapper<double, InvertedIndexTantivy<double>> idx(
+        JsonCastType::FromString("ARRAY_DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        schema,
+        ctx,
+        TANTIVY_INDEX_LATEST_VERSION);
+    idx.BuildWithFieldData({json_fd});
+    idx.finish();
+    idx.create_reader(milvus::index::SetBitsetSealed);
+    auto snapshot = idx.GetValidityView();
+    ASSERT_TRUE(snapshot.has_value());
+    auto expected = idx.IsNotNull();
+    ASSERT_EQ(expected.size(), 6);
+    ASSERT_TRUE(snapshot->size() == 0 || snapshot->size() == expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(snapshot->size() == 0 || snapshot->test(i), expected[i]);
+    }
+    // IsNotNull still returns independent writable storage.
+    expected.flip();
+    auto repeated = idx.IsNotNull();
+    for (size_t i = 0; i < repeated.size(); ++i) {
+        EXPECT_EQ(snapshot->size() == 0 || snapshot->test(i), repeated[i]);
+    }
 }

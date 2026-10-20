@@ -19,9 +19,11 @@
 #include <boost/dynamic_bitset.hpp>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "common/Types.h"
+#include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "index/Index.h"
 #include "fmt/format.h"
@@ -128,6 +130,16 @@ class ScalarIndex : public IndexBase {
 
     virtual TargetBitmap
     IsNotNull() = 0;
+
+    // Borrowed dense counterpart to IsNotNull(), valid while the selected
+    // index remains pinned. nullopt is unsupported; an engaged zero-sized
+    // view is all-valid, with logical coordinate count taken from Count().
+    // Nonempty views cover Count() bits without ID mapping or an ID offset.
+    // Growing and predicate-specific indexes may keep the owned fallback.
+    virtual std::optional<BitsetView>
+    GetValidityView() {
+        return std::nullopt;
+    }
 
     // Some indexes persist absolute null offsets independently of Count().
     // They may override this to project validity into a caller-owned row

@@ -117,6 +117,12 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         return bitset;
     }
 
+    std::optional<BitsetView>
+    GetValidityView() override {
+        // The executor can have path/type-specific comparable-value masks.
+        return std::nullopt;
+    }
+
     // Declaring IsNotNull() here hides the base's row-count-aware
     // IsNotNull(int64_t) overload; keep it visible so a call through this
     // static type still finds it.
@@ -741,6 +747,12 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
     friend class JsonFlatIndexQueryExecutor;
 
  public:
+    std::optional<BitsetView>
+    GetValidityView() override {
+        // Query validity belongs to a path/type-aware executor, not this index.
+        return std::nullopt;
+    }
+
     JsonFlatIndex() : InvertedIndexTantivy<std::string>() {
     }
 
