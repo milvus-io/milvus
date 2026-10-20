@@ -84,6 +84,9 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			mlog.Int32("loadPriority", int32(p.LoadPriority)),
 			mlog.Int64("from", p.From),
 			mlog.Int64("to", p.To))
+		if p.Reason != "" {
+			t.SetReason(p.Reason)
+		}
 		if task.GetTaskType(t) == task.TaskTypeMove {
 			// from balance checker
 			t.SetPriority(task.TaskPriorityLow)

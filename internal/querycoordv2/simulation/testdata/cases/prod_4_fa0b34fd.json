@@ -1,0 +1,75 @@
+{
+ "name": "prod_4_fa0b34fd",
+ "category": "4_load_hurts_query",
+ "customer": "modash",
+ "source": "in01-fa0b34fd aws-eu; node scale 1.000, segment scale 1.000, row_scale=0.0633; modash: search p99 median 1.6 s in load windows vs 1.0 s idle; worst 15.9 s at 10-10T03:15-03:20 during a 28-33 loads/5m burst (balance + handoff); QPS only 0.3-0.7 so measured with low confidence.",
+ "streaming": true,
+ "qns": 6,
+ "sns": 1,
+ "qn_cores": 16,
+ "qn_memory_gb": 64,
+ "load": {
+  "concurrency": 4,
+  "bandwidth_mb": 252,
+  "base_ms": 10,
+  "jitter_sigma": 0.77,
+  "ref_latency_ms": 783.6,
+  "ref_bytes": 51200000,
+  "size_exponent": 0.0
+ },
+ "search": {
+  "BaseMs": 1016.1,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 2.29
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 152,
+   "rows_median": 1557991,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 137.7,
+   "compact_every_seconds": 172.0,
+   "flush_rows": 1557991
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 148,
+   "rows_median": 1077136,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 141.4,
+   "compact_every_seconds": 176.6,
+   "flush_rows": 1077136
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 6,
+  "flush_every_seconds": 139.5,
+  "compact_every_seconds": 174.3
+ },
+ "events": [],
+ "duration_seconds": 300,
+ "prod": {
+  "qn": 6,
+  "sn": 1,
+  "segments": 300.0,
+  "collections": 2,
+  "steady_seg_move_per_hour": 1.29,
+  "seg_move_per_hour": 1.29,
+  "seg_move_per_segment_per_hour": 0.0043,
+  "seg_moves_per_seg_grow": 0.25,
+  "load_p50_s": 7.8358,
+  "load_p99_s": 46.6036,
+  "load_mean_s": 10.153124605678233,
+  "segment_grow_mean_s": 8.6791,
+  "segment_move_mean_s": 21.8793,
+  "task_num_max": 4.0,
+  "search_p99_idle_ms": 1016.115,
+  "search_p99_busy_ms": 1597.44,
+  "window_events_real_hour": 0
+ }
+}

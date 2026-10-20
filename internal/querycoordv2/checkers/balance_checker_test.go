@@ -488,6 +488,9 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 	mockSetReason := mockey.Mock(task.SetReason).Return().Build()
 	defer mockSetReason.UnPatch()
 
+	mockSetReasonIfEmpty := mockey.Mock(task.SetReasonIfEmpty).Return().Build()
+	defer mockSetReasonIfEmpty.UnPatch()
+
 	// Mock balance.PrintNewBalancePlans
 	mockPrintPlans := mockey.Mock(balance.PrintNewBalancePlans).Return().Build()
 	defer mockPrintPlans.UnPatch()

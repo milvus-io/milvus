@@ -1,0 +1,97 @@
+{
+ "name": "prod_1_bbdc0b52",
+ "category": "1_frequent_balance",
+ "customer": null,
+ "source": "in01-bbdc0b52 gcp; node scale 1.000, segment scale 1.000, row_scale=0.6577; gcp, 3 QN / 4 collections, 1.47k moves/h driven by compaction (rho 0.58); compare moves per compaction.",
+ "streaming": true,
+ "qns": 3,
+ "sns": 1,
+ "qn_cores": 6,
+ "qn_memory_gb": 32,
+ "load": {
+  "concurrency": 4,
+  "bandwidth_mb": 6916,
+  "base_ms": 10,
+  "jitter_sigma": 0.76,
+  "ref_latency_ms": 38.2,
+  "ref_bytes": 51200000,
+  "size_exponent": 0.568
+ },
+ "search": {
+  "BaseMs": 20,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.0
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 321,
+   "rows_median": 270266,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 8.6,
+   "compact_every_seconds": 8.5,
+   "flush_rows": 270266
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 256,
+   "rows_median": 50449,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 10.7,
+   "compact_every_seconds": 10.7,
+   "flush_rows": 50449
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 112,
+   "rows_median": 1480,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 24.5,
+   "compact_every_seconds": 24.4,
+   "flush_rows": 1480
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 29,
+   "rows_median": 21082,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 94.8,
+   "compact_every_seconds": 94.2,
+   "flush_rows": 21082
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 24,
+  "flush_every_seconds": 15.3,
+  "compact_every_seconds": 15.2
+ },
+ "events": [],
+ "duration_seconds": 300,
+ "prod": {
+  "qn": 3,
+  "sn": 1,
+  "segments": 724.0,
+  "collections": 4,
+  "steady_seg_move_per_hour": 1475.26,
+  "seg_move_per_hour": 1468.58,
+  "seg_move_per_segment_per_hour": 2.0284254143646407,
+  "seg_moves_per_seg_grow": 15.619868113167412,
+  "load_p50_s": 0.38239999999999996,
+  "load_p99_s": 4.5225,
+  "load_mean_s": 0.501222758062001,
+  "segment_grow_mean_s": 3.4423000000000004,
+  "segment_move_mean_s": 0.9632999999999999,
+  "task_num_max": 42.0,
+  "search_p99_idle_ms": 20,
+  "search_p99_busy_ms": 20,
+  "window_events_real_hour": 4
+ }
+}

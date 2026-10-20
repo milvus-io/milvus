@@ -1,0 +1,170 @@
+{
+ "name": "prod_3_a0e8d38c",
+ "category": "3_slow_load",
+ "customer": "anker",
+ "source": "in01-a0e8d38c aws-eu; node scale 1.000, segment scale 1.000, row_scale=0.0535; anker (3.0 tiered): per-segment load mean 119 s / p50 66 s, segment_grow mean 466 s, task_num peak 419; scale 5->10->5 cancels in-flight loads (segcore Future canceled) and re-loads same segment; compare load latency and cancelled-load count during scale.",
+ "streaming": true,
+ "qns": 5,
+ "sns": 1,
+ "qn_cores": 6,
+ "qn_memory_gb": 32,
+ "load": {
+  "concurrency": 4,
+  "bandwidth_mb": 29,
+  "base_ms": 10,
+  "jitter_sigma": 0.86,
+  "ref_latency_ms": 6600.7,
+  "ref_bytes": 51200000,
+  "size_exponent": 0.0
+ },
+ "search": {
+  "BaseMs": 491.5,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.03
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 266,
+   "rows_median": 611495,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 42.1,
+   "compact_every_seconds": 69.9,
+   "flush_rows": 611495
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 23,
+   "rows_median": 98398,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 487.4,
+   "compact_every_seconds": 808.7,
+   "flush_rows": 98398
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 4,
+   "rows_median": 117727,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 2802.5,
+   "compact_every_seconds": 4649.9,
+   "flush_rows": 117727
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 1,
+   "rows_median": 349301,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 11210.0,
+   "compact_every_seconds": 18599.6,
+   "flush_rows": 349301
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 1,
+   "rows_median": 331940,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 11210.0,
+   "compact_every_seconds": 18599.6,
+   "flush_rows": 331940
+  },
+  {
+   "count": 3,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 1,
+   "rows_median": 566337,
+   "rows_sigma": 0.0,
+   "flush_every_seconds": 11210.0,
+   "compact_every_seconds": 18599.6,
+   "flush_rows": 566337
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 14,
+  "flush_every_seconds": 300.9,
+  "compact_every_seconds": 499.3
+ },
+ "events": [
+  {
+   "at": 5.0,
+   "op": "kill_qn",
+   "node": 1
+  },
+  {
+   "at": 8.0,
+   "op": "restart_qn",
+   "node": 1
+  },
+  {
+   "at": 245.0,
+   "op": "add_qn",
+   "count": 5
+  },
+  {
+   "at": 245.0,
+   "op": "add_sn",
+   "count": 1
+  },
+  {
+   "at": 305.0,
+   "op": "stop_qn",
+   "node": 10
+  },
+  {
+   "at": 305.0,
+   "op": "stop_qn",
+   "node": 9
+  },
+  {
+   "at": 305.0,
+   "op": "stop_qn",
+   "node": 8
+  },
+  {
+   "at": 305.0,
+   "op": "stop_qn",
+   "node": 7
+  },
+  {
+   "at": 305.0,
+   "op": "stop_qn",
+   "node": 6
+  },
+  {
+   "at": 305.0,
+   "op": "kill_sn",
+   "node": 1001
+  }
+ ],
+ "duration_seconds": 360.0,
+ "prod": {
+  "qn": 5,
+  "sn": 1,
+  "segments": 280.0,
+  "collections": 8,
+  "steady_seg_move_per_hour": 3.35,
+  "seg_move_per_hour": 5.3,
+  "seg_move_per_segment_per_hour": 0.018928571428571427,
+  "seg_moves_per_seg_grow": 0.5538140020898641,
+  "load_p50_s": 66.0072,
+  "load_p99_s": 485.6882,
+  "load_mean_s": 119.42641063929071,
+  "segment_grow_mean_s": 465.7264,
+  "segment_move_mean_s": 234.6369,
+  "task_num_max": 419.0,
+  "search_p99_idle_ms": 491.52,
+  "search_p99_busy_ms": 502.784,
+  "window_events_real_hour": 5
+ }
+}

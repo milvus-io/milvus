@@ -1,0 +1,75 @@
+{
+ "name": "prod_4_2f2e7926",
+ "category": "4_load_hurts_query",
+ "customer": "modash",
+ "source": "in01-2f2e7926 aws-eu; node scale 1.000, segment scale 1.000, row_scale=0.0418; modash second cluster: no measurable load effect (busy 0.99 s vs idle 0.98 s); control case.",
+ "streaming": true,
+ "qns": 8,
+ "sns": 1,
+ "qn_cores": 16,
+ "qn_memory_gb": 64,
+ "load": {
+  "concurrency": 4,
+  "bandwidth_mb": 522,
+  "base_ms": 10,
+  "jitter_sigma": 0.69,
+  "ref_latency_ms": 384.1,
+  "ref_bytes": 51200000,
+  "size_exponent": 0.0
+ },
+ "search": {
+  "BaseMs": 976.6,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.05
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 125,
+   "rows_median": 2389510,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 446.4,
+   "compact_every_seconds": 508.4,
+   "flush_rows": 2389510
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 123,
+   "rows_median": 1552457,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 453.7,
+   "compact_every_seconds": 516.7,
+   "flush_rows": 1552457
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 1,
+  "flush_every_seconds": 450.0,
+  "compact_every_seconds": 512.5
+ },
+ "events": [],
+ "duration_seconds": 300,
+ "prod": {
+  "qn": 8,
+  "sn": 1,
+  "segments": 247.0,
+  "collections": 2,
+  "steady_seg_move_per_hour": 0.12,
+  "seg_move_per_hour": 0.12,
+  "seg_move_per_segment_per_hour": 0.00048582995951417,
+  "seg_moves_per_seg_grow": 0.075,
+  "load_p50_s": 3.8411,
+  "load_p99_s": 19.0118,
+  "load_mean_s": 4.262130952380952,
+  "segment_grow_mean_s": 4.6612,
+  "segment_move_mean_s": 14.0866,
+  "task_num_max": 2.0,
+  "search_p99_idle_ms": 976.64,
+  "search_p99_busy_ms": 989.867,
+  "window_events_real_hour": 0
+ }
+}
