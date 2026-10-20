@@ -155,8 +155,11 @@ they cannot establish semantic restore compatibility. There is no separate
 minimum-reader or feature-negotiation protocol.
 
 Historical raw binary manifests continue to require an exact V0-V5 version;
-V6+ raw binary manifests are rejected. Old unmodified readers cannot read OCF
-snapshots. OCF corruption must not fall back to historical binary decoding.
+OCF manifests declaring V0-V5 and raw binary manifests declaring V6+ are rejected.
+Old unmodified readers cannot read OCF snapshots. OCF corruption must not fall
+back to historical binary decoding.
+Before OCF decoding, readers reject declared block sizes exceeding the input
+length to prevent allocations based on corrupt block headers.
 
 **StorageV2 Support**: For segments using Milvus's newer storage format, additional manifest paths are stored in `StorageV2ManifestList`. This enables seamless snapshot/restore for both legacy and new storage formats.
 

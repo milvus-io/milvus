@@ -20,6 +20,7 @@ package snapshotio
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"sync"
 
@@ -290,13 +291,19 @@ func MarshalSegmentManifest(segment *datapb.SegmentDescription) ([]byte, error) 
 	return buf.Bytes(), nil
 }
 
-// ParseSegmentManifest uses embedded writer schemas for OCF files and exact
-// historical schemas for legacy raw binary files.
+// ParseSegmentManifest requires OCF with embedded writer schemas for V6+ and
+// exact historical raw binary schemas for V0-V5.
 func ParseSegmentManifest(data []byte, formatVersion int) (*datapb.SegmentDescription, error) {
 	if err := ValidateFormatVersion(formatVersion); err != nil {
 		return nil, merr.Wrap(err, "incompatible snapshot format")
 	}
 	if bytes.HasPrefix(data, []byte{'O', 'b', 'j', 1}) {
+		if formatVersion < SelfDescribingManifestVersion {
+			return nil, merr.WrapErrDataIntegrityMsg("snapshot format %d requires a raw binary manifest, got an avro container", formatVersion)
+		}
+		if err := validateOCFBlockSizes(data); err != nil {
+			return nil, err
+		}
 		decoder, err := ocf.NewDecoder(bytes.NewReader(data))
 		if err != nil {
 			return nil, merr.WrapErrServiceInternalErr(err, "failed to read avro container header")
@@ -342,6 +349,31 @@ func ParseSegmentManifest(data []byte, formatVersion int) (*datapb.SegmentDescri
 	}
 	record.manifestHasIndexPresent = formatVersion >= 5
 	return ManifestEntryToSegment(record), nil
+}
+
+// validateOCFBlockSizes scans framing without allocating block buffers. The OCF
+// decoder allocates from declared block sizes before checking for truncated input.
+func validateOCFBlockSizes(data []byte) error {
+	reader := avro.NewReader(nil, 0).Reset(data)
+	var header ocf.Header
+	reader.ReadVal(ocf.HeaderSchema, &header)
+	for reader.Error == nil {
+		reader.Peek()
+		if reader.Error == io.EOF {
+			return nil
+		}
+		_ = reader.ReadLong() // Record count does not affect block allocation.
+		size := reader.ReadLong()
+		if reader.Error != nil {
+			break
+		}
+		if size < 0 || size > int64(len(data)) {
+			return merr.WrapErrDataIntegrityMsg("invalid avro container block size %d for %d input bytes", size, len(data))
+		}
+		reader.SkipNBytesInt64(size)
+		reader.SkipNBytes(len(header.Sync))
+	}
+	return merr.WrapErrDataIntegrity(reader.Error, "failed to read avro container framing")
 }
 
 // SegmentToManifestEntry converts a protobuf SegmentDescription to Avro format.

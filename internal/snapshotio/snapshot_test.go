@@ -18,6 +18,7 @@ package snapshotio
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"testing"
@@ -351,6 +352,82 @@ func TestManifestContainerAndLegacy(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestParseSegmentManifestRejectsOCFForLegacyVersion(t *testing.T) {
+	data, err := MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 101})
+	require.NoError(t, err)
+
+	for _, version := range []int{0, 1, 2, 3, 4, 5} {
+		t.Run(fmt.Sprintf("V%d", version), func(t *testing.T) {
+			segment, err := ParseSegmentManifest(data, version)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.Nil(t, segment)
+			assert.ErrorContains(t, err, fmt.Sprintf("snapshot format %d requires a raw binary manifest", version))
+			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			assert.False(t, merr.Status(err).GetRetriable())
+		})
+	}
+}
+
+func TestParseSegmentManifestRejectsInvalidBlockSizes(t *testing.T) {
+	schema, err := ManifestSchema()
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	encoder, err := ocf.NewEncoderWithSchema(schema, &buf)
+	require.NoError(t, err)
+	require.NoError(t, encoder.Close())
+	header := buf.Bytes()
+	valid, err := MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 101})
+	require.NoError(t, err)
+	withBlockHeader := func(prefix []byte, count, size int64) []byte {
+		data := binary.AppendVarint(bytes.Clone(prefix), count)
+		return binary.AppendVarint(data, size)
+	}
+
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{"oversized block", withBlockHeader(header, 1, 1<<30), "block size"},
+		{"zero-count oversized block", withBlockHeader(header, 0, 1<<30), "block size"},
+		{"oversized trailing block", withBlockHeader(valid, 1, 1<<30), "block size"},
+		{"negative block size", withBlockHeader(header, 1, -1), "block size"},
+		{"truncated header", header[:4], "framing"},
+		{"truncated block count", append(bytes.Clone(header), 0x80), "framing"},
+		{"truncated block size", binary.AppendVarint(bytes.Clone(header), 1), "framing"},
+		{"truncated block data", withBlockHeader(header, 1, 1), "framing"},
+		{"truncated block sync", withBlockHeader(header, 1, 0), "framing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A missing guard must not allocate the forged 1 GiB block in this test.
+			// Validation must reject the file before creating the OCF decoder.
+			patch := mockey.Mock(ocf.NewDecoder).Return(nil, errors.New("unexpected OCF decoder call")).Build()
+			defer patch.UnPatch()
+			segment, err := ParseSegmentManifest(tc.data, SnapshotFormatVersion)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.Nil(t, segment)
+			assert.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestParseSegmentManifestContainerCodecs(t *testing.T) {
+	schema, err := ManifestSchema()
+	require.NoError(t, err)
+	for _, codec := range []ocf.CodecName{ocf.Null, ocf.Deflate, ocf.Snappy, ocf.ZStandard} {
+		t.Run(string(codec), func(t *testing.T) {
+			var buf bytes.Buffer
+			encoder, err := ocf.NewEncoderWithSchema(schema, &buf, ocf.WithCodec(codec))
+			require.NoError(t, err)
+			require.NoError(t, encoder.Encode(SegmentToManifestEntry(&datapb.SegmentDescription{SegmentId: 101})))
+			require.NoError(t, encoder.Close())
+			segment, err := ParseSegmentManifest(buf.Bytes(), SnapshotFormatVersion)
+			require.NoError(t, err)
+			assert.Equal(t, int64(101), segment.GetSegmentId())
+		})
+	}
+}
+
 func TestManifestContainerFailures(t *testing.T) {
 	schema, err := ManifestSchema()
 	require.NoError(t, err)
@@ -392,6 +469,15 @@ func TestParseManifestFailures(t *testing.T) {
 	t.Run("legacy data", func(t *testing.T) {
 		_, err := ParseSegmentManifest(nil, 1)
 		require.ErrorContains(t, err, "failed to parse avro data")
+	})
+	t.Run("container schema", func(t *testing.T) {
+		data, err := avro.Marshal(ocf.HeaderSchema, ocf.Header{
+			Magic: [4]byte{'O', 'b', 'j', 1},
+			Meta:  map[string][]byte{"avro.schema": []byte("invalid")},
+		})
+		require.NoError(t, err)
+		_, err = ParseSegmentManifest(data, SnapshotFormatVersion)
+		require.ErrorContains(t, err, "failed to read avro container header")
 	})
 	t.Run("container record", func(t *testing.T) {
 		var buf bytes.Buffer
