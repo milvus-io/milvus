@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/types"
@@ -78,9 +79,11 @@ type DataNode struct {
 	Role     string
 	lifetime lifetime.Lifetime[commonpb.StateCode]
 
-	syncMgr         syncmgr.SyncManager
-	importTaskMgr   importv2.TaskManager
-	importScheduler importv2.Scheduler
+	syncMgr           syncmgr.SyncManager
+	importTaskMgr     importv2.TaskManager
+	importScheduler   importv2.Scheduler
+	importV3Scheduler *importv3.Scheduler
+	importV3Metrics   *importv3.Metrics
 
 	// indexnode related
 	storageFactory StorageFactory
@@ -107,6 +110,15 @@ type DataNode struct {
 	pool                   *conc.Pool[any]
 
 	metricsRequest *metricsinfo.MetricsRequest
+}
+
+// importV3Capacity reports the node's total slot budget (index.CalculateNodeSlots)
+// for the import V3 slot scheduler. Index-build and compaction usage is
+// deliberately not counted here: only import V3 tasks are admitted through the
+// scheduler, and DataCoord's global water-filling already accounts for every
+// executor through QuerySlot.
+func (node *DataNode) importV3Capacity() int64 {
+	return index.CalculateNodeSlots()
 }
 
 // NewDataNode will return a DataNode with abnormal state.
@@ -215,6 +227,9 @@ func (node *DataNode) Init() error {
 
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
+		node.importV3Metrics = importv3.NewMetrics(serverID)
+		node.importV3Scheduler = importv3.NewScheduler(node.ctx, node.importV3Capacity, node.importV3Metrics)
+		importv3.CleanImportV3Prefixes()
 
 		err := index.InitSegcore(serverID)
 		if err != nil {
@@ -252,6 +267,8 @@ func (node *DataNode) Start() error {
 		go node.compactionExecutor.Start(node.ctx)
 
 		go node.importScheduler.Start()
+
+		go node.importV3Scheduler.Start()
 
 		err := node.taskScheduler.Start()
 		if err != nil {
@@ -302,6 +319,14 @@ func (node *DataNode) Stop() error {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
+
+		if node.importV3Scheduler != nil {
+			node.importV3Scheduler.Close()
+		}
+
+		if node.importV3Metrics != nil {
+			node.importV3Metrics.Close()
+		}
 
 		if node.syncMgr != nil {
 			err := node.syncMgr.Close()

@@ -10,7 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 ARG MILVUS_BASE_IMAGE_REPO="milvusdb/milvus-base"
 ARG MILVUS_BASE_IMAGE_TAG="gpu-20230822-34f9067"
-FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 FROM ${MILVUS_BASE_IMAGE_REPO}:${MILVUS_BASE_IMAGE_TAG}
 
 ARG MILVUS_RUNTIME_USER=milvus:milvus
@@ -26,7 +26,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 RUN uv --no-cache python install 3.12.13 && \
-    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        --upgrade setuptools msgpack urllib3
 
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     install -d -o milvus -g milvus /milvus /milvus/bin /var/lib/milvus

@@ -20,9 +20,9 @@ package rootcoord
 
 import (
 	"context"
+	"strings"
 
 	"github.com/samber/lo"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -33,6 +33,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// policyKeysOf returns the de-duplicated proxy policy cache keys of the
+// expanded grants, in first-seen order. A key is role + resource + privilege
+// and does not carry the grantor: grants that differ only in who granted them
+// are the same key, which is the unit the proxy cache stores and revokes.
+func policyKeysOf(grants []*milvuspb.GrantEntity) []string {
+	return lo.Uniq(lo.Map(grants, func(g *milvuspb.GrantEntity, _ int) string {
+		return funcutil.PolicyForPrivilege(g.Role.Name, g.Object.Name, g.ObjectName, g.Grantor.Privilege.Name, g.DbName)
+	}))
+}
+
+// policyKeysWithout returns the keys that are not in exclude, keeping their order.
+func policyKeysWithout(keys []string, exclude []string) []string {
+	excluded := typeutil.NewSet(exclude...)
+	return lo.Filter(keys, func(key string, _ int) bool {
+		return !excluded.Contain(key)
+	})
+}
 
 func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	privName := entity.Grantor.Privilege.Name
@@ -80,7 +98,10 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 		if err != nil {
 			return err
 		}
-		// if there is same grant in the other privilege groups, the grant should not be removed from the cache
+		keys := policyKeysOf(expandGrants)
+		// a policy key still produced by the remaining grants of the role (another
+		// privilege group, or the same privilege granted by another user) must
+		// stay in the cache
 		if operateType == milvuspb.OperatePrivilegeType_Revoke {
 			metaGrants, err := core.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 				Role:   entity.Role,
@@ -93,16 +114,12 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 			if err != nil {
 				return err
 			}
-			expandGrants = lo.Filter(expandGrants, func(g1 *milvuspb.GrantEntity, _ int) bool {
-				return !lo.ContainsBy(metaExpandGrants, func(g2 *milvuspb.GrantEntity) bool {
-					return proto.Equal(g1, g2)
-				})
-			})
+			keys = policyKeysWithout(keys, policyKeysOf(metaExpandGrants))
 		}
-		if len(expandGrants) > 0 {
+		if len(keys) > 0 {
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(expandGrants),
+				OpKey:  strings.Join(keys, "|"),
 			}); err != nil {
 				mlog.Warn(ctx, "fail to refresh policy info cache", mlog.Any("in", entity), mlog.Err(err))
 				return err
@@ -117,7 +134,12 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 
 func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *milvuspb.PrivilegeGroupInfo, operateType milvuspb.OperatePrivilegeGroupType) error {
 	if err := func() error {
-		groups, err := core.meta.ListPrivilegeGroups(ctx)
+		// Expand with the built-in groups as well, the same set the grant/revoke
+		// path and ListPolicy use to build the proxy policy cache. A privilege that
+		// a role still holds through a built-in group (e.g. Query via
+		// CollectionReadOnly) must survive its removal from a custom group;
+		// expanding only the custom groups made it look revoked.
+		groups, err := core.getDefaultAndCustomPrivilegeGroups(ctx)
 		if err != nil && !common.IsIgnorableError(err) {
 			mlog.Warn(ctx, "fail to list privilege groups", mlog.Err(err))
 			return err
@@ -156,16 +178,12 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 			}
 		}
 
-		var rolesToRevoke []*milvuspb.GrantEntity
-		var rolesToGrant []*milvuspb.GrantEntity
-		compareGrants := func(a, b *milvuspb.GrantEntity) bool {
-			return a.Role.Name == b.Role.Name &&
-				a.Object.Name == b.Object.Name &&
-				a.ObjectName == b.ObjectName &&
-				a.Grantor.User.Name == b.Grantor.User.Name &&
-				a.Grantor.Privilege.Name == b.Grantor.Privilege.Name &&
-				a.DbName == b.DbName
-		}
+		// Diff the policy keys, not the grants: the cache holds keys, a key has no
+		// grantor, and a set lookup keeps the diff linear in the number of
+		// expanded grants (a role holding a built-in group on many collections
+		// expands into thousands of them).
+		var keysToRevoke []string
+		var keysToGrant []string
 		for _, role := range roles {
 			grants, err := core.meta.SelectGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
 				Role:   role,
@@ -183,38 +201,28 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 				return err
 			}
 
-			toRevoke := lo.Filter(currGrants, func(item *milvuspb.GrantEntity, _ int) bool {
-				return !lo.ContainsBy(newGrants, func(newItem *milvuspb.GrantEntity) bool {
-					return compareGrants(item, newItem)
-				})
-			})
-
-			toGrant := lo.Filter(newGrants, func(item *milvuspb.GrantEntity, _ int) bool {
-				return !lo.ContainsBy(currGrants, func(currItem *milvuspb.GrantEntity) bool {
-					return compareGrants(item, currItem)
-				})
-			})
-
-			rolesToRevoke = append(rolesToRevoke, toRevoke...)
-			rolesToGrant = append(rolesToGrant, toGrant...)
+			currKeys := policyKeysOf(currGrants)
+			newKeys := policyKeysOf(newGrants)
+			keysToRevoke = append(keysToRevoke, policyKeysWithout(currKeys, newKeys)...)
+			keysToGrant = append(keysToGrant, policyKeysWithout(newKeys, currKeys)...)
 		}
 
-		if len(rolesToRevoke) > 0 {
+		if len(keysToRevoke) > 0 {
 			opType := int32(typeutil.CacheRevokePrivilege)
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(rolesToRevoke),
+				OpKey:  strings.Join(keysToRevoke, "|"),
 			}); err != nil {
 				mlog.Warn(ctx, "fail to refresh policy info cache for revoke privileges in operate privilege group", mlog.Any("in", in), mlog.Err(err))
 				return err
 			}
 		}
 
-		if len(rolesToGrant) > 0 {
+		if len(keysToGrant) > 0 {
 			opType := int32(typeutil.CacheGrantPrivilege)
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(rolesToGrant),
+				OpKey:  strings.Join(keysToGrant, "|"),
 			}); err != nil {
 				mlog.Warn(ctx, "fail to refresh policy info cache for grants privilege in operate privilege group", mlog.Any("in", in), mlog.Err(err))
 				return err

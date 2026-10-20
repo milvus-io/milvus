@@ -84,6 +84,7 @@ knowhere	internal/core/src/segcore/vector_index_c.cpp
 knowhere	internal/core/src/storage/artifact/FileSink.cpp
 knowhere	internal/core/src/storage/DiskFileManagerImpl.cpp
 knowhere	internal/core/src/storage/Event.cpp
+knowhere	internal/core/src/storage/Util.cpp
 arrow	internal/core/src/common/ArrowDataWrapper.h
 arrow	internal/core/src/common/ChunkWriter.cpp
 arrow	internal/core/src/common/ChunkWriter.h
@@ -104,6 +105,12 @@ arrow	internal/core/src/segcore/json_stats/utils.cpp
 arrow	internal/core/src/segcore/json_stats/utils.h
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.cpp
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.h
+arrow	internal/core/src/mmap/SparseVortexFileSystem.cpp
+arrow	internal/core/src/mmap/SparseVortexFileSystem.h
+arrow	internal/core/src/mmap/VortexColumn.cpp
+arrow	internal/core/src/mmap/VortexColumnGroup.cpp
+arrow	internal/core/src/mmap/VortexColumnGroup.h
+arrow	internal/core/src/mmap/VortexColumn.h
 arrow	internal/core/src/segcore/arrow_field_utils.cpp
 arrow	internal/core/src/segcore/arrow_field_utils.h
 arrow	internal/core/src/segcore/boost_score.cpp
@@ -152,6 +159,11 @@ arrow	internal/core/src/storage/Util.cpp
 arrow	internal/core/src/storage/Util.h
 milvus_storage	internal/core/src/common/Schema.cpp
 milvus_storage	internal/core/src/indexbuilder/BuildSession.cpp
+milvus_storage	internal/core/src/mmap/SparseVortexFileSystem.cpp
+milvus_storage	internal/core/src/mmap/VortexColumn.cpp
+milvus_storage	internal/core/src/mmap/VortexColumnGroup.cpp
+milvus_storage	internal/core/src/mmap/VortexColumnGroup.h
+milvus_storage	internal/core/src/mmap/VortexColumn.h
 milvus_storage	internal/core/src/segcore/arrow_fs_c.cpp
 milvus_storage	internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp
 milvus_storage	internal/core/src/segcore/ChunkedSegmentSealedImpl.h

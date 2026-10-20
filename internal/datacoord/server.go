@@ -43,6 +43,8 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -109,6 +111,8 @@ type Server struct {
 	metaRootPath                        string
 	meta                                *meta
 	dataViewManager                     DataViewManager
+	metaStore                           metacache.MetaStore
+	catalog                             metastore.DataCoordCatalog
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
 	segmentManager                      Manager
 	allocator                           allocator.Allocator
@@ -123,6 +127,7 @@ type Server struct {
 	importMeta       ImportMeta
 	importInspector  ImportInspector
 	importChecker    ImportChecker
+	importCheckerV3  ImportChecker
 	importJobLock    *lock.KeyLock[int64]
 
 	copySegmentMeta      CopySegmentMeta
@@ -204,6 +209,22 @@ func WithDataNodeCreator(creator session.DataNodeCreatorFunc) Option {
 func WithSegmentManager(manager Manager) Option {
 	return func(svr *Server) {
 		svr.segmentManager = manager
+	}
+}
+
+// WithMetaStore returns an Option to set the shared MetaStore for datacoord
+// to use as the primary segment and collection storage.
+func WithMetaStore(store metacache.MetaStore) Option {
+	return func(svr *Server) {
+		svr.metaStore = store
+	}
+}
+
+// WithCatalog returns an Option to set the DataCoordCatalog for sub-meta
+// initialization (indexMeta, analyzeMeta, importMeta, etc.).
+func WithCatalog(catalog metastore.DataCoordCatalog) Option {
+	return func(svr *Server) {
+		svr.catalog = catalog
 	}
 }
 
@@ -325,7 +346,7 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
-	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog, s.allocator, s.meta)
+	s.importMeta, err = NewImportMeta(s.ctx, s.catalog, s.allocator, s.meta)
 	if err != nil {
 		return err
 	}
@@ -351,9 +372,13 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
-
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
+		commitImport:        s.broadcastCommitImportMessage,
+		rollbackImport:      s.broadcastRollbackImportMessage,
+		assignImportIDRange: s.broadcastUpdateImportMessage,
+		getReplicationRole:  s.getReplicationRole,
+	})
+	s.importCheckerV3 = NewImportCheckerV3(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.cluster2, importCheckerHooks{
 		commitImport:        s.broadcastCommitImportMessage,
 		rollbackImport:      s.broadcastRollbackImportMessage,
 		assignImportIDRange: s.broadcastUpdateImportMessage,
@@ -370,6 +395,8 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
+
+	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
 	s.copySegmentInspector = NewCopySegmentInspector(
 		s.ctx,
 		s.meta,
@@ -429,6 +456,11 @@ func (s *Server) Start() error {
 
 func (s *Server) startDataCoord() {
 	s.startTaskScheduler()
+	// Reconcile orphan import segments and re-enqueue in-flight import tasks
+	// before the checkers start and before the state turns Healthy: the scan
+	// must not race producers that persist a segment before its owner record
+	// (snapshot restore pre-registration, V2 import segment allocation).
+	s.importInspector.Reload()
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -508,6 +540,9 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
 		dataViewGC:       s.dataViewManager,
+		importJobAlive: func(ctx context.Context, jobID int64) bool {
+			return s.importMeta.GetJob(ctx, jobID) != nil
+		},
 	})
 }
 
@@ -646,14 +681,27 @@ func (s *Server) initKV() error {
 }
 
 func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
+	// MixCoord injects the shared catalog and MetaStore. A standalone
+	// DataCoord (e.g. in tests) builds its own over the local KV.
+	if s.catalog == nil {
+		s.catalog = datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+	}
+	if s.metaStore == nil {
+		s.metaStore = metacache.NewMetaStore(s.catalog)
+	}
 	if s.meta != nil {
 		return nil
 	}
-	catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+	// DataView persistence lives on the concrete KV catalog, not on the
+	// DataCoordCatalog interface.
+	catalog, ok := s.catalog.(dataview.Catalog)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("datacoord catalog does not support DataView persistence")
+	}
 	var recoveredMeta *meta
 	reloadEtcdFn := func() error {
 		var err error
-		recoveredMeta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		recoveredMeta, err = newMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker)
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -773,6 +821,7 @@ func (s *Server) startServerLoop() {
 	s.globalScheduler.Start()
 	go s.importInspector.Start()
 	go s.importChecker.Start()
+	go s.importCheckerV3.Start()
 
 	// Start copy segment inspector and checker
 	go s.copySegmentInspector.Start()
@@ -1122,6 +1171,7 @@ func (s *Server) Stop() error {
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()
+	s.importCheckerV3.Close()
 
 	// Stop copy segment components
 	s.copySegmentInspector.Close()
@@ -1261,7 +1311,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	collInfo := &collectionInfo{
+	s.meta.AddCollection(&collectionInfo{
 		ID:             resp.CollectionID,
 		Schema:         resp.Schema,
 		Partitions:     partitionIDs,
@@ -1271,8 +1321,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		DatabaseName:   resp.GetDbName(),
 		DatabaseID:     resp.GetDbId(),
 		VChannelNames:  resp.GetVirtualChannelNames(),
-	}
-	s.meta.AddCollection(collInfo)
+	})
 	return nil
 }
 

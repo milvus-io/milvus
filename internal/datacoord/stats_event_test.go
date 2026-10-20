@@ -147,7 +147,7 @@ func TestStatsNotifyNothingWhenCompactionMutationFails(t *testing.T) {
 	defer drainStatsBuildChForTest()
 	mt := NewMockCompactionMeta(t)
 	mt.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).
-		Return(nil, nil, merr.WrapErrServiceInternalMsg("injected"))
+		Return(nil, merr.WrapErrServiceInternalMsg("injected"))
 	task := newMixCompactionTask(&datapb.CompactionTask{CollectionID: 100, Type: datapb.CompactionType_MixCompaction}, nil, mt, nil)
 
 	require.Error(t, task.saveSegmentMeta(&datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{SegmentID: 2}}}))

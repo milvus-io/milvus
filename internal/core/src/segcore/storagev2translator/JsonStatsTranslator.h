@@ -82,6 +82,7 @@ class JsonStatsTranslator
         info_proto_;
     milvus::storage::ChunkManagerPtr chunk_manager_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    const bool use_async_load_;
     std::string key_;
     milvus::cachinglayer::Meta meta_;
 };

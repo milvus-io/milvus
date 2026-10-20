@@ -14,27 +14,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+package rootcoord
 
-#include <cstdint>
-#include <limits>
+import (
+	"testing"
 
-namespace milvus::index::detail {
+	"github.com/stretchr/testify/assert"
+)
 
-inline uint64_t
-SaturatingAdd(uint64_t lhs, uint64_t rhs) {
-    if (lhs > std::numeric_limits<uint64_t>::max() - rhs) {
-        return std::numeric_limits<uint64_t>::max();
-    }
-    return lhs + rhs;
+func TestNameDbRemoveIfMatched(t *testing.T) {
+	names := newNameDb()
+	names.insert("db", "old", 100)
+	names.insert("db", "reused", 200)
+	names.insert("other-db", "old", 300)
+	assert.False(t, names.removeIfMatched("missing-db", "old", 100))
+	assert.False(t, names.removeIfMatched("db", "missing", 100))
+	assert.False(t, names.removeIfMatched("db", "reused", 100))
+	assert.True(t, names.removeIfMatched("db", "old", 100))
+	assert.False(t, names.removeIfMatched("db", "old", 100))
+	assert.Equal(t, map[string]UniqueID{"reused": 200}, names.listCollections("db"))
+	assert.Equal(t, map[string]UniqueID{"old": 300}, names.listCollections("other-db"))
 }
-
-inline uint64_t
-SaturatingMul(uint64_t lhs, uint64_t rhs) {
-    if (lhs != 0 && rhs > std::numeric_limits<uint64_t>::max() / lhs) {
-        return std::numeric_limits<uint64_t>::max();
-    }
-    return lhs * rhs;
-}
-
-}  // namespace milvus::index::detail

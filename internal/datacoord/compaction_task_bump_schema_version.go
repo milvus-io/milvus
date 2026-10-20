@@ -383,12 +383,11 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 		}
 		newSegmentIDs = ids
 	} else {
-		newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), result)
+		newSegments, err := t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), result)
 		if err != nil {
 			return err
 		}
 		newSegmentIDs = lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
-		metricMutation.commit()
 	}
 
 	for _, newSegID := range newSegmentIDs {

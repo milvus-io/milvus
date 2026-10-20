@@ -357,6 +357,12 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     reader->priority_ = priority;
     reader->cancellation_token_ = cancellation_token;
     reader->CheckCancelled("IndexEntryReader::Open");
+    if (file_size <
+        static_cast<int64_t>(MILVUS_V3_MAGIC_SIZE + MILVUS_V3_FOOTER_SIZE)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Invalid packed V3 input or file size {}",
+                  file_size);
+    }
     reader->ValidateMagic();
     reader->ReadFooterAndDirectory();
     reader->CheckCancelled("IndexEntryReader::Open");

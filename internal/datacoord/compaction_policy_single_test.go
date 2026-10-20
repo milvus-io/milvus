@@ -26,9 +26,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSingleCompactionPolicySuite(t *testing.T) {
@@ -55,11 +55,12 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+	singleStore := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(singleStore), metaStore: singleStore}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	singleStore.PutCollection(&collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -142,20 +143,9 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 
 	segments := make(map[UniqueID]*SegmentInfo, 0)
 	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201, true, false)
-	segments[102] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10, true, false)
-	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 100, 10000, 1, true, false)
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: {
-					101: segments[101],
-					102: segments[102],
-					103: segments[103],
-				},
-			},
-		},
-	}
+	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L2, 500, 10000, 10, true, false)
+	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L2, 100, 10000, 1, true, false)
+	segmentsInfo := newSegmentsInfoWithSegments(segments)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
 	s.singlePolicy.meta = &meta{
@@ -188,20 +178,9 @@ func (s *SingleCompactionPolicySuite) TestSortCompaction() {
 
 	segments := make(map[UniqueID]*SegmentInfo, 0)
 	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 0, 10000, 201, false, true)
-	segments[102] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10, false, true)
-	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 100, 10000, 1, false, false)
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: {
-					101: segments[101],
-					102: segments[102],
-					103: segments[103],
-				},
-			},
-		},
-	}
+	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L2, 500, 10000, 10, false, true)
+	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L1, 100, 10000, 1, false, false)
+	segmentsInfo := newSegmentsInfoWithSegments(segments)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
 	s.singlePolicy.meta = &meta{
@@ -238,18 +217,7 @@ func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
 	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L1, 0, 10000, 201, true, true)
 	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L1, 0, 10000, 201, true, true)
 	segments[103].State = commonpb.SegmentState_Dropped
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: {
-					101: segments[101],
-					102: segments[102],
-					103: segments[103],
-				},
-			},
-		},
-	}
+	segmentsInfo := newSegmentsInfoWithSegments(segments)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
 	s.singlePolicy.meta = &meta{
