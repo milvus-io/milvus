@@ -885,7 +885,7 @@ TEST(Indexing, HnswEmbListEmptyNullableUsesLogicalIds) {
     ASSERT_NO_THROW(index->BuildWithDataset(dataset, build_conf));
     EXPECT_TRUE(vec_index->HasValidData());
     EXPECT_EQ(vec_index->GetValidCount(), 2);
-    EXPECT_EQ(vec_index->GetIdMap().OutCount(), 3);
+    EXPECT_EQ(vec_index->GetLogicalCount(), 3);
     EXPECT_EQ(vec_index->Count(), 0);
 
     std::vector<int64_t> logical_ids = {0, 2};

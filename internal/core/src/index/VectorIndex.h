@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstring>
+#include <limits>
 #include "common/FastMem.h"
 #include <map>
 #include <memory>
@@ -26,7 +27,7 @@
 
 #include "Utils.h"
 #include "knowhere/comp/index_param.h"
-#include "knowhere/id_map.h"
+#include "knowhere/index/index.h"
 #include "knowhere/index/index_factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
@@ -88,15 +89,10 @@ class VectorIndex : public IndexBase {
     virtual bool
     IsIndexRefineEnabled() const = 0;
 
-    virtual knowhere::IdMap&
-    GetIdMap() = 0;
-
-    virtual const knowhere::IdMap&
-    GetIdMap() const = 0;
-
     virtual void
-    SetIdMapType(knowhere::IdMap::Type type) {
-        GetIdMap().SetType(type);
+    SetGrowingMapping() {
+        ThrowInfo(Unsupported,
+                  "growing mapping is not supported by this index");
     }
 
     virtual knowhere::expected<knowhere::DataSetPtr>
@@ -196,57 +192,91 @@ class VectorIndex : public IndexBase {
         return search_cfg;
     }
 
-    // Indexed nullable mapping is owned by Knowhere IdMap. Milvus only exposes
-    // logical-row helpers here; raw column physical mapping stays in OffsetMapping.
+    // Keep nullable mapping access behind Knowhere's semantic Index APIs.
     bool
     IsRowValid(int64_t logical_offset) const {
-        const auto& id_map = GetIdMap();
-        if (id_map.ValidBitmap().empty()) {
-            return true;
-        }
-        return id_map.IsValidOutId(logical_offset);
+        const auto result = GetNativeIndex().IsRowValid(logical_offset);
+        AssertInfo(result.has_value(),
+                   "failed to read row validity: {}",
+                   result.what());
+        return result.value();
     }
 
     void
     ApplyValidDataByRange(int64_t logical_offset,
                           int64_t count,
                           TargetBitmapView valid_result) const {
-        AssertInfo(count >= 0, "validity range count is negative");
-        AssertInfo(valid_result.size() == static_cast<size_t>(count),
-                   "validity range result size mismatch");
-        GetIdMap().AndValidityByRange(
-            logical_offset,
-            static_cast<size_t>(count),
-            reinterpret_cast<uint8_t*>(valid_result.data()),
-            valid_result.offset());
+        AssertInfo(
+            count >= 0 && valid_result.size() == static_cast<size_t>(count),
+            "validity range result size mismatch");
+        const auto status =
+            GetNativeIndex().IntersectValidity(logical_offset,
+                                               static_cast<size_t>(count),
+                                               ValidityTarget(valid_result));
+        AssertInfo(status == knowhere::Status::success,
+                   "failed to apply validity range: {}",
+                   KnowhereStatusString(status));
     }
 
     void
     ApplyValidDataByOffsets(const int64_t* offsets,
                             int64_t count,
                             TargetBitmapView valid_result) const {
-        AssertInfo(count >= 0, "validity offset count is negative");
-        AssertInfo(valid_result.size() == static_cast<size_t>(count),
-                   "validity offset result size mismatch");
-        GetIdMap().ApplyValidityByOffsets(
-            offsets, static_cast<size_t>(count), [&](size_t i, bool valid) {
-                if (!valid) {
-                    valid_result[i] = false;
-                }
-            });
+        AssertInfo(
+            count >= 0 && valid_result.size() == static_cast<size_t>(count),
+            "validity offset result size mismatch");
+        const auto status = GetNativeIndex().IntersectValidityAt(
+            offsets, static_cast<size_t>(count), ValidityTarget(valid_result));
+        AssertInfo(status == knowhere::Status::success,
+                   "failed to apply validity offsets: {}",
+                   KnowhereStatusString(status));
     }
 
     bool
     HasValidData() const {
-        return !GetIdMap().ValidBitmap().empty();
+        const auto result = GetNativeIndex().HasValidity();
+        AssertInfo(result.has_value(),
+                   "failed to inspect nullable validity: {}",
+                   result.what());
+        return result.value();
     }
 
     int64_t
     GetValidCount() const {
-        return static_cast<int64_t>(GetIdMap().InCount());
+        const auto result = GetNativeIndex().ValidCount();
+        AssertInfo(result.has_value(),
+                   "failed to read valid count: {}",
+                   result.what());
+        return static_cast<int64_t>(result.value());
+    }
+
+    int64_t
+    GetLogicalCount() const {
+        const auto result = GetNativeIndex().LogicalCount();
+        AssertInfo(result.has_value(),
+                   "failed to read logical count: {}",
+                   result.what());
+        return static_cast<int64_t>(result.value());
     }
 
  protected:
+    virtual const knowhere::Index<knowhere::IndexNode>&
+    GetNativeIndex() const = 0;
+
+    static knowhere::MutableBitmapView
+    ValidityTarget(TargetBitmapView view) {
+        if (view.size() == 0) {
+            return {};
+        }
+        const auto intra = view.offset() % 8;
+        AssertInfo(view.size() <= std::numeric_limits<size_t>::max() - intra,
+                   "validity window overflows");
+        const auto span = intra + view.size();
+        auto* bytes = reinterpret_cast<uint8_t*>(view.data());
+        AssertInfo(bytes != nullptr, "validity window data is null");
+        return {bytes + view.offset() / 8, span / 8 + (span % 8 != 0), intra};
+    }
+
     void
     CheckEmptyEmbListIds(const int64_t* ids,
                          int64_t rows,
@@ -256,12 +286,9 @@ class VectorIndex : public IndexBase {
             return;
         }
         AssertInfo(ids != nullptr, "emb list ids are null");
-
-        const auto& id_map = GetIdMap();
-        const bool has_valid_data = !id_map.ValidBitmap().empty();
-        const auto logical_count = has_valid_data
-                                       ? static_cast<int64_t>(id_map.OutCount())
-                                       : fallback_list_count;
+        const bool has_valid_data = HasValidData();
+        const auto logical_count =
+            has_valid_data ? GetLogicalCount() : fallback_list_count;
         for (int64_t i = 0; i < rows; ++i) {
             const auto id = ids[i];
             AssertInfo(id >= 0 && id < logical_count,
@@ -269,8 +296,7 @@ class VectorIndex : public IndexBase {
                        id,
                        logical_count);
             if (has_valid_data) {
-                AssertInfo(
-                    id_map.IsValidOutId(id), "emb list id {} is null", id);
+                AssertInfo(IsRowValid(id), "emb list id {} is null", id);
             }
         }
     }

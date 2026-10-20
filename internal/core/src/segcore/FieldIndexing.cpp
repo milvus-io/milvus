@@ -413,7 +413,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
             auto logical_offset =
                 field_raw_data->get_logical_offset(build_threshold - 1);
             auto update_count = logical_offset + 1;
-            index_->SetIdMapType(knowhere::IdMap::Type::GROWING);
+            index_->SetGrowingMapping();
             // IdMapData only keeps a view of valid_data; keep this buffer
             // alive until the synchronous Build call consumes the dataset.
             id_map_valid_data = std::make_unique<bool[]>(update_count);
@@ -457,10 +457,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
         }
     } else {
         auto append_info = PrepareNullableAppendInfo(
-            field_raw_data,
-            reserved_offset,
-            size,
-            static_cast<int64_t>(index_->GetIdMap().OutCount()));
+            field_raw_data, reserved_offset, size, index_->GetLogicalCount());
         if (!append_info.HasLogicalRange()) {
             sync_with_index_.store(true);
             return;
@@ -472,7 +469,6 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                                        source + append_info.valid_before_new)
                 : knowhere::GenDataSet(0, dim, nullptr);
         dataset->SetIsSparse(true);
-        index_->SetIdMapType(knowhere::IdMap::Type::GROWING);
         dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
             append_info.ValidDataForNewRange(reserved_offset),
             static_cast<size_t>(append_info.logical_count)));
@@ -558,7 +554,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
             auto logical_offset =
                 field_raw_data->get_logical_offset(build_threshold - 1);
             auto update_count = logical_offset + 1;
-            index_->SetIdMapType(knowhere::IdMap::Type::GROWING);
+            index_->SetGrowingMapping();
             // IdMapData only keeps a view of valid_data; keep this buffer
             // alive until the synchronous Build call consumes the dataset.
             id_map_valid_data = std::make_unique<bool[]>(update_count);
@@ -600,10 +596,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
         }
     } else {
         auto append_info = PrepareNullableAppendInfo(
-            field_raw_data,
-            reserved_offset,
-            size,
-            static_cast<int64_t>(index_->GetIdMap().OutCount()));
+            field_raw_data, reserved_offset, size, index_->GetLogicalCount());
         if (!append_info.HasLogicalRange()) {
             sync_with_index_.store(true);
             return;
@@ -614,7 +607,6 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                             : nullptr;
         auto dataset =
             knowhere::GenDataSet(append_info.add_count, dim, data_ptr);
-        index_->SetIdMapType(knowhere::IdMap::Type::GROWING);
         dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
             append_info.ValidDataForNewRange(reserved_offset),
             static_cast<size_t>(append_info.logical_count)));

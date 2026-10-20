@@ -245,8 +245,7 @@ VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
         return iterators;
     };
 
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map)) {
+    if (IsAllNullNullable(index_)) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -304,8 +303,7 @@ template <typename T>
 BinarySet
 VectorMemIndex<T>::Serialize(const Config& config) {
     knowhere::BinarySet ret;
-    const auto& id_map = GetIdMap();
-    bool all_null_nullable = IsAllNullNullable(id_map);
+    bool all_null_nullable = IsAllNullNullable(index_);
     if (IsEmptyEmbListIndex()) {
         AppendEmptyEmbListOffsetsToBinarySet(
             GetDim(), empty_emb_list_offsets_, ret);
@@ -317,7 +315,7 @@ VectorMemIndex<T>::Serialize(const Config& config) {
                       KnowhereStatusString(stat));
     }
 
-    AppendValidDataToBinarySet(id_map, ret);
+    AppendValidDataToBinarySet(index_, ret);
     Disassemble(ret);
 
     return ret;
@@ -327,28 +325,21 @@ template <typename T>
 void
 VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                        const Config& config) {
-    const auto restored_id_map =
-        RestoreIdMapFromBinarySet(binary_set, index_.GetIdMap());
+    const auto load_options =
+        MakeNullableLoadInput(LoadValidDataViewFromBinarySet(binary_set));
     auto empty_emb_list_state =
         LoadEmptyEmbListOffsetsFromBinarySet(binary_set);
     if (empty_emb_list_state.has_value()) {
         SetDim(empty_emb_list_state->dim);
         empty_emb_list_offsets_ = std::move(empty_emb_list_state->offsets);
-        if (restored_id_map.has_valid_data) {
-            FinalizeRestoredIdMap(index_.Node(),
-                                  ErrorCode::UnexpectedError,
-                                  "empty emb-list load");
-        }
+        ImportValidData(index_, load_options);
     } else if (ContainsOnlyValidData(binary_set)) {
         if (config.contains(DIM_KEY)) {
             SetDim(GetDimFromConfig(config));
         }
-        if (restored_id_map.has_valid_data) {
-            FinalizeRestoredIdMap(
-                index_.Node(), ErrorCode::UnexpectedError, "all-null load");
-        }
+        ImportValidData(index_, load_options);
     } else {
-        auto stat = index_.Deserialize(binary_set, config);
+        auto stat = index_.Deserialize(binary_set, config, load_options);
         if (stat != knowhere::Status::success)
             ThrowInfo(ErrorCode::UnexpectedError,
                       "failed to Deserialize index: {}",
@@ -501,10 +492,6 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     knowhere::Json index_config;
     index_config.update(config);
 
-    if (dataset != nullptr && dataset->HasIdMapData() &&
-        !index_.GetIdMap().IsEnabled()) {
-        index_.GetIdMap().SetType(knowhere::IdMap::Type::SEALED);
-    }
     SetDim(dataset->GetDim());
     const auto id_map_only_build =
         GetIdMapOnlyBuildPlan(dataset, elem_type_ != DataType::NONE);
@@ -515,7 +502,8 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
     LOG_INFO("start build memory index with KNOWHERE, build_id: {}",
              config.value("build_id", "unknown"));
-    auto stat = index_.Build(dataset, index_config, use_knowhere_build_pool_);
+    auto stat = index_.Build(
+        dataset, index_config, use_knowhere_build_pool_, build_options_);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build index, {}",
@@ -768,8 +756,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     auto num_vectors = dataset->GetRows();
     knowhere::Json search_conf = PrepareSearchParams(search_info);
     auto topk = search_info.topk_;
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
+    if (IsAllNullNullable(index_) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -860,8 +847,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
 template <typename T>
 const bool
 VectorMemIndex<T>::HasRawData() const {
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
+    if (IsAllNullNullable(index_) || IsEmptyEmbListIndex()) {
         return true;
     }
     return index_.HasRawData(GetMetricType());
@@ -870,8 +856,7 @@ VectorMemIndex<T>::HasRawData() const {
 template <typename T>
 bool
 VectorMemIndex<T>::IsIndexRefineEnabled() const {
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
+    if (IsAllNullNullable(index_) || IsEmptyEmbListIndex()) {
         return false;
     }
     return index_.IsIndexRefineEnabled();
@@ -891,8 +876,7 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
         return {};
     }
 
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map)) {
+    if (IsAllNullNullable(index_)) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, nullable vector index contains no "
                   "valid vectors");
@@ -939,8 +923,7 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
         return nullptr;
     }
 
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map)) {
+    if (IsAllNullNullable(index_)) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, nullable vector index contains no "
                   "valid vectors");
@@ -1178,30 +1161,30 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
                 embedding_list_raw_index_path.value();
         }
     }
-    auto restore_id_map = [&]() -> RestoredIdMap {
+    auto read_validity = [&]() -> knowhere::LoadOptions {
         if (!valid_data_count_codec && !valid_data_codec) {
             return {};
         }
         AssertInfo(valid_data_count_codec && valid_data_codec,
                    "nullable vector index valid_data files are incomplete");
-        return RestoreIdMapFromValidDataPayload(
-            index_.GetIdMap(),
-            valid_data_count_codec->PayloadData(),
-            valid_data_count_codec->PayloadSize(),
-            valid_data_codec->PayloadData(),
-            valid_data_codec->PayloadSize(),
-            &conf,
+        return MakeNullableLoadInput(
+            LoadValidDataViewFromPayload(valid_data_count_codec->PayloadData(),
+                                         valid_data_count_codec->PayloadSize(),
+                                         valid_data_codec->PayloadData(),
+                                         valid_data_codec->PayloadSize()),
+            conf,
             std::filesystem::path(local_filepath.value())
                 .parent_path()
                 .string());
     };
-    const auto restored_id_map = restore_id_map();
+    const auto load_options = read_validity();
 
     auto start_deserialize = std::chrono::system_clock::now();
     std::chrono::duration<double> deserialize_duration{};
     if (wrote_index_data) {
         LOG_DEBUG("load index into Knowhere...");
-        auto stat = index_.DeserializeFromFile(local_filepath.value(), conf);
+        auto stat = index_.DeserializeFromFile(
+            local_filepath.value(), conf, load_options);
         deserialize_duration =
             std::chrono::system_clock::now() - start_deserialize;
         if (stat != knowhere::Status::success) {
@@ -1217,11 +1200,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
             static_cast<size_t>(empty_emb_list_offsets_codec->PayloadSize()));
         this->SetDim(empty_emb_list_state.dim);
         empty_emb_list_offsets_ = std::move(empty_emb_list_state.offsets);
-        if (restored_id_map.has_valid_data) {
-            FinalizeRestoredIdMap(index_.Node(),
-                                  ErrorCode::UnexpectedError,
-                                  "empty emb-list mmap load");
-        }
+        ImportValidData(index_, load_options);
     } else {
         LOG_INFO("load all-null nullable vector index valid data only...");
         AssertInfo(valid_data_count_codec && valid_data_codec,
@@ -1229,11 +1208,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         if (conf.contains(DIM_KEY)) {
             this->SetDim(GetDimFromConfig(conf));
         }
-        if (restored_id_map.has_valid_data) {
-            FinalizeRestoredIdMap(index_.Node(),
-                                  ErrorCode::UnexpectedError,
-                                  "all-null mmap load");
-        }
+        ImportValidData(index_, load_options);
     }
     milvus::monitor::internal_storage_deserialize_duration.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(

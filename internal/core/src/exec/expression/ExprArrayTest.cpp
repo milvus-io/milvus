@@ -49,6 +49,7 @@
 #include "index/BitmapIndex.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/VectorIndex.h"
+#include "index/VectorMemIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
@@ -228,21 +229,26 @@ MakeSealedVectorIndexOnlySegment(const SchemaPtr& schema,
     const auto valid_count = CountValidRows(valid_data);
     auto vectors =
         MakeCompactFloatVectors(std::max<int64_t>(valid_count, 1), dim);
-    auto indexing = GenVecIndexing(valid_count,
-                                   dim,
-                                   vectors.data(),
-                                   knowhere::IndexEnum::INDEX_FAISS_IDMAP);
-    auto vec_indexing = dynamic_cast<index::VectorIndex*>(indexing.get());
-    AssertInfo(vec_indexing != nullptr, "invalid generated vector index");
+    auto indexing = std::make_unique<index::VectorMemIndex<float>>(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        false,
+        storage::FileManagerContext());
+    auto* vec_indexing = indexing.get();
 
     std::unique_ptr<bool[]> valid_data_bool(new bool[row_count]);
     for (int64_t i = 0; i < row_count; ++i) {
         valid_data_bool[i] = valid_data[i];
     }
-    vec_indexing->SetIdMapType(knowhere::IdMap::Type::SEALED);
-    vec_indexing->GetIdMap().AddFromData(
+    auto dataset = knowhere::GenDataSet(valid_count, dim, vectors.data());
+    dataset->SetIdMapData(
         knowhere::IdMapData::FromValidData(valid_data_bool.get(), row_count));
-    vec_indexing->GetIdMap().FinalizeVectorIds();
+    vec_indexing->BuildWithDataset(
+        dataset,
+        Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+               {knowhere::meta::DIM, std::to_string(dim)}});
 
     TargetBitmap range_storage(row_count + 6, false);
     auto range_result = range_storage.view(3, row_count);

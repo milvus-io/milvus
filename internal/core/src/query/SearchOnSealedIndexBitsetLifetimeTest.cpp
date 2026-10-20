@@ -691,7 +691,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
     ASSERT_TRUE(vector_index->HasValidData());
-    ASSERT_EQ(vector_index->GetIdMap().OutCount(), total_count);
+    ASSERT_EQ(vector_index->GetLogicalCount(), total_count);
     ASSERT_EQ(vector_index->GetValidCount(), valid_count);
 
     auto indexing_entry = MakeSealedIndexingEntry(
@@ -789,7 +789,7 @@ TEST(SearchOnSealedIndexCachePinLifetime,
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
     ASSERT_TRUE(vector_index->HasValidData());
-    ASSERT_EQ(vector_index->GetIdMap().OutCount(), total_count);
+    ASSERT_EQ(vector_index->GetLogicalCount(), total_count);
     ASSERT_EQ(vector_index->GetValidCount(), valid_count);
 
     auto cache_index = CreateTestCacheIndex(
@@ -893,7 +893,7 @@ TEST(SearchOnSealedIndexNullableNoFilter,
     auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
     ASSERT_NE(vector_index, nullptr);
     ASSERT_TRUE(vector_index->HasValidData());
-    ASSERT_EQ(vector_index->GetIdMap().OutCount(), total_count);
+    ASSERT_EQ(vector_index->GetLogicalCount(), total_count);
     ASSERT_EQ(vector_index->GetValidCount(), valid_count);
 
     auto indexing_entry = MakeSealedIndexingEntry(
