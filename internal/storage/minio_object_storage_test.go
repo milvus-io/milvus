@@ -274,13 +274,14 @@ func TestMinioObjectStorageCopyObjectCrossBucketMultipartRequests(t *testing.T) 
 
 func TestMinioObjectStorage(t *testing.T) {
 	ctx := context.Background()
+	// This test deletes its bucket, so it must not share one with other test packages.
 	config := objectstorage.Config{
 		Address:           Params.MinioCfg.Address.GetValue(),
 		AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
 		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey.GetValue(),
 		RootPath:          Params.MinioCfg.RootPath.GetValue(),
 
-		BucketName:    Params.MinioCfg.BucketName.GetValue(),
+		BucketName:    fmt.Sprintf("test-minio-object-storage-%d", time.Now().UnixNano()),
 		CreateBucket:  true,
 		UseIAM:        false,
 		CloudProvider: "minio",
