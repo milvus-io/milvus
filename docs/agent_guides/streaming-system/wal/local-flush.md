@@ -3,7 +3,9 @@
 Flush and FlushAll operate locally on either replication role, using `_ur` and the
 existing resource keys. They abort incomplete transactions in their WAL lock scope
 instead of waiting for source replication. AckSyncUp still proves local L1/L0
-completion; this operation does not promise source catch-up.
+completion; this operation does not promise source catch-up. A local ManualFlush
+overtaken by collection Drop becomes an empty best-effort WAL operation. It follows
+normal resource-key ACK ordering and adds no dependency on Drop completion.
 
 CDC replays complete transactions. The persisted Commit `body_cnt` is checked against distinct successfully appended
 source body IDs, preventing stale Commit from accepting missing bodies. Zero skips

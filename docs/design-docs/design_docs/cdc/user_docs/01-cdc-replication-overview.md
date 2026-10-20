@@ -56,6 +56,10 @@ A local Flush can interrupt an incomplete receiving transaction. CDC automatical
 replays the complete transaction, so that transaction may become visible after the
 Flush completes. Flush does not wait for a disconnected source to finish it.
 
+If a replicated collection Drop overtakes an admitted local collection Flush,
+Flush completes as an empty best-effort operation. Its success does not guarantee
+that the concurrent Drop has completed.
+
 Upgrade all participating CDC, Proxy, StreamingNode and consumer processes before
 using local Flush on a standby. Operators coordinate this rollout across clusters;
 there is no automatic cross-cluster version gate.

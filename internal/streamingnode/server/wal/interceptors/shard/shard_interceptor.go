@@ -280,8 +280,9 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 		// DataCoord admits a local flush only for an existing collection, after
 		// CreateCollection's business-channel ACKs. Its ID is never reused, so a
 		// missing shard here means Drop overtook the flush (including on retry
-		// after WAL recovery). Append an empty flush: consuming ACK ordering still
-		// waits for the preceding Drop's persistence. Never synthesize an ACK or
+		// after WAL recovery). Append an empty best-effort flush for the dropped
+		// collection. It follows normal consuming ACK/resource-key ordering without
+		// an additional dependency on Drop completion. Never synthesize an ACK or
 		// apply this exception to historical/replicated flushes or other errors.
 		segmentIDs = nil
 	}

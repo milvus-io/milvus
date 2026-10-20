@@ -420,7 +420,7 @@ func TestBroadcastAckCloseCancelsPendingRetry(t *testing.T) {
 	assert.Same(t, msg, owner.Message())
 }
 
-func TestLocalFlushNoopAckWaitsForPrecedingDrop(t *testing.T) {
+func TestLocalFlushNoopAckUsesResourceKeyOrdering(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	defer module.Close()
@@ -437,18 +437,18 @@ func TestLocalFlushNoopAckWaitsForPrecedingDrop(t *testing.T) {
 		message.NewExclusiveCollectionNameResourceKey("db", "before-rename"))
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	dropOwner := tracker.Track(drop)
-	// Drop holds the consumer handle through its L1/L0 persistence work. The
-	// later empty Flush has no data consumer, but cannot ACK ahead of Drop.
-	// Its admission preceded a replicated Rename, so its name key is stale.
+	// A replicated Rename changed the name key after Flush admission. The
+	// collection is already dropped, so the empty Flush is best effort and
+	// adds no VChannel dependency on Drop's remaining persistence work.
 	persistence := dropOwner.Clone()
 	module.Accept(dropOwner)
 	module.Accept(tracker.Track(flush))
 	module.dispatchReadyTasks()
-	require.Empty(t, scheduler.snapshot())
-	persistence.Release()
 	require.NoError(t, scheduler.waitTask(t).Execute(context.Background()))
-	require.Equal(t, []message.MessageType{message.MessageTypeDropCollection}, acked)
+	require.Equal(t, []message.MessageType{message.MessageTypeManualFlush}, acked)
+	require.Zero(t, tracker.CompletedPoint().TimeTick, "Flush ACK must not advance recovery past the unfinished Drop")
+	persistence.Release()
 	require.NoError(t, scheduler.waitTaskAfter(t, 1).Execute(context.Background()))
-	require.Equal(t, []message.MessageType{message.MessageTypeDropCollection, message.MessageTypeManualFlush}, acked)
+	require.Equal(t, []message.MessageType{message.MessageTypeManualFlush, message.MessageTypeDropCollection}, acked)
 	require.EqualValues(t, 20, tracker.CompletedPoint().TimeTick)
 }

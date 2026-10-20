@@ -54,12 +54,12 @@ AND task is not in flight
 AND no earlier unfinished task conflicts
 ```
 
-Conflicting tasks preserve WAL observation order. A local unreplicable ManualFlush
-also waits for earlier DropCollection tasks on its business VChannel: replicated
-renames can make its admitted collection-name key differ from the subsequent
-Drop key. This lifecycle dependency survives poisoned payload release and keeps
-an empty post-Drop Flush behind the Drop's persistence. Independent tasks may Ack
-concurrently.
+Conflicting tasks preserve WAL observation order. Independent tasks may Ack
+concurrently. A local ManualFlush overtaken by DropCollection is an empty
+best-effort operation and uses the same ResourceKey ordering. It adds no VChannel
+dependency on Drop completion when a replicated rename makes their name keys
+differ. An unfinished Drop still blocks the global recovery checkpoint through
+its own retained handle.
 
 ## 4. Ack And Retry
 
