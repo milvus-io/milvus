@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -515,6 +516,8 @@ func TestQuerySlotSegmentRootedIndexCapability(t *testing.T) {
 	node := NewDataNode(ctx)
 	defer node.cancel()
 	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
+	node.importV3Scheduler = importv3.NewScheduler(ctx, func() int64 { return 1 }, importv3.NewMetrics(1))
+	defer node.importV3Scheduler.Close()
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	resp, err := node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
 	require.NoError(t, err)

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metacache"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -54,9 +55,10 @@ func TestIndexInspector_inspect(t *testing.T) {
 		versionManager := newIndexEngineVersionManager()
 		catalog := mocks2.NewDataCoordCatalog(t)
 
+		store := metacache.NewMetaStore(nil)
 		meta := &meta{
-			segments:    NewSegmentsInfo(),
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			segments:  NewSegmentsInfo(store),
+			metaStore: store,
 			indexMeta: &indexMeta{
 				keyLock:          lock.NewKeyLock[UniqueID](),
 				catalog:          catalog,
@@ -147,9 +149,10 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	versionManager := newIndexEngineVersionManager()
 	catalog := mocks2.NewDataCoordCatalog(t)
 
+	store := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:  NewSegmentsInfo(store),
+		metaStore: store,
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -232,9 +235,10 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 			versionManager := newIndexEngineVersionManager()
 			catalog := mocks2.NewDataCoordCatalog(t)
 
+			ms := metacache.NewMetaStore(nil)
 			meta := &meta{
-				segments:    NewSegmentsInfo(),
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:  NewSegmentsInfo(ms),
+				metaStore: ms,
 				indexMeta: &indexMeta{
 					keyLock:          lock.NewKeyLock[UniqueID](),
 					catalog:          catalog,
@@ -295,9 +299,10 @@ func TestIndexInspector_isExternalCollection(t *testing.T) {
 	storageCli := mocks.NewChunkManager(t)
 	versionManager := newIndexEngineVersionManager()
 
+	ms := metacache.NewMetaStore(nil)
 	m := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:  NewSegmentsInfo(ms),
+		metaStore: ms,
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
@@ -313,7 +318,7 @@ func TestIndexInspector_isExternalCollection(t *testing.T) {
 	})
 
 	t.Run("normal collection is not external", func(t *testing.T) {
-		m.collections.Insert(10, &collectionInfo{
+		m.AddCollection(&collectionInfo{
 			ID: 10,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
@@ -325,7 +330,7 @@ func TestIndexInspector_isExternalCollection(t *testing.T) {
 	})
 
 	t.Run("external collection is external", func(t *testing.T) {
-		m.collections.Insert(20, &collectionInfo{
+		m.AddCollection(&collectionInfo{
 			ID: 20,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
@@ -355,9 +360,10 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	versionManager := newIndexEngineVersionManager()
 	catalog := mocks2.NewDataCoordCatalog(t)
 
+	ms := metacache.NewMetaStore(nil)
 	m := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:  NewSegmentsInfo(ms),
+		metaStore: ms,
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -379,7 +385,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
 
 	t.Run("normal unsorted segment is skipped", func(t *testing.T) {
-		m.collections.Insert(2, &collectionInfo{
+		m.AddCollection(&collectionInfo{
 			ID: 2,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
@@ -405,7 +411,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	})
 
 	t.Run("external unsorted segment is not skipped", func(t *testing.T) {
-		m.collections.Insert(2, &collectionInfo{
+		m.AddCollection(&collectionInfo{
 			ID: 2,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
@@ -452,9 +458,10 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	versionManager := newIndexEngineVersionManager()
 	catalog := mocks2.NewDataCoordCatalog(t)
 
+	ms := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:  NewSegmentsInfo(ms),
+		metaStore: ms,
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -519,9 +526,10 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 	versionManager := newIndexEngineVersionManager()
 	catalog := mocks2.NewDataCoordCatalog(t)
 
+	ms := metacache.NewMetaStore(nil)
 	m := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:  NewSegmentsInfo(ms),
+		metaStore: ms,
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -547,7 +555,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 			},
 		},
 	}
-	m.collections.Insert(collID, collInfo)
+	m.AddCollection(collInfo)
 	handler.EXPECT().GetCollection(mock.Anything, collID).Return(collInfo, nil).Maybe()
 
 	t.Run("build function output index when collection has no schema change", func(t *testing.T) {

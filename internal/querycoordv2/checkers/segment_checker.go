@@ -370,7 +370,12 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
 	currentTargetExist := c.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
-	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
+	// Membership comes from the ID sets, not from the resolved protos: a
+	// segment DataCoord has dropped is still part of the target until the
+	// target itself changes, and releasing on its disappearance would drop a
+	// loaded segment before its replacement is served.
+	nextTargetIDs := c.targetMgr.GetSealedSegmentIDsByCollection(ctx, collectionID, meta.NextTarget)
+	currentTargetIDs := c.targetMgr.GetSealedSegmentIDsByCollection(ctx, collectionID, meta.CurrentTarget)
 
 	// Hoisted out of the loop below, where it was resolved once per segment on
 	// the refresh/import path and each call read-locks the collection manager's
@@ -379,11 +384,26 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	// still observed.
 	collection := c.meta.GetCollection(ctx, collectionID)
 
-	// Segment which exist on next target, but not on dist
-	for _, segment := range nextTargetMap {
+	// Segment which exist on next target, but not on dist.
+	//
+	// Walk the ID set, not the resolved map, so this loop shares a basis with
+	// the release loop below and with CheckDelegatorDataReady. A load task
+	// genuinely cannot be built without the proto (it needs the data version
+	// and manifest path), so an unresolvable segment is still skipped -- but
+	// readiness keeps demanding it, so the delegator parks unserviceable until
+	// the next target refresh drops the ID. Say so rather than skipping in
+	// silence.
+	for segmentID := range nextTargetIDs {
+		segment, resolved := nextTargetMap[segmentID]
+		if !resolved {
+			mlog.RatedWarn(ctx, rate.Limit(10), "segment in next target cannot be resolved from the shared store, it cannot be loaded and the delegator will stay unserviceable until the next target refresh",
+				mlog.FieldCollectionID(collectionID),
+				mlog.FieldSegmentID(segmentID))
+			continue
+		}
 		if isSegmentLack(segment) {
 			if currentTargetExist {
-				_, existOnCurrent := currentTargetMap[segment.GetID()]
+				existOnCurrent := currentTargetIDs.Contain(segment.GetID())
 				if existOnCurrent {
 					// Segment exists in current target but missing in dist -> Recovery scenario (HIGH priority)
 					loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
@@ -410,8 +430,8 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 
 	// get segment which exist on dist, but not on current target and next target
 	for _, segment := range dist {
-		_, existOnCurrent := currentTargetMap[segment.GetID()]
-		_, existOnNext := nextTargetMap[segment.GetID()]
+		existOnCurrent := currentTargetIDs.Contain(segment.GetID())
+		existOnNext := nextTargetIDs.Contain(segment.GetID())
 
 		// l0 segment should be release with channel together
 		if !existOnNext && nextTargetExist && !existOnCurrent {

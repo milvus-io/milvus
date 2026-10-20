@@ -769,20 +769,18 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 			mlog.Err(err))
 		return nil, err
 	}
-
-	// TODO: the cache should be removed in next step.
 	return h.s.meta.GetCollection(collectionID), nil
 }
 
 // CheckShouldDropChannel returns whether specified channel is marked to be removed
 func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
-	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel)
+	return h.s.meta.metaStore.ShouldDropChannel(h.s.ctx, channel)
 }
 
 // FinishDropChannel cleans up the remove flag for channels
 // this function is a wrapper of server.meta.FinishDropChannel
 func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) error {
-	err := h.s.meta.catalog.DropChannel(h.s.ctx, channel)
+	err := h.s.meta.metaStore.DropChannel(h.s.ctx, channel)
 	if err != nil {
 		mlog.Warn(context.TODO(), "DropChannel failed", mlog.String("vChannel", channel), mlog.Err(err))
 		return err
@@ -1014,6 +1012,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
 			ManifestHasIndex:  proto.Bool(segInfo.GetManifestHasIndex()),
+			CommitTimestamp:   segInfo.GetCommitTimestamp(),
 		}
 	})
 

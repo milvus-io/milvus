@@ -717,7 +717,7 @@ func TestProxy_SearchPreservesFunctionFailedStatus(t *testing.T) {
 
 		functionErr := merr.WrapErrFunctionFailedMsg("py_udf: injected transform_query failure")
 		var enqueueCalls atomic.Int32
-		mockey.Mock((*scheduler.BaseTaskQueue).Enqueue).To(func(_ *scheduler.BaseTaskQueue, queued taskmodel.Task) error {
+		mockey.Mock((*scheduler.DqTaskQueue).Enqueue).To(func(_ *scheduler.DqTaskQueue, queued taskmodel.Task) error {
 			enqueueCalls.Add(1)
 			require.NoError(t, queued.OnEnqueue())
 			queued.Notify(functionErr)
@@ -1599,16 +1599,17 @@ func TestProxy_Delete(t *testing.T) {
 	}
 	schema := mustNewSchemaInfo(collSchema)
 	basicInfo := &collectionInfo{
-		CollID: collectionID,
-		Schema: schema,
+		CollID:    collectionID,
+		Schema:    schema,
+		VChannels: channels,
 	}
 	paramtable.Init()
 
 	t.Run("delete run failed", func(t *testing.T) {
+		streaming.SetupNoopWALForTest()
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-
-		chMgr := channelmgr.NewMockChannelsMgr(t)
 
 		req := &milvuspb.DeleteRequest{
 			CollectionName: collectionName,
@@ -1635,17 +1636,27 @@ func TestProxy_Delete(t *testing.T) {
 			mock.AnythingOfType("string"),
 		).Return(partitionID, nil)
 		cache.On("GetCollectionInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(basicInfo, nil)
-		chMgr.On("GetVChannels", mock.Anything).Return(channels, nil)
-		chMgr.On("GetChannels", mock.Anything).Return(nil, errors.New("mock error"))
+		streaming.ExpectErrorOnce(errors.New("mock error"))
 		rc := mocks.NewMockRootCoordClient(t)
+		// The delete reuses the cached channels and reaches message repacking,
+		// which allocates message IDs before the WAL append fails.
+		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+			Status: merr.Success(),
+			ID:     1,
+			Count:  1000,
+		}, nil).Maybe()
 		tsoAllocator := &mockTsoAllocator{}
 		idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
 		assert.NoError(t, err)
+		assert.NoError(t, idAllocator.Start())
+		defer idAllocator.Close()
 
 		queue, err := scheduler.NewTaskScheduler(ctx, tsoAllocator)
 		assert.NoError(t, err)
+		queue.Start()
+		defer queue.Close()
 
-		node := &Proxy{metaCache: cache, chMgr: chMgr, rowIDAllocator: idAllocator, sched: queue}
+		node := &Proxy{metaCache: cache, rowIDAllocator: idAllocator, sched: queue}
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := node.Delete(ctx, req)
 		assert.NoError(t, err)
@@ -1922,7 +1933,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// normal case
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		mixCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, nil)
+		mixCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{Status: merr.Success()}, nil)
 		node.mixCoord = mixCoord
 		rsp, err = node.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{})
 		assert.NoError(t, err)
@@ -1943,7 +1954,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		node.setMetaCache(mc)
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		mixCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(nil, nil)
+		mixCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{Status: merr.Success()}, nil)
 		node.mixCoord = mixCoord
 		rsp, err = node.ListImports(ctx, &internalpb.ListImportsRequest{
 			CollectionName: "col",

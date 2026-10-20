@@ -29,6 +29,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Consts.h"
+#include "common/ChunkWriter.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
 #include "common/Schema.h"
@@ -47,6 +48,7 @@
 #include "segcore/json_stats/JsonKeyStats.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
+#include "mmap/ChunkedColumn.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -66,6 +68,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -1477,20 +1480,35 @@ TEST(JsonStatsThreeValuedAuditTest,
 }
 
 namespace {
+class ShreddedOnlyGroupByColumn : public ChunkedVariableColumn<Json> {
+ public:
+    using ChunkedVariableColumn<Json>::ChunkedVariableColumn;
+
+    PinWrapper<Chunk*>
+    GetChunk(milvus::OpContext*, int64_t) const override {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "valid shredded group-by must not access raw JSON");
+    }
+};
+
 class ShreddedOnlyGroupBySegment : public segcore::ChunkedSegmentSealedImpl {
  public:
     ShreddedOnlyGroupBySegment(SchemaPtr schema,
-                               std::shared_ptr<JsonKeyStats> stats)
+                               std::shared_ptr<JsonKeyStats> stats,
+                               FieldId field,
+                               std::shared_ptr<ChunkedColumnInterface> column)
         : ChunkedSegmentSealedImpl(schema,
                                    empty_index_meta,
                                    segcore::SegcoreConfig::default_config(),
                                    66),
-          stats_(std::move(stats)) {
+          stats_(std::move(stats)),
+          field_(field),
+          column_(std::move(column)) {
     }
 
     bool
-    HasFieldData(FieldId) const override {
-        return true;
+    HasFieldData(FieldId field) const override {
+        return field == field_;
     }
 
     int64_t
@@ -1503,14 +1521,15 @@ class ShreddedOnlyGroupBySegment : public segcore::ChunkedSegmentSealedImpl {
         return stats_;
     }
 
-    std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId, int64_t) const override {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "valid shredded group-by must not access raw JSON");
+    std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field) const override {
+        return field == field_ ? column_ : nullptr;
     }
 
  private:
     std::shared_ptr<JsonKeyStats> stats_;
+    FieldId field_;
+    std::shared_ptr<ChunkedColumnInterface> column_;
 };
 }  // namespace
 
@@ -1531,7 +1550,24 @@ TEST(JsonContainsByStatsTest, GroupByScalarReadersSurviveBuildUploadLoad) {
                                           field.get(),
                                           5266,
                                           1);
-    ShreddedOnlyGroupBySegment segment(schema, std::move(stats));
+    arrow::BinaryBuilder builder;
+    for (const auto& document : documents) {
+        ASSERT_TRUE(builder.Append(document).ok());
+    }
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(create_chunk((*schema)[field], {array}, false));
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::make_unique<TestChunkTranslator>(
+            std::vector<int64_t>{static_cast<int64_t>(documents.size())},
+            "shredded_group_by",
+            std::move(chunks)),
+        nullptr);
+    auto column = std::make_shared<ShreddedOnlyGroupByColumn>(std::move(slot),
+                                                              (*schema)[field]);
+    ShreddedOnlyGroupBySegment segment(
+        schema, std::move(stats), field, std::move(column));
     auto strings = exec::GetDataGetter<std::string, Json>(
         nullptr, segment, field, "/s", DataType::VARCHAR);
     auto integers = exec::GetDataGetter<int64_t, Json>(

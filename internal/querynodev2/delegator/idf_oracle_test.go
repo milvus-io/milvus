@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -494,6 +496,141 @@ func (suite *IDFOracleSuite) TestLoadSealedFailureCleanup() {
 	suite.True(os.IsNotExist(statErr))
 }
 
+// setFieldForTest replaces the stats of one field.
+func (t *statsTable) setFieldForTest(fieldID int64, stats *storage.BM25Stats) {
+	concurrent := storage.NewConcurrentBM25Stats()
+	concurrent.Merge(stats)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.fields[fieldID] = concurrent
+}
+
+// genOverlapStats builds stats of rows drawing tokens from [0, vocab), so different segments share tokens.
+func (suite *IDFOracleSuite) genOverlapStats(r *rand.Rand, rows int, vocab uint32) map[int64]*storage.BM25Stats {
+	result := map[int64]*storage.BM25Stats{102: storage.NewBM25Stats()}
+	for i := 0; i < rows; i++ {
+		row := map[uint32]float32{}
+		for j := 0; j < 8; j++ {
+			row[uint32(r.Int31n(int32(vocab)))] += 1
+		}
+		result[102].Append(row)
+	}
+	return result
+}
+
+// assertIDFEqual checks that the oracle builds the same IDF and avgdl as expected for every token.
+func (suite *IDFOracleSuite) assertIDFEqual(expected *storage.BM25Stats, vocab uint32) {
+	all := map[uint32]float32{}
+	for i := uint32(0); i < vocab; i++ {
+		all[i] = 1
+	}
+	tf := typeutil.CreateAndSortSparseFloatRow(all)
+	idf, avgdl, err := suite.idfOracle.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{tf}, Dim: int64(vocab)})
+	suite.Require().NoError(err)
+	suite.Equal(expected.GetAvgdl(), avgdl)
+	suite.Equal(typeutil.SparseFloatBytesToMap(expected.BuildIDF(tf)), typeutil.SparseFloatBytesToMap(idf[0]))
+}
+
+func (suite *IDFOracleSuite) TestConcurrentPreloadMatchesSerial() {
+	const segNum, vocab = 200, 500
+	r := rand.New(rand.NewSource(7))
+
+	segStats := make(map[int64]*storage.BM25Stats, segNum)
+	cms := make(map[int64]*mocks.ChunkManager, segNum)
+	logs := make(map[int64][]*datapb.FieldBinlog, segNum)
+	for segID := int64(1); segID <= segNum; segID++ {
+		stats := suite.genOverlapStats(r, 20, vocab)
+		data, err := stats[102].Serialize()
+		suite.Require().NoError(err)
+		remotePath := fmt.Sprintf("bm25stats/seg_%d/field_102/0", segID)
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil)
+		segStats[segID], cms[segID] = stats[102], cm
+		logs[segID] = bm25LogsForField(102, remotePath)
+	}
+
+	// load all segments concurrently while searches and memory accounting read the oracle
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		tf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				suite.idfOracle.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{tf}, Dim: 2})
+				suite.idfOracle.MemorySize()
+			}
+		}
+	}()
+	errs := make(chan error, segNum)
+	for segID := int64(1); segID <= segNum; segID++ {
+		wg.Add(1)
+		go func(segID int64) {
+			defer wg.Done()
+			errs <- suite.idfOracle.LoadSealed(context.Background(), segID, &querypb.SegmentLoadInfo{Bm25Logs: logs[segID]}, cms[segID])
+		}(segID)
+	}
+	wg.Wait()
+	close(stop)
+	<-readerDone
+	close(errs)
+	for err := range errs {
+		suite.Require().NoError(err)
+	}
+
+	expected := storage.NewBM25Stats()
+	for _, stats := range segStats {
+		expected.Merge(stats)
+	}
+	suite.assertIDFEqual(expected, vocab)
+
+	// first target keeps the odd segments: the even ones are deactivated through the parallel merge
+	seals := []int64{}
+	expected = storage.NewBM25Stats()
+	for segID := int64(1); segID <= segNum; segID += 2 {
+		seals = append(seals, segID)
+		expected.Merge(segStats[segID])
+	}
+	suite.updateSnapshot(seals, []int64{}, []int64{})
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.assertIDFEqual(expected, vocab)
+}
+
+func (suite *IDFOracleSuite) TestFetchStatsDiff() {
+	suite.registerSealed(1, 1, 5)
+	suite.registerSealed(2, 5, 9)
+	kept, ok := suite.idfOracle.sealed.Get(1)
+	suite.Require().True(ok)
+	removed, ok := suite.idfOracle.sealed.Get(2)
+	suite.Require().True(ok)
+
+	// one activated, one deactivated: the diff holds the difference and records what was read
+	add := &statsCandidate{seg: kept}
+	sub := &statsCandidate{seg: removed, minus: true}
+	diff, err := fetchStatsDiff(map[int64]*statsCandidate{1: add, 2: sub})
+	suite.NoError(err)
+	suite.Equal(int64(0), diff.NumRow())
+	suite.Equal([]int64{102}, add.fields)
+	suite.Equal(kept.version, add.version)
+
+	diff, err = fetchStatsDiff(map[int64]*statsCandidate{1: {seg: kept}})
+	suite.NoError(err)
+	suite.Equal(int64(4), diff.NumRow())
+
+	removed.Remove()
+	_, err = fetchStatsDiff(map[int64]*statsCandidate{1: {seg: kept}, 2: {seg: removed}})
+	suite.Error(err)
+
+	diff, err = fetchStatsDiff(nil)
+	suite.NoError(err)
+	suite.Equal(int64(0), diff.NumRow())
+}
+
 func TestIDFOracle(t *testing.T) {
 	suite.Run(t, new(IDFOracleSuite))
 }
@@ -942,9 +1079,11 @@ func TestIDFSyncFunctionsAddsNewBM25Field(t *testing.T) {
 
 	oldStats := storage.NewBM25Stats()
 	oldStats.Append(map[uint32]float32{1: 1})
-	idfOracle.current[102] = oldStats
+	idfOracle.current.setFieldForTest(102, oldStats)
+	oldField, err := idfOracle.current.GetStats(102)
+	require.NoError(t, err)
 
-	err := idfOracle.SyncFunctions([]*schemapb.FunctionSchema{
+	err = idfOracle.SyncFunctions([]*schemapb.FunctionSchema{
 		{
 			Type:           schemapb.FunctionType_BM25,
 			InputFieldIds:  []int64{101},
@@ -960,7 +1099,7 @@ func TestIDFSyncFunctionsAddsNewBM25Field(t *testing.T) {
 
 	existing, err := idfOracle.current.GetStats(102)
 	require.NoError(t, err)
-	assert.Same(t, oldStats, existing)
+	assert.Same(t, oldField, existing)
 	added, err := idfOracle.current.GetStats(104)
 	require.NoError(t, err)
 	require.NotNil(t, added)
@@ -1016,8 +1155,10 @@ func TestIDFSyncFunctionsPrunesDroppedBM25Field(t *testing.T) {
 
 	droppedStats := genBM25StatsForField(102, 1, 2)[102]
 	keptStats := genBM25StatsForField(104, 3, 4)[104]
-	idfOracle.current[102] = droppedStats
-	idfOracle.current[104] = keptStats
+	idfOracle.current.setFieldForTest(102, droppedStats)
+	idfOracle.current.setFieldForTest(104, keptStats)
+	keptField, err := idfOracle.current.GetStats(104)
+	require.NoError(t, err)
 	idfOracle.growing[1] = &growingBm25Stats{
 		bm25Stats: bm25Stats{
 			102: droppedStats.Clone(),
@@ -1044,7 +1185,7 @@ func TestIDFSyncFunctionsPrunesDroppedBM25Field(t *testing.T) {
 	})
 	idfOracle.sealedDiskSize.Store(int64(len(droppedBytes) + len(keptBytes)))
 
-	err := idfOracle.SyncFunctions([]*schemapb.FunctionSchema{
+	err = idfOracle.SyncFunctions([]*schemapb.FunctionSchema{
 		{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{103}, OutputFieldIds: []int64{104}},
 	})
 	require.NoError(t, err)
@@ -1053,7 +1194,7 @@ func TestIDFSyncFunctionsPrunesDroppedBM25Field(t *testing.T) {
 	require.Error(t, err)
 	existing, err := idfOracle.current.GetStats(104)
 	require.NoError(t, err)
-	assert.Same(t, keptStats, existing)
+	assert.Same(t, keptField, existing)
 	_, ok := idfOracle.growing[1].bm25Stats[102]
 	assert.False(t, ok)
 	_, ok = idfOracle.growing[1].bm25Stats[104]
@@ -1081,7 +1222,7 @@ func TestIDFSyncFunctionsPrunesAllDroppedBM25Fields(t *testing.T) {
 	defer idfOracle.Close()
 
 	stats := genBM25StatsForField(102, 1, 2)[102]
-	idfOracle.current[102] = stats
+	idfOracle.current.setFieldForTest(102, stats)
 	idfOracle.growing[1] = &growingBm25Stats{bm25Stats: bm25Stats{102: stats.Clone()}, activate: true}
 
 	err := idfOracle.SyncFunctions(nil)

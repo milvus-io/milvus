@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -463,7 +464,7 @@ func TestCompactionTargetReconcilerUsesManualIndexReadinessFilter(t *testing.T) 
 				sortedTargetSegment(1, collectionID, 10, "ch-1", 0, 199, false),
 				sortedTargetSegment(2, collectionID, 10, "ch-1", 0, 199, false),
 			)
-			meta.collections.Insert(collectionID, &collectionInfo{
+			meta.metaStore.PutCollection(&collectionInfo{
 				ID: collectionID,
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 					{FieldID: vectorFieldID, DataType: schemapb.DataType_FloatVector},
@@ -585,9 +586,10 @@ func enableCompactionTargetReconciler(t *testing.T) {
 }
 
 func newCompactionTargetReconcilerTestMeta(targetMeta *compactionTargetMeta, segments ...*SegmentInfo) *meta {
+	store := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments:             NewSegmentsInfo(),
-		collections:          typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:             NewSegmentsInfo(store),
+		metaStore:            store,
 		compactionTargetMeta: targetMeta,
 		indexMeta: &indexMeta{
 			indexes: make(map[UniqueID]map[UniqueID]*model.Index),

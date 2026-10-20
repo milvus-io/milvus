@@ -31,10 +31,11 @@ type WritePathRecoveryModuleSnapshot struct {
 }
 
 type VChannelWritePathRecoveryState struct {
-	VChannel     string
-	CollectionID int64
-	PartitionIDs []int64
-	Schema       *schemapb.CollectionSchema
+	VChannel       string
+	CollectionID   int64
+	PartitionIDs   []int64
+	Schema         *schemapb.CollectionSchema
+	SchemaTimeTick uint64
 }
 
 type SegmentWritePathRecoveryState struct {

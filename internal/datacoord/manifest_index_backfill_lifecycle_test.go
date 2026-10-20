@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metacache"
 	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -368,7 +369,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 					Status:        merr.Success(),
 					DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{restartCollID}}},
 				}, nil)
-				m, err := newMeta(ctx, catalog, migrationServerCopyFixture(t, root), b)
+				m, err := newMeta(ctx, catalog, migrationServerCopyFixture(t, root), metacache.NewMetaStore(catalog), b)
 				require.NoError(t, err)
 				t.Cleanup(m.closeManifestCommitExecutor)
 				return m

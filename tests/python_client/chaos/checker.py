@@ -4,6 +4,7 @@ import math
 import os
 import random
 import re
+import tempfile
 import threading
 import time
 import unittest
@@ -3251,6 +3252,7 @@ class BulkInsertChecker(Checker):
 
     def prepare(self, data_size=100000):
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=self.schema,
             file_type=BulkFileType.NUMPY,
             remote_path="bulk_data",
@@ -3545,6 +3547,7 @@ class Import2PCChecker(Checker):
 
     def _write_import_files(self, rows):
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=self.schema,
             file_type=BulkFileType.PARQUET,
             remote_path=self.import_remote_path,

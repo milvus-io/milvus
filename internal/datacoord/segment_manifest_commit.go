@@ -410,7 +410,7 @@ func (m *meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 			segment = latest
 		}
 
-		updated, metricMutation, err := m.applySegmentCatalogMutation(segment, commit.CatalogMutation)
+		updated, err := m.applySegmentCatalogMutation(segment, commit.CatalogMutation)
 		if err != nil {
 			// Preserve UpdateSegmentsInfo's contract for stale SaveBinlogPaths
 			// requests: the prepared immutable revision remains unpublished and
@@ -425,14 +425,6 @@ func (m *meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 		var action metastore.UpdateAction
 		if isNewSegment {
 			action = metastore.AddSegment(updated.SegmentInfo)
-			metricMutation.addNewSeg(
-				updated.GetState(),
-				updated.GetLevel(),
-				updated.GetIsSorted(),
-				updated.GetStorageVersion(),
-				segmentMetricFormatLabel(updated),
-				updated.GetNumOfRows(),
-			)
 		} else if rollbackSource != "" {
 			// Rollback does not change binlogs, including for Dropped parents.
 			// Keep the atomic write to one segment PUT plus the index PUTs.
@@ -455,7 +447,6 @@ func (m *meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 		if err := m.catalog.Update(ctx, actions...); err != nil {
 			return merr.Wrap(err, "publish segment manifest")
 		}
-		metricMutation.commit()
 		// Memory is installed only after the catalog write has succeeded while the
 		// same segMu critical section still excludes competing full-record writers.
 		m.segments.SetSegment(commit.SegmentID, updated)
@@ -722,15 +713,11 @@ func validatePreparedManifest(baseManifest, preparedManifest string) error {
 	return nil
 }
 
-func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation SegmentCatalogMutation) (*SegmentInfo, *segMetricMutation, error) {
+func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation SegmentCatalogMutation) (*SegmentInfo, error) {
 	pack := &updateSegmentPack{
 		meta:       m,
 		segments:   make(map[int64]*SegmentInfo),
 		increments: make(map[int64]metastore.BinlogsIncrement),
-		metricMutation: &segMetricMutation{
-			stateChange:             make(segmentMetricStateChange),
-			deferSegmentLabelChange: true,
-		},
 	}
 	// Always seed the pack from the segment-lock snapshot. Operators then never
 	// re-read the shared SegmentsInfo map while catalog I/O is intentionally
@@ -740,11 +727,11 @@ func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation Segmen
 	for _, operator := range mutation.Operators {
 		operator(pack)
 		if pack.err != nil {
-			return nil, nil, pack.err
+			return nil, pack.err
 		}
 	}
 	if len(pack.l0ManifestUpdates) > 0 {
-		return nil, nil, merr.WrapErrServiceInternalMsg("segment manifest commit catalog mutation must not contain L0 manifest updates")
+		return nil, merr.WrapErrServiceInternalMsg("segment manifest commit catalog mutation must not contain L0 manifest updates")
 	}
 	segment := pack.Get(current.GetID())
 	if segment == nil {
@@ -752,13 +739,9 @@ func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation Segmen
 	}
 	applySegmentCatalogTypedFields(segment, mutation)
 	if err := pack.Validate(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	// Operators prepare metric transitions as part of UpdateSegmentsInfo.
-	// Do this after applying the typed fields too, so a state mutation is
-	// reflected only once the catalog write succeeds.
-	pack.prepareSegmentMetricUpdates()
-	return segment, pack.metricMutation, nil
+	return segment, nil
 }
 
 func staleSegmentManifestError(segmentID int64, expected, current string) error {

@@ -710,13 +710,15 @@ func NewEmptyArrayOfVectorRow(dim int64, elementType schemapb.DataType) (*schema
 }
 
 // IsClusteringKeyType returns true if the data type is supported as a clustering key.
-// Supported scalar types: Int8, Int16, Int32, Int64, Float, Double, VarChar, String, FloatVector.
+// Supported scalar types: Int8, Int16, Int32, Int64, Float, Double, VarChar, String, Timestamptz.
+// Supported vector types: FloatVector.
 func IsClusteringKeyType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16,
 		schemapb.DataType_Int32, schemapb.DataType_Int64,
 		schemapb.DataType_Float, schemapb.DataType_Double,
-		schemapb.DataType_VarChar, schemapb.DataType_String:
+		schemapb.DataType_VarChar, schemapb.DataType_String,
+		schemapb.DataType_Timestamptz:
 		return true
 	default:
 		return dataType == schemapb.DataType_FloatVector
@@ -1521,6 +1523,11 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 			}
 			dstVector := dstFieldData.GetVectors()
+			if dstVector.GetDim() == 0 && IsFixDimVectorType(fieldData.GetType()) {
+				// Older QueryNodes omit the dimension for all-null columns.
+				// Recover it when a later shard supplies vector metadata.
+				dstVector.Dim = dim
+			}
 			isNullRow := fieldIdx < 0 || (len(srcValidData) > 0 && !srcValidData[idx])
 
 			switch srcVector := fieldType.Vectors.Data.(type) {
@@ -3566,8 +3573,8 @@ func validateExternalFieldType(collectionName string, field *schemapb.FieldSchem
 // isExternalFieldTypeSupported returns true if the given data type can be
 // reliably used in external collections (both load and take modes).
 //
-// Blocked types and reasons:
-//   - SparseFloatVector: Custom binary encoding incompatible with external files
+// Sparse source columns are normalized from Arrow map/struct containers to
+// the Milvus-native sparse binary representation at read time.
 func isExternalFieldTypeSupported(dt schemapb.DataType) bool {
 	switch dt {
 	case schemapb.DataType_Bool,
@@ -3588,6 +3595,7 @@ func isExternalFieldTypeSupported(dt schemapb.DataType) bool {
 		schemapb.DataType_BFloat16Vector,
 		schemapb.DataType_BinaryVector,
 		schemapb.DataType_Int8Vector,
+		schemapb.DataType_SparseFloatVector,
 		schemapb.DataType_ArrayOfVector:
 		return true
 	default:

@@ -32,10 +32,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ==================== Test Functions ====================
@@ -1264,11 +1264,12 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 		// collection meta, so the fixture needs a collection. The staged job
 		// carries no source/spec, so an empty one matches and these cases keep
 		// nudging exactly as before.
+		ms := metacache.NewMetaStore(nil)
 		mt := &meta{
-			segments:    NewSegmentsInfo(),
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			segments:  NewSegmentsInfo(ms),
+			metaStore: ms,
 		}
-		mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
+		mt.AddCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 		for _, id := range append(append([]int64{}, indexedSegments...), *debt...) {
 			mt.segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -1303,7 +1304,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			mockey.Mock((*meta).SelectSegments).To(
 				func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
 					out := make([]*SegmentInfo, 0)
-					for _, s := range m.segments.segments {
+					for _, s := range m.segments.GetSegments() {
 						keep := true
 						for _, f := range filters {
 							if ff, ok := f.(SegmentFilterFunc); ok && !ff(s) {
@@ -1601,12 +1602,13 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 			require.NoError(t, err)
 
+			ms := metacache.NewMetaStore(nil)
 			mt := &meta{
-				segments:    NewSegmentsInfo(),
-				indexMeta:   &indexMeta{},
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:  NewSegmentsInfo(ms),
+				indexMeta: &indexMeta{},
+				metaStore: ms,
 			}
-			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
+			mt.AddCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			}})
@@ -1646,12 +1648,13 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			require.NoError(t, err)
 
 			debt := []int64{556}
+			ms := metacache.NewMetaStore(nil)
 			mt := &meta{
-				segments:    NewSegmentsInfo(),
-				indexMeta:   &indexMeta{},
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:  NewSegmentsInfo(ms),
+				indexMeta: &indexMeta{},
+				metaStore: ms,
 			}
-			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
+			mt.AddCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			}})
@@ -1701,12 +1704,13 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			require.NoError(t, err)
 
 			debt := []int64{556}
+			ms := metacache.NewMetaStore(nil)
 			mt := &meta{
-				segments:    NewSegmentsInfo(),
-				indexMeta:   &indexMeta{},
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:  NewSegmentsInfo(ms),
+				indexMeta: &indexMeta{},
+				metaStore: ms,
 			}
-			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
+			mt.AddCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			}})
@@ -2096,8 +2100,8 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		require.NoError(t, err)
 
-		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
 			Name:           "coll",
 			ExternalSource: "s3://old",
 			ExternalSpec:   `{"format":"parquet"}`,
@@ -2106,7 +2110,7 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 		// debt in the same pass, so a collection with nothing to index would
 		// finish there and the ordering this test exists for would never be
 		// reached.
-		mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
+		mt := &meta{segments: NewSegmentsInfo(ms), indexMeta: &indexMeta{}, metaStore: ms}
 		mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 		}})
@@ -2198,13 +2202,13 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		require.NoError(t, err)
 
-		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
 			Name:           "coll",
 			ExternalSource: "s3://old",
 			ExternalSpec:   `{"format":"parquet"}`,
 		}})
-		mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
+		mt := &meta{segments: NewSegmentsInfo(ms), indexMeta: &indexMeta{}, metaStore: ms}
 		mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 		}})
@@ -2222,7 +2226,7 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 			"the entry pass runs before the publish; a build dispatched now would read the pre-refresh source/spec")
 
 		// The AlterCollection round trip lands in DataCoord's meta.
-		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
+		ms.PutCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
 			Name:           "coll",
 			ExternalSource: "s3://new",
 			ExternalSpec:   `{"format":"parquet","v":2}`,
@@ -2281,14 +2285,14 @@ func TestExternalCollectionRefreshChecker_IndexWait_DataStaysQueryVisible(t *tes
 		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
 		require.NoError(t, err)
 
+		ms := metacache.NewMetaStore(nil)
 		mt := &meta{
-			segments:           NewSegmentsInfo(),
-			collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			segments:           NewSegmentsInfo(ms),
+			metaStore:          ms,
 			indexMeta:          &indexMeta{},
 			partitionStatsMeta: &partitionStatsMeta{partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{}},
-			channelCPs:         newChannelCps(),
 		}
-		mt.collections.Insert(collectionID, &collectionInfo{
+		mt.AddCollection(&collectionInfo{
 			ID: collectionID, Schema: &schemapb.CollectionSchema{Name: "coll"},
 		})
 		mt.segments.SetSegment(segmentID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -2298,7 +2302,9 @@ func TestExternalCollectionRefreshChecker_IndexWait_DataStaysQueryVisible(t *tes
 			DmlPosition: &msgpb.MsgPosition{ChannelName: channel, Timestamp: 100},
 			Binlogs:     []*datapb.FieldBinlog{{FieldID: 1}},
 		}})
-		mt.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{ChannelName: channel, Timestamp: 100}
+		mt.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			channel: {ChannelName: channel, Timestamp: 100},
+		})
 
 		// The segment carries no index, so it is still debt for the whole wait.
 		mockey.Mock((*indexMeta).GetUnindexedSegments).Return([]int64{segmentID}).Build()

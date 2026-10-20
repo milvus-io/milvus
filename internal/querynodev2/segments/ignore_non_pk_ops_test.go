@@ -20,13 +20,16 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -267,4 +270,70 @@ func TestMergeByPKWithOffsetsOperator_ElementLevel_IndicesLengthMismatch(t *test
 	_, err := op.Run(ctx, nil, []*segcorepb.RetrieveResults{res})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "element_indices length")
+}
+
+func TestFetchFieldsDataOperatorArrowCompatibility(t *testing.T) {
+	paramtable.Init()
+	cfg := &paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled
+	old := cfg.GetValue()
+	defer paramtable.Get().Save(cfg.Key, old)
+	require.NoError(t, paramtable.Get().Save(cfg.Key, "true"))
+	for _, tc := range []struct {
+		name     string
+		segments []Segment
+	}{
+		{"local", []Segment{&LocalSegment{}, &LocalSegment{}}},
+		{"sn", []Segment{&viewQueryGrowingSegment{}, &viewQueryGrowingSegment{}}},
+		{"mixed", []Segment{&LocalSegment{}, &viewQueryGrowingSegment{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			arrow := mockey.Mock(fetchFieldsArrow).Return([]any{"arrow"}, nil).Build()
+			defer arrow.UnPatch()
+			fallback := mockey.Mock(fetchFieldsProto).Return([]any{"proto"}, nil).Build()
+			defer fallback.UnPatch()
+			op := NewFetchFieldsDataOperator(tc.segments, nil, nil, nil)
+			out, err := op.Run(context.Background(), nil, &MergedResultWithOffsets{
+				IDs: makeSegcoreIntIDs([]int64{1}), Selections: []OffsetSelection{{SegmentIndex: 0, Offset: 0}},
+			})
+			require.NoError(t, err)
+			require.Equal(t, []any{"arrow"}, out)
+			require.Zero(t, fallback.Times())
+		})
+	}
+}
+
+func TestFetchFieldsAsRecordReleasesLocalPins(t *testing.T) {
+	local, failed := &LocalSegment{}, &LocalSegment{}
+	sn := &viewQueryGrowingSegment{}
+	for _, tc := range []struct {
+		name                         string
+		segments                     []Segment
+		wantPin, wantUnpin, wantFill int
+	}{
+		{"sn", []Segment{sn}, 0, 0, 1},
+		{"mixed_fill_failure", []Segment{sn, local}, 1, 1, 1},
+		{"partial_pin_failure", []Segment{local, sn, failed}, 2, 1, 0},
+		{"unsupported_segment", []Segment{local, nil}, 1, 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pin := mockey.Mock((*LocalSegment).PinIfNotReleased).To(func(s *LocalSegment) error {
+				if s == failed {
+					return merr.ErrSegmentNotLoaded
+				}
+				return nil
+			}).Build()
+			defer pin.UnPatch()
+			unpin := mockey.Mock((*LocalSegment).Unpin).To(func(s *LocalSegment) {
+				require.Same(t, local, s, "only a successfully acquired local pin may be released")
+			}).Build()
+			defer unpin.UnPatch()
+			fill := mockey.Mock(segcore.FillRetrieveFieldsOrdered).Return(nil, context.Canceled).Build()
+			defer fill.UnPatch()
+			_, err := fetchFieldsAsRecord(context.Background(), tc.segments, nil, &MergedResultWithOffsets{})
+			require.Error(t, err)
+			require.EqualValues(t, tc.wantPin, pin.Times())
+			require.EqualValues(t, tc.wantUnpin, unpin.Times())
+			require.EqualValues(t, tc.wantFill, fill.Times())
+		})
+	}
 }
