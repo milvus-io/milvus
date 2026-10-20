@@ -6409,6 +6409,7 @@ func TestHandleCommitVchannelRPC(t *testing.T) {
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(3001)).Return(&importJob{ImportJob: &datapb.ImportJob{JobID: 3001}})
 	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
 		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
 			// Execute the callback to verify it works correctly.
@@ -6438,10 +6439,40 @@ func TestHandleCommitVchannelRPC(t *testing.T) {
 	assert.True(t, merr.Ok(resp))
 }
 
+func TestHandleCommitVchannelRPC_MissingJob_PrimaryIsNoOp(t *testing.T) {
+	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, nil)
+	server := &Server{importMeta: importMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// A StreamingNode replaying an old CommitImport after checkGC removed the
+	// job must get success, or it retries forever and blocks the pchannel.
+	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
+		JobId: 13, Vchannel: "vchan-0", CommitTimestamp: 300,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Nil(t, importMeta.GetJob(context.Background(), 13))
+}
+
+func TestHandleCommitVchannelRPC_MissingJob_SecondaryRetries(t *testing.T) {
+	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, secondaryReplicateConfiguration())
+	server := &Server{importMeta: importMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
+		JobId: 13, Vchannel: "vchan-0", CommitTimestamp: 300,
+	})
+	err = merr.CheckRPCCall(resp, err)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrImportSysFailed))
+}
+
 func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(3001)).Return(&importJob{ImportJob: &datapb.ImportJob{JobID: 3001}})
 	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
 		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
 			return callback()
@@ -6499,6 +6530,7 @@ func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *t
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(3001)).Return(&importJob{ImportJob: &datapb.ImportJob{JobID: 3001}})
 	importMetaMock.EXPECT().HandleCommitVchannel(mock.Anything, int64(3001), "vchan-0", mock.AnythingOfType("func() error")).
 		RunAndReturn(func(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
 			return callback()
@@ -6548,29 +6580,6 @@ func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *t
 	require.NotNil(t, seg)
 	assert.EqualValues(t, 0, seg.GetCommitTimestamp())
 	assert.True(t, seg.GetIsImporting())
-}
-
-func TestHandleCommitVchannelRPC_MissingJobReturnsError(t *testing.T) {
-	ctx := context.Background()
-
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-
-	importMeta, err := NewImportMeta(ctx, catalog, nil, nil)
-	require.NoError(t, err)
-
-	server := &Server{
-		importMeta: importMeta,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	resp, err := server.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{
-		JobId:    3001,
-		Vchannel: "vchan-0",
-	})
-	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrImportSysFailed)
 }
 
 // Named helper types for mockey interface-method patching. Using named types
