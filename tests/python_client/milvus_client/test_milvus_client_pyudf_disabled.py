@@ -19,10 +19,12 @@ class TestMilvusClientPyUDFDisabled(TestMilvusClientV2Base):
         if not request.config.getoption("--run-pyudf-disabled"):
             pytest.skip("requires --run-pyudf-disabled and a dedicated PyUDF-disabled deployment")
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("nq", [1, 2])
     def test_pyudf_disabled_rejects_nonempty_search_without_affecting_search(self, nq):
         """
+        preconditions: --run-pyudf-disabled and a dedicated deployment with
+        function.pyUDF.enabled=false; the regular CI profile enables PyUDF.
         target: check the disabled configuration before resource resolution
         method: compare nonempty ordinary Search with PyUDF Search on the same data
         expected: exact code/message for disabled PyUDF, followed by intact ordinary results

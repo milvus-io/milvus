@@ -32,12 +32,28 @@ prefix = "pyudf"
 class TestMilvusClientPyUDF(TestMilvusClientV2Base):
     """End-to-end tests for PyUDF-backed FunctionChain reranking."""
 
-    # RBAC resources are owned by each case's ExitStack, including under xdist.
+    # Identity cases also join rbac_serial to avoid the RBAC suite's global cleanup.
     skip_global_role_cleanup = True
 
     dim = 2
     vector_field = "vector"
     scalar_field = "ts"
+
+    @staticmethod
+    def _pyudf_management_config(request, key):
+        import requests
+
+        endpoint = request.config.getoption("--pyudf-management-endpoint")
+        assert endpoint, "requires --pyudf-management-endpoint pointing to the coordinator management service"
+        response = requests.get(
+            endpoint.rstrip("/") + "/management/config/get",
+            params={"keys": key},
+            timeout=10,
+        )
+        response.raise_for_status()
+        entry = response.json()["configs"][0]
+        assert entry["key"] == key and "value" in entry, entry
+        return entry["value"]
 
     @staticmethod
     def _build_wheel(tmp_path, package_name, module=None, entry_points=None):
@@ -1963,9 +1979,13 @@ def create_udf(context):
             assert time.monotonic() < deadline, "privilege cache did not converge"
             time.sleep(0.2)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xdist_group(name="rbac_serial")
+    @pytest.mark.tags(CaseLabel.L3)
     def test_pyudf_search_privileges_follow_grant_and_revoke(self, tmp_path, minio_host, minio_bucket):
         """target: Search and resource privileges; method: grant/revoke on same user; expected: isolation and recovery."""
+        # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
+        # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
+        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (root, name, resource):
             self._assert_pyudf_recovery(root, name, resource)
             user, role, password = (
@@ -2192,10 +2212,14 @@ def create_udf(context):
         assert [h["distance"] for h in hits] == pytest.approx([60 * scale, 40 * scale, 20 * scale])
         assert [TestMilvusClientPyUDF._hit_field(h, "ts") for h in hits] == [30 * scale, 20 * scale, 10 * scale]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xdist_group(name="rbac_serial")
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("credential", ["missing", "malformed", "wrong_password"])
     def test_pyudf_security_rpc_authentication(self, tmp_path, minio_host, minio_bucket, credential):
         """target: four public RPC auth gates; method: raw requests; expected: denial and intact assets."""
+        # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
+        # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
+        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
         from urllib.parse import urlparse
 
         from pymilvus.grpc_gen import milvus_pb2, milvus_pb2_grpc
@@ -2247,10 +2271,14 @@ def create_udf(context):
                     assert resources[resource] == path and candidate not in resources
                     self._assert_pyudf_recovery(root, name, resource)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xdist_group(name="rbac_serial")
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("surface", ["sdk", "rest"])
     def test_pyudf_security_collection_scope_and_revocation(self, tmp_path, minio_host, minio_bucket, surface):
         """target: collection-scoped Search; method: A/B and revoke; expected: exact A, denied B, intact peer."""
+        # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
+        # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
+        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
         from urllib.parse import urlparse
 
         import requests
@@ -2361,9 +2389,13 @@ def create_udf(context):
                         self._search_with_synced_resource(owner, b, self._pyudf_chain(resource_b))[0], scale=10
                     )
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xdist_group(name="rbac_serial")
+    @pytest.mark.tags(CaseLabel.L3)
     def test_pyudf_security_resource_manager_has_no_search_privilege(self, tmp_path, minio_host, minio_bucket):
         """target: management/execution separation; method: grant only resources; expected: Search denied."""
+        # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
+        # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
+        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (root, name, resource):
             self._assert_pyudf_recovery(root, name, resource)
             path = next(r.path for r in root.list_file_resources() if r.name == resource)
@@ -2459,11 +2491,15 @@ def create_udf(context):
             result = self._search_with_synced_resource(root, name, self._pyudf_chain(resource, {"literal": literal}))
             self._assert_pyudf_security_hits(result[0])
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xdist_group(name="rbac_serial")
+    @pytest.mark.tags(CaseLabel.L3)
     def test_pyudf_security_exception_disclosure_characterization(
         self, tmp_path, minio_host, minio_bucket, record_property
     ):
         """target: error disclosure observation; method: synthetic canary; expected: classified error and peer recovery."""
+        # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
+        # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
+        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
         canary = cf.gen_unique_str("qa_synthetic_sensitive")
         module = (
             "CANARY = "
@@ -2498,9 +2534,12 @@ def create_udf(context):
                 record_property("security_verdict", "EXPOSURE_OBSERVATION_NOT_SECURITY_PASS")
                 self._assert_pyudf_recovery(root, name, resource)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_pyudf_security_worker_endpoint_not_peer_accessible(self, record_property):
         """target: supplied endpoint exposure; method: bounded peer TCP probes; expected: API reachable, worker closed."""
+        # Preconditions: enabled PyUDF on 127.0.0.1:19090 and a runner outside its Pod;
+        # point --uri at the actual Proxy/standalone Pod IP, with public port 19530 reachable.
+        # A Service address alone does not establish the worker network boundary.
         from urllib.parse import urlparse
 
         from common.pyudf_helpers import probe_endpoint
@@ -2518,9 +2557,13 @@ def create_udf(context):
         record_property("worker_tcp_code", result["observation"]["worker_rpc"]["tcp_connect_code"])
         record_property("scope", "supplied endpoint; bind it to a recorded Pod IP to certify the Pod boundary")
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xdist_group(name="rbac_serial")
+    @pytest.mark.tags(CaseLabel.L3)
     def test_pyudf_security_database_scope_with_colliding_names(self, tmp_path, minio_host, minio_bucket):
         """target: database-scoped Search; method: identical names and separate grants; expected: exact scoped data."""
+        # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
+        # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
+        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (root, name, resource):
             self._assert_pyudf_recovery(root, name, resource)
             db = cf.gen_unique_str("pyudf_sec_db")
@@ -2571,22 +2614,18 @@ def create_udf(context):
                 observed = self.query(owner, name, filter="id >= 0", output_fields=["id", "ts"])[0]
                 assert sorted(observed, key=lambda row: row["id"]) == [{"id": i, "ts": i * 100} for i in (1, 2, 3)]
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_pyudf_mixed_segment_states_preserve_results(self, tmp_path, minio_host, minio_bucket, record_property):
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_pyudf_mixed_segment_states_preserve_results(
+        self, tmp_path, minio_host, minio_bucket, record_property, request
+    ):
         """target: three segment paths; method: prove topology and rerank each PK group; expected: exact ledger."""
+        # Preconditions: enabled PyUDF with Proxy FileResource sync and MinIO;
+        # --pyudf-management-endpoint must address this deployment's coordinator
+        # (not its Proxy), with common.security.adminAuthEnabled=false.
+        # Require 500 < indexCoord.segment.minSegmentNumRowsToEnableIndex <= 3000.
         import json
-        from urllib.parse import urlparse
 
-        import requests
-
-        uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
-        config = requests.get(
-            f"http://{urlparse(uri).hostname}:9091/management/config/get",
-            params={"keys": "indexCoord.segment.minSegmentNumRowsToEnableIndex"},
-            timeout=10,
-        )
-        config.raise_for_status()
-        threshold = int(config.json()["configs"][0]["value"])
+        threshold = int(self._pyudf_management_config(request, "indexCoord.segment.minSegmentNumRowsToEnableIndex"))
         assert 500 < threshold <= 3000, f"mixed segment fixture requires compatible build threshold, got {threshold}"
         record_property("min_index_rows", threshold)
 
@@ -2826,9 +2865,20 @@ def create_udf(context):
                 finally:
                     self._remove_file_resource(client, resource)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_pyudf_package_collision_preserves_original(self, tmp_path, minio_host, minio_bucket):
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_pyudf_package_collision_preserves_original(self, tmp_path, minio_host, minio_bucket, request):
         """target: package ownership; method: same package in two wheel paths; expected: rejection and intact control."""
+        # Preconditions: one standalone instance with PyUDF enabled, Proxy resource
+        # sync, MinIO, and function.pyUDF.server.workerCount=1 applied at startup.
+        # --pyudf-management-endpoint must address that same standalone instance,
+        # with common.security.adminAuthEnabled=false. Do not route through multiple replicas.
+        probe = self._client()
+        try:
+            assert probe.get_server_version(detail=True)["deploy_mode"] == "STANDALONE"
+        finally:
+            probe.close()
+        workers = int(self._pyudf_management_config(request, "function.pyUDF.server.workerCount"))
+        assert workers == 1, f"package ownership is process-local; requires one worker, got {workers}"
         package = cf.gen_unique_str("pyudf_shared_package").lower()
         wheel = self._build_wheel(tmp_path, package).read_bytes()
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None, wheel_bytes=wheel) as first:

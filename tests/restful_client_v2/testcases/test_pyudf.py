@@ -502,10 +502,12 @@ def create_udf(context):
             assert [hit["distance"] for hit in response["data"]] == pytest.approx([0, 0.0001, 0.0004])
             self._assert_ranked_response(self._search_once(payload))
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("operation", ["search", "add", "remove", "list"])
     def test_pyudf_unauthenticated_calls_are_rejected(self, operation):
         """
+        preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
+        MinIO wheel storage, common.security.authorizationEnabled=true, and a valid root --token.
         target: reject unauthenticated use and management without altering an existing UDF
         method: send an invalid token against a warmed resource, then inspect it as the owner
         expected: REST code 1800, no partial data, and the authorized resource/result remain intact
