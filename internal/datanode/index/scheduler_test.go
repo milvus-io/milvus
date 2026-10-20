@@ -38,6 +38,26 @@ import (
 )
 
 func TestGetStateFromError(t *testing.T) {
+	t.Run("sparse conversion limit is terminal but allocation failures retry", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			code  merr.SegcoreCode
+			state indexpb.JobState
+		}{
+			{"conversion budget exceeded", merr.CodeUnsupported, indexpb.JobState_JobStateFailed},
+			{"allocation failed", merr.CodeMemAllocateFailed, indexpb.JobState_JobStateRetry},
+			{"other configuration error", merr.CodeConfigInvalid, indexpb.JobState_JobStateRetry},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				// Preserve the code through the same wrapper used by index builds.
+				err := merr.Wrap(merr.SegcoreError(int32(tc.code), tc.name),
+					"failed to create index, C Runtime Exception")
+				assert.Equal(t, tc.state, getStateFromError(err))
+				assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			})
+		}
+	})
+
 	t.Run("data format broken is terminal", func(t *testing.T) {
 		assert.Equal(t, indexpb.JobState_JobStateFailed, getStateFromError(merr.SegcoreError(2024, "malformed vector data")))
 	})

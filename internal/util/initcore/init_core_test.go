@@ -19,6 +19,8 @@ package initcore
 import (
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -419,6 +421,30 @@ func TestInitExternalVectorNullPolicy(t *testing.T) {
 	err := InitExternalVectorNullPolicy(pt)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestInitExternalSparseConversionConfig(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	key := pt.CommonCfg.ExternalSparseConversionMemoryLimit.Key
+	original := pt.CommonCfg.ExternalSparseConversionMemoryLimit.GetValue()
+	t.Cleanup(func() {
+		assert.NoError(t, pt.Save(key, original))
+		assert.NoError(t, InitExternalSparseConversionConfig(pt))
+	})
+	for _, value := range []string{"1", " 268435456 ", "9223372036854775807"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.NoError(t, InitExternalSparseConversionConfig(pt))
+		expected, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, externalSparseConversionMemoryLimit())
+	}
+	previous := externalSparseConversionMemoryLimit()
+	for _, value := range []string{"0", "-1", "", "invalid", "9223372036854775808"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.ErrorIs(t, InitExternalSparseConversionConfig(pt), merr.ErrParameterInvalid)
+		assert.Equal(t, previous, externalSparseConversionMemoryLimit())
+	}
 }
 
 func TestInitLoonReaderConfig(t *testing.T) {
