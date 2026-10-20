@@ -17,6 +17,7 @@
 package importv2
 
 import (
+	"context"
 	"math/rand"
 	"sync"
 	"testing"
@@ -36,11 +37,11 @@ func TestMemoryAllocatorBasicOperations(t *testing.T) {
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory allocation for task 1 using BlockingAllocate
-	ma.BlockingAllocate(1, 50*1024*1024) // 50MB for task 1
+	ma.BlockingAllocate(context.Background(), 1, 50*1024*1024) // 50MB for task 1
 	assert.Equal(t, int64(50*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory allocation for task 2
-	ma.BlockingAllocate(2, 50*1024*1024) // 50MB for task 2
+	ma.BlockingAllocate(context.Background(), 2, 50*1024*1024) // 50MB for task 2
 	assert.Equal(t, int64(100*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory release for task 1
@@ -63,13 +64,13 @@ func TestMemoryAllocatorMemoryLimit(t *testing.T) {
 	testSize := memoryLimit / 10 // Use 10% of available memory
 
 	// Allocate memory up to the limit
-	ma.BlockingAllocate(1, testSize)
+	ma.BlockingAllocate(context.Background(), 1, testSize)
 	assert.Equal(t, testSize, ma.(*memoryAllocator).usedMemory)
 
 	// Try to allocate more memory than available (this will block, so we test in a goroutine)
 	done := make(chan bool)
 	go func() {
-		ma.BlockingAllocate(2, testSize)
+		ma.BlockingAllocate(context.Background(), 2, testSize)
 		done <- true
 	}()
 
@@ -95,7 +96,7 @@ func TestMemoryAllocatorConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		taskID := int64(i + 1)
 		go func() {
-			ma.BlockingAllocate(taskID, 50*1024*1024) // 50MB each
+			ma.BlockingAllocate(context.Background(), taskID, 50*1024*1024) // 50MB each
 			ma.Release(taskID, 50*1024*1024)
 			done <- true
 		}()
@@ -117,7 +118,7 @@ func TestMemoryAllocatorNegativeRelease(t *testing.T) {
 	ma := NewMemoryAllocator(1024 * 1024 * 1024)
 
 	// Allocate some memory
-	ma.BlockingAllocate(1, 100*1024*1024) // 100MB
+	ma.BlockingAllocate(context.Background(), 1, 100*1024*1024) // 100MB
 	assert.Equal(t, int64(100*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Release more than allocated (should not go negative)
@@ -135,7 +136,7 @@ func TestMemoryAllocatorMultipleTasks(t *testing.T) {
 	sizes := []int64{20, 30, 25, 15, 35} // Total: 125MB
 
 	for i, taskID := range taskIDs {
-		ma.BlockingAllocate(taskID, sizes[i]*1024*1024)
+		ma.BlockingAllocate(context.Background(), taskID, sizes[i]*1024*1024)
 	}
 
 	// Verify total used memory
@@ -168,7 +169,7 @@ func TestMemoryAllocatorZeroSize(t *testing.T) {
 	ma := NewMemoryAllocator(1024 * 1024 * 1024)
 
 	// Test zero size allocation
-	ma.BlockingAllocate(1, 0)
+	ma.BlockingAllocate(context.Background(), 1, 0)
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 
 	// Test zero size release
@@ -185,7 +186,7 @@ func TestMemoryAllocatorSimple(t *testing.T) {
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory allocation
-	ma.BlockingAllocate(1, 50*1024*1024) // 50MB
+	ma.BlockingAllocate(context.Background(), 1, 50*1024*1024) // 50MB
 	assert.Equal(t, int64(50*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory release
@@ -217,7 +218,7 @@ func TestMemoryAllocatorMassiveConcurrency(t *testing.T) {
 
 		go func(id int64, size int64) {
 			defer wg.Done()
-			ma.BlockingAllocate(id, size)
+			ma.BlockingAllocate(context.Background(), id, size)
 			time.Sleep(1 * time.Millisecond)
 			ma.Release(id, size)
 		}(taskID, memorySize)
@@ -241,7 +242,7 @@ func TestMemoryAllocatorOversizedRequest(t *testing.T) {
 	allocateAsync := func(taskID int64, size int64) chan struct{} {
 		done := make(chan struct{})
 		go func() {
-			ma.BlockingAllocate(taskID, size)
+			ma.BlockingAllocate(context.Background(), taskID, size)
 			close(done)
 		}()
 		return done
@@ -279,4 +280,107 @@ func TestMemoryAllocatorOversizedRequest(t *testing.T) {
 
 	ma.Release(3, oversized)
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorCancelWhileWaiting tests that a canceled ctx releases a
+// waiter without charging memory and without disturbing other waiters.
+func TestMemoryAllocatorCancelWhileWaiting(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+	memoryLimit := int64(float64(ma.(*memoryAllocator).systemTotalMemory) *
+		paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat() / 100.0)
+
+	// Task 1 fills the budget.
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 1, memoryLimit))
+
+	// Task 2 waits, then is canceled.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- ma.BlockingAllocate(ctx, 2, 1) }()
+	select {
+	case err := <-errCh:
+		t.Fatalf("allocation returned before cancel: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled waiter did not return")
+	}
+	assert.Equal(t, memoryLimit, ma.(*memoryAllocator).usedMemory, "canceled waiter must not be charged")
+
+	// Task 3 still gets memory when task 1 releases.
+	done := make(chan error, 1)
+	go func() { done <- ma.BlockingAllocate(context.Background(), 3, 1) }()
+	ma.Release(1, memoryLimit)
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("live waiter did not wake after release")
+	}
+	assert.Equal(t, int64(1), ma.(*memoryAllocator).usedMemory)
+	ma.Release(3, 1)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorPreCanceledRequest tests that a request whose ctx is
+// already canceled returns ctx.Err() without charging memory, even when the
+// allocator is idle or has spare capacity.
+func TestMemoryAllocatorPreCanceledRequest(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Idle allocator.
+	err := ma.BlockingAllocate(ctx, 1, 1)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory, "pre-canceled request must not be charged")
+
+	// Spare capacity.
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 2, 1))
+	err = ma.BlockingAllocate(ctx, 3, 1)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int64(1), ma.(*memoryAllocator).usedMemory, "pre-canceled request must not be charged")
+	ma.Release(2, 1)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorCancelRacesRelease tests that a waiter whose ctx is
+// canceled while memory becomes available, before it reacquires the mutex,
+// still returns ctx.Err() without charging memory.
+func TestMemoryAllocatorCancelRacesRelease(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024).(*memoryAllocator)
+	memoryLimit := int64(float64(ma.systemTotalMemory) *
+		paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat() / 100.0)
+
+	// Task 1 fills the budget, task 2 parks in Cond.Wait.
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 1, memoryLimit))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- ma.BlockingAllocate(ctx, 2, 1) }()
+	select {
+	case err := <-errCh:
+		t.Fatalf("allocation returned before cancel: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Hold the mutex so the waiter observes the cancellation and the freed
+	// budget in the same wakeup, whichever broadcast reaches it first.
+	ma.mutex.Lock()
+	cancel()
+	ma.usedMemory = 0
+	ma.cond.Broadcast()
+	ma.mutex.Unlock()
+
+	select {
+	case err := <-errCh:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled waiter did not return")
+	}
+	assert.Equal(t, int64(0), ma.usedMemory, "canceled waiter must not be charged")
 }

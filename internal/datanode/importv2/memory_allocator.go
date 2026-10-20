@@ -17,6 +17,7 @@
 package importv2
 
 import (
+	"context"
 	"sync"
 
 	"go.uber.org/zap"
@@ -41,9 +42,10 @@ func GetMemoryAllocator() MemoryAllocator {
 
 // MemoryAllocator handles memory allocation and deallocation for import tasks
 type MemoryAllocator interface {
-	// BlockingAllocate blocks until memory is available and then allocates
-	// This method will block until memory becomes available
-	BlockingAllocate(taskID int64, size int64)
+	// BlockingAllocate blocks until memory is available and then allocates.
+	// It returns ctx.Err() when ctx is canceled before the allocation succeeds,
+	// in which case no memory is charged.
+	BlockingAllocate(ctx context.Context, taskID int64, size int64) error
 
 	// Release releases memory of the specified size
 	Release(taskID int64, size int64)
@@ -67,33 +69,56 @@ func NewMemoryAllocator(systemTotalMemory int64) MemoryAllocator {
 	return ma
 }
 
-// BlockingAllocate blocks until memory is available and then allocates
-func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
+// BlockingAllocate blocks until memory is available and then allocates.
+func (ma *memoryAllocator) BlockingAllocate(ctx context.Context, taskID int64, size int64) error {
 	ma.mutex.Lock()
 	defer ma.mutex.Unlock()
 
 	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
 	memoryLimit := int64(float64(ma.systemTotalMemory) * percentage / 100.0)
 
-	// Wait until enough memory is available.
-	// A request larger than the whole limit runs alone instead of waiting forever.
-	for ma.usedMemory > 0 && ma.usedMemory+size > memoryLimit {
-		log.Warn("task waiting for memory allocation...",
+	if err := ma.waitForMemory(ctx, taskID, size, memoryLimit); err != nil {
+		log.Warn("task canceled while waiting for memory allocation",
 			zap.Int64("taskID", taskID),
 			zap.Int64("requestedSize", size),
-			zap.Int64("usedMemory", ma.usedMemory),
-			zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
-
-		ma.cond.Wait()
+			zap.Error(err))
+		return err
 	}
-
-	// Allocate memory
-	ma.usedMemory += size
 	log.Info("memory allocated successfully",
 		zap.Int64("taskID", taskID),
 		zap.Int64("allocatedSize", size),
 		zap.Int64("usedMemory", ma.usedMemory),
 		zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
+	return nil
+}
+
+// Caller holds ma.mutex. Waiting acquires no partial reservation, and releasing
+// any existing reservation or canceling the context wakes the waiter.
+// A request larger than the whole limit runs alone instead of waiting forever.
+func (ma *memoryAllocator) waitForMemory(ctx context.Context, taskID, size, limit int64) error {
+	// Acquiring the same lock in the callback prevents a lost wakeup between
+	// checking ctx.Err and Cond.Wait. Stop need not wait for the callback.
+	stop := context.AfterFunc(ctx, func() {
+		ma.mutex.Lock()
+		defer ma.mutex.Unlock()
+		ma.cond.Broadcast()
+	})
+	defer stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if ma.usedMemory == 0 || size <= limit-ma.usedMemory {
+			ma.usedMemory += size
+			return nil
+		}
+		log.Warn("task waiting for memory allocation...",
+			zap.Int64("taskID", taskID),
+			zap.Int64("requestedSize", size),
+			zap.Int64("usedMemory", ma.usedMemory),
+			zap.Int64("availableMemory", limit-ma.usedMemory))
+		ma.cond.Wait()
+	}
 }
 
 // Release releases memory of the specified size
