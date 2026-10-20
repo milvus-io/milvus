@@ -11,12 +11,14 @@
 
 #include <stdlib.h>
 #include <exception>
+#include <limits>
 #include <string>
 
 #include "common/EasyAssert.h"
 #include "common/protobuf_utils.h"
 #include "config/ConfigKnowhere.h"
 #include "gtest/gtest.h"
+#include "knowhere/comp/knowhere_config.h"
 #include "segcore/Collection.h"
 #include "segcore/segcore_init_c.h"
 
@@ -27,6 +29,24 @@ TEST(Init, Naive) {
     SegcoreSetChunkRows(32768);
     auto simd_type = SegcoreSetSimdType("auto");
     free(simd_type);
+}
+
+TEST(Init, KnowhereMRLRefineRatio) {
+    const auto previous = knowhere::KnowhereConfig::GetMRLRefineRatio();
+    auto status = SegcoreSetMRLRefineRatio(2.9f);
+    EXPECT_EQ(status.error_code, 0);
+    EXPECT_FLOAT_EQ(knowhere::KnowhereConfig::GetMRLRefineRatio(), 2.9f);
+    for (float value : {0.0f,
+                        0.5f,
+                        -1.0f,
+                        std::numeric_limits<float>::infinity(),
+                        std::numeric_limits<float>::quiet_NaN()}) {
+        status = SegcoreSetMRLRefineRatio(value);
+        EXPECT_NE(status.error_code, 0);
+        EXPECT_FLOAT_EQ(knowhere::KnowhereConfig::GetMRLRefineRatio(), 2.9f);
+        free(const_cast<char*>(status.error_msg));
+    }
+    EXPECT_TRUE(knowhere::KnowhereConfig::SetMRLRefineRatio(previous));
 }
 
 TEST(Init, KnowhereThreadPoolInit) {
