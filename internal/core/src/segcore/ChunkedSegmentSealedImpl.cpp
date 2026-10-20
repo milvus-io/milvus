@@ -6791,10 +6791,8 @@ ChunkedSegmentSealedImpl::get_raw_data_from_state(
     }
 
     std::optional<ChunkedColumnInterface::OwnedTakeData> taken_data;
-    // Native-list arrays are read through BulkArrayValueAt, which serves null
-    // elements; Vortex Take rejects them.
     const bool use_owned_take =
-        !field_meta.is_vector() && !field_meta.is_native_list_array() &&
+        !field_meta.is_vector() &&
         field_meta.get_data_type() != DataType::JSON && column->IsNullable() &&
         column->GetLocalFormat() == ChunkedColumnInterface::LocalFormat::Vortex;
     if (use_owned_take) {

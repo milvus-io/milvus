@@ -18,9 +18,11 @@
 
 #include <algorithm>
 #include <bit>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -85,6 +87,77 @@ CanUseSkipFilter(bool is_nullable, bool null_rejecting) {
 // it by chunk_id and never repeat the field lookups.
 using SkipChunkFn =
     std::function<bool(const FieldSkipMetricsView&, int64_t chunk_id)>;
+
+// Logical element count of one ARRAY row, null elements included.
+template <typename ArrayType>
+inline size_t
+ArrayRowLength(const ArrayType& row) {
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        return row.size();
+    } else {
+        return static_cast<size_t>(row.length());
+    }
+}
+
+// Subscript of an ARRAY operand (`a[i]`, `s[i][x]`), parsed from
+// nested_path[0]. kWholeArrayOperand: no subscript, the operand is the whole
+// row.
+inline constexpr int kWholeArrayOperand = -1;
+// A subscript that names no element: above INT_MAX or negative. It is never
+// kWholeArrayOperand, and HasArrayElementAt / NestedArrayElementAt treat it as
+// out of bounds, so the operand is UNKNOWN.
+inline constexpr int kArraySubscriptOutOfRange =
+    std::numeric_limits<int>::max();
+
+inline int
+ParseArraySubscript(const std::vector<std::string>& nested_path) {
+    if (nested_path.empty()) {
+        return kWholeArrayOperand;
+    }
+    const auto& text = nested_path[0];
+    const char* last = text.data() + text.size();
+    int index = 0;
+    const auto [end, ec] = std::from_chars(text.data(), last, index);
+    // The plan parser emits only decimal digits here.
+    AssertInfo(ec != std::errc::invalid_argument && end == last,
+               "invalid array subscript '{}'",
+               text);
+    if (ec == std::errc::result_out_of_range || index < 0) {
+        return kArraySubscriptOutOfRange;
+    }
+    return index;
+}
+
+// Whether row[index] is a non-null element. A subscript that misses (out of
+// bounds or a null element) evaluates to UNKNOWN.
+template <typename ArrayType>
+inline bool
+HasArrayElementAt(const ArrayType& row, int index) {
+    if (index < 0 || index == kArraySubscriptOutOfRange ||
+        static_cast<size_t>(index) >= ArrayRowLength(row)) {
+        return false;
+    }
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        return row.is_valid(index);
+    } else {
+        return true;
+    }
+}
+
+// `s[i][tags]` on a nested Array field: the inner Array of struct element i,
+// or nullopt (NULL) when element i is missing or null.
+inline std::optional<ArrayValueView>
+NestedArrayElementAt(const ArrayValueView& row, int index) {
+    if (index < 0 || index == kArraySubscriptOutOfRange ||
+        static_cast<size_t>(index) >= row.size()) {
+        return std::nullopt;
+    }
+    auto inner = row.array_at(index);
+    if (inner.is_null()) {
+        return std::nullopt;
+    }
+    return inner;
+}
 
 // IndexPathSelection.h owns ExprExecPath and metadata-only path selection.
 // Capability inspection must not pin a cold reader to choose an execution path.
@@ -520,6 +593,9 @@ class SegmentExpr : public Expr {
         field_type_ = field_meta.get_data_type();
         is_nullable_ = field_meta.is_nullable();
         has_nullable_array_element_ = field_meta.has_nullable_array_element();
+        is_native_list_array_ = field_meta.get_data_type() == DataType::ARRAY &&
+                                field_meta.is_native_list_array();
+        is_nested_array_field_ = field_meta.is_nested_array();
 
         if (schema->get_primary_field_id().has_value() &&
             schema->get_primary_field_id().value() == field_id_ &&
@@ -2327,6 +2403,38 @@ class SegmentExpr : public Expr {
         }
         return ProcessDataByOffsetsByChunkFallback<T>(
             func, skip_func, input, res, valid_res, values...);
+    }
+
+    // `s[i][tags]` used as an Array: each row of the nested Array field
+    // yields the inner Array of struct element i (see NestedArrayElementAt).
+    bool
+    IsNestedArrayElementOperand() const {
+        return is_nested_array_field_ && nested_path_.size() == 1;
+    }
+
+    // Evaluate a row-level ARRAY predicate over the batch rows or the offset
+    // input. make_func.template operator()<RowType>() returns the batch
+    // evaluator for rows read as RowType.
+    template <typename MakeFunc, typename... ValTypes>
+    int64_t
+    ProcessArrayRows(MakeFunc make_func,
+                     OffsetVector* input,
+                     TargetBitmapView res,
+                     TargetBitmapView valid_res,
+                     const ValTypes&... values) {
+        auto process = [&]<typename RowType>() -> int64_t {
+            auto func = make_func.template operator()<RowType>();
+            if (has_offset_input_) {
+                return ProcessDataByOffsets<RowType>(
+                    func, nullptr, input, res, valid_res, values...);
+            }
+            return ProcessDataChunks<RowType>(
+                func, nullptr, res, valid_res, values...);
+        };
+        if (is_native_list_array_) {
+            return process.template operator()<ArrayValueView>();
+        }
+        return process.template operator()<ArrayView>();
     }
 
     // Process element-level data by element IDs. Consecutive element IDs from
@@ -4287,6 +4395,10 @@ class SegmentExpr : public Expr {
     // scan can avoid pinning/materializing it (see ProcessDataChunksForMultipleChunk).
     bool is_nullable_{false};
     bool has_nullable_array_element_{false};
+    // Element-nullable and nested ARRAY rows are readable only as
+    // ArrayValueView.
+    bool is_native_list_array_{false};
+    bool is_nested_array_field_{false};
     // Set when a null-rejecting parent (top-level filter / AND / OR) consumes
     // this expr's output, so result validity (valid_res) is never observed and
     // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.
