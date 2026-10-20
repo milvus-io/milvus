@@ -305,6 +305,7 @@ type OrderedReduceStream struct {
 	metricType      string
 	currentQuery    int64
 	emittedPerQuery []int64
+	seenPKs         map[any]struct{}
 	isTopKReduce    bool
 	isRecallEval    bool
 	metadata        *internalpb.SearchResults
@@ -347,6 +348,16 @@ func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStr
 		metricType:      request.GetMetricType(),
 		emittedPerQuery: make([]int64, request.GetNq()),
 	}, nil
+}
+
+// NewShardReduceStream merges worker results within one vchannel, deduplicating hits per query.
+func NewShardReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
+	stream, err := NewReduceStream(request, childStreams, chunkBytes)
+	if err != nil {
+		return nil, err
+	}
+	stream.(*OrderedReduceStream).seenPKs = make(map[any]struct{})
+	return stream, nil
 }
 
 // Recv returns the next ordered Search Chunk.
@@ -527,6 +538,7 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 		if s.emittedPerQuery[s.currentQuery] >= s.topK {
 			if s.currentQuery == s.nq-1 {
 				s.currentQuery++
+				clear(s.seenPKs)
 				return nil, false, nil
 			}
 
@@ -539,6 +551,7 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 				}
 			}
 			s.currentQuery++
+			clear(s.seenPKs)
 			continue
 		}
 
@@ -568,10 +581,28 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 
 		if winner == -1 {
 			s.currentQuery++
+			clear(s.seenPKs)
 			continue
 		}
 
 		selected := readyBuffers[winner].front()
+		key := selected.pk()
+		if s.seenPKs != nil {
+			if elements := selected.data.GetElementIndices(); elements != nil {
+				if selected.rowIndex >= int64(len(elements.GetData())) {
+					return nil, false, merr.WrapErrServiceInternalMsg("Search hit is missing its element index")
+				}
+				key = struct {
+					pk           any
+					elementIndex int64
+				}{key, elements.GetData()[selected.rowIndex]}
+			}
+			if _, exists := s.seenPKs[key]; exists {
+				s.pop(readyBuffers[winner])
+				// Refill an emptied child before selecting another merge candidate.
+				return nil, false, nil
+			}
+		}
 		unitBytes, err := selected.reducibleByteSize()
 		if err != nil {
 			return nil, false, err
@@ -582,9 +613,13 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 
 		oneReduceResult := s.pop(readyBuffers[winner])
 		oneReduceResult.byteSize = unitBytes
+		if s.seenPKs != nil {
+			s.seenPKs[key] = struct{}{}
+		}
 		s.emittedPerQuery[s.currentQuery]++
 		if s.emittedPerQuery[s.currentQuery] == s.topK && s.currentQuery == s.nq-1 {
 			s.currentQuery++
+			clear(s.seenPKs)
 		}
 		return &oneReduceResult, false, nil
 	}
@@ -754,6 +789,7 @@ func (s *OrderedReduceStream) closeChildren() error {
 		s.childBuffers[i].cursor = 0
 	}
 	s.metadata = nil
+	s.seenPKs = nil
 	s.closeErr = s.childStreams.Close()
 	return s.closeErr
 }

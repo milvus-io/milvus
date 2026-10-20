@@ -172,8 +172,11 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 		{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: rightNode.ID}}},
 	}
 
-	leftStream := &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: newTestSearchChunk(3, []int64{1, 4}, []float32{0.9, 0.6})}}}
-	rightStream := &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: newTestSearchChunk(3, []int64{2, 3}, []float32{0.8, 0.7})}}}
+	leftStream := &fakeSearchStream{recv: []fakeSearchStreamRecv{{chunk: newTestSearchChunk(3, []int64{1, 2}, []float32{0.9, 0.8})}}}
+	rightStream := &fakeSearchStream{recv: []fakeSearchStreamRecv{
+		{chunk: newTestSearchChunk(3, []int64{1}, []float32{0.85})},
+		{chunk: newTestSearchChunk(3, []int64{3}, []float32{0.7})},
+	}}
 	queryService := &fakeViewQueryServiceClient{
 		searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
 			switch node.Key() {
@@ -236,8 +239,12 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	qviews.OmitUnchangedQueryPayloads(plan, &viewpb.GetQueryPlanRequest{
 		Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: request},
 	})
-	leftStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: newTestQueryChunk([]int64{1, 3})}}}
-	rightStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: newTestQueryChunk([]int64{2, 4})}}}
+	leftChunk := newTestQueryChunk([]int64{1, 3})
+	leftChunk.FieldsData = append(leftChunk.FieldsData, shardTestField(1, 10, 10))
+	rightChunk := newTestQueryChunk([]int64{1, 2, 4})
+	rightChunk.FieldsData = append(rightChunk.FieldsData, shardTestField(1, 20, 20, 20))
+	leftStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: leftChunk}}}
+	rightStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: rightChunk}}}
 	queryService := &fakeViewQueryServiceClient{
 		queryOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
 			switch node.Key() {
@@ -256,17 +263,18 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	stream, shardPlan, err := client.QueryStream(context.Background(), &ShardQueryRequest{
 		VChannel: shardID.VChannel,
 		Req:      request, ReadProofAfter: 456, BarrierMVCC: 123,
-	}, 32)
+	}, 64)
 
 	require.NoError(t, err)
 	require.Equal(t, shardID, shardPlan.ShardID)
 	require.Equal(t, uint64(456), planClient.planReq.GetReadProofAfter())
 	require.Equal(t, uint64(123), planClient.planReq.GetBarrierMvcc())
-	require.Equal(t, int64(32), queryService.queryReq.GetStreamChunkBytes())
+	require.Equal(t, int64(64), queryService.queryReq.GetStreamChunkBytes())
 	require.Equal(t, request.GetSerializedExprPlan(), queryService.queryReq.GetLegacyReq().GetSerializedExprPlan())
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2}, chunk.GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{20, 20}, chunk.GetFieldsData()[1].GetScalars().GetLongData().GetData())
 	chunk, err = stream.Recv()
 	require.NoError(t, err)
 	require.Equal(t, []int64{3}, chunk.GetIds().GetIntId().GetData())
