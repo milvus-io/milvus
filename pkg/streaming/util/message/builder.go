@@ -49,7 +49,7 @@ func NewImmutableMesasge(
 ) ImmutableMessage {
 	return &immutableMessageImpl{
 		id:        id,
-		bodyCache: &bodyCacheSlot{},
+		bodyCache: newBodyCacheSlot(),
 		messageImpl: messageImpl{
 			payload:    payload,
 			properties: properties,

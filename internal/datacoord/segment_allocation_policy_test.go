@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -356,7 +357,7 @@ func Test_sealByBlockingL0(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.BlockingL0EntryNum.Key, strconv.FormatInt(tc.entryNumLimit, 10))
 			defer pt.Reset(pt.DataCoordCfg.BlockingL0EntryNum.Key)
 
-			segments := NewSegmentsInfo()
+			segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 			for _, l0segment := range tc.l0Segments {
 				segments.SetSegment(l0segment.GetID(), l0segment)
 			}

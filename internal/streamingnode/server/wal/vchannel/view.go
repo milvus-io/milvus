@@ -133,6 +133,7 @@ func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathR
 	}
 	if schemas := collection.GetSchemas(); len(schemas) > 0 && schemas[len(schemas)-1].GetSchema() != nil {
 		state.Schema = proto.Clone(schemas[len(schemas)-1].GetSchema()).(*schemapb.CollectionSchema)
+		state.SchemaTimeTick = schemas[len(schemas)-1].GetCheckpointTimeTick()
 	}
 	return state, true
 }

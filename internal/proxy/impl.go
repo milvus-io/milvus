@@ -6466,7 +6466,32 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 		mlog.Warn(context.TODO(), "get import progress failed", mlog.String("reason", resp.GetStatus().GetReason()), mlog.Err(err))
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return resp, err
+	if err != nil {
+		return nil, err
+	}
+	if err := merr.CheckRPCCall(resp, nil); err != nil {
+		// DataCoord uses ImportSysFailed for an absent job. Hide its existence
+		// exactly as for an existing job outside the caller's grants.
+		if !authorizationDisabled() && errors.Is(err, merr.ErrImportSysFailed) {
+			err = importPrivilegeDenied()
+		}
+		return &internalpb.GetImportProgressResponse{Status: merr.Status(err)}, nil
+	}
+	if !authorizationDisabled() {
+		subject, err := importSubject(ctx)
+		if err != nil {
+			return &internalpb.GetImportProgressResponse{Status: merr.Status(err)}, nil
+		}
+		resource, err := node.resolveImportResource(ctx, resp.GetCollectionId())
+		if err == nil {
+			err = node.authorizeImportResource(ctx, resp.GetCollectionId(), resource, subject)
+		}
+		if err != nil {
+			return &internalpb.GetImportProgressResponse{Status: merr.Status(err)}, nil
+		}
+		resp.CollectionName = resource.collectionName
+	}
+	return resp, nil
 }
 
 func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
@@ -6489,8 +6514,9 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		err          error
 		collectionID UniqueID
 	)
+	dbName := GetCurDBNameFromRequestOrContext(ctx, req)
 	if req.GetCollectionName() != "" {
-		collectionID, err = node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		collectionID, err = node.GetMetaCache().GetCollectionID(ctx, dbName, req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -6503,6 +6529,13 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		mlog.Warn(context.TODO(), "list imports", mlog.String("reason", resp.GetStatus().GetReason()), mlog.Err(err))
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return &internalpb.ListImportsResponse{Status: merr.Status(err)}, nil
+	}
+	resp, err = node.filterImportJobs(ctx, dbName, collectionID, resp)
+	if err != nil {
+		return &internalpb.ListImportsResponse{Status: merr.Status(err)}, nil
+	}
 	return resp, nil
 }
 

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/dataview"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -1058,9 +1059,11 @@ func newTestCopyJob(jobID int64, state datapb.CopySegmentJobState) CopySegmentJo
 func newCopySegmentTaskTestMeta(t *testing.T, task *copySegmentTask) (CopySegmentMeta, *meta) {
 	ctx := context.Background()
 	catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	store := metacache.NewMetaStore(catalog)
 	m := &meta{
-		catalog:  catalog,
-		segments: NewSegmentsInfo(),
+		catalog:   catalog,
+		segments:  NewSegmentsInfo(store),
+		metaStore: store,
 	}
 	copyMeta, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
 	assert.NoError(t, err)
@@ -1108,7 +1111,8 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
 	}
 	im := createTestIndexMeta(s.T(), collectionID, indexes)
-	m := &meta{indexMeta: im, segments: NewSegmentsInfo()}
+	copyStore := metacache.NewMetaStore(nil)
+	m := &meta{indexMeta: im, segments: NewSegmentsInfo(copyStore), metaStore: copyStore}
 	m.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:           segmentID,
 		CollectionID: collectionID,
@@ -1329,7 +1333,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 		assert.False(s.T(), seg.GetIsImporting())
 		return nil
 	}).Once()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	ms1 := metacache.NewMetaStore(catalog)
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo(ms1), metaStore: ms1}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            segmentID,
 		CollectionID:  collectionID,
@@ -1372,7 +1377,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	ms3 := metacache.NewMetaStore(catalog)
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo(ms3), metaStore: ms3}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -1427,7 +1433,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	// A fresh StorageV3 copy target publishes its first manifest inline via
 	// UpdateManifest/UpdateSegmentsInfo, which writes through AlterSegments.
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	ms4 := metacache.NewMetaStore(catalog)
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo(ms4), metaStore: ms4}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -1802,7 +1809,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnF
 	catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	ms5 := metacache.NewMetaStore(catalog)
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo(ms5), metaStore: ms5}
 	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            segmentID,
 		CollectionID:  collectionID,
@@ -2908,7 +2916,8 @@ func (s *CopySegmentTaskSuite) TestBuildCopySegmentTargetIndexes_GatedBySwitch()
 	im := createTestIndexMeta(s.T(), collectionID, map[int64]*model.Index{
 		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
 	})
-	m := &meta{indexMeta: im, segments: NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+	ms6 := metacache.NewMetaStore(nil)
+	m := &meta{indexMeta: im, segments: NewSegmentsInfo(ms6), metaStore: ms6}
 
 	s.Nil(buildCopySegmentTargetIndexes(m, collectionID, false),
 		"with manifest writes off the worker must get no definitions, or it would mint manifest entries the etcd records do not own")
@@ -2929,7 +2938,8 @@ func (s *CopySegmentTaskSuite) TestValidateCopiedManifestIndexPlacement_FailsWhe
 	im := createTestIndexMeta(s.T(), collectionID, map[int64]*model.Index{
 		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
 	})
-	m := &meta{indexMeta: im, segments: NewSegmentsInfo()}
+	ms7 := metacache.NewMetaStore(nil)
+	m := &meta{indexMeta: im, segments: NewSegmentsInfo(ms7), metaStore: ms7}
 	m.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,

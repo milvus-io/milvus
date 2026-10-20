@@ -597,6 +597,53 @@ func (_c *MockWALAccesser_Replicate_Call) RunAndReturn(run func() streaming.Repl
 	return _c
 }
 
+// SchemaClient provides a mock function with no fields
+func (_m *MockWALAccesser) SchemaClient() streaming.SchemaClient {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for SchemaClient")
+	}
+
+	var r0 streaming.SchemaClient
+	if rf, ok := ret.Get(0).(func() streaming.SchemaClient); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streaming.SchemaClient)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_SchemaClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SchemaClient'
+type MockWALAccesser_SchemaClient_Call struct {
+	*mock.Call
+}
+
+// SchemaClient is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) SchemaClient() *MockWALAccesser_SchemaClient_Call {
+	return &MockWALAccesser_SchemaClient_Call{Call: _e.mock.On("SchemaClient")}
+}
+
+func (_c *MockWALAccesser_SchemaClient_Call) Run(run func()) *MockWALAccesser_SchemaClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_SchemaClient_Call) Return(_a0 streaming.SchemaClient) *MockWALAccesser_SchemaClient_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_SchemaClient_Call) RunAndReturn(run func() streaming.SchemaClient) *MockWALAccesser_SchemaClient_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockWALAccesser creates a new instance of MockWALAccesser. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockWALAccesser(t interface {

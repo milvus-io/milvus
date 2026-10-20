@@ -35,7 +35,7 @@ import (
 func TestUpdateExternalSchemaViaWAL_CollectionNotFound(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetClonedCollectionInfo).Return(nil).Build()
+	mockGetCloned := mockey.Mock((*meta).GetCollection).Return(nil).Build()
 	defer mockGetCloned.UnPatch()
 
 	server := &Server{
@@ -50,7 +50,7 @@ func TestUpdateExternalSchemaViaWAL_CollectionNotFound(t *testing.T) {
 func TestUpdateExternalSchemaViaWAL_AlterCollectionRPCError(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetClonedCollectionInfo).Return(&collectionInfo{
+	mockGetCloned := mockey.Mock((*meta).GetCollection).Return(&collectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name:           "test_collection",
@@ -78,7 +78,7 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionRPCError(t *testing.T) {
 func TestUpdateExternalSchemaViaWAL_AlterCollectionStatusError(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetClonedCollectionInfo).Return(&collectionInfo{
+	mockGetCloned := mockey.Mock((*meta).GetCollection).Return(&collectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name:           "test_collection",
@@ -106,7 +106,7 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionStatusError(t *testing.T) {
 func TestUpdateExternalSchemaViaWAL_Success(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetClonedCollectionInfo).Return(&collectionInfo{
+	mockGetCloned := mockey.Mock((*meta).GetCollection).Return(&collectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name:           "test_collection",
