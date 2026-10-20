@@ -1083,15 +1083,18 @@ TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
         auto* staging =
             dynamic_cast<ChunkedSegmentSealedImpl*>(staging_segment.get());
         ASSERT_NE(staging, nullptr);
-        auto column = staging->TestStageLoadColumnGroupWithReader(
-            groups,
-            storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties(),
-            index,
-            {label},
-            *current->load_info,
-            schema,
-            reader,
-            /*eager_load=*/false);
+        auto column =
+            staging
+                ->TestStageLoadColumnGroupsWithReader(
+                    groups,
+                    storage::LoonFFIPropertiesSingleton::GetInstance()
+                        .GetProperties(),
+                    /*eager_cg_field_ids=*/{},
+                    /*lazy_cg_field_ids=*/{{static_cast<int>(index), {label}}},
+                    *current->load_info,
+                    schema,
+                    reader)
+                .front();
         auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
         ASSERT_NE(proxy, nullptr);
         ASSERT_TRUE(proxy->IsLazy());
