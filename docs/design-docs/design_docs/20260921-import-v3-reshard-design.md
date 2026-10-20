@@ -466,11 +466,24 @@ the `import_v3` prefix. Barrier/Planning/Importing read only ID-derived exact
 paths; LIST is reserved for GC and diagnostics.
 
 Terminal-job GC (`importV3JobGC`) is derived from durable facts, with no GC
-record: **Quiesce** (re-send version-aware Drop while still bound; drop the
-failed job's import segments and their superseded `old_segment_ids`; remove task
-records only after `cleanupTs`) → **Retain** (until `cleanupTs`) → **Delete**
-(broadcast `RollbackImport` for a failed replicate job, then
-`RemoveWithPrefix("import_v3/{job}/")`, remove remaining tasks, remove the job).
+record: **Prepare** (re-send version-aware Drop while still bound; drop the failed
+job's import segments and their superseded `old_segment_ids`; report once every
+task is unbound) → **Release objects** (`RemoveWithPrefix("import_v3/{job}/")`
+as soon as no task is bound: the fragments and manifests never wait for the
+retention window, so a terminal job's fragment diagnostic window is one GC pass,
+not `cleanupTs`) → **Retain metadata** (task records keep backing the job's row
+accounting and the idempotency window until `cleanupTs`; nothing reads a
+terminal job's fragments) → **Delete metadata** (broadcast `RollbackImport` for
+a failed replicate job, remove remaining tasks, remove the job).
+The object phase skips the tick that issued a Drop, because DataNode's Drop only
+cancels a run and releases its slot when the closure exits; a run canceled in
+that tick may still flush a fragment afterwards. A Drop issued by the scheduler
+(not by this pass) can still fall just before a release pass; that residual
+window is bounded by the low-frequency cadence
+(`dataCoord.import.checkIntervalLow`, 120s), and any object a late writer
+re-creates is left to the orphan scan below. The per-job `objCleaned` flag that
+skips the repeated delete is memory-only and disappears with the job, and a
+restart simply repeats the idempotent delete.
 Orphan `import_v3/{job}/` prefixes with no live job and no write for
 `dataCoord.gc.missingTolerance` are swept by the GC orphan scan. Import V3
 segments are always created at dispatch for a task that already carries their
@@ -489,7 +502,7 @@ IndexBuilding:
 
 - equivalent ⇒ continue; the segment's schema version is safely bumped to the
   current version;
-- different ⇒ `ErrImportSysFailed` (2101), non-retriable: fail, quiesce and
+- different ⇒ `ErrImportSysFailed` (2101), non-retriable: fail, prepare and
   reclaim, recording the first differing item.
 
 ## Rollout and Configuration
