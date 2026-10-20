@@ -456,9 +456,14 @@ func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
 
 func TestLegacyClientQueryKeepsUnlimitedOrdinaryQueryOnBatchPath(t *testing.T) {
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{}))
-	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: 1}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
 		Limit:         1,
 		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
+	}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		GroupByFieldIds: []int64{100},
+		OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
 	}))
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
 		GroupByFieldIds: []int64{100},
