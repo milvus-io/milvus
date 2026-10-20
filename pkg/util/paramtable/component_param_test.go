@@ -35,6 +35,8 @@ func TestQueryNodeSparseInterimIndexAlgorithms(t *testing.T) {
 	t.Cleanup(base.mgr.Close)
 	params.Init(base)
 	cfg := &params.QueryNodeCfg
+	assert.Equal(t, "2.6.26", cfg.InterimIndexSparseIPAlgo.Version)
+	assert.Equal(t, "2.6.26", cfg.InterimIndexSparseBM25Algo.Version)
 	assert.False(t, cfg.InterimIndexSparseIPAlgo.Export)
 	assert.False(t, cfg.InterimIndexSparseBM25Algo.Export)
 	for _, name := range []string{"InterimIndexSparseIPAlgo", "InterimIndexSparseBM25Algo"} {

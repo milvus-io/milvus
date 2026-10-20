@@ -372,6 +372,8 @@ TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
     auto* info = anns->mutable_query_info();
     info->set_topk(5);
     info->set_metric_type(metric);
+    // QueryInfo defaults to 0 decimal places; compare unrounded BM25 scores.
+    info->set_round_decimal(-1);
     info->set_search_params(R"({"drop_ratio_search":0})");
     info->set_bm25_avgdl(avgdl);
     auto placeholders = CreateSparseFloatPlaceholderGroup(1);
@@ -383,6 +385,7 @@ TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
         auto serialized = node.SerializeAsString();
         auto plan = query::CreateSearchPlanByExpr(
             schema, serialized.data(), serialized.size());
+        ASSERT_EQ(plan->plan_node_->search_info_.round_decimal_, -1);
         auto parsed =
             ParsePlaceholderGroup(plan.get(), placeholders.SerializeAsString());
         auto result = segment.Search(plan.get(), parsed.get(), MAX_TIMESTAMP);
