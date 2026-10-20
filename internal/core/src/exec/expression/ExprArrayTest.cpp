@@ -28,6 +28,7 @@
 #include <numeric>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -77,6 +78,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/arrow_field_utils.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/MmapManager.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -766,7 +768,7 @@ TEST(Expr, TestArrayElementPredicateWithoutNestedPathThrows) {
     }
 }
 
-TEST(Expr, ElementNullableStructChildRejectsElementLevelExpression) {
+TEST(Expr, ElementNullableStructChildElementLevelUsesRawData) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(pk);
@@ -782,7 +784,7 @@ TEST(Expr, ElementNullableStructChildRejectsElementLevelExpression) {
         column, proto::plan::OpType::Equal, Int64Value(1));
     exec::PhyUnaryRangeFilterExpr physical(
         {}, logical, "element-nullable child", nullptr, growing, 0, 64, 0);
-    EXPECT_THROW((void)physical.GetExecPath(), SegcoreError);
+    EXPECT_EQ(physical.GetExecPath(), exec::ExprExecPath::RawData);
 }
 
 TEST(Expr, TestArrayRange) {
@@ -5376,4 +5378,1882 @@ TEST(Expr, ElementNullableRowFilterSealed) {
     auto sealed = LoadElementNullableSealed(data, segment_path);
     RunElementNullableRowFilters(sealed.get(), data);
     RunElementNullableParsedRowFilters(sealed.get(), data);
+}
+
+// Element-level filters (MATCH_* / element_filter) on element-nullable struct
+// sub-fields. Struct `s`:
+//   a     Array<Int64>, elements never null
+//   b     Array<Int64>, element nullable
+//   i8    Array<Int8>, element nullable
+//   name  Array<VarChar>, element nullable
+//   tags  Array<Array<Int64>>, inner Arrays and leaves nullable
+//   vec   ArrayOfVector, element nullable
+//   pv    ArrayOfVector, elements never null
+// and, only in the reopened segments, three sub-fields added to the struct
+// after the rows were written, so every existing element of them is null:
+//   lang  Array<VarChar>, lnum Array<Int64>, ltags Array<Array<Int64>>.
+// Null slots carry a zero / "" payload, so a predicate that ignores element
+// validity would match them.
+namespace {
+
+constexpr int64_t kElemVecDim = 4;
+
+// Three-valued result: 1 TRUE, 0 FALSE, -1 UNKNOWN.
+using Tv = int;
+constexpr Tv kTvTrue = 1;
+constexpr Tv kTvFalse = 0;
+constexpr Tv kTvUnknown = -1;
+
+Tv
+TvNot(Tv v) {
+    return v == kTvUnknown ? kTvUnknown : 1 - v;
+}
+
+Tv
+TvAnd(Tv x, Tv y) {
+    if (x == kTvFalse || y == kTvFalse) {
+        return kTvFalse;
+    }
+    return x == kTvUnknown || y == kTvUnknown ? kTvUnknown : kTvTrue;
+}
+
+Tv
+TvOr(Tv x, Tv y) {
+    if (x == kTvTrue || y == kTvTrue) {
+        return kTvTrue;
+    }
+    return x == kTvUnknown || y == kTvUnknown ? kTvUnknown : kTvFalse;
+}
+
+// A predicate on a nullable value is UNKNOWN when the value is null.
+template <typename T, typename Pred>
+Tv
+TvOf(const std::optional<T>& value, Pred pred) {
+    return value.has_value() ? Tv(pred(*value)) : kTvUnknown;
+}
+
+Tv
+TvBool(bool value) {
+    return value ? kTvTrue : kTvFalse;
+}
+
+using ElemLeaves = std::vector<std::optional<int64_t>>;
+
+struct ElemValue {
+    int64_t a = 0;
+    std::optional<int64_t> b;
+    std::optional<int64_t> i8;
+    std::optional<std::string> name;
+    std::optional<ElemLeaves> tags;
+    bool vec = false;
+};
+
+// One struct row; nullopt is a NULL struct row.
+using ElemRow = std::optional<std::vector<ElemValue>>;
+
+struct ElementLevelFixture {
+    // Schema version 1, without the added sub-fields.
+    SchemaPtr schema;
+    FieldId pk, a, b, i8, name, tags, vec, pv;
+    // Added in schema version 2.
+    FieldId lang, lnum, ltags;
+    std::vector<ElemRow> rows;
+    std::unique_ptr<InsertRecordProto> insert;
+    // Logical element ids: values[id], and the row / in-row index of id.
+    std::vector<ElemValue> values;
+    std::vector<int64_t> elem_row;
+    std::vector<int64_t> elem_index;
+    // First element id of each row, plus the total at the end.
+    std::vector<int64_t> row_begin;
+
+    int64_t
+    num_rows() const {
+        return static_cast<int64_t>(rows.size());
+    }
+
+    int64_t
+    num_elements() const {
+        return static_cast<int64_t>(values.size());
+    }
+};
+
+proto::schema::TypeSchema
+NestedNullableInt64Type() {
+    proto::schema::TypeSchema type;
+    type.set_nullable(true);
+    auto* inner = type.mutable_array_element();
+    inner->set_nullable(true);
+    inner->mutable_array_element()->set_leaf_type(
+        proto::schema::DataType::Int64);
+    inner->mutable_array_element()->set_nullable(true);
+    return type;
+}
+
+ElementLevelFixture
+BuildElementLevelFixture(std::vector<ElemRow> rows) {
+    ElementLevelFixture f;
+    auto schema = std::make_shared<Schema>();
+    f.pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(f.pk);
+    f.a = schema->AddDebugArrayField("s[a]", DataType::INT64, true, false);
+    f.b = schema->AddDebugArrayField("s[b]", DataType::INT64, true, true);
+    f.i8 = schema->AddDebugArrayField("s[i8]", DataType::INT8, true, true);
+    f.name =
+        schema->AddDebugArrayField("s[name]", DataType::VARCHAR, true, true);
+    f.vec = schema->AddDebugVectorArrayField("s[vec]",
+                                             DataType::VECTOR_FLOAT,
+                                             kElemVecDim,
+                                             knowhere::metric::L2,
+                                             true,
+                                             true);
+    f.pv = schema->AddDebugVectorArrayField("s[pv]",
+                                            DataType::VECTOR_FLOAT,
+                                            kElemVecDim,
+                                            knowhere::metric::L2,
+                                            true,
+                                            false);
+    f.tags = FieldId(f.pv.get() + 100);
+    schema->AddField(FieldMeta(FieldName("s[tags]"),
+                               f.tags,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               true,
+                               true,
+                               std::nullopt,
+                               std::string{},
+                               LOCAL_FORMAT_RAW,
+                               std::make_optional(NestedNullableInt64Type())));
+    f.lang = FieldId(f.pv.get() + 101);
+    f.lnum = FieldId(f.pv.get() + 102);
+    f.ltags = FieldId(f.pv.get() + 103);
+    schema->set_schema_version(1);
+    f.schema = schema;
+    f.rows = std::move(rows);
+
+    for (int64_t r = 0; r < f.num_rows(); ++r) {
+        f.row_begin.push_back(f.num_elements());
+        if (!f.rows[r].has_value()) {
+            continue;
+        }
+        for (size_t j = 0; j < f.rows[r]->size(); ++j) {
+            f.values.push_back((*f.rows[r])[j]);
+            f.elem_row.push_back(r);
+            f.elem_index.push_back(static_cast<int64_t>(j));
+        }
+    }
+    f.row_begin.push_back(f.num_elements());
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    insert->set_num_rows(f.num_rows());
+    auto* pk = insert->add_fields_data();
+    pk->set_field_id(f.pk.get());
+    pk->set_type(proto::schema::DataType::Int64);
+    for (int64_t r = 0; r < f.num_rows(); ++r) {
+        pk->mutable_scalars()->mutable_long_data()->add_data(r);
+    }
+
+    auto add_array_field = [&](FieldId id, proto::schema::DataType element) {
+        auto* field = insert->add_fields_data();
+        field->set_field_id(id.get());
+        field->set_type(proto::schema::DataType::Array);
+        for (const auto& row : f.rows) {
+            field->mutable_scalars()->add_valid_data(row.has_value());
+        }
+        auto* data = field->mutable_scalars()->mutable_array_data();
+        data->set_element_type(element);
+        return data;
+    };
+    auto* a_rows = add_array_field(f.a, proto::schema::DataType::Int64);
+    auto* b_rows = add_array_field(f.b, proto::schema::DataType::Int64);
+    auto* i8_rows = add_array_field(f.i8, proto::schema::DataType::Int8);
+    auto* name_rows = add_array_field(f.name, proto::schema::DataType::VarChar);
+    auto* tags_rows = add_array_field(f.tags, proto::schema::DataType::Array);
+    for (const auto& row : f.rows) {
+        auto* a_row = a_rows->add_data();
+        a_row->mutable_long_data();
+        auto* b_row = b_rows->add_data();
+        b_row->mutable_long_data();
+        auto* i8_row = i8_rows->add_data();
+        i8_row->mutable_int_data();
+        auto* name_row = name_rows->add_data();
+        name_row->mutable_string_data();
+        auto* tags_row = tags_rows->add_data();
+        tags_row->mutable_array_data()->set_element_type(
+            proto::schema::DataType::Int64);
+        if (!row.has_value()) {
+            continue;
+        }
+        for (const auto& e : *row) {
+            a_row->mutable_long_data()->add_data(e.a);
+            b_row->mutable_long_data()->add_data(e.b.value_or(0));
+            b_row->add_valid_data(e.b.has_value());
+            i8_row->mutable_int_data()->add_data(
+                static_cast<int32_t>(e.i8.value_or(0)));
+            i8_row->add_valid_data(e.i8.has_value());
+            name_row->mutable_string_data()->add_data(e.name.value_or(""));
+            name_row->add_valid_data(e.name.has_value());
+            auto* child = tags_row->mutable_array_data()->add_data();
+            child->mutable_long_data();
+            if (e.tags.has_value()) {
+                for (const auto& leaf : *e.tags) {
+                    child->mutable_long_data()->add_data(leaf.value_or(0));
+                    child->add_valid_data(leaf.has_value());
+                }
+            }
+            tags_row->add_valid_data(e.tags.has_value());
+        }
+    }
+
+    auto add_vector_field = [&](FieldId id, bool element_nullable) {
+        auto* vec = insert->add_fields_data();
+        vec->set_field_id(id.get());
+        vec->set_type(proto::schema::DataType::ArrayOfVector);
+        vec->mutable_vectors()->set_dim(kElemVecDim);
+        auto* vec_rows = vec->mutable_vectors()->mutable_vector_array();
+        vec_rows->set_dim(kElemVecDim);
+        vec_rows->set_element_type(proto::schema::DataType::FloatVector);
+        for (const auto& row : f.rows) {
+            auto* proto_row = vec_rows->add_data();
+            proto_row->set_dim(kElemVecDim);
+            proto_row->mutable_float_vector();
+            if (!row.has_value()) {
+                continue;
+            }
+            for (const auto& e : *row) {
+                const bool valid = !element_nullable || e.vec;
+                if (element_nullable) {
+                    proto_row->add_valid_data(valid);
+                }
+                if (valid) {
+                    for (int64_t d = 0; d < kElemVecDim; ++d) {
+                        proto_row->mutable_float_vector()->add_data(1.0f);
+                    }
+                }
+            }
+        }
+        for (const auto& row : f.rows) {
+            vec->mutable_vectors()->add_valid_data(row.has_value());
+        }
+    };
+    add_vector_field(f.vec, true);
+    add_vector_field(f.pv, false);
+    f.insert = std::move(insert);
+    return f;
+}
+
+// The main data set. Rows 1 (empty) and 2 (NULL) share a two-row batch
+// that has no element.
+ElementLevelFixture
+BuildElementLevelMatrixFixture() {
+    using L = ElemLeaves;
+    const auto null = std::nullopt;
+    std::vector<ElemRow> rows = {
+        std::vector<ElemValue>{
+            {1, null, 1, "ab", L{1, 2}, true},
+            {2, 3, null, null, null, false},
+            {1, 1, 5, "ac", L{null, 4}, true},
+        },
+        std::vector<ElemValue>{},
+        null,
+        std::vector<ElemValue>{
+            {1, 3, null, "b", L{}, false},
+            {3, null, 2, null, L{null}, true},
+        },
+        std::vector<ElemValue>{
+            {1, null, null, null, null, false},
+            {2, null, null, null, null, false},
+        },
+        std::vector<ElemValue>{
+            {5, 7, 7, "abc", L{7, 7}, true},
+        },
+        std::vector<ElemValue>{
+            {1, 1, 1, "aa", L{1}, true},
+            {1, null, 3, "ba", L{2, null}, false},
+            {2, 2, null, "ab", L{}, true},
+        },
+    };
+    return BuildElementLevelFixture(std::move(rows));
+}
+
+// The C18 truth table rows, on real element-nullable data:
+//   b = [3, NULL], [NULL, NULL], [], [NULL, NULL, 5], [3, 5, NULL], [3, 5],
+//   s = [{a: 1, b: NULL}, {a: 2, b: 3}].
+ElementLevelFixture
+BuildElementLevelC18Fixture() {
+    const auto null = std::nullopt;
+    auto b_only = [](std::vector<std::optional<int64_t>> values) {
+        std::vector<ElemValue> row;
+        for (auto value : values) {
+            ElemValue e;
+            e.b = value;
+            row.push_back(e);
+        }
+        return ElemRow(std::move(row));
+    };
+    ElemValue first;
+    first.a = 1;
+    ElemValue second;
+    second.a = 2;
+    second.b = 3;
+    std::vector<ElemRow> rows = {
+        b_only({3, null}),
+        b_only({null, null}),
+        b_only({}),
+        b_only({null, null, 5}),
+        b_only({3, 5, null}),
+        b_only({3, 5}),
+        ElemRow(std::vector<ElemValue>{first, second}),
+    };
+    return BuildElementLevelFixture(std::move(rows));
+}
+
+// Schema version 2: `base` plus the sub-fields added to `s` after the rows
+// were written.
+SchemaPtr
+WithAddedSubFields(const Schema& base, const ElementLevelFixture& f) {
+    auto next = Schema::ParseFrom(base.ToProto());
+    next->AddField(FieldName("s[lang]"),
+                   f.lang,
+                   DataType::ARRAY,
+                   DataType::VARCHAR,
+                   true,
+                   true);
+    next->AddField(FieldName("s[lnum]"),
+                   f.lnum,
+                   DataType::ARRAY,
+                   DataType::INT64,
+                   true,
+                   true);
+    next->AddField(FieldMeta(FieldName("s[ltags]"),
+                             f.ltags,
+                             DataType::ARRAY,
+                             DataType::ARRAY,
+                             true,
+                             true,
+                             std::nullopt,
+                             std::string{},
+                             LOCAL_FORMAT_RAW,
+                             std::make_optional(NestedNullableInt64Type())));
+    next->set_schema_version(base.get_schema_version() + 1);
+    return next;
+}
+
+std::unique_ptr<SegmentGrowing>
+LoadElementLevelGrowing(const ElementLevelFixture& f) {
+    auto growing = CreateGrowingSegment(
+        f.schema, empty_index_meta, 1, SegcoreConfig::default_config());
+    std::vector<int64_t> row_ids(f.num_rows());
+    std::vector<Timestamp> timestamps(f.num_rows());
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+    std::iota(timestamps.begin(), timestamps.end(), 0);
+    const auto offset = growing->PreInsert(f.num_rows());
+    growing->Insert(offset,
+                    f.num_rows(),
+                    row_ids.data(),
+                    timestamps.data(),
+                    std::make_shared<InsertRecordProto>(*f.insert));
+    return growing;
+}
+
+// Native-list fields load only from Storage V2/V3: write the rows as a V3
+// segment in batches of batch_rows, one chunk per batch.
+std::unique_ptr<SegmentSealed>
+LoadElementLevelSealed(const ElementLevelFixture& f,
+                       const std::string& segment_path,
+                       int64_t batch_rows = 2) {
+    proto::schema::CollectionSchema storage_proto;
+    for (auto [id, name] : {std::pair{RowFieldID, "RowID"},
+                            std::pair{TimestampFieldID, "Timestamp"}}) {
+        auto* field = storage_proto.add_fields();
+        field->set_fieldid(id.get());
+        field->set_name(name);
+        field->set_data_type(proto::schema::DataType::Int64);
+    }
+    const auto user_proto = f.schema->ToProto();
+    for (const auto& field : user_proto.fields()) {
+        *storage_proto.add_fields() = field;
+    }
+    auto schema = Schema::ParseFrom(storage_proto);
+    schema->set_schema_version(f.schema->get_schema_version());
+
+    const auto rows = f.num_rows();
+    auto build_int64 = [rows]() {
+        arrow::Int64Builder builder;
+        for (int64_t i = 0; i < rows; ++i) {
+            AssertInfo(builder.Append(i).ok(), "append int64");
+        }
+        std::shared_ptr<arrow::Array> output;
+        AssertInfo(builder.Finish(&output).ok(), "finish int64");
+        return output;
+    };
+    std::unordered_map<FieldId, std::shared_ptr<arrow::Array>> columns = {
+        {RowFieldID, build_int64()}, {TimestampFieldID, build_int64()}};
+    for (const auto& field_data : f.insert->fields_data()) {
+        const FieldId id(field_data.field_id());
+        auto converted = FieldDataToArrow(std::to_string(id.get()),
+                                          field_data,
+                                          rows,
+                                          false,
+                                          nullptr,
+                                          &(*schema)[id]);
+        AssertInfo(converted.ok(),
+                   "convert field {}: {}",
+                   id.get(),
+                   converted.status().ToString());
+        columns[id] = converted->second;
+    }
+    auto loon_schema = schema->ConvertToLoonArrowSchema();
+    std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
+    for (int64_t offset = 0; offset < rows; offset += batch_rows) {
+        const auto length = std::min<int64_t>(batch_rows, rows - offset);
+        arrow::ArrayVector sliced;
+        for (const auto& id : schema->get_field_ids()) {
+            sliced.push_back(columns.at(id)->Slice(offset, length));
+        }
+        batches.push_back(
+            arrow::RecordBatch::Make(loon_schema, length, sliced));
+    }
+    // One commit per batch, so each batch lands in its own file and chunk.
+    int64_t version = 0;
+    for (const auto& batch : batches) {
+        version = test::WriteRecordBatchesToV3(
+            schema,
+            segment_path,
+            {batch},
+            test::GenerateColumnGroupPattern(schema));
+    }
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(3);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(rows);
+    load_info.set_manifest_path("{\"base_path\":\"" + segment_path +
+                                "\",\"ver\":" + std::to_string(version) + "}");
+    load_info.set_insert_channel("element-level-null-test");
+    auto sealed = CreateSealedSegment(schema, empty_index_meta, 3);
+    sealed->SetLoadInfo(load_info);
+    // One cell per written batch; the default target merges them.
+    const auto cell_target = storagev2translator::GetCellTargetSizeBytes();
+    storagev2translator::SetCellTargetSizeBytes(1);
+    auto restore_cell_target = folly::makeGuard([cell_target] {
+        storagev2translator::SetCellTargetSizeBytes(cell_target);
+    });
+    tracer::TraceContext trace_ctx;
+    sealed->Load(trace_ctx, nullptr);
+    return sealed;
+}
+
+std::string
+ElementLevelSegmentPath(const std::string& tag) {
+    return (std::filesystem::temp_directory_path() /
+            ("milvus_element_level_null_" + tag + "_" +
+             std::to_string(
+                 std::chrono::steady_clock::now().time_since_epoch().count())))
+        .string();
+}
+
+// Evaluate an element-level expression over all rows in two-row batches,
+// crossing chunk boundaries and the zero-element batch.
+ColumnVectorPtr
+EvalElementBatches(SegmentInternalInterface* segment,
+                   const expr::TypedExprPtr& typed_expr,
+                   int64_t num_rows,
+                   int64_t num_elements) {
+    const auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+    auto restore = folly::makeGuard([saved_batch_size] {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+    });
+    auto query_context = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, num_rows, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(query_context.get());
+    exec::ExprSet expr_set({typed_expr}, &exec_context);
+    exec::EvalCtx eval_ctx(&exec_context);
+    TargetBitmap res;
+    TargetBitmap valid;
+    for (int64_t batch = 0; batch < num_rows; batch += 2) {
+        std::vector<VectorPtr> results;
+        expr_set.Eval(0, 1, true, eval_ctx, results);
+        AssertInfo(results.size() == 1 && results[0] != nullptr,
+                   "element batch {} returned no result",
+                   batch);
+        auto vec = test::GetColumnVectorForTest(results[0]);
+        res.append(TargetBitmapView(vec->GetRawData(), vec->size()));
+        valid.append(TargetBitmapView(vec->GetValidRawData(), vec->size()));
+    }
+    AssertInfo(static_cast<int64_t>(res.size()) == num_elements,
+               "two-row batches covered {} elements, expected {}",
+               res.size(),
+               num_elements);
+    return std::make_shared<ColumnVector>(std::move(res), std::move(valid));
+}
+
+void
+ExpectTv(Tv want, bool bit, bool valid, const std::string& where) {
+    if (want == kTvUnknown) {
+        EXPECT_FALSE(valid) << where << ": want UNKNOWN";
+        EXPECT_FALSE(bit) << where << ": want UNKNOWN";
+    } else {
+        EXPECT_TRUE(valid) << where << ": want " << want;
+        EXPECT_EQ(bit, want == kTvTrue) << where;
+    }
+}
+
+// Check an element-level predicate element by element: one batch, two-row
+// batches, and element-id input in ascending, scrambled and partial order,
+// each also under NOT.
+void
+CheckElementLevelExpr(SegmentInternalInterface* segment,
+                      const ElementLevelFixture& f,
+                      const expr::TypedExprPtr& typed_expr,
+                      const std::vector<Tv>& expected,
+                      const std::string& label) {
+    const auto n = f.num_elements();
+    ASSERT_EQ(static_cast<int64_t>(expected.size()), n) << label;
+    std::vector<int32_t> ascending(n);
+    std::iota(ascending.begin(), ascending.end(), 0);
+    std::vector<int32_t> scrambled;
+    for (int64_t lo = 0, hi = n - 1; lo <= hi; ++lo, --hi) {
+        scrambled.push_back(static_cast<int32_t>(hi));
+        if (lo != hi) {
+            scrambled.push_back(static_cast<int32_t>(lo));
+        }
+    }
+    std::vector<int32_t> partial;
+    for (int64_t id = n - 1; id >= 0; id -= 3) {
+        partial.push_back(static_cast<int32_t>(id));
+    }
+
+    auto check = [&](const ColumnVectorPtr& vec,
+                     const std::vector<int32_t>& ids,
+                     bool negated,
+                     const std::string& path) {
+        ASSERT_EQ(vec->size(), ids.size()) << label << " " << path;
+        BitsetTypeView bits(vec->GetRawData(), vec->size());
+        BitsetTypeView valid(vec->GetValidRawData(), vec->size());
+        for (size_t i = 0; i < ids.size(); ++i) {
+            const auto id = ids[i];
+            const auto want = negated ? TvNot(expected[id]) : expected[id];
+            ExpectTv(want,
+                     bits[i],
+                     valid[i],
+                     label + " " + path + ", row " +
+                         std::to_string(f.elem_row[id]) + " element " +
+                         std::to_string(f.elem_index[id]));
+        }
+    };
+
+    for (bool negated : {false, true}) {
+        expr::TypedExprPtr target = typed_expr;
+        if (negated) {
+            target = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, typed_expr);
+        }
+        const std::string tag = negated ? "NOT " : "";
+        plan::FilterBitsNode node(DEFAULT_PLANNODE_ID, target);
+        if (n > 0) {
+            check(test::gen_filter_res(
+                      &node, segment, f.num_rows(), MAX_TIMESTAMP),
+                  ascending,
+                  negated,
+                  tag + "batch");
+        }
+        check(EvalElementBatches(segment, target, f.num_rows(), n),
+              ascending,
+              negated,
+              tag + "two-row batches");
+        for (const auto& [ids, path] : {std::pair{ascending, "ascending ids"},
+                                        std::pair{scrambled, "scrambled ids"},
+                                        std::pair{partial, "partial ids"}}) {
+            if (ids.empty()) {
+                continue;
+            }
+            exec::OffsetVector offsets(ids.begin(), ids.end());
+            check(test::gen_filter_res(
+                      &node, segment, f.num_rows(), MAX_TIMESTAMP, &offsets),
+                  ids,
+                  negated,
+                  tag + path);
+        }
+    }
+}
+
+// Check a row-level predicate on the batch path, on row-offset input and
+// through the query pipeline in two-row batches, each also under NOT.
+void
+CheckRowLevelExpr(SegmentInternalInterface* segment,
+                  int64_t num_rows,
+                  const expr::TypedExprPtr& typed_expr,
+                  const std::vector<Tv>& expected,
+                  const std::string& label) {
+    ASSERT_EQ(static_cast<int64_t>(expected.size()), num_rows) << label;
+    std::vector<int64_t> all_rows(num_rows);
+    std::iota(all_rows.begin(), all_rows.end(), 0);
+    std::vector<int64_t> reversed(all_rows.rbegin(), all_rows.rend());
+    auto check = [&](const ColumnVectorPtr& vec,
+                     const std::vector<int64_t>& rows,
+                     bool negated,
+                     const std::string& path) {
+        ASSERT_EQ(vec->size(), rows.size()) << label << " " << path;
+        BitsetTypeView bits(vec->GetRawData(), vec->size());
+        BitsetTypeView valid(vec->GetValidRawData(), vec->size());
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const auto want =
+                negated ? TvNot(expected[rows[i]]) : expected[rows[i]];
+            ExpectTv(want,
+                     bits[i],
+                     valid[i],
+                     label + " " + path + ", row " + std::to_string(rows[i]));
+        }
+    };
+    auto not_expr = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, typed_expr);
+    for (bool negated : {false, true}) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID,
+            negated ? expr::TypedExprPtr(not_expr) : typed_expr);
+        const std::string tag = negated ? "NOT " : "";
+        check(
+            test::gen_filter_res(plan.get(), segment, num_rows, MAX_TIMESTAMP),
+            all_rows,
+            negated,
+            tag + "batch");
+        exec::OffsetVector offsets(reversed.begin(), reversed.end());
+        check(test::gen_filter_res(
+                  plan.get(), segment, num_rows, MAX_TIMESTAMP, &offsets),
+              reversed,
+              negated,
+              tag + "offsets");
+
+        const auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+        auto final = ExecuteQueryExpr(plan, segment, num_rows, MAX_TIMESTAMP);
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+        ASSERT_EQ(static_cast<int64_t>(final.size()), num_rows) << label;
+        for (int64_t r = 0; r < num_rows; ++r) {
+            const auto want = negated ? TvNot(expected[r]) : expected[r];
+            EXPECT_EQ(final[r], want == kTvTrue)
+                << label << " " << tag << "filter, row " << r;
+        }
+    }
+}
+
+// Row results of MATCH_<type>(s, P, threshold) from P's element results:
+// an UNKNOWN element is a miss (C18), a NULL struct row is UNKNOWN.
+std::vector<Tv>
+MatchRowExpected(const ElementLevelFixture& f,
+                 const std::vector<Tv>& elements,
+                 expr::MatchType type,
+                 int64_t threshold) {
+    std::vector<Tv> rows;
+    for (int64_t r = 0; r < f.num_rows(); ++r) {
+        if (!f.rows[r].has_value()) {
+            rows.push_back(kTvUnknown);
+            continue;
+        }
+        const auto begin = f.row_begin[r];
+        const auto count = f.row_begin[r + 1] - begin;
+        int64_t hits = 0;
+        for (int64_t id = begin; id < begin + count; ++id) {
+            hits += elements[id] == kTvTrue;
+        }
+        bool match = false;
+        switch (type) {
+            case expr::MatchType::MatchAny:
+                match = hits > 0;
+                break;
+            case expr::MatchType::MatchAll:
+                match = hits == count;
+                break;
+            case expr::MatchType::MatchLeast:
+                match = hits >= threshold;
+                break;
+            case expr::MatchType::MatchMost:
+                match = hits <= threshold;
+                break;
+            case expr::MatchType::MatchExact:
+                match = hits == threshold;
+                break;
+            default:
+                ThrowInfo(UnexpectedError,
+                          "unexpected match type {}",
+                          static_cast<int>(type));
+        }
+        rows.push_back(TvBool(match));
+    }
+    return rows;
+}
+
+// (row, in-row element index) of the elements an element_filter retrieve
+// selects, optionally behind a row-level predicate.
+std::set<std::pair<int64_t, int64_t>>
+RetrieveElementHits(SegmentInternalInterface* segment,
+                    const ElementLevelFixture& f,
+                    const expr::TypedExprPtr& element_expr,
+                    const expr::TypedExprPtr& doc_expr) {
+    auto plan =
+        std::make_unique<query::RetrievePlan>(segment->get_schema_snapshot());
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    std::vector<plan::PlanNodePtr> sources;
+    if (doc_expr != nullptr) {
+        sources = {
+            std::make_shared<plan::FilterBitsNode>("1001", doc_expr, sources)};
+    }
+    auto mvcc = std::make_shared<plan::MvccNode>("1002", sources);
+    plan->plan_node_->plannodes_ =
+        std::make_shared<plan::ElementFilterBitsNode>(
+            "1003", element_expr, "s", std::vector<plan::PlanNodePtr>{mvcc});
+    plan->plan_node_->limit_ = 1 << 20;
+    plan->field_ids_ = {f.pk};
+    auto result = segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+    std::set<std::pair<int64_t, int64_t>> hits;
+    if (result == nullptr) {
+        ADD_FAILURE() << "element_filter retrieve returned no result";
+        return hits;
+    }
+    EXPECT_EQ(result->element_indices_size(), result->offset_size());
+    for (int i = 0; i < result->offset_size(); ++i) {
+        for (auto index : result->element_indices(i).indices()) {
+            hits.emplace(result->offset(i), index);
+        }
+    }
+    return hits;
+}
+
+struct ElementLevelCase {
+    std::string name;
+    expr::TypedExprPtr expr;
+    // Expected result on one element. The sub-fields added in schema
+    // version 2 are null on every element.
+    std::function<Tv(const ElemValue&)> oracle;
+    bool uses_added_fields = false;
+};
+
+// Check one element-level predicate P everywhere it is consumed:
+// - element by element (CheckElementLevelExpr), also as NOT P;
+// - MATCH_ANY / ALL / LEAST(2) / MOST(1) / EXACT(1) over P and over NOT P,
+//   each also under an outer NOT;
+// - element_filter over P and NOT P, with and without a row predicate.
+void
+CheckElementLevelEverywhere(SegmentInternalInterface* segment,
+                            const ElementLevelFixture& f,
+                            const std::string& name,
+                            const expr::TypedExprPtr& typed_expr,
+                            const std::vector<Tv>& expected) {
+    CheckElementLevelExpr(segment, f, typed_expr, expected, name);
+
+    using MT = expr::MatchType;
+    const std::vector<std::pair<MT, int64_t>> match_types = {
+        {MT::MatchAny, 0},
+        {MT::MatchAll, 0},
+        {MT::MatchLeast, 2},
+        {MT::MatchMost, 1},
+        {MT::MatchExact, 1}};
+    auto pk_column = expr::ColumnInfo(f.pk, DataType::INT64);
+    proto::plan::GenericValue two;
+    two.set_int64_val(2);
+    auto doc_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        pk_column, proto::plan::OpType::GreaterThan, two);
+    for (bool inner_not : {false, true}) {
+        expr::TypedExprPtr predicate = typed_expr;
+        std::vector<Tv> elements = expected;
+        if (inner_not) {
+            predicate = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, typed_expr);
+            for (auto& value : elements) {
+                value = TvNot(value);
+            }
+        }
+        const std::string pred_name = inner_not ? "!(" + name + ")" : name;
+        for (const auto& [type, threshold] : match_types) {
+            auto match = std::make_shared<expr::MatchExpr>(
+                "s", type, threshold, predicate);
+            CheckRowLevelExpr(segment,
+                              f.num_rows(),
+                              match,
+                              MatchRowExpected(f, elements, type, threshold),
+                              "MATCH_" + proto::plan::MatchType_Name(type) +
+                                  "(" + std::to_string(threshold) + ", " +
+                                  pred_name + ")");
+        }
+        for (bool with_doc : {false, true}) {
+            std::set<std::pair<int64_t, int64_t>> want;
+            for (int64_t id = 0; id < f.num_elements(); ++id) {
+                if (elements[id] == kTvTrue &&
+                    (!with_doc || f.elem_row[id] > 2)) {
+                    want.emplace(f.elem_row[id], f.elem_index[id]);
+                }
+            }
+            EXPECT_EQ(RetrieveElementHits(
+                          segment, f, predicate, with_doc ? doc_expr : nullptr),
+                      want)
+                << "element_filter(s, " << pred_name << ")"
+                << (with_doc ? " behind pk > 2" : "");
+        }
+    }
+}
+
+// Builders for element-level operands and predicates.
+struct ElementLevelExprs {
+    static expr::ColumnInfo
+    Column(FieldId id, DataType type, DataType element) {
+        expr::ColumnInfo column(id, type, element, {}, true);
+        column.element_level_ = true;
+        return column;
+    }
+    // `$[x]` on a scalar or vector sub-field.
+    static expr::ColumnInfo
+    Scalar(FieldId id, DataType type) {
+        return Column(id, type, type);
+    }
+    // `$[tags]` in array_contains*: the leaf type.
+    static expr::ColumnInfo
+    NestedLeaf(FieldId id) {
+        return Column(id, DataType::ARRAY, DataType::INT64);
+    }
+    // `$[tags]` in array_length and IS NULL.
+    static expr::ColumnInfo
+    Nested(FieldId id) {
+        return Column(id, DataType::ARRAY, DataType::ARRAY);
+    }
+
+    static proto::plan::GenericValue
+    Int(int64_t value) {
+        proto::plan::GenericValue val;
+        val.set_int64_val(value);
+        return val;
+    }
+    static proto::plan::GenericValue
+    Str(const std::string& value) {
+        proto::plan::GenericValue val;
+        val.set_string_val(value);
+        return val;
+    }
+
+    static expr::TypedExprPtr
+    Unary(const expr::ColumnInfo& col,
+          proto::plan::OpType op,
+          proto::plan::GenericValue val) {
+        return std::make_shared<expr::UnaryRangeFilterExpr>(col, op, val);
+    }
+    static expr::TypedExprPtr
+    Range(const expr::ColumnInfo& col,
+          proto::plan::GenericValue lower,
+          proto::plan::GenericValue upper,
+          bool lower_inclusive,
+          bool upper_inclusive) {
+        return std::make_shared<expr::BinaryRangeFilterExpr>(
+            col, lower, upper, lower_inclusive, upper_inclusive);
+    }
+    static expr::TypedExprPtr
+    Term(const expr::ColumnInfo& col,
+         std::vector<proto::plan::GenericValue> vals) {
+        return std::make_shared<expr::TermFilterExpr>(col, std::move(vals));
+    }
+    static expr::TypedExprPtr
+    Arith(const expr::ColumnInfo& col,
+          proto::plan::ArithOpType arith,
+          int64_t right,
+          proto::plan::OpType op,
+          int64_t value) {
+        return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+            col, op, arith, Int(value), Int(right));
+    }
+    static expr::TypedExprPtr
+    Contains(const expr::ColumnInfo& col,
+             proto::plan::JSONContainsExpr_JSONOp op,
+             std::vector<proto::plan::GenericValue> vals) {
+        return std::make_shared<expr::JsonContainsExpr>(col, op, true, vals);
+    }
+    static expr::TypedExprPtr
+    Length(const expr::ColumnInfo& col, proto::plan::OpType op, int64_t value) {
+        return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+            col, op, proto::plan::ArithOpType::ArrayLength, Int(value), Int(0));
+    }
+    static expr::TypedExprPtr
+    IsNull(const expr::ColumnInfo& col) {
+        return std::make_shared<expr::NullExpr>(
+            col, proto::plan::NullExpr_NullOp_IsNull);
+    }
+    static expr::TypedExprPtr
+    IsNotNull(const expr::ColumnInfo& col) {
+        return std::make_shared<expr::NullExpr>(
+            col, proto::plan::NullExpr_NullOp_IsNotNull);
+    }
+    static expr::TypedExprPtr
+    And(const expr::TypedExprPtr& left, const expr::TypedExprPtr& right) {
+        return std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, left, right);
+    }
+    static expr::TypedExprPtr
+    Or(const expr::TypedExprPtr& left, const expr::TypedExprPtr& right) {
+        return std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::Or, left, right);
+    }
+    static expr::TypedExprPtr
+    Not(const expr::TypedExprPtr& input) {
+        return std::make_shared<expr::LogicalUnaryExpr>(
+            expr::LogicalUnaryExpr::OpType::LogicalNot, input);
+    }
+};
+
+std::vector<ElementLevelCase>
+BuildElementLevelCases(const ElementLevelFixture& f) {
+    using E = ElementLevelExprs;
+    using proto::plan::ArithOpType;
+    using proto::plan::OpType;
+    constexpr auto kContains = proto::plan::JSONContainsExpr_JSONOp_Contains;
+    constexpr auto kAny = proto::plan::JSONContainsExpr_JSONOp_ContainsAny;
+    constexpr auto kAll = proto::plan::JSONContainsExpr_JSONOp_ContainsAll;
+    const auto a = E::Scalar(f.a, DataType::INT64);
+    const auto b = E::Scalar(f.b, DataType::INT64);
+    const auto i8 = E::Scalar(f.i8, DataType::INT8);
+    const auto name = E::Scalar(f.name, DataType::VARCHAR);
+    const auto tags_leaf = E::NestedLeaf(f.tags);
+    const auto tags = E::Nested(f.tags);
+    const auto vec = E::Scalar(f.vec, DataType::VECTOR_FLOAT);
+    const auto pv = E::Scalar(f.pv, DataType::VECTOR_FLOAT);
+    const auto lang = E::Scalar(f.lang, DataType::VARCHAR);
+    const auto lnum = E::Scalar(f.lnum, DataType::INT64);
+    const auto ltags_leaf = E::NestedLeaf(f.ltags);
+    const auto ltags = E::Nested(f.ltags);
+
+    auto b_is = [](int64_t v) {
+        return [v](const ElemValue& e) {
+            return TvOf(e.b, [v](int64_t x) { return x == v; });
+        };
+    };
+    auto a_is = [](int64_t v) {
+        return [v](const ElemValue& e) { return TvBool(e.a == v); };
+    };
+    // Leaves of a non-null inner Array that match, skipping null leaves.
+    auto contains_leaf = [](const ElemValue& e, int64_t v) {
+        for (const auto& leaf : *e.tags) {
+            if (leaf.has_value() && *leaf == v) {
+                return true;
+            }
+        }
+        return false;
+    };
+    auto tags_tv = [](auto pred) {
+        return [pred](const ElemValue& e) {
+            return e.tags.has_value() ? TvBool(pred(e)) : kTvUnknown;
+        };
+    };
+    auto unknown = [](const ElemValue&) { return kTvUnknown; };
+
+    std::vector<ElementLevelCase> cases = {
+        // Compare, including the payload a null slot carries.
+        {"$[b] == 3", E::Unary(b, OpType::Equal, E::Int(3)), b_is(3)},
+        {"$[b] == 0", E::Unary(b, OpType::Equal, E::Int(0)), b_is(0)},
+        {"$[b] != 1",
+         E::Unary(b, OpType::NotEqual, E::Int(1)),
+         [](const ElemValue& e) {
+             return TvOf(e.b, [](int64_t x) { return x != 1; });
+         }},
+        {"$[b] > 1",
+         E::Unary(b, OpType::GreaterThan, E::Int(1)),
+         [](const ElemValue& e) {
+             return TvOf(e.b, [](int64_t x) { return x > 1; });
+         }},
+        {"$[b] <= 1",
+         E::Unary(b, OpType::LessEqual, E::Int(1)),
+         [](const ElemValue& e) {
+             return TvOf(e.b, [](int64_t x) { return x <= 1; });
+         }},
+        {"$[i8] >= 3",
+         E::Unary(i8, OpType::GreaterEqual, E::Int(3)),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t x) { return x >= 3; });
+         }},
+        // Literals outside Int8 take the overflow shortcut.
+        {"$[i8] < 1000",
+         E::Unary(i8, OpType::LessThan, E::Int(1000)),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t) { return true; });
+         }},
+        {"$[i8] == 1000",
+         E::Unary(i8, OpType::Equal, E::Int(1000)),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t) { return false; });
+         }},
+        {"$[i8] > -1000",
+         E::Unary(i8, OpType::GreaterThan, E::Int(-1000)),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t) { return true; });
+         }},
+        {"$[i8] != 1000",
+         E::Unary(i8, OpType::NotEqual, E::Int(1000)),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t) { return true; });
+         }},
+        {"$[name] == \"ab\"",
+         E::Unary(name, OpType::Equal, E::Str("ab")),
+         [](const ElemValue& e) {
+             return TvOf(e.name,
+                         [](const std::string& s) { return s == "ab"; });
+         }},
+        {"$[name] == \"\"",
+         E::Unary(name, OpType::Equal, E::Str("")),
+         [](const ElemValue& e) {
+             return TvOf(e.name,
+                         [](const std::string& s) { return s.empty(); });
+         }},
+        {"$[name] != \"ab\"",
+         E::Unary(name, OpType::NotEqual, E::Str("ab")),
+         [](const ElemValue& e) {
+             return TvOf(e.name,
+                         [](const std::string& s) { return s != "ab"; });
+         }},
+        {"$[name] > \"ab\"",
+         E::Unary(name, OpType::GreaterThan, E::Str("ab")),
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string& s) { return s > "ab"; });
+         }},
+        {"$[name] prefix \"a\"",
+         E::Unary(name, OpType::PrefixMatch, E::Str("a")),
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string& s) {
+                 return s.rfind("a", 0) == 0;
+             });
+         }},
+        {"$[name] postfix \"b\"",
+         E::Unary(name, OpType::PostfixMatch, E::Str("b")),
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string& s) {
+                 return !s.empty() && s.back() == 'b';
+             });
+         }},
+        {"$[name] inner \"b\"",
+         E::Unary(name, OpType::InnerMatch, E::Str("b")),
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string& s) {
+                 return s.find('b') != std::string::npos;
+             });
+         }},
+        {"$[name] like \"a_\"",
+         E::Unary(name, OpType::Match, E::Str("a_")),
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string& s) {
+                 return s.size() == 2 && s[0] == 'a';
+             });
+         }},
+        {"$[name] like \"%\"",
+         E::Unary(name, OpType::Match, E::Str("%")),
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string&) { return true; });
+         }},
+        {"$[name] regex \"^a.$\"",
+         E::Unary(name, OpType::RegexMatch, E::Str("^a.$")),
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string& s) {
+                 return s.size() == 2 && s[0] == 'a';
+             });
+         }},
+        {"$[a] == 1", E::Unary(a, OpType::Equal, E::Int(1)), a_is(1)},
+        {"$[a] != 1",
+         E::Unary(a, OpType::NotEqual, E::Int(1)),
+         [](const ElemValue& e) { return TvBool(e.a != 1); }},
+        // BinaryRange.
+        {"1 <= $[b] <= 3",
+         E::Range(b, E::Int(1), E::Int(3), true, true),
+         [](const ElemValue& e) {
+             return TvOf(e.b, [](int64_t x) { return 1 <= x && x <= 3; });
+         }},
+        {"1 < $[b] < 3",
+         E::Range(b, E::Int(1), E::Int(3), false, false),
+         [](const ElemValue& e) {
+             return TvOf(e.b, [](int64_t x) { return 1 < x && x < 3; });
+         }},
+        {"-1000 < $[i8] < 3",
+         E::Range(i8, E::Int(-1000), E::Int(3), false, false),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t x) { return x < 3; });
+         }},
+        {"1000 < $[i8] < 2000",
+         E::Range(i8, E::Int(1000), E::Int(2000), false, false),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t) { return false; });
+         }},
+        {"-2000 < $[i8] < -1000",
+         E::Range(i8, E::Int(-2000), E::Int(-1000), false, false),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t) { return false; });
+         }},
+        {"\"a\" <= $[name] < \"b\"",
+         E::Range(name, E::Str("a"), E::Str("b"), true, false),
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string& s) {
+                 return "a" <= s && s < "b";
+             });
+         }},
+        {"0 <= $[a] <= 1",
+         E::Range(a, E::Int(0), E::Int(1), true, true),
+         [](const ElemValue& e) { return TvBool(0 <= e.a && e.a <= 1); }},
+        // Term.
+        {"$[b] in [1, 3]",
+         E::Term(b, {E::Int(1), E::Int(3)}),
+         [](const ElemValue& e) {
+             return TvOf(e.b, [](int64_t x) { return x == 1 || x == 3; });
+         }},
+        {"$[b] in [0]", E::Term(b, {E::Int(0)}), b_is(0)},
+        {"$[b] in []",
+         E::Term(b, {}),
+         [](const ElemValue&
+                e) { return TvOf(e.b, [](int64_t) { return false; }); }},
+        {"$[i8] in [1, 1000]",
+         E::Term(i8, {E::Int(1), E::Int(1000)}),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t x) { return x == 1; });
+         }},
+        {"$[name] in [\"ab\", \"b\"]",
+         E::Term(name, {E::Str("ab"), E::Str("b")}),
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string& s) {
+                 return s == "ab" || s == "b";
+             });
+         }},
+        {"$[a] in [2, 3]",
+         E::Term(a, {E::Int(2), E::Int(3)}),
+         [](const ElemValue& e) { return TvBool(e.a == 2 || e.a == 3); }},
+        // BinaryArithOpEvalRange.
+        {"$[b] + 1 == 4",
+         E::Arith(b, ArithOpType::Add, 1, OpType::Equal, 4),
+         b_is(3)},
+        {"$[b] * 2 > 3",
+         E::Arith(b, ArithOpType::Mul, 2, OpType::GreaterThan, 3),
+         [](const ElemValue& e) {
+             return TvOf(e.b, [](int64_t x) { return x * 2 > 3; });
+         }},
+        {"$[b] - 1 != 0",
+         E::Arith(b, ArithOpType::Sub, 1, OpType::NotEqual, 0),
+         [](const ElemValue& e) {
+             return TvOf(e.b, [](int64_t x) { return x - 1 != 0; });
+         }},
+        {"$[i8] % 2 == 1",
+         E::Arith(i8, ArithOpType::Mod, 2, OpType::Equal, 1),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t x) { return x % 2 == 1; });
+         }},
+        {"$[a] + 1 == 2",
+         E::Arith(a, ArithOpType::Add, 1, OpType::Equal, 2),
+         a_is(1)},
+        // contains* on a nested Array: a null leaf matches nothing, a NULL
+        // inner Array is UNKNOWN.
+        {"array_contains($[tags], 4)",
+         E::Contains(tags_leaf, kContains, {E::Int(4)}),
+         tags_tv([contains_leaf](const ElemValue& e) {
+             return contains_leaf(e, 4);
+         })},
+        {"array_contains($[tags], 0)",
+         E::Contains(tags_leaf, kContains, {E::Int(0)}),
+         tags_tv([contains_leaf](const ElemValue& e) {
+             return contains_leaf(e, 0);
+         })},
+        {"array_contains_any($[tags], [1, 7])",
+         E::Contains(tags_leaf, kAny, {E::Int(1), E::Int(7)}),
+         tags_tv([contains_leaf](const ElemValue& e) {
+             return contains_leaf(e, 1) || contains_leaf(e, 7);
+         })},
+        {"array_contains_all($[tags], [1, 2])",
+         E::Contains(tags_leaf, kAll, {E::Int(1), E::Int(2)}),
+         tags_tv([contains_leaf](const ElemValue& e) {
+             return contains_leaf(e, 1) && contains_leaf(e, 2);
+         })},
+        {"array_contains_all($[tags], [])",
+         E::Contains(tags_leaf, kAll, {}),
+         tags_tv([](const ElemValue&) { return true; })},
+        {"array_contains_any($[tags], [])",
+         E::Contains(tags_leaf, kAny, {}),
+         tags_tv([](const ElemValue&) { return false; })},
+        // array_length counts null leaves; a NULL inner Array is UNKNOWN.
+        {"array_length($[tags]) == 0",
+         E::Length(tags, OpType::Equal, 0),
+         tags_tv([](const ElemValue& e) { return e.tags->empty(); })},
+        {"array_length($[tags]) == 1",
+         E::Length(tags, OpType::Equal, 1),
+         tags_tv([](const ElemValue& e) { return e.tags->size() == 1; })},
+        {"array_length($[tags]) == 2",
+         E::Length(tags, OpType::Equal, 2),
+         tags_tv([](const ElemValue& e) { return e.tags->size() == 2; })},
+        {"array_length($[tags]) > 0",
+         E::Length(tags, OpType::GreaterThan, 0),
+         tags_tv([](const ElemValue& e) { return !e.tags->empty(); })},
+        // IS NULL / IS NOT NULL: only true or false.
+        {"$[b] IS NULL",
+         E::IsNull(b),
+         [](const ElemValue& e) { return TvBool(!e.b.has_value()); }},
+        {"$[b] IS NOT NULL",
+         E::IsNotNull(b),
+         [](const ElemValue& e) { return TvBool(e.b.has_value()); }},
+        {"$[i8] IS NULL",
+         E::IsNull(i8),
+         [](const ElemValue& e) { return TvBool(!e.i8.has_value()); }},
+        {"$[name] IS NOT NULL",
+         E::IsNotNull(name),
+         [](const ElemValue& e) { return TvBool(e.name.has_value()); }},
+        {"$[a] IS NULL",
+         E::IsNull(a),
+         [](const ElemValue&) { return kTvFalse; }},
+        {"$[a] IS NOT NULL",
+         E::IsNotNull(a),
+         [](const ElemValue&) { return kTvTrue; }},
+        {"$[tags] IS NULL",
+         E::IsNull(tags),
+         [](const ElemValue& e) { return TvBool(!e.tags.has_value()); }},
+        {"$[tags] IS NOT NULL",
+         E::IsNotNull(tags),
+         [](const ElemValue& e) { return TvBool(e.tags.has_value()); }},
+        {"$[vec] IS NULL",
+         E::IsNull(vec),
+         [](const ElemValue& e) { return TvBool(!e.vec); }},
+        {"$[vec] IS NOT NULL",
+         E::IsNotNull(vec),
+         [](const ElemValue& e) { return TvBool(e.vec); }},
+        {"$[pv] IS NULL",
+         E::IsNull(pv),
+         [](const ElemValue&) { return kTvFalse; }},
+        {"$[pv] IS NOT NULL",
+         E::IsNotNull(pv),
+         [](const ElemValue&) { return kTvTrue; }},
+        // Sub-fields of one element with different null layouts.
+        {"$[a] == 1 && $[b] == 3",
+         E::And(E::Unary(a, OpType::Equal, E::Int(1)),
+                E::Unary(b, OpType::Equal, E::Int(3))),
+         [a_is, b_is](const ElemValue& e) {
+             return TvAnd(a_is(1)(e), b_is(3)(e));
+         }},
+        {"$[a] == 1 || $[b] == 3",
+         E::Or(E::Unary(a, OpType::Equal, E::Int(1)),
+               E::Unary(b, OpType::Equal, E::Int(3))),
+         [a_is, b_is](const ElemValue& e) {
+             return TvOr(a_is(1)(e), b_is(3)(e));
+         }},
+        {"!($[b] == 3)",
+         E::Not(E::Unary(b, OpType::Equal, E::Int(3))),
+         [b_is](const ElemValue& e) { return TvNot(b_is(3)(e)); }},
+        {"$[b] != 1 || $[b] IS NULL",
+         E::Or(E::Unary(b, OpType::NotEqual, E::Int(1)), E::IsNull(b)),
+         [](const ElemValue& e) {
+             return TvOr(TvOf(e.b, [](int64_t x) { return x != 1; }),
+                         TvBool(!e.b.has_value()));
+         }},
+        {"$[b] == 1 && $[i8] == 1",
+         E::And(E::Unary(b, OpType::Equal, E::Int(1)),
+                E::Unary(i8, OpType::Equal, E::Int(1))),
+         [b_is](const ElemValue& e) {
+             return TvAnd(b_is(1)(e),
+                          TvOf(e.i8, [](int64_t x) { return x == 1; }));
+         }},
+        {"$[b] IS NULL && $[name] IS NOT NULL",
+         E::And(E::IsNull(b), E::IsNotNull(name)),
+         [](const ElemValue& e) {
+             return TvBool(!e.b.has_value() && e.name.has_value());
+         }},
+        {"$[a] == 1 && $[vec] IS NULL",
+         E::And(E::Unary(a, OpType::Equal, E::Int(1)), E::IsNull(vec)),
+         [](const ElemValue& e) { return TvBool(e.a == 1 && !e.vec); }},
+        {"($[b] > 0 || $[i8] > 0) && $[name] prefix \"a\"",
+         E::And(E::Or(E::Unary(b, OpType::GreaterThan, E::Int(0)),
+                      E::Unary(i8, OpType::GreaterThan, E::Int(0))),
+                E::Unary(name, OpType::PrefixMatch, E::Str("a"))),
+         [](const ElemValue& e) {
+             return TvAnd(TvOr(TvOf(e.b, [](int64_t x) { return x > 0; }),
+                               TvOf(e.i8, [](int64_t x) { return x > 0; })),
+                          TvOf(e.name, [](const std::string& s) {
+                              return s.rfind("a", 0) == 0;
+                          }));
+         }},
+        {"array_contains($[tags], 4) || $[b] == 1",
+         E::Or(E::Contains(tags_leaf, kContains, {E::Int(4)}),
+               E::Unary(b, OpType::Equal, E::Int(1))),
+         [contains_leaf, b_is](const ElemValue& e) {
+             const auto left =
+                 e.tags.has_value() ? TvBool(contains_leaf(e, 4)) : kTvUnknown;
+             return TvOr(left, b_is(1)(e));
+         }},
+        {"!($[a] == 1 && $[b] IS NULL)",
+         E::Not(E::And(E::Unary(a, OpType::Equal, E::Int(1)), E::IsNull(b))),
+         [](const ElemValue& e) {
+             return TvBool(!(e.a == 1 && !e.b.has_value()));
+         }},
+        // Sub-fields added after the rows were written: null on every
+        // existing element.
+        {"$[lang] == \"en\"",
+         E::Unary(lang, OpType::Equal, E::Str("en")),
+         unknown,
+         true},
+        {"$[lang] prefix \"e\"",
+         E::Unary(lang, OpType::PrefixMatch, E::Str("e")),
+         unknown,
+         true},
+        {"$[lang] in [\"en\"]", E::Term(lang, {E::Str("en")}), unknown, true},
+        {"\"a\" < $[lang] < \"z\"",
+         E::Range(lang, E::Str("a"), E::Str("z"), false, false),
+         unknown,
+         true},
+        {"$[lang] IS NULL",
+         E::IsNull(lang),
+         [](const ElemValue&) { return kTvTrue; },
+         true},
+        {"$[lang] IS NOT NULL",
+         E::IsNotNull(lang),
+         [](const ElemValue&) { return kTvFalse; },
+         true},
+        {"$[lnum] + 1 == 1",
+         E::Arith(lnum, ArithOpType::Add, 1, OpType::Equal, 1),
+         unknown,
+         true},
+        {"0 <= $[lnum] <= 5",
+         E::Range(lnum, E::Int(0), E::Int(5), true, true),
+         unknown,
+         true},
+        {"$[lnum] in [0]", E::Term(lnum, {E::Int(0)}), unknown, true},
+        {"$[lnum] IS NULL",
+         E::IsNull(lnum),
+         [](const ElemValue&) { return kTvTrue; },
+         true},
+        {"array_contains($[ltags], 0)",
+         E::Contains(ltags_leaf, kContains, {E::Int(0)}),
+         unknown,
+         true},
+        {"array_contains_all($[ltags], [])",
+         E::Contains(ltags_leaf, kAll, {}),
+         unknown,
+         true},
+        {"array_length($[ltags]) == 0",
+         E::Length(ltags, OpType::Equal, 0),
+         unknown,
+         true},
+        {"$[ltags] IS NULL",
+         E::IsNull(ltags),
+         [](const ElemValue&) { return kTvTrue; },
+         true},
+        {"$[a] == 1 && $[lang] == \"en\"",
+         E::And(E::Unary(a, OpType::Equal, E::Int(1)),
+                E::Unary(lang, OpType::Equal, E::Str("en"))),
+         [](const ElemValue& e) { return e.a == 1 ? kTvUnknown : kTvFalse; },
+         true},
+        {"$[a] == 1 || $[lang] == \"en\"",
+         E::Or(E::Unary(a, OpType::Equal, E::Int(1)),
+               E::Unary(lang, OpType::Equal, E::Str("en"))),
+         [](const ElemValue& e) { return e.a == 1 ? kTvTrue : kTvUnknown; },
+         true},
+        {"$[lang] IS NULL && $[b] IS NOT NULL",
+         E::And(E::IsNull(lang), E::IsNotNull(b)),
+         [](const ElemValue& e) { return TvBool(e.b.has_value()); },
+         true},
+    };
+    return cases;
+}
+
+void
+RunElementLevelCases(SegmentInternalInterface* segment,
+                     const ElementLevelFixture& f,
+                     bool with_added_fields) {
+    for (const auto& c : BuildElementLevelCases(f)) {
+        if (c.uses_added_fields && !with_added_fields) {
+            continue;
+        }
+        SCOPED_TRACE(c.name);
+        std::vector<Tv> expected;
+        for (const auto& value : f.values) {
+            expected.push_back(c.oracle(value));
+        }
+        CheckElementLevelEverywhere(segment, f, c.name, c.expr, expected);
+    }
+}
+
+// Run the matrix on growing (heap and mmap) and sealed segments, each also
+// after a schema change that adds sub-fields to `s`.
+void
+RunElementLevelMatrix(const ElementLevelFixture& f,
+                      const std::function<void(SegmentInternalInterface*,
+                                               bool with_added_fields,
+                                               const std::string& kind)>& run) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    config.set_chunk_rows(2);
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const auto saved_growing_mmap = mmap_config.GetEnableGrowingMmap();
+    auto mmap_guard = folly::makeGuard([&mmap_config, saved_growing_mmap] {
+        mmap_config.growing_enable_mmap = saved_growing_mmap;
+    });
+    for (bool enable_mmap : {false, true}) {
+        mmap_config.growing_enable_mmap = enable_mmap;
+        const std::string kind = enable_mmap ? "growing mmap" : "growing";
+        {
+            SCOPED_TRACE(kind);
+            auto growing = LoadElementLevelGrowing(f);
+            ASSERT_GT(growing->num_chunk(f.b), 1);
+            run(growing.get(), false, kind);
+        }
+        {
+            SCOPED_TRACE(kind + " with added sub-fields");
+            auto growing = LoadElementLevelGrowing(f);
+            growing->Reopen(WithAddedSubFields(*f.schema, f));
+            run(growing.get(), true, kind + " with added sub-fields");
+        }
+    }
+    mmap_config.growing_enable_mmap = saved_growing_mmap;
+
+    const auto segment_path = ElementLevelSegmentPath("sealed");
+    std::filesystem::remove_all(segment_path);
+    auto directory_guard = folly::makeGuard(
+        [&segment_path] { std::filesystem::remove_all(segment_path); });
+    {
+        SCOPED_TRACE("sealed");
+        auto sealed = LoadElementLevelSealed(f, segment_path);
+        ASSERT_GT(sealed->num_chunk(f.b), 1);
+        run(sealed.get(), false, "sealed");
+    }
+    {
+        SCOPED_TRACE("sealed with added sub-fields");
+        auto sealed = LoadElementLevelSealed(f, segment_path + "_added");
+        auto added_guard = folly::makeGuard([&segment_path] {
+            std::filesystem::remove_all(segment_path + "_added");
+        });
+        sealed->Reopen(WithAddedSubFields(*sealed->get_schema_snapshot(), f));
+        run(sealed.get(), true, "sealed with added sub-fields");
+    }
+}
+
+}  // namespace
+
+TEST(Expr, ElementLevelFilterOnElementNullableSubFields) {
+    auto f = BuildElementLevelMatrixFixture();
+    ASSERT_EQ(f.num_elements(), 11);
+    RunElementLevelMatrix(f,
+                          [&](SegmentInternalInterface* segment,
+                              bool with_added_fields,
+                              const std::string&) {
+                              RunElementLevelCases(
+                                  segment, f, with_added_fields);
+                          });
+}
+
+// The C18 truth table (feature map, 语义约定) rerun on real element-nullable
+// data instead of injected element bitmaps: an UNKNOWN element is a miss.
+TEST(Expr, ElementLevelMatchC18TruthTableOnElementNullableData) {
+    auto f = BuildElementLevelC18Fixture();
+    using E = ElementLevelExprs;
+    using MT = expr::MatchType;
+    using proto::plan::OpType;
+    const auto a = E::Scalar(f.a, DataType::INT64);
+    const auto b = E::Scalar(f.b, DataType::INT64);
+    auto b_gt0 = E::Unary(b, OpType::GreaterThan, E::Int(0));
+    auto match = [](MT type, int64_t threshold, expr::TypedExprPtr pred) {
+        return std::make_shared<expr::MatchExpr>("s", type, threshold, pred);
+    };
+    // Rows: [3, NULL], [NULL, NULL], [], [NULL, NULL, 5], [3, 5, NULL],
+    // [3, 5], [{a: 1, b: NULL}, {a: 2, b: 3}].
+    const std::vector<
+        std::tuple<std::string, expr::TypedExprPtr, std::vector<Tv>>>
+        table = {
+            {"MATCH_ANY($[b] > 0)",
+             match(MT::MatchAny, 0, b_gt0),
+             {1, 0, 0, 1, 1, 1, 1}},
+            {"MATCH_ALL($[b] > 0)",
+             match(MT::MatchAll, 0, b_gt0),
+             {0, 0, 1, 0, 0, 1, 0}},
+            {"MATCH_LEAST($[b] > 0, 2)",
+             match(MT::MatchLeast, 2, b_gt0),
+             {0, 0, 0, 0, 1, 1, 0}},
+            {"MATCH_MOST($[b] > 0, 1)",
+             match(MT::MatchMost, 1, b_gt0),
+             {1, 1, 1, 1, 0, 0, 1}},
+            {"MATCH_EXACT($[b] > 0, 1)",
+             match(MT::MatchExact, 1, b_gt0),
+             {1, 0, 0, 1, 0, 0, 1}},
+            {"MATCH_ANY($[a] == 1 && $[b] == 3)",
+             match(MT::MatchAny,
+                   0,
+                   E::And(E::Unary(a, OpType::Equal, E::Int(1)),
+                          E::Unary(b, OpType::Equal, E::Int(3)))),
+             {0, 0, 0, 0, 0, 0, 0}},
+            {"MATCH_ANY($[a] == 1 || $[b] == 3)",
+             match(MT::MatchAny,
+                   0,
+                   E::Or(E::Unary(a, OpType::Equal, E::Int(1)),
+                         E::Unary(b, OpType::Equal, E::Int(3)))),
+             {1, 0, 0, 0, 1, 1, 1}},
+            {"MATCH_ALL($[b] != 1)",
+             match(MT::MatchAll, 0, E::Unary(b, OpType::NotEqual, E::Int(1))),
+             {0, 0, 1, 0, 0, 1, 0}},
+            {"MATCH_ANY(!($[b] == 3))",
+             match(MT::MatchAny,
+                   0,
+                   E::Not(E::Unary(b, OpType::Equal, E::Int(3)))),
+             {0, 0, 0, 1, 1, 1, 0}},
+            // Spelling out the null check makes a null element a hit.
+            {"MATCH_ALL($[b] != 1 || $[b] IS NULL)",
+             match(
+                 MT::MatchAll,
+                 0,
+                 E::Or(E::Unary(b, OpType::NotEqual, E::Int(1)), E::IsNull(b))),
+             {1, 1, 1, 1, 1, 1, 1}},
+        };
+    RunElementLevelMatrix(
+        f,
+        [&](SegmentInternalInterface* segment,
+            bool with_added_fields,
+            const std::string&) {
+            for (const auto& [label, typed_expr, expected] : table) {
+                CheckRowLevelExpr(
+                    segment, f.num_rows(), typed_expr, expected, label);
+            }
+            RunElementLevelCases(segment, f, with_added_fields);
+        });
+}
+
+namespace {
+
+// A nested (element-domain) inverted index on `s[a]`, whose elements are
+// never null. A NULL struct row has no elements.
+void
+InstallNestedIndexOnA(SegmentSealed& segment, const ElementLevelFixture& f) {
+    std::vector<Array> arrays;
+    for (const auto& row : f.rows) {
+        proto::schema::ScalarField values;
+        auto* integers = values.mutable_long_data();
+        if (row.has_value()) {
+            for (const auto& e : *row) {
+                integers->add_data(e.a);
+            }
+        }
+        arrays.emplace_back(values);
+    }
+    auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
+    field->FillFieldData(arrays.data(), arrays.size());
+    auto opened = test::expr_index::BuildIndex(f.a,
+                                               DataType::ARRAY,
+                                               index::INVERTED_INDEX_TYPE,
+                                               {field},
+                                               Config::object(),
+                                               DataType::INT64,
+                                               true);
+    test::expr_index::InstallIndex(
+        segment, f.a, DataType::ARRAY, std::move(opened), DataType::INT64);
+}
+
+exec::ExprExecPath
+ElementLevelUnaryExecPath(SegmentInternalInterface* segment,
+                          const expr::ColumnInfo& column) {
+    auto logical = std::make_shared<expr::UnaryRangeFilterExpr>(
+        column, proto::plan::OpType::Equal, ElementLevelExprs::Int(1));
+    exec::PhyUnaryRangeFilterExpr physical({},
+                                           logical,
+                                           "element-level unary",
+                                           nullptr,
+                                           segment,
+                                           segment->get_row_count(),
+                                           64,
+                                           0);
+    return physical.GetExecPath();
+}
+
+}  // namespace
+
+// One predicate mixes a sub-field served by a nested index (`$[a]`) with
+// element-nullable sub-fields read from raw data; results stay aligned by
+// element id.
+TEST(Expr, ElementLevelMixedNestedIndexAndElementNullable) {
+    auto f = BuildElementLevelMatrixFixture();
+    const auto segment_path = ElementLevelSegmentPath("nested_index");
+    std::filesystem::remove_all(segment_path);
+    auto directory_guard = folly::makeGuard(
+        [&segment_path] { std::filesystem::remove_all(segment_path); });
+    auto sealed = LoadElementLevelSealed(f, segment_path);
+    InstallNestedIndexOnA(*sealed, f);
+    ASSERT_EQ(
+        ElementLevelUnaryExecPath(
+            sealed.get(), ElementLevelExprs::Scalar(f.a, DataType::INT64)),
+        exec::ExprExecPath::ScalarIndex);
+    ASSERT_EQ(
+        ElementLevelUnaryExecPath(
+            sealed.get(), ElementLevelExprs::Scalar(f.b, DataType::INT64)),
+        exec::ExprExecPath::RawData);
+    RunElementLevelCases(sealed.get(), f, false);
+}
+
+namespace {
+
+// Element predicates written as filter strings and parsed by the Go plan
+// parser, including `$[x] IS NULL`.
+struct ParsedElementLevelCase {
+    std::string text;
+    std::function<Tv(const ElemValue&)> oracle;
+    bool uses_added_fields = false;
+};
+
+std::vector<ParsedElementLevelCase>
+BuildParsedElementLevelCases() {
+    auto b_tv = [](auto pred) {
+        return [pred](const ElemValue& e) { return TvOf(e.b, pred); };
+    };
+    auto b_is_null = [](const ElemValue& e) {
+        return TvBool(!e.b.has_value());
+    };
+    auto contains_leaf = [](const ElemValue& e, int64_t v) {
+        for (const auto& leaf : *e.tags) {
+            if (leaf.has_value() && *leaf == v) {
+                return true;
+            }
+        }
+        return false;
+    };
+    return {
+        {"$[b] IS NULL", b_is_null},
+        {"$[b] is not null",
+         [](const ElemValue& e) { return TvBool(e.b.has_value()); }},
+        {"not ($[b] IS NULL)",
+         [](const ElemValue& e) { return TvBool(e.b.has_value()); }},
+        {"$[i8] IS NULL",
+         [](const ElemValue& e) { return TvBool(!e.i8.has_value()); }},
+        {"$[name] IS NOT NULL",
+         [](const ElemValue& e) { return TvBool(e.name.has_value()); }},
+        {"$[a] IS NULL", [](const ElemValue&) { return kTvFalse; }},
+        {"$[a] IS NOT NULL", [](const ElemValue&) { return kTvTrue; }},
+        {"$[tags] IS NULL",
+         [](const ElemValue& e) { return TvBool(!e.tags.has_value()); }},
+        {"$[tags] IS NOT NULL",
+         [](const ElemValue& e) { return TvBool(e.tags.has_value()); }},
+        {"$[vec] IS NULL", [](const ElemValue& e) { return TvBool(!e.vec); }},
+        {"$[vec] IS NOT NULL",
+         [](const ElemValue& e) { return TvBool(e.vec); }},
+        {"$[pv] IS NULL", [](const ElemValue&) { return kTvFalse; }},
+        {"$[b] == 3", b_tv([](int64_t x) { return x == 3; })},
+        {"$[b] != 1 || $[b] IS NULL",
+         [](const ElemValue& e) {
+             return TvOr(TvOf(e.b, [](int64_t x) { return x != 1; }),
+                         TvBool(!e.b.has_value()));
+         }},
+        {"$[a] == 1 && $[b] == 3",
+         [](const ElemValue& e) {
+             return TvAnd(TvBool(e.a == 1),
+                          TvOf(e.b, [](int64_t x) { return x == 3; }));
+         }},
+        {"$[a] == 1 || $[b] == 3",
+         [](const ElemValue& e) {
+             return TvOr(TvBool(e.a == 1),
+                         TvOf(e.b, [](int64_t x) { return x == 3; }));
+         }},
+        {"!($[b] == 3)",
+         [](const ElemValue& e) {
+             return TvNot(TvOf(e.b, [](int64_t x) { return x == 3; }));
+         }},
+        {"$[b] IS NULL && $[name] IS NOT NULL",
+         [](const ElemValue& e) {
+             return TvBool(!e.b.has_value() && e.name.has_value());
+         }},
+        {"$[a] == 1 && $[vec] IS NULL",
+         [](const ElemValue& e) { return TvBool(e.a == 1 && !e.vec); }},
+        {"$[i8] < 1000",
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t) { return true; });
+         }},
+        {"1000 < $[i8] < 2000",
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t) { return false; });
+         }},
+        {"$[name] like \"a%\"",
+         [](const ElemValue& e) {
+             return TvOf(e.name, [](const std::string& s) {
+                 return s.rfind("a", 0) == 0;
+             });
+         }},
+        {"$[b] in [1, 3]", b_tv([](int64_t x) { return x == 1 || x == 3; })},
+        {"$[b] not in [1, 3]",
+         b_tv([](int64_t x) { return x != 1 && x != 3; })},
+        {"$[b] + 1 == 4", b_tv([](int64_t x) { return x == 3; })},
+        {"array_contains($[tags], 4)",
+         [contains_leaf](const ElemValue& e) {
+             return e.tags.has_value() ? TvBool(contains_leaf(e, 4))
+                                       : kTvUnknown;
+         }},
+        {"array_contains_all($[tags], [])",
+         [](const ElemValue& e) {
+             return e.tags.has_value() ? kTvTrue : kTvUnknown;
+         }},
+        {"array_length($[tags]) == 1",
+         [](const ElemValue& e) {
+             return e.tags.has_value() ? TvBool(e.tags->size() == 1)
+                                       : kTvUnknown;
+         }},
+        {"$[lang] IS NULL", [](const ElemValue&) { return kTvTrue; }, true},
+        {"$[lang] IS NOT NULL",
+         [](const ElemValue&) { return kTvFalse; },
+         true},
+        {"$[ltags] IS NULL", [](const ElemValue&) { return kTvTrue; }, true},
+        {"$[a] == 1 && $[lang] == \"en\"",
+         [](const ElemValue& e) { return e.a == 1 ? kTvUnknown : kTvFalse; },
+         true},
+    };
+}
+
+void
+RunParsedElementLevelCases(SegmentInternalInterface* segment,
+                           const ElementLevelFixture& f,
+                           bool with_added_fields) {
+    auto schema = segment->get_schema_snapshot();
+    ScopedSchemaHandle handle(*schema);
+    for (const auto& c : BuildParsedElementLevelCases()) {
+        if (c.uses_added_fields && !with_added_fields) {
+            continue;
+        }
+        SCOPED_TRACE("parsed " + c.text);
+        std::vector<Tv> expected;
+        for (const auto& value : f.values) {
+            expected.push_back(c.oracle(value));
+        }
+        // element_filter: the element predicate, checked everywhere.
+        const auto bytes = handle.Parse("element_filter(s, " + c.text + ")");
+        auto plan =
+            CreateRetrievePlanByExpr(schema, bytes.data(), bytes.size());
+        ASSERT_NE(plan, nullptr);
+        auto* element_filter = dynamic_cast<plan::ElementFilterBitsNode*>(
+            plan->plan_node_->plannodes_.get());
+        ASSERT_NE(element_filter, nullptr);
+        CheckElementLevelEverywhere(segment,
+                                    f,
+                                    "parsed " + c.text,
+                                    element_filter->element_filter(),
+                                    expected);
+
+        // MATCH_* written in the filter string.
+        using MT = expr::MatchType;
+        for (const auto& [type, spelled, threshold] :
+             std::vector<std::tuple<MT, std::string, int64_t>>{
+                 {MT::MatchAny, "match_any(s, " + c.text + ")", 0},
+                 {MT::MatchAll, "match_all(s, " + c.text + ")", 0},
+                 {MT::MatchLeast,
+                  "match_least(s, " + c.text + ", threshold=2)",
+                  2},
+                 {MT::MatchMost,
+                  "match_most(s, " + c.text + ", threshold=1)",
+                  1},
+                 {MT::MatchExact,
+                  "match_exact(s, " + c.text + ", threshold=1)",
+                  1}}) {
+            const auto match_bytes = handle.Parse(spelled);
+            auto match_plan = CreateRetrievePlanByExpr(
+                schema, match_bytes.data(), match_bytes.size());
+            ASSERT_NE(match_plan, nullptr) << spelled;
+            const auto& sources = match_plan->plan_node_->plannodes_->sources();
+            ASSERT_EQ(sources.size(), 1) << spelled;
+            auto* filter =
+                dynamic_cast<plan::FilterBitsNode*>(sources.front().get());
+            ASSERT_NE(filter, nullptr) << spelled;
+            CheckRowLevelExpr(segment,
+                              f.num_rows(),
+                              filter->filter(),
+                              MatchRowExpected(f, expected, type, threshold),
+                              "parsed " + spelled);
+        }
+    }
+}
+
+}  // namespace
+
+TEST(Expr, ElementLevelFilterOnElementNullableSubFieldsParsed) {
+    auto f = BuildElementLevelMatrixFixture();
+    RunElementLevelMatrix(f,
+                          [&](SegmentInternalInterface* segment,
+                              bool with_added_fields,
+                              const std::string&) {
+                              RunParsedElementLevelCases(
+                                  segment, f, with_added_fields);
+                          });
+}
+
+// element_filter evaluates only the elements of the rows that pass the row
+// predicate when few rows pass (offset mode, under 1% of the rows). Element
+// validity must hold there too.
+TEST(Expr, ElementFilterOffsetModeOnElementNullableSubFields) {
+    constexpr int64_t kRows = 1000;
+    std::vector<ElemRow> rows;
+    for (int64_t r = 0; r < kRows; ++r) {
+        ElemValue first;
+        first.a = 1;
+        if (r % 3 != 0) {
+            first.b = r % 4;
+        }
+        ElemValue second;
+        second.a = 2;
+        if (r % 2 == 0) {
+            second.b = 1;
+        }
+        rows.emplace_back(std::vector<ElemValue>{first, second});
+    }
+    auto f = BuildElementLevelFixture(std::move(rows));
+    using E = ElementLevelExprs;
+    const auto b = E::Scalar(f.b, DataType::INT64);
+    const std::vector<std::tuple<std::string,
+                                 expr::TypedExprPtr,
+                                 std::function<Tv(const ElemValue&)>>>
+        cases = {
+            {"$[b] != 1",
+             E::Unary(b, proto::plan::OpType::NotEqual, E::Int(1)),
+             [](const ElemValue& e) {
+                 return TvOf(e.b, [](int64_t x) { return x != 1; });
+             }},
+            {"!($[b] != 1)",
+             E::Not(E::Unary(b, proto::plan::OpType::NotEqual, E::Int(1))),
+             [](const ElemValue& e) {
+                 return TvOf(e.b, [](int64_t x) { return x == 1; });
+             }},
+            {"$[b] IS NULL",
+             E::IsNull(b),
+             [](const ElemValue& e) { return TvBool(!e.b.has_value()); }},
+            {"$[b] != 1 || $[b] IS NULL",
+             E::Or(E::Unary(b, proto::plan::OpType::NotEqual, E::Int(1)),
+                   E::IsNull(b)),
+             [](const ElemValue& e) {
+                 return TvBool(!e.b.has_value() || *e.b != 1);
+             }},
+        };
+    // pk in [3, 501, 998]: 0.3% of the rows pass.
+    const std::set<int64_t> selected_rows = {3, 501, 998};
+    std::vector<proto::plan::GenericValue> pks;
+    for (auto r : selected_rows) {
+        pks.push_back(E::Int(r));
+    }
+    auto doc_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(f.pk, DataType::INT64), pks);
+
+    auto check = [&](SegmentInternalInterface* segment) {
+        for (const auto& [label, typed_expr, oracle] : cases) {
+            std::set<std::pair<int64_t, int64_t>> want;
+            for (int64_t id = 0; id < f.num_elements(); ++id) {
+                if (selected_rows.count(f.elem_row[id]) > 0 &&
+                    oracle(f.values[id]) == kTvTrue) {
+                    want.emplace(f.elem_row[id], f.elem_index[id]);
+                }
+            }
+            EXPECT_EQ(RetrieveElementHits(segment, f, typed_expr, doc_expr),
+                      want)
+                << "pk in [3, 501, 998] && element_filter(s, " << label << ")";
+        }
+    };
+    {
+        SCOPED_TRACE("growing");
+        auto& config = SegcoreConfig::default_config();
+        ScopedSegcoreConfigRestore config_restore(config);
+        config.set_chunk_rows(64);
+        auto growing = LoadElementLevelGrowing(f);
+        check(growing.get());
+    }
+    {
+        SCOPED_TRACE("sealed");
+        const auto segment_path = ElementLevelSegmentPath("offset_mode");
+        std::filesystem::remove_all(segment_path);
+        auto directory_guard = folly::makeGuard(
+            [&segment_path] { std::filesystem::remove_all(segment_path); });
+        auto sealed = LoadElementLevelSealed(f, segment_path, 250);
+        ASSERT_GT(sealed->num_chunk(f.b), 1);
+        check(sealed.get());
+    }
 }
