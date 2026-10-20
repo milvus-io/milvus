@@ -25,11 +25,15 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <optional>
+#include <ranges>
 
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
+#include "filemanager/impl/MemoryInputStream.h"
 #include "folly/OperationCancelled.h"
 #include "folly/coro/AsyncScope.h"
+#include "folly/coro/Collect.h"
 #include "milvus-storage/common/extend_status.h"
 #include "monitor/Monitor.h"
 #include "storage/DataCodec.h"
@@ -121,8 +125,7 @@ CheckFormat(bool valid, const char* message) {
     }
 }
 
-// Metadata keeps the wire buffer, parsed descriptor and JSON scratch together.
-// Reserve conservatively for the small descriptor while it is parsed.
+// Estimate the wire buffer, parsed descriptor and JSON scratch together.
 size_t
 MetadataScratchBytes(size_t bytes) {
     return SaturatingAdd(SaturatingMultiply(bytes, size_t{32}), size_t{4096});
@@ -360,8 +363,9 @@ LegacyIndexLoadTransientBytes(size_t total_bytes,
     const auto batch_bytes =
         files_per_batch == 0
             ? total_bytes
-            : std::min(total_bytes,
-                       SaturatingMultiply(max_file_bytes, files_per_batch));
+            : std::min<size_t>(
+                  total_bytes,
+                  SaturatingMultiply(max_file_bytes, files_per_batch));
     return std::max<size_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT, batch_bytes);
 }
 
@@ -371,6 +375,7 @@ OpenLegacyIndexInputAsync(const ChunkManagerPtr& chunk_manager,
                           const std::string& remote_file,
                           proto::common::LoadPriority priority) {
     const auto token = co_await folly::coro::co_current_cancellation_token;
+    auto lease = co_await AcquireMetadataLoadSlotAsync(priority, token);
     ThrowIfCancelled(token, "LegacyIndexFileIO::Open");
     if (ReadsThroughChunkManager(fs)) {
         AssertInfo(chunk_manager != nullptr,
@@ -399,6 +404,11 @@ InspectLegacyIndexFileImpl(milvus::InputStream& input,
                            bool use_async) {
     token = folly::cancellation_token_merge(
         token, co_await folly::coro::co_current_cancellation_token);
+    LoadAdmissionLease inspection_lease;
+    if (use_async) {
+        inspection_lease =
+            co_await AcquireMetadataLoadSlotAsync(priority, token);
+    }
     ThrowIfCancelled(token, "LegacyIndexFileIO::Inspect");
     size_t file_bytes;
     if (!use_async || dynamic_cast<RemoteInputStream*>(&input)) {
@@ -417,8 +427,6 @@ InspectLegacyIndexFileImpl(milvus::InputStream& input,
     CheckFormat(file_bytes >= prefix_bytes, "truncated descriptor header");
     size_t descriptor_bytes;
     {
-        auto lease =
-            co_await Admit(MetadataScratchBytes(prefix_bytes), priority, token);
         auto prefix = std::shared_ptr<uint8_t[]>(new uint8_t[prefix_bytes]);
         co_await ReadRange(
             input, 0, prefix.get(), prefix_bytes, priority, token, use_async);
@@ -443,8 +451,14 @@ InspectLegacyIndexFileImpl(milvus::InputStream& input,
     }
     LegacyIndexFileInfo info;
     {
-        auto lease = co_await Admit(
-            MetadataScratchBytes(descriptor_bytes), priority, token);
+        // Replace the slot reservation before acquiring descriptor bytes: even
+        // a one-slot controller must permit the second stage to make progress.
+        constexpr size_t kUnadmittedDescriptorBytes = 64 * 1024;
+        if (descriptor_bytes > kUnadmittedDescriptorBytes) {
+            inspection_lease.Release();
+            inspection_lease = co_await Admit(
+                MetadataScratchBytes(descriptor_bytes), priority, token);
+        }
         auto descriptor =
             std::shared_ptr<uint8_t[]>(new uint8_t[descriptor_bytes]);
         co_await ReadRange(input,
@@ -477,8 +491,6 @@ InspectLegacyIndexFileImpl(milvus::InputStream& input,
         const size_t event_prefix = header_bytes + 2 * sizeof(Timestamp);
         CheckFormat(event_prefix <= file_bytes - descriptor_bytes,
                     "truncated index event");
-        auto lease =
-            co_await Admit(MetadataScratchBytes(event_prefix), priority, token);
         auto prefix = std::shared_ptr<uint8_t[]>(new uint8_t[event_prefix]);
         co_await ReadRange(input,
                            descriptor_bytes,
@@ -505,6 +517,30 @@ InspectLegacyIndexFileImpl(milvus::InputStream& input,
                                                   DefaultStreamSliceSize())));
     }
     co_return info;
+}
+
+std::unique_ptr<DataCodec>
+ReadLegacyIndexFile(ChunkManager& chunk_manager,
+                    const std::string& path,
+                    proto::common::LoadPriority priority,
+                    folly::CancellationToken token) {
+    ThrowIfCancelled(token, "LegacyIndexFileIO::Download");
+    const auto size = chunk_manager.Size(path);
+    CheckFormat(
+        size <= static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+        "file size exceeds int64");
+    ThrowIfCancelled(token, "LegacyIndexFileIO::Download");
+    auto buffer = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
+    CheckFormat(chunk_manager.Read(path, buffer.get(), size) == size,
+                "short object read");
+    ThrowIfCancelled(token, "LegacyIndexFileIO::Download");
+    milvus::MemoryInputStream input(buffer.get(), size);
+    const auto info = folly::coro::blockingWait(
+        InspectLegacyIndexFileImpl(input, priority, token, false));
+    auto codec = DeserializeFileData(
+        buffer, size, true, std::nullopt, info.payload_bytes);
+    ThrowIfCancelled(token, "LegacyIndexFileIO::Decode");
+    return codec;
 }
 
 LegacyIndexFileInfo
@@ -586,8 +622,10 @@ StreamLegacyIndexFilesAsync(std::span<const LegacyIndexFile> files,
         (!files.front().info.raw_payload ||
          files.front().info.payload_bytes <= DefaultStreamSliceSize())) {
         // Small unsliced entries and metadata need no fan-out machinery.
-        auto input = co_await OpenLegacyIndexInputAsync(
-            chunk_manager, fs, files.front().path, priority);
+        auto input = co_await folly::coro::co_withCancellation(
+            token,
+            OpenLegacyIndexInputAsync(
+                chunk_manager, fs, files.front().path, priority));
         co_await folly::coro::co_withExecutor(
             executor.copy(),
             StreamLegacyIndexFileAsync(
@@ -650,8 +688,10 @@ StreamLegacyIndexFilesAsync(std::span<const LegacyIndexFile> files,
                                     info.file_bytes - info.payload_offset,
                             "invalid raw payload range");
             }
-            auto input = co_await OpenLegacyIndexInputAsync(
-                chunk_manager, fs, file.path, priority);
+            auto input = co_await folly::coro::co_withCancellation(
+                effective_token,
+                OpenLegacyIndexInputAsync(
+                    chunk_manager, fs, file.path, priority));
             size_t offset = 0;
             do {
                 const auto bytes = info.raw_payload
@@ -695,14 +735,16 @@ InspectLegacyIndexFileAsync(
     const std::shared_ptr<const LegacyIndexFileInfos>& infos,
     proto::common::LoadPriority priority,
     folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
     ThrowIfCancelled(token, "LegacyIndexFileIO::Inspect");
     if (infos) {
         if (auto it = infos->find(path); it != infos->end()) {
             co_return it->second;
         }
     }
-    auto input =
-        co_await OpenLegacyIndexInputAsync(chunk_manager, fs, path, priority);
+    auto input = co_await folly::coro::co_withCancellation(
+        token, OpenLegacyIndexInputAsync(chunk_manager, fs, path, priority));
     co_return co_await InspectLegacyIndexFileAsync(*input, priority, token);
 }
 
@@ -712,18 +754,30 @@ InspectLegacyIndexFilesAsync(std::span<const std::string> files,
                              const milvus_storage::ArrowFileSystemPtr& fs,
                              proto::common::LoadPriority priority,
                              folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
     auto infos = std::make_shared<LegacyIndexFileInfos>();
     infos->reserve(files.size());
+    auto inspect = [&](const std::string& path,
+                       LegacyIndexFileInfo& info) -> folly::coro::Task<void> {
+        auto input = co_await OpenLegacyIndexInputAsync(
+            chunk_manager, fs, path, priority);
+        info = co_await InspectLegacyIndexFileAsync(*input, priority, token);
+    };
     for (const auto& path : files) {
         ThrowIfCancelled(token, "LegacyIndexFileIO::InspectFiles");
-        if (!infos->contains(path)) {
-            auto input = co_await OpenLegacyIndexInputAsync(
-                chunk_manager, fs, path, priority);
-            infos->emplace(
-                path,
-                co_await InspectLegacyIndexFileAsync(*input, priority, token));
-        }
+        infos->try_emplace(path);
     }
+    auto tasks = *infos | std::views::transform([&](auto& entry) {
+        return inspect(entry.first, entry.second);
+    });
+    // Bound each batch even when process-wide slot admission is disabled.
+    constexpr size_t kMaxConcurrentInspections = 16;
+    co_await folly::coro::co_withCancellation(
+        token,
+        folly::coro::collectAllWindowed(std::move(tasks),
+                                        kMaxConcurrentInspections));
+    ThrowIfCancelled(token, "LegacyIndexFileIO::InspectFilesComplete");
     co_return infos;
 }
 

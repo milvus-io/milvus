@@ -27,10 +27,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -39,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type DistHandlerSuite struct {
@@ -80,7 +83,7 @@ func (suite *DistHandlerSuite) TestBasic() {
 		suite.dispatchMockCall = nil
 	}
 
-	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{})
+	suite.target.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet())
 	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -129,6 +132,7 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 		suite.dispatchMockCall = nil
 	}
 	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+	suite.target.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet()).Maybe()
 	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -239,6 +243,7 @@ func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
 	}
 
 	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+	suite.target.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet()).Maybe()
 	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -338,7 +343,7 @@ func TestHeartbeatMetricsRecording(t *testing.T) {
 		nodeID:      nodeID,
 		nodeManager: nodeManager,
 		dist:        meta.NewDistributionManager(nodeManager),
-		target:      meta.NewTargetManager(nil, nil),
+		target:      meta.NewTargetManager(nil, nil, metacache.NewMetaStore(nil)),
 		scheduler:   task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
 	}
 
@@ -718,6 +723,83 @@ func TestDispatchLoopUsesDispatchInterval(t *testing.T) {
 
 	assert.Eventually(t, dispatched.Load, time.Second, 10*time.Millisecond)
 	<-done
+}
+
+func TestDistributionDoesNotRetainStoreProtos(t *testing.T) {
+	ctx := context.Background()
+	nodeID := time.Now().UnixNano() % 1000000
+
+	// What the shared metacache store hands back: the live DataCoord proto,
+	// binlog/statslog arrays included.
+	stored := &datapb.SegmentInfo{
+		ID:                  7,
+		CollectionID:        1,
+		PartitionID:         2,
+		InsertChannel:       "test-channel-1",
+		NumOfRows:           1024,
+		Level:               datapb.SegmentLevel_L1,
+		IsSorted:            true,
+		IsSortedByNamespace: true,
+		ManifestPath:        "manifest-7",
+		DataVersion:         3,
+		Binlogs:             []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "insert_log/1/2/7/100/1"}}}},
+		Statslogs:           []*datapb.FieldBinlog{{FieldID: 100}},
+		Deltalogs:           []*datapb.FieldBinlog{{FieldID: 100}},
+		Bm25Statslogs:       []*datapb.FieldBinlog{{FieldID: 100}},
+		TextStatsLogs:       map[int64]*datapb.TextIndexStats{100: {FieldID: 100}},
+		JsonKeyStats:        map[int64]*datapb.JsonKeyStats{100: {FieldID: 100}},
+	}
+
+	targetMgr := meta.NewMockTargetManager(t)
+	targetMgr.EXPECT().GetSealedSegment(mock.Anything, int64(1), int64(7), mock.Anything).Return(stored)
+
+	nodeManager := session.NewNodeManager()
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost:19530",
+		Hostname: "localhost",
+	}))
+	handler := &distHandler{
+		nodeID:      nodeID,
+		nodeManager: nodeManager,
+		dist:        meta.NewDistributionManager(nodeManager),
+		target:      targetMgr,
+	}
+
+	handler.updateSegmentsDistribution(ctx, &querypb.GetDataDistributionResponse{
+		Status: merr.Success(),
+		NodeID: nodeID,
+		Segments: []*querypb.SegmentVersionInfo{
+			{ID: 7, Collection: 1, Partition: 2, Channel: "test-channel-1", Version: 1},
+		},
+	})
+
+	segments := handler.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
+	require.Len(t, segments, 1)
+	got := segments[0].SegmentInfo
+
+	// The distribution must not pin the store's proto: DataCoord replaces it
+	// wholesale on every mutation, and unchanged node distributions are not
+	// refreshed, so the old object would stay alive per node.
+	assert.NotSame(t, stored, got)
+	assert.Empty(t, got.GetBinlogs())
+	assert.Empty(t, got.GetStatslogs())
+	assert.Empty(t, got.GetDeltalogs())
+	assert.Empty(t, got.GetBm25Statslogs())
+	assert.Empty(t, got.GetTextStatsLogs())
+	assert.Empty(t, got.GetJsonKeyStats())
+
+	// Everything the distribution consumers read still survives the projection.
+	assert.Equal(t, stored.GetID(), got.GetID())
+	assert.Equal(t, stored.GetCollectionID(), got.GetCollectionID())
+	assert.Equal(t, stored.GetPartitionID(), got.GetPartitionID())
+	assert.Equal(t, stored.GetInsertChannel(), got.GetInsertChannel())
+	assert.Equal(t, stored.GetNumOfRows(), got.GetNumOfRows())
+	assert.Equal(t, stored.GetLevel(), got.GetLevel())
+	assert.Equal(t, stored.GetIsSorted(), got.GetIsSorted())
+	assert.Equal(t, stored.GetIsSortedByNamespace(), got.GetIsSortedByNamespace())
+	assert.Equal(t, stored.GetManifestPath(), got.GetManifestPath())
+	assert.Equal(t, stored.GetDataVersion(), got.GetDataVersion())
 }
 
 func TestDistHandlerSuite(t *testing.T) {

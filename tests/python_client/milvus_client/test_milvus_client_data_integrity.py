@@ -4,6 +4,7 @@ import math
 import os
 import random
 import struct
+import tempfile
 import time
 from contextlib import contextmanager
 
@@ -3883,6 +3884,7 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
             primary_key_type,
         )
         with RemoteBulkWriter(
+            local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
             schema=schema,
             remote_path=f"compaction_integrity/{collection_name}/round_{round_index + 1}",
             connect_param=RemoteBulkWriter.ConnectParam(

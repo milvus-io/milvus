@@ -29,12 +29,14 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "bitset/bitset.h"
@@ -70,6 +72,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/artifact/ArtifactStats.h"
 
+class JsonStatsGroupByTestAccessor;
 class CollectSingleJsonStatsInfoAccessor;
 class CollectKeyInfoAccessor;
 class BuildKeyStatsAccessor;
@@ -79,6 +82,8 @@ class JsonStatsProjectionTestAccessor;
 class JsonStatsScanTestAccessor;
 
 namespace milvus::index {
+
+struct JsonStatsParquetMetadata;
 
 struct JsonStatsFieldDataSlice {
     FieldDataPtr data;
@@ -106,6 +111,8 @@ CreateJsonStatsRowRanges(const std::vector<FieldDataPtr>& field_datas,
 // Upload/Load pipeline rather than storage::Artifact. JSON layout routing and
 // sub-column promotion are not implemented by merely moving this class.
 class JsonKeyStats {
+    friend class ::JsonStatsGroupByTestAccessor;
+
  public:
     cachinglayer::ResourceUsage
     CellByteSize() const {
@@ -133,7 +140,9 @@ class JsonKeyStats {
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas, bool nullable);
 
     void
-    Load(milvus::tracer::TraceContext ctx, const Config& config = {});
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config = {},
+         OpContext* op_ctx = nullptr);
 
     void
     Build(const Config& config = {});
@@ -154,6 +163,40 @@ class JsonKeyStats {
     // the concrete layout object, not scalar-index predicate virtual methods.
 
  public:
+    // A query-local reader for one exact scalar path. A missing value means
+    // "read raw JSON", not JSON null: typed validity also excludes other
+    // types, absent paths and legacy empty strings. Returned keys own data.
+    class ShreddingReader {
+     public:
+        using Value = std::variant<bool, int64_t, std::string>;
+
+        std::optional<Value>
+        Get(milvus::OpContext* op_ctx, int64_t row_id);
+
+     private:
+        friend class JsonKeyStats;
+        ShreddingReader(std::shared_ptr<ChunkedColumnInterface> column,
+                        JSONType type)
+            : column_(std::move(column)), type_(type) {
+        }
+
+        std::shared_ptr<ChunkedColumnInterface> column_;
+        JSONType type_;
+        std::unordered_map<int64_t, PinWrapper<Chunk*>> pins_;
+    };
+
+    // Checks path/type eligibility without loading stats. A supported path
+    // still needs a matching typed column before a reader can be created.
+    static bool
+    IsShreddingReaderSupported(const std::string& pointer, JSONType type);
+
+    // Returns nullptr for unsupported paths/types or a path without a typed
+    // column. Storage failures and inconsistent row counts propagate.
+    std::unique_ptr<ShreddingReader>
+    CreateShreddingReader(const std::string& pointer,
+                          JSONType type,
+                          int64_t segment_rows) const;
+
     PinWrapper<BsonInvertedIndex*>
     GetBsonIndex(milvus::OpContext* op_ctx) const {
         if (bson_index_cache_slot_ == nullptr) {
@@ -488,7 +531,7 @@ class JsonKeyStats {
     WriteMetaFile();
 
     void
-    LoadMetaFile(const std::string& meta_file_path);
+    LoadMetaFile(const std::string& remote_path, OpContext* ctx);
 
     void
     AddKeyStats(const std::vector<std::string>& path,
@@ -577,26 +620,31 @@ class JsonKeyStats {
 
     void
     LoadShreddingData(const std::vector<std::string>& index_files,
-                      const std::string& warmup_policy = "");
+                      const std::string& warmup_policy,
+                      OpContext* ctx);
 
     void
-    GetColumnSchemaFromParquet(int64_t column_group_id,
-                               const std::string& file);
+    ParseParquetSchema(const std::shared_ptr<arrow::Schema>& schema);
 
     void
-    GetCommonMetaFromParquet(const std::string& file);
+    ParseParquetLayout(
+        const std::string& file,
+        const std::shared_ptr<const arrow::KeyValueMetadata>& metadata);
 
     void
     LoadColumnGroup(int64_t column_group_id,
                     const std::vector<int64_t>& file_ids,
-                    const std::string& warmup_policy = "",
-                    const std::string& override_prefix = "");
+                    const std::string& warmup_policy,
+                    const std::string& override_prefix,
+                    std::span<const JsonStatsParquetMetadata> metadata,
+                    OpContext* ctx);
 
-    void
+    std::vector<JsonStatsParquetMetadata>
     LoadShreddingMeta(
         const std::vector<std::pair<int64_t, std::vector<int64_t>>>&
             sorted_files,
-        const std::string& override_prefix = "");
+        const std::string& override_prefix,
+        OpContext* ctx);
 
     std::string
     AddBucketName(const std::string& remote_prefix);
@@ -605,7 +653,8 @@ class JsonKeyStats {
     LoadSharedKeyIndex(const std::vector<std::string>& shared_key_index_files,
                        bool enable_mmap,
                        int64_t index_size,
-                       const std::string& warmup_policy = "");
+                       const std::string& warmup_policy,
+                       OpContext* ctx);
 
  private:
     proto::schema::FieldSchema schema_;

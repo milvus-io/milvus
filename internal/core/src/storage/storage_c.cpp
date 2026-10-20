@@ -23,6 +23,7 @@
 
 #include "PluginInterface.h"
 #include "common/EasyAssert.h"
+#include "common/init_c.h"
 #include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalFileIOPool.h"
@@ -198,6 +199,29 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
 }
 
 CStatus
+InitStorageRuntime(const int cpu_threads, const int io_threads) {
+    try {
+        if (cpu_threads <= 0 || io_threads <= 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "storage runtime thread counts must be positive");
+        }
+        const auto status = milvus_storage::ConfigureStorageRuntime(
+            static_cast<uint32_t>(cpu_threads),
+            static_cast<uint32_t>(io_threads));
+        if (!status.ok()) {
+            // Storage reports late/duplicate Tokio initialization as Invalid.
+            // With validated counts this is a runtime setup failure, not bad input.
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          status.ToString());
+        }
+        UpdateArrowIOThreadPoolMetrics();
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
 InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
     try {
         if (c_arrow_reader_config.hole_size_limit_bytes < 0) {
@@ -229,6 +253,16 @@ SetExternalVectorPartialNullAsRowNull(bool enabled) {
 bool
 GetExternalVectorPartialNullAsRowNull() {
     return milvus::storage::GetExternalVectorPartialNullAsRowNull();
+}
+
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes) {
+    return milvus::storage::SetExternalSparseConversionMemoryLimit(bytes);
+}
+
+int64_t
+GetExternalSparseConversionMemoryLimit() {
+    return milvus::storage::GetExternalSparseConversionMemoryLimit();
 }
 
 CStatus

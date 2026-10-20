@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <arrow/array/builder_primitive.h>
+#include <arrow/io/type_fwd.h>
 #include <arrow/scalar.h>
 #include <arrow/util/byte_size.h>
+#include <arrow/util/thread_pool.h>
 #include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -113,6 +115,40 @@ get_azure_storage_config() {
                           "",
                           false,
                           100};
+}
+
+TEST(StorageRuntimeDeathTest, ConfiguresBothPoolsAndPreservesFailure) {
+    // Rust runtime configuration is process-wide and cannot be reset.
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    ASSERT_EXIT(
+        {
+            const auto invalid = InitStorageRuntime(0, 3);
+            if (invalid.error_code != milvus::ConfigInvalid) {
+                std::_Exit(1);
+            }
+            std::free(const_cast<char*>(invalid.error_msg));
+
+            const auto status = InitStorageRuntime(2, 3);
+            if (status.error_code != 0 ||
+                arrow::GetCpuThreadPoolCapacity() != 2 ||
+                arrow::io::GetIOThreadPoolCapacity() != 3) {
+                std::_Exit(2);
+            }
+
+            const auto repeated = InitStorageRuntime(4, 5);
+            const bool preserved =
+                repeated.error_code == milvus::UnexpectedError &&
+                std::string(repeated.error_msg)
+                        .find("already been configured") != std::string::npos;
+            std::free(const_cast<char*>(repeated.error_msg));
+            if (!preserved || arrow::GetCpuThreadPoolCapacity() != 2 ||
+                arrow::io::GetIOThreadPoolCapacity() != 3) {
+                std::_Exit(3);
+            }
+            std::_Exit(0);
+        },
+        ::testing::ExitedWithCode(0),
+        "");
 }
 
 class StorageTest : public testing::Test {

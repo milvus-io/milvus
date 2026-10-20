@@ -50,6 +50,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// An immutable job/task source mismatch cannot be repaired by rescheduling.
+var errSnapshotTaskSource = errors.New("invalid snapshot task source")
+
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -63,9 +66,23 @@ func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	return res
 }
 
+// newTaskRecorder starts a task's latency recorder at its persisted
+// created_time, so a recorder rebuilt during recovery resumes the stage
+// latency instead of restarting at zero. An empty or unparseable value (a
+// record written before the field existed) falls back to now.
+func newTaskRecorder(header, createdTime string) *timerecord.TimeRecorder {
+	if ts, err := time.Parse(time.RFC3339, createdTime); err == nil {
+		return timerecord.NewTimeRecorderWithStart(header, ts)
+	}
+	return timerecord.NewTimeRecorder(header)
+}
+
 func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 	job ImportJob, alloc allocator.Allocator, importMeta ImportMeta,
 ) ([]ImportTask, error) {
+	fileGroups = splitImportFileGroupsByPartition(fileGroups, func(file *internalpb.ImportFile) int64 {
+		return file.GetSnapshotSource().GetTargetPartitionId()
+	})
 	idStart, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
 		return nil, err
@@ -83,11 +100,11 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 			CollectionID: job.GetCollectionID(),
 			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
-			CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			CreatedTime:  time.Now().Format(time.RFC3339),
 		}
 		task := &preImportTask{
 			importMeta: importMeta,
-			tr:         timerecord.NewTimeRecorder("preimport task"),
+			tr:         newTaskRecorder("preimport task", taskProto.GetCreatedTime()),
 			times:      taskcommon.NewTimes(),
 		}
 		task.task.Store(taskProto)
@@ -99,6 +116,9 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	job ImportJob, alloc allocator.Allocator, meta *meta, importMeta ImportMeta, segmentMaxSize int,
 ) ([]ImportTask, error) {
+	fileGroups = splitImportFileGroupsByPartition(fileGroups, func(file *datapb.ImportFileStats) int64 {
+		return file.GetImportFile().GetSnapshotSource().GetTargetPartitionId()
+	})
 	idBegin, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
 		return nil, err
@@ -112,13 +132,13 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 			NodeID:       NullNodeID,
 			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    group,
-			CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
+			CreatedTime:  time.Now().Format(time.RFC3339),
 		}
 		task := &importTask{
 			alloc:      alloc,
 			meta:       meta,
 			importMeta: importMeta,
-			tr:         timerecord.NewTimeRecorder("import task"),
+			tr:         newTaskRecorder("import task", taskProto.GetCreatedTime()),
 			times:      taskcommon.NewTimes(),
 		}
 		task.task.Store(taskProto)
@@ -138,6 +158,41 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 		tasks = append(tasks, task)
 	}
 	return tasks, nil
+}
+
+// Split within the existing size/count limits, without merging groups. A zero
+// destination is the unchanged ordinary/partition-key routing contract. Mapped
+// files retain their destination through WAL, catalog reload, and both phases.
+func splitImportFileGroupsByPartition[T any](groups [][]T, destination func(T) int64) [][]T {
+	result := make([][]T, 0, len(groups))
+	for _, group := range groups {
+		if len(group) == 0 {
+			result = append(result, group)
+			continue
+		}
+		byPartition := make(map[int64]int)
+		for _, file := range group {
+			id := destination(file)
+			index, ok := byPartition[id]
+			if !ok {
+				index = len(result)
+				byPartition[id] = index
+				result = append(result, nil)
+			}
+			result[index] = append(result[index], file)
+		}
+	}
+	return result
+}
+
+func importTaskPartitionIDs(task ImportTask, job ImportJob) []int64 {
+	files := task.GetFileStats()
+	if len(files) != 0 {
+		if id := files[0].GetImportFile().GetSnapshotSource().GetTargetPartitionId(); id != 0 {
+			return []int64{id}
+		}
+	}
+	return job.GetPartitionIDs()
 }
 
 func GetSegmentMaxSize(job ImportJob, meta *meta) int {
@@ -197,7 +252,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		for size > 0 {
 			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
 				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(),
-				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion)
+				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion, 0)
 			if err != nil {
 				return err
 			}
@@ -245,6 +300,7 @@ func AllocImportSegment(ctx context.Context,
 	dataTimestamp uint64,
 	level datapb.SegmentLevel,
 	storageVersion int64,
+	schemaVersion int32,
 ) (*SegmentInfo, error) {
 	id, err := alloc.AllocID(ctx)
 	if err != nil {
@@ -257,7 +313,18 @@ func AllocImportSegment(ctx context.Context,
 			return nil, err
 		}
 	}
+	return addImportSegment(ctx, meta, id, jobID, taskID, collectionID, partitionID, channelName, level, storageVersion, schemaVersion)
+}
 
+func addImportSegment(
+	ctx context.Context,
+	meta *meta,
+	id, jobID, taskID, collectionID, partitionID int64,
+	channelName string,
+	level datapb.SegmentLevel,
+	storageVersion int64,
+	schemaVersion int32,
+) (*SegmentInfo, error) {
 	segmentInfo := &datapb.SegmentInfo{
 		ID:             id,
 		CollectionID:   collectionID,
@@ -269,10 +336,17 @@ func AllocImportSegment(ctx context.Context,
 		Level:          level,
 		LastExpireTime: math.MaxUint64,
 		StorageVersion: storageVersion,
+		SchemaVersion:  schemaVersion,
 	}
 	segmentInfo.IsImporting = true
 	segment := NewSegmentInfo(segmentInfo)
-	if err = meta.AddSegment(ctx, segment); err != nil {
+	// A preallocated import segment has not written any binlog yet, so it must
+	// not carry a zero-value Statistics object; NewSegmentInfo fills one in
+	// when the caller leaves Stats nil. Reset it so import v3 result
+	// validation can tell a clean preallocated segment apart from one that
+	// already received output.
+	segmentInfo.Stats = nil
+	if err := meta.AddSegment(ctx, segment); err != nil {
 		mlog.Error(ctx, "failed to add import segment", mlog.Err(err))
 		return nil, err
 	}
@@ -287,30 +361,61 @@ func AllocImportSegment(ctx context.Context,
 	return segment, nil
 }
 
-func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
-	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
+func AssemblePreImportRequest(task ImportTask, job ImportJob) (*datapb.PreImportRequest, error) {
+	importFiles := lo.Map(task.GetFileStats(),
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStats.GetImportFile()
 		})
+	return assemblePreImportRequest(task, job, importFiles)
+}
 
+// AssemblePreImportV3Request builds the count-only preimport request for an
+// Import V3 task. The V3 record carries only ImportV3FileStats (file IDs, no
+// ImportFile), so its files are resolved against the frozen job; using the
+// shared AssemblePreImportRequest would send an empty import_files list.
+// Snapshot-sourced imports never reach V3, so the shared snapshot L0 lookup
+// below resolves to nil for these files.
+func AssemblePreImportV3Request(task *preImportV3Task, job ImportJob) (*datapb.PreImportRequest, error) {
+	jobFiles := lo.KeyBy(job.GetFiles(), func(file *internalpb.ImportFile) int64 { return file.GetId() })
+	importFiles := lo.FilterMap(task.GetV3FileStats(),
+		func(stat *datapb.ImportV3FileStats, _ int) (*internalpb.ImportFile, bool) {
+			file, ok := jobFiles[stat.GetFileId()]
+			return file, ok
+		})
+	return assemblePreImportRequest(task, job, importFiles)
+}
+
+func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {
+	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
+	if err != nil {
+		return nil, err
+	}
 	req := &datapb.PreImportRequest{
-		JobID:         task.GetJobID(),
-		TaskID:        task.GetTaskID(),
-		CollectionID:  task.GetCollectionID(),
-		PartitionIDs:  job.GetPartitionIDs(),
-		Vchannels:     job.GetVchannels(),
-		Schema:        job.GetSchema(),
-		ImportFiles:   importFiles,
-		Options:       job.GetOptions(),
-		TaskSlot:      task.GetTaskSlot(),
-		StorageConfig: createStorageConfig(),
-		PluginContext: GetReadPluginContext(job.GetOptions()),
+		JobID:            task.GetJobID(),
+		TaskID:           task.GetTaskID(),
+		CollectionID:     task.GetCollectionID(),
+		PartitionIDs:     importTaskPartitionIDs(task, job),
+		Vchannels:        job.GetVchannels(),
+		Schema:           job.GetSchema(),
+		ImportFiles:      importFiles,
+		Options:          job.GetOptions(),
+		TaskSlot:         task.GetTaskSlot(),
+		StorageConfig:    createStorageConfig(),
+		PluginContext:    GetReadPluginContext(job.GetOptions()),
+		SnapshotL0Source: l0Source,
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
-	return req
+	return req, nil
 }
 
 func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator.Allocator) (*datapb.ImportRequest, error) {
+	importFiles := lo.Map(task.GetFileStats(), func(stat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
+		return stat.GetImportFile()
+	})
+	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
+	if err != nil {
+		return nil, merr.Mark(err, errSnapshotTaskSource)
+	}
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
 		segment := meta.GetSegment(context.TODO(), segmentID)
@@ -326,7 +431,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ts := job.GetDataTs()
-	var err error
 	if ts == 0 {
 		ts, err = alloc.AllocTimestamp(ctx)
 		if err != nil {
@@ -356,10 +460,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		mlog.Uint64("ts", ts))...,
 	)
 
-	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
-		return fileStat.GetImportFile()
-	})
-
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	storageVersion := importStorageVersion(isL0Import)
 	useLoonFFI := importUseLoonFFI(isL0Import)
@@ -369,7 +469,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		JobID:             task.GetJobID(),
 		TaskID:            task.GetTaskID(),
 		CollectionID:      task.GetCollectionID(),
-		PartitionIDs:      job.GetPartitionIDs(),
+		PartitionIDs:      importTaskPartitionIDs(task, job),
 		Vchannels:         job.GetVchannels(),
 		Schema:            job.GetSchema(),
 		Files:             importFiles,
@@ -383,18 +483,60 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		PluginContext:     GetReadPluginContext(job.GetOptions()),
 		UseLoonFfi:        useLoonFFI,
 		RlsCheckPredicate: job.GetRlsCheckPredicate(),
+		SnapshotL0Source:  l0Source,
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
 }
 
 func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {
-	if len(files) == 0 {
-		return nil
+	var groups [][]*datapb.ImportFileStats
+	for _, scope := range groupSnapshotImportFiles(files, func(stat *datapb.ImportFileStats) *internalpb.ImportFile { return stat.GetImportFile() }) {
+		groups = append(groups, regroupImportFilesBySize(job, scope, segmentMaxSize)...)
 	}
+	return groups
+}
 
+// Group by the immutable source scope before applying phase-specific limits.
+// Descriptors without shared L0 and ordinary files retain their existing grouping.
+func groupSnapshotImportFiles[T any](files []T, getFile func(T) *internalpb.ImportFile) [][]T {
+	type scope struct {
+		channel     string
+		partitionID int64
+	}
+	indices := make(map[scope]int)
+	var groups [][]T
+	for _, file := range files {
+		key := scope{}
+		if source := getFile(file).GetSnapshotSource(); importutilv2.SnapshotSourceUsesSharedL0(source) {
+			key = scope{source.GetSourceChannel(), source.GetSourcePartitionId()}
+		}
+		index, ok := indices[key]
+		if !ok {
+			index = len(groups)
+			indices[key] = index
+			groups = append(groups, nil)
+		}
+		groups[index] = append(groups[index], file)
+	}
+	return groups
+}
+
+func groupPreImportFiles(files []*internalpb.ImportFile, count int) [][]*internalpb.ImportFile {
+	var groups [][]*internalpb.ImportFile
+	for _, scope := range groupSnapshotImportFiles(files, func(file *internalpb.ImportFile) *internalpb.ImportFile { return file }) {
+		groups = append(groups, lo.Chunk(scope, count)...)
+	}
+	return groups
+}
+
+func regroupImportFilesBySize(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {
 	threshold := paramtable.Get().DataCoordCfg.MaxSizeInMBPerImportTask.GetAsInt() * 1024 * 1024
-	maxSizePerFileGroup := segmentMaxSize * len(job.GetPartitionIDs()) * len(job.GetVchannels())
+	partitionNum := len(job.GetPartitionIDs())
+	if files[0].GetImportFile().GetSnapshotSource().GetTargetPartitionId() != 0 {
+		partitionNum = 1
+	}
+	maxSizePerFileGroup := segmentMaxSize * partitionNum * len(job.GetVchannels())
 	if maxSizePerFileGroup > threshold {
 		maxSizePerFileGroup = threshold
 	}
@@ -480,11 +622,77 @@ func CheckDiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta I
 	return requestSize, nil
 }
 
+// CheckImportV3DiskQuota is the V3 counterpart of CheckDiskQuota. V3 has no
+// PreImportTask file stats, so the planner passes the actual Reshard fragment
+// bytes. The hierarchical merge writes its intermediates to the DataNode's
+// local disk, so the object store only ever holds one copy of the normalized
+// data: the reshard fragments, which the final segments supersede and the job
+// GC then removes. The request therefore reserves the normalized data volume
+// itself -- the same decoded-volume metric CheckDiskQuota reserves -- which is
+// a conservative upper bound on the compressed physical bytes.
+func CheckImportV3DiskQuota(ctx context.Context, job ImportJob, meta *meta, importMeta ImportMeta, fragmentBytes int64) (int64, error) {
+	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
+		return 0, nil
+	}
+	if importutilv2.SkipDiskQuotaCheck(job.GetOptions()) {
+		mlog.Info(ctx, "skip disk quota check for import", mlog.FieldJobID(job.GetJobID()))
+		return 0, nil
+	}
+
+	var (
+		requestedTotal       int64
+		requestedCollections = make(map[int64]int64)
+	)
+	for _, j := range importMeta.GetJobBy(ctx) {
+		requested := j.GetRequestedDiskSize()
+		requestedTotal += requested
+		requestedCollections[j.GetCollectionID()] += requested
+	}
+
+	err := merr.WrapErrServiceQuotaExceeded("disk quota exceeded, please allocate more resources")
+	quotaInfo := meta.GetQuotaInfo()
+	totalUsage, collectionsUsage := quotaInfo.TotalBinlogSize, quotaInfo.CollectionBinlogSize
+	requestSize := fragmentBytes
+
+	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
+	if float64(totalUsage+requestedTotal+requestSize) > totalDiskQuota {
+		mlog.Warn(ctx, "global disk quota exceeded", mlog.FieldJobID(job.GetJobID()),
+			mlog.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
+			mlog.Int64("totalUsage", totalUsage),
+			mlog.Int64("requestedTotal", requestedTotal),
+			mlog.Int64("requestSize", requestSize),
+			mlog.Float64("totalDiskQuota", totalDiskQuota))
+		return 0, err
+	}
+	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
+	colID := job.GetCollectionID()
+	if float64(collectionsUsage[colID]+requestedCollections[colID]+requestSize) > collectionDiskQuota {
+		mlog.Warn(ctx, "collection disk quota exceeded", mlog.FieldJobID(job.GetJobID()),
+			mlog.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
+			mlog.Int64("collectionsUsage", collectionsUsage[colID]),
+			mlog.Int64("requestedCollection", requestedCollections[colID]),
+			mlog.Int64("requestSize", requestSize),
+			mlog.Float64("collectionDiskQuota", collectionDiskQuota))
+		return 0, err
+	}
+	return requestSize, nil
+}
+
 func getPendingProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
-	tasks := importMeta.GetTaskByJob(context.TODO(), jobID, WithType(PreImportTaskType))
-	preImportingFiles := lo.SumBy(tasks, func(task ImportTask) int {
-		return len(task.GetFileStats())
-	})
+	var preImportingFiles int
+	if job := importMeta.GetJob(ctx, jobID); job != nil && isV3Job(job) {
+		// V3 creates count-only PreImportTaskV3 tasks while the job is still
+		// Pending; each carries one ImportV3FileStats per covered file.
+		tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(PreImportTaskV3Type))
+		preImportingFiles = lo.SumBy(tasks, func(task ImportTask) int {
+			return len(task.(*preImportV3Task).GetV3FileStats())
+		})
+	} else {
+		tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(PreImportTaskType))
+		preImportingFiles = lo.SumBy(tasks, func(task ImportTask) int {
+			return len(task.GetFileStats())
+		})
+	}
 	totalFiles := len(importMeta.GetJob(ctx, jobID).GetFiles())
 	if totalFiles == 0 {
 		return 1
@@ -494,6 +702,20 @@ func getPendingProgress(ctx context.Context, jobID int64, importMeta ImportMeta)
 
 func getPreImportingProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
 	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(PreImportTaskType))
+	if job := importMeta.GetJob(ctx, jobID); job != nil && isV3Job(job) {
+		tasks = importMeta.GetTaskByJob(ctx, jobID, WithType(PreImportTaskV3Type))
+	}
+	completedTasks := lo.Filter(tasks, func(task ImportTask, _ int) bool {
+		return task.GetState() == datapb.ImportTaskStateV2_Completed
+	})
+	if len(tasks) == 0 {
+		return 1
+	}
+	return float32(len(completedTasks)) / float32(len(tasks))
+}
+
+func getReshardProgress(ctx context.Context, jobID int64, importMeta ImportMeta) float32 {
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ReshardTaskType))
 	completedTasks := lo.Filter(tasks, func(task ImportTask, _ int) bool {
 		return task.GetState() == datapb.ImportTaskStateV2_Completed
 	})
@@ -504,6 +726,21 @@ func getPreImportingProgress(ctx context.Context, jobID int64, importMeta Import
 }
 
 func getImportRowsInfo(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) (importedRows, totalRows int64) {
+	job := importMeta.GetJob(ctx, jobID)
+	if job != nil && isV3Job(job) {
+		tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskV3Type))
+		segmentIDs := make([]int64, 0)
+		for _, generic := range tasks {
+			task := generic.(*importTaskV3)
+			persisted := task.task.Load()
+			if segmentID := persisted.GetSegmentId(); segmentID != 0 {
+				segmentIDs = append(segmentIDs, segmentID)
+			}
+			totalRows += persisted.GetRows()
+		}
+		importedRows = meta.GetSegmentsTotalNumRows(segmentIDs)
+		return importedRows, totalRows
+	}
 	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	segmentIDs := make([]int64, 0)
 	for _, task := range tasks {
@@ -550,6 +787,23 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
 		return 1
 	}
+	if isV3Job(job) {
+		tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskV3Type))
+		targetSegmentIDs := make([]int64, 0)
+		for _, task := range tasks {
+			if segmentID := task.(*importTaskV3).task.Load().GetSegmentId(); segmentID != 0 {
+				segment := meta.GetHealthySegment(ctx, segmentID)
+				if segment != nil && segment.GetNumOfRows() > 0 {
+					targetSegmentIDs = append(targetSegmentIDs, segmentID)
+				}
+			}
+		}
+		if len(targetSegmentIDs) == 0 {
+			return 1
+		}
+		unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
+		return float32(len(targetSegmentIDs)-len(unindexed)) / float32(len(targetSegmentIDs))
+	}
 	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
 		return t.(*importTask).GetSegmentIDs()
@@ -569,11 +823,20 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 
 // GetJobProgress calculates the importing job progress.
 // The weight of each status is as follows:
+// ImportVersionV2:
 // 10%: Pending
 // 30%: PreImporting/AssigningIDRange
 // 30%: Importing
 // 10%: Stats
 // 10%: IndexBuilding
+// 10%: Completed
+// ImportVersionV3:
+// 10%: Pending
+// 5%: PreImporting/AssigningIDRange
+// 30%: Resharding
+// 5%: Planning
+// 10%: Importing
+// 30%: IndexBuilding
 // 10%: Completed
 // TODO: Wrap a function to map status to user status.
 // TODO: Save these progress to job instead of recalculating.
@@ -584,6 +847,15 @@ func GetJobProgress(ctx context.Context, jobID int64,
 	if job == nil {
 		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
 	}
+	if isV3Job(job) {
+		return getV3JobProgress(ctx, job, importMeta, meta)
+	}
+	return getV2JobProgress(ctx, job, importMeta, meta)
+}
+
+// getV2JobProgress maps the legacy import job states to progress.
+func getV2JobProgress(ctx context.Context, job ImportJob, importMeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
+	jobID := job.GetJobID()
 	switch job.GetState() {
 	case internalpb.ImportJobState_Pending:
 		progress := getPendingProgress(ctx, jobID, importMeta)
@@ -631,7 +903,62 @@ func GetJobProgress(ctx context.Context, jobID int64,
 	return 0, internalpb.ImportJobState_None, 0, 0, "unknown import job state"
 }
 
+// getV3JobProgress maps the Import V3 job states to progress.
+func getV3JobProgress(ctx context.Context, job ImportJob, importMeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
+	jobID := job.GetJobID()
+	switch job.GetState() {
+	case internalpb.ImportJobState_Pending:
+		progress := getPendingProgress(ctx, jobID, importMeta)
+		return int64(progress * 10), internalpb.ImportJobState_Pending, 0, 0, ""
+
+	case internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_AssigningIDRange:
+		progress := getPreImportingProgress(ctx, jobID, importMeta)
+		return 10 + int64(progress*5), internalpb.ImportJobState_Importing, 0, 0, ""
+
+	case internalpb.ImportJobState_Resharding:
+		progress := getReshardProgress(ctx, jobID, importMeta)
+		return 10 + 5 + int64(progress*30), internalpb.ImportJobState_Importing, 0, 0, ""
+
+	case internalpb.ImportJobState_Planning:
+		return 10 + 5 + 30, internalpb.ImportJobState_Importing, 0, 0, ""
+
+	case internalpb.ImportJobState_Importing:
+		progress, importedRows, totalRows := getImportingProgress(ctx, jobID, importMeta, meta)
+		return 10 + 5 + 30 + 5 + int64(progress*10), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
+
+	case internalpb.ImportJobState_IndexBuilding:
+		progress := getIndexBuildingProgress(ctx, jobID, importMeta, meta)
+		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
+		return 10 + 5 + 30 + 5 + 10 + int64(progress*30), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
+
+	case internalpb.ImportJobState_Uncommitted:
+		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
+		if job.GetAutoCommit() {
+			return 99, internalpb.ImportJobState_Importing, totalRows, totalRows, ""
+		}
+		return 99, internalpb.ImportJobState_Uncommitted, totalRows, totalRows, ""
+
+	case internalpb.ImportJobState_Committing:
+		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
+		if job.GetAutoCommit() {
+			return 99, internalpb.ImportJobState_Importing, totalRows, totalRows, ""
+		}
+		return 99, internalpb.ImportJobState_Committing, totalRows, totalRows, ""
+
+	case internalpb.ImportJobState_Completed:
+		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
+		return 100, internalpb.ImportJobState_Completed, totalRows, totalRows, ""
+
+	case internalpb.ImportJobState_Failed:
+		return 0, internalpb.ImportJobState_Failed, 0, 0, job.GetReason()
+	}
+	return 0, internalpb.ImportJobState_None, 0, 0, "unknown import job state"
+}
+
 func GetTaskProgresses(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) []*internalpb.ImportTaskProgress {
+	if job := importMeta.GetJob(ctx, jobID); job != nil && isV3Job(job) {
+		return getV3TaskProgresses(ctx, job, importMeta)
+	}
 	progresses := make([]*internalpb.ImportTaskProgress, 0)
 	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	for _, task := range tasks {
@@ -653,6 +980,67 @@ func GetTaskProgresses(ctx context.Context, jobID int64, importMeta ImportMeta, 
 				State:        task.GetState().String(),
 				ImportedRows: progress * fileStat.GetTotalRows() / 100,
 				TotalRows:    fileStat.GetTotalRows(),
+			})
+		}
+	}
+	return progresses
+}
+
+// getV3TaskProgresses projects the V3 per-file progress. V3 has no per-file
+// import task: a reshard task owns a set of source files and hashes them into
+// fragments, so one entry is emitted per source file of every reshard task.
+// The numerator is the rows the reshard worker has hashed for that file (hash
+// time, not the later merge flush); the denominator is the count-only preimport
+// row count when the job ran it. A job that skipped preimport (backup, or a
+// collection without a resolvable primary key) has no denominator: its file
+// entries report total_rows 0 and only reach 100 once the owning reshard run
+// completed.
+func getV3TaskProgresses(ctx context.Context, job ImportJob, importMeta ImportMeta) []*internalpb.ImportTaskProgress {
+	pathsByFile := make(map[int64]string)
+	for _, file := range job.GetFiles() {
+		pathsByFile[file.GetId()] = fmt.Sprintf("%v", file.GetPaths())
+	}
+	rowsByFile, sizeByFile := make(map[int64]int64), make(map[int64]int64)
+	for _, task := range importMeta.GetTaskByJob(ctx, job.GetJobID(), WithType(PreImportTaskV3Type)) {
+		for _, stat := range task.(*preImportV3Task).GetV3FileStats() {
+			fileID := stat.GetFileId()
+			rowsByFile[fileID] += stat.GetTotalRows()
+			sizeByFile[fileID] += stat.GetFileSize()
+		}
+	}
+
+	progresses := make([]*internalpb.ImportTaskProgress, 0)
+	for _, generic := range importMeta.GetTaskByJob(ctx, job.GetJobID(), WithType(ReshardTaskType)) {
+		task, ok := generic.(*reshardTask)
+		if !ok {
+			continue
+		}
+		p := task.task.Load()
+		hashed := make(map[int64]int64)
+		for _, progress := range task.getSourceProgress() {
+			hashed[progress.GetFileId()] = progress.GetHashedRows()
+		}
+		for _, fileID := range p.GetFileIds() {
+			totalRows := rowsByFile[fileID]
+			importedRows := hashed[fileID]
+			if totalRows > 0 && importedRows > totalRows {
+				importedRows = totalRows
+			}
+			progress := int64(0)
+			if totalRows > 0 {
+				progress = importedRows * 100 / totalRows
+			} else if p.GetState() == datapb.ImportTaskStateV2_Completed {
+				progress = 100
+			}
+			progresses = append(progresses, &internalpb.ImportTaskProgress{
+				FileName:     pathsByFile[fileID],
+				FileSize:     sizeByFile[fileID],
+				Reason:       p.GetReason(),
+				Progress:     progress,
+				CompleteTime: p.GetCompleteTime(),
+				State:        p.GetState().String(),
+				ImportedRows: importedRows,
+				TotalRows:    totalRows,
 			})
 		}
 	}
@@ -956,7 +1344,10 @@ func ValidateBinlogImportRequest(ctx context.Context, cm storage.ChunkManager,
 	reqFiles []*msgpb.ImportFile, options []*commonpb.KeyValuePair,
 ) error {
 	files := lo.Map(reqFiles, func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-		return &internalpb.ImportFile{Id: file.GetId(), Paths: file.GetPaths()}
+		return &internalpb.ImportFile{
+			Id:    file.GetId(),
+			Paths: file.GetPaths(),
+		}
 	})
 	_, err := ListBinlogImportRequestFiles(ctx, cm, files, options)
 	return err
@@ -1051,7 +1442,7 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
 	if task.GetType() == ImportTaskType {
 		// ImportTask use dynamic buffer size calculated by vchannels and partitions
-		taskBufferSize = baseBufferSize * len(job.GetVchannels()) * len(job.GetPartitionIDs())
+		taskBufferSize = baseBufferSize * len(job.GetVchannels()) * len(importTaskPartitionIDs(task, job))
 	} else {
 		// PreImportTask use fixed buffer size
 		taskBufferSize = baseBufferSize
@@ -1062,6 +1453,23 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 		taskBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
 	}
 	memoryLimitPerSlot := paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt()
+	if files := task.GetFileStats(); !isL0Import && len(files) > 0 && files[0].GetImportFile().GetSnapshotSource() != nil {
+		// Typed tasks are homogeneous. Before selecting a worker we do not know
+		// its pool size or memory allowance, so use the file count as an upper
+		// bound on concurrent readers. The DN allocator remains authoritative
+		// and may admit fewer readers or smaller row buffers.
+		deleteBudget := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
+		taskBufferSize = len(files) * (taskBufferSize + deleteBudget)
+		if importutilv2.SnapshotSourceUsesSharedL0(files[0].GetImportFile().GetSnapshotSource()) {
+			// One delete batch is reserved per task. The per-reader delete
+			// allowances above become the shared task's bitmap pool on the DN.
+			taskBufferSize += deleteBudget
+		}
+		// Round up only for the new snapshot accounting. Keep the existing
+		// ordinary/legacy L0 slot calculation unchanged.
+		memoryBasedSlots := (taskBufferSize-1)/memoryLimitPerSlot + 1
+		return max(cpuBasedSlots, memoryBasedSlots)
+	}
 	memoryBasedSlots := taskBufferSize / memoryLimitPerSlot
 
 	// Return the larger value to ensure both CPU and memory constraints are satisfied

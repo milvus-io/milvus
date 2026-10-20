@@ -186,6 +186,24 @@ func GetDenseFloatAutoIndexParams(collectionProperties []*commonpb.KeyValuePair)
 	return autoIndexCfg.IndexParams.GetAsJSONMap()
 }
 
+// GetSparseAutoIndexParams returns the metric-specific sparse autoindex build
+// params. BM25 function output fields select the BM25 config even when the
+// request omits metric_type. Each metric-specific ParamItem falls back to the
+// legacy autoIndex.params.sparse.build key when it is not configured.
+func GetSparseAutoIndexParams(metricType string, functionType schemapb.FunctionType) map[string]string {
+	autoIndexCfg := &paramtable.Get().AutoIndexConfig
+	var config map[string]string
+	if metricType == metric.BM25 || functionType == schemapb.FunctionType_BM25 {
+		config = autoIndexCfg.SparseBM25IndexParams.GetAsJSONMap()
+	} else {
+		config = autoIndexCfg.SparseIPIndexParams.GetAsJSONMap()
+	}
+	if len(config) == 0 {
+		return autoIndexCfg.SparseIndexParams.GetAsJSONMap()
+	}
+	return config
+}
+
 // PrepareFunctionOutputIndexParams expands the user-provided extra params of a
 // function output field's bound index and produces its concrete build params.
 // An explicit index_type passes through unchanged (function-type defaults
@@ -241,7 +259,7 @@ func PrepareFunctionOutputIndexParams(functionType schemapb.FunctionType, field 
 	case typeutil.IsDenseFloatVectorType(field.GetDataType()):
 		config = AdjustAutoIndexParamsByDataType(GetDenseFloatAutoIndexParams(collectionProperties), field.GetDataType())
 	case typeutil.IsSparseFloatVectorType(field.GetDataType()):
-		config = autoIndexCfg.SparseIndexParams.GetAsJSONMap()
+		config = GetSparseAutoIndexParams(userMetric, functionType)
 	case typeutil.IsBinaryVectorType(field.GetDataType()):
 		// A MinHash output field with no user metric must resolve to the
 		// deduplicate config (MINHASH_LSH/MHJACCARD): the generic binary config

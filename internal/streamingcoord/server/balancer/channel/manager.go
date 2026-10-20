@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -41,7 +42,7 @@ type (
 		StreamingVersion       *streamingpb.StreamingVersion
 		Version                typeutil.VersionInt64Pair
 		CChannelAssignment     *streamingpb.CChannelAssignment
-		PChannelView           *PChannelView
+		PChannelView           *PChannelView // channel metas only, Stats is nil
 		Relations              []types.PChannelInfoAssigned
 		ReplicateConfiguration *commonpb.ReplicateConfiguration
 	}
@@ -82,6 +83,11 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 		streamingVersion: streamingVersion,
 		replicateConfig:  replicateConfig,
 	}
+	replicateRole := replicateutil.RolePrimary
+	if replicateConfig != nil {
+		replicateRole = replicateConfig.GetCurrentCluster().Role()
+	}
+	cm.replicateRole.Store(int32(replicateRole))
 
 	// Register the channel manager singleton after recovery.
 	register(cm)
@@ -217,6 +223,7 @@ type ChannelManager struct {
 	// 1 if streaming service has been run once.
 	streamingEnableNotifiers []*syncutil.AsyncTaskNotifier[struct{}]
 	replicateConfig          *replicateutil.ConfigHelper
+	replicateRole            atomic.Int32 // lock-free snapshot published after replicateConfig is persisted
 }
 
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
@@ -262,13 +269,7 @@ func (cm *ChannelManager) IsStreamingVersionAtLeast(version int64) bool {
 
 // ReplicateRole returns the replicate role of the channel manager.
 func (cm *ChannelManager) ReplicateRole() replicateutil.Role {
-	cm.cond.L.Lock()
-	defer cm.cond.L.Unlock()
-
-	if cm.replicateConfig == nil {
-		return replicateutil.RolePrimary
-	}
-	return cm.replicateConfig.GetCurrentCluster().Role()
+	return replicateutil.Role(cm.replicateRole.Load())
 }
 
 // AddPChannels adds new PChannels dynamically. Channels that already exist are skipped.
@@ -380,8 +381,9 @@ func (cm *ChannelManager) MarkStreamingVersion(ctx context.Context, version int6
 // CurrentPChannelsView returns the current view of pchannels.
 func (cm *ChannelManager) CurrentPChannelsView() *PChannelView {
 	cm.cond.L.Lock()
-	view := newPChannelView(cm.channels)
+	view := newPChannelMetaView(cm.channels)
 	cm.cond.L.Unlock()
+	view.fillStats()
 
 	for _, channel := range view.Channels {
 		cm.metrics.UpdateVChannelTotal(channel)
@@ -650,6 +652,7 @@ func (cm *ChannelManager) UpdateReplicateConfiguration(ctx context.Context, resu
 	cm.cond.UnsafeBroadcast()
 	cm.version.Local++
 	cm.metrics.UpdateAssignmentVersion(cm.version.Local)
+	cm.replicateRole.Store(int32(config.GetCurrentCluster().Role()))
 	return nil
 }
 
@@ -725,7 +728,7 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 	}
 	version := cm.version
 	cchannelAssignment := proto.Clone(cm.cchannelMeta).(*streamingpb.CChannelMeta)
-	pchannelViews := newPChannelView(cm.channels)
+	pchannelViews := newPChannelMetaView(cm.channels)
 	cm.cond.L.Unlock()
 
 	var replicateConfig *commonpb.ReplicateConfiguration

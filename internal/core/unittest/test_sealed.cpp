@@ -22,6 +22,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -30,6 +31,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -456,6 +458,41 @@ class WarmupTestReader : public milvus_storage::api::Reader {
     std::string* chunk_rows_thread_name_;
     std::shared_ptr<std::atomic<int>> chunk_reader_calls_;
     std::shared_ptr<std::atomic<int>> estimate_calls_;
+};
+
+// Holds every synchronous chunk reader open until `parties` opens are in
+// flight, so it only succeeds when those opens run concurrently.
+class RendezvousTestReader : public WarmupTestReader {
+ public:
+    RendezvousTestReader(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups,
+        int parties)
+        : WarmupTestReader(std::move(column_groups)), parties_(parties) {
+    }
+
+    arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>
+    get_chunk_reader(int64_t index,
+                     const std::shared_ptr<std::vector<std::string>>& columns)
+        const override {
+        {
+            std::unique_lock lock(mutex_);
+            ++arrived_;
+            cv_.notify_all();
+            if (!cv_.wait_for(lock, std::chrono::seconds(10), [&] {
+                    return arrived_ >= parties_;
+                })) {
+                return arrow::Status::Invalid(
+                    "chunk reader opens did not run concurrently");
+            }
+        }
+        return WarmupTestReader::get_chunk_reader(index, columns);
+    }
+
+ private:
+    const int parties_;
+    mutable std::mutex mutex_;
+    mutable std::condition_variable cv_;
+    mutable int arrived_{0};
 };
 
 class CancellationObservingIndexTranslator
@@ -2611,6 +2648,18 @@ TEST(Sealed, QueryAllNullableFields) {
               dataset_size);
     EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
               dataset_size);
+
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        const auto offset = ids_ds->GetIds()[i];
+        if (int8_valid_values[offset]) {
+            EXPECT_EQ(int8_result->scalars().int_data().data(i),
+                      static_cast<int32_t>(int8_values[offset]));
+        }
+        if (int16_valid_values[offset]) {
+            EXPECT_EQ(int16_result->scalars().int_data().data(i),
+                      static_cast<int32_t>(int16_values[offset]));
+        }
+    }
 
     EXPECT_EQ(GetFieldDataRowValidData(*bool_result).size(), dataset_size);
     EXPECT_EQ(GetFieldDataRowValidData(*int8_result).size(), dataset_size);
@@ -4789,8 +4838,7 @@ TEST(SealedSegmentCowState,
         {vec},
         segment_load_info,
         schema,
-        std::move(reader),
-        /*eager_load=*/true);
+        std::move(reader));
 
     auto proxy_column = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
     ASSERT_NE(proxy_column, nullptr);
@@ -4824,8 +4872,7 @@ TEST(SealedSegmentCowState,
         {vec},
         segment_load_info,
         schema,
-        std::move(reader),
-        /*eager_load=*/true);
+        std::move(reader));
 
     EXPECT_NE(std::dynamic_pointer_cast<ProxyChunkColumn>(column), nullptr);
 }
@@ -4861,8 +4908,7 @@ TEST(SealedSegmentCowState,
         {vec},
         segment_load_info,
         schema,
-        std::move(reader),
-        /*eager_load=*/true));
+        std::move(reader)));
 
     EXPECT_NE(chunk_rows_thread, caller_thread);
     EXPECT_TRUE(chunk_rows_thread_name.starts_with("MIDD_SEGC_POOL"))
@@ -4915,10 +4961,10 @@ TEST(SealedSegmentCowState,
                 column_groups,
                 std::make_shared<milvus_storage::api::Properties>(),
                 {{0, {vec}}},
+                /*lazy_cg_field_ids=*/{},
                 segment_load_info,
                 schema,
-                std::move(reader),
-                /*eager_load=*/true);
+                std::move(reader));
             ASSERT_EQ(columns.size(), 1);
             auto column =
                 std::dynamic_pointer_cast<ProxyChunkColumn>(columns.front());
@@ -4995,11 +5041,11 @@ TEST(SealedSegmentCowState, MixedManifestTasksOnlyPreopenRegularReaders) {
         auto columns = sealed->TestStageLoadColumnGroupsWithReader(
             column_groups,
             std::make_shared<milvus_storage::api::Properties>(),
+            /*eager_cg_field_ids=*/{},
             {{0, {vec}}, {0, {pk}}},
             load_info,
             schema,
-            std::move(reader),
-            /*eager_load=*/false);
+            std::move(reader));
         ASSERT_EQ(columns.size(), 2);
         auto lazy = std::dynamic_pointer_cast<ProxyChunkColumn>(columns[0]);
         auto regular = std::dynamic_pointer_cast<ProxyChunkColumn>(columns[1]);
@@ -5057,11 +5103,11 @@ TEST(SealedSegmentCowState, StagedManifestTasksShareColumnGroupSizeEstimate) {
     auto columns = sealed->TestStageLoadColumnGroupsWithReader(
         column_groups,
         std::make_shared<milvus_storage::api::Properties>(),
+        /*eager_cg_field_ids=*/{},
         std::move(tasks),
         segment_load_info,
         schema,
-        std::move(reader),
-        /*eager_load=*/false);
+        std::move(reader));
 
     ASSERT_EQ(columns.size(), 2);
     EXPECT_EQ(chunk_reader_calls->load(std::memory_order_relaxed), 2);
@@ -5084,11 +5130,11 @@ TEST(SealedSegmentCowState, StagedManifestTasksShareColumnGroupSizeEstimate) {
         columns = sealed->TestStageLoadColumnGroupsWithReader(
             column_groups,
             std::make_shared<milvus_storage::api::Properties>(),
+            /*eager_cg_field_ids=*/{},
             {{0, {first}}, {0, {second}}},
             segment_load_info,
             schema,
-            std::move(lazy_reader),
-            /*eager_load=*/false);
+            std::move(lazy_reader));
         ASSERT_EQ(columns.size(), 2);
         EXPECT_EQ(chunk_reader_calls->load(), 0);
         EXPECT_EQ(estimate_calls->load(), 0);
@@ -5119,6 +5165,183 @@ TEST(SealedSegmentCowState, StagedManifestTasksShareColumnGroupSizeEstimate) {
         EXPECT_EQ(estimate_calls->load(), 1);
         EXPECT_TRUE(captured_reader.expired());
     }
+}
+
+TEST(SealedSegmentCowState, StagedEagerAndLazyManifestTasksOpenInOneBatch) {
+    LazyColumnGroupConfigGuard lazy_group_guard(false);
+    auto async_guard = SetStorageV2AsyncLoadForTest(false);
+    auto schema = std::make_shared<Schema>();
+    auto eager = schema->AddDebugField("eager", DataType::INT64);
+    auto lazy = schema->AddDebugField("lazy", DataType::INT64);
+
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 1010, SegcoreConfig::default_config());
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1010);
+    load_proto.set_num_of_rows(1);
+    load_proto.set_storageversion(STORAGE_V3);
+    load_proto.set_manifest_path("test-manifest");
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    for (const auto field_id : {eager, lazy}) {
+        auto column_group =
+            std::make_shared<milvus_storage::api::ColumnGroup>();
+        column_group->columns = {std::to_string(field_id.get())};
+        column_groups->push_back(std::move(column_group));
+    }
+
+    // A serial lazy batch would leave the eager open waiting alone.
+    auto columns = sealed->TestStageLoadColumnGroupsWithReader(
+        column_groups,
+        std::make_shared<milvus_storage::api::Properties>(),
+        {{0, {eager}}},
+        {{1, {lazy}}},
+        segment_load_info,
+        schema,
+        std::make_shared<RendezvousTestReader>(column_groups, /*parties=*/2));
+
+    ASSERT_EQ(columns.size(), 2);
+    EXPECT_EQ(columns[0]->DataByteSize(), 1);
+    EXPECT_EQ(columns[1]->DataByteSize(), 1);
+}
+
+TEST(SealedSegmentCowState, ResolvesVortexColumnGroupLocalFormatFallback) {
+    const FieldId pk(100);
+    const FieldId raw(101);
+    const FieldId vortex(102);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldMeta(FieldName("pk"),
+                               pk,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_RAW));
+    schema->AddField(FieldMeta(FieldName("raw"),
+                               raw,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_RAW));
+    schema->AddField(FieldMeta(FieldName("vortex"),
+                               vortex,
+                               DataType::INT64,
+                               false,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_VORTEX));
+    schema->set_primary_field_id(pk);
+
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->format = LOON_FORMAT_VORTEX;
+
+    column_group->columns = {schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Vortex);
+    column_group->columns = {schema->get_storage_column_name(raw),
+                             schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Default);
+    column_group->columns = {schema->get_storage_column_name(pk),
+                             schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Raw);
+
+    column_group->format = "parquet";
+    column_group->columns = {schema->get_storage_column_name(vortex)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Default);
+    column_group->columns = {schema->get_storage_column_name(pk)};
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormat(column_group, schema),
+        VortexColumnGroupLocalFormat::Raw);
+}
+
+TEST(SealedSegmentCowState, ResolvesCompleteVortexGroupsPerSchemaSnapshot) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_external_source("s3://bucket/path");
+    schema_proto.set_external_spec(R"({"format":"parquet"})");
+    auto add_field = [&](int64_t id,
+                         const std::string& column,
+                         const std::string& local_format) {
+        auto* field = schema_proto.add_fields();
+        field->set_fieldid(id);
+        field->set_name("field_" + std::to_string(id));
+        field->set_data_type(milvus::proto::schema::DataType::Int64);
+        field->set_external_field(column);
+        auto* param = field->add_type_params();
+        param->set_key("local_format");
+        param->set_value(local_format);
+        return field;
+    };
+    add_field(100, "id", LOCAL_FORMAT_RAW)->set_is_primary_key(true);
+    add_field(101, "shared", LOCAL_FORMAT_VORTEX);
+    add_field(102, "shared", LOCAL_FORMAT_VORTEX);
+    add_field(103, "direct", LOCAL_FORMAT_VORTEX);
+    add_field(104, "raw", LOCAL_FORMAT_RAW);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto add_group = [&](const std::string& format,
+                         std::vector<std::string> columns) {
+        auto group = std::make_shared<milvus_storage::api::ColumnGroup>();
+        group->format = format;
+        group->columns = std::move(columns);
+        groups->push_back(std::move(group));
+    };
+    add_group("parquet", {"direct"});
+    add_group(LOON_FORMAT_VORTEX, {});
+    add_group(LOON_FORMAT_VORTEX, {"shared"});
+    add_group(LOON_FORMAT_VORTEX, {"direct"});
+    add_group(LOON_FORMAT_VORTEX, {"direct", "raw"});
+    add_group(LOON_FORMAT_VORTEX, {"999"});
+    add_group(LOON_FORMAT_VORTEX, {"direct", "999"});
+    add_group(LOON_FORMAT_VORTEX, {"id", "direct"});
+    add_group("parquet", {"id"});
+    // Numeric field-id fallback does not establish a physical-name match.
+    add_group(LOON_FORMAT_VORTEX, {"103"});
+    using Format = VortexColumnGroupLocalFormat;
+    const std::vector<Format> expected = {Format::Default,
+                                          Format::Default,
+                                          Format::Vortex,
+                                          Format::Vortex,
+                                          Format::Default,
+                                          Format::Default,
+                                          Format::Default,
+                                          Format::Raw,
+                                          Format::Raw,
+                                          Format::Default};
+    EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, schema),
+              expected);
+
+    // A Raw alias excludes its entire group, including a Vortex-only projection.
+    schema_proto.mutable_fields(2)->mutable_type_params(0)->set_value(
+        LOCAL_FORMAT_RAW);
+    auto next_schema = Schema::ParseFrom(schema_proto);
+    auto next_expected = expected;
+    next_expected[2] = Format::Default;
+    EXPECT_EQ(
+        sealed->TestResolveVortexColumnGroupLocalFormats(groups, next_schema),
+        next_expected);
+    EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, schema),
+              expected);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {

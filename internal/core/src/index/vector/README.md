@@ -66,6 +66,11 @@ not enough to conclude that the lifetime is safe.
 - The caller keeps DiskANN's complete input files until the synchronous Build finishes; the output
   staging is owned separately. An Artifact/Reader that lives on afterwards does not borrow the input
   files or the validity metadata.
+  Before invoking the backend, the builder declares the exact raw and supplied sidecar paths for
+  read-only stream access. These borrowed paths do not enter the output inventory or its cleanup.
+- Stream output metadata may arrive before or after `Close`. Only successfully closed files enter
+  the artifact inventory; repeated metadata must match the completed raw file's size and transport.
+  A metadata failure stays recorded even if a later submission succeeds.
 - The in-memory artifact writes logical entries; slicing, assembly, and transport naming belong to
   the source/sink. The packed V3 vector format is not implemented at present.
 - An mmap load streams the ordered engine entries and concatenates them into a local file.

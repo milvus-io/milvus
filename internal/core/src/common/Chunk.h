@@ -538,6 +538,13 @@ class ArrayChunk : public Chunk {
                   "ArrayChunk::ValueAt is not supported");
     }
 
+    // Element count of row idx, read from the offsets table without
+    // touching the element data.
+    uint32_t
+    LengthAt(int64_t idx) const {
+        return offsets_lens_[2 * idx + 1];
+    }
+
  private:
     milvus::DataType element_type_;
     uint32_t* offsets_lens_;

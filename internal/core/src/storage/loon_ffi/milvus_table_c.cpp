@@ -603,12 +603,12 @@ ReadManifestWithFFI(const std::string& manifest_path,
     auto version = j.at("ver").get<int64_t>();
 
     TransactionGuard transaction;
-    ThrowIfFFIError(loon_transaction_begin(base_path.c_str(),
-                                           properties,
-                                           version,
-                                           LOON_TRANSACTION_RESOLVE_FAIL,
-                                           1,
-                                           &transaction.handle),
+    ThrowIfFFIError(loon_transaction_open(base_path.c_str(),
+                                          properties,
+                                          version,
+                                          LOON_TRANSACTION_RESOLVE_FAIL,
+                                          1,
+                                          &transaction.handle),
                     "open source manifest transaction " + manifest_path);
 
     ManifestGuard manifest;
@@ -854,12 +854,12 @@ loon_milvus_table_create_manifest_from_segment_manifests(
 
         TransactionGuard transaction;
         ThrowIfFFIError(
-            loon_transaction_begin(base_path,
-                                   properties,
-                                   0,
-                                   LOON_TRANSACTION_RESOLVE_OVERWRITE,
-                                   10,
-                                   &transaction.handle),
+            loon_transaction_open(base_path,
+                                  properties,
+                                  0,
+                                  LOON_TRANSACTION_RESOLVE_OVERWRITE,
+                                  10,
+                                  &transaction.handle),
             "open milvus-table target manifest transaction");
 
         std::unordered_set<std::string> added_delta_paths;
