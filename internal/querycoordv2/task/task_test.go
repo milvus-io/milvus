@@ -2312,6 +2312,131 @@ func (suite *TaskSuite) TestRemoveStartedTaskReturnsError() {
 	suite.NoError(task2.Err())
 }
 
+// A forced release goes around the delegator's serving guard: the segment is removed from the
+// delegator's distribution through SyncDistribution on the shard leader, then released directly
+// on the worker that holds it, with NeedTransfer off so the delegator is not asked again. The task
+// completes once the segment has left the distribution, and the refusal it ends is cleared.
+func (suite *TaskSuite) TestForceReleaseSegmentTask() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	leaderNode := int64(2)
+	workerNode := int64(3)
+	segmentID := suite.releaseSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	var synced *querypb.SyncDistributionRequest
+	suite.cluster.EXPECT().SyncDistribution(mock.Anything, leaderNode, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
+			synced = req
+			return merr.Success(), nil
+		}).Once()
+	var released *querypb.ReleaseSegmentsRequest
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, workerNode, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
+			suite.NotNil(synced, "the distribution is updated before the worker is released")
+			released = req
+			return merr.Success(), nil
+		}).Once()
+
+	suite.dist.ChannelDistManager.Update(leaderNode, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: suite.collection, ChannelName: channel.ChannelName},
+		Node:         leaderNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           leaderNode,
+			CollectionID: suite.collection,
+			Channel:      channel.ChannelName,
+			Segments:     map[int64]*querypb.SegmentDist{segmentID: {NodeID: workerNode, Version: 0}},
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	suite.dist.SegmentDistManager.Update(workerNode, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{ID: segmentID, CollectionID: suite.collection, PartitionID: 100, InsertChannel: channel.ChannelName},
+		Node:        workerNode,
+	})
+	suite.dist.ReleaseRefusals.Refused(suite.collection, suite.replica.GetID(), segmentID, workerNode, 0, time.Now().Add(-time.Hour))
+
+	task, err := NewSegmentTask(ctx, timeout, WrapIDSource(0), suite.collection, suite.replica, commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(workerNode, ActionTypeReduce, channel.GetChannelName(), segmentID, querypb.DataScope_Historical, 0))
+	suite.NoError(err)
+	task.SetForceRelease()
+	task.SetPriority(TaskPriorityHigh)
+	suite.NoError(suite.scheduler.Add(task))
+	suite.AssertTaskNum(0, 1, 0, 1)
+
+	suite.dispatchAndWait(workerNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Require().NotNil(synced)
+	suite.Equal(suite.collection, synced.GetCollectionID())
+	suite.Equal(channel.ChannelName, synced.GetChannel())
+	suite.Equal(suite.replica.GetID(), synced.GetReplicaID())
+	suite.Require().Len(synced.GetActions(), 1)
+	suite.Equal(querypb.SyncType_Remove, synced.GetActions()[0].GetType())
+	suite.Equal(segmentID, synced.GetActions()[0].GetSegmentID())
+	suite.Equal(workerNode, synced.GetActions()[0].GetNodeID())
+	suite.Require().NotNil(released)
+	suite.False(released.GetNeedTransfer())
+	suite.Equal([]int64{segmentID}, released.GetSegmentIDs())
+	suite.Equal(channel.ChannelName, released.GetShard())
+	suite.Equal(querypb.DataScope_Historical, released.GetScope())
+
+	// the segment leaves the distribution: the task is done and the refusal it ended is cleared
+	suite.dist.SegmentDistManager.Update(workerNode)
+	suite.dispatchAndWait(workerNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
+	_, refused := suite.dist.ReleaseRefusals.Get(suite.replica.GetID(), segmentID)
+	suite.False(refused)
+}
+
+// The scheduler feeds the refusal tracker from task outcomes: a release that fails with the
+// delegator's refusal starts a refusal, a release that fails some other way does not, a release
+// that goes through ends it, and a load that goes through is progress for the replica.
+func (suite *TaskSuite) TestReleaseRefusalObserved() {
+	ctx := context.Background()
+	tracker := suite.dist.ReleaseRefusals
+	newRelease := func() *SegmentTask {
+		task, err := NewSegmentTask(ctx, 10*time.Second, WrapIDSource(0), suite.collection, suite.replica, commonpb.LoadPriority_LOW,
+			NewSegmentActionWithScope(3, ActionTypeReduce, "channel", 1, querypb.DataScope_Historical, 0))
+		suite.Require().NoError(err)
+		return task
+	}
+
+	refused := newRelease()
+	refused.Fail(merr.WrapErrSegmentReleaseRefused([]int64{1}, "still in the delegator's readable set"))
+	suite.scheduler.remove(refused)
+	refusal, ok := tracker.Get(suite.replica.GetID(), 1)
+	suite.Require().True(ok)
+	suite.Equal(int64(3), refusal.NodeID)
+	suite.Equal(suite.collection, refusal.CollectionID)
+
+	other := newRelease()
+	other.Fail(merr.WrapErrServiceInternal("shard leader changed"))
+	suite.scheduler.remove(other)
+	_, ok = tracker.Get(suite.replica.GetID(), 1)
+	suite.True(ok, "another failure neither starts nor ends a refusal")
+
+	_, ok = tracker.LastLoadSucceeded(suite.replica.GetID())
+	suite.False(ok)
+	loaded, err := NewSegmentTask(ctx, 10*time.Second, WrapIDSource(0), suite.collection, suite.replica, commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(3, ActionTypeGrow, "channel", 2, querypb.DataScope_Historical, 0))
+	suite.Require().NoError(err)
+	loaded.SetStatus(TaskStatusSucceeded)
+	suite.scheduler.remove(loaded)
+	_, ok = tracker.LastLoadSucceeded(suite.replica.GetID())
+	suite.True(ok)
+
+	released := newRelease()
+	released.SetStatus(TaskStatusSucceeded)
+	suite.scheduler.remove(released)
+	_, ok = tracker.Get(suite.replica.GetID(), 1)
+	suite.False(ok)
+}
+
 func TestTask(t *testing.T) {
 	suite.Run(t, new(TaskSuite))
 }

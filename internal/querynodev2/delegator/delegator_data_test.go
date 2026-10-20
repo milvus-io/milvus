@@ -1897,7 +1897,7 @@ func (s *DelegatorDataSuite) TestReleaseSegmentsRefusesServedSegment() {
 			SegmentIDs: []int64{1000},
 			Scope:      scope,
 		}, false)
-		s.ErrorIs(err, merr.ErrServiceInternal, scope.String())
+		s.ErrorIs(err, merr.ErrSegmentReleaseRefused, scope.String())
 		s.False(merr.IsRetryableErr(err), scope.String())
 		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Len(sealed, 1)

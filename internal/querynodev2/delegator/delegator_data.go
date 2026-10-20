@@ -1293,8 +1293,9 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			// Non-retriable on purpose: a retriable error makes the QueryCoord grpc
 			// client retry in place for ~53s, holding an executor slot and starving
 			// the loads the delegator needs before its readable set can advance.
-			// The segment checker regenerates the release task on its next round.
-			return merr.WrapErrServiceInternalMsg("segments %v are still in the delegator's readable set", stillServing)
+			// The segment checker regenerates the release task on its next round, and
+			// the dedicated error lets QueryCoord count how long the refusal lasts.
+			return merr.WrapErrSegmentReleaseRefused(stillServing, "still in the delegator's readable set")
 		}
 	} else {
 		signal = sd.distribution.RemoveDistributions(sealed, growing)

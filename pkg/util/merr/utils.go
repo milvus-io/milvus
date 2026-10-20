@@ -943,6 +943,17 @@ func WrapErrSegmentRequestResourceFailed(
 	return err
 }
 
+// WrapErrSegmentReleaseRefused is returned by a delegator that refuses to release sealed segments
+// it still serves. Not retriable: the query coordinator regenerates the release once the segments
+// have left the delegator's readable set, or forces it (see queryCoord.forceReleaseRefusedSegmentAfter).
+func WrapErrSegmentReleaseRefused(segmentIDs []int64, msg ...string) error {
+	err := wrapFields(ErrSegmentReleaseRefused, value("segments", segmentIDs))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrSegmentNotLoaded(id int64, msg ...string) error {
 	err := wrapFields(ErrSegmentNotLoaded, value("segment", id))
 	if len(msg) > 0 {

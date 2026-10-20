@@ -1049,6 +1049,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.BalanceCheckCollectionMaxCount.GetAsInt())
 		assert.Equal(t, 30, Params.ResourceExhaustionPenaltyDuration.GetAsInt())
 		assert.Equal(t, 10, Params.ResourceExhaustionCleanupInterval.GetAsInt())
+		assert.Equal(t, 600, Params.ForceReleaseRefusedSegmentAfter.GetAsInt())
 
 		assert.False(t, Params.AutoscalePrecheckEnabled.GetAsBool())
 		assert.False(t, Params.AutoscaleEnabled.GetAsBool())
