@@ -366,10 +366,9 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
         [this, batch_size](OffsetVector* input) -> ColumnVectorPtr {
         TargetBitmap valid_res;
         if (expr_->column_.element_level_) {
-            valid_res = TargetBitmap(batch_size, true);
-            if (input == nullptr) {
-                MoveCursor();
-            }
+            // A null element stays UNKNOWN. Without input this consumes the
+            // batch.
+            valid_res = ProcessElementValidity(input, batch_size);
         } else if (input != nullptr) {
             valid_res =
                 ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input);

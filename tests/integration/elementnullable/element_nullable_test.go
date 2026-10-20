@@ -491,18 +491,18 @@ func (s *ElementNullableSuite) TestGrowingSealedSearchAndExpressions() {
 		s.Contains(err.Error(), "embedding-list search is not supported for element-nullable vector array field "+nullName)
 	}
 
-	// Element-level predicates on element-nullable sub-fields stay rejected.
+	// Element-level predicates on element-nullable sub-fields: the null
+	// element of pk 1 is UNKNOWN, its first element matches.
 	for _, expr := range []string{
 		"element_filter(items, $[ints] > 0)",
 		"MATCH_ANY(items, $[ints] > 0)",
 	} {
-		result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+		resp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 			CollectionName: name, Expr: expr, OutputFields: []string{"pk"},
 		})
-		s.Require().NoError(err)
-		err = merr.Error(result.GetStatus())
-		s.Require().Error(err)
-		s.Contains(err.Error(), "not supported")
+		s.Require().NoError(merr.CheckRPCCall(resp, err), expr)
+		s.Require().NotEmpty(resp.GetFieldsData(), expr)
+		s.Equal([]int64{1}, resp.GetFieldsData()[0].GetScalars().GetLongData().GetData(), expr)
 	}
 
 	// Row-level filters: ints is [11, NULL], [] and a NULL struct row. A null

@@ -1361,7 +1361,10 @@ ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
     auto data_type = field.get_data_type();
 
     if (column_info.is_element_level()) {
-        Assert(data_type == DataType::ARRAY);
+        // `$[x] IS NULL` checks one struct element of a scalar, nested Array
+        // or vector sub-field.
+        Assert(data_type == DataType::ARRAY ||
+               data_type == DataType::VECTOR_ARRAY);
         Assert(field.get_element_type() ==
                static_cast<DataType>(column_info.element_type()));
     } else {

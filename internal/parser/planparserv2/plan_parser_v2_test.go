@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	clientroaring "github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -4582,6 +4583,405 @@ func TestExpr_ElementNullableStructSubFieldRowFilter(t *testing.T) {
 	assert.Equal(t, int64(10004), vectorLength.GetColumnInfo().GetFieldId())
 	assert.Equal(t, schemapb.DataType_ArrayOfVector, vectorLength.GetColumnInfo().GetDataType())
 	assert.Equal(t, schemapb.DataType_FloatVector, vectorLength.GetColumnInfo().GetElementType())
+}
+
+const (
+	elemNullNestedFieldID   = 10001
+	elemNullScalarFieldID   = 10003
+	elemNullEnVecFieldID    = 10004
+	elemNullVecFieldID      = 10005
+	elemNullEnNestedFieldID = 10006
+)
+
+// newElementNullExprSchema adds to struct_array an Array<VarChar> sub-field
+// (nested), an element-nullable scalar (en), an element-nullable vector
+// (en_vec), a vector (vec) and an element-nullable Array<VarChar> (en_nested).
+// structNullable makes the struct nullable and, as the proxy does, every
+// sub-field nullable.
+func newElementNullExprSchema(t *testing.T, structNullable bool) *typeutil.SchemaHelper {
+	schema := newTestSchema(true)
+	leaf := func(dataType schemapb.DataType) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: dataType}}
+	}
+	array := func(element *schemapb.TypeSchema, nullable bool) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: element}, Nullable: nullable}
+	}
+	dim := []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}
+	structField := schema.StructArrayFields[0]
+	structField.Fields = append(structField.Fields,
+		&schemapb.FieldSchema{
+			FieldID: elemNullNestedFieldID, Name: "struct_array[nested]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array, TypeSchema: array(array(leaf(schemapb.DataType_VarChar), false), false),
+		},
+		&schemapb.FieldSchema{
+			FieldID: elemNullScalarFieldID, Name: "struct_array[en]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64, ElementNullable: true,
+		},
+		&schemapb.FieldSchema{
+			FieldID: elemNullEnVecFieldID, Name: "struct_array[en_vec]", DataType: schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector, ElementNullable: true, TypeParams: dim,
+		},
+		&schemapb.FieldSchema{
+			FieldID: elemNullVecFieldID, Name: "struct_array[vec]", DataType: schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector, TypeParams: dim,
+		},
+		&schemapb.FieldSchema{
+			FieldID: elemNullEnNestedFieldID, Name: "struct_array[en_nested]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array, ElementNullable: true,
+			TypeSchema: array(array(leaf(schemapb.DataType_VarChar), true), false),
+		},
+	)
+	if structNullable {
+		structField.Nullable = true
+		for _, subField := range structField.GetFields() {
+			subField.Nullable = true
+		}
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return helper
+}
+
+// assertElementColumn checks a ColumnInfo built by
+// getColumnInfoFromStructSubField: data_type and element_type are the
+// sub-field element type and there is no nested_path.
+func assertElementColumn(t *testing.T, expr string, columnInfo *planpb.ColumnInfo, fieldID int64, dataType schemapb.DataType, nullable bool) {
+	require.NotNil(t, columnInfo, expr)
+	assert.Equal(t, fieldID, columnInfo.GetFieldId(), expr)
+	assert.Equal(t, dataType, columnInfo.GetDataType(), expr)
+	assert.Equal(t, dataType, columnInfo.GetElementType(), expr)
+	assert.True(t, columnInfo.GetIsElementLevel(), expr)
+	assert.Empty(t, columnInfo.GetNestedPath(), expr)
+	assert.Equal(t, nullable, columnInfo.GetNullable(), expr)
+}
+
+func requireNullExpr(t *testing.T, expr string, node *planpb.Expr, op planpb.NullExpr_NullOp) *planpb.NullExpr {
+	nullExpr := node.GetNullExpr()
+	require.NotNil(t, nullExpr, "%s: %v", expr, node)
+	assert.Equal(t, op, nullExpr.GetOp(), expr)
+	return nullExpr
+}
+
+func requireBinaryExpr(t *testing.T, expr string, node *planpb.Expr, op planpb.BinaryExpr_BinaryOp) *planpb.BinaryExpr {
+	binary := node.GetBinaryExpr()
+	require.NotNil(t, binary, "%s: %v", expr, node)
+	require.Equal(t, op, binary.GetOp(), expr)
+	return binary
+}
+
+// $[sub] IS NULL / IS NOT NULL inside MATCH_* and element_filter is an
+// element-level NullExpr on scalar, vector and Array<T> sub-fields.
+func TestExpr_ElementLevelNullExpr(t *testing.T) {
+	subFields := []struct {
+		name            string
+		fieldID         int64
+		dataType        schemapb.DataType
+		elementNullable bool
+	}{
+		{"sub_int", structSubIntFieldID, schemapb.DataType_Int32, false},
+		{"en", elemNullScalarFieldID, schemapb.DataType_Int64, true},
+		{"vec", elemNullVecFieldID, schemapb.DataType_FloatVector, false},
+		{"en_vec", elemNullEnVecFieldID, schemapb.DataType_FloatVector, true},
+		{"nested", elemNullNestedFieldID, schemapb.DataType_Array, false},
+		{"en_nested", elemNullEnNestedFieldID, schemapb.DataType_Array, true},
+	}
+	matchPredicate := func(matchType planpb.MatchType, count int64) func(*testing.T, string, *planpb.Expr) *planpb.Expr {
+		return func(t *testing.T, expr string, node *planpb.Expr) *planpb.Expr {
+			match := node.GetMatchExpr()
+			require.NotNil(t, match, expr)
+			assert.Equal(t, "struct_array", match.GetStructName(), expr)
+			assert.Equal(t, matchType, match.GetMatchType(), expr)
+			assert.Equal(t, count, match.GetCount(), expr)
+			return match.GetPredicate()
+		}
+	}
+	contexts := []struct {
+		format    string
+		predicate func(*testing.T, string, *planpb.Expr) *planpb.Expr
+	}{
+		{`MATCH_ANY(struct_array, %s)`, matchPredicate(planpb.MatchType_MatchAny, 0)},
+		{`MATCH_ALL(struct_array, %s)`, matchPredicate(planpb.MatchType_MatchAll, 0)},
+		{`MATCH_LEAST(struct_array, %s, threshold=2)`, matchPredicate(planpb.MatchType_MatchLeast, 2)},
+		{`MATCH_MOST(struct_array, %s, threshold=1)`, matchPredicate(planpb.MatchType_MatchMost, 1)},
+		{`MATCH_EXACT(struct_array, %s, threshold=3)`, matchPredicate(planpb.MatchType_MatchExact, 3)},
+		{`element_filter(struct_array, %s)`, func(t *testing.T, expr string, node *planpb.Expr) *planpb.Expr {
+			elementFilter := node.GetElementFilterExpr()
+			require.NotNil(t, elementFilter, expr)
+			assert.Equal(t, "struct_array", elementFilter.GetStructName(), expr)
+			assert.Nil(t, elementFilter.GetPredicate(), expr)
+			return elementFilter.GetElementExpr()
+		}},
+	}
+	ops := []struct {
+		text string
+		op   planpb.NullExpr_NullOp
+	}{
+		{"IS NULL", planpb.NullExpr_IsNull},
+		{"is null", planpb.NullExpr_IsNull},
+		{"IS NOT NULL", planpb.NullExpr_IsNotNull},
+		{"is not null", planpb.NullExpr_IsNotNull},
+	}
+
+	for _, structNullable := range []bool{false, true} {
+		helper := newElementNullExprSchema(t, structNullable)
+		for _, sub := range subFields {
+			for _, context := range contexts {
+				for _, op := range ops {
+					expr := fmt.Sprintf(context.format, fmt.Sprintf("$[%s] %s", sub.name, op.text))
+					predicate := context.predicate(t, expr, parseSearchPredicates(t, helper, expr))
+					nullExpr := requireNullExpr(t, expr, predicate, op.op)
+					assertElementColumn(t, expr, nullExpr.GetColumnInfo(), sub.fieldID, sub.dataType,
+						sub.elementNullable || structNullable)
+				}
+			}
+		}
+	}
+}
+
+func TestExpr_ElementLevelNullExprCombinations(t *testing.T) {
+	helper := newElementNullExprSchema(t, false)
+	assertEnColumn := func(t *testing.T, expr string, columnInfo *planpb.ColumnInfo) {
+		assertElementColumn(t, expr, columnInfo, elemNullScalarFieldID, schemapb.DataType_Int64, true)
+	}
+	// Operands built by VisitStructSubField keep data_type=Array and carry the
+	// element type in element_type.
+	assertEnOperandColumn := func(t *testing.T, expr string, columnInfo *planpb.ColumnInfo) {
+		require.NotNil(t, columnInfo, expr)
+		assert.Equal(t, int64(elemNullScalarFieldID), columnInfo.GetFieldId(), expr)
+		assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType(), expr)
+		assert.Equal(t, schemapb.DataType_Int64, columnInfo.GetElementType(), expr)
+		assert.True(t, columnInfo.GetIsElementLevel(), expr)
+		assert.Empty(t, columnInfo.GetNestedPath(), expr)
+		assert.True(t, columnInfo.GetNullable(), expr)
+	}
+	matchPredicate := func(t *testing.T, expr string) *planpb.Expr {
+		match := parseSearchPredicates(t, helper, expr).GetMatchExpr()
+		require.NotNil(t, match, expr)
+		return match.GetPredicate()
+	}
+	elementExpr := func(t *testing.T, expr string) *planpb.Expr {
+		elementFilter := parseSearchPredicates(t, helper, expr).GetElementFilterExpr()
+		require.NotNil(t, elementFilter, expr)
+		return elementFilter.GetElementExpr()
+	}
+
+	t.Run("or with a comparison", func(t *testing.T) {
+		for _, expr := range []string{
+			`MATCH_ALL(struct_array, $[en] != 1 || $[en] IS NULL)`,
+			`MATCH_ANY(struct_array, $[en] != 1 or $[en] is null)`,
+			`MATCH_LEAST(struct_array, $[en] != 1 || $[en] IS NULL, threshold=1)`,
+			`MATCH_MOST(struct_array, $[en] != 1 || $[en] IS NULL, threshold=1)`,
+			`MATCH_EXACT(struct_array, $[en] != 1 || $[en] IS NULL, threshold=1)`,
+		} {
+			or := requireBinaryExpr(t, expr, matchPredicate(t, expr), planpb.BinaryExpr_LogicalOr)
+			notEqual := or.GetLeft().GetUnaryRangeExpr()
+			require.NotNil(t, notEqual, expr)
+			assert.Equal(t, planpb.OpType_NotEqual, notEqual.GetOp(), expr)
+			assertEnOperandColumn(t, expr, notEqual.GetColumnInfo())
+			assertEnColumn(t, expr, requireNullExpr(t, expr, or.GetRight(), planpb.NullExpr_IsNull).GetColumnInfo())
+		}
+
+		expr := `element_filter(struct_array, $[en] != 1 || $[en] IS NULL)`
+		or := requireBinaryExpr(t, expr, elementExpr(t, expr), planpb.BinaryExpr_LogicalOr)
+		require.NotNil(t, or.GetLeft().GetUnaryRangeExpr(), expr)
+		assertEnColumn(t, expr, requireNullExpr(t, expr, or.GetRight(), planpb.NullExpr_IsNull).GetColumnInfo())
+	})
+
+	t.Run("and across sub-fields", func(t *testing.T) {
+		expr := `MATCH_ANY(struct_array, $[en] IS NOT NULL && $[sub_int] > 1)`
+		and := requireBinaryExpr(t, expr, matchPredicate(t, expr), planpb.BinaryExpr_LogicalAnd)
+		assertEnColumn(t, expr, requireNullExpr(t, expr, and.GetLeft(), planpb.NullExpr_IsNotNull).GetColumnInfo())
+		greater := and.GetRight().GetUnaryRangeExpr()
+		require.NotNil(t, greater, expr)
+		assert.Equal(t, int64(structSubIntFieldID), greater.GetColumnInfo().GetFieldId(), expr)
+
+		expr = `MATCH_LEAST(struct_array, $[en] IS NULL && $[nested] IS NOT NULL, threshold=2)`
+		and = requireBinaryExpr(t, expr, matchPredicate(t, expr), planpb.BinaryExpr_LogicalAnd)
+		assertEnColumn(t, expr, requireNullExpr(t, expr, and.GetLeft(), planpb.NullExpr_IsNull).GetColumnInfo())
+		assertElementColumn(t, expr, requireNullExpr(t, expr, and.GetRight(), planpb.NullExpr_IsNotNull).GetColumnInfo(),
+			elemNullNestedFieldID, schemapb.DataType_Array, false)
+
+		expr = `element_filter(struct_array, ($[en] IS NULL || $[en] > 5) && $[en_vec] IS NOT NULL)`
+		and = requireBinaryExpr(t, expr, elementExpr(t, expr), planpb.BinaryExpr_LogicalAnd)
+		or := requireBinaryExpr(t, expr, and.GetLeft(), planpb.BinaryExpr_LogicalOr)
+		assertEnColumn(t, expr, requireNullExpr(t, expr, or.GetLeft(), planpb.NullExpr_IsNull).GetColumnInfo())
+		require.NotNil(t, or.GetRight().GetUnaryRangeExpr(), expr)
+		assertElementColumn(t, expr, requireNullExpr(t, expr, and.GetRight(), planpb.NullExpr_IsNotNull).GetColumnInfo(),
+			elemNullEnVecFieldID, schemapb.DataType_FloatVector, true)
+	})
+
+	t.Run("not", func(t *testing.T) {
+		// The rewriter does not visit MATCH predicates, so NOT stays.
+		for _, expr := range []string{
+			`MATCH_ANY(struct_array, !($[en] IS NULL))`,
+			`MATCH_ANY(struct_array, not $[en] is null)`,
+		} {
+			not := matchPredicate(t, expr).GetUnaryExpr()
+			require.NotNil(t, not, expr)
+			assert.Equal(t, planpb.UnaryExpr_Not, not.GetOp(), expr)
+			assertEnColumn(t, expr, requireNullExpr(t, expr, not.GetChild(), planpb.NullExpr_IsNull).GetColumnInfo())
+		}
+		// Inside element_filter, NOT IS NULL is rewritten to IS NOT NULL.
+		expr := `element_filter(struct_array, not ($[en_vec] IS NULL))`
+		assertElementColumn(t, expr, requireNullExpr(t, expr, elementExpr(t, expr), planpb.NullExpr_IsNotNull).GetColumnInfo(),
+			elemNullEnVecFieldID, schemapb.DataType_FloatVector, true)
+		expr = `element_filter(struct_array, !($[en] IS NOT NULL))`
+		assertEnColumn(t, expr, requireNullExpr(t, expr, elementExpr(t, expr), planpb.NullExpr_IsNull).GetColumnInfo())
+	})
+
+	t.Run("nested array sub-field", func(t *testing.T) {
+		expr := `MATCH_ANY(struct_array, array_contains($[en_nested], "a") || $[en_nested] IS NULL)`
+		or := requireBinaryExpr(t, expr, matchPredicate(t, expr), planpb.BinaryExpr_LogicalOr)
+		contains := or.GetLeft().GetJsonContainsExpr()
+		require.NotNil(t, contains, expr)
+		assert.Equal(t, int64(elemNullEnNestedFieldID), contains.GetColumnInfo().GetFieldId(), expr)
+		assert.Equal(t, schemapb.DataType_VarChar, contains.GetColumnInfo().GetElementType(), expr)
+		assertElementColumn(t, expr, requireNullExpr(t, expr, or.GetRight(), planpb.NullExpr_IsNull).GetColumnInfo(),
+			elemNullEnNestedFieldID, schemapb.DataType_Array, true)
+
+		expr = `MATCH_ALL(struct_array, array_length($[en_nested]) > 0 || $[en_nested] IS NULL)`
+		or = requireBinaryExpr(t, expr, matchPredicate(t, expr), planpb.BinaryExpr_LogicalOr)
+		length := or.GetLeft().GetBinaryArithOpEvalRangeExpr()
+		require.NotNil(t, length, expr)
+		assert.Equal(t, planpb.ArithOpType_ArrayLength, length.GetArithOp(), expr)
+		assertElementColumn(t, expr, requireNullExpr(t, expr, or.GetRight(), planpb.NullExpr_IsNull).GetColumnInfo(),
+			elemNullEnNestedFieldID, schemapb.DataType_Array, true)
+	})
+
+	t.Run("document-level composition", func(t *testing.T) {
+		// The rewriter may reorder AND operands.
+		expr := `Int64Field > 1 && MATCH_ANY(struct_array, $[en] IS NULL)`
+		and := requireBinaryExpr(t, expr, parseSearchPredicates(t, helper, expr), planpb.BinaryExpr_LogicalAnd)
+		match, other := and.GetLeft(), and.GetRight()
+		if match.GetMatchExpr() == nil {
+			match, other = other, match
+		}
+		require.NotNil(t, other.GetUnaryRangeExpr(), expr)
+		require.NotNil(t, match.GetMatchExpr(), expr)
+		requireNullExpr(t, expr, match.GetMatchExpr().GetPredicate(), planpb.NullExpr_IsNull)
+
+		expr = `MATCH_ANY(struct_array, $[en] IS NULL) || MATCH_ALL(struct_array, $[en] IS NOT NULL)`
+		or := requireBinaryExpr(t, expr, parseSearchPredicates(t, helper, expr), planpb.BinaryExpr_LogicalOr)
+		requireNullExpr(t, expr, or.GetLeft().GetMatchExpr().GetPredicate(), planpb.NullExpr_IsNull)
+		requireNullExpr(t, expr, or.GetRight().GetMatchExpr().GetPredicate(), planpb.NullExpr_IsNotNull)
+
+		expr = `not MATCH_ALL(struct_array, $[en] IS NOT NULL)`
+		not := parseSearchPredicates(t, helper, expr).GetUnaryExpr()
+		require.NotNil(t, not, expr)
+		requireNullExpr(t, expr, not.GetChild().GetMatchExpr().GetPredicate(), planpb.NullExpr_IsNotNull)
+	})
+
+	t.Run("template value beside IS NULL", func(t *testing.T) {
+		expr := `MATCH_ANY(struct_array, $[en] IS NULL || $[en] == {v})`
+		parsed, err := ParseExpr(helper, expr, map[string]*schemapb.TemplateValue{
+			"v": generateTemplateValue(schemapb.DataType_Int64, int64(7)),
+		})
+		require.NoError(t, err)
+		or := requireBinaryExpr(t, expr, parsed.GetMatchExpr().GetPredicate(), planpb.BinaryExpr_LogicalOr)
+		assertEnColumn(t, expr, requireNullExpr(t, expr, or.GetLeft(), planpb.NullExpr_IsNull).GetColumnInfo())
+		equal := or.GetRight().GetUnaryRangeExpr()
+		require.NotNil(t, equal, expr)
+		assert.Equal(t, int64(7), equal.GetValue().GetInt64Val(), expr)
+	})
+
+	// An element of an element_nullable sub-field can be null, so the
+	// rewriter must not fold predicates on it to constants.
+	t.Run("element_nullable predicates are not folded", func(t *testing.T) {
+		expr := `element_filter(struct_array, $[en] in [1, 2] && $[en] in [3])`
+		and := requireBinaryExpr(t, expr, elementExpr(t, expr), planpb.BinaryExpr_LogicalAnd)
+		require.NotNil(t, and.GetLeft().GetUnaryRangeExpr(), expr)
+		assertEnOperandColumn(t, expr, and.GetLeft().GetUnaryRangeExpr().GetColumnInfo())
+		require.NotNil(t, and.GetRight().GetTermExpr(), expr)
+		assertEnOperandColumn(t, expr, and.GetRight().GetTermExpr().GetColumnInfo())
+
+		expr = `element_filter(struct_array, not ($[en] in [1, 2] && $[en] in [3]))`
+		not := elementExpr(t, expr).GetUnaryExpr()
+		require.NotNil(t, not, expr)
+		requireBinaryExpr(t, expr, not.GetChild(), planpb.BinaryExpr_LogicalAnd)
+
+		// Elements of a sub-field that is not element_nullable are never null.
+		expr = `element_filter(struct_array, $[sub_int] in [1, 2] && $[sub_int] in [3])`
+		assert.True(t, rewriter.IsAlwaysFalseExpr(elementExpr(t, expr)), expr)
+	})
+}
+
+// element_filter in an element-level search on a vector sub-field accepts
+// $[sub] IS NULL / IS NOT NULL on scalar and vector sub-fields.
+func TestExpr_ElementLevelNullExprInElementLevelSearch(t *testing.T) {
+	helper := newElementNullExprSchema(t, false)
+	for _, test := range []struct {
+		annsField string
+		fieldID   int64
+	}{
+		{"struct_array[en_vec]", elemNullEnVecFieldID},
+		{"struct_array[vec]", elemNullVecFieldID},
+	} {
+		expr := `element_filter(struct_array, $[en_vec] IS NOT NULL)`
+		plan, err := CreateSearchPlan(helper, expr, test.annsField, &planpb.QueryInfo{}, nil, nil)
+		require.NoError(t, err, expr)
+		anns := plan.GetVectorAnns()
+		assert.Equal(t, test.fieldID, anns.GetFieldId())
+		elementFilter := anns.GetPredicates().GetElementFilterExpr()
+		require.NotNil(t, elementFilter, expr)
+		assertElementColumn(t, expr,
+			requireNullExpr(t, expr, elementFilter.GetElementExpr(), planpb.NullExpr_IsNotNull).GetColumnInfo(),
+			elemNullEnVecFieldID, schemapb.DataType_FloatVector, true)
+
+		expr = `Int64Field > 0 && element_filter(struct_array, $[en] IS NULL || $[vec] IS NULL)`
+		plan, err = CreateSearchPlan(helper, expr, test.annsField, &planpb.QueryInfo{}, nil, nil)
+		require.NoError(t, err, expr)
+		elementFilter = plan.GetVectorAnns().GetPredicates().GetElementFilterExpr()
+		require.NotNil(t, elementFilter, expr)
+		require.NotNil(t, elementFilter.GetPredicate().GetUnaryRangeExpr(), expr)
+		or := requireBinaryExpr(t, expr, elementFilter.GetElementExpr(), planpb.BinaryExpr_LogicalOr)
+		assertElementColumn(t, expr, requireNullExpr(t, expr, or.GetLeft(), planpb.NullExpr_IsNull).GetColumnInfo(),
+			elemNullScalarFieldID, schemapb.DataType_Int64, true)
+		assertElementColumn(t, expr, requireNullExpr(t, expr, or.GetRight(), planpb.NullExpr_IsNull).GetColumnInfo(),
+			elemNullVecFieldID, schemapb.DataType_FloatVector, false)
+	}
+}
+
+func TestExpr_ElementLevelNullExprRejections(t *testing.T) {
+	helper := newElementNullExprSchema(t, false)
+	assertRejected := func(t *testing.T, expr string, want string) {
+		_, err := ParseExpr(helper, expr, nil)
+		require.Error(t, err, expr)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, expr)
+		assert.Contains(t, err.Error(), want, expr)
+	}
+
+	// $[sub] outside MATCH_* / element_filter.
+	for _, test := range []struct{ expr, field string }{
+		{`$[en] IS NULL`, "en"},
+		{`$[en] is not null`, "en"},
+		{`$[sub_int] IS NULL`, "sub_int"},
+		{`$[en_vec] IS NULL`, "en_vec"},
+		{`$[en_nested] IS NOT NULL`, "en_nested"},
+		{`Int64Field > 1 && $[en] IS NULL`, "en"},
+		{`not $[en] IS NULL`, "en"},
+		{`MATCH_ANY(struct_array, $[en] > 1) || $[en] IS NULL`, "en"},
+	} {
+		assertRejected(t, test.expr, fmt.Sprintf("$[%s] syntax can only be used inside ElementFilter or MATCH_*", test.field))
+	}
+
+	// Row-level struct sub-fields stay rejected, also inside an element context.
+	for _, test := range []struct{ expr, operand string }{
+		{`struct_array[en] IS NULL`, "struct_array[en]"},
+		{`struct_array[en] is not null`, "struct_array[en]"},
+		{`struct_array[0][en] IS NULL`, "struct_array[0][en]"},
+		{`struct_array[1][en] IS NOT NULL`, "struct_array[1][en]"},
+		{`struct_array[en_vec] IS NULL`, "struct_array[en_vec]"},
+		{`struct_array[0][en_nested] IS NULL`, "struct_array[0][en_nested]"},
+		{`MATCH_ANY(struct_array, struct_array[en] IS NULL)`, "struct_array[en]"},
+		{`element_filter(struct_array, struct_array[0][en] IS NOT NULL)`, "struct_array[0][en]"},
+	} {
+		assertRejected(t, test.expr, fmt.Sprintf(
+			"IS NULL / IS NOT NULL is not supported on struct sub-field %s; it can only be applied to the struct array field struct_array",
+			test.operand))
+	}
+
+	assertRejected(t, `MATCH_ANY(struct_array, $[missing] IS NULL)`, "array field not found: struct_array[missing]")
+	assertRejected(t, `element_filter(struct_array, $[missing] IS NOT NULL)`, "array field not found: struct_array[missing]")
 }
 
 func TestExpr_StructIndexField(t *testing.T) {
