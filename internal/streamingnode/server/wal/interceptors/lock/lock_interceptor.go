@@ -21,16 +21,9 @@ type lockAppendInterceptor struct {
 	buildParam *interceptors.InterceptorBuildParam
 }
 
-func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
-	g := r.acquireLockGuard(ctx, msg)
-	defer func() {
-		// A rejected or deduplicated operation is not a durable abort boundary.
-		abort := err == nil
-		if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
-			abort = abort && !message.MustAsMutableAlterReplicateConfigMessageV2(msg).Header().Ignore
-		}
-		g(abort)
-	}()
+func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
+	unlock := r.acquireLockGuard(msg)
+	defer unlock()
 
 	// Row locks are taken under the shard lifecycle lock and before TimeTick
 	// allocates the write timestamp, so a later lock holder always receives a
@@ -46,7 +39,25 @@ func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 		}
 		defer release()
 	}
-	return append(ctx, msg)
+
+	msgID, err := append(ctx, msg)
+	if err != nil || !msg.MessageType().IsExclusiveRequired() {
+		return msgID, err
+	}
+	if msg.MessageType() == message.MessageTypeAlterReplicateConfig &&
+		message.MustAsMutableAlterReplicateConfigMessageV2(msg).Header().Ignore {
+		return msgID, nil
+	}
+
+	// Only a durable exclusive operation ends transactions, while still holding
+	// the WAL lock. Failed, deduplicated and explicitly ignored operations do not.
+	vchannel := msg.VChannel()
+	if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
+		r.txnManager.FailTxnAtVChannel("")
+	} else if !funcutil.IsControlChannel(vchannel) {
+		r.txnManager.FailTxnAtVChannel(vchannel)
+	}
+	return msgID, nil
 }
 
 func (r *lockAppendInterceptor) rowLock() interceptors.MessageRowLock {
@@ -56,26 +67,17 @@ func (r *lockAppendInterceptor) rowLock() interceptors.MessageRowLock {
 	return r.buildParam.RowLock
 }
 
-// acquireLockGuard acquires the lock for the vchannel and return a function as a guard.
-func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.MutableMessage) func(bool) {
+// acquireLockGuard acquires the required WAL locks and returns only their unlock function.
+func (r *lockAppendInterceptor) acquireLockGuard(msg message.MutableMessage) func() {
 	vchannel := msg.VChannel()
 	if msg.MessageType().IsExclusiveRequired() {
 		if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
 			r.glock.Lock()
-			return func(abort bool) {
-				if abort {
-					r.txnManager.FailTxnAtVChannel("")
-				}
-				r.glock.Unlock()
-			}
+			return r.glock.Unlock
 		} else if !funcutil.IsControlChannel(vchannel) {
 			r.glock.RLock()
 			r.vchannelLocker.Lock(vchannel)
-			return func(abort bool) {
-				// A transaction cannot commit across a durable exclusive operation.
-				if abort {
-					r.txnManager.FailTxnAtVChannel(vchannel)
-				}
+			return func() {
 				r.vchannelLocker.Unlock(vchannel)
 				r.glock.RUnlock()
 			}
@@ -90,7 +92,7 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 	// shared lock. Row-level exclusion is taken by PK in DoAppend.
 	r.glock.RLock()
 	r.vchannelLocker.RLock(vchannel)
-	return func(_ bool) {
+	return func() {
 		r.vchannelLocker.RUnlock(vchannel)
 		r.glock.RUnlock()
 	}

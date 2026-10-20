@@ -16,8 +16,10 @@ See [Message Semantic Docs](../message/message.md) for per-message lock requirem
 ## Local flush and replication
 
 Every successfully appended exclusive operation aborts transactions in its lock
-scope, regardless of their local or replicated origin. The same guard releases
-references and then unlocks; failed or deduplicated operations do not abort.
+scope, regardless of their local or replicated origin. `DoAppend` explicitly
+cleans up transactions after append succeeds, then its deferred unlock releases
+the locks. The lock guard only manages locking. Failed or deduplicated operations
+do not abort.
 An ignored AlterReplicateConfig record is also a no-op. ManualFlush affects one
 business VChannel per copy; FlushAll and topology changes affect the PChannel.
 Replication prefix cleanup completes under the same outer WAL lock before replay

@@ -53,7 +53,7 @@ No complete ID manifest, predecessor chain, per-attempt key or ReplicateTerm is 
 
 A duplicate Begin preserves an intact prefix. Successful local exclusive operations
 clear the scoped prefix through the replicate acker and abort sessions through
-the common lock guard, all before releasing the WAL lock. The next replayed Begin
+the lock interceptor after successful append, all before releasing the WAL lock. The next replayed Begin
 starts fresh. Failed and deduplicated operations do not discard the prefix. Repeated Commit is covered by the checkpoint once committed. CDC
 restart resumes from the existing checkpoint and immutable source WAL; there is no
 additional replication-term high-water mark to allocate or recover. Existing WAL

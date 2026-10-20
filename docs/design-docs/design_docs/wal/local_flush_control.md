@@ -46,8 +46,8 @@ references, and notifies recovery and shutdown waiters. There is no replicated
 session flag, includeReplicated switch or separate Flush/ForcePromote abort API.
 
 An operation rejected or deduplicated before append is not an abort boundary.
-The lock guard receives the append outcome; a failed append does not discard a
-session. An AlterReplicateConfig record with Ignore set likewise has no abort
+`DoAppend` checks the append outcome before cleaning up transactions; its deferred
+lock guard only unlocks. A failed append does not discard a session. An AlterReplicateConfig record with Ignore set likewise has no abort
 effect. Ordinary WAL-generated TimeTick/CreateSegment/Flush do not require an
 exclusive lock and therefore do not abort transactions.
 

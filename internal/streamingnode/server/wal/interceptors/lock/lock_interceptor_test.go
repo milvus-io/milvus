@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,9 +37,6 @@ func newTestInterceptor() *lockAppendInterceptor {
 
 func TestAcquireLockGuard(t *testing.T) {
 	t.Run("PChannelLevelOnControlChannel", func(t *testing.T) {
-		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
-		defer mocker.UnPatch()
-
 		interceptor := newTestInterceptor()
 		controlChannel := funcutil.GetControlChannel(testPChannelName)
 		broadcast := message.NewFlushAllMessageBuilderV2().
@@ -54,18 +50,15 @@ func TestAcquireLockGuard(t *testing.T) {
 		broadcast.WithBroadcastID(1)
 		msg := broadcast.SplitIntoMutableMessage()[0]
 
-		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		guard := interceptor.acquireLockGuard(msg)
 		assert.False(t, interceptor.glock.TryRLock(), "pchannel-level message should hold the global write lock")
-		guard(true)
+		guard()
 		assert.True(t, interceptor.glock.TryRLock())
 		interceptor.glock.RUnlock()
 	})
 
 	// Test: Exclusive message with pchannel name as vchannel should acquire global write lock (existing behavior).
 	t.Run("ExclusiveWithPChannelName", func(t *testing.T) {
-		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
-		defer mocker.UnPatch()
-
 		interceptor := newTestInterceptor()
 		msg := message.NewManualFlushMessageBuilderV2().
 			WithVChannel(testPChannelName).
@@ -73,9 +66,9 @@ func TestAcquireLockGuard(t *testing.T) {
 			WithBody(&message.ManualFlushMessageBody{}).
 			MustBuildMutable()
 
-		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		guard := interceptor.acquireLockGuard(msg)
 		assert.False(t, interceptor.glock.TryRLock(), "glock should be write-locked for exclusive message with pchannel name")
-		guard(true)
+		guard()
 		assert.True(t, interceptor.glock.TryRLock())
 		interceptor.glock.RUnlock()
 	})
@@ -83,9 +76,6 @@ func TestAcquireLockGuard(t *testing.T) {
 	// Test: Exclusive message on regular vchannel should acquire the global
 	// read lock before the per-vchannel write lock.
 	t.Run("ExclusiveOnRegularVChannel", func(t *testing.T) {
-		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
-		defer mocker.UnPatch()
-
 		interceptor := newTestInterceptor()
 		msg := message.NewManualFlushMessageBuilderV2().
 			WithVChannel(testVChannel).
@@ -93,7 +83,7 @@ func TestAcquireLockGuard(t *testing.T) {
 			WithBody(&message.ManualFlushMessageBody{}).
 			MustBuildMutable()
 
-		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		guard := interceptor.acquireLockGuard(msg)
 		assert.False(t, interceptor.glock.TryLock(), "glock write lock should fail while the shared hierarchy lock is held")
 		assert.True(t, interceptor.glock.TryRLock(), "glock read lock should remain shareable")
 		interceptor.glock.RUnlock()
@@ -102,13 +92,10 @@ func TestAcquireLockGuard(t *testing.T) {
 		// Other vchannels should not be blocked.
 		assert.True(t, interceptor.vchannelLocker.TryLock("other-vchannel"), "other vchannels should not be blocked")
 		interceptor.vchannelLocker.Unlock("other-vchannel")
-		guard(true)
+		guard()
 	})
 
 	t.Run("ExclusiveOnControlChannel", func(t *testing.T) {
-		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
-		defer mocker.UnPatch()
-
 		interceptor := newTestInterceptor()
 		controlChannel := funcutil.GetControlChannel(testPChannelName)
 		msg := message.NewCreateCollectionMessageBuilderV1().
@@ -117,7 +104,7 @@ func TestAcquireLockGuard(t *testing.T) {
 			WithBody(&msgpb.CreateCollectionRequest{}).
 			MustBuildMutable()
 
-		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		guard := interceptor.acquireLockGuard(msg)
 		// A control-channel copy of collection DDL uses shared locks so another
 		// non-conflicting DDL can append concurrently.
 		assert.False(t, interceptor.glock.TryLock(), "global read lock should be held")
@@ -126,18 +113,10 @@ func TestAcquireLockGuard(t *testing.T) {
 		assert.False(t, interceptor.vchannelLocker.TryLock(controlChannel), "control channel read lock should be held")
 		assert.True(t, interceptor.vchannelLocker.TryRLock(controlChannel), "another control channel read lock should succeed")
 		interceptor.vchannelLocker.RUnlock(controlChannel)
-		guard(true)
+		guard()
 	})
 
 	t.Run("PartialUpdateCASCommit", func(t *testing.T) {
-		failCalls := 0
-		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).To(
-			func(*txn.TxnManager, string) {
-				failCalls++
-			},
-		).Build()
-		defer mocker.UnPatch()
-
 		interceptor := newTestInterceptor()
 		msg := message.NewCommitTxnMessageBuilderV2().
 			WithVChannel(testVChannel).
@@ -146,7 +125,7 @@ func TestAcquireLockGuard(t *testing.T) {
 			MustBuildMutable()
 		assert.NoError(t, message.MarkPartialUpdateCASCommit(msg))
 
-		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		guard := interceptor.acquireLockGuard(msg)
 		assert.False(t, interceptor.glock.TryLock())
 		assert.True(t, interceptor.glock.TryRLock())
 		interceptor.glock.RUnlock()
@@ -155,15 +134,11 @@ func TestAcquireLockGuard(t *testing.T) {
 		interceptor.vchannelLocker.RUnlock(testVChannel)
 		assert.True(t, interceptor.vchannelLocker.TryLock("other-vchannel"))
 		interceptor.vchannelLocker.Unlock("other-vchannel")
-		guard(true)
-		assert.Equal(t, 0, failCalls)
+		guard()
 	})
 
 	// Test: Non-exclusive message on regular vchannel should acquire read locks on both glock and vchannel.
 	t.Run("NonExclusiveOnRegularVChannel", func(t *testing.T) {
-		mocker := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
-		defer mocker.UnPatch()
-
 		interceptor := newTestInterceptor()
 		msg := message.NewInsertMessageBuilderV1().
 			WithVChannel(testVChannel).
@@ -176,7 +151,7 @@ func TestAcquireLockGuard(t *testing.T) {
 			WithBody(&msgpb.InsertRequest{}).
 			MustBuildMutable()
 
-		guard := interceptor.acquireLockGuard(context.Background(), msg)
+		guard := interceptor.acquireLockGuard(msg)
 		// glock should be read-locked: write TryLock fails, read TryRLock succeeds.
 		assert.False(t, interceptor.glock.TryLock(), "glock write lock should fail when read-locked")
 		assert.True(t, interceptor.glock.TryRLock(), "glock read lock should succeed when read-locked")
@@ -185,7 +160,7 @@ func TestAcquireLockGuard(t *testing.T) {
 		assert.False(t, interceptor.vchannelLocker.TryLock(testVChannel), "vchannel write lock should fail when read-locked")
 		assert.True(t, interceptor.vchannelLocker.TryRLock(testVChannel), "vchannel read lock should succeed when read-locked")
 		interceptor.vchannelLocker.RUnlock(testVChannel)
-		guard(true)
+		guard()
 	})
 }
 
@@ -432,16 +407,14 @@ func TestRowLockHookIsReadAtAppendTime(t *testing.T) {
 // Structural exclusive messages keep the vchannel write lock, independent of
 // partial-update CAS.
 func TestManualFlushKeepsStructuralExclusiveLock(t *testing.T) {
-	patch := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
-	defer patch.UnPatch()
 	interceptor := newTestInterceptor()
 	msg := message.NewManualFlushMessageBuilderV2().
 		WithVChannel(testVChannel).
 		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).
 		WithBody(&message.ManualFlushMessageBody{}).
 		MustBuildMutable()
-	guard := interceptor.acquireLockGuard(context.Background(), msg)
-	defer guard(true)
+	guard := interceptor.acquireLockGuard(msg)
+	defer guard()
 	require.False(t, interceptor.vchannelLocker.TryRLock(testVChannel))
 }
 
