@@ -1306,6 +1306,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaSegmentIndex(task)
 		scheduler.segmentTasks.Remove(index)
 		log = mlog.With(mlog.Int64("segmentID", task.SegmentID()))
+		noteSegmentTaskDone(task)
 		if task.Status() == TaskStatusFailed &&
 			task.Err() != nil &&
 			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceTooManyRequests) {

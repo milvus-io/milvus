@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -69,6 +71,7 @@ type Executor struct {
 	executingTasks    *typeutil.ConcurrentSet[string] // task index
 	channelTaskNum    atomic.Int32                    // channel task pool counter
 	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
+	pacer             loadPacer                       // per-node cap on segment loads in flight
 
 	collectionInfoSingleflight conc.Singleflight[*milvuspb.DescribeCollectionResponse]
 }
@@ -175,6 +178,26 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		}
 	}
 
+	// Pace segment loads per node: a load over the cap waits here in
+	// QueryCoord, where no deadline is armed yet.
+	pacerCfg := getLoadPacerConfig()
+	paced := false
+	if sa, ok := task.Actions()[step].(*SegmentAction); ok && pacerCfg.enabled && sa.Type() == ActionTypeGrow {
+		// The cap starts at the node's load budget (half a load per core),
+		// the same number placement spreads loads by, so a burst keeps the
+		// QueryNode's load pool fed; it then adapts to how loads go.
+		if info := ex.nodeMgr.Get(ex.nodeID); info != nil && info.CPUNum() > 0 {
+			pacerCfg.initial = max(pacerCfg.initial, float64(info.CPUNum())*paramtable.Get().QueryCoordCfg.LoadBudgetPerCore.GetAsFloat())
+		}
+		if !ex.pacer.tryAcquire(pacerCfg) {
+			metrics.QueryCoordLoadPacerWaitTotal.WithLabelValues(fmt.Sprint(ex.nodeID)).Inc()
+			ex.nonChannelTaskNum.Dec()
+			ex.executingTasks.Remove(task.Index())
+			return false
+		}
+		paced = true
+	}
+
 	// Only now is this step actually admitted to run: it cleared the wait
 	// queue and the executor's capacity gates above. Arm a fresh deadline for
 	// this step here (no-op if already armed for it) so time spent queued or
@@ -187,7 +210,12 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		mlog.Info(context.TODO(), "execute the action of task")
 		switch task.Actions()[step].(type) {
 		case *SegmentAction:
+			start := time.Now()
 			ex.executeSegmentAction(task.(*SegmentTask), step)
+			if paced {
+				ex.pacer.release(pacerCfg, time.Since(start), task.(*SegmentTask).timeout)
+				metrics.QueryCoordLoadPacerCap.WithLabelValues(fmt.Sprint(ex.nodeID)).Set(ex.pacer.Cap())
+			}
 
 		case *ChannelAction:
 			ex.executeDmChannelAction(task.(*ChannelTask), step)

@@ -3722,6 +3722,17 @@ type queryCoordConfig struct {
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
 
+	// load pacing and adaptive task timeouts
+	LoadPacingEnabled      ParamItem `refreshable:"true"`
+	LoadPacingInitial      ParamItem `refreshable:"true"`
+	LoadPacingMin          ParamItem `refreshable:"true"`
+	LoadPacingMax          ParamItem `refreshable:"true"`
+	LoadPacingSlowFraction ParamItem `refreshable:"true"`
+	LoadBudgetPerCore      ParamItem `refreshable:"true"`
+	MinLoadBandwidthMBps   ParamItem `refreshable:"true"`
+	AdaptiveSegmentTimeout ParamItem `refreshable:"true"`
+	AdaptiveChannelTimeout ParamItem `refreshable:"true"`
+
 	AutoscalePrecheckEnabled ParamItem `refreshable:"true"`
 	AutoscaleEnabled         ParamItem `refreshable:"true"`
 	AutoscaleMaxMemoryLimit  ParamItem `refreshable:"true"`
@@ -4426,6 +4437,94 @@ Set to 0 to disable the penalty period.`,
 		Export: true,
 	}
 	p.ResourceExhaustionPenaltyDuration.Init(base.mgr)
+
+	p.LoadPacingEnabled = ParamItem{
+		Key:          "queryCoord.loadPacingEnabled",
+		Version:      "3.1.0",
+		DefaultValue: "true",
+		Doc: `Cap the segment loads in flight per QueryNode and adapt the cap to how long loads take (AIMD):
+the executor otherwise admits far more loads than a node runs at once, the rest queue inside the node
+against the task timeout, and a burst of loads times out and is redone. Loads over the cap wait in
+QueryCoord, where no deadline runs.`,
+		Export: true,
+	}
+	p.LoadPacingEnabled.Init(base.mgr)
+
+	p.LoadPacingInitial = ParamItem{
+		Key:          "queryCoord.loadPacingInitial",
+		Version:      "3.1.0",
+		DefaultValue: "4",
+		Doc:          `The pacer's starting cap; raised to the node's load budget (CPUs x loadBudgetPerCore) when that is larger.`,
+		Export:       true,
+	}
+	p.LoadPacingInitial.Init(base.mgr)
+
+	p.LoadPacingMin = ParamItem{
+		Key:          "queryCoord.loadPacingMin",
+		Version:      "3.1.0",
+		DefaultValue: "2",
+		Doc:          `The pacer never caps a node below this many loads in flight.`,
+		Export:       true,
+	}
+	p.LoadPacingMin.Init(base.mgr)
+
+	p.LoadPacingMax = ParamItem{
+		Key:          "queryCoord.loadPacingMax",
+		Version:      "3.1.0",
+		DefaultValue: "64",
+		Doc:          `The pacer never raises a node's cap above this.`,
+		Export:       true,
+	}
+	p.LoadPacingMax.Init(base.mgr)
+
+	p.LoadPacingSlowFraction = ParamItem{
+		Key:          "queryCoord.loadPacingSlowFraction",
+		Version:      "3.1.0",
+		DefaultValue: "0.25",
+		Doc: `A load that takes more than this fraction of its task timeout on a saturated node counts as slow;
+a window of slow loads halves the node's cap, a window of fast ones raises it by one.`,
+		Export: true,
+	}
+	p.LoadPacingSlowFraction.Init(base.mgr)
+
+	p.LoadBudgetPerCore = ParamItem{
+		Key:          "queryCoord.loadBudgetPerCore",
+		Version:      "3.1.0",
+		DefaultValue: "0.5",
+		Doc:          `Segment loads a QueryNode is expected to run at once per CPU core; the pacer's cap starts there.`,
+		Export:       true,
+	}
+	p.LoadBudgetPerCore.Init(base.mgr)
+
+	p.MinLoadBandwidthMBps = ParamItem{
+		Key:          "queryCoord.minLoadBandwidthMBps",
+		Version:      "3.1.0",
+		DefaultValue: "0",
+		Doc: `A segment task's timeout is at least twice what the segment takes to load at this bandwidth (MB/s),
+so an oversized segment is not cancelled and retried forever. 0 disables.`,
+		Export: true,
+	}
+	p.MinLoadBandwidthMBps.Init(base.mgr)
+
+	p.AdaptiveSegmentTimeout = ParamItem{
+		Key:          "queryCoord.adaptiveSegmentTimeout",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Doc: `Double a segment's task timeout each time its load ends on the deadline, up to 8x, so a segment
+whose load is slower than the timeout eventually loads instead of being retried forever.`,
+		Export: true,
+	}
+	p.AdaptiveSegmentTimeout.Init(base.mgr)
+
+	p.AdaptiveChannelTimeout = ParamItem{
+		Key:          "queryCoord.adaptiveChannelTimeout",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Doc: `Double a channel task's timeout each time a watch of the same channel on the same node is re-created
+within its previous timeout window, up to 8x, so a delegator that needs longer to catch up converges.`,
+		Export: true,
+	}
+	p.AdaptiveChannelTimeout.Init(base.mgr)
 
 	p.ResourceExhaustionCleanupInterval = ParamItem{
 		Key:          "queryCoord.resourceExhaustionCleanupInterval",

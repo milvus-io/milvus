@@ -195,6 +195,25 @@ var (
 		}, []string{nodeIDLabelName})
 )
 
+// Load pacing.
+var (
+	QueryCoordLoadPacerCap = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "load_pacer_cap",
+			Help:      "segment loads the pacer lets a node run at once",
+		}, []string{nodeIDLabelName})
+
+	QueryCoordLoadPacerWaitTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "load_pacer_wait_total",
+			Help:      "segment loads the pacer held back in QueryCoord because the node was at its cap",
+		}, []string{nodeIDLabelName})
+)
+
 // RegisterQueryCoord registers QueryCoord metrics
 func RegisterQueryCoord(registry *prometheus.Registry) {
 	QueryCoordLoadDemandMemoryBytes.WithLabelValues(common.DefaultResourceGroupName).Add(0)
@@ -217,6 +236,13 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordResourceGroupReplicaTotal)
 	registry.MustRegister(QueryCoordReplicaRONodeTotal)
 	registry.MustRegister(QueryCoordLastHeartbeatTimeStamp)
+	registry.MustRegister(QueryCoordLoadPacerCap)
+	registry.MustRegister(QueryCoordLoadPacerWaitTotal)
+}
+
+// CleanQueryCoordMetricsWithNodeID drops a gone node's per-node gauges.
+func CleanQueryCoordMetricsWithNodeID(nodeID int64) {
+	QueryCoordLoadPacerCap.DeleteLabelValues(fmt.Sprint(nodeID))
 }
 
 func CleanQueryCoordMetricsWithCollectionID(collectionID int64) {
