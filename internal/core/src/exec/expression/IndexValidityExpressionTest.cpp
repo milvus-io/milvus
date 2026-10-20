@@ -154,11 +154,17 @@ TEST_P(IndexValidityExpressionTest, NullableContainsLeavesBatchOffsetAndMove) {
         }
     }
     ASSERT_NE(data, nullptr);
+    ASSERT_TRUE((*schema)[field].is_nullable());
+    ASSERT_EQ(data->scalars().array_data().data_size(), rows);
+    // Master stores row validity in ScalarField; the legacy FieldData field
+    // may be empty. Use the same accessor as the raw-segment loader.
+    auto* row_validity = MutableFieldDataRowValidData(data);
+    row_validity->Resize(rows, true);
     FixedVector<Array> arrays;
     std::vector<uint8_t> validity((rows + 7) / 8, 0);
     for (int64_t row = 0; row < rows; ++row) {
         const bool valid = row % 5 != 0;
-        data->mutable_valid_data()->Set(row, valid);
+        row_validity->Set(row, valid);
         auto* array =
             data->mutable_scalars()->mutable_array_data()->mutable_data(row);
         array->mutable_long_data()->clear_data();
@@ -290,6 +296,10 @@ TEST_P(IndexValidityExpressionTest,
             }
         }
         ASSERT_NE(data, nullptr);
+        ASSERT_EQ((*schema)[field].is_nullable(), nullable);
+        ASSERT_EQ(data->scalars().long_data().data_size(), rows);
+        auto* row_validity = MutableFieldDataRowValidData(data);
+        row_validity->Resize(rows, true);
         std::vector<int64_t> values(rows);
         std::vector<uint8_t> validity((rows + 7) / 8, 0xff);
         for (int64_t row = 0; row < rows; ++row) {
@@ -297,7 +307,7 @@ TEST_P(IndexValidityExpressionTest,
             data->mutable_scalars()->mutable_long_data()->set_data(row, row);
             if (nullable) {
                 const bool valid = row % 5 != 0;
-                data->mutable_valid_data()->Set(row, valid);
+                row_validity->Set(row, valid);
                 if (!valid) {
                     validity[row >> 3] &= ~(1 << (row & 7));
                 }
