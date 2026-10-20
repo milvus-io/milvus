@@ -1607,6 +1607,21 @@ flat, and its histogram buckets are cumulative with a different meaning. Request
 series is what Prometheus is for, and `milvus_proxy_req_count` already exists; this design does not
 replace it.
 
+### Prometheus client library with a private registry
+
+The cardinality and scrape objections above are about the Prometheus server. A variant keeps only the
+client library: counters live in a `prometheus.NewRegistry()` that is never exposed on `/metrics`, and the
+handler calls `Gather()` on demand, so nothing reaches the time-series database. It was not chosen
+because it replaces only the storage layer, which is already a fixed array of atomics indexed by the
+feature enum; the hooks, the `feature_bits` return path, the MixCoord fan-out, auth and the config
+collectors are unchanged. It also adds work: a Prometheus counter has no last-increment time, so
+`last_used_at` needs a parallel gauge, and `Gauge.Set` overwrites, so the forward-only compare-and-swap
+still has to be written by hand; `WithLabelValues` hashes the label strings and takes a lock on every
+call, so matching the current hot-path cost requires pre-binding every child at startup; the
+`MetricFamily` output must be converted to the node → group → feature shape; and registering any of
+these counters on the default registry by mistake would publish them as series. The report format does
+not depend on the storage layer, so this choice can be revisited without a protocol change.
+
 ### A periodic snapshot log line
 
 A complete design for this existed. It was not chosen because: a log stream carrying "current state"
