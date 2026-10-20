@@ -74,6 +74,7 @@ type importCheckerHooks struct {
 type importChecker struct {
 	ctx        context.Context
 	meta       *meta
+	indexMeta  *indexMeta
 	broker     broker.Broker
 	alloc      allocator.Allocator
 	importMeta ImportMeta
@@ -98,6 +99,7 @@ type importChecker struct {
 
 func NewImportChecker(ctx context.Context,
 	meta *meta,
+	indexMeta *indexMeta,
 	broker broker.Broker,
 	alloc allocator.Allocator,
 	importMeta ImportMeta,
@@ -110,6 +112,7 @@ func NewImportChecker(ctx context.Context,
 	return &importChecker{
 		ctx:        ctx,
 		meta:       meta,
+		indexMeta:  indexMeta,
 		broker:     broker,
 		alloc:      alloc,
 		importMeta: importMeta,
@@ -470,7 +473,7 @@ func (c *importChecker) createImportTasks(job ImportJob, preimports []ImportTask
 		return
 	}
 
-	segmentMaxSize := GetSegmentMaxSize(job, c.meta)
+	segmentMaxSize := GetSegmentMaxSize(job, c.indexMeta)
 	groups := RegroupImportFiles(job, lacks, segmentMaxSize)
 	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta, c.importMeta, segmentMaxSize)
 	if err != nil {
@@ -736,7 +739,7 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 			// if not compacting, trigger sort compaction task
 			isCompacting := c.meta.IsSegmentCompacting(originSegmentID)
 			if !isCompacting {
-				compactionTask, err := createSortCompactionTask(c.ctx, task, originSegment, sortSegmentIDs[i], c.meta, c.handler, c.alloc)
+				compactionTask, err := createSortCompactionTask(c.ctx, task, originSegment, sortSegmentIDs[i], c.meta, c.indexMeta, c.handler, c.alloc)
 				if err != nil {
 					logger.Warn(c.ctx, "create sort compaction task failed", mlog.Err(err))
 					continue
@@ -778,11 +781,11 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	}
 
 	healthySegments := c.meta.GetSegments(targetSegmentIDs, isSegmentHealthy)
-	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
+	unindexed := c.indexMeta.GetUnindexedSegments(job.GetCollectionID(), healthySegments)
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	if len(unindexed) > 0 && !isL0Import {
 		// Segments that already have index tasks only need time to finish.
-		notifySegmentIndexBuild(c.meta.indexMeta.GetUnIndexedSegmentIDsForIndexTask(job.GetCollectionID(), unindexed).Collect()...)
+		notifySegmentIndexBuild(c.indexMeta.GetUnIndexedSegmentIDsForIndexTask(job.GetCollectionID(), unindexed).Collect()...)
 	}
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 && !isL0Import {
 		log.Debug(c.ctx, "waiting for import segments building index...", mlog.Int64s("unindexed", unindexed))

@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -55,7 +54,7 @@ func TestExternalCollectionRefreshChecker_NewChecker(t *testing.T) {
 	assert.NoError(t, err)
 
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, nil, refreshMeta, closeChan, nil, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, nil, nil, refreshMeta, closeChan, nil, nil, nil, nil, nil)
 	assert.NotNil(t, checker)
 }
 
@@ -76,7 +75,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -97,7 +96,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -118,7 +117,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -144,7 +143,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -173,7 +172,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -202,7 +201,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -231,7 +230,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.aggregateJobState(job)
@@ -260,7 +259,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.tryTimeoutJob(job)
@@ -283,7 +282,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.tryTimeoutJob(job)
@@ -316,7 +315,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.tryTimeoutJob(job)
@@ -377,7 +376,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		var failedCalls []int64
 		onFailed := func(jobID int64) { failedCalls = append(failedCalls, jobID) }
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, onFailed, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, onFailed, nil, nil)
 
 		// Feed tryTimeoutJob the STALE InProgress snapshot, not the
 		// committed Finished entry.
@@ -416,7 +415,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob(t *testing.T) {
 
 		var failedCalls []int64
 		onFailed := func(jobID int64) { failedCalls = append(failedCalls, jobID) }
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, onFailed, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, onFailed, nil, nil)
 
 		job := meta.GetJob(99)
 		checker.tryTimeoutJob(job)
@@ -443,7 +442,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -465,7 +464,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -491,7 +490,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -520,7 +519,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -546,7 +545,7 @@ func TestExternalCollectionRefreshChecker_CheckGC(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		job := meta.GetJob(1)
 		checker.checkGC(job)
@@ -571,7 +570,7 @@ func TestExternalCollectionRefreshChecker_Run(t *testing.T) {
 	assert.NoError(t, err)
 
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, nil, refreshMeta, closeChan, nil, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, nil, nil, refreshMeta, closeChan, nil, nil, nil, nil, nil)
 
 	// Run checker in goroutine and close immediately to test the run loop
 	done := make(chan struct{})
@@ -615,7 +614,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_UpdateStateFailed(t 
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.aggregateJobState(job)
@@ -645,7 +644,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_FailedWithProgressUp
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.aggregateJobState(job)
@@ -688,7 +687,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_FinishedApplyOnce(t 
 		<-applyRelease
 		return nil
 	}
-	checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, applyJobInfo, nil, nil, nil)
+	checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, applyJobInfo, nil, nil, nil)
 
 	firstJob := meta.GetJob(1)
 	var wg sync.WaitGroup
@@ -761,7 +760,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_ClearsTaskResultsAft
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
+	checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
 		return nil
 	}, nil, nil, nil)
 
@@ -799,7 +798,7 @@ func TestExternalCollectionRefreshChecker_TryTimeoutJob_UpdateStateFailed(t *tes
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.tryTimeoutJob(job)
@@ -827,7 +826,7 @@ func TestExternalCollectionRefreshChecker_CheckGC_DropJobFailed(t *testing.T) {
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.checkGC(job)
@@ -850,7 +849,7 @@ func TestExternalCollectionRefreshChecker_LogJobStats(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		// Should not panic on empty jobs
 		checker.logJobStats(map[int64]*datapb.ExternalCollectionRefreshJob{})
@@ -866,7 +865,7 @@ func TestExternalCollectionRefreshChecker_LogJobStats(t *testing.T) {
 
 		meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 		closeChan := make(chan struct{})
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		jobs := map[int64]*datapb.ExternalCollectionRefreshJob{
 			1: {JobId: 1, State: indexpb.JobState_JobStateInit},
@@ -909,7 +908,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 			callbackCalled = true
 			callbackJob = job
 		}
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, onFinished, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, onFinished, nil, nil, nil, nil)
 
 		// Drive a full processing pass: aggregateJobState transitions the
 		// job to Finished, then ensureJobFinishedNotified fires the callback.
@@ -948,7 +947,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 		onFinished := func(_ context.Context, _ *datapb.ExternalCollectionRefreshJob) {
 			callbackCalled = true
 		}
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, onFinished, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, onFinished, nil, nil, nil, nil)
 
 		checker.processJobs()
 
@@ -983,7 +982,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 		onFinished := func(_ context.Context, _ *datapb.ExternalCollectionRefreshJob) {
 			callbackCalled = true
 		}
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, onFinished, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, onFinished, nil, nil, nil, nil)
 
 		checker.processJobs()
 
@@ -1011,7 +1010,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 		closeChan := make(chan struct{})
 
 		// nil onJobFinished - should not panic
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 		assert.NotPanics(t, func() {
 			checker.processJobs()
@@ -1048,7 +1047,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 		onFailed := func(jobID int64) {
 			failedJobs = append(failedJobs, jobID)
 		}
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, onFailed, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, onFailed, nil, nil)
 
 		checker.processJobs()
 
@@ -1077,7 +1076,7 @@ func TestExternalCollectionRefreshChecker_OnJobFinishedCallback(t *testing.T) {
 
 		failedCalled := false
 		onFailed := func(_ int64) { failedCalled = true }
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, onFailed, nil, nil)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, onFailed, nil, nil)
 
 		checker.processJobs()
 
@@ -1099,7 +1098,7 @@ func TestExternalCollectionRefreshChecker_RunGracefulShutdown(t *testing.T) {
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 	done := make(chan struct{})
 	go func() {
@@ -1145,7 +1144,7 @@ func TestExternalCollectionRefreshChecker_AggregateJobState_ProgressOnlyUpdateFa
 
 	meta, _ := newExternalCollectionRefreshMeta(ctx, catalog)
 	closeChan := make(chan struct{})
-	checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, nil)
+	checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, nil)
 
 	job := meta.GetJob(1)
 	checker.aggregateJobState(job)
@@ -1179,7 +1178,7 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 
 		var gotJobID int64
 		onInit := func(jobID int64) { gotJobID = jobID }
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, onInit)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, onInit)
 
 		checker.processJob(meta.GetJob(42))
 		assert.Equal(t, int64(42), gotJobID, "onInitJobPending should be called for Init job without tasks")
@@ -1203,7 +1202,7 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 
 		called := false
 		onInit := func(jobID int64) { called = true }
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, onInit)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, onInit)
 
 		checker.processJob(meta.GetJob(43))
 		assert.False(t, called, "onInitJobPending must not fire once tasks exist")
@@ -1224,7 +1223,7 @@ func TestExternalCollectionRefreshChecker_OnInitJobPending(t *testing.T) {
 
 		called := false
 		onInit := func(jobID int64) { called = true }
-		checker := newRefreshChecker(ctx, nil, meta, closeChan, nil, nil, nil, nil, onInit)
+		checker := newRefreshChecker(ctx, nil, nil, meta, closeChan, nil, nil, nil, nil, onInit)
 
 		checker.processJob(meta.GetJob(44))
 		assert.False(t, called, "onInitJobPending must only fire for Init state")
@@ -1280,7 +1279,6 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 		// full index meta - what matters here is the wait, not index bookkeeping.
 		mockey.Mock((*indexMeta).GetUnindexedSegments).To(
 			func(_ *indexMeta, _ int64, _ []int64) []int64 { return *debt }).Build()
-		mt.indexMeta = &indexMeta{}
 
 		return refreshMeta, mt, refreshMeta.GetJob(1)
 	}
@@ -1320,7 +1318,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 					return out
 				}).Build()
 
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -1347,7 +1345,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			require.NoError(t, refreshMeta.UpdateJobProgress(1, 100))
 			job := refreshMeta.GetJob(1)
 
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 			checker.aggregateJobState(job)
@@ -1368,7 +1366,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			debt := []int64{555}
 			refreshMeta, mt, job := stage(t, nil, &debt)
 			applied := 0
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applied++; return nil },
 				nil, nil, nil)
 
@@ -1392,7 +1390,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			debt := []int64{556}
 			refreshMeta, mt, job := stage(t, []int64{555}, &debt)
 			applied := 0
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applied++; return nil },
 				nil, nil, nil)
 
@@ -1427,7 +1425,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			debt := []int64{556}
 			refreshMeta, mt, job := stage(t, []int64{555}, &debt)
 			applied := 0
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
 					applied++
 					if applied > 1 {
@@ -1465,7 +1463,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			debt := []int64{556}
 			refreshMeta, mt, job := stage(t, nil, &debt)
 			notified := 0
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}),
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}),
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) { notified++ },
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
@@ -1488,7 +1486,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			debt := []int64{556}
 			refreshMeta, mt, job := stage(t, nil, &debt)
 			job.StartTime = time.Now().Add(-1000 * time.Hour).UnixMilli()
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -1529,7 +1527,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			refreshMeta, mt, job := stage(t, nil, &debt)
 
 			var applies int32
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
 					atomic.AddInt32(&applies, 1)
 					return nil
@@ -1560,7 +1558,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			refreshMeta, mt, job := stage(t, nil, &debt)
 
 			var applies int32
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
 					atomic.AddInt32(&applies, 1)
 					return nil
@@ -1606,7 +1604,6 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			ms := metacache.NewMetaStore(nil)
 			mt := &meta{
 				segments:  NewSegmentsInfo(ms),
-				indexMeta: &indexMeta{},
 				metaStore: ms,
 			}
 			mt.AddCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
@@ -1614,7 +1611,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			}})
 
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -1652,7 +1649,6 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			ms := metacache.NewMetaStore(nil)
 			mt := &meta{
 				segments:  NewSegmentsInfo(ms),
-				indexMeta: &indexMeta{},
 				metaStore: ms,
 			}
 			mt.AddCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
@@ -1663,7 +1659,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 				func(_ *indexMeta, _ int64, _ []int64) []int64 { return debt }).Build()
 
 			var applied int
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applied++; return nil },
 				nil, nil, nil)
 
@@ -1708,7 +1704,6 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			ms := metacache.NewMetaStore(nil)
 			mt := &meta{
 				segments:  NewSegmentsInfo(ms),
-				indexMeta: &indexMeta{},
 				metaStore: ms,
 			}
 			mt.AddCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
@@ -1718,7 +1713,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			mockey.Mock((*indexMeta).GetUnindexedSegments).To(
 				func(_ *indexMeta, _ int64, _ []int64) []int64 { return debt }).Build()
 
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -1754,7 +1749,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 					return nil
 				}).Build()
 
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -1791,7 +1786,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 				indexpb.JobState_JobStateInProgress, int64(40), nil).Build()
 			require.NoError(t, refreshMeta.UpdateJobProgress(1, 40))
 
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -1821,7 +1816,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			var debt []int64 // everything already indexed
 			refreshMeta, mt, job := stage(t, []int64{555, 556}, &debt)
 			applied := 0
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applied++; return nil },
 				nil, nil, nil)
 
@@ -1848,7 +1843,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 
 			var debt []int64
 			refreshMeta, mt, job := stage(t, nil, &debt) // no segments at all
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -1871,7 +1866,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			debt := []int64{556}
 			refreshMeta, mt, job := stage(t, nil, &debt)
 			var failed []int64
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error {
 					return errors.New("result store unavailable")
 				},
@@ -1907,7 +1902,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 					return errors.New("etcd unavailable")
 				}).Build()
 
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -1934,7 +1929,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 
 			debt := []int64{556}
 			refreshMeta, mt, job := stage(t, nil, &debt)
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -1971,7 +1966,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 
 			debt := []int64{556}
 			refreshMeta, mt, job := stage(t, []int64{555}, &debt)
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -2002,7 +1997,7 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 
 			debt := []int64{556}
 			refreshMeta, mt, job := stage(t, nil, &debt)
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 				nil, nil, nil)
 
@@ -2111,7 +2106,7 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 		// debt in the same pass, so a collection with nothing to index would
 		// finish there and the ordering this test exists for would never be
 		// reached.
-		mt := &meta{segments: NewSegmentsInfo(ms), indexMeta: &indexMeta{}, metaStore: ms}
+		mt := &meta{segments: NewSegmentsInfo(ms), metaStore: ms}
 		mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 		}})
@@ -2119,7 +2114,7 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 
 		cm := &recordingChunkManager{}
 		var published [][2]string
-		mgr := NewExternalCollectionRefreshManager(ctx, mt, newStubScheduler(), &stubAllocator{},
+		mgr := NewExternalCollectionRefreshManager(ctx, mt, &indexMeta{}, newStubScheduler(), &stubAllocator{},
 			refreshMeta, nil, testCollectionGetter(mt),
 			func(_ context.Context, _ int64, source, spec string) error {
 				published = append(published, [2]string{source, spec})
@@ -2128,7 +2123,7 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 
 		// The manager's own callbacks, wired to a stub apply - what is under
 		// test is the callback ordering, not the segment update.
-		checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}),
+		checker := newRefreshChecker(ctx, mt, &indexMeta{}, refreshMeta, make(chan struct{}),
 			mgr.handleJobFinished,
 			func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 			mgr.handleJobFailed, mgr.forgetJob, nil)
@@ -2196,10 +2191,10 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 		}})
 		// Neither segment is indexed, but 557 already has its index task, so
 		// only 556 needs a nudge.
+		im := newTestIndexMeta(100, 557, 1, "", &model.SegmentIndex{SegmentID: 557, CollectionID: 100, IndexID: 1})
 		mt := &meta{
 			segments:  NewSegmentsInfo(ms),
 			metaStore: ms,
-			indexMeta: newTestIndexMeta(100, 557, 1, "", &model.SegmentIndex{SegmentID: 557, CollectionID: 100, IndexID: 1}),
 		}
 		for _, id := range []int64{556, 557} {
 			mt.segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -2207,15 +2202,15 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 			}})
 		}
 
-		checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+		checker := newRefreshChecker(ctx, mt, im, refreshMeta, make(chan struct{}), nil,
 			func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
 			nil, nil, nil)
 
-		drainBuildIndexChForTest() // ignore whatever earlier tests left behind
+		drainBuildIndexCh() // ignore whatever earlier tests left behind
 
 		checker.aggregateJobState(refreshMeta.GetJob(1)) // entry pass: apply + mark
 		require.NotZero(t, refreshMeta.GetJob(1).GetIndexWaitStartedTime())
-		assert.Empty(t, drainBuildIndexChForTest(),
+		assert.Empty(t, drainBuildIndexCh(),
 			"the entry pass runs before the publish; a build dispatched now would read the pre-refresh source/spec")
 
 		// The AlterCollection round trip lands in DataCoord's meta.
@@ -2228,131 +2223,5 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 		checker.aggregateJobState(refreshMeta.GetJob(1))
 		assert.Equal(t, []int64{556}, drainBuildIndexChForTest(),
 			"once the refreshed schema is visible the wait accelerates the builds that have no task yet")
-	})
-}
-
-// TestExternalCollectionRefreshChecker_IndexWait_DataStaysQueryVisible pins the
-// contract the wait actually offers, because it is easy to read the option's
-// name as a visibility barrier and it is not one: what the wait holds back is
-// the job's COMPLETION SIGNAL, not the data.
-//
-// The refreshed segments are applied by the same applyJobInfo call the ungated
-// path makes, at the same point in the same tick, and they land as Flushed.
-// GetQueryVChanPositions - the source of QueryCoord's target, both directly and
-// through GetRecoveryInfoV2 - admits a flushed segment with no compaction
-// ancestry unconditionally; the index state only ever decides whether to serve
-// a compacted segment or its unindexed parents. So a loaded replica can serve
-// the refreshed rows by brute force while the job still reads InProgress, and
-// that is true with the parameter on and off alike: the wait neither adds the
-// exposure nor removes it.
-//
-// Excluding refreshed segments from the target until their indexes are ready
-// would be a different feature - a staged segment state visible to the index
-// builder but not to QueryCoord - and it is not this one. This test fails if
-// that ever changes silently.
-func TestExternalCollectionRefreshChecker_IndexWait_DataStaysQueryVisible(t *testing.T) {
-	ctx := context.Background()
-	paramtable.Init()
-
-	const (
-		collectionID = int64(100)
-		segmentID    = int64(556)
-		channel      = "by-dev-rootcoord-dml_ext_0v0"
-	)
-
-	// A collection with one refreshed segment: flushed, no compaction ancestry,
-	// no index record - exactly what an apply leaves behind.
-	stage := func(t *testing.T) (*externalCollectionRefreshMeta, *meta, *ServerHandler) {
-		t.Helper()
-		catalog := &stubCatalog{}
-		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return(
-			[]*datapb.ExternalCollectionRefreshJob{{
-				JobId: 1, CollectionId: collectionID,
-				State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001},
-			}}, nil).Build()
-		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return(
-			[]*datapb.ExternalCollectionRefreshTask{{
-				TaskId: 1001, JobId: 1, CollectionId: collectionID,
-				State: indexpb.JobState_JobStateFinished, Progress: 100,
-			}}, nil).Build()
-		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-		require.NoError(t, err)
-
-		ms := metacache.NewMetaStore(nil)
-		mt := &meta{
-			segments:           NewSegmentsInfo(ms),
-			metaStore:          ms,
-			indexMeta:          &indexMeta{},
-			partitionStatsMeta: &partitionStatsMeta{partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{}},
-		}
-		mt.AddCollection(&collectionInfo{
-			ID: collectionID, Schema: &schemapb.CollectionSchema{Name: "coll"},
-		})
-		mt.segments.SetSegment(segmentID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID: segmentID, CollectionID: collectionID, InsertChannel: channel,
-			State:       commonpb.SegmentState_Flushed,
-			NumOfRows:   1024,
-			DmlPosition: &msgpb.MsgPosition{ChannelName: channel, Timestamp: 100},
-			Binlogs:     []*datapb.FieldBinlog{{FieldID: 1}},
-		}})
-		mt.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
-			channel: {ChannelName: channel, Timestamp: 100},
-		})
-
-		// The segment carries no index, so it is still debt for the whole wait.
-		mockey.Mock((*indexMeta).GetUnindexedSegments).Return([]int64{segmentID}).Build()
-
-		return refreshMeta, mt, &ServerHandler{s: &Server{meta: mt}}
-	}
-
-	flushedIDs := func(h *ServerHandler) []int64 {
-		return h.GetQueryVChanPositions(&channelMeta{
-			Name: channel, CollectionID: collectionID,
-		}).GetFlushedSegmentIds()
-	}
-
-	t.Run("a waiting job's segments are already in the query target", func(t *testing.T) {
-		mockey.PatchConvey("visible while waiting", t, func() {
-			pt := paramtable.Get()
-			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
-			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
-
-			refreshMeta, mt, handler := stage(t)
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
-				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
-				nil, nil, nil)
-
-			checker.aggregateJobState(refreshMeta.GetJob(1))
-
-			waiting := refreshMeta.GetJob(1)
-			require.Equal(t, indexpb.JobState_JobStateInProgress, waiting.GetState(),
-				"the job must still be waiting for this assertion to mean anything")
-			require.NotZero(t, waiting.GetIndexWaitStartedTime())
-
-			assert.Contains(t, flushedIDs(handler), segmentID,
-				"the wait holds the completion signal, not the data - an unindexed refreshed "+
-					"segment is in the query target and may be brute-force scanned")
-		})
-	})
-
-	t.Run("the ungated path exposes exactly the same set", func(t *testing.T) {
-		mockey.PatchConvey("visible with the wait off", t, func() {
-			pt := paramtable.Get()
-			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "false")
-			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
-
-			refreshMeta, mt, handler := stage(t)
-			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
-				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
-				nil, nil, nil)
-
-			checker.aggregateJobState(refreshMeta.GetJob(1))
-
-			require.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState(),
-				"off, the job finishes as soon as its data lands")
-			assert.Contains(t, flushedIDs(handler), segmentID,
-				"the same unindexed segment is in the target here, which is why the wait "+
-					"does not widen the exposure - it is master's, not this feature's")
-		})
 	})
 }

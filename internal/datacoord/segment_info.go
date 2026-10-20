@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // dcSegmentState holds the DC-only fields that are not part of the shared
@@ -645,4 +646,16 @@ func segmentEffectiveDmlTs(seg *datapb.SegmentInfo) uint64 {
 		return ts
 	}
 	return seg.GetDmlPosition().GetTimestamp()
+}
+
+// Allocation records the allocation info
+type Allocation struct {
+	SegmentID  UniqueID
+	NumOfRows  int64
+	ExpireTime Timestamp
+}
+
+func (alloc *Allocation) String() string {
+	t, _ := tsoutil.ParseTS(alloc.ExpireTime)
+	return fmt.Sprintf("SegmentID: %d, NumOfRows: %d, ExpireTime: %v", alloc.SegmentID, alloc.NumOfRows, t)
 }

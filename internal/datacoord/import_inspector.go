@@ -30,10 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
-const (
-	NullNodeID = -1
-)
-
 type ImportInspector interface {
 	Reload()
 	Start()

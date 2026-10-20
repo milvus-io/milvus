@@ -235,3 +235,9 @@ func GetBinlogSizeAsBytes(fieldBinlogs []*datapb.FieldBinlog) float64 {
 	}
 	return deltaSize
 }
+
+type compactTime struct {
+	startTime     Timestamp
+	expireTime    Timestamp
+	collectionTTL time.Duration
+}

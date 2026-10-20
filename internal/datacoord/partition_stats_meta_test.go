@@ -38,22 +38,6 @@ func TestPartitionStatsMetaSuite(t *testing.T) {
 	suite.Run(t, new(PartitionStatsMetaSuite))
 }
 
-// seedPartitionStatsInfo inserts info into psm's in-memory state (lazily
-// creating the channel/partition buckets), mirroring what a persisted load
-// leaves behind - a memory-only test fixture with no catalog write.
-func seedPartitionStatsInfo(psm *partitionStatsMeta, info *datapb.PartitionStatsInfo) {
-	vch, part := info.GetVChannel(), info.GetPartitionID()
-	if _, ok := psm.partitionStatsInfos[vch]; !ok {
-		psm.partitionStatsInfos[vch] = make(map[int64]*partitionStatsInfo)
-	}
-	if _, ok := psm.partitionStatsInfos[vch][part]; !ok {
-		psm.partitionStatsInfos[vch][part] = &partitionStatsInfo{
-			infos: make(map[int64]*datapb.PartitionStatsInfo),
-		}
-	}
-	psm.partitionStatsInfos[vch][part].infos[info.GetVersion()] = info
-}
-
 func (s *PartitionStatsMetaSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()

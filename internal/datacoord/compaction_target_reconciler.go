@@ -14,16 +14,20 @@ import (
 // views for segments that still miss their target. It stores no progress - a
 // target is satisfied when no in-scope segment matches its predicate anymore.
 type compactionTargetReconciler struct {
-	meta    *meta
-	handler Handler
+	meta                 *meta
+	indexMeta            *indexMeta
+	compactionTargetMeta *compactionTargetMeta
+	handler              Handler
 }
 
 var _ CompactionPolicy = (*compactionTargetReconciler)(nil)
 
-func newCompactionTargetReconciler(meta *meta, handler Handler) *compactionTargetReconciler {
+func newCompactionTargetReconciler(meta *meta, indexMeta *indexMeta, compactionTargetMeta *compactionTargetMeta, handler Handler) *compactionTargetReconciler {
 	return &compactionTargetReconciler{
-		meta:    meta,
-		handler: handler,
+		meta:                 meta,
+		indexMeta:            indexMeta,
+		compactionTargetMeta: compactionTargetMeta,
+		handler:              handler,
 	}
 }
 
@@ -31,7 +35,7 @@ func (reconciler *compactionTargetReconciler) Enable() bool {
 	return paramtable.Get().DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() &&
 		reconciler != nil &&
 		reconciler.meta != nil &&
-		reconciler.meta.GetCompactionTargetMeta() != nil
+		reconciler.compactionTargetMeta != nil
 }
 
 func (reconciler *compactionTargetReconciler) Name() string {
@@ -50,7 +54,7 @@ func (reconciler *compactionTargetReconciler) Reconcile(ctx context.Context) (ma
 		return events, nil
 	}
 
-	targetMeta := reconciler.meta.GetCompactionTargetMeta()
+	targetMeta := reconciler.compactionTargetMeta
 	targets := targetMeta.GetActiveCompactionTargets()
 	if len(targets) == 0 {
 		return events, nil
@@ -143,7 +147,7 @@ func (reconciler *compactionTargetReconciler) filterMixCompactionSelectable(
 		}
 	}
 	if paramtable.Get().DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-		return FilterInIndexedSegments(ctx, reconciler.handler, reconciler.meta, true, selectable...)
+		return FilterInIndexedSegments(ctx, reconciler.handler, reconciler.indexMeta, true, selectable...)
 	}
 	return selectable
 }

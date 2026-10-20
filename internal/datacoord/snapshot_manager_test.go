@@ -69,10 +69,6 @@ type restoreAllocatorTarget struct {
 	allocator.Allocator
 }
 
-type restoreBrokerTarget struct {
-	broker.Broker
-}
-
 type restoreWALAccesserTarget struct {
 	streaming.WALAccesser
 }
@@ -1313,16 +1309,6 @@ func TestSnapshotManager_BuildChannelMapping_GetChannelsError(t *testing.T) {
 }
 
 // --- Test RestoreSnapshot ---
-
-// newRestoreAbsentTargetBroker supplies admission metadata for tests focused on
-// later restore phases. Concurrency tests exercise the changing target state.
-func newRestoreAbsentTargetBroker(t *testing.T) broker.Broker {
-	t.Helper()
-	m := mockey.Mock((*restoreBrokerTarget).DescribeCollectionByName).
-		Return(nil, merr.WrapErrCollectionNotFound("target")).Build()
-	t.Cleanup(func() { m.UnPatch() })
-	return &restoreBrokerTarget{}
-}
 
 func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testing.T) {
 	ctx := context.Background()

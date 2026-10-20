@@ -30,20 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func newTestGroup() *model.SegmentChangeGroup {
-	return &model.SegmentChangeGroup{
-		GroupID:              1,
-		Source:               model.SegmentChangeSourceMixCompaction,
-		CollectionID:         10,
-		PartitionID:          100,
-		SourceJobID:          999,
-		State:                model.SegmentChangeStateStaged,
-		NewSegmentIDs:        []int64{1001},
-		SupersededSegmentIDs: []int64{2001},
-		CreateTS:             123,
-	}
-}
-
 // deleteGroupCleanup aborts (if non-terminal) then deletes a group. Used by
 // tests as cleanup; production must go through ABORT/FAIL before Delete (M3).
 func deleteGroupCleanup(t *testing.T, m *meta, collectionID, groupID int64) {

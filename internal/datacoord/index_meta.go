@@ -1345,33 +1345,6 @@ func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex)
 	m.segmentBuildInfo.Remove(segIdx.BuildID)
 }
 
-// errSegmentIndexRecordGone reports that the SegmentIndex record a staged
-// upsert must be projected from no longer exists. The commit that staged the
-// mutation is abandoned before creating a manifest revision; publishing would
-// strand an index entry that no SegmentIndex record can ever drive GC for.
-var errSegmentIndexRecordGone = errors.New("segment index record no longer exists")
-
-// stagedSegmentIndexMutation carries a SegmentIndex change from its projection
-// under keyLock to the in-memory install that follows a successful catalog
-// write. action is nil when the mutation resolves to no catalog write at all;
-// record is the locked task projection used to validate manifest contents.
-//
-// install performs in-memory changes only — it never acquires fieldIndexLock, so
-// the manifest commit may run it inside its segMu critical section. It returns
-// the observability update it deferred (never nil): the stored-index-size gauge
-// must serialize against MarkIndexAsDeleted via fieldIndexLock, whose write
-// side every index DDL (CreateIndex, AlterIndex, MarkIndexAsDeleted,
-// RemoveIndex) holds across an etcd round trip. The caller MUST run the
-// returned closure only after releasing segMu — acquiring fieldIndexLock inside
-// segMu would let one slow DDL stall every segment reader — and before
-// releasing keyLock(BuildID), so the install-then-metric sequence stays ordered
-// against the next writer of the same build.
-type stagedSegmentIndexMutation struct {
-	action  *metastore.UpdateAction
-	record  *model.SegmentIndex
-	install func() (deferredMetric func())
-}
-
 // stageSegmentIndexMutation projects mut against the SegmentIndex record
 // current under its per-buildID key lock, and returns the catalog action to
 // compose into the caller's transaction plus the in-memory install to run once
@@ -1683,3 +1656,46 @@ func (m *indexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 	}
 	return isIndexed, segmentIndexes
 }
+
+func (m *indexMeta) HasBuildInfo(buildID int64) bool {
+	_, ok := m.segmentBuildInfo.Get(buildID)
+	return ok
+}
+
+func (m *indexMeta) LockBuildIDs(buildIDs []int64) { lock.LockManyOrdered(m.keyLock, buildIDs) }
+
+// RLockFieldIndexes takes the read side of fieldIndexLock.
+func (m *indexMeta) RLockFieldIndexes() { m.fieldIndexLock.RLock() }
+
+// RUnlockFieldIndexes releases the read side of fieldIndexLock.
+func (m *indexMeta) RUnlockFieldIndexes() { m.fieldIndexLock.RUnlock() }
+
+// LiveIndexIDsOnColumnsLocked returns the IDs of the live indexes of the
+// collection whose field ID, formatted as a manifest column name, is in
+// columns. The caller must hold the read side of fieldIndexLock.
+func (m *indexMeta) LiveIndexIDsOnColumnsLocked(collectionID int64, columns map[string]struct{}) map[int64]struct{} {
+	indexIDs := make(map[int64]struct{})
+	for _, index := range m.indexes[collectionID] {
+		if index.IsDeleted {
+			continue
+		}
+		if _, ok := columns[strconv.FormatInt(index.FieldID, 10)]; ok {
+			indexIDs[index.IndexID] = struct{}{}
+		}
+	}
+	return indexIDs
+}
+
+func (m *indexMeta) UnlockBuildIDs(buildIDs []int64) { m.keyLock.UnlockMany(buildIDs) }
+
+func (m *indexMeta) UpdateSegmentIndex(segIdx *model.SegmentIndex) { m.updateSegmentIndex(segIdx) }
+
+func (m *indexMeta) AddStoredIndexSizeMetric(collID, indexID UniqueID, delta float64) {
+	m.addStoredIndexSizeMetric(collID, indexID, delta)
+}
+
+func (m *indexMeta) StageSegmentIndexMutation(mut SegmentIndexMutation) (*stagedSegmentIndexMutation, error) {
+	return m.stageSegmentIndexMutation(mut)
+}
+
+var _ SegmentIndexCatalog = (*indexMeta)(nil)

@@ -26,10 +26,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func (s *DDLCallbacks) alterIndexV2AckCallback(ctx context.Context, result message.BroadcastResultAlterIndexMessageV2) error {
+func (c *DDLCallbacks) alterIndexV2AckCallback(ctx context.Context, result message.BroadcastResultAlterIndexMessageV2) error {
 	indexes := result.Message.MustBody().FieldIndexes
 	indexModels := lo.Map(indexes, func(index *indexpb.FieldIndex, _ int) *model.Index {
 		return model.UnmarshalIndexModel(index)
 	})
-	return s.meta.indexMeta.AlterIndex(ctx, indexModels...)
+	return c.IndexMeta.AlterIndex(ctx, indexModels...)
 }

@@ -48,16 +48,18 @@ const (
 // indexed segment and one segment whose index task is still in progress.
 func newDroppedSegmentRaceServer(t *testing.T) *Server {
 	store := metacache.NewMetaStore(nil)
+	im := newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
 	s := &Server{
 		meta: &meta{
-			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
-			metaStore: store,
-			segments:  NewSegmentsInfo(store),
+			catalog:      &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
+			indexCatalog: im,
+			metaStore:    store,
+			segments:     NewSegmentsInfo(store),
 		},
+		domainMetas: domainMetas{indexMeta: im},
 	}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
-	s.meta.indexMeta.indexes[droppedRaceCollID] = map[UniqueID]*model.Index{
+	s.indexMeta.indexes[droppedRaceCollID] = map[UniqueID]*model.Index{
 		droppedRaceIndexID: {
 			CollectionID: droppedRaceCollID,
 			FieldID:      droppedRaceFieldID,
@@ -88,7 +90,7 @@ func newDroppedSegmentRaceServer(t *testing.T) *Server {
 			BuildID:      segID + 10000,
 			IndexState:   state,
 		})
-		s.meta.indexMeta.segmentIndexes.Insert(segID, segIdx)
+		s.indexMeta.segmentIndexes.Insert(segID, segIdx)
 	}
 	return s
 }

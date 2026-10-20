@@ -37,7 +37,7 @@ func (s *ForceMergeCompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta, err := newMemoryMeta(s.T())
+	meta, dm, err := newMemoryMetaWithIndex(s.T())
 	s.Require().NoError(err)
 	for id, segment := range segments {
 		if segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetState() == commonpb.SegmentState_Flushed {
@@ -50,14 +50,14 @@ func (s *ForceMergeCompactionPolicySuite) SetupTest() {
 	s.mockHandler = NewNMockHandler(s.T())
 	s.mockQuerier = NewMockCollectionTopologyQuerier(s.T())
 
-	s.policy = newForceMergeCompactionPolicy(meta, s.mockAlloc, s.mockHandler)
+	s.policy = newForceMergeCompactionPolicy(meta, dm.indexMeta, s.mockAlloc, s.mockHandler)
 	s.policy.SetTopologyQuerier(s.mockQuerier)
 }
 
 func (s *ForceMergeCompactionPolicySuite) TestNewForceMergeCompactionPolicy() {
-	meta, err := newMemoryMeta(s.T())
+	meta, dm, err := newMemoryMetaWithIndex(s.T())
 	s.Require().NoError(err)
-	policy := newForceMergeCompactionPolicy(meta, s.mockAlloc, s.mockHandler)
+	policy := newForceMergeCompactionPolicy(meta, dm.indexMeta, s.mockAlloc, s.mockHandler)
 
 	s.NotNil(policy)
 	s.Equal(meta, policy.meta)
@@ -67,7 +67,7 @@ func (s *ForceMergeCompactionPolicySuite) TestNewForceMergeCompactionPolicy() {
 }
 
 func (s *ForceMergeCompactionPolicySuite) TestSetTopologyQuerier() {
-	policy := newForceMergeCompactionPolicy(s.policy.meta, s.mockAlloc, s.mockHandler)
+	policy := newForceMergeCompactionPolicy(s.policy.meta, s.policy.indexMeta, s.mockAlloc, s.mockHandler)
 	s.Nil(policy.topologyQuerier)
 
 	policy.SetTopologyQuerier(s.mockQuerier)
@@ -382,9 +382,9 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_AlignsTargetS
 	targetSize := int64(1024 * 2) // 2GB in MB
 	triggerID := int64(100)
 
-	meta, err := newMemoryMeta(s.T())
+	meta, dm, err := newMemoryMetaWithIndex(s.T())
 	s.Require().NoError(err)
-	policy := newForceMergeCompactionPolicy(meta, s.mockAlloc, s.mockHandler)
+	policy := newForceMergeCompactionPolicy(meta, dm.indexMeta, s.mockAlloc, s.mockHandler)
 	policy.SetTopologyQuerier(s.mockQuerier)
 
 	newSegment := func(id int64, level datapb.SegmentLevel, sorted bool, sortedByNamespace bool, compacting bool) *SegmentInfo {

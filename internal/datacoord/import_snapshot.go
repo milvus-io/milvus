@@ -171,7 +171,7 @@ func readSnapshotImportMetadata(ctx context.Context, cm milvusstorage.ChunkManag
 // in WAL body options; it never embeds the metadata itself.
 // Segment metadata and physical manifest I/O belong to Pending/PreImport, not the
 // user-facing create RPC. A version-9 descriptor is not executable by a worker.
-// broadcastImport validates the completed descriptor before broadcasting it.
+// BroadcastImport validates the completed descriptor before broadcasting it.
 func prepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milvusstorage.ChunkManager,
 	schema *schemapb.CollectionSchema, files []*internalpb.ImportFile, options importutilv2.Options,
 ) ([]*internalpb.ImportFile, importutilv2.Options, error) {
@@ -486,39 +486,6 @@ func resolveSnapshotPartitionMapping(sourcePartitions map[string]int64, targetID
 		result[id] = targets[target]
 	}
 	return result, nil
-}
-
-// Recheck Proxy's name-to-ID resolution while holding the collection broadcast
-// lock. A drop/recreate during snapshot I/O must not redirect already-bound
-// files to another partition with the same name.
-func (s *Server) validateSnapshotPartitionTargets(ctx context.Context, collectionID int64,
-	partitionIDs []int64, options importutilv2.Options,
-) error {
-	mapping, err := importutilv2.GetPartitionMapping(options)
-	if err != nil || mapping == nil {
-		return err
-	}
-	partitions, err := s.broker.ShowPartitions(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	if len(partitions.GetPartitionNames()) != len(partitions.GetPartitionIDs()) {
-		return merr.WrapErrServiceInternalMsg("partition metadata has mismatched names and IDs")
-	}
-	current := make(map[string]int64)
-	for i, name := range partitions.GetPartitionNames() {
-		current[name] = partitions.GetPartitionIDs()[i]
-	}
-	names := importutilv2.PartitionMappingTargets(mapping)
-	if len(names) != len(partitionIDs) {
-		return merr.WrapErrServiceInternalMsg("partition_mapping destination count changed")
-	}
-	for i, name := range names {
-		if current[name] != partitionIDs[i] {
-			return merr.WrapErrServiceUnavailableMsg("target partition %s changed while preparing snapshot import; retry the request", name)
-		}
-	}
-	return nil
 }
 
 // Match L0 against original source partitions/channels, including collection-wide

@@ -28,7 +28,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/metacache"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestNormalizeLocalManifestPath(t *testing.T) {
@@ -126,45 +125,6 @@ func TestNormalizeLocalManifestPath(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrDataIntegrity)
 		assert.Empty(t, got)
 	})
-}
-
-func setLocalManifestLegacyPrefix(t *testing.T, prefix string) {
-	t.Helper()
-	paramtable.Init()
-	params := paramtable.Get()
-	key := params.MinioCfg.RootPath.Key
-	original := params.MinioCfg.RootPath.GetValue()
-	require.NoError(t, params.Save(key, prefix))
-	t.Cleanup(func() { require.NoError(t, params.Save(key, original)) })
-}
-
-func newLocalManifestTestMeta(t *testing.T, catalog *catalogmocks.DataCoordCatalog, cm storage.ChunkManager) *meta {
-	t.Helper()
-	executor := newManifestCommitExecutor(1)
-	t.Cleanup(executor.close)
-	store := metacache.NewMetaStore(catalog)
-	return &meta{
-		manifestCommitExecutor: executor,
-		ctx:                    context.Background(),
-		catalog:                catalog,
-		metaStore:              store,
-		chunkManager:           cm,
-		segments:               NewSegmentsInfo(store),
-		channelSync:            newChannelSync(),
-	}
-}
-
-func loadAndNormalize(ctx context.Context, mt *meta, collectionIDs []int64) error {
-	return mt.metaStore.LoadFromCatalog(ctx, collectionIDs, mt.segmentLoadNormalizer())
-}
-
-func assertLocalManifestCatalogReadOnly(t *testing.T, catalog *catalogmocks.DataCoordCatalog) {
-	t.Helper()
-	catalog.AssertNotCalled(t, "AlterSegments", mock.Anything, mock.Anything)
-	for _, call := range catalog.Calls {
-		assert.Contains(t, []string{"ListSegments", "ListChannelCheckpoint"}, call.Method,
-			"loading local manifests must not call a catalog mutation")
-	}
 }
 
 func TestReloadLocalManifestPathsReadOnlyAndLazyPersistence(t *testing.T) {

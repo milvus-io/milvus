@@ -35,7 +35,7 @@ func TestManualFlushSyncCompletion(t *testing.T) {
 			server.stateCode.Store(commonpb.StateCode_Healthy)
 			patch := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
 			defer patch.UnPatch()
-			patchLock := mockey.Mock((*Server).startLocalFlushBroadcast).To(func(_ *Server, _ context.Context, id int64) (broadcaster.BroadcastAPI, error) {
+			patchLock := mockey.Mock((*DDLCallbacks).StartLocalFlushBroadcast).To(func(_ *DDLCallbacks, _ context.Context, id int64) (broadcaster.BroadcastAPI, error) {
 				require.Equal(t, coll.ID, id)
 				return bc, nil
 			}).Build()

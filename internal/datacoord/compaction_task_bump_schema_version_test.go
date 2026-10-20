@@ -52,6 +52,7 @@ type BumpSchemaVersionCompactionTaskSuite struct {
 	mockID    atomic.Int64
 	mockAlloc *allocator.MockAllocator
 	meta      *meta
+	dm        *compactionTaskTestMetas
 	handler   *NMockHandler
 	ievm      IndexEngineVersionManager
 }
@@ -62,9 +63,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) SetupTest() {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(ctx, catalog, cm, metacache.NewMetaStore(catalog), broker)
+	dm := &compactionTaskTestMetas{}
+	meta, err := newMeta(ctx, catalog, cm, metacache.NewMetaStore(catalog), broker, loadCompactionTaskTestMetas(catalog, cm, dm))
 	s.NoError(err)
 	s.meta = meta
+	s.dm = dm
 
 	s.mockID.Store(time.Now().UnixMilli())
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
@@ -131,7 +134,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) generateBasicTask() *bumpSchemaVe
 		Channel: "ch-1",
 	}
 
-	task := newBumpSchemaVersionTask(compactionTask, s.mockAlloc, s.meta, s.ievm)
+	task := newBumpSchemaVersionTask(compactionTask, s.mockAlloc, s.meta, s.dm.compactionTaskMeta, s.ievm)
 	return task
 }
 
@@ -270,7 +273,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequestPreAllo
 	allocErr := errors.New("alloc failed")
 	mockAlloc := allocator.NewMockAllocator(s.T())
 	mockAlloc.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), allocErr).Once()
-	task := newBumpSchemaVersionTask(s.generateBasicTask().GetTaskProto(), mockAlloc, s.meta, s.ievm)
+	task := newBumpSchemaVersionTask(s.generateBasicTask().GetTaskProto(), mockAlloc, s.meta, s.dm.compactionTaskMeta, s.ievm)
 
 	plan, err := task.BuildCompactionRequest()
 	s.ErrorIs(err, allocErr)
@@ -908,11 +911,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestGetTaskSlot() {
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestCleanError() {
 	// Make the compactionTaskMeta catalog fail on SaveCompactionTask so that doClean returns an error.
-	// meta.compactionTaskMeta.catalog is the catalog used by SaveCompactionTask,
+	// compactionTaskMeta.catalog is the catalog used by SaveCompactionTask,
 	// separate from meta.catalog which is used by segment operations.
 	mockCatalog := mocks.NewDataCoordCatalog(s.T())
 	mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("catalog write error"))
-	s.meta.compactionTaskMeta.catalog = mockCatalog
+	s.dm.compactionTaskMeta.catalog = mockCatalog
 
 	task := s.generateBasicTask()
 	result := task.Clean()

@@ -33,8 +33,8 @@ func (s *Server) FeatureUsageEntries(cc featureusage.CollectionContext) []*inter
 		return nil
 	}
 	var entries []*internalpb.FeatureEntry
-	if s.meta.indexMeta != nil {
-		entries = append(entries, featureusage.ComputeIndexEntries(s.meta.indexMeta.ListAllIndexes())...)
+	if s.indexMeta != nil {
+		entries = append(entries, featureusage.ComputeIndexEntries(s.indexMeta.ListAllIndexes())...)
 	}
 	if s.meta.segments != nil {
 		segs := s.meta.GetAllSegmentsUnsafe()
@@ -99,13 +99,5 @@ func importFileTypeFeature(t importutilv2.FileType) (featureusage.Feature, bool)
 		return featureusage.FeatureImportCSV, true
 	default:
 		return 0, false
-	}
-}
-
-// recordCompactionType counts a compaction task the moment DataCoord persists
-// it, for the same reason as recordImportFileTypes.
-func recordCompactionType(t datapb.CompactionType) {
-	if featureusage.Enabled() {
-		featureusage.Hit(featureusage.CompactionTypeFeature(t))
 	}
 }

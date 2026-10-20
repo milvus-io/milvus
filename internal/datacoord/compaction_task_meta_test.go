@@ -50,14 +50,6 @@ func (suite *CompactionTaskMetaSuite) SetupTest() {
 	suite.meta = meta
 }
 
-func newTestCompactionTaskMeta(t *testing.T) *compactionTaskMeta {
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	meta, _ := newCompactionTaskMeta(context.TODO(), catalog)
-	return meta
-}
-
 func (suite *CompactionTaskMetaSuite) TestGetCompactionTasksByCollection() {
 	suite.meta.SaveCompactionTask(context.TODO(), &datapb.CompactionTask{
 		TriggerID:    1,

@@ -42,6 +42,7 @@ import (
 type analyzeTaskSuite struct {
 	suite.Suite
 	mt *meta
+	am *analyzeMeta
 
 	collID  int64
 	partID  int64
@@ -127,17 +128,17 @@ func (s *analyzeTaskSuite) SetupSuite() {
 	})
 
 	s.mt = &meta{
-		analyzeMeta: analyzeMt,
-		segments:    segments,
-		metaStore:   ms,
+		segments:  segments,
+		metaStore: ms,
 	}
+	s.am = analyzeMt
 }
 
 func (s *analyzeTaskSuite) TestBasicTaskOperations() {
 	at := newAnalyzeTask(&indexpb.AnalyzeTask{
 		TaskID: s.taskID,
 		State:  indexpb.JobState_JobStateInit,
-	}, s.mt)
+	}, s.mt, s.am)
 
 	s.Run("task type and state", func() {
 		s.Equal(taskcommon.Analyze, at.GetTaskType())
@@ -169,17 +170,17 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker() {
 	at := newAnalyzeTask(&indexpb.AnalyzeTask{
 		TaskID: s.taskID,
 		State:  indexpb.JobState_JobStateInit,
-	}, s.mt)
+	}, s.mt, s.am)
 
 	s.Run("task not exist in meta", func() {
 		// Remove task from meta
-		originalTask := s.mt.analyzeMeta.tasks[s.taskID]
-		delete(s.mt.analyzeMeta.tasks, s.taskID)
+		originalTask := s.am.tasks[s.taskID]
+		delete(s.am.tasks, s.taskID)
 		at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 		s.Equal(indexpb.JobState_JobStateNone, at.GetState())
 
 		// Restore task
-		s.mt.analyzeMeta.tasks[s.taskID] = originalTask
+		s.am.tasks[s.taskID] = originalTask
 	})
 
 	s.Run("successful creation", func() {
@@ -189,7 +190,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker() {
 		// Mock the UpdateVersion function
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-		s.mt.analyzeMeta.catalog = catalog
+		s.am.catalog = catalog
 
 		at.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
@@ -201,13 +202,13 @@ func (s *analyzeTaskSuite) newTask() *analyzeTask {
 		CollectionID: s.collID,
 		TaskID:       s.taskID,
 		State:        indexpb.JobState_JobStateInit,
-	}, s.mt)
+	}, s.mt, s.am)
 }
 
 // restoreMetaTask puts back the task the suite was set up with, so a test that
 // persists a state transition does not leak it into the following tests.
 func (s *analyzeTaskSuite) restoreMetaTask(task *indexpb.AnalyzeTask) {
-	s.mt.analyzeMeta.tasks[s.taskID] = task
+	s.am.tasks[s.taskID] = task
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentNil() {
@@ -236,15 +237,15 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentNil() {
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.mt.analyzeMeta.catalog = catalog
-	defer s.restoreMetaTask(s.mt.analyzeMeta.tasks[s.taskID])
+	s.am.catalog = catalog
+	defer s.restoreMetaTask(s.am.tasks[s.taskID])
 
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 	s.Equal(indexpb.JobState_JobStateFailed, at.GetState())
 	s.Contains(at.GetFailReason(), "102")
 	// The terminal state must be persisted, not only set on the scheduler-owned copy.
-	s.Equal(indexpb.JobState_JobStateFailed, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
-	s.Contains(s.mt.analyzeMeta.GetTask(s.taskID).GetFailReason(), "102")
+	s.Equal(indexpb.JobState_JobStateFailed, s.am.GetTask(s.taskID).GetState())
+	s.Contains(s.am.GetTask(s.taskID).GetFailReason(), "102")
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DimExtractionError() {
@@ -273,7 +274,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DimExtractionError() {
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.mt.analyzeMeta.catalog = catalog
+	s.am.catalog = catalog
 
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 	// Should reset to Init state on dim error
@@ -288,14 +289,14 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.mt.analyzeMeta.catalog = catalog
-	defer s.restoreMetaTask(s.mt.analyzeMeta.tasks[s.taskID])
+	s.am.catalog = catalog
+	defer s.restoreMetaTask(s.am.tasks[s.taskID])
 
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 	// data too small → skip → mark as finished
 	s.Equal(indexpb.JobState_JobStateFinished, at.GetState())
 	// Persisting Finished is what lets the GC recycle the task's analyze stats files.
-	s.Equal(indexpb.JobState_JobStateFinished, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
+	s.Equal(indexpb.JobState_JobStateFinished, s.am.GetTask(s.taskID).GetState())
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_TerminalStateNotPersisted() {
@@ -310,15 +311,15 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_TerminalStateNotPersisted() {
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).
 		Return(merr.WrapErrServiceInternalMsg("mock save error")).Once()
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.mt.analyzeMeta.catalog = catalog
-	defer s.restoreMetaTask(s.mt.analyzeMeta.tasks[s.taskID])
-	stateBefore := s.mt.analyzeMeta.GetTask(s.taskID).GetState()
+	s.am.catalog = catalog
+	defer s.restoreMetaTask(s.am.tasks[s.taskID])
+	stateBefore := s.am.GetTask(s.taskID).GetState()
 
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 	// A failed persistence leaves the task at Init so the scheduler re-enqueues it,
 	// rather than dropping it on an in-memory-only terminal state.
 	s.Equal(indexpb.JobState_JobStateInit, at.GetState())
-	s.Equal(stateBefore, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
+	s.Equal(stateBefore, s.am.GetTask(s.taskID).GetState())
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
@@ -333,7 +334,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.mt.analyzeMeta.catalog = catalog
+	s.am.catalog = catalog
 
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
@@ -352,7 +353,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_CreateAnalyzeError() {
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.mt.analyzeMeta.catalog = catalog
+	s.am.catalog = catalog
 
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.Anything).Return(fmt.Errorf("node down"))
@@ -371,7 +372,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentStatsPopulated() {
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.mt.analyzeMeta.catalog = catalog
+	s.am.catalog = catalog
 
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
@@ -437,7 +438,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_ManifestPropagated() {
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.mt.analyzeMeta.catalog = catalog
+	s.am.catalog = catalog
 
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
@@ -466,7 +467,7 @@ func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 		TaskID: s.taskID,
 		NodeID: 1,
 		State:  indexpb.JobState_JobStateInProgress,
-	}, s.mt)
+	}, s.mt, s.am)
 
 	s.Run("query failed", func() {
 		cluster := session.NewMockCluster(s.T())
@@ -499,7 +500,7 @@ func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 		// Mock the FinishTask function
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
-		s.mt.analyzeMeta.catalog = catalog
+		s.am.catalog = catalog
 
 		at.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateFinished, at.GetState())
@@ -511,7 +512,7 @@ func (s *analyzeTaskSuite) TestDropTaskOnWorker() {
 		TaskID: s.taskID,
 		NodeID: 1,
 		State:  indexpb.JobState_JobStateInProgress,
-	}, s.mt)
+	}, s.mt, s.am)
 
 	s.Run("drop failed", func() {
 		cluster := session.NewMockCluster(s.T())

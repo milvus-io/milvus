@@ -30,9 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -67,7 +65,8 @@ type statsInspector struct {
 	// failed attempts); only the ticker processes them.
 	pendingStatsSegs typeutil.UniqueSet
 
-	mt *meta
+	mt            *meta
+	statsTaskMeta *statsTaskMeta
 
 	scheduler           task.GlobalScheduler
 	allocator           allocator.Allocator
@@ -79,6 +78,7 @@ type statsInspector struct {
 func newStatsInspector(ctx context.Context,
 	notifyStatsChan chan int64,
 	mt *meta,
+	statsTaskMeta *statsTaskMeta,
 	scheduler task.GlobalScheduler,
 	allocator allocator.Allocator,
 	handler Handler,
@@ -95,6 +95,7 @@ func newStatsInspector(ctx context.Context,
 		notifiedStatsSegs:   typeutil.NewUniqueSet(),
 		pendingStatsSegs:    typeutil.NewUniqueSet(),
 		mt:                  mt,
+		statsTaskMeta:       statsTaskMeta,
 		scheduler:           scheduler,
 		allocator:           allocator,
 		handler:             handler,
@@ -195,7 +196,7 @@ func (si *statsInspector) Stop() {
 }
 
 func (si *statsInspector) reloadFromMeta() {
-	tasks := si.mt.statsTaskMeta.GetAllTasks()
+	tasks := si.statsTaskMeta.GetAllTasks()
 	for _, st := range tasks {
 		if st.GetState() != indexpb.JobState_JobStateInit &&
 			st.GetState() != indexpb.JobState_JobStateRetry &&
@@ -216,6 +217,7 @@ func (si *statsInspector) reloadFromMeta() {
 			proto.Clone(st).(*indexpb.StatsTask),
 			taskSlot,
 			si.mt,
+			si.statsTaskMeta,
 			si.handler,
 			si.allocator,
 			si.ievm,
@@ -330,7 +332,7 @@ func segmentNeedsStats(segment *SegmentInfo, fields statsFields, subJobType inde
 // that is not in meta yet.
 func (si *statsInspector) needStatsTask(segment *SegmentInfo, fields statsFields, subJobType indexpb.StatsSubJob) bool {
 	return segmentNeedsStats(segment, fields, subJobType) &&
-		!si.mt.statsTaskMeta.HasStatsTask(segment.GetID(), subJobType)
+		!si.statsTaskMeta.HasStatsTask(segment.GetID(), subJobType)
 }
 
 // getStatsCandidateSegments returns the IDs of the segments of the given
@@ -427,53 +429,6 @@ func (si *statsInspector) getStatsTaskResources(ctx context.Context, collection 
 	return lookup.resources, lookup.err
 }
 
-func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
-	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
-		return false
-	}
-	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
-		return false
-	}
-
-	for _, fieldID := range fieldIDs {
-		if segment.GetTextStatsLogs() == nil {
-			return true
-		}
-		if segment.GetTextStatsLogs()[fieldID] == nil {
-			return true
-		}
-	}
-	return false
-}
-
-func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
-	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 {
-		return false
-	}
-	if !allowUnsorted && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
-		return false
-	}
-
-	for _, fieldID := range fieldIDs {
-		if segment.GetJsonKeyStats() == nil {
-			return true
-		}
-		if segment.GetJsonKeyStats()[fieldID] == nil {
-			return true
-		}
-		// if the data format version is less than the current version, we need to do the stats task again
-		// because the data format is updated, the old data format need to be converted to the new data format
-		if segment.GetJsonKeyStats()[fieldID].GetJsonKeyStatsDataFormat() < common.JSONStatsDataFormatVersion {
-			return true
-		}
-	}
-	return false
-}
-
-func canBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {
-	return supportsFieldProjection(segment)
-}
-
 // canSubmitStatsTask reports whether the global scheduler still has room for a
 // new stats task. The pending queue is shared by every task type, so the count is
 // scoped to stats work: an index or compaction backlog must not starve text-index
@@ -510,9 +465,9 @@ func (si *statsInspector) cleanupStatsTasksLoop() {
 			start := time.Now()
 			mlog.Info(si.ctx, "start cleanupUnusedStatsTasks...", mlog.Time("startAt", start))
 
-			taskIDs := si.mt.statsTaskMeta.CanCleanedTasks()
+			taskIDs := si.statsTaskMeta.CanCleanedTasks()
 			for _, taskID := range taskIDs {
-				if err := si.mt.statsTaskMeta.DropStatsTask(si.ctx, taskID); err != nil {
+				if err := si.statsTaskMeta.DropStatsTask(si.ctx, taskID); err != nil {
 					// ignore err, if remove failed, wait next GC
 					mlog.Warn(si.ctx, "clean up stats task failed", mlog.FieldTaskID(taskID), mlog.Err(err))
 				}
@@ -548,7 +503,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 			return nil
 		}
 	}
-	if si.mt.statsTaskMeta.HasStatsTask(originSegmentID, subJobType) {
+	if si.statsTaskMeta.HasStatsTask(originSegmentID, subJobType) {
 		mlog.RatedInfo(si.ctx, rate.Limit(10), "stats task already exists",
 			mlog.FieldCollectionID(originSegment.GetCollectionID()),
 			mlog.FieldSegmentID(originSegmentID),
@@ -591,7 +546,7 @@ func (si *statsInspector) submitStatsTask(originSegment *SegmentInfo, targetSegm
 		CanRecycle:      canRecycle,
 		FileResources:   resources,
 	}
-	if err = si.mt.statsTaskMeta.AddStatsTask(t); err != nil {
+	if err = si.statsTaskMeta.AddStatsTask(t); err != nil {
 		if errors.Is(err, merr.ErrTaskDuplicate) {
 			mlog.RatedInfo(si.ctx, rate.Limit(10), "stats task already exists", mlog.FieldTaskID(taskID),
 				mlog.FieldCollectionID(originSegment.GetCollectionID()),
@@ -600,7 +555,7 @@ func (si *statsInspector) submitStatsTask(originSegment *SegmentInfo, targetSegm
 		}
 		return err
 	}
-	si.scheduler.Enqueue(newStatsTask(proto.Clone(t).(*indexpb.StatsTask), taskSlot, si.mt, si.handler, si.allocator, si.ievm))
+	si.scheduler.Enqueue(newStatsTask(proto.Clone(t).(*indexpb.StatsTask), taskSlot, si.mt, si.statsTaskMeta, si.handler, si.allocator, si.ievm))
 	mlog.Info(si.ctx,
 		"submit stats task success", mlog.FieldTaskID(taskID),
 		mlog.String("subJobType", subJobType.String()),
@@ -611,7 +566,7 @@ func (si *statsInspector) submitStatsTask(originSegment *SegmentInfo, targetSegm
 }
 
 func (si *statsInspector) GetStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) *indexpb.StatsTask {
-	task := si.mt.statsTaskMeta.GetStatsTaskBySegmentID(originSegmentID, subJobType)
+	task := si.statsTaskMeta.GetStatsTaskBySegmentID(originSegmentID, subJobType)
 	mlog.Info(si.ctx, "statsJobManager get stats task state", mlog.FieldSegmentID(originSegmentID),
 		mlog.String("subJobType", subJobType.String()), mlog.String("state", task.GetState().String()),
 		mlog.String("failReason", task.GetFailReason()))
@@ -619,12 +574,12 @@ func (si *statsInspector) GetStatsTask(originSegmentID int64, subJobType indexpb
 }
 
 func (si *statsInspector) DropStatsTask(originSegmentID int64, subJobType indexpb.StatsSubJob) error {
-	task := si.mt.statsTaskMeta.GetStatsTaskBySegmentID(originSegmentID, subJobType)
+	task := si.statsTaskMeta.GetStatsTaskBySegmentID(originSegmentID, subJobType)
 	if task == nil {
 		return nil
 	}
 	si.scheduler.AbortAndRemoveTask(task.GetTaskID())
-	if err := si.mt.statsTaskMeta.MarkTaskCanRecycle(task.GetTaskID()); err != nil {
+	if err := si.statsTaskMeta.MarkTaskCanRecycle(task.GetTaskID()); err != nil {
 		return err
 	}
 

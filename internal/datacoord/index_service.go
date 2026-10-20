@@ -104,85 +104,12 @@ func isJSONField(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	return false
 }
 
-func getIndexParam(indexParams []*commonpb.KeyValuePair, key string) (string, error) {
-	for _, p := range indexParams {
-		if p.Key == key {
-			return p.Value, nil
-		}
-	}
-	return "", merr.WrapErrParameterInvalidMsg("%s not found", key)
-}
-
 func setIndexParam(indexParams []*commonpb.KeyValuePair, key, value string) {
 	for _, p := range indexParams {
 		if p.Key == key {
 			p.Value = value
 		}
 	}
-}
-
-func isTypedJSONArrayIndex(indexType, castType string) bool {
-	if indexType != indexparamcheck.IndexHybrid && indexType != indexparamcheck.IndexSTLSORT {
-		return false
-	}
-	return indexparamcheck.IsJSONArrayCastType(castType)
-}
-
-func checkJSONArrayIndexEnabled(indexType, castType string) error {
-	if isTypedJSONArrayIndex(indexType, castType) &&
-		!Params.DataCoordCfg.EnableArraySortIndex.GetAsBool() {
-		return merr.WrapErrServiceNotReadyMsg("JSON ARRAY HYBRID and STL_SORT are disabled by the cluster software upgrade gate")
-	}
-	return nil
-}
-
-// Explicit SORT on ordinary ARRAY is a new logical index type for old readers.
-// Nested ARRAY SORT retains its existing admission rules.
-func checkOrdinaryArraySortIndex(field *schemapb.FieldSchema, indexType string, versions IndexEngineVersionManager) error {
-	if indexType != indexparamcheck.IndexSTLSORT || field.GetDataType() != schemapb.DataType_Array || typeutil.IsStructSubField(field.GetName()) {
-		return nil
-	}
-	if !Params.DataCoordCfg.EnableArraySortIndex.GetAsBool() {
-		return merr.WrapErrServiceNotReadyMsg("ARRAY STL_SORT is disabled by the cluster software upgrade gate")
-	}
-	if versions.ResolveScalarIndexVersion() < 3 {
-		return merr.WrapErrParameterInvalidMsg("ARRAY STL_SORT requires the existing packed scalar index format (version >= 3)")
-	}
-	return nil
-}
-
-func requiredJSONPathIndexVersion(indexType, castType string) int32 {
-	if isTypedJSONArrayIndex(indexType, castType) {
-		return 3 // Existing packed scalar index format; no new engine version.
-	}
-	return common.MinScalarIndexVersionForJsonPathMultiType
-}
-
-// checkFMIndexEngineVersion rejects FMINDEX creation when the cluster's resolved
-// scalar index engine version is below MinScalarIndexVersionForFMINDEX. FMINDEX
-// (scalar engine v5) is a new capability older nodes cannot handle:
-// `ResolveScalarIndexVersion` aggregates QueryNode sessions, so passing here
-// means no old QueryNode will be asked to LOAD a freshly built FMINDEX segment.
-//
-// This is shared by BOTH Server.CreateIndex and snapshotManager.RestoreIndexes:
-// restore broadcasts the same CreateIndex DDL directly, so without this it could
-// bypass the gate and create an FMINDEX index in a mixed-version cluster.
-// FMINDEX is opt-in (never an AutoIndex-resolved type), so reject, don't downgrade.
-//
-// Caveat (unchanged): this gates the loaders, not the build workers
-// (DataNode/IndexNode), which must be upgraded no later than the QueryNodes; the
-// bundled upgrade script orders IndexNode/DataNode first. Gating build workers on
-// scalar capability is a follow-up.
-func checkFMIndexEngineVersion(indexParams []*commonpb.KeyValuePair, resolvedScalarVersion int32) error {
-	if common.GetIndexType(indexParams) != indexparamcheck.IndexFMINDEX {
-		return nil
-	}
-	if resolvedScalarVersion < common.MinScalarIndexVersionForFMINDEX {
-		return merr.WrapErrServiceNotReadyMsg(
-			"FMINDEX requires scalar index engine version >= %d, current resolved version: %d (a rolling upgrade may still be in progress)",
-			common.MinScalarIndexVersionForFMINDEX, resolvedScalarVersion)
-	}
-	return nil
 }
 
 // CreateIndex create an index on collection.
@@ -204,7 +131,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
 	// Create a new broadcaster for the collection.
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -306,7 +233,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 
 	if req.GetIndexName() == "" {
-		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
+		indexes := s.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
 		fieldName, err := s.defaultIndexNameByID(schema, req.GetFieldID())
 		if err != nil {
 			mlog.Warn(ctx, "get field name from schema failed", mlog.Int64("fieldID", req.GetFieldID()))
@@ -355,7 +282,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			return merr.Status(err), nil
 		}
 
-		indexID, err = s.meta.indexMeta.CanCreateIndex(req, isJSON)
+		indexID, err = s.indexMeta.CanCreateIndex(req, isJSON)
 		if err != nil {
 			if errors.Is(err, errIndexOperationIgnored) {
 				mlog.Info(ctx, "index already exists",
@@ -442,25 +369,6 @@ func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*
 	})
 }
 
-func DeleteParams(from []*commonpb.KeyValuePair, deletes []string) []*commonpb.KeyValuePair {
-	params := make(map[string]string)
-	for _, param := range from {
-		params[param.GetKey()] = param.GetValue()
-	}
-
-	// delete the params
-	for _, key := range deletes {
-		delete(params, key)
-	}
-
-	return lo.MapToSlice(params, func(k string, v string) *commonpb.KeyValuePair {
-		return &commonpb.KeyValuePair{
-			Key:   k,
-			Value: v,
-		}
-	})
-}
-
 func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "received AlterIndex request",
 		mlog.Any("params", req.GetParams()),
@@ -475,13 +383,13 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		return merr.Status(err), nil
 	}
 
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
 	defer broadcaster.Close()
 
-	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		return merr.Status(err), nil
@@ -592,7 +500,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 		}, nil
 	}
 
-	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		mlog.Warn(context.TODO(), "GetIndexState fail", mlog.Err(err))
@@ -645,7 +553,7 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 		Status: merr.Success(),
 		States: make([]*indexpb.SegmentIndexState, 0),
 	}
-	indexID2CreateTs := s.meta.indexMeta.GetIndexIDByName(req.GetCollectionID(), req.GetIndexName())
+	indexID2CreateTs := s.indexMeta.GetIndexIDByName(req.GetCollectionID(), req.GetIndexName())
 	if len(indexID2CreateTs) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		mlog.Warn(context.TODO(), "GetSegmentIndexState fail", mlog.String("indexName", req.GetIndexName()), mlog.Err(err))
@@ -655,7 +563,7 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 	}
 	for _, segID := range req.GetSegmentIDs() {
 		for indexID := range indexID2CreateTs {
-			state := s.meta.indexMeta.GetSegmentIndexState(req.GetCollectionID(), segID, indexID)
+			state := s.indexMeta.GetSegmentIndexState(req.GetCollectionID(), segID, indexID)
 			ret.States = append(ret.States, state)
 		}
 	}
@@ -674,7 +582,7 @@ func (s *Server) selectSegmentIndexesStats(ctx context.Context, filters ...Segme
 		return ret
 	}
 	hasCompactionLineage := false
-	segmentsIndexes := s.meta.indexMeta.getSegmentsIndexStates(segments[0].CollectionID, segmentIDs)
+	segmentsIndexes := s.indexMeta.getSegmentsIndexStates(segments[0].CollectionID, segmentIDs)
 	if s.droppedSinceSnapshot(ctx, segments, segmentsIndexes) {
 		// The index states carry a task aborted because its segment was
 		// dropped after the snapshot. The abort is persisted only once the
@@ -762,7 +670,7 @@ func (s *Server) queryServingSegments(ctx context.Context, segments map[int64]*i
 				flushedIDs.Insert(info.GetID())
 			}
 		}
-		indexedInfos := FilterInIndexedSegments(ctx, s.handler, s.meta, false, infos...)
+		indexedInfos := FilterInIndexedSegments(ctx, s.handler, s.indexMeta, false, infos...)
 		indexed := typeutil.NewUniqueSet(lo.Map(indexedInfos, func(info *SegmentInfo, _ int) int64 { return info.GetID() })...)
 		frontier, _ := retrieveQuerySegments(validInfos, flushedIDs, droppedIDs, indexed)
 		hasKnownCycle := newQueryLineageCycleChecker(validInfos)
@@ -1067,7 +975,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 		}, nil
 	}
 
-	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		mlog.Warn(context.TODO(), "GetIndexBuildProgress fail", mlog.String("indexName", req.IndexName), mlog.Err(err))
@@ -1134,7 +1042,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 		}, nil
 	}
 
-	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		mlog.RatedWarn(context.TODO(), rate.Limit(60), "DescribeIndex fail", mlog.Err(err))
@@ -1187,7 +1095,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 		}, nil
 	}
 
-	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
 		mlog.Warn(context.TODO(), "GetIndexStatistics fail",
@@ -1269,13 +1177,13 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	}
 
 	// Create a new broadcaster for the collection.
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
 	defer broadcaster.Close()
 
-	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		mlog.Info(ctx, fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName))
 		return merr.Success(), nil
@@ -1351,7 +1259,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		SegmentInfo: map[int64]*indexpb.SegmentInfo{},
 	}
 
-	segmentsIndexes := s.meta.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
+	segmentsIndexes := s.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
 	for _, segID := range req.GetSegmentIDs() {
 		segIdxes := segmentsIndexes[segID]
 		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
@@ -1374,8 +1282,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 					if err != nil {
 						return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
 					}
-					indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-					indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
+					indexParams := s.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+					indexParams = append(indexParams, s.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 					// respect segment-based index type
 					for _, param := range indexParams {
 						if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {
@@ -1383,14 +1291,14 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							break
 						}
 					}
-					indexName := s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
+					indexName := s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 					if segIdx.IndexType != "" && segIdx.IndexType != indexName {
 						indexName = segIdx.IndexType
 					}
 					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
 						&indexpb.IndexFilePathInfo{
 							SegmentID:                 segID,
-							FieldID:                   s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+							FieldID:                   s.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
 							IndexID:                   segIdx.IndexID,
 							BuildID:                   segIdx.BuildID,
 							IndexName:                 indexName,
@@ -1421,7 +1329,7 @@ func (s *Server) ListIndexes(ctx context.Context, req *indexpb.ListIndexesReques
 		}, nil
 	}
 
-	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), "")
+	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), "")
 
 	indexInfos := lo.Map(indexes, func(index *model.Index, _ int) *indexpb.IndexInfo {
 		return &indexpb.IndexInfo{

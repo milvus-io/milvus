@@ -51,23 +51,24 @@ func TestIndexInspectorGetUnIndexTaskSegmentsSkipsSegmentsCannotBuildIndexNow(t 
 		sortedSegmentID   = UniqueID(2002)
 	)
 	ms := metacache.NewMetaStore(nil)
-	m := &meta{
-		segments:  NewSegmentsInfo(ms),
-		metaStore: ms,
-		indexMeta: &indexMeta{
-			segmentBuildInfo: newSegmentIndexBuildInfo(),
-			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {
-					indexID: {
-						CollectionID: collID,
-						FieldID:      fieldID,
-						IndexID:      indexID,
-						IndexName:    "default_idx",
-					},
+	im := &indexMeta{
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+					IndexName:    "default_idx",
 				},
 			},
 		},
+	}
+	m := &meta{
+		segments:     NewSegmentsInfo(ms),
+		metaStore:    ms,
+		indexCatalog: im,
 	}
 	ms.PutCollection(&collectionInfo{
 		ID: collID,
@@ -101,7 +102,7 @@ func TestIndexInspectorGetUnIndexTaskSegmentsSkipsSegmentsCannotBuildIndexNow(t 
 		IsSorted:     true,
 	}})
 
-	segmentIDs := (&indexInspector{meta: m}).getUnIndexTaskSegments(context.TODO())
+	segmentIDs := (&indexInspector{meta: m, indexMeta: im}).getUnIndexTaskSegments(context.TODO())
 
 	assert.ElementsMatch(t, []UniqueID{sortedSegmentID}, segmentIDs)
 }

@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -464,24 +463,6 @@ func newForceMergePlanningView(ids []int64, sizes []float64, targetSize int64) *
 	}
 }
 
-func newForceMergePlanningSegment(id int64, size float64) *SegmentInfo {
-	return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:        id,
-		NumOfRows: 1,
-		Stats: &datapb.Statistics{
-			InsertBinlogSize: int64(size),
-		},
-	}}
-}
-
-func newForceMergePlanningSegments(sizes ...float64) []*SegmentInfo {
-	segments := make([]*SegmentInfo, 0, len(sizes))
-	for i, size := range sizes {
-		segments = append(segments, newForceMergePlanningSegment(int64(i+1), size))
-	}
-	return segments
-}
-
 func forceMergePlanningChildren(t *testing.T, view *ForceMergeSegmentView) []*ForceMergeSegmentView {
 	t.Helper()
 	children, reason := view.ForceTriggerAll()
@@ -580,73 +561,6 @@ func TestSumSegmentSize(t *testing.T) {
 	totalSize := sumSegmentSize(segments)
 	expected := 1.5 * 1024 * 1024 * 1024
 	assert.InDelta(t, expected, totalSize, 1)
-}
-
-func TestGroupByPartitionChannel(t *testing.T) {
-	label1 := &CompactionGroupLabel{
-		CollectionID: 1,
-		PartitionID:  10,
-		Channel:      "ch1",
-	}
-	label2 := &CompactionGroupLabel{
-		CollectionID: 1,
-		PartitionID:  20,
-		Channel:      "ch1",
-	}
-
-	segments := []*SegmentInfo{
-		newForceMergeSegmentForLabel(1, label1),
-		newForceMergeSegmentForLabel(2, label1),
-		newForceMergeSegmentForLabel(3, label2),
-	}
-
-	groups := groupByPartitionChannel(segments)
-	assert.Equal(t, 2, len(groups))
-
-	var count1, count2 int
-	for _, segs := range groups {
-		if len(segs) == 2 {
-			count1++
-		} else if len(segs) == 1 {
-			count2++
-		}
-	}
-	assert.Equal(t, 1, count1)
-	assert.Equal(t, 1, count2)
-}
-
-func TestGroupByPartitionChannel_EmptySegments(t *testing.T) {
-	groups := groupByPartitionChannel([]*SegmentInfo{})
-	assert.Empty(t, groups)
-}
-
-func TestGroupByPartitionChannel_SameLabel(t *testing.T) {
-	label := &CompactionGroupLabel{
-		CollectionID: 1,
-		PartitionID:  10,
-		Channel:      "ch1",
-	}
-
-	segments := []*SegmentInfo{
-		newForceMergeSegmentForLabel(1, label),
-		newForceMergeSegmentForLabel(2, label),
-		newForceMergeSegmentForLabel(3, label),
-	}
-
-	groups := groupByPartitionChannel(segments)
-	assert.Equal(t, 1, len(groups))
-	for _, segs := range groups {
-		assert.Equal(t, 3, len(segs))
-	}
-}
-
-func newForceMergeSegmentForLabel(id int64, label *CompactionGroupLabel) *SegmentInfo {
-	return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:            id,
-		CollectionID:  label.CollectionID,
-		PartitionID:   label.PartitionID,
-		InsertChannel: label.Channel,
-	}}
 }
 
 func TestCalculateTargetSizeCount_AppliesToleranceBeforeTopology(t *testing.T) {

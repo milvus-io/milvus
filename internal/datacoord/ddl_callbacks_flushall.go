@@ -22,7 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func (s *DDLCallbacks) flushAllV2AckCallback(ctx context.Context, result message.BroadcastResultFlushAllMessageV2) error {
+func (c *DDLCallbacks) flushAllV2AckCallback(ctx context.Context, result message.BroadcastResultFlushAllMessageV2) error {
 	// An empty callback to indicate it's a ddl or dcl operation.
 	return nil
 }

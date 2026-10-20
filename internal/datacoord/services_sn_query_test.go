@@ -76,13 +76,14 @@ func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
 }
 
 func TestQueryViewCollectionIndexInfosResolveExactIDs(t *testing.T) {
-	s := &Server{meta: &meta{indexMeta: &indexMeta{indexes: map[int64]map[int64]*model.Index{
+	im := &indexMeta{indexes: map[int64]map[int64]*model.Index{
 		1: {
 			100: {CollectionID: 1, FieldID: 10, IndexID: 100, IndexName: "old", IsDeleted: true},
 			101: {CollectionID: 1, FieldID: 10, IndexID: 101, IndexName: "new"},
 			102: {CollectionID: 1, FieldID: 10, IndexID: 102, IndexName: "another-path"},
 		},
-	}}}}
+	}}
+	s := &Server{meta: &meta{indexCatalog: im}, domainMetas: domainMetas{indexMeta: im}}
 	current := s.GetQueryViewCollectionIndexInfos(1)
 	require.Len(t, current, 2)
 	require.EqualValues(t, 101, current[0].GetIndexID())

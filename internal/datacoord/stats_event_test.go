@@ -31,33 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func drainStatsBuildChForTest() []UniqueID {
-	ch := getStatsBuildChSingleton()
-	var segIDs []UniqueID
-	for {
-		select {
-		case segID := <-ch:
-			segIDs = append(segIDs, segID)
-		default:
-			return segIDs
-		}
-	}
-}
-
-func fillStatsBuildChForTest(t *testing.T) {
-	ch := getStatsBuildChSingleton()
-	for len(ch) < cap(ch) {
-		ch <- 0
-	}
-	t.Cleanup(func() { drainStatsBuildChForTest() })
-}
-
-func setStatsBuildConsumerForTest(t *testing.T, done <-chan struct{}) {
-	prev, _ := statsBuildConsumerDone.Load().(<-chan struct{})
-	setStatsBuildConsumer(done)
-	t.Cleanup(func() { setStatsBuildConsumer(prev) })
-}
-
 func TestNotifySegmentStatsBuild(t *testing.T) {
 	drainStatsBuildChForTest()
 	defer drainStatsBuildChForTest()
@@ -106,7 +79,7 @@ func TestNotifyCollectionStatsBuildNeverBlocks(t *testing.T) {
 // ticker also takes the pending ones, and a notification supersedes a pending
 // retry.
 func TestStatsInspector_PopStatsSegments(t *testing.T) {
-	inspector := newStatsInspector(context.Background(), nil, nil, nil, nil, nil, nil, nil)
+	inspector := newStatsInspector(context.Background(), nil, nil, nil, nil, nil, nil, nil, nil)
 	inspector.requeuePendingStatsSegments(1, 2)
 	inspector.notifyStatsSegments(2, 3, 2)
 
@@ -124,7 +97,7 @@ func TestStatsInspector_ForwardStatsBuildChWithoutTriggerLoop(t *testing.T) {
 	// The deadline bounds the senders' wait if forwarding regresses.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	inspector := newStatsInspector(ctx, nil, nil, nil, nil, nil, nil, nil)
+	inspector := newStatsInspector(ctx, nil, nil, nil, nil, nil, nil, nil, nil)
 	defer inspector.Stop()
 	setStatsBuildConsumerForTest(t, ctx.Done())
 	inspector.loopWg.Add(1)
@@ -148,7 +121,7 @@ func TestStatsNotifyNothingWhenCompactionMutationFails(t *testing.T) {
 	mt := NewMockCompactionMeta(t)
 	mt.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, merr.WrapErrServiceInternalMsg("injected"))
-	task := newMixCompactionTask(&datapb.CompactionTask{CollectionID: 100, Type: datapb.CompactionType_MixCompaction}, nil, mt, nil)
+	task := newMixCompactionTask(&datapb.CompactionTask{CollectionID: 100, Type: datapb.CompactionType_MixCompaction}, nil, mt, nil, nil)
 
 	require.Error(t, task.saveSegmentMeta(&datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{SegmentID: 2}}}))
 

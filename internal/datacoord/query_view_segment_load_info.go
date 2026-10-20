@@ -30,7 +30,7 @@ func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID 
 		return nil, nil, nil
 	}
 
-	indexes, segmentIndexes := s.meta.indexMeta.getQueryViewIndexSnapshot(collectionID, segmentIDs)
+	indexes, segmentIndexes := s.indexMeta.getQueryViewIndexSnapshot(collectionID, segmentIDs)
 	indexInfos := packQueryViewCollectionIndexInfos(indexes)
 	results := make([]*querypb.QueryViewSegmentLoadInfoResult, 0, len(segmentIDs))
 	seen := make(map[int64]struct{}, len(segmentIDs))

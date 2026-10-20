@@ -58,16 +58,6 @@ func addV3Segment(t *testing.T, meta *meta, segmentID int64, basePath string, ve
 	})))
 }
 
-// advanceManifest returns the revision n versions after baseManifest, the way a
-// mocked loon transaction publishes onto the base it was handed.
-func advanceManifest(baseManifest string, n int64) (string, error) {
-	base, version, err := packed.UnmarshalManifestPath(baseManifest)
-	if err != nil {
-		return "", err
-	}
-	return packed.MarshalManifestPath(base, version+n), nil
-}
-
 // bumpVersionMock mocks the loon transaction to return the next revision of the
 // base it was handed, so each segment advances independently and deterministically.
 func bumpVersionMock() *mockey.Mocker {
@@ -81,18 +71,6 @@ func bumpVersionMock() *mockey.Mocker {
 			return nil
 		},
 	).Build()
-}
-
-func commitUpdates(segmentID int64, basePath string, operators ...UpdateOperator) SegmentManifestCommit {
-	return SegmentManifestCommit{
-		SegmentID:     segmentID,
-		StorageConfig: &indexpb.StorageConfig{},
-		Mutation: ManifestMutation{
-			Type:    ManifestMutationCommitUpdates,
-			Updates: &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: basePath + "/_delta/1", NumEntries: 1}}},
-		},
-		CatalogMutation: SegmentCatalogMutation{Operators: operators},
-	}
 }
 
 // TestCommitSegmentManifestsBatchesInSingleCatalogWrite is the core guarantee: N

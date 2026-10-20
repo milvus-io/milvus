@@ -39,34 +39,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// Handler handles some channel method for ChannelManager
-type Handler interface {
-	// GetQueryVChanPositions gets the information recovery needed of a channel for QueryCoord
-	GetQueryVChanPositions(ch RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo
-	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
-	GetDataVChanPositions(ch RWChannel, partitionID UniqueID) *datapb.VchannelInfo
-	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
-	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
-	ListLoadedSegments(ctx context.Context) ([]int64, error)
-	GenSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error)
-	GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error)
-}
-
-type SegmentsView struct {
-	FlushedSegmentIDs   []int64
-	GrowingSegmentIDs   []int64
-	DroppedSegmentIDs   []int64
-	L0SegmentIDs        []int64
-	ImportingSegmentIDs []int64
-}
 
 // ServerHandler is a helper of Server
 type ServerHandler struct {
@@ -140,7 +118,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	filterWithPartition := len(validPartitions) > 0
 	validPartitionsMap := make(map[int64]bool)
-	partStatsVersions := h.s.meta.partitionStatsMeta.GetChannelPartitionsStatsVersion(channel.GetCollectionID(), channel.GetName())
+	partStatsVersions := h.s.partitionStatsMeta.GetChannelPartitionsStatsVersion(channel.GetCollectionID(), channel.GetName())
 	partStatsVersionsMap := make(map[int64]int64)
 	if filterWithPartition {
 		for _, partitionID := range validPartitions {
@@ -170,7 +148,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	aliveStaged := h.s.meta.aliveStagedMembers(h.s.ctx, channel.GetCollectionID())
 
 	validSegmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.meta, false, segments...)
+	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.indexMeta, false, segments...)
 	indexed := typeutil.NewUniqueSet(lo.Map(indexedSegments, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
 	for _, s := range segments {
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
@@ -728,35 +706,6 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 	return nil
 }
 
-// Deprecated: use toMsgPositionWithWALNames
-func toMsgPosition(channel string, startPositions []*commonpb.KeyDataPair) *msgpb.MsgPosition {
-	for _, sp := range startPositions {
-		if sp.GetKey() != funcutil.ToPhysicalChannel(channel) {
-			continue
-		}
-		return &msgpb.MsgPosition{
-			ChannelName: channel,
-			MsgID:       sp.GetData(),
-		}
-	}
-	return nil
-}
-
-func toMsgPositionWithWALNames(channel string, startPositions []*commonpb.KeyDataPair, channelWALNames map[string]commonpb.WALName) *msgpb.MsgPosition {
-	for _, sp := range startPositions {
-		pChannel := funcutil.ToPhysicalChannel(channel)
-		if sp.GetKey() != pChannel {
-			continue
-		}
-		return &msgpb.MsgPosition{
-			ChannelName: channel,
-			MsgID:       sp.GetData(),
-			WALName:     channelWALNames[pChannel],
-		}
-	}
-	return nil
-}
-
 // trimSegmentInfo returns a shallow copy of datapb.SegmentInfo and sets ALL binlog info to nil
 func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 	return &datapb.SegmentInfo{
@@ -938,7 +887,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		snapshotTs = min(snapshotTs, position.GetTimestamp())
 	}
 
-	indexes := h.s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+	indexes := h.s.indexMeta.GetIndexesForCollection(collectionID, "")
 	indexInfos := lo.FilterMap(indexes, func(index *model.Index, _ int) (*indexpb.IndexInfo, bool) {
 		return &indexpb.IndexInfo{
 			IndexID:         index.IndexID,
@@ -1083,12 +1032,12 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 }
 
 func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*indexpb.IndexFilePathInfo, error) {
-	segIdxes := h.s.meta.indexMeta.getSegmentIndexes(segment.GetCollectionID(), segment.GetID())
+	segIdxes := h.s.indexMeta.getSegmentIndexes(segment.GetCollectionID(), segment.GetID())
 	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState == commonpb.IndexState_Finished {
-			fieldID := h.s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
-			indexName := h.s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
+			fieldID := h.s.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
+			indexName := h.s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 
 			// Use the segment already selected for this snapshot, rather than
 			// looking it up again while metadata may be changing.
@@ -1096,8 +1045,8 @@ func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*ind
 			if err != nil {
 				return nil, err
 			}
-			indexParams := h.s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-			indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
+			indexParams := h.s.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+			indexParams = append(indexParams, h.s.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 
 			indexesFiles = append(indexesFiles, &indexpb.IndexFilePathInfo{
 				SegmentID:                 segment.GetID(),

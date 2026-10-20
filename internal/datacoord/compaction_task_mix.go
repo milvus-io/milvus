@@ -28,8 +28,9 @@ var _ CompactionTask = (*mixCompactionTask)(nil)
 type mixCompactionTask struct {
 	taskProto atomic.Value // *datapb.CompactionTask
 
-	allocator allocator.Allocator
-	meta      CompactionMeta
+	allocator          allocator.Allocator
+	meta               CompactionMeta
+	compactionTaskMeta *compactionTaskMeta
 
 	ievm IndexEngineVersionManager
 
@@ -205,13 +206,15 @@ func (t *mixCompactionTask) GetTaskProto() *datapb.CompactionTask {
 func newMixCompactionTask(t *datapb.CompactionTask,
 	allocator allocator.Allocator,
 	meta CompactionMeta,
+	compactionTaskMeta *compactionTaskMeta,
 	ievm IndexEngineVersionManager,
 ) *mixCompactionTask {
 	task := &mixCompactionTask{
-		allocator: allocator,
-		meta:      meta,
-		ievm:      ievm,
-		times:     taskcommon.NewTimes(),
+		allocator:          allocator,
+		meta:               meta,
+		compactionTaskMeta: compactionTaskMeta,
+		ievm:               ievm,
+		times:              taskcommon.NewTimes(),
 	}
 	task.taskProto.Store(t)
 	return task
@@ -227,7 +230,7 @@ func (t *mixCompactionTask) processMetaSaved() bool {
 }
 
 func (t *mixCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(context.TODO(), task)
+	return t.compactionTaskMeta.SaveCompactionTask(context.TODO(), task)
 }
 
 func (t *mixCompactionTask) SaveTaskMeta() error {

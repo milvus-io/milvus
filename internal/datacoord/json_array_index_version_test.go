@@ -34,39 +34,10 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-func jsonArrayVersionManager(t *testing.T, version int32) IndexEngineVersionManager {
-	t.Helper()
-	manager := newIndexEngineVersionManager()
-	manager.AddNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{
-		ServerID: 1,
-		ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
-			CurrentIndexVersion: version,
-			MaximumIndexVersion: common.MaximumScalarIndexEngineVersion,
-		},
-	}})
-	require.Equal(t, version, manager.ResolveScalarIndexVersion())
-	return manager
-}
-
-func resetJSONVersionTargets(t *testing.T) {
-	t.Helper()
-	paramtable.Init()
-	target := Params.DataCoordCfg.TargetScalarIndexVersion.GetValue()
-	force := Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetValue()
-	require.NoError(t, Params.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key, "-1"))
-	require.NoError(t, Params.Save(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key, "false"))
-	t.Cleanup(func() {
-		require.NoError(t, Params.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key, target))
-		require.NoError(t, Params.Save(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key, force))
-	})
-}
 
 func setJSONArrayIndexGate(t *testing.T, enabled bool) {
 	t.Helper()
@@ -124,6 +95,7 @@ func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
 							allocator:                 alloc,
 							indexEngineVersionManager: jsonArrayVersionManager(t, tc.version),
 						}
+						server.ddl = newDDLCallbacks(server)
 						server.stateCode.Store(commonpb.StateCode_Healthy)
 						request := &indexpb.CreateIndexRequest{
 							CollectionID: 1, FieldID: 100, IndexName: "json_array",

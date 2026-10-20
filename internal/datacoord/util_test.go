@@ -1009,7 +1009,7 @@ func TestFilterInIndexedSegmentsStructVector(t *testing.T) {
 			}
 			im.segmentIndexes.Insert(segmentID, byIndex)
 		}
-		got := FilterInIndexedSegments(context.Background(), handler, &meta{indexMeta: im}, false, infos...)
+		got := FilterInIndexedSegments(context.Background(), handler, im, false, infos...)
 		gotIDs := make([]int64, 0, len(got))
 		for _, segment := range got {
 			gotIDs = append(gotIDs, segment.GetID())

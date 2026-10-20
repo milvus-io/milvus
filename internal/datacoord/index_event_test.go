@@ -21,78 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-func drainBuildIndexChForTest() []UniqueID {
-	ch := getBuildIndexChSingleton()
-	var segIDs []UniqueID
-	for {
-		select {
-		case segID := <-ch:
-			segIDs = append(segIDs, segID)
-		default:
-			return segIDs
-		}
-	}
-}
-
-func fillBuildIndexChForTest(t *testing.T) {
-	ch := getBuildIndexChSingleton()
-	for len(ch) < cap(ch) {
-		ch <- 0
-	}
-	t.Cleanup(func() { drainBuildIndexChForTest() })
-}
-
-func setBuildIndexConsumerForTest(t *testing.T, done <-chan struct{}) {
-	prev, _ := buildIndexConsumerDone.Load().(<-chan struct{})
-	setBuildIndexConsumer(done)
-	t.Cleanup(func() { setBuildIndexConsumer(prev) })
-}
-
-func drainStatsTaskChForTest() {
-	ch := getStatsTaskChSingleton()
-	for {
-		select {
-		case <-ch:
-		default:
-			return
-		}
-	}
-}
-
-func assertBuildIndexEvents(t *testing.T, expected ...UniqueID) {
-	t.Helper()
-	got := make([]UniqueID, 0, len(expected))
-	for range expected {
-		select {
-		case segID := <-getBuildIndexChSingleton():
-			got = append(got, segID)
-		case <-time.After(100 * time.Millisecond):
-			require.Failf(t, "missing build index event", "got %v, expected %v", got, expected)
-		}
-	}
-	assert.ElementsMatch(t, expected, got)
-}
-
-func assertNoBuildIndexEvent(t *testing.T) {
-	t.Helper()
-	select {
-	case segID := <-getBuildIndexChSingleton():
-		require.Failf(t, "unexpected build index event", "segmentID=%d", segID)
-	default:
-	}
-}
-
-func assertNoStatsTaskEvent(t *testing.T) {
-	t.Helper()
-	select {
-	case segID := <-getStatsTaskChSingleton():
-		require.Failf(t, "unexpected stats task event", "segmentID=%d", segID)
-	default:
-	}
-}
 
 func TestNotifySegmentIndexBuild(t *testing.T) {
 	drainBuildIndexChForTest()

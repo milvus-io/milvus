@@ -45,8 +45,9 @@ var _ CompactionTask = (*l0CompactionTask)(nil)
 type l0CompactionTask struct {
 	taskProto atomic.Value // *datapb.CompactionTask
 
-	allocator allocator.Allocator
-	meta      CompactionMeta
+	allocator          allocator.Allocator
+	meta               CompactionMeta
+	compactionTaskMeta *compactionTaskMeta
 
 	times                *taskcommon.Times
 	committedV3Manifests map[int64]string
@@ -227,10 +228,11 @@ func (t *l0CompactionTask) GetTaskProto() *datapb.CompactionTask {
 	return task.(*datapb.CompactionTask)
 }
 
-func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta) *l0CompactionTask {
+func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, compactionTaskMeta *compactionTaskMeta) *l0CompactionTask {
 	task := &l0CompactionTask{
 		allocator:            allocator,
 		meta:                 meta,
+		compactionTaskMeta:   compactionTaskMeta,
 		times:                taskcommon.NewTimes(),
 		committedV3Manifests: make(map[int64]string),
 	}
@@ -455,24 +457,7 @@ func (t *l0CompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskOpt) erro
 }
 
 func (t *l0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(context.TODO(), task)
-}
-
-func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) ([]packed.DeltaLogEntry, error) {
-	entries := make([]packed.DeltaLogEntry, 0)
-	for _, fieldBinlog := range deltalogs {
-		for _, binlog := range fieldBinlog.GetBinlogs() {
-			path := binlog.GetLogPath()
-			if path == "" {
-				return nil, merr.WrapErrServiceInternalMsg("L0 V3 compaction result missing deltalog path for segment %d, logID %d", segmentID, binlog.GetLogID())
-			}
-			entries = append(entries, packed.DeltaLogEntry{
-				Path:       path,
-				NumEntries: binlog.GetEntriesNum(),
-			})
-		}
-	}
-	return entries, nil
+	return t.compactionTaskMeta.SaveCompactionTask(context.TODO(), task)
 }
 
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {

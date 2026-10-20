@@ -20,7 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
@@ -28,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -495,64 +494,6 @@ func filterTargetMatches(target compactionTarget, segments ...*SegmentInfo) []*S
 		}
 	}
 	return matches
-}
-
-type compactionTargetCatalogUpdate struct {
-	targetID        int64
-	state           datapb.TargetState
-	inactivatedAtTS uint64
-}
-
-func newCompactionTargetTestCatalog(
-	t *testing.T,
-	records ...*datapb.CompactionTarget,
-) (*metastoremocks.DataCoordCatalog, map[int64]*datapb.CompactionTarget, *[]compactionTargetCatalogUpdate, *[]int64) {
-	catalog := metastoremocks.NewDataCoordCatalog(t)
-	stored := make(map[int64]*datapb.CompactionTarget)
-	for _, record := range records {
-		stored[record.GetTargetID()] = proto.Clone(record).(*datapb.CompactionTarget)
-	}
-	updates := make([]compactionTargetCatalogUpdate, 0)
-	dropped := make([]int64, 0)
-
-	catalog.EXPECT().ListCompactionTargets(mock.Anything).RunAndReturn(
-		func(context.Context) ([]*datapb.CompactionTarget, error) {
-			return cloneCompactionTargetSlice(records), nil
-		}).Maybe()
-	catalog.EXPECT().SaveCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, record *datapb.CompactionTarget) error {
-			stored[record.GetTargetID()] = proto.Clone(record).(*datapb.CompactionTarget)
-			return nil
-		}).Maybe()
-	catalog.EXPECT().UpdateCompactionTargetState(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error {
-			updates = append(updates, compactionTargetCatalogUpdate{
-				targetID:        targetID,
-				state:           state,
-				inactivatedAtTS: inactivatedAtTS,
-			})
-			record := proto.Clone(stored[targetID]).(*datapb.CompactionTarget)
-			record.State = state
-			record.InactivatedAtTS = inactivatedAtTS
-			stored[targetID] = record
-			return nil
-		}).Maybe()
-	catalog.EXPECT().DropCompactionTarget(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, record *datapb.CompactionTarget) error {
-			dropped = append(dropped, record.GetTargetID())
-			delete(stored, record.GetTargetID())
-			return nil
-		}).Maybe()
-
-	return catalog, stored, &updates, &dropped
-}
-
-func cloneCompactionTargetSlice(records []*datapb.CompactionTarget) []*datapb.CompactionTarget {
-	cloned := make([]*datapb.CompactionTarget, 0, len(records))
-	for _, record := range records {
-		cloned = append(cloned, proto.Clone(record).(*datapb.CompactionTarget))
-	}
-	return cloned
 }
 
 func targetSegment(id, collectionID, partitionID int64, channel string, createTS uint64, compacting bool, compactionFrom ...int64) *SegmentInfo {

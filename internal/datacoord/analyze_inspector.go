@@ -26,18 +26,21 @@ import (
 )
 
 type analyzeInspector struct {
-	mt *meta
+	mt          *meta
+	analyzeMeta *analyzeMeta
 
 	scheduler task.GlobalScheduler
 }
 
 func newAnalyzeInspector(ctx context.Context,
 	mt *meta,
+	analyzeMeta *analyzeMeta,
 	scheduler task.GlobalScheduler,
 ) *analyzeInspector {
 	return &analyzeInspector{
-		mt:        mt,
-		scheduler: scheduler,
+		mt:          mt,
+		analyzeMeta: analyzeMeta,
+		scheduler:   scheduler,
 	}
 }
 
@@ -49,7 +52,7 @@ func (ai *analyzeInspector) Stop() {
 }
 
 func (ai *analyzeInspector) reloadFromMeta() {
-	analyzeTasks := ai.mt.analyzeMeta.GetAllTasks()
+	analyzeTasks := ai.analyzeMeta.GetAllTasks()
 	for _, t := range analyzeTasks {
 		if t.GetState() != indexpb.JobState_JobStateInit &&
 			t.GetState() != indexpb.JobState_JobStateRetry &&
@@ -59,6 +62,7 @@ func (ai *analyzeInspector) reloadFromMeta() {
 		ai.scheduler.Enqueue(newAnalyzeTask(
 			proto.Clone(t).(*indexpb.AnalyzeTask),
 			ai.mt,
+			ai.analyzeMeta,
 		))
 	}
 }

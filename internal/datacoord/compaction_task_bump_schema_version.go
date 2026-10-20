@@ -42,19 +42,21 @@ import (
 var _ CompactionTask = (*bumpSchemaVersionTask)(nil)
 
 type bumpSchemaVersionTask struct {
-	taskProto atomic.Value // *datapb.CompactionTask
-	allocator allocator.Allocator
-	meta      CompactionMeta
-	ievm      IndexEngineVersionManager
-	times     *taskcommon.Times
+	taskProto          atomic.Value // *datapb.CompactionTask
+	allocator          allocator.Allocator
+	meta               CompactionMeta
+	compactionTaskMeta *compactionTaskMeta
+	ievm               IndexEngineVersionManager
+	times              *taskcommon.Times
 }
 
-func newBumpSchemaVersionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, ievm IndexEngineVersionManager) *bumpSchemaVersionTask {
+func newBumpSchemaVersionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, compactionTaskMeta *compactionTaskMeta, ievm IndexEngineVersionManager) *bumpSchemaVersionTask {
 	task := &bumpSchemaVersionTask{
-		allocator: allocator,
-		meta:      meta,
-		ievm:      ievm,
-		times:     taskcommon.NewTimes(),
+		allocator:          allocator,
+		meta:               meta,
+		compactionTaskMeta: compactionTaskMeta,
+		ievm:               ievm,
+		times:              taskcommon.NewTimes(),
 	}
 	task.taskProto.Store(t)
 	return task
@@ -179,7 +181,7 @@ func (t *bumpSchemaVersionTask) NeedReAssignNodeID() bool {
 }
 
 func (t *bumpSchemaVersionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(context.TODO(), task)
+	return t.compactionTaskMeta.SaveCompactionTask(context.TODO(), task)
 }
 
 func (t *bumpSchemaVersionTask) SaveTaskMeta() error {

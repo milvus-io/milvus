@@ -246,7 +246,7 @@ func TestLastExpireReset(t *testing.T) {
 			},
 		},
 	}, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, noDomainMetas)
 	assert.Nil(t, err)
 	// add collection
 	channelName := "c1"
@@ -300,7 +300,7 @@ func TestLastExpireReset(t *testing.T) {
 	newMetaKV := etcdkv.NewEtcdKV(newEtcdCli, rootPath)
 	defer newMetaKV.RemoveWithPrefix(ctx, "")
 	newCatalog := datacoord.NewCatalog(newMetaKV, "", "")
-	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil, metacache.NewMetaStore(newCatalog), broker)
+	restartedMeta, err := newMeta(context.TODO(), newCatalog, nil, metacache.NewMetaStore(newCatalog), broker, noDomainMetas)
 	restartedMeta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
 	assert.Nil(t, err)
 	newSegmentManager, _ := newSegmentManager(restartedMeta, mockAllocator)
@@ -746,7 +746,7 @@ func TestTryToSealSegment(t *testing.T) {
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+		meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, noDomainMetas)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -777,7 +777,7 @@ func TestTryToSealSegment(t *testing.T) {
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+		meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, noDomainMetas)
 		assert.NoError(t, err)
 
 		schema := newTestSchema()
@@ -1163,14 +1163,4 @@ func TestAllocNewGrowingSegment_ManifestPath(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Empty(t, segment.ManifestPath)
 	})
-}
-
-// setTestRowCount writes a segment's NumOfRows directly. The production
-// per-field setters were retired with their last production callers; tests that
-// simulate a growing segment filling up still need the poke, so it lives here
-// rather than widening the production surface again.
-func setTestRowCount(m *meta, segmentID UniqueID, rowCount int64) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-	m.segments.modifyProto(segmentID, func(seg *datapb.SegmentInfo) { seg.NumOfRows = rowCount })
 }

@@ -567,25 +567,6 @@ func TestNewSegmentInfo_PreservesExplicitStats(t *testing.T) {
 	assert.Same(t, explicit, seg.GetStats(), "supplied Stats must not be replaced")
 }
 
-// newSegmentsInfoWithSegments builds a store-backed SegmentsInfo pre-populated
-// with the given segments, for use in test fixtures that used to build a
-// SegmentsInfo struct literal directly (e.g. `&SegmentsInfo{segments: ...}`)
-// back when the standalone in-memory map existed.
-// newEmptyTestMeta returns a meta whose segments and metaStore share one
-// empty MetaStore.
-func newEmptyTestMeta() *meta {
-	ms := metacache.NewMetaStore(nil)
-	return &meta{metaStore: ms, segments: NewSegmentsInfo(ms)}
-}
-
-func newSegmentsInfoWithSegments(segs map[int64]*SegmentInfo) *SegmentsInfo {
-	si := NewSegmentsInfo(metacache.NewMetaStore(nil))
-	for id, seg := range segs {
-		si.SetSegment(id, seg)
-	}
-	return si
-}
-
 // TestRebuildFromStore covers the recovery path: segments loaded straight into
 // the shared store bypass SetSegment, so the compaction relations and the
 // per-segment transient state have to be seeded explicitly. Without it

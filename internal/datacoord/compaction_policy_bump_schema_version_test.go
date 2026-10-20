@@ -78,40 +78,6 @@ func (s *BumpSchemaVersionPolicySuite) SetupTest() {
 	s.bumpSchemaVersionPolicy = newBumpSchemaVersionPolicy(meta, s.mockAlloc, mockHandler)
 }
 
-func newBumpSchemaVersionTestCollection(collectionID int64, schemaVersion int32) *collectionInfo {
-	return &collectionInfo{
-		ID: collectionID,
-		Schema: &schemapb.CollectionSchema{
-			Name:    "test_collection",
-			Version: schemaVersion,
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-			},
-		},
-	}
-}
-
-func newBumpSchemaVersionTestSegment(collectionID, segmentID int64, schemaVersion int32, storageVersion int64, manifestPath string) *SegmentInfo {
-	return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:             segmentID,
-		CollectionID:   collectionID,
-		PartitionID:    10,
-		InsertChannel:  "ch-1",
-		Level:          datapb.SegmentLevel_L1,
-		State:          commonpb.SegmentState_Flushed,
-		NumOfRows:      1000,
-		SchemaVersion:  schemaVersion,
-		StorageVersion: storageVersion,
-		ManifestPath:   manifestPath,
-		StartPosition:  &msgpb.MsgPosition{Timestamp: 10000},
-		Binlogs: []*datapb.FieldBinlog{{
-			FieldID: 101,
-			Binlogs: []*datapb.Binlog{{LogPath: "test_path", EntriesNum: 1000}},
-		}},
-	}}
-}
-
 func (s *BumpSchemaVersionPolicySuite) TestTrigger() {
 	// Test basic trigger with no collections
 	events, err := s.bumpSchemaVersionPolicy.Trigger(context.Background())
@@ -406,10 +372,11 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsBlockedCollection() {
 	collID := int64(100)
 	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
-	s.bumpSchemaVersionPolicy.meta.snapshotMeta = &snapshotMeta{
+	snapMeta := &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(collID),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
 	}
+	s.bumpSchemaVersionPolicy.meta.compactionProtection = snapMeta
 
 	events, err := s.bumpSchemaVersionPolicy.Trigger(ctx)
 	s.NoError(err)
@@ -421,10 +388,11 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsSnapshotPendingCollection
 	collID := int64(100)
 	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
-	s.bumpSchemaVersionPolicy.meta.snapshotMeta = &snapshotMeta{
+	snapMeta := &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(collID),
 	}
+	s.bumpSchemaVersionPolicy.meta.compactionProtection = snapMeta
 
 	events, err := s.bumpSchemaVersionPolicy.Trigger(ctx)
 	s.NoError(err)
@@ -437,11 +405,12 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsSnapshotProtectedSegment(
 	segmentID := int64(101)
 	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(segmentID, newBumpSchemaVersionTestSegment(collID, segmentID, 1, storage.StorageV3, "manifest"))
-	s.bumpSchemaVersionPolicy.meta.snapshotMeta = &snapshotMeta{
+	snapMeta := &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
 		segmentProtectionUntil:       map[int64]uint64{segmentID: uint64(time.Now().Add(time.Hour).Unix())},
 	}
+	s.bumpSchemaVersionPolicy.meta.compactionProtection = snapMeta
 
 	events, err := s.bumpSchemaVersionPolicy.Trigger(ctx)
 	s.NoError(err)

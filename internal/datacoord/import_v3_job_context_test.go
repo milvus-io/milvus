@@ -136,10 +136,10 @@ func TestPlanImportV3EmptyInputShortcut(t *testing.T) {
 	}}
 
 	t.Run("empty input finishes the job", func(t *testing.T) {
-		meta, cm, schema := newImportV3PlanningTestMeta(t)
+		meta, im, cm, schema := newImportV3PlanningTestMeta(t)
 		writeReshardManifest(t, cm, 1, 20, 1, manifest)
 		importMeta := NewMockImportMeta(t)
-		checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta, alloc: newMockAllocator(t)}
+		checker := &importCheckerV3{ctx: ctx, meta: meta, indexMeta: im, importMeta: importMeta, alloc: newMockAllocator(t)}
 		job := &importJob{ImportJob: &datapb.ImportJob{
 			JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Planning, AutoCommit: true,
 			Schema: schema, Vchannels: []string{"v0"}, PartitionIDs: []int64{3},
@@ -155,10 +155,10 @@ func TestPlanImportV3EmptyInputShortcut(t *testing.T) {
 	})
 
 	t.Run("tasks but no plan is an integrity error", func(t *testing.T) {
-		meta, cm, schema := newImportV3PlanningTestMeta(t)
+		meta, im, cm, schema := newImportV3PlanningTestMeta(t)
 		writeReshardManifest(t, cm, 1, 20, 1, manifest)
 		importMeta := NewMockImportMeta(t)
-		checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta, alloc: newMockAllocator(t)}
+		checker := &importCheckerV3{ctx: ctx, meta: meta, indexMeta: im, importMeta: importMeta, alloc: newMockAllocator(t)}
 		job := &importJob{ImportJob: &datapb.ImportJob{
 			JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Planning,
 			Schema: schema, Vchannels: []string{"v0"}, PartitionIDs: []int64{3},

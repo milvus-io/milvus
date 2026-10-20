@@ -45,12 +45,13 @@ func TestQueryViewSegmentLoadInfoPreservesV3ResourceStatistics(t *testing.T) {
 }
 
 func TestQueryViewSegmentLoadInfoRejectsUnknownReplayCursor(t *testing.T) {
-	m := &meta{indexMeta: &indexMeta{}}
+	im := &indexMeta{}
+	m := &meta{indexCatalog: im}
 	patchIndexes := mockey.Mock((*indexMeta).getQueryViewIndexSnapshot).Return([]*model.Index(nil), map[int64]map[UniqueID]*model.SegmentIndex(nil)).Build()
 	defer patchIndexes.UnPatch()
 	patchSegment := mockey.Mock((*meta).GetSegment).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 10, CollectionID: 1}}).Build()
 	defer patchSegment.UnPatch()
-	s := &Server{meta: m}
+	s := &Server{meta: m, domainMetas: domainMetas{indexMeta: im}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	infos, indexes, err := s.GetQueryViewSegmentLoadInfos(context.Background(), 1, []int64{10})
 	require.NoError(t, err)
@@ -76,7 +77,8 @@ func TestQueryViewSegmentLoadInfoBatchIsolation(t *testing.T) {
 		}
 	}).Build()
 	defer patchSegment.UnPatch()
-	s := &Server{meta: &meta{indexMeta: &indexMeta{}}}
+	im := &indexMeta{}
+	s := &Server{meta: &meta{indexCatalog: im}, domainMetas: domainMetas{indexMeta: im}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	results, indexes, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{2, 3, 4, 1, 1})
 	require.NoError(t, err)
@@ -169,7 +171,8 @@ func TestQueryViewSegmentLoadInfoManifestErrorIsolation(t *testing.T) {
 		return segments[id]
 	}).Build()
 	defer patchSegment.UnPatch()
-	s := &Server{meta: &meta{indexMeta: &indexMeta{}, chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files"))}}
+	im := &indexMeta{}
+	s := &Server{meta: &meta{indexCatalog: im, chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files"))}, domainMetas: domainMetas{indexMeta: im}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	results, indexes, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{1, 2, 3, 4})
 	require.NoError(t, err)

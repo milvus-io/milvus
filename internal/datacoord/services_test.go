@@ -1533,7 +1533,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
@@ -1580,22 +1580,22 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg1.ID,
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg2.ID,
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1745,18 +1745,18 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1812,18 +1812,18 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -2007,14 +2007,14 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 			IndexName:    "_default_idx_2",
 		})
 		assert.NoError(t, err)
-		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		svr.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,
 			CollectionID:        0,
 			PartitionID:         0,
@@ -2151,11 +2151,11 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 			svr := &Server{
 				ctx: ctx,
 				meta: &meta{
-					segments:           NewSegmentsInfo(store),
-					partitionStatsMeta: &partitionStatsMeta{},
-					metaStore:          store,
-					channelSync:        newChannelSync(),
+					segments:    NewSegmentsInfo(store),
+					metaStore:   store,
+					channelSync: newChannelSync(),
 				},
+				domainMetas: domainMetas{partitionStatsMeta: &partitionStatsMeta{}},
 			}
 			store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{channelName: checkpoint})
 			svr.stateCode.Store(commonpb.StateCode_Healthy)
@@ -3820,6 +3820,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, newRestoreAbsentTargetBroker(t), nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
 		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
 			Name:                 "non_existent_snapshot",
@@ -4532,7 +4533,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// through meta.CommitSegmentManifests (Noop mutations, no broadcast).
 	t.Run("v3_happy_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		for _, id := range []int64{1001, 1002} {
@@ -4608,7 +4609,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// The handler must not add a second notification after a V3 commit.
 	t.Run("v3_commit_recomputes_data_view", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 903, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -4649,7 +4650,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// unchanged membership/manifest projection does not publish a new DataVersion.
 	t.Run("v2_commit_notifies_data_view_reconciliation", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 202, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -4699,7 +4700,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// as a whole (no broadcast), with every segment reported failed.
 	t.Run("schema_version_mismatch_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 501, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -4745,7 +4746,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// Schema-version fence: a matching version passes and reaches broadcast.
 	t.Run("schema_version_match_accepted", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 502, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -4794,7 +4795,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// aborted and every segment reported failed.
 	t.Run("schema_version_changed_before_commit_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 504, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -4846,7 +4847,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// producer that does not stamp it) is exempt from the fence.
 	t.Run("schema_version_zero_exempt", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 503, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -4891,7 +4892,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 
 	t.Run("success_false_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		jsonStr := `{"success": false, "collectionId": 1, "segments": {"1": {"version": 1}}}`
 		server := newServerForCommit(t, m, nil, []byte(jsonStr))
@@ -4904,7 +4905,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 
 	t.Run("bad_json_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		server := newServerForCommit(t, m, nil, []byte("not json"))
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -4917,7 +4918,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// All segments fail pre-validation -> no broadcast, top-level error.
 	t.Run("all_segments_prevalidation_fail", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		// Seg 1 does NOT exist in meta, so pre-validation rejects it.
 		jsonStr := `{
@@ -4945,7 +4946,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// one fails (wrong collection).
 	t.Run("partial_failure_reported", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 101, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -4999,7 +5000,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// UpdateSegmentsInfo and lands on the segment's FieldBinlogs.
 	t.Run("v2_happy_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 201, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5057,7 +5058,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// writes for the whole commit.
 	t.Run("v2_batched_update_segments_info", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		var segIDs []string
@@ -5107,7 +5108,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// to a different partition -> rejected.
 	t.Run("wrong_partition_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 401, CollectionID: 100, PartitionID: 999,
@@ -5140,7 +5141,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// partition ID; segments from different partitions are all accepted.
 	t.Run("multi_partition_negative_partition_id_ok", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		for _, p := range []int64{101, 102} {
 			id := 1000 + p
@@ -5190,7 +5191,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// would otherwise see a fake committed=true.
 	t.Run("v3_rejected_on_non_v3_segment", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 301, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5221,7 +5222,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// Spark retry from silently rolling the manifest pointer backwards.
 	t.Run("v3_rejected_on_stale_version", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 401, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5254,7 +5255,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// commit as a no-op while we report committed=true.
 	t.Run("v3_rejected_on_equal_version", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 402, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5282,7 +5283,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// (ManifestPath == "") must be rejected at pre-validation.
 	t.Run("v3_rejected_on_empty_manifest_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 302, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5312,7 +5313,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// so an oversized or malicious file cannot OOM DataCoord.
 	t.Run("oversized_result_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		cm := mock_storage.NewMockChunkManager(t)
@@ -5337,7 +5338,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// drop those changes.
 	t.Run("v3_legacy_rejected_on_source_version_mismatch", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 403, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5369,7 +5370,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// commit carrying the column-group descriptor, with no source-version pin.
 	t.Run("v3_delta_add_happy_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 601, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5430,7 +5431,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// path cannot mutate SegmentIndex records.
 	t.Run("v3_delta_replace_happy_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 602, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5488,7 +5489,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// republishes a new revision nor re-retracts rebuilt SegmentIndex records.
 	t.Run("v3_delta_replace_replay_idempotent", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 603, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5576,17 +5577,17 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		_, _, err = packed.UnmarshalManifestPath(seedManifest)
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, dm, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 810, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
 		}})
-		require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
+		require.NoError(t, dm.indexMeta.CreateIndex(ctx, &model.Index{
 			CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
 		}))
-		require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+		require.NoError(t, dm.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
 			CollectionID: 100, SegmentID: 810, IndexID: 10, BuildID: 500,
 			IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
 		}))
@@ -5623,7 +5624,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// The SegmentIndex record is retracted in the same transaction, so the
 		// stale Finished record no longer serves the old artifact and the
 		// inspector will rebuild against the new column data.
-		require.Empty(t, m.indexMeta.GetSegmentIndexes(100, 810))
+		require.Empty(t, dm.indexMeta.GetSegmentIndexes(100, 810))
 		// The manifest dropped the column's index entries and re-registered
 		// the field with the new files.
 		manifestPath := m.GetSegment(ctx, 810).GetManifestPath()
@@ -5667,7 +5668,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(1), seedVersion)
 
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 810, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5745,7 +5746,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		_, _, err = packed.UnmarshalManifestPath(seedManifest)
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 811, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5783,7 +5784,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// kinds in one batch, dispatched together.
 	t.Run("v3_mixed_delta_and_legacy_batch", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 901, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5856,7 +5857,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// per-segment failure instead of reporting a fake committed=true.
 	t.Run("v3_legacy_stale_cas_surfaces_failed", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 701, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5903,7 +5904,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// legacy CAS treats the replay as stale rather than rolling back.
 	t.Run("v3_legacy_idempotent_replay", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 702, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5957,7 +5958,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		newStandalone := func(t *testing.T) *Server {
-			mm, err := newMemoryMeta(t)
+			mm, _, err := newMemoryMetaWithIndex(t)
 			require.NoError(t, err)
 			mm.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 801, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5999,7 +6000,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// arbitrarily large batch.
 	t.Run("commits_split_across_manifest_batches", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		segIDs := make([]int64, 0, maxBackfillCommitBatch+5)
@@ -6063,7 +6064,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		// Twice the classification concurrency, so more than a full worker
@@ -6134,7 +6135,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, dm, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 812, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -6143,7 +6144,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		}})
 		// The field has an index definition but NO build record at classification:
 		// a build created afterwards must still be retracted by the commit.
-		require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
+		require.NoError(t, dm.indexMeta.CreateIndex(ctx, &model.Index{
 			CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
 		}))
 
@@ -6174,7 +6175,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			RunAndReturn(func(_ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
 				if !created {
 					created = true
-					require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+					require.NoError(t, dm.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
 						CollectionID: 100, SegmentID: 812, IndexID: 10, BuildID: 500,
 						IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
 					}))
@@ -6195,7 +6196,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// The late Finished record is retracted atomically with the new pointer:
 		// readers never serve an index built from the old column data, and the
 		// inspector rebuilds against the new data.
-		require.Empty(t, m.indexMeta.GetSegmentIndexes(100, 812))
+		require.Empty(t, dm.indexMeta.GetSegmentIndexes(100, 812))
 	})
 
 	// A backfill replace whose field has NO index definition at classification
@@ -6224,7 +6225,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, dm, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 814, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -6260,10 +6261,10 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			RunAndReturn(func(_ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
 				if !created {
 					created = true
-					require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
+					require.NoError(t, dm.indexMeta.CreateIndex(ctx, &model.Index{
 						CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
 					}))
-					require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+					require.NoError(t, dm.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
 						CollectionID: 100, SegmentID: 814, IndexID: 10, BuildID: 500,
 						IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
 					}))
@@ -6283,7 +6284,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 
 		// The record created against the index definition that appeared during
 		// the window is retracted atomically with the new pointer.
-		require.Empty(t, m.indexMeta.GetSegmentIndexes(100, 814))
+		require.Empty(t, dm.indexMeta.GetSegmentIndexes(100, 814))
 		groups, err := packed.ReadManifestColumnGroups(m.GetSegment(ctx, 814).GetManifestPath(), cfg)
 		require.NoError(t, err)
 		require.Len(t, groups, 1)
@@ -6298,7 +6299,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// column against its schema before any manifest read.
 	t.Run("v3_delta_op_columns_validated_against_schema", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		for _, id := range []int64{701, 702, 703, 704, 705, 706, 707, 708} {
 			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -6385,7 +6386,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// group.
 	t.Run("v2_group_field_ids_validated_against_schema", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		for _, id := range []int64{201, 202, 203, 204} {
 			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -6475,7 +6476,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 815, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -6546,7 +6547,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, _, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 813, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -7075,6 +7076,7 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 			externalCollectionRefreshManager: nil, // Not initialized
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
 		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
 			CollectionId:   100,
@@ -7100,10 +7102,11 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
 		// Bypass startBroadcast (broker not wired in test) and the new
 		// duplicate-active-job pre-check (refreshMeta is nil here).
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*DDLCallbacks).StartBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
 		defer mockStartBroadcast.UnPatch()
 		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
@@ -7127,8 +7130,9 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*DDLCallbacks).StartBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
 		defer mockStartBroadcast.UnPatch()
 		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
@@ -7162,9 +7166,10 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
-		// Mock startBroadcastWithCollectionID to return error
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(nil, errors.New("broadcaster failed")).Build()
+		// Mock StartBroadcastWithCollectionID to return error
+		mockStartBroadcast := mockey.Mock((*DDLCallbacks).StartBroadcastWithCollectionID).Return(nil, errors.New("broadcaster failed")).Build()
 		defer mockStartBroadcast.UnPatch()
 
 		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
@@ -7950,8 +7955,7 @@ func TestAbortImport_UserAbortedJobIsIdempotent(t *testing.T) {
 }
 
 func TestHandleCommitVchannelRPCIsNoOpForCoordinatorOwnedJob(t *testing.T) {
-	callbacks, _, _ := newImportCommitCallbackTest(t)
-	server := callbacks.Server
+	server, _, _ := newImportCommitCallbackTest(t)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	for _, ts := range []uint64{0, 300, 500} {
 		resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
@@ -8047,7 +8051,6 @@ func (r *recordingDataViewManager) Recompute(_ context.Context, collectionID int
 type (
 	embeddedHandler      struct{ Handler }
 	embeddedBroadcastAPI struct{ broadcaster.BroadcastAPI }
-	embeddedBroker       struct{ broker.Broker }
 )
 
 func TestAbortImport_FailedSourceBroadcastsRollback(t *testing.T) {
@@ -8145,7 +8148,7 @@ func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing
 	}
 
 	server := &Server{importMeta: importMetaMock, meta: &meta{segments: segments, metaStore: store}}
-	segIDs := server.getImportSegmentIDsByVchannel(ctx, jobID, "vchan-0")
+	segIDs := getImportSegmentIDsByVchannel(ctx, server.importMeta, server.meta, jobID, "vchan-0")
 	assert.Equal(t, []int64{101}, segIDs)
 }
 

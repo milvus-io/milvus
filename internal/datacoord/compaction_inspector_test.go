@@ -33,8 +33,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metacache"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -149,15 +150,6 @@ func TestSummaryCompactionState(t *testing.T) {
 	})
 }
 
-type targetAwareCompactionMeta struct {
-	CompactionMeta
-	targetMeta *compactionTargetMeta
-}
-
-func (m *targetAwareCompactionMeta) GetCompactionTargetMeta() *compactionTargetMeta {
-	return m.targetMeta
-}
-
 func TestGetCompactionInfoUsesTargetRuntimeState(t *testing.T) {
 	ctx := context.Background()
 	targetMeta := newLoadedCompactionTargetMeta(t, ctx,
@@ -213,49 +205,44 @@ func TestGetCompactionInfoUsesTargetRuntimeState(t *testing.T) {
 			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
 		},
 	)
-	mockMeta := NewMockCompactionMeta(t)
-	mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, triggerID int64) []*datapb.CompactionTask {
-			switch triggerID {
-			case 300:
-				return []*datapb.CompactionTask{{
-					TriggerID: triggerID,
-					PlanID:    1,
-					State:     datapb.CompactionTaskState_completed,
-				}}
-			case 500:
-				return []*datapb.CompactionTask{{
-					TriggerID: triggerID,
-					PlanID:    2,
-					State:     datapb.CompactionTaskState_unknown,
-				}}
-			case 600:
-				return []*datapb.CompactionTask{{
-					TriggerID: triggerID,
-					PlanID:    3,
-					State:     datapb.CompactionTaskState_unknown,
-				}}
-			case 700:
-				return []*datapb.CompactionTask{{
-					TriggerID:     triggerID,
-					PlanID:        4,
-					State:         datapb.CompactionTaskState_cleaned,
-					TerminalState: datapb.CompactionTaskState_executing,
-				}}
-			case 800:
-				return []*datapb.CompactionTask{{
-					TriggerID: triggerID,
-					PlanID:    5,
-					State:     datapb.CompactionTaskState_executing,
-				}}
-			}
-			return nil
+	compactionTaskMeta := newCompactionTaskMetaOverCatalog(nil)
+	for _, task := range []*datapb.CompactionTask{
+		{
+			TriggerID: 300,
+			PlanID:    1,
+			State:     datapb.CompactionTaskState_completed,
 		},
-	)
-	inspector := &compactionInspector{meta: &targetAwareCompactionMeta{
-		CompactionMeta: mockMeta,
-		targetMeta:     targetMeta,
-	}}
+		{
+			TriggerID: 500,
+			PlanID:    2,
+			State:     datapb.CompactionTaskState_unknown,
+		},
+		{
+			TriggerID: 600,
+			PlanID:    3,
+			State:     datapb.CompactionTaskState_unknown,
+		},
+		{
+			TriggerID:     700,
+			PlanID:        4,
+			State:         datapb.CompactionTaskState_cleaned,
+			TerminalState: datapb.CompactionTaskState_executing,
+		},
+		{
+			TriggerID: 800,
+			PlanID:    5,
+			State:     datapb.CompactionTaskState_executing,
+		},
+	} {
+		if compactionTaskMeta.compactionTasks[task.GetTriggerID()] == nil {
+			compactionTaskMeta.compactionTasks[task.GetTriggerID()] = make(map[int64]*datapb.CompactionTask)
+		}
+		compactionTaskMeta.compactionTasks[task.GetTriggerID()][task.GetPlanID()] = task
+	}
+	inspector := &compactionInspector{
+		compactionTaskMeta:   compactionTaskMeta,
+		compactionTargetMeta: targetMeta,
+	}
 
 	active := inspector.getCompactionInfo(ctx, 100)
 	inactive := inspector.getCompactionInfo(ctx, 200)
@@ -321,20 +308,26 @@ func TestSetCompactionTaskStatePreservesTerminalOutcome(t *testing.T) {
 type CompactionPlanHandlerSuite struct {
 	suite.Suite
 
-	mockMeta    *MockCompactionMeta
-	mockAlloc   allocator.Allocator
-	handler     *compactionInspector
-	mockHandler *NMockHandler
+	mockMeta           *MockCompactionMeta
+	mockCleaner        *MockPartitionStatsCleaner
+	mockCatalog        *mocks.DataCoordCatalog
+	compactionTaskMeta *compactionTaskMeta
+	mockAlloc          allocator.Allocator
+	handler            *compactionInspector
+	mockHandler        *NMockHandler
 }
 
 func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
-	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.mockCleaner = NewMockPartitionStatsCleaner(s.T())
+	s.mockCatalog = mocks.NewDataCoordCatalog(s.T())
+	s.compactionTaskMeta = newCompactionTaskMetaOverCatalog(s.mockCatalog)
+	s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mockAlloc := allocator.NewMockAllocator(s.T())
 	mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(1000), nil).Maybe()
 	s.mockAlloc = mockAlloc
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
-	s.handler = newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
+	s.handler = newCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, nil, s.mockCleaner, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 	s.mockHandler = NewNMockHandler(s.T())
 	s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 }
@@ -414,14 +407,14 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-10",
 					NodeID:  101,
-				}, nil, s.mockMeta),
+				}, nil, s.mockMeta, s.compactionTaskMeta),
 				newL0CompactionTask(&datapb.CompactionTask{
 					PlanID:  11,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  101,
-				}, nil, s.mockMeta),
+				}, nil, s.mockMeta, s.compactionTaskMeta),
 			},
 			[]*datapb.CompactionPlan{
 				{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction},
@@ -438,14 +431,14 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  101,
-				}, nil, s.mockMeta, newMockVersionManager()),
+				}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager()),
 				newL0CompactionTask(&datapb.CompactionTask{
 					PlanID:  10,
 					Type:    datapb.CompactionType_Level0DeleteCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  101,
-				}, nil, s.mockMeta),
+				}, nil, s.mockMeta, s.compactionTaskMeta),
 			},
 			[]*datapb.CompactionPlan{
 				{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction},
@@ -462,14 +455,14 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWith1ParallelTask() {
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-2",
 					NodeID:  101,
-				}, nil, s.mockMeta, newMockVersionManager()),
+				}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager()),
 				newMixCompactionTask(&datapb.CompactionTask{
 					PlanID:  13,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  101,
-				}, nil, s.mockMeta, newMockVersionManager()),
+				}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager()),
 			},
 			[]*datapb.CompactionPlan{
 				{PlanID: 14, Channel: "ch-2", Type: datapb.CompactionType_MixCompaction},
@@ -522,14 +515,14 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-10",
 					NodeID:  102,
-				}, nil, s.mockMeta),
+				}, nil, s.mockMeta, s.compactionTaskMeta),
 				newMixCompactionTask(&datapb.CompactionTask{
 					PlanID:  11,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  102,
-				}, nil, s.mockMeta, newMockVersionManager()),
+				}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager()),
 			},
 			[]*datapb.CompactionPlan{{}, {}},
 			[]UniqueID{10, 11},
@@ -543,21 +536,21 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  102,
-				}, nil, s.mockMeta),
+				}, nil, s.mockMeta, s.compactionTaskMeta),
 				newMixCompactionTask(&datapb.CompactionTask{
 					PlanID:  11,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  102,
-				}, nil, s.mockMeta, newMockVersionManager()),
+				}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager()),
 				newMixCompactionTask(&datapb.CompactionTask{
 					PlanID:  13,
 					Type:    datapb.CompactionType_MixCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-3",
 					NodeID:  102,
-				}, nil, s.mockMeta, newMockVersionManager()),
+				}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager()),
 			},
 			[]*datapb.CompactionPlan{
 				{PlanID: 10, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction},
@@ -575,21 +568,21 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  102,
-				}, nil, s.mockMeta),
+				}, nil, s.mockMeta, s.compactionTaskMeta),
 				newL0CompactionTask(&datapb.CompactionTask{
 					PlanID:  11,
 					Type:    datapb.CompactionType_Level0DeleteCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  102,
-				}, nil, s.mockMeta),
+				}, nil, s.mockMeta, s.compactionTaskMeta),
 				newL0CompactionTask(&datapb.CompactionTask{
 					PlanID:  12,
 					Type:    datapb.CompactionType_Level0DeleteCompaction,
 					State:   datapb.CompactionTaskState_pipelining,
 					Channel: "ch-11",
 					NodeID:  102,
-				}, nil, s.mockMeta),
+				}, nil, s.mockMeta, s.compactionTaskMeta),
 			},
 			[]*datapb.CompactionPlan{
 				{PlanID: 10, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction},
@@ -606,13 +599,13 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 					Type:    datapb.CompactionType_MixCompaction,
 					Channel: "ch-3",
 					NodeID:  102,
-				}, nil, s.mockMeta, newMockVersionManager()),
+				}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager()),
 				newMixCompactionTask(&datapb.CompactionTask{
 					PlanID:  13,
 					Type:    datapb.CompactionType_MixCompaction,
 					Channel: "ch-11",
 					NodeID:  102,
-				}, nil, s.mockMeta, newMockVersionManager()),
+				}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager()),
 			},
 			[]*datapb.CompactionPlan{
 				{PlanID: 14, Channel: "ch-3", Type: datapb.CompactionType_MixCompaction},
@@ -652,7 +645,7 @@ func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionConflictsWith
 		Channel:     "ch-1",
 		PartitionID: 10,
 		NodeID:      102,
-	}, nil, s.mockMeta)
+	}, nil, s.mockMeta, s.compactionTaskMeta)
 	s.NoError(s.handler.submitTask(newBumpSchemaVersionTask(&datapb.CompactionTask{
 		PlanID:      2,
 		Type:        datapb.CompactionType_BumpSchemaVersionCompaction,
@@ -660,7 +653,7 @@ func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionConflictsWith
 		Channel:     "ch-1",
 		PartitionID: 10,
 		NodeID:      102,
-	}, nil, s.mockMeta, newMockVersionManager())))
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())))
 
 	gotTasks := s.handler.schedule()
 	s.Empty(gotTasks)
@@ -680,7 +673,7 @@ func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionBlocksQueuedL
 		Channel:     "ch-1",
 		PartitionID: 10,
 		NodeID:      102,
-	}, nil, s.mockMeta, newMockVersionManager())))
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())))
 	s.NoError(s.handler.submitTask(newL0CompactionTask(&datapb.CompactionTask{
 		PlanID:      1,
 		Type:        datapb.CompactionType_Level0DeleteCompaction,
@@ -688,7 +681,7 @@ func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionBlocksQueuedL
 		Channel:     "ch-1",
 		PartitionID: 10,
 		NodeID:      102,
-	}, nil, s.mockMeta)))
+	}, nil, s.mockMeta, s.compactionTaskMeta)))
 
 	gotTasks := s.handler.schedule()
 	s.Equal([]UniqueID{2}, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
@@ -708,7 +701,7 @@ func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionBlocksCluster
 		Channel:     "ch-1",
 		PartitionID: 10,
 		NodeID:      102,
-	}, nil, s.mockMeta, newMockVersionManager())))
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())))
 	s.NoError(s.handler.submitTask(newClusteringCompactionTask(&datapb.CompactionTask{
 		PlanID:      2,
 		Type:        datapb.CompactionType_ClusteringCompaction,
@@ -716,7 +709,7 @@ func (s *CompactionPlanHandlerSuite) TestSchedule_BumpSchemaVersionBlocksCluster
 		Channel:     "ch-1",
 		PartitionID: 10,
 		NodeID:      102,
-	}, nil, s.mockMeta, s.mockHandler, nil, newMockVersionManager())))
+	}, nil, s.mockMeta, s.compactionTaskMeta, nil, nil, nil, nil, s.mockHandler, nil, newMockVersionManager())))
 
 	gotTasks := s.handler.schedule()
 	s.Equal([]UniqueID{1}, lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
@@ -736,14 +729,14 @@ func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 		Type:    datapb.CompactionType_MixCompaction,
 		Channel: ch,
 		NodeID:  1,
-	}, nil, s.mockMeta, newMockVersionManager())
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  19531,
 		Type:    datapb.CompactionType_MixCompaction,
 		Channel: ch,
 		NodeID:  1,
-	}, nil, s.mockMeta, newMockVersionManager())
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	s.handler.submitTask(t1)
 	s.handler.restoreTask(t2)
@@ -761,7 +754,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		Type:      datapb.CompactionType_MixCompaction,
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_executing,
-	}, nil, s.mockMeta, newMockVersionManager())
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		TriggerID: 1,
@@ -769,7 +762,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		Type:      datapb.CompactionType_MixCompaction,
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_completed,
-	}, nil, s.mockMeta, newMockVersionManager())
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	t3 := newL0CompactionTask(&datapb.CompactionTask{
 		TriggerID: 1,
@@ -777,29 +770,22 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 		Type:      datapb.CompactionType_Level0DeleteCompaction,
 		Channel:   "ch-02",
 		State:     datapb.CompactionTaskState_failed,
-	}, nil, s.mockMeta)
+	}, nil, s.mockMeta, s.compactionTaskMeta)
 
 	inTasks := map[int64]CompactionTask{
 		1: t1,
 		2: t2,
 		3: t3,
 	}
-	s.mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) []*datapb.CompactionTask {
-		var ret []*datapb.CompactionTask
-		for _, t := range inTasks {
-			if t.GetTaskProto().GetTriggerID() != i {
-				continue
-			}
-			ret = append(ret, t.ShadowClone())
-		}
-		return ret
-	})
-
 	for _, t := range inTasks {
 		s.handler.submitTask(t)
 	}
 
 	s.handler.schedule()
+
+	for _, t := range inTasks {
+		s.handler.compactionTaskMeta.saveCompactionTaskMemory(t.ShadowClone())
+	}
 
 	info := s.handler.getCompactionInfo(context.TODO(), 1)
 	s.Equal(1, info.completedCnt)
@@ -819,7 +805,7 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 			t.QueryTaskOnWorker(cluster)
 		}
 	}).Maybe()
-	s.handler = newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
+	s.handler = newCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, nil, nil, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
 		TriggerID: 1,
@@ -827,7 +813,7 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 		Type:      datapb.CompactionType_MixCompaction,
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_executing,
-	}, nil, s.mockMeta, newMockVersionManager())
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	s.NoError(s.handler.submitTask(t1))
 
@@ -837,7 +823,7 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 		Type:      datapb.CompactionType_MixCompaction,
 		Channel:   "ch-01",
 		State:     datapb.CompactionTaskState_completed,
-	}, nil, s.mockMeta, newMockVersionManager())
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	s.Error(s.handler.submitTask(t2))
 }
@@ -857,12 +843,12 @@ func (s *CompactionPlanHandlerSuite) TestIsFullAtMaxTaskNum() {
 		s.Run(tc.name, func() {
 			paramtable.Get().Save(Params.DataCoordCfg.CompactionMaxTaskNum.Key, tc.maxTaskNum)
 			defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionMaxTaskNum.Key)
-			inspector := newCompactionInspector(s.mockMeta, nil, nil, nil, nil, newMockVersionManager())
+			inspector := newCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, nil, nil, nil, nil, nil, nil, newMockVersionManager())
 			for i := 0; i < tc.pending; i++ {
-				s.Require().NoError(inspector.submitTask(newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(1 + i)}, nil, s.mockMeta, newMockVersionManager())))
+				s.Require().NoError(inspector.submitTask(newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(1 + i)}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())))
 			}
 			for i := 0; i < tc.running; i++ {
-				inspector.executingTasks[int64(100+i)] = newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(100 + i)}, nil, s.mockMeta, newMockVersionManager())
+				inspector.executingTasks[int64(100+i)] = newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(100 + i)}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 			}
 			s.Equal(tc.full, inspector.isFull())
 		})
@@ -881,7 +867,7 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 			t.QueryTaskOnWorker(cluster)
 		}
 	}).Maybe()
-	handler := newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
+	handler := newCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, nil, nil, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 
 	task := &datapb.CompactionTask{
 		TriggerID: 1,
@@ -941,7 +927,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:     datapb.CompactionTaskState_executing,
 		NodeID:    111,
 		StartTime: time.Now().Unix(),
-	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
+	}, s.mockAlloc, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	t2 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:    2,
@@ -950,7 +936,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:     datapb.CompactionTaskState_executing,
 		NodeID:    111,
 		StartTime: time.Now().Unix(),
-	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
+	}, s.mockAlloc, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	t3 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:    3,
@@ -959,7 +945,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:     datapb.CompactionTaskState_timeout,
 		NodeID:    111,
 		StartTime: time.Now().Unix(),
-	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
+	}, s.mockAlloc, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	t4 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:    4,
@@ -968,7 +954,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:     datapb.CompactionTaskState_timeout,
 		NodeID:    111,
 		StartTime: time.Now().Unix(),
-	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
+	}, s.mockAlloc, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	t6 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:    6,
@@ -977,7 +963,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 		State:     datapb.CompactionTaskState_executing,
 		NodeID:    111,
 		StartTime: time.Now().Unix(),
-	}, s.mockAlloc, s.mockMeta, newMockVersionManager())
+	}, s.mockAlloc, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	inTasks := map[int64]CompactionTask{
 		1: t1,
@@ -1070,13 +1056,14 @@ func (s *CompactionPlanHandlerSuite) TestCompactionGC() {
 	catalog := &datacoord.Catalog{MetaKv: NewMetaMemoryKV()}
 	compactionTaskMeta, err := newCompactionTaskMeta(context.TODO(), catalog)
 	s.NoError(err)
-	s.handler.meta = &meta{compactionTaskMeta: compactionTaskMeta}
+	s.handler.meta = &meta{}
+	s.handler.compactionTaskMeta = compactionTaskMeta
 	for _, t := range inTasks {
-		s.handler.meta.SaveCompactionTask(context.TODO(), t)
+		s.handler.compactionTaskMeta.SaveCompactionTask(context.TODO(), t)
 	}
 
 	s.handler.cleanCompactionTaskMeta()
-	tasks := s.handler.meta.GetCompactionTaskMeta().GetCompactionTasksByTriggerID(0)
+	tasks := s.handler.compactionTaskMeta.GetCompactionTasksByTriggerID(0)
 	remainingPlanIDs := lo.Map(tasks, func(task *datapb.CompactionTask, _ int) int64 {
 		return task.GetPlanID()
 	})
@@ -1145,7 +1132,7 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 		State:         datapb.CompactionTaskState_executing,
 		NodeID:        dataNodeID,
 		InputSegments: []UniqueID{1, 2},
-	}, nil, s.mockMeta, newMockVersionManager())
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
 	compactionResult := datapb.CompactionPlanResult{
 		PlanID: 1,
@@ -1187,7 +1174,7 @@ func (s *CompactionPlanHandlerSuite) TestCleanCompaction() {
 					NodeID:        1,
 					InputSegments: []UniqueID{1, 2},
 				},
-				nil, s.mockMeta, newMockVersionManager()),
+				nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager()),
 		},
 		{
 			newL0CompactionTask(&datapb.CompactionTask{
@@ -1198,13 +1185,13 @@ func (s *CompactionPlanHandlerSuite) TestCleanCompaction() {
 				NodeID:        1,
 				InputSegments: []UniqueID{1, 2},
 			},
-				nil, s.mockMeta),
+				nil, s.mockMeta, s.compactionTaskMeta),
 		},
 	}
 	for _, test := range tests {
 		task := test.task
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+		s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		s.handler.executingTasks[1] = task
 		s.Equal(1, len(s.handler.executingTasks))
@@ -1231,12 +1218,12 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompaction() {
 			NodeID:        1,
 			InputSegments: []UniqueID{1, 2},
 		},
-		nil, s.mockMeta, s.mockHandler, nil, newMockVersionManager())
+		nil, s.mockMeta, s.compactionTaskMeta, nil, nil, nil, s.mockCleaner, s.mockHandler, nil, newMockVersionManager())
 	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
 	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	s.mockCleaner.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
+	s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 	s.handler.executingTasks[1] = task
 	s.Equal(1, len(s.handler.executingTasks))
@@ -1278,10 +1265,10 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompactionCommitFail() {
 			IsClusteringKey: true,
 		},
 	},
-		nil, s.mockMeta, s.mockHandler, nil, newMockVersionManager())
+		nil, s.mockMeta, s.compactionTaskMeta, nil, nil, nil, s.mockCleaner, s.mockHandler, nil, newMockVersionManager())
 
 	s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 	cluster.EXPECT().QueryCompaction(UniqueID(1), &datapb.CompactionStateRequest{PlanID: 1}).Return(
 		&datapb.CompactionPlanResult{
 			PlanID: 1,
@@ -1307,7 +1294,7 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompactionCommitFail() {
 
 	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Once()
 	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
+	s.mockCleaner.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil)
 	s.handler.cleanFailedTasks()
 	s.Equal(0, len(s.handler.cleaningTasks))
 }
@@ -1328,7 +1315,7 @@ func (s *CompactionPlanHandlerSuite) TestKeepClean() {
 				NodeID:        1,
 				InputSegments: []UniqueID{1, 2},
 			},
-				nil, s.mockMeta, s.mockHandler, nil, newMockVersionManager()),
+				nil, s.mockMeta, s.compactionTaskMeta, nil, nil, nil, s.mockCleaner, s.mockHandler, nil, newMockVersionManager()),
 		},
 	}
 	for _, test := range tests {
@@ -1336,8 +1323,8 @@ func (s *CompactionPlanHandlerSuite) TestKeepClean() {
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil)
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
-		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+		s.mockCleaner.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 
 		s.handler.executingTasks[1] = task
 
@@ -1347,55 +1334,10 @@ func (s *CompactionPlanHandlerSuite) TestKeepClean() {
 		s.Equal(1, len(s.handler.cleaningTasks))
 		s.handler.cleanFailedTasks()
 		s.Equal(1, len(s.handler.cleaningTasks))
-		s.mockMeta.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockCleaner.EXPECT().CleanPartitionStatsInfo(mock.Anything, mock.Anything).Return(nil).Once()
 		s.handler.cleanFailedTasks()
 		s.Equal(0, len(s.handler.cleaningTasks))
 	}
-}
-
-func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
-	l := &datapb.FieldBinlog{
-		FieldID: fieldID,
-		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
-	}
-	for _, id := range logIDs {
-		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogID: id})
-	}
-	err := binlog.CompressFieldBinlogs([]*datapb.FieldBinlog{l})
-	if err != nil {
-		panic(err)
-	}
-	return l
-}
-
-func getFieldBinlogPaths(fieldID int64, paths ...string) *datapb.FieldBinlog {
-	l := &datapb.FieldBinlog{
-		FieldID: fieldID,
-		Binlogs: make([]*datapb.Binlog, 0, len(paths)),
-	}
-	for _, path := range paths {
-		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogPath: path})
-	}
-	err := binlog.CompressFieldBinlogs([]*datapb.FieldBinlog{l})
-	if err != nil {
-		panic(err)
-	}
-	return l
-}
-
-func getFieldBinlogIDsWithEntry(fieldID int64, entry int64, logIDs ...int64) *datapb.FieldBinlog {
-	l := &datapb.FieldBinlog{
-		FieldID: fieldID,
-		Binlogs: make([]*datapb.Binlog, 0, len(logIDs)),
-	}
-	for _, id := range logIDs {
-		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogID: id, EntriesNum: entry})
-	}
-	err := binlog.CompressFieldBinlogs([]*datapb.FieldBinlog{l})
-	if err != nil {
-		panic(err)
-	}
-	return l
 }
 
 func getInsertLogPath(rootPath string, segmentID typeutil.UniqueID) string {
@@ -1414,19 +1356,19 @@ func TestCheckDelay(t *testing.T) {
 	handler := &compactionInspector{}
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
 		StartTime: time.Now().Add(-100 * time.Minute).Unix(),
-	}, nil, nil, newMockVersionManager())
+	}, nil, nil, nil, newMockVersionManager())
 	handler.checkDelay(t1)
 	t2 := newL0CompactionTask(&datapb.CompactionTask{
 		StartTime: time.Now().Add(-100 * time.Minute).Unix(),
-	}, nil, nil)
+	}, nil, nil, nil)
 	handler.checkDelay(t2)
 	t3 := newClusteringCompactionTask(&datapb.CompactionTask{
 		StartTime: time.Now().Add(-100 * time.Minute).Unix(),
-	}, nil, nil, nil, nil, newMockVersionManager())
+	}, nil, nil, nil, nil, nil, nil, nil, nil, nil, newMockVersionManager())
 	handler.checkDelay(t3)
 	t4 := newBumpSchemaVersionTask(&datapb.CompactionTask{
 		StartTime: time.Now().Add(-100 * time.Minute).Unix(),
-	}, nil, nil, newMockVersionManager())
+	}, nil, nil, nil, newMockVersionManager())
 	handler.checkDelay(t4)
 }
 
@@ -1437,33 +1379,33 @@ func TestGetCompactionTasksNum(t *testing.T) {
 			StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
 			CollectionID: 1,
 			Type:         datapb.CompactionType_MixCompaction,
-		}, nil, nil, newMockVersionManager()),
+		}, nil, nil, nil, newMockVersionManager()),
 	)
 	queueTasks.Enqueue(
 		newL0CompactionTask(&datapb.CompactionTask{
 			StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
 			CollectionID: 1,
 			Type:         datapb.CompactionType_Level0DeleteCompaction,
-		}, nil, nil),
+		}, nil, nil, nil),
 	)
 	queueTasks.Enqueue(
 		newClusteringCompactionTask(&datapb.CompactionTask{
 			StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
 			CollectionID: 10,
 			Type:         datapb.CompactionType_ClusteringCompaction,
-		}, nil, nil, nil, nil, newMockVersionManager()),
+		}, nil, nil, nil, nil, nil, nil, nil, nil, nil, newMockVersionManager()),
 	)
 	executingTasks := make(map[int64]CompactionTask, 0)
 	executingTasks[1] = newMixCompactionTask(&datapb.CompactionTask{
 		StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
 		CollectionID: 1,
 		Type:         datapb.CompactionType_MixCompaction,
-	}, nil, nil, newMockVersionManager())
+	}, nil, nil, nil, newMockVersionManager())
 	executingTasks[2] = newL0CompactionTask(&datapb.CompactionTask{
 		StartTime:    time.Now().Add(-100 * time.Minute).Unix(),
 		CollectionID: 10,
 		Type:         datapb.CompactionType_Level0DeleteCompaction,
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	handler := &compactionInspector{
 		queueTasks:     queueTasks,
@@ -1494,7 +1436,7 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BumpSchemaVersionComp
 
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
 	mockScheduler.EXPECT().Enqueue(mock.Anything).Maybe()
-	handler := newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
+	handler := newCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, nil, nil, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 
 	t := &datapb.CompactionTask{
 		TriggerID: 1,
@@ -1534,9 +1476,11 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTaskRejectsSnapshotProtect
 			test.block(snapshotMeta)
 			store := metacache.NewMetaStore(nil)
 			meta := &meta{
-				segments:     NewSegmentsInfo(store),
-				metaStore:    store,
-				snapshotMeta: snapshotMeta,
+				segments:  NewSegmentsInfo(store),
+				metaStore: store,
+			}
+			if snapshotMeta != nil {
+				meta.compactionProtection = snapshotMeta
 			}
 			meta.segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
@@ -1544,7 +1488,7 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTaskRejectsSnapshotProtect
 				State:        commonpb.SegmentState_Flushed,
 				Level:        datapb.SegmentLevel_L1,
 			}})
-			inspector := newCompactionInspector(meta, nil, nil, nil, nil, newMockVersionManager())
+			inspector := newCompactionInspector(meta, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, newMockVersionManager())
 
 			compactTask, err := inspector.createCompactTask(&datapb.CompactionTask{
 				PlanID:        10,
@@ -1564,7 +1508,7 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_UnknownType() {
 	s.SetupTest()
 
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
-	handler := newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
+	handler := newCompactionInspector(s.mockMeta, s.compactionTaskMeta, nil, nil, nil, nil, nil, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 
 	t := &datapb.CompactionTask{
 		TriggerID: 2,

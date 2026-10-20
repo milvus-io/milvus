@@ -33,7 +33,7 @@ import (
 // Error handling strategy:
 // - Non-retriable errors (collection not found, not external, job already in progress): return nil to avoid blocking WAL
 // - Retriable errors (transient failures): return error to trigger WAL retry
-func (s *DDLCallbacks) refreshExternalCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultRefreshExternalCollectionMessageV2) error {
+func (c *DDLCallbacks) refreshExternalCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultRefreshExternalCollectionMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
 		mlog.FieldCollectionID(header.CollectionId),
@@ -45,7 +45,7 @@ func (s *DDLCallbacks) refreshExternalCollectionV2AckCallback(ctx context.Contex
 
 	// Submit refresh job using the pre-allocated jobID from WAL
 	// This ensures idempotency - if the job already exists, it will be skipped
-	jobID, err := s.externalCollectionRefreshManager.SubmitRefreshJobWithID(
+	jobID, err := c.ExternalCollectionRefreshManager.SubmitRefreshJobWithID(
 		ctx,
 		header.JobId,
 		header.CollectionId,

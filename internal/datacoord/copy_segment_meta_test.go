@@ -20,9 +20,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
-	"github.com/stretchr/testify/assert"
+
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -57,26 +56,27 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
-	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker)
+	dm := &indexTestMetas{}
+	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker, loadIndexTestMetas(s.catalog, dm))
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
 		ID:     s.collectionID,
 		Schema: newTestSchema(),
 	})
 
-	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
+	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, dm.indexMeta, nil, nil)
 	s.NoError(err)
 }
 
@@ -92,22 +92,23 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+	dm := &indexTestMetas{}
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, loadIndexTestMetas(catalog, dm))
 	s.NoError(err)
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, dm.indexMeta, nil, nil)
 	s.NoError(err)
 	s.NotNil(copyMeta)
 }
@@ -117,7 +118,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ListJobsError() {
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, errors.New("list jobs error"))
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, nil, nil, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, nil, nil, nil, nil)
 	s.Error(err)
 	s.Nil(copyMeta)
 	s.Contains(err.Error(), "list jobs error")
@@ -129,7 +130,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ListTasksError() {
 	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, errors.New("list tasks error"))
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, nil, nil, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, nil, nil, nil, nil)
 	s.Error(err)
 	s.Nil(copyMeta)
 	s.Contains(err.Error(), "list tasks error")
@@ -157,22 +158,23 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+	dm := &indexTestMetas{}
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, loadIndexTestMetas(catalog, dm))
 	s.NoError(err)
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, dm.indexMeta, nil, nil)
 	s.NoError(err)
 
 	// Verify jobs are restored
@@ -209,22 +211,23 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+	dm := &indexTestMetas{}
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, loadIndexTestMetas(catalog, dm))
 	s.NoError(err)
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, dm.indexMeta, nil, nil)
 	s.NoError(err)
 
 	// Verify tasks are restored
@@ -953,145 +956,6 @@ func (s *CopySegmentMetaSuite) TestCopySegmentTasks_Operations() {
 	s.Nil(tasks.get(1001))
 	s.NotNil(tasks.get(1002))
 	s.Len(tasks.listTasks(), 1)
-}
-
-// TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal verifies that transitioning a
-// job to Completed with PinId>0 unpins the source snapshot exactly once.
-func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-
-	snapMeta := &snapshotMeta{}
-	unpinCalls := 0
-	var unpinPinID int64
-	mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
-		func(_ *snapshotMeta, _ context.Context, pinID int64) (int64, string, int, error) {
-			unpinCalls++
-			unpinPinID = pinID
-			return 0, "", 0, nil
-		}).Build()
-	defer mockUnpin.UnPatch()
-
-	copyMeta := &copySegmentMeta{
-		catalog:      catalog,
-		snapshotMeta: snapMeta,
-		jobs:         map[int64]CopySegmentJob{},
-		tasks:        newCopySegmentTasks(),
-	}
-
-	jobID := int64(777)
-	job := &copySegmentJob{
-		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:              jobID,
-			CollectionId:       1,
-			SourceCollectionId: 1,
-			SnapshotName:       "snap_pin",
-			State:              datapb.CopySegmentJobState_CopySegmentJobExecuting,
-			PinId:              42,
-		},
-		tr: timerecord.NewTimeRecorder("test"),
-	}
-	copyMeta.jobs[jobID] = job
-
-	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
-	assert.NoError(t, err)
-	assert.Equal(t, 1, unpinCalls, "UnpinSnapshot must be called exactly once on terminal transition")
-	assert.Equal(t, int64(42), unpinPinID, "Unpin must be called with job.PinId")
-
-	// Second terminal call: already terminal → must not Unpin again.
-	err = copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
-	assert.NoError(t, err)
-	assert.Equal(t, 1, unpinCalls, "Double terminal transition must not double-unpin")
-}
-
-// TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob verifies jobs persisted
-// before the pin refactor (PinId=0) skip Unpin and do not panic on nil snapshotMeta.
-func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-
-	unpinCalled := false
-	mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
-		func(_ *snapshotMeta, _ context.Context, _ int64) (int64, string, int, error) {
-			unpinCalled = true
-			return 0, "", 0, nil
-		}).Build()
-	defer mockUnpin.UnPatch()
-
-	// snapshotMeta=nil is allowed because PinId==0 short-circuits before Unpin.
-	copyMeta := &copySegmentMeta{
-		catalog: catalog,
-		jobs:    map[int64]CopySegmentJob{},
-		tasks:   newCopySegmentTasks(),
-	}
-
-	jobID := int64(888)
-	job := &copySegmentJob{
-		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:              jobID,
-			CollectionId:       1,
-			SourceCollectionId: 1,
-			SnapshotName:       "snap_legacy",
-			State:              datapb.CopySegmentJobState_CopySegmentJobExecuting,
-			// PinId intentionally zero (pre-refactor job).
-		},
-		tr: timerecord.NewTimeRecorder("test"),
-	}
-	copyMeta.jobs[jobID] = job
-
-	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
-	assert.NoError(t, err)
-	assert.False(t, unpinCalled, "UnpinSnapshot must not be called for legacy job (PinId=0)")
-}
-
-// TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed verifies that when UnpinSnapshot
-// returns an error the state transition is still persisted, and the caller receives nil.
-// The pin is expected to self-expire via TTL — failing the state machine would double-drive it.
-func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-
-	unpinCalls := 0
-	mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
-		func(_ *snapshotMeta, _ context.Context, _ int64) (int64, string, int, error) {
-			unpinCalls++
-			return 0, "", 0, errors.New("etcd unavailable")
-		}).Build()
-	defer mockUnpin.UnPatch()
-
-	copyMeta := &copySegmentMeta{
-		catalog:      catalog,
-		snapshotMeta: &snapshotMeta{},
-		jobs:         map[int64]CopySegmentJob{},
-		tasks:        newCopySegmentTasks(),
-	}
-
-	jobID := int64(999)
-	copyMeta.jobs[jobID] = &copySegmentJob{
-		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:              jobID,
-			CollectionId:       1,
-			SourceCollectionId: 1,
-			SnapshotName:       "snap_err",
-			State:              datapb.CopySegmentJobState_CopySegmentJobExecuting,
-			PinId:              101,
-		},
-		tr: timerecord.NewTimeRecorder("test"),
-	}
-
-	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
-
-	assert.NoError(t, err, "unpin error must be swallowed — state transition already persisted")
-	assert.Equal(t, 1, unpinCalls)
-	// State transition happened despite unpin failure.
-	assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobCompleted, copyMeta.jobs[jobID].GetState())
 }
 
 // TestUpdateJobStateAndReleaseRef_NotFound verifies that updating a non-existent

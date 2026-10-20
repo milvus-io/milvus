@@ -60,26 +60,27 @@ func (s *CopySegmentInspectorSuite) SetupTest() {
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
-	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker)
+	dm := &indexTestMetas{}
+	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker, loadIndexTestMetas(s.catalog, dm))
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
 		ID:     s.collectionID,
 		Schema: newTestSchema(),
 	})
 
-	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
+	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, dm.indexMeta, nil, nil)
 	s.NoError(err)
 
 	s.scheduler = task2.NewMockGlobalScheduler(s.T())

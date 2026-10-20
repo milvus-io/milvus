@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -27,11 +28,15 @@ func TestMixCompactionTaskSuite(t *testing.T) {
 type MixCompactionTaskSuite struct {
 	suite.Suite
 
-	mockMeta *MockCompactionMeta
+	mockMeta           *MockCompactionMeta
+	mockCatalog        *mocks.DataCoordCatalog
+	compactionTaskMeta *compactionTaskMeta
 }
 
 func (s *MixCompactionTaskSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
+	s.mockCatalog = mocks.NewDataCoordCatalog(s.T())
+	s.compactionTaskMeta = newCompactionTaskMetaOverCatalog(s.mockCatalog)
 }
 
 func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
@@ -57,7 +62,7 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 		InputSegments:  []int64{200, 201},
 		ResultSegments: []int64{100, 200},
 		Schema:         &schemapb.CollectionSchema{Version: 1},
-	}, nil, s.mockMeta, newMockVersionManager())
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 	alloc := allocator.NewMockAllocator(s.T())
 	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task.allocator = alloc
@@ -119,7 +124,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {
 				Schema: &schemapb.CollectionSchema{
 					FileResourceIds: []int64{7},
 				},
-			}, nil, mockMeta, newMockVersionManager())
+			}, nil, mockMeta, nil, newMockVersionManager())
 			alloc := allocator.NewMockAllocator(s.T())
 			alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 			task.allocator = alloc
@@ -153,7 +158,7 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 			InputSegments:  []int64{200, 201},
 			ResultSegments: []int64{100, 200},
 			Schema:         &schemapb.CollectionSchema{Version: 1},
-		}, nil, s.mockMeta, newMockVersionManager())
+		}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)
 		s.ErrorIs(err, merr.ErrSegmentNotFound)
@@ -166,7 +171,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 			PlanID:        1,
 			Type:          datapb.CompactionType_MixCompaction,
 			InputSegments: []int64{200},
-		}, nil, NewMockCompactionMeta(s.T()), newMockVersionManager())
+		}, nil, NewMockCompactionMeta(s.T()), nil, newMockVersionManager())
 
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)
@@ -185,7 +190,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 			Type:          datapb.CompactionType_MixCompaction,
 			InputSegments: []int64{200},
 			Schema:        &schemapb.CollectionSchema{Version: 2},
-		}, nil, meta, newMockVersionManager())
+		}, nil, meta, nil, newMockVersionManager())
 
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)
@@ -204,7 +209,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 			Type:          datapb.CompactionType_SortCompaction,
 			InputSegments: []int64{200},
 			Schema:        &schemapb.CollectionSchema{Version: 2},
-		}, nil, meta, newMockVersionManager())
+		}, nil, meta, nil, newMockVersionManager())
 		task.slotUsage.Store(1)
 
 		_, err := task.BuildCompactionRequest()
@@ -257,7 +262,7 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 				Type:          test.compactionType,
 				InputSegments: []int64{200},
 				Schema:        &schemapb.CollectionSchema{Version: test.taskSchema},
-			}, nil, meta, newMockVersionManager())
+			}, nil, meta, nil, newMockVersionManager())
 			if test.storeSlotUsage {
 				task.slotUsage.Store(1)
 			}
@@ -290,7 +295,7 @@ func (s *MixCompactionTaskSuite) TestProcess() {
 			task := newMixCompactionTask(&datapb.CompactionTask{
 				PlanID: 1,
 				State:  tc.state,
-			}, nil, s.mockMeta, newMockVersionManager())
+			}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 			res := task.Process()
 			s.Equal(tc.processResult, res)
 		}
@@ -307,9 +312,9 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 		Channel:   "ch-1",
 		State:     datapb.CompactionTaskState_executing,
 		NodeID:    111,
-	}, nil, s.mockMeta, newMockVersionManager())
+	}, nil, s.mockMeta, s.compactionTaskMeta, newMockVersionManager())
 
-	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+	s.mockCatalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(
 		&datapb.CompactionPlanResult{PlanID: 1, State: datapb.CompactionTaskState_timeout}, nil).Once()
 

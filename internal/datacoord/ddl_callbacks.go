@@ -20,30 +20,34 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// RegisterDDLCallbacks registers the ddl callbacks.
-func RegisterDDLCallbacks(s *Server) {
-	ddlCallback := &DDLCallbacks{
-		Server: s,
-	}
-	ddlCallback.registerIndexCallbacks()
-	registry.RegisterFlushAllV2AckCallback(ddlCallback.flushAllV2AckCallback)
-	ddlCallback.registerSnapshotCallbacks()
-	ddlCallback.registerExternalCollectionCallbacks()
-	ddlCallback.registerImportCallbacks()
-	ddlCallback.registerBatchUpdateManifestCallbacks()
+// DDLDeps holds what the DDL ack callbacks read.
+type DDLDeps struct {
+	Meta                             *meta
+	ImportMeta                       ImportMeta
+	IndexMeta                        *indexMeta
+	SnapshotMeta                     *snapshotMeta
+	SnapshotManager                  SnapshotManager
+	ExternalCollectionRefreshManager ExternalCollectionRefreshManager
+	Broker                           broker.Broker
+	NotifyIndexChan                  chan UniqueID
+	// CreateImportJobFromAck creates the import job of an acked ImportMessageV1.
+	CreateImportJobFromAck func(ctx context.Context, result message.BroadcastResultImportMessageV1) (*internalpb.ImportResponse, error)
 }
 
+// DDLCallbacks holds the DDL ack callbacks and the helpers they share with the RPC handlers.
 type DDLCallbacks struct {
-	*Server
+	DDLDeps
 }
 
 func (c *DDLCallbacks) registerIndexCallbacks() {
@@ -67,9 +71,9 @@ func (c *DDLCallbacks) registerBatchUpdateManifestCallbacks() {
 	registry.RegisterBatchUpdateManifestV2AckCallback(c.batchUpdateManifestV2AckCallback)
 }
 
-// startBroadcastWithCollectionID starts a broadcast with collection name.
-func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+// StartBroadcastWithCollectionID starts a broadcast with collection name.
+func (c *DDLCallbacks) StartBroadcastWithCollectionID(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
+	coll, err := c.Broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -82,11 +86,11 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 	return broadcaster, nil
 }
 
-// startLocalFlushBroadcast serializes local collection operations on either role.
+// StartLocalFlushBroadcast serializes local collection operations on either role.
 // Replicated Drop bypasses these locks; the WAL accepts the admitted local flush
 // as an empty flush if Drop removes its shard before it appends.
-func (s *Server) startLocalFlushBroadcast(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+func (c *DDLCallbacks) StartLocalFlushBroadcast(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
+	coll, err := c.Broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -95,12 +99,12 @@ func (s *Server) startLocalFlushBroadcast(ctx context.Context, collectionID int6
 		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
 }
 
-// startBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.
+// StartBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.
 // It only creates the broadcaster with appropriate resource keys (DB, collection, snapshot)
 // without performing resource validation.
 // Use this when you need a broadcaster before all resources are created (e.g., for index restoration).
-func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+func (c *DDLCallbacks) StartBroadcastForRestoreSnapshot(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
+	coll, err := c.Broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return nil, merr.Wrapf(err, "collection %d does not exist", collectionID)
 	}
@@ -123,7 +127,7 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 	return b, nil
 }
 
-// startRestoreSnapshotLock acquires the Phase 0 restore lock set for RestoreSnapshot.
+// StartRestoreSnapshotLock acquires the Phase 0 restore lock set for RestoreSnapshot.
 //
 // These locks protect target validation and source snapshot pinning against
 // concurrent DropSnapshot / CreateCollection during Phase 0:
@@ -140,7 +144,7 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 // pin becomes the persistent source guard after the lock is released. The
 // separate restore target lock serializes restore requests through job submission
 // and synchronous cleanup without holding the DDL lock across nested DDL calls.
-func (s *Server) startRestoreSnapshotLock(
+func (c *DDLCallbacks) StartRestoreSnapshotLock(
 	ctx context.Context,
 	sourceCollectionID int64,
 	snapshotName, targetDbName, targetCollectionName string,
@@ -163,7 +167,8 @@ func (s *Server) startRestoreSnapshotLock(
 	return b, nil
 }
 
-func (s *Server) startExternalRestoreSnapshotLock(
+// StartExternalRestoreSnapshotLock acquires the Phase 0 restore lock set for an external RestoreSnapshot.
+func (c *DDLCallbacks) StartExternalRestoreSnapshotLock(
 	ctx context.Context,
 	targetDbName, targetCollectionName string,
 ) (broadcaster.BroadcastAPI, error) {
@@ -185,30 +190,31 @@ func (s *Server) startExternalRestoreSnapshotLock(
 	return b, nil
 }
 
-// validateRestoreSnapshotResources validates that all required resources exist for restore.
+// ValidateRestoreSnapshotResources validates that all required resources exist for restore.
 // This includes snapshot, collection, partitions, and indexes.
-func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *snapshotstorage.SnapshotData) error {
+func (c *DDLCallbacks) ValidateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *snapshotstorage.SnapshotData) error {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	// ========== Validate Snapshot Exists ==========
 	// Use source collection ID from snapshot data (not the target collectionID parameter)
 	// because snapshots are stored under the source collection's namespace.
 	sourceCollectionID := snapshotData.SnapshotInfo.GetCollectionId()
-	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, sourceCollectionID, snapshotData.SnapshotInfo.GetName())
+	snapshot, err := c.SnapshotMeta.GetSnapshot(ctx, sourceCollectionID, snapshotData.SnapshotInfo.GetName())
 	if err != nil {
 		return merr.Wrapf(err, "snapshot %s does not exist for collection %d",
 			snapshotData.SnapshotInfo.GetName(), sourceCollectionID)
 	}
 	log.Info(ctx, "snapshot validated", mlog.String("snapshotName", snapshot.GetName()))
 
-	return s.validateRestoredCollectionResources(ctx, collectionID, snapshotData)
+	return c.ValidateRestoredCollectionResources(ctx, collectionID, snapshotData)
 }
 
-func (s *Server) validateRestoredCollectionResources(ctx context.Context, collectionID int64, snapshotData *snapshotstorage.SnapshotData) error {
+// ValidateRestoredCollectionResources validates that the collection, partitions, and indexes of snapshotData exist in collectionID.
+func (c *DDLCallbacks) ValidateRestoredCollectionResources(ctx context.Context, collectionID int64, snapshotData *snapshotstorage.SnapshotData) error {
 	logger := mlog.With(mlog.Int64("collectionID", collectionID))
 
 	// ========== Validate Collection Exists ==========
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := c.Broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return merr.Wrapf(err, "collection %d does not exist", collectionID)
 	}
@@ -219,7 +225,7 @@ func (s *Server) validateRestoredCollectionResources(ctx context.Context, collec
 		mlog.FieldCollectionName(collectionName))
 
 	// ========== Validate Partitions Exist ==========
-	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
+	partitionsResp, err := c.Broker.ShowPartitions(ctx, collectionID)
 	if err != nil {
 		return merr.Wrapf(err, "failed to get partitions for collection %d", collectionID)
 	}
@@ -241,7 +247,7 @@ func (s *Server) validateRestoredCollectionResources(ctx context.Context, collec
 	// ========== Validate Indexes Exist ==========
 	for _, indexInfo := range snapshotData.Indexes {
 		// Check if index exists for this field
-		indexes := s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+		indexes := c.IndexMeta.GetIndexesForCollection(collectionID, "")
 
 		indexFound := false
 		for _, idx := range indexes {

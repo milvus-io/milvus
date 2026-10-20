@@ -58,6 +58,7 @@ type indexBuildTask struct {
 	times *taskcommon.Times
 
 	meta                      *meta
+	indexMeta                 *indexMeta
 	handler                   Handler
 	chunkManager              storage.ChunkManager
 	indexEngineVersionManager IndexEngineVersionManager
@@ -91,6 +92,7 @@ func fieldSchemaForIndexBuild(schema *schemapb.CollectionSchema, field *schemapb
 func newIndexBuildTask(segIndex *model.SegmentIndex,
 	taskSlot int64,
 	meta *meta,
+	indexMeta *indexMeta,
 	handler Handler,
 	chunkManager storage.ChunkManager,
 	indexEngineVersionManager IndexEngineVersionManager,
@@ -100,6 +102,7 @@ func newIndexBuildTask(segIndex *model.SegmentIndex,
 		taskSlot:                  taskSlot,
 		times:                     taskcommon.NewTimes(),
 		meta:                      meta,
+		indexMeta:                 indexMeta,
 		handler:                   handler,
 		chunkManager:              chunkManager,
 		indexEngineVersionManager: indexEngineVersionManager,
@@ -140,7 +143,7 @@ func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 }
 
 func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason string) error {
-	if err := it.meta.indexMeta.UpdateIndexState(it.BuildID, commonpb.IndexState(state), failReason); err != nil {
+	if err := it.indexMeta.UpdateIndexState(it.BuildID, commonpb.IndexState(state), failReason); err != nil {
 		return err
 	}
 	it.SetState(state, failReason)
@@ -148,7 +151,7 @@ func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason
 }
 
 func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
-	if err := it.meta.indexMeta.UpdateVersion(it.BuildID, nodeID); err != nil {
+	if err := it.indexMeta.UpdateVersion(it.BuildID, nodeID); err != nil {
 		return err
 	}
 	it.IndexVersion++
@@ -162,7 +165,7 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 		return err
 	}
 	if !published {
-		if err := it.meta.indexMeta.FinishTask(result); err != nil {
+		if err := it.indexMeta.FinishTask(result); err != nil {
 			return err
 		}
 	}
@@ -200,7 +203,7 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	if !isSegmentHealthy(segment) {
 		return false, nil
 	}
-	segIdx, ok := it.meta.indexMeta.GetIndexJob(it.BuildID)
+	segIdx, ok := it.indexMeta.GetIndexJob(it.BuildID)
 	if !ok || segIdx == nil {
 		return false, nil
 	}
@@ -219,13 +222,13 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	// reader rejects and GC can therefore never retire. Record the result the
 	// legacy way instead; the record goes terminal and dies with the ordinary
 	// dropped-index GC path.
-	if !it.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+	if !it.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 		return false, nil
 	}
 	// Project the worker result now so an invalid one is rejected before any
 	// manifest I/O. CommitSegmentManifest repeats this under indexMeta's
 	// per-buildID lock and persists that authoritative copy.
-	finished, _, err := it.meta.indexMeta.buildFinishedSegmentIndex(segIdx, result)
+	finished, _, err := it.indexMeta.buildFinishedSegmentIndex(segIdx, result)
 	if err != nil {
 		return false, err
 	}
@@ -289,7 +292,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	log := mlog.With(mlog.Int64("taskID", it.BuildID), mlog.Int64("segmentID", it.SegmentID))
 
 	// Check if task exists in meta
-	segIndex, exist := it.meta.indexMeta.GetIndexJob(it.BuildID)
+	segIndex, exist := it.indexMeta.GetIndexJob(it.BuildID)
 	if !exist || segIndex == nil {
 		log.Info(ctx, "index task has not exist in meta table, removing task")
 		it.SetState(indexpb.JobState_JobStateNone, "index task has not exist in meta table")
@@ -305,14 +308,14 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}
 
 	// Handle special cases for certain index types or small segments
-	indexParams := it.meta.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID)
+	indexParams := it.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID)
 	indexType := GetIndexType(indexParams)
 	effectiveRows := segIndex.NumRows
 	estimatedVectorArrayVectors := int64(0)
 	isVectorArrayIndex := false
 	isEmbeddingListIndex := false
 	skipVectorArrayThreshold := false
-	if fieldID := it.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 {
+	if fieldID := it.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 {
 		if collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID); err == nil {
 			for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
 				if f.FieldID == fieldID {
@@ -624,8 +627,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 ) (*workerpb.CreateJobRequest, error) {
 	log := mlog.With(mlog.Int64("taskID", it.BuildID), mlog.Int64("segmentID", segment.GetID()))
 
-	typeParams := it.meta.indexMeta.GetTypeParams(segIndex.CollectionID, segIndex.IndexID)
-	fieldID := it.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
+	typeParams := it.indexMeta.GetTypeParams(segIndex.CollectionID, segIndex.IndexID)
+	fieldID := it.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
 
 	binlogIDs := getBinLogIDs(segment, fieldID)
 	totalRows := getTotalBinlogRows(segment, fieldID)
@@ -800,7 +803,7 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 	log := mlog.With(mlog.Int64("taskID", it.BuildID), mlog.Int64("segmentID", it.SegmentID), mlog.Int64("nodeID", it.NodeID))
 
 	// Check if task exists in meta
-	segIndex, exist := it.meta.indexMeta.GetIndexJob(it.BuildID)
+	segIndex, exist := it.indexMeta.GetIndexJob(it.BuildID)
 	if !exist || segIndex == nil {
 		log.Info(ctx, "index task has not exist in meta table, removing task")
 		if it.tryDropTaskOnWorker(cluster) != nil {
@@ -868,7 +871,7 @@ func (it *indexBuildTask) droppedTargetReason(segment *SegmentInfo, segIndex *mo
 	if !isSegmentHealthy(segment) {
 		return indexTaskAbortReasonSegmentDropped, true
 	}
-	if !it.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
+	if !it.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
 		return indexTaskAbortReasonIndexDropped, true
 	}
 	return "", false
