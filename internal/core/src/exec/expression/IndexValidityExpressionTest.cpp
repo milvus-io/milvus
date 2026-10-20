@@ -18,6 +18,7 @@
 #include "ExprBatchTestUtils.h"
 #include "ExprIndexIntegrationTestUtils.h"
 #include "index/contracts/query/INullReader.h"
+#include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 
 namespace milvus::test {
@@ -30,12 +31,17 @@ struct ValidityCalls {
 
 // Keep the production inverted reader and its loader; count only the consumer
 // boundary calls so this test detects a full IsNotNull copy per leaf.
-class CountingValidityReader final
-    : public index::IIndexReaderBase,
-      public index::IScalarPredicateReader<int64_t>,
-      public index::INullReader {
+template <typename T>
+class CountingValidityReader final : public index::IIndexReaderBase,
+                                     public index::IScalarPredicateReader<T>,
+                                     public index::INullReader {
  public:
     CountingValidityReader(index::IIndexReaderBasePtr inner,
+                           std::shared_ptr<ValidityCalls> calls)
+        : inner_(index::JsonResolvedReader::Owned(std::move(inner))),
+          calls_(std::move(calls)) {
+    }
+    CountingValidityReader(index::JsonResolvedReader inner,
                            std::shared_ptr<ValidityCalls> calls)
         : inner_(std::move(inner)), calls_(std::move(calls)) {
     }
@@ -66,22 +72,19 @@ class CountingValidityReader final
     }
 
     TargetBitmap
-    In(size_t n, const int64_t* values) const override {
+    In(size_t n, const T* values) const override {
         return Predicate().In(n, values);
     }
     TargetBitmap
-    NotIn(size_t n, const int64_t* values) const override {
+    NotIn(size_t n, const T* values) const override {
         return Predicate().NotIn(n, values);
     }
     TargetBitmap
-    Range(const int64_t& value, index::CompareOp op) const override {
+    Range(const T& value, index::CompareOp op) const override {
         return Predicate().Range(value, op);
     }
     TargetBitmap
-    Range(const int64_t& lo,
-          bool lo_inc,
-          const int64_t& hi,
-          bool hi_inc) const override {
+    Range(const T& lo, bool lo_inc, const T& hi, bool hi_inc) const override {
         return Predicate().Range(lo, lo_inc, hi, hi_inc);
     }
     TargetBitmap
@@ -103,14 +106,75 @@ class CountingValidityReader final
     }
 
  private:
-    const index::IScalarPredicateReader<int64_t>&
+    const index::IScalarPredicateReader<T>&
     Predicate() const {
-        return dynamic_cast<const index::IScalarPredicateReader<int64_t>&>(
-            *inner_);
+        return dynamic_cast<const index::IScalarPredicateReader<T>&>(
+            *inner_.get());
     }
     const index::INullReader&
     Nulls() const {
-        return dynamic_cast<const index::INullReader&>(*inner_);
+        return dynamic_cast<const index::INullReader&>(*inner_.get());
+    }
+    index::JsonResolvedReader inner_;
+    std::shared_ptr<ValidityCalls> calls_;
+};
+
+// Preserve the production JSON router/loader and wrap only its resolved
+// DOUBLE reader to observe the validity boundary. The parent pin owns storage.
+class CountingJsonValidityReader final : public index::IIndexReaderBase,
+                                         public index::IJsonIndexReader {
+ public:
+    CountingJsonValidityReader(index::IIndexReaderBasePtr inner,
+                               std::shared_ptr<ValidityCalls> calls)
+        : inner_(std::move(inner)), calls_(std::move(calls)) {
+    }
+    index::ReaderCaps
+    Caps() const override {
+        return inner_->Caps();
+    }
+    index::Domain
+    CoordDomain() const override {
+        return inner_->CoordDomain();
+    }
+    int64_t
+    Count() const override {
+        return inner_->Count();
+    }
+    DataType
+    ValueType() const override {
+        return inner_->ValueType();
+    }
+    int64_t
+    MemoryUsage() const override {
+        return inner_->MemoryUsage();
+    }
+    cachinglayer::ResourceUsage
+    CellByteSize() const override {
+        return inner_->CellByteSize();
+    }
+    index::JsonResolvedReader
+    Resolve(std::string_view path, JsonCastType cast_type) const override {
+        auto resolved = Json().Resolve(path, cast_type);
+        if (!resolved) {
+            return {};
+        }
+        return index::JsonResolvedReader::Owned(
+            std::make_unique<CountingValidityReader<double>>(
+                std::move(resolved), calls_));
+    }
+    TargetBitmap
+    Exists(std::string_view path) const override {
+        return Json().Exists(path);
+    }
+    std::vector<JsonCastType>
+    CastTypesOf(std::string_view path) const override {
+        return Json().CastTypesOf(path);
+    }
+
+ private:
+    const index::IJsonIndexReader&
+    Json() const {
+        return dynamic_cast<const index::IJsonIndexReader&>(*inner_);
     }
     index::IIndexReaderBasePtr inner_;
     std::shared_ptr<ValidityCalls> calls_;
@@ -189,7 +253,7 @@ TEST_P(IndexValidityExpressionTest, NullableContainsLeavesBatchOffsetAndMove) {
                                          Config::object(),
                                          DataType::INT64);
     auto calls = std::make_shared<ValidityCalls>();
-    opened.reader = std::make_unique<CountingValidityReader>(
+    opened.reader = std::make_unique<CountingValidityReader<int64_t>>(
         std::move(opened.reader), calls);
     expr_index::InstallIndex(
         *segment, field, DataType::ARRAY, std::move(opened), DataType::INT64);
@@ -284,51 +348,44 @@ TEST_P(IndexValidityExpressionTest,
     constexpr int64_t rows = 33;
     for (bool has_nulls : {false, true}) {
         SCOPED_TRACE(has_nulls ? "has-nulls" : "all-valid");
-        // Nullable metadata forces the validity path even when every row is
-        // valid, so the zero-size borrowed sentinel must be materialized.
+        // Scalar offsets always scan raw data. A typed JSON-path index routes
+        // offset ranges to ExecRangeVisitorImplForIndex, the owned-cache branch
+        // under regression. Keep raw JSON unloaded so raw fallback cannot pass.
         auto schema = std::make_shared<Schema>();
         auto pk = schema->AddDebugField("pk", DataType::INT64);
-        auto field = schema->AddDebugField("value", DataType::INT64, true);
+        auto field = schema->AddDebugField("json", DataType::JSON, true);
         schema->set_primary_field_id(pk);
         auto raw = segcore::DataGen(schema, rows, 42);
-        proto::schema::FieldData* data = nullptr;
-        for (auto& f : *raw.raw_->mutable_fields_data()) {
-            if (f.field_id() == field.get()) {
-                data = &f;
-            }
-        }
-        ASSERT_NE(data, nullptr);
-        ASSERT_TRUE((*schema)[field].is_nullable());
-        ASSERT_EQ(data->scalars().long_data().data_size(), rows);
-        auto* row_validity = MutableFieldDataRowValidData(data);
-        row_validity->Resize(rows, true);
-        std::vector<int64_t> values(rows);
+        auto segment =
+            CreateSealedWithFieldDataLoaded(schema, raw, false, {field.get()});
+        ASSERT_FALSE(segment->HasFieldData(field));
+        std::vector<std::string> documents;
         std::vector<uint8_t> validity((rows + 7) / 8, 0xff);
         for (int64_t row = 0; row < rows; ++row) {
-            values[row] = row;
-            data->mutable_scalars()->mutable_long_data()->set_data(row, row);
-            const bool valid = !has_nulls || row % 5 != 0;
-            row_validity->Set(row, valid);
-            if (!valid) {
+            documents.push_back("{\"value\":" + std::to_string(row) + "}");
+            if (has_nulls && row % 5 == 0) {
                 validity[row >> 3] &= ~(1 << (row & 7));
             }
         }
-        auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
         auto field_data =
-            storage::CreateFieldData(DataType::INT64, DataType::NONE, true);
-        field_data->FillFieldData(values.data(), validity.data(), rows, 0);
+            expr_index::JsonField(documents, true, validity.data());
         auto opened = expr_index::BuildIndex(
-            field, DataType::INT64, index::INVERTED_INDEX_TYPE, {field_data});
+            field,
+            DataType::JSON,
+            index::INVERTED_INDEX_TYPE,
+            {field_data},
+            {{"json_path", "/value"}, {"json_cast_type", "DOUBLE"}});
         auto calls = std::make_shared<ValidityCalls>();
-        opened.reader = std::make_unique<CountingValidityReader>(
+        opened.reader = std::make_unique<CountingJsonValidityReader>(
             std::move(opened.reader), calls);
         expr_index::InstallIndex(
-            *segment, field, DataType::INT64, std::move(opened));
+            *segment, field, DataType::JSON, std::move(opened));
+        ASSERT_FALSE(segment->HasFieldData(field));
         proto::plan::GenericValue lower, upper;
-        lower.set_int64_val(3);
-        upper.set_int64_val(20);
+        lower.set_float_val(3);
+        upper.set_float_val(20);
         auto range = std::make_shared<expr::BinaryRangeFilterExpr>(
-            expr::ColumnInfo(field, DataType::INT64, DataType::NONE, {}, true),
+            expr::ColumnInfo(field, DataType::JSON, {"value"}, true),
             lower,
             upper,
             true,
