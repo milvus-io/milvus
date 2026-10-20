@@ -315,45 +315,7 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 				}
 			}
 		} else { // behavior change after 2.2.9, adapt autoindex logic here.
-			useAutoIndex := func(autoIndexConfig map[string]string) {
-				fields := make([]mlog.Field, 0, len(autoIndexConfig))
-				for k, v := range autoIndexConfig {
-					indexParamsMap[k] = v
-					fields = append(fields, mlog.String(k, v))
-				}
-				mlog.Info(ctx, "AutoIndex triggered", fields...)
-			}
 			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
-
-			handle := func(numberParams int, autoIndexConfig map[string]string) error {
-				// empty case.
-				if len(indexParamsMap) == numberParams {
-					// though we already know there must be metric type, how to make this safer to avoid crash?
-					metricType := autoIndexConfig[common.MetricTypeKey]
-					cit.newExtraParams = indexparamcheck.WrapUserIndexParams(metricType)
-					useAutoIndex(autoIndexConfig)
-					return nil
-				}
-
-				if len(indexParamsMap) > numberParams+1 {
-					return merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
-				}
-
-				if len(indexParamsMap) == numberParams+1 {
-					if !metricTypeExist {
-						return merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
-					}
-
-					// only metric type is passed.
-					cit.newExtraParams = indexparamcheck.WrapUserIndexParams(metricType)
-					useAutoIndex(autoIndexConfig)
-					// make the users' metric type first class citizen.
-					indexParamsMap[common.MetricTypeKey] = metricType
-					cit.userAutoIndexMetricTypeSpecified = true
-				}
-
-				return nil
-			}
 
 			var config map[string]string
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
@@ -382,14 +344,21 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 				// override int vector index params by autoindex
 				config = paramtable.Get().AutoIndexConfig.IntVectorIndexParams.GetAsJSONMap()
 			}
-			if !exist {
-				if err := handle(0, config); err != nil {
+			if !exist || specifyIndexType == AutoIndexName {
+				resolvedAutoIndexParams, resolvedUserParams, userMetricTypeSpecified, err :=
+					indexparamcheck.ResolveAutoIndexParams(indexParamsMap, config)
+				if err != nil {
 					return err
 				}
-			} else if specifyIndexType == AutoIndexName {
-				if err := handle(1, config); err != nil {
-					return err
+				indexParamsMap = resolvedAutoIndexParams
+				cit.newExtraParams = resolvedUserParams
+				cit.userAutoIndexMetricTypeSpecified = userMetricTypeSpecified
+
+				fields := make([]mlog.Field, 0, len(config))
+				for key, value := range config {
+					fields = append(fields, mlog.String(key, value))
 				}
+				mlog.Info(ctx, "AutoIndex triggered", fields...)
 			}
 			// When user does not specify metric, map autoindex config's element-level metrics to EmbList
 			if !metricTypeExist && typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {

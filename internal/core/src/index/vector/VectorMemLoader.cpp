@@ -276,15 +276,21 @@ RestoreValidity(bool use_async,
  * @brief Per-load Knowhere engine owner until transfer into VectorIndexReader.
  */
 struct OpenedMemState {
-    explicit OpenedMemState(const RuntimeParams& params)
+    explicit OpenedMemState(const RuntimeParams& params,
+                            const storage::LoadOptions& opts)
         : engine(params.physical_type,
                  params.elem_type,
                  params.index_type,
                  params.metric_type,
                  params.version) {
+        mrl_enabled = ConfigureMRL(engine,
+                                   params.runtime_dim,
+                                   params.knowhere_config,
+                                   opts.vector_data_view_scope);
     }
 
     KnowhereEngine engine;
+    bool mrl_enabled{false};
 };
 
 // Populate a per-load engine from legacy entries; native deserialization
@@ -392,7 +398,7 @@ PopulateState(bool use_async,
                                 LoadBackend::Memory);
     } else {
         const bool mmap =
-            opts.enable_mmap &&
+            opts.enable_mmap && !state.mrl_enabled &&
             KnowhereMmapSupported(state.engine.KnowhereIndexType());
         if (mmap) {
             std::string directory;
@@ -543,7 +549,7 @@ VectorMemLoader::LoadLegacy(storage::FileSource& source,
         ThrowInfo(UnexpectedError,
                   "nullable vector mmap mapping requires a staging parent");
     }
-    OpenedMemState state(params);
+    OpenedMemState state(params, opts);
     co_await PopulateState(use_async, state, source, opts, params, plan);
     co_return std::make_unique<VectorIndexReader>(std::move(state.engine));
 }

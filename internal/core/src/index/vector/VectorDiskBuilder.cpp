@@ -307,6 +307,7 @@ VectorDiskBuilder<T>::VectorDiskBuilder(DataType elem_type,
                   PhysicalVectorDataType<T>());
     }
     engine_->SetDim(dim);
+    ConfigureMRL(*engine_, dim, build_params_);
 }
 
 template <typename T>
@@ -468,10 +469,22 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
                           static_cast<int>(serialize_status),
                           knowhere::Status2String(serialize_status));
             }
-            AssertInfo(entries.binary_map_.empty(),
-                       "disk vector index {} unexpectedly returned in-memory "
-                       "serialized entries",
-                       engine_->KnowhereIndexType());
+            for (const auto& [name, binary] : entries.binary_map_) {
+                AssertInfo(!name.empty() &&
+                               std::filesystem::path(name).filename() == name,
+                           "disk vector index returned invalid sidecar name {}",
+                           name);
+                AssertInfo(binary != nullptr && binary->size >= 0,
+                           "disk vector index returned invalid sidecar {}",
+                           name);
+                const auto path =
+                    (std::filesystem::path(file_manager_->Directory()) / name)
+                        .string();
+                WriteFile(path,
+                          binary->data.get(),
+                          static_cast<size_t>(binary->size));
+                file_manager_->RegisterOwnedFile(path);
+            }
         }
 
         file_manager_->RethrowFirstFailure();

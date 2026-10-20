@@ -48,6 +48,7 @@
 #include "NamedType/named_type_impl.hpp"
 #include "Types.h"
 #include "Utils.h"
+#include "segcore/indexing/ChunkedColumnDataView.h"
 #include "arrow/array.h"
 #include "arrow/result.h"
 #include "arrow/table.h"
@@ -10164,8 +10165,17 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                          field_id.get(),
                          load_index_info_ptr->index_files.size());
 
+                storage::VectorDataViewScope vector_data_view_scope;
+                if (IsVectorDataType(load_index_info_ptr->field_type)) {
+                    vector_data_view_scope = CreateChunkedColumnDataViewScope(
+                        [this, field_id] { return get_column(field_id); });
+                }
+
                 // Download & compose index
-                LoadIndexData(trace_ctx, load_index_info_ptr, op_ctx);
+                LoadIndexData(trace_ctx,
+                              load_index_info_ptr,
+                              op_ctx,
+                              std::move(vector_data_view_scope));
 
                 // RuntimeResourceState and staged PublishedSegmentState are
                 // shared batch-private objects. Keep expensive IO/build work

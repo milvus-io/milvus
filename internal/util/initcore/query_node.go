@@ -103,6 +103,12 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cKnowhereFetchThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereFetchThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereFetchThreadPoolNum(cKnowhereFetchThreadPoolSize)
 
+	mrlRefineRatio := C.float(paramtable.Get().KnowhereConfig.MRLRefineRatio.GetAsFloat())
+	mrlStatus := C.SegcoreSetMRLRefineRatio(mrlRefineRatio)
+	if err := HandleCStatus(&mrlStatus, "SegcoreSetMRLRefineRatio failed"); err != nil {
+		return err
+	}
+
 	// override segcore SIMD type
 	cSimdType := C.CString(paramtable.Get().CommonCfg.SimdType.GetValue())
 	C.SegcoreSetSimdType(cSimdType)

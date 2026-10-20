@@ -23,7 +23,9 @@
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "common/Utils.h"
+#include "index/Utils.h"
 #include "knowhere/index/index_factory.h"
+#include "knowhere/index/mrl_index_node.h"
 
 namespace milvus::index {
 
@@ -347,6 +349,81 @@ bool
 KnowhereMmapSupported(const IndexType& index_type) {
     return knowhere::IndexFactory::Instance().FeatureCheck(
         index_type, knowhere::feature::MMAP);
+}
+
+MRLParams
+ParseMRLParams(const Config& params) {
+    return {
+        .mrl_dim =
+            GetValueFromConfig<int64_t>(params, MRL_DIM_KEY).value_or(-1),
+        .with_refine = GetValueFromConfig<bool>(params, WITH_MRL_REFINE_KEY)
+                           .value_or(false),
+    };
+}
+
+MRLConfig
+ResolveMRLConfig(const MRLParams& params, std::optional<int64_t> source_dim) {
+    if (params.mrl_dim == -1) {
+        AssertInfo(!params.with_refine,
+                   "{} requires a valid {}",
+                   WITH_MRL_REFINE_KEY,
+                   MRL_DIM_KEY);
+        return {};
+    }
+    AssertInfo(
+        source_dim.has_value(), "{} requires a source dimension", MRL_DIM_KEY);
+    AssertInfo(params.mrl_dim > 0 && params.mrl_dim < *source_dim,
+               "{} must satisfy 0 < {} < source dimension {}",
+               MRL_DIM_KEY,
+               MRL_DIM_KEY,
+               *source_dim);
+    return {
+        .enabled = true,
+        .mrl_dim = params.mrl_dim,
+        .with_refine = params.with_refine,
+    };
+}
+
+MRLConfig
+ResolveMRLConfig(const Config& params, std::optional<int64_t> source_dim) {
+    return ResolveMRLConfig(ParseMRLParams(params), source_dim);
+}
+
+bool
+ConfigureMRL(KnowhereEngine& engine,
+             std::optional<int64_t> source_dim,
+             const Config& params,
+             knowhere::ViewDataScopeOp view_data_scope) {
+    const auto mrl = ResolveMRLConfig(params, source_dim);
+    if (!mrl.enabled) {
+        return false;
+    }
+
+    knowhere::DataFormatEnum data_type;
+    switch (engine.PhysicalType()) {
+        case DataType::VECTOR_FLOAT:
+            data_type = knowhere::DataFormatEnum::fp32;
+            break;
+        case DataType::VECTOR_FLOAT16:
+            data_type = knowhere::DataFormatEnum::fp16;
+            break;
+        case DataType::VECTOR_BFLOAT16:
+            data_type = knowhere::DataFormatEnum::bf16;
+            break;
+        default:
+            ThrowInfo(Unsupported,
+                      "MRL does not support vector type {}",
+                      engine.PhysicalType());
+    }
+    engine.native_index =
+        knowhere::CreateMRLIndex(std::move(engine.native_index),
+                                 *source_dim,
+                                 mrl.mrl_dim,
+                                 data_type,
+                                 mrl.with_refine,
+                                 std::move(view_data_scope));
+    engine.SetDim(*source_dim);
+    return true;
 }
 
 template <typename T>
