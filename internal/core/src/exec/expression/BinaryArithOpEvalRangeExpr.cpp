@@ -675,6 +675,14 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     if (real_batch_size == 0) {
         return nullptr;
     }
+
+    // Row-level ARRAY_LENGTH on a sealed ArrayChunk column: read the per-row
+    // length table instead of building an ArrayView per row. On 3.0 the
+    // ARRAY_LENGTH plan still goes through this visitor (master split it into
+    // ExecArrayLength); UseArrayChunkLengths() checks the arith type itself.
+    if (UseArrayChunkLengths()) {
+        return ExecArrayLengthFromChunks<ValueType>(input, real_batch_size);
+    }
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
@@ -1222,6 +1230,139 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
                "expect batch size {}",
                processed_size,
                real_batch_size);
+    return res_vec;
+}
+
+bool
+PhyBinaryArithOpEvalRangeExpr::UseArrayChunkLengths() const {
+    if (use_array_chunk_lengths_.has_value()) {
+        return *use_array_chunk_lengths_;
+    }
+    const auto& column = expr_->column_;
+    bool use = expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength &&
+               column.data_type_ == DataType::ARRAY &&
+               column.element_type_ != DataType::ARRAY &&
+               !column.element_level_ && column.nested_path_.empty() &&
+               segment_->type() == SegmentType::Sealed;
+    if (use) {
+        // Plain and struct-member ARRAY columns on sealed segments are made
+        // of ArrayChunk (see ChunkedArrayColumn / ProxyChunkColumn
+        // ArrayViews); keep the column for the chunk loop.
+        auto self = const_cast<PhyBinaryArithOpEvalRangeExpr*>(this);
+        self->array_length_column_ =
+            snapshot_ ? snapshot_->GetDataScanResources(field_id_)
+                      : segment_->GetChunkedColumn(field_id_);
+        use = array_length_column_ != nullptr;
+    }
+    use_array_chunk_lengths_ = use;
+    return use;
+}
+
+template <typename ValueType>
+VectorPtr
+PhyBinaryArithOpEvalRangeExpr::ExecArrayLengthFromChunks(
+    OffsetVector* input, int64_t real_batch_size) {
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    const auto value = value_arg_.GetValue<ValueType>();
+    const auto& column = *array_length_column_;
+
+    // The operator is fixed per expression: select the comparison once and
+    // run a tight loop over `count` rows of one chunk starting at `first`
+    // (sequential) or at the rows named by `rows` (offset input).
+    auto fill = [&](const ArrayChunk& chunk,
+                    auto&& row_in_chunk,
+                    int64_t out_start,
+                    int64_t count) {
+        auto run = [&](auto cmp) {
+            for (int64_t i = 0; i < count; ++i) {
+                const auto row = row_in_chunk(i);
+                if (!chunk.isValid(row)) {
+                    res[out_start + i] = false;
+                    valid_res[out_start + i] = false;
+                    continue;
+                }
+                if (cmp(static_cast<int64_t>(chunk.LengthAt(row)))) {
+                    res[out_start + i] = true;
+                }
+            }
+        };
+        switch (expr_->op_type_) {
+            case proto::plan::OpType::Equal:
+                run([value](int64_t len) { return len == value; });
+                break;
+            case proto::plan::OpType::NotEqual:
+                run([value](int64_t len) { return len != value; });
+                break;
+            case proto::plan::OpType::GreaterThan:
+                run([value](int64_t len) { return len > value; });
+                break;
+            case proto::plan::OpType::GreaterEqual:
+                run([value](int64_t len) { return len >= value; });
+                break;
+            case proto::plan::OpType::LessThan:
+                run([value](int64_t len) { return len < value; });
+                break;
+            case proto::plan::OpType::LessEqual:
+                run([value](int64_t len) { return len <= value; });
+                break;
+            default:
+                ThrowInfo(UnexpectedError,
+                          "unsupported operator type for ARRAY length "
+                          "expression: {}",
+                          expr_->op_type_);
+        }
+    };
+
+    if (has_offset_input_) {
+        // Offset input (iterative filter): arbitrary rows; pin each chunk
+        // once per run of rows that fall into it.
+        std::vector<int64_t> rows(input->begin(), input->end());
+        auto [cids, offsets_in_chunk] =
+            column.GetChunkIDsByOffsets(rows.data(), real_batch_size);
+        int64_t i = 0;
+        while (i < real_batch_size) {
+            int64_t j = i + 1;
+            while (j < real_batch_size && cids[j] == cids[i]) {
+                ++j;
+            }
+            auto pw = column.GetChunk(op_ctx_, cids[i]);
+            const auto& chunk = *static_cast<const ArrayChunk*>(pw.get());
+            fill(
+                chunk,
+                [&, i](int64_t k) { return offsets_in_chunk[i + k]; },
+                i,
+                j - i);
+            i = j;
+        }
+        return res_vec;
+    }
+
+    // Sequential batch starting at the data cursor; one chunk at a time.
+    int64_t done = 0;
+    while (done < real_batch_size) {
+        auto [cid, first] =
+            column.GetChunkIDByOffset(current_data_global_pos_ + done);
+        auto pw = column.GetChunk(op_ctx_, cid);
+        const auto& chunk = *static_cast<const ArrayChunk*>(pw.get());
+        const int64_t count =
+            std::min<int64_t>(chunk.RowNums() - first, real_batch_size - done);
+        AssertInfo(count > 0,
+                   "empty chunk range at row {}",
+                   current_data_global_pos_ + done);
+        fill(
+            chunk,
+            [first = static_cast<int64_t>(first)](int64_t k) {
+                return first + k;
+            },
+            done,
+            count);
+        done += count;
+    }
+    MoveCursorForData();
     return res_vec;
 }
 
