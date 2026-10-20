@@ -1,0 +1,196 @@
+{
+ "name": "day_13_typical_saas",
+ "category": "typical",
+ "source": "synthetic day (gen_days.py)",
+ "streaming": false,
+ "qns": 16,
+ "sns": 0,
+ "qn_cores": 16,
+ "qn_memory_gb": 64,
+ "load": {
+  "concurrency": 4,
+  "bandwidth_mb": 100,
+  "base_ms": 10,
+  "jitter_sigma": 0.4
+ },
+ "search": {
+  "BaseMs": 0,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0
+ },
+ "time_scale": 6,
+ "collections": [
+  {
+   "count": 72,
+   "replicas": 2,
+   "channels": 1,
+   "segments_per_channel": 1,
+   "rows_median": 81920,
+   "rows_sigma": 0.5,
+   "flush_every_seconds": 60.0,
+   "flush_rows": 1000,
+   "compact_every_seconds": 240.0
+  },
+  {
+   "count": 288,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 1,
+   "rows_median": 81920,
+   "rows_sigma": 0.5
+  },
+  {
+   "count": 48,
+   "replicas": 2,
+   "channels": 1,
+   "segments_per_channel": 5,
+   "rows_median": 81920,
+   "rows_sigma": 0.5,
+   "flush_every_seconds": 60.0,
+   "flush_rows": 1000,
+   "compact_every_seconds": 240.0
+  },
+  {
+   "count": 192,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 5,
+   "rows_median": 81920,
+   "rows_sigma": 0.5
+  },
+  {
+   "count": 29,
+   "replicas": 2,
+   "channels": 1,
+   "segments_per_channel": 20,
+   "rows_median": 81920,
+   "rows_sigma": 0.5,
+   "flush_every_seconds": 60.0,
+   "flush_rows": 1300,
+   "compact_every_seconds": 240.0
+  },
+  {
+   "count": 115,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 20,
+   "rows_median": 81920,
+   "rows_sigma": 0.5
+  },
+  {
+   "count": 11,
+   "replicas": 2,
+   "channels": 1,
+   "segments_per_channel": 70,
+   "rows_median": 81920,
+   "rows_sigma": 0.5,
+   "flush_every_seconds": 60.0,
+   "flush_rows": 4551,
+   "compact_every_seconds": 240.0
+  },
+  {
+   "count": 45,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 70,
+   "rows_median": 81920,
+   "rows_sigma": 0.5
+  },
+  {
+   "count": 10,
+   "replicas": 2,
+   "channels": 4,
+   "segments_per_channel": 60,
+   "rows_median": 102400,
+   "rows_sigma": 0.5,
+   "flush_every_seconds": 18.0,
+   "flush_rows": 5851,
+   "compact_every_seconds": 72.0
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 0,
+  "flush_every_seconds": 0,
+  "compact_every_seconds": 0
+ },
+ "events": [
+  {
+   "at": 360.0,
+   "op": "ingest_rate",
+   "multiplier": 8
+  },
+  {
+   "at": 1080.0,
+   "op": "ingest_rate",
+   "multiplier": 1
+  },
+  {
+   "at": 1800.0,
+   "op": "kill_qn",
+   "node": 2
+  },
+  {
+   "at": 1890.0,
+   "op": "restart_qn",
+   "node": 2
+  },
+  {
+   "at": 2520.0,
+   "op": "add_qn",
+   "count": 4
+  },
+  {
+   "at": 3240.0,
+   "op": "ingest_rate",
+   "multiplier": 3
+  },
+  {
+   "at": 3600.0,
+   "op": "load_tables",
+   "tables": {
+    "count": 60,
+    "replicas": 1,
+    "channels": 1,
+    "segments_per_channel": 4,
+    "rows_median": 81920,
+    "rows_sigma": 0.5
+   }
+  },
+  {
+   "at": 4320.0,
+   "op": "ingest_rate",
+   "multiplier": 1
+  },
+  {
+   "at": 4680.0,
+   "op": "release_tables",
+   "count": 80
+  },
+  {
+   "at": 4860.0,
+   "op": "reload_tables",
+   "count": 80
+  },
+  {
+   "at": 5400.0,
+   "op": "rolling_replace",
+   "count": 4,
+   "gap_seconds": 30.0
+  },
+  {
+   "at": 6480.0,
+   "op": "restart_qc"
+  },
+  {
+   "at": 7200.0,
+   "op": "ingest_rate",
+   "multiplier": 0.5
+  },
+  {
+   "at": 7920.0,
+   "op": "stop_qn",
+   "count": 2
+  }
+ ],
+ "duration_seconds": 8640.0
+}

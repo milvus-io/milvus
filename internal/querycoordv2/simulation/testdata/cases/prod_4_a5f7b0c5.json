@@ -1,0 +1,64 @@
+{
+ "name": "prod_4_a5f7b0c5",
+ "category": "4_load_hurts_query",
+ "customer": null,
+ "source": "in01-a5f7b0c5 aws-eu; node scale 1.000, segment scale 1.000, row_scale=0.0177; 4 QN single collection 5.6M rows/segment: p99 220->360->485 ms across load terciles, rho 0.56; mixed balance (66%) and handoff (33%) triggers.",
+ "streaming": true,
+ "qns": 4,
+ "sns": 1,
+ "qn_cores": 6,
+ "qn_memory_gb": 32,
+ "load": {
+  "concurrency": 4,
+  "bandwidth_mb": 156,
+  "base_ms": 10,
+  "jitter_sigma": 0.59,
+  "ref_latency_ms": 1256.7,
+  "ref_bytes": 51200000,
+  "size_exponent": 0.0
+ },
+ "search": {
+  "BaseMs": 185.9,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 1.4
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 67,
+   "rows_median": 1941280,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 9.5,
+   "compact_every_seconds": 6.5,
+   "flush_rows": 1941280
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 177,
+  "flush_every_seconds": 9.5,
+  "compact_every_seconds": 6.5
+ },
+ "events": [],
+ "duration_seconds": 300,
+ "prod": {
+  "qn": 4,
+  "sn": 1,
+  "segments": 66.0,
+  "collections": 1,
+  "steady_seg_move_per_hour": 29.18,
+  "seg_move_per_hour": 29.2,
+  "seg_move_per_segment_per_hour": 0.4424242424242424,
+  "seg_moves_per_seg_grow": 0.7670081428946677,
+  "load_p50_s": 12.5665,
+  "load_p99_s": 49.107699999999994,
+  "load_mean_s": 13.945900755219903,
+  "segment_grow_mean_s": 11.3719,
+  "segment_move_mean_s": 20.1271,
+  "task_num_max": 7.0,
+  "search_p99_idle_ms": 185.878,
+  "search_p99_busy_ms": 359.724,
+  "window_events_real_hour": 0
+ }
+}

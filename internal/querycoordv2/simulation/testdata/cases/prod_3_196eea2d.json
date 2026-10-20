@@ -1,0 +1,155 @@
+{
+ "name": "prod_3_196eea2d",
+ "category": "3_slow_load",
+ "customer": null,
+ "source": "in01-196eea2d aws-us/az; node scale 1.000, segment scale 1.000, row_scale=0.1328; load mean 75 s / p99 473 s with 58 collections and scale 4->8->4 burst (902 moves in one hour); compare load backlog drain time.",
+ "streaming": true,
+ "qns": 4,
+ "sns": 1,
+ "qn_cores": 6,
+ "qn_memory_gb": 32,
+ "load": {
+  "concurrency": 4,
+  "bandwidth_mb": 69,
+  "base_ms": 10,
+  "jitter_sigma": 1.21,
+  "ref_latency_ms": 2817.4,
+  "ref_bytes": 51200000,
+  "size_exponent": 1.0
+ },
+ "search": {
+  "BaseMs": 112.6,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.0
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 17,
+   "rows_median": 852285,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 105.4,
+   "compact_every_seconds": 1868.1,
+   "flush_rows": 852285
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 15,
+   "rows_median": 866937,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 119.4,
+   "compact_every_seconds": 2117.2,
+   "flush_rows": 866937
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 11,
+   "rows_median": 752835,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 162.9,
+   "compact_every_seconds": 2887.1,
+   "flush_rows": 752835
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 11,
+   "rows_median": 752835,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 162.9,
+   "compact_every_seconds": 2887.1,
+   "flush_rows": 752835
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 10,
+   "rows_median": 828118,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 179.1,
+   "compact_every_seconds": 3175.8,
+   "flush_rows": 828118
+  },
+  {
+   "count": 53,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 1,
+   "rows_median": 375253,
+   "rows_sigma": 0.11,
+   "flush_every_seconds": 1318.7,
+   "compact_every_seconds": 23377.3,
+   "flush_rows": 375253
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 0,
+  "flush_every_seconds": 764.0,
+  "compact_every_seconds": 13543.8
+ },
+ "events": [
+  {
+   "at": 5.0,
+   "op": "add_qn",
+   "count": 4
+  },
+  {
+   "at": 5.0,
+   "op": "add_sn",
+   "count": 1
+  },
+  {
+   "at": 155.0,
+   "op": "stop_qn",
+   "node": 8
+  },
+  {
+   "at": 155.0,
+   "op": "stop_qn",
+   "node": 7
+  },
+  {
+   "at": 155.0,
+   "op": "stop_qn",
+   "node": 6
+  },
+  {
+   "at": 155.0,
+   "op": "stop_qn",
+   "node": 5
+  },
+  {
+   "at": 155.0,
+   "op": "kill_sn",
+   "node": 1001
+  }
+ ],
+ "duration_seconds": 360.0,
+ "prod": {
+  "qn": 4,
+  "sn": 1,
+  "segments": 233.0,
+  "collections": 58,
+  "steady_seg_move_per_hour": 2.6,
+  "seg_move_per_hour": 7.95,
+  "seg_move_per_segment_per_hour": 0.03412017167381974,
+  "seg_moves_per_seg_grow": 0.29088913282107576,
+  "load_p50_s": 28.1739,
+  "load_p99_s": 472.94870000000003,
+  "load_mean_s": 75.51590771812081,
+  "segment_grow_mean_s": 19.2475,
+  "segment_move_mean_s": 35.7964,
+  "task_num_max": 177.0,
+  "search_p99_idle_ms": 112.64,
+  "search_p99_busy_ms": 112.64,
+  "window_events_real_hour": 4
+ }
+}

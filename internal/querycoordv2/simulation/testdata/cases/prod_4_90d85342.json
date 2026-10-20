@@ -1,0 +1,75 @@
+{
+ "name": "prod_4_90d85342",
+ "category": "4_load_hurts_query",
+ "customer": null,
+ "source": "in01-90d85342 gcp; node scale 1.000, segment scale 1.000, row_scale=0.0407; cleanest load->latency case: balance-driven loads (2003/2004 busy windows have seg_move), search p99 rises 60->117->243 ms across load terciles at flat QPS (~3.7), rho(p99,loads)=0.73, rho(p99,load_conc)=0.81; compare p99 vs concurrent loads.",
+ "streaming": true,
+ "qns": 16,
+ "sns": 2,
+ "qn_cores": 6,
+ "qn_memory_gb": 32,
+ "load": {
+  "concurrency": 4,
+  "bandwidth_mb": 546,
+  "base_ms": 10,
+  "jitter_sigma": 1.37,
+  "ref_latency_ms": 367.3,
+  "ref_bytes": 51200000,
+  "size_exponent": 0.0
+ },
+ "search": {
+  "BaseMs": 47.4,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 2.19
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 150,
+   "rows_median": 1775204,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 3.2,
+   "compact_every_seconds": 2.3,
+   "flush_rows": 1775204
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 148,
+   "rows_median": 1799268,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 3.2,
+   "compact_every_seconds": 2.3,
+   "flush_rows": 1799268
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 86,
+  "flush_every_seconds": 3.2,
+  "compact_every_seconds": 2.3
+ },
+ "events": [],
+ "duration_seconds": 300,
+ "prod": {
+  "qn": 16,
+  "sn": 2,
+  "segments": 303.0,
+  "collections": 2,
+  "steady_seg_move_per_hour": 454.42,
+  "seg_move_per_hour": 454.65,
+  "seg_move_per_segment_per_hour": 1.5004950495049505,
+  "seg_moves_per_seg_grow": 2.0085262413854035,
+  "load_p50_s": 3.673,
+  "load_p99_s": 88.018,
+  "load_mean_s": 9.723597502359562,
+  "segment_grow_mean_s": 7.5436000000000005,
+  "segment_move_mean_s": 12.0982,
+  "task_num_max": 28.0,
+  "search_p99_idle_ms": 47.42,
+  "search_p99_busy_ms": 116.67,
+  "window_events_real_hour": 0
+ }
+}

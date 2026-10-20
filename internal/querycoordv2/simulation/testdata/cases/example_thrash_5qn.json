@@ -1,0 +1,11 @@
+{
+  "name": "example_thrash_5qn",
+  "category": "frequent_balance",
+  "source": "shape of 1293431b (5 QN, ~1119 segments, ~2349 moves/h); placeholder until prod_cases.json lands",
+  "qns": 5, "qn_cores": 12, "qn_memory_gb": 64,
+  "search": {"BaseMs": 5, "MsPerMillionRows": 4, "LoadInterference": 1.0},
+  "collections": [{"count": 10, "replicas": 1, "channels": 2, "segments_per_channel": 56, "rows_median": 20000, "rows_sigma": 1.2}],
+  "ingest": {"rows_per_sec_per_channel": 20000, "flush_every_seconds": 3},
+  "events": [{"at": 30, "op": "kill_qn", "node": 3}, {"at": 40, "op": "restart_qn", "node": 3}],
+  "duration_seconds": 90
+}
