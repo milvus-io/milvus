@@ -423,10 +423,26 @@ CreateNullStructSubFieldDataArray(
     AssertInfo(field_meta.is_native_list_array(),
                "struct sub-field {} must be a native list",
                field_meta.get_id().get());
+    // Rows are dense and match what reading a stored column of this sub-field
+    // returns (ColumnarArrayChunk::output_data, VectorArray::output_data,
+    // CreateEmptyVectorDataArray): every row has an entry, a null struct row
+    // is an empty placeholder whose row validity is false, and a valid row
+    // holds lengths[i] null elements.
     auto result = std::make_unique<DataArray>();
     result->set_field_id(field_meta.get_id().get());
     result->set_type(
         static_cast<proto::schema::DataType>(field_meta.get_data_type()));
+    auto check_row = [&](int64_t i, bool valid) {
+        AssertInfo(
+            lengths[i] >= 0, "struct sub-field row {} has negative length", i);
+        AssertInfo(field_meta.is_nullable() || valid,
+                   "non-nullable struct sub-field has null row {}",
+                   i);
+        AssertInfo(valid || lengths[i] == 0,
+                   "null struct row {} has {} elements",
+                   i,
+                   lengths[i]);
+    };
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
         auto* vectors = result->mutable_vectors();
         vectors->set_dim(field_meta.get_dim());
@@ -434,67 +450,62 @@ CreateNullStructSubFieldDataArray(
         rows->set_dim(field_meta.get_dim());
         rows->set_element_type(static_cast<proto::schema::DataType>(
             field_meta.get_element_type()));
+        rows->mutable_data()->Reserve(count);
         for (int64_t i = 0; i < count; ++i) {
             const bool valid = row_valid(i);
-            AssertInfo(lengths[i] >= 0,
-                       "struct sub-field row {} has negative length",
-                       i);
-            AssertInfo(field_meta.is_nullable() || valid,
-                       "non-nullable struct sub-field has null row {}",
-                       i);
-            AssertInfo(valid || lengths[i] == 0,
-                       "null struct row {} has {} elements",
-                       i,
-                       lengths[i]);
+            check_row(i, valid);
             if (field_meta.is_nullable()) {
                 vectors->add_valid_data(valid);
             }
-            if (!valid) {
-                continue;
-            }
+            // A null element has no physical vector, so every row is an
+            // empty typed payload; a valid row carries its logical length in
+            // valid_data.
             auto* row = rows->add_data();
             row->set_dim(field_meta.get_dim());
             InitEmptyVectorArrayRow(row, field_meta.get_element_type());
-            row->mutable_valid_data()->Resize(lengths[i], false);
+            if (valid) {
+                row->mutable_valid_data()->Resize(lengths[i], false);
+            }
         }
     } else {
         auto* scalars = result->mutable_scalars();
         auto* rows = scalars->mutable_array_data();
         rows->set_element_type(static_cast<proto::schema::DataType>(
             field_meta.get_element_type()));
+        rows->mutable_data()->Reserve(count);
         for (int64_t i = 0; i < count; ++i) {
             const bool valid = row_valid(i);
-            AssertInfo(lengths[i] >= 0,
-                       "struct sub-field row {} has negative length",
-                       i);
-            AssertInfo(field_meta.is_nullable() || valid,
-                       "non-nullable struct sub-field has null row {}",
-                       i);
-            AssertInfo(valid || lengths[i] == 0,
-                       "null struct row {} has {} elements",
-                       i,
-                       lengths[i]);
+            check_row(i, valid);
             if (field_meta.is_nullable()) {
                 scalars->add_valid_data(valid);
             }
+            // A null struct row stays an unset ScalarField.
+            auto* row = rows->add_data();
             if (!valid) {
                 continue;
             }
-            auto* row = rows->add_data();
             if (field_meta.is_nested_array()) {
+                // A null inner Array is an empty ScalarField of the leaf type.
                 auto leaf_type =
                     static_cast<DataType>(field_meta.get_array_type_schema()
                                               .array_element()
                                               .array_element()
                                               .leaf_type());
-                row->mutable_array_data()->set_element_type(
+                auto* inner_arrays = row->mutable_array_data();
+                inner_arrays->set_element_type(
                     static_cast<proto::schema::DataType>(leaf_type));
+                inner_arrays->mutable_data()->Reserve(lengths[i]);
+                for (int32_t j = 0; j < lengths[i]; ++j) {
+                    auto* inner = inner_arrays->add_data();
+                    SetUpScalarFieldData(inner, leaf_type, leaf_type, 0);
+                }
             } else {
+                // A null scalar element is a zero value.
                 auto* typed_row = row;
                 SetUpScalarFieldData(typed_row,
                                      field_meta.get_element_type(),
                                      field_meta.get_element_type(),
-                                     0);
+                                     lengths[i]);
             }
             row->mutable_valid_data()->Resize(lengths[i], false);
         }

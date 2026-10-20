@@ -53,6 +53,7 @@
 #include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
+#include "google/protobuf/util/message_differencer.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/contracts/query/IIndexReaderBase.h"
@@ -77,6 +78,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/Utils.h"
 #include "segcore/arrow_field_utils.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/MmapManager.h"
@@ -7451,4 +7453,950 @@ TEST(Expr, ElementFilterOffsetModeOnElementNullableSubFields) {
         ASSERT_GT(sealed->num_chunk(f.b), 1);
         check(sealed.get());
     }
+}
+
+namespace {
+
+// Struct sub-field output. Every output column of a struct sub-field has one
+// row per output row, so the sub-fields of a struct stay aligned. A sub-field
+// added after rows were written reads on those rows as a null row where the
+// struct row is null and otherwise as one null element per element of the
+// row, in the format the stored sub-fields use.
+
+using google::protobuf::util::MessageDifferencer;
+
+// s[lvec]: an element-nullable vector sub-field added in schema version 2.
+FieldId
+AddedVectorSubField(const ElementLevelFixture& f) {
+    return FieldId(f.pv.get() + 104);
+}
+
+// WithAddedSubFields (s[lang], s[lnum], s[ltags]) plus s[lvec].
+SchemaPtr
+WithAddedOutputSubFields(const Schema& base, const ElementLevelFixture& f) {
+    auto next = WithAddedSubFields(base, f);
+    next->AddField(FieldMeta(FieldName("s[lvec]"),
+                             AddedVectorSubField(f),
+                             DataType::VECTOR_ARRAY,
+                             DataType::VECTOR_FLOAT,
+                             kElemVecDim,
+                             knowhere::metric::L2,
+                             true,
+                             true));
+    return next;
+}
+
+// Each added sub-field and the stored sibling of the same type.
+std::vector<std::pair<FieldId, FieldId>>
+AddedAndSiblingSubFields(const ElementLevelFixture& f) {
+    return {{f.lnum, f.b},
+            {f.lang, f.name},
+            {f.ltags, f.tags},
+            {AddedVectorSubField(f), f.vec}};
+}
+
+std::vector<FieldId>
+AllOutputFields(const ElementLevelFixture& f) {
+    return {f.pk,
+            f.a,
+            f.b,
+            f.i8,
+            f.name,
+            f.tags,
+            f.vec,
+            f.pv,
+            f.lang,
+            f.lnum,
+            f.ltags,
+            AddedVectorSubField(f)};
+}
+
+// The fixture row an output row holds, its pk, and whether the added
+// sub-fields were written with values for it.
+struct OutputRow {
+    int64_t row;
+    int64_t pk;
+    bool added_written;
+};
+
+// Growing segments hold the fixture rows in batches; batch k has
+// pk = row + kOutputPkStride * k.
+constexpr int64_t kOutputPkStride = 100;
+
+// The fixture rows as one insert message with pk = row + pk_base. With
+// `with_added`, s[lnum], s[lang], s[ltags] and s[lvec] carry the values of
+// s[b], s[name], s[tags] and s[vec], as rows written after the sub-fields were
+// added. Without, the message lacks them, as from a proxy that predates the
+// change.
+std::shared_ptr<InsertRecordProto>
+OutputInsertBatch(const ElementLevelFixture& f,
+                  int64_t pk_base,
+                  bool with_added) {
+    auto insert = std::make_shared<InsertRecordProto>(*f.insert);
+    std::vector<DataArray> added;
+    for (auto& field : *insert->mutable_fields_data()) {
+        if (field.field_id() == f.pk.get()) {
+            for (auto& pk : *field.mutable_scalars()
+                                 ->mutable_long_data()
+                                 ->mutable_data()) {
+                pk += pk_base;
+            }
+        }
+        if (!with_added) {
+            continue;
+        }
+        for (const auto& [added_id, sibling] : AddedAndSiblingSubFields(f)) {
+            if (field.field_id() == sibling.get()) {
+                added.push_back(field);
+                added.back().set_field_id(added_id.get());
+            }
+        }
+    }
+    for (auto& field : added) {
+        *insert->add_fields_data() = std::move(field);
+    }
+    return insert;
+}
+
+void
+InsertOutputBatch(SegmentGrowing* growing,
+                  const ElementLevelFixture& f,
+                  int64_t batch,
+                  bool with_added) {
+    const auto n = f.num_rows();
+    std::vector<int64_t> row_ids(n);
+    std::vector<Timestamp> timestamps(n);
+    std::iota(row_ids.begin(), row_ids.end(), batch * n);
+    std::iota(timestamps.begin(),
+              timestamps.end(),
+              static_cast<Timestamp>(batch * n));
+    const auto offset = growing->PreInsert(n);
+    growing->Insert(offset,
+                    n,
+                    row_ids.data(),
+                    timestamps.data(),
+                    OutputInsertBatch(f, batch * kOutputPkStride, with_added));
+}
+
+// Segment offset -> expected output row. Batch 0 is the fixture as loaded;
+// later batches of a growing segment repeat the fixture rows.
+OutputRow
+ExpectedOutputRow(const ElementLevelFixture& f,
+                  int64_t offset,
+                  int64_t first_written_batch) {
+    const auto batch = offset / f.num_rows();
+    const auto row = offset % f.num_rows();
+    return {row, row + batch * kOutputPkStride, batch >= first_written_batch};
+}
+
+std::vector<OutputRow>
+ExpectedOutputRows(const ElementLevelFixture& f,
+                   const std::vector<int64_t>& offsets,
+                   int64_t first_written_batch) {
+    std::vector<OutputRow> rows;
+    for (auto offset : offsets) {
+        rows.push_back(ExpectedOutputRow(f, offset, first_written_batch));
+    }
+    return rows;
+}
+
+int
+OutputRowCount(const FieldMeta& meta, const DataArray& column) {
+    return meta.get_data_type() == DataType::VECTOR_ARRAY
+               ? column.vectors().vector_array().data_size()
+               : column.scalars().array_data().data_size();
+}
+
+// Logical element count of row i. Element-nullable scalar rows are dense:
+// one payload value per element, null or not.
+int64_t
+OutputElementCount(const FieldMeta& meta,
+                   const DataArray& column,
+                   int i,
+                   const std::string& where) {
+    if (meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        const auto& row = column.vectors().vector_array().data(i);
+        if (meta.is_element_nullable()) {
+            return row.valid_data_size();
+        }
+        return row.float_vector().data_size() / kElemVecDim;
+    }
+    const auto& row = column.scalars().array_data().data(i);
+    int64_t count = 0;
+    switch (meta.get_element_type()) {
+        case DataType::ARRAY:
+            count = row.array_data().data_size();
+            break;
+        case DataType::INT64:
+            count = row.long_data().data_size();
+            break;
+        case DataType::INT8:
+            count = row.int_data().data_size();
+            break;
+        case DataType::VARCHAR:
+            count = row.string_data().data_size();
+            break;
+        default:
+            ADD_FAILURE() << where << ": unexpected element type";
+    }
+    if (meta.is_element_nullable()) {
+        EXPECT_EQ(row.valid_data_size(), count)
+            << where << ": element validity must cover the dense payload";
+    }
+    return count;
+}
+
+int
+ScalarPayloadCount(const proto::schema::ScalarField& row) {
+    switch (row.data_case()) {
+        case proto::schema::ScalarField::kBoolData:
+            return row.bool_data().data_size();
+        case proto::schema::ScalarField::kIntData:
+            return row.int_data().data_size();
+        case proto::schema::ScalarField::kLongData:
+            return row.long_data().data_size();
+        case proto::schema::ScalarField::kStringData:
+            return row.string_data().data_size();
+        case proto::schema::ScalarField::kArrayData:
+            return row.array_data().data_size();
+        case proto::schema::ScalarField::DATA_NOT_SET:
+            return 0;
+        default:
+            ADD_FAILURE() << "unexpected payload " << row.ShortDebugString();
+            return -1;
+    }
+}
+
+// A null struct row: an empty VectorField with the dim set, or a ScalarField
+// without values. A stored row is unset when segcore wrote it (column read,
+// backfill) and typed when the insert message sent a typed placeholder;
+// `require_unset` asks for the former.
+void
+ExpectNullStructRow(const FieldMeta& meta,
+                    const DataArray& column,
+                    int i,
+                    bool require_unset,
+                    const std::string& where) {
+    if (meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        const auto& row = column.vectors().vector_array().data(i);
+        EXPECT_EQ(row.dim(), kElemVecDim) << where;
+        EXPECT_TRUE(row.has_float_vector()) << where;
+        EXPECT_EQ(row.float_vector().data_size(), 0) << where;
+        EXPECT_EQ(row.valid_data_size(), 0) << where;
+        return;
+    }
+    const auto& row = column.scalars().array_data().data(i);
+    EXPECT_EQ(ScalarPayloadCount(row), 0)
+        << where << ": " << row.ShortDebugString();
+    EXPECT_EQ(row.valid_data_size(), 0) << where;
+    if (require_unset) {
+        EXPECT_EQ(row.data_case(), proto::schema::ScalarField::DATA_NOT_SET)
+            << where << ": " << row.ShortDebugString();
+    }
+}
+
+// A valid row of an added sub-field written before the sub-field existed:
+// n null elements. Scalars are dense zero values, a null inner Array is an
+// empty leaf-typed ScalarField, and vectors have no physical values.
+void
+ExpectNullElementsRow(const FieldMeta& meta,
+                      const DataArray& column,
+                      int i,
+                      int64_t n,
+                      const std::string& where) {
+    auto expect_all_null = [&](const google::protobuf::RepeatedField<bool>& v) {
+        ASSERT_EQ(v.size(), n) << where;
+        for (bool valid : v) {
+            EXPECT_FALSE(valid) << where;
+        }
+    };
+    if (meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        const auto& row = column.vectors().vector_array().data(i);
+        EXPECT_EQ(row.dim(), kElemVecDim) << where;
+        EXPECT_TRUE(row.has_float_vector()) << where;
+        EXPECT_EQ(row.float_vector().data_size(), 0) << where;
+        expect_all_null(row.valid_data());
+        return;
+    }
+    const auto& row = column.scalars().array_data().data(i);
+    expect_all_null(row.valid_data());
+    switch (meta.get_element_type()) {
+        case DataType::INT64:
+            ASSERT_TRUE(row.has_long_data()) << where;
+            ASSERT_EQ(row.long_data().data_size(), n) << where;
+            for (auto value : row.long_data().data()) {
+                EXPECT_EQ(value, 0) << where;
+            }
+            break;
+        case DataType::VARCHAR:
+            ASSERT_TRUE(row.has_string_data()) << where;
+            ASSERT_EQ(row.string_data().data_size(), n) << where;
+            for (const auto& value : row.string_data().data()) {
+                EXPECT_TRUE(value.empty()) << where;
+            }
+            break;
+        case DataType::ARRAY:
+            ASSERT_TRUE(row.has_array_data()) << where;
+            EXPECT_EQ(row.array_data().element_type(),
+                      proto::schema::DataType::Int64)
+                << where;
+            ASSERT_EQ(row.array_data().data_size(), n) << where;
+            for (const auto& inner : row.array_data().data()) {
+                EXPECT_TRUE(inner.has_long_data()) << where;
+                EXPECT_EQ(inner.long_data().data_size(), 0) << where;
+                EXPECT_EQ(inner.valid_data_size(), 0) << where;
+            }
+            break;
+        default:
+            ADD_FAILURE() << where << ": unexpected added sub-field type";
+    }
+}
+
+bool
+AllElementsNull(const FieldMeta& meta, const DataArray& column, int i) {
+    const auto& valid =
+        meta.get_data_type() == DataType::VECTOR_ARRAY
+            ? column.vectors().vector_array().data(i).valid_data()
+            : column.scalars().array_data().data(i).valid_data();
+    return std::none_of(
+        valid.begin(), valid.end(), [](bool element) { return element; });
+}
+
+std::string
+OutputRowDebugString(const FieldMeta& meta, const DataArray& column, int i) {
+    return meta.get_data_type() == DataType::VECTOR_ARRAY
+               ? column.vectors().vector_array().data(i).ShortDebugString()
+               : column.scalars().array_data().data(i).ShortDebugString();
+}
+
+bool
+OutputRowsEqual(const FieldMeta& meta,
+                const DataArray& lhs,
+                int lhs_row,
+                const DataArray& rhs,
+                int rhs_row) {
+    if (meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        return MessageDifferencer::Equals(
+            lhs.vectors().vector_array().data(lhs_row),
+            rhs.vectors().vector_array().data(rhs_row));
+    }
+    return MessageDifferencer::Equals(lhs.scalars().array_data().data(lhs_row),
+                                      rhs.scalars().array_data().data(rhs_row));
+}
+
+// Checks retrieve or search output columns at the proto level: every column
+// has one row per output row, row validity in ScalarField / VectorField
+// valid_data and, after the sync segcore runs before results go to Go, in
+// FieldData.valid_data; each sub-field row has the struct row's element
+// count; null struct rows are empty placeholders; and each added sub-field
+// row is null elements (history rows) or equals its sibling.
+void
+ExpectStructOutput(const Schema& schema,
+                   const ElementLevelFixture& f,
+                   const std::map<FieldId, const DataArray*>& columns,
+                   const std::vector<OutputRow>& rows,
+                   const std::string& where) {
+    const auto n = static_cast<int>(rows.size());
+    for (const auto& [id, column] : columns) {
+        const auto& meta = schema[id];
+        const auto field_where = where + ", " + meta.get_name().get();
+        ASSERT_NE(column, nullptr) << field_where;
+        EXPECT_EQ(column->field_id(), id.get()) << field_where;
+        if (id == f.pk) {
+            ASSERT_EQ(column->scalars().long_data().data_size(), n)
+                << field_where;
+            for (int i = 0; i < n; ++i) {
+                EXPECT_EQ(column->scalars().long_data().data(i), rows[i].pk)
+                    << field_where << ", output row " << i;
+            }
+            continue;
+        }
+        const bool is_vector = meta.get_data_type() == DataType::VECTOR_ARRAY;
+        if (is_vector) {
+            ASSERT_TRUE(column->vectors().has_vector_array()) << field_where;
+            EXPECT_EQ(column->vectors().dim(), kElemVecDim) << field_where;
+            EXPECT_EQ(column->vectors().vector_array().dim(), kElemVecDim)
+                << field_where;
+            EXPECT_EQ(column->vectors().vector_array().element_type(),
+                      proto::schema::DataType::FloatVector)
+                << field_where;
+        } else {
+            ASSERT_TRUE(column->scalars().has_array_data()) << field_where;
+            EXPECT_EQ(
+                column->scalars().array_data().element_type(),
+                static_cast<proto::schema::DataType>(meta.get_element_type()))
+                << field_where;
+        }
+        ASSERT_EQ(OutputRowCount(meta, *column), n) << field_where;
+        DataArray synced = *column;
+        SyncFieldDataRowValidData(&synced);
+        const auto& field_valid = is_vector ? synced.vectors().valid_data()
+                                            : synced.scalars().valid_data();
+        ASSERT_EQ(synced.valid_data_size(), n) << field_where;
+        ASSERT_EQ(field_valid.size(), n) << field_where;
+        for (int i = 0; i < n; ++i) {
+            const auto& r = f.rows[rows[i].row];
+            const auto row_where = field_where + ", output row " +
+                                   std::to_string(i) + " (fixture row " +
+                                   std::to_string(rows[i].row) + ")";
+            EXPECT_EQ(synced.valid_data(i), r.has_value()) << row_where;
+            EXPECT_EQ(field_valid.Get(i), r.has_value()) << row_where;
+            if (!r.has_value()) {
+                ExpectNullStructRow(meta, *column, i, false, row_where);
+                continue;
+            }
+            EXPECT_EQ(OutputElementCount(meta, *column, i, row_where),
+                      static_cast<int64_t>(r->size()))
+                << row_where;
+        }
+    }
+
+    for (const auto& [added, sibling] : AddedAndSiblingSubFields(f)) {
+        auto added_it = columns.find(added);
+        if (added_it == columns.end()) {
+            continue;
+        }
+        const auto& meta = schema[added];
+        auto sibling_it = columns.find(sibling);
+        for (int i = 0; i < n; ++i) {
+            const auto& r = f.rows[rows[i].row];
+            const auto row_where = where + ", " + meta.get_name().get() +
+                                   ", output row " + std::to_string(i) +
+                                   " (fixture row " +
+                                   std::to_string(rows[i].row) + ")";
+            if (!rows[i].added_written) {
+                if (r.has_value()) {
+                    ExpectNullElementsRow(
+                        meta, *added_it->second, i, r->size(), row_where);
+                } else {
+                    ExpectNullStructRow(
+                        meta, *added_it->second, i, true, row_where);
+                }
+            }
+            if (sibling_it == columns.end()) {
+                continue;
+            }
+            // Where the sibling row is empty or all null, or the added
+            // sub-field was written with the sibling's values, the two rows
+            // must be identical. (A NULL struct row is checked above: its
+            // placeholder carries no values either way.)
+            const bool same = rows[i].added_written ||
+                              (r.has_value() &&
+                               AllElementsNull(meta, *sibling_it->second, i));
+            if (same) {
+                EXPECT_TRUE(OutputRowsEqual(
+                    meta, *added_it->second, i, *sibling_it->second, i))
+                    << row_where << "\n added:   "
+                    << OutputRowDebugString(meta, *added_it->second, i)
+                    << "\n sibling: "
+                    << OutputRowDebugString(meta, *sibling_it->second, i);
+            }
+        }
+    }
+}
+
+std::map<FieldId, const DataArray*>
+OutputColumns(const proto::segcore::RetrieveResults& result) {
+    std::map<FieldId, const DataArray*> columns;
+    for (const auto& field : result.fields_data()) {
+        columns[FieldId(field.field_id())] = &field;
+    }
+    return columns;
+}
+
+std::map<FieldId, const DataArray*>
+OutputColumns(const std::map<FieldId, std::unique_ptr<DataArray>>& fields) {
+    std::map<FieldId, const DataArray*> columns;
+    for (const auto& [id, field] : fields) {
+        columns[id] = field.get();
+    }
+    return columns;
+}
+
+std::unique_ptr<query::RetrievePlan>
+OutputRetrievePlan(const SchemaPtr& schema,
+                   const std::vector<FieldId>& fields) {
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->limit_ = 1 << 20;
+    plan->field_ids_ = fields;
+    plan->access_entries_ = fields;
+    return plan;
+}
+
+// One segment under test: `schema` is the newest schema (with the added
+// sub-fields); `first_written_batch` is the first batch whose rows were
+// written with the added sub-fields.
+struct OutputSegment {
+    std::string kind;
+    SegmentInternalInterface* segment;
+    SchemaPtr schema;
+    int64_t num_rows;
+    int64_t first_written_batch;
+};
+
+// The output fields of a query on the whole struct, and two partial ones
+// (like clips[b] + clips[tags], with one added sub-field each).
+std::vector<std::vector<FieldId>>
+OutputFieldSets(const ElementLevelFixture& f) {
+    return {AllOutputFields(f),
+            {f.b, f.ltags},
+            {f.pk, f.lang, AddedVectorSubField(f)}};
+}
+
+// Offsets to read: all rows, a scrambled order, and subsets that hold only
+// the NULL struct row, the empty and NULL rows, and a few scattered rows.
+std::vector<std::vector<int64_t>>
+OutputOffsetSets(int64_t num_rows) {
+    std::vector<int64_t> all(num_rows);
+    std::iota(all.begin(), all.end(), 0);
+    std::vector<int64_t> scrambled;
+    for (int64_t lo = 0, hi = num_rows - 1; lo <= hi; ++lo, --hi) {
+        scrambled.push_back(hi);
+        if (lo != hi) {
+            scrambled.push_back(lo);
+        }
+    }
+    std::vector<int64_t> scattered;
+    for (int64_t offset = num_rows - 1; offset >= 0; offset -= 3) {
+        scattered.push_back(offset);
+    }
+    return {all, scrambled, {2}, {1, 2}, scattered};
+}
+
+// Retrieve by offsets: the second phase of a query, and the only phase when
+// the segment's rows need no merge.
+void
+CheckRetrieveByOffsets(const OutputSegment& s, const ElementLevelFixture& f) {
+    for (const auto& fields : OutputFieldSets(f)) {
+        auto plan = OutputRetrievePlan(s.schema, fields);
+        for (const auto& offsets : OutputOffsetSets(s.num_rows)) {
+            const auto where = s.kind + ", retrieve by " +
+                               std::to_string(offsets.size()) + " offsets, " +
+                               std::to_string(fields.size()) + " fields";
+            auto result = s.segment->Retrieve(nullptr,
+                                              plan.get(),
+                                              offsets.data(),
+                                              offsets.size(),
+                                              folly::CancellationToken());
+            ASSERT_NE(result, nullptr) << where;
+            ASSERT_EQ(result->fields_data_size(),
+                      static_cast<int>(fields.size()))
+                << where;
+            ExpectStructOutput(
+                *s.schema,
+                f,
+                OutputColumns(*result),
+                ExpectedOutputRows(f, offsets, s.first_written_batch),
+                where);
+        }
+    }
+}
+
+// Search output: FillTargetEntry on the hits' row offsets, which come in
+// distance order and repeat a row hit through several of its elements.
+std::map<FieldId, std::unique_ptr<DataArray>>
+FillSearchOutput(const OutputSegment& s,
+                 const std::vector<FieldId>& fields,
+                 const std::vector<int64_t>& offsets) {
+    query::Plan plan(s.schema);
+    plan.target_entries_ = fields;
+    plan.access_entries_ = fields;
+    SearchResult result;
+    result.seg_offsets_ = offsets;
+    result.distances_.resize(offsets.size(), 0.0f);
+    s.segment->FillTargetEntry(&plan, result);
+    return std::move(result.output_fields_data_);
+}
+
+void
+CheckSearchOutput(const OutputSegment& s, const ElementLevelFixture& f) {
+    std::vector<int64_t> hits;
+    for (int64_t offset = s.num_rows - 1; offset >= 0; offset -= 2) {
+        hits.push_back(offset);
+        hits.push_back((offset * 5 + 3) % s.num_rows);
+    }
+    for (const auto& fields : OutputFieldSets(f)) {
+        const auto where = s.kind + ", search output, " +
+                           std::to_string(fields.size()) + " fields";
+        auto output = FillSearchOutput(s, fields, hits);
+        ASSERT_EQ(output.size(), fields.size()) << where;
+        ExpectStructOutput(*s.schema,
+                           f,
+                           OutputColumns(output),
+                           ExpectedOutputRows(f, hits, s.first_written_batch),
+                           where);
+    }
+}
+
+struct FilteredOutput {
+    std::string mode;
+    // offset / element_indices of the filter, and the output columns.
+    std::unique_ptr<proto::segcore::RetrieveResults> result;
+};
+
+// Runs a filtered query: in two passes as a query over several segments does
+// (the filter with pk only, then the output fields by offset), and also in
+// one pass when the segment has every output field. A one-pass Retrieve on a
+// segment that lacks an output field throws in its output-size estimate
+// (get_field_avg_size looks the field up in the segment's schema); in
+// production LazyCheckSchema reopens the segment first.
+std::vector<FilteredOutput>
+RunFilteredRetrieve(const OutputSegment& s,
+                    const ElementLevelFixture& f,
+                    const std::function<plan::PlanNodePtr()>& make_nodes,
+                    const std::vector<FieldId>& fields) {
+    auto run = [&](const std::vector<FieldId>& plan_fields) {
+        auto plan = OutputRetrievePlan(s.schema, plan_fields);
+        plan->plan_node_->plannodes_ = make_nodes();
+        return s.segment->Retrieve(
+            nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+    };
+    std::vector<FilteredOutput> outputs;
+    if (std::all_of(fields.begin(), fields.end(), [&](FieldId id) {
+            return s.segment->is_field_exist(id);
+        })) {
+        outputs.push_back({"one pass", run(fields)});
+    }
+    auto first = run({f.pk});
+    std::vector<int64_t> offsets(first->offset().begin(),
+                                 first->offset().end());
+    auto plan = OutputRetrievePlan(s.schema, fields);
+    auto second = s.segment->Retrieve(nullptr,
+                                      plan.get(),
+                                      offsets.data(),
+                                      offsets.size(),
+                                      folly::CancellationToken());
+    *second->mutable_offset() = first->offset();
+    second->set_element_level(first->element_level());
+    *second->mutable_element_indices() = first->element_indices();
+    outputs.push_back({"two passes", std::move(second)});
+    return outputs;
+}
+
+// A filtered query: the rows come from the filter.
+void
+CheckFilteredRetrieve(const OutputSegment& s, const ElementLevelFixture& f) {
+    using E = ElementLevelExprs;
+    std::vector<int64_t> wanted;
+    std::vector<proto::plan::GenericValue> pks;
+    for (int64_t offset = 0; offset < s.num_rows; ++offset) {
+        if (offset % 3 != 1) {
+            wanted.push_back(offset);
+            pks.push_back(
+                E::Int(ExpectedOutputRow(f, offset, s.first_written_batch).pk));
+        }
+    }
+    auto filter = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(f.pk, DataType::INT64), pks);
+    auto make_nodes = [&]() -> plan::PlanNodePtr {
+        std::vector<plan::PlanNodePtr> sources = {
+            std::make_shared<plan::FilterBitsNode>(
+                "1001", filter, std::vector<plan::PlanNodePtr>{})};
+        return std::make_shared<plan::MvccNode>("1002", sources);
+    };
+    for (const auto& fields : OutputFieldSets(f)) {
+        for (auto& [mode, result] :
+             RunFilteredRetrieve(s, f, make_nodes, fields)) {
+            const auto where = s.kind + ", filtered retrieve in " + mode +
+                               ", " + std::to_string(fields.size()) + " fields";
+            ASSERT_NE(result, nullptr) << where;
+            std::vector<int64_t> offsets(result->offset().begin(),
+                                         result->offset().end());
+            EXPECT_EQ(offsets, wanted) << where;
+            ExpectStructOutput(
+                *s.schema,
+                f,
+                OutputColumns(*result),
+                ExpectedOutputRows(f, offsets, s.first_written_batch),
+                where);
+        }
+    }
+}
+
+// Checks element_filter(s, $[b] IS NULL) with output fields: rows come back
+// whole, with the hit elements' logical positions (null elements keep their
+// slot) in element_indices, and every sub-field row has an element at each
+// of them.
+void
+CheckElementFilterResult(const OutputSegment& s,
+                         const ElementLevelFixture& f,
+                         const proto::segcore::RetrieveResults& result,
+                         const std::string& where) {
+    ASSERT_TRUE(result.element_level()) << where;
+    ASSERT_EQ(result.element_indices_size(), result.offset_size()) << where;
+
+    std::map<int64_t, std::vector<int32_t>> want;
+    for (int64_t offset = 0; offset < s.num_rows; ++offset) {
+        const auto& r = f.rows[offset % f.num_rows()];
+        if (!r.has_value()) {
+            continue;
+        }
+        for (size_t j = 0; j < r->size(); ++j) {
+            if (!(*r)[j].b.has_value()) {
+                want[offset].push_back(static_cast<int32_t>(j));
+            }
+        }
+    }
+    std::map<int64_t, std::vector<int32_t>> got;
+    std::vector<int64_t> offsets;
+    for (int i = 0; i < result.offset_size(); ++i) {
+        offsets.push_back(result.offset(i));
+        auto& indices = got[result.offset(i)];
+        indices.assign(result.element_indices(i).indices().begin(),
+                       result.element_indices(i).indices().end());
+    }
+    EXPECT_EQ(got, want) << where;
+    const auto rows = ExpectedOutputRows(f, offsets, s.first_written_batch);
+    const auto columns = OutputColumns(result);
+    ExpectStructOutput(*s.schema, f, columns, rows, where);
+
+    // The hit element is the null element at that position of every
+    // element-nullable sub-field, the added ones included.
+    for (int i = 0; i < result.offset_size(); ++i) {
+        for (auto index : result.element_indices(i).indices()) {
+            const auto hit_where = where + ", output row " + std::to_string(i) +
+                                   ", element " + std::to_string(index);
+            for (auto id : {f.b, f.lnum, f.lang, f.ltags}) {
+                const auto& row =
+                    columns.at(id)->scalars().array_data().data(i);
+                ASSERT_LT(index, row.valid_data_size()) << hit_where;
+                if (id == f.b || id == f.lnum || !rows[i].added_written) {
+                    EXPECT_FALSE(row.valid_data(index)) << hit_where;
+                }
+            }
+            for (auto id : {f.vec, AddedVectorSubField(f)}) {
+                const auto& row =
+                    columns.at(id)->vectors().vector_array().data(i);
+                ASSERT_LT(index, row.valid_data_size()) << hit_where;
+            }
+        }
+    }
+}
+
+void
+CheckElementFilterOutput(const OutputSegment& s, const ElementLevelFixture& f) {
+    using E = ElementLevelExprs;
+    const auto b = E::Scalar(f.b, DataType::INT64);
+    auto make_nodes = [&]() -> plan::PlanNodePtr {
+        auto mvcc = std::make_shared<plan::MvccNode>(
+            "1002", std::vector<plan::PlanNodePtr>{});
+        return std::make_shared<plan::ElementFilterBitsNode>(
+            "1003", E::IsNull(b), "s", std::vector<plan::PlanNodePtr>{mvcc});
+    };
+    for (auto& [mode, result] :
+         RunFilteredRetrieve(s, f, make_nodes, AllOutputFields(f))) {
+        CheckElementFilterResult(
+            s,
+            f,
+            *result,
+            s.kind + ", element_filter($[b] IS NULL) in " + mode);
+    }
+}
+
+void
+CheckStructOutput(const OutputSegment& s, const ElementLevelFixture& f) {
+    SCOPED_TRACE(s.kind);
+    CheckRetrieveByOffsets(s, f);
+    CheckSearchOutput(s, f);
+    CheckFilteredRetrieve(s, f);
+    CheckElementFilterOutput(s, f);
+}
+
+// Output of `lhs` and `rhs` for the same rows must be identical: an added
+// sub-field read without a column (the segment predates it) and read from
+// the backfilled column after Reopen, or from a growing and a sealed segment.
+void
+ExpectSameOutput(const OutputSegment& lhs,
+                 const OutputSegment& rhs,
+                 const std::vector<FieldId>& fields,
+                 const std::vector<int64_t>& offsets) {
+    auto lhs_plan = OutputRetrievePlan(lhs.schema, fields);
+    auto rhs_plan = OutputRetrievePlan(rhs.schema, fields);
+    auto lhs_result = lhs.segment->Retrieve(nullptr,
+                                            lhs_plan.get(),
+                                            offsets.data(),
+                                            offsets.size(),
+                                            folly::CancellationToken());
+    auto rhs_result = rhs.segment->Retrieve(nullptr,
+                                            rhs_plan.get(),
+                                            offsets.data(),
+                                            offsets.size(),
+                                            folly::CancellationToken());
+    ASSERT_EQ(lhs_result->fields_data_size(), rhs_result->fields_data_size());
+    for (int i = 0; i < lhs_result->fields_data_size(); ++i) {
+        DataArray lhs_field = lhs_result->fields_data(i);
+        DataArray rhs_field = rhs_result->fields_data(i);
+        SyncFieldDataRowValidData(&lhs_field);
+        SyncFieldDataRowValidData(&rhs_field);
+        EXPECT_TRUE(MessageDifferencer::Equals(lhs_field, rhs_field))
+            << lhs.kind << " vs " << rhs.kind << ", field "
+            << lhs_field.field_id() << "\n " << lhs.kind << ": "
+            << lhs_field.ShortDebugString() << "\n " << rhs.kind << ": "
+            << rhs_field.ShortDebugString();
+    }
+}
+
+// The C++ search reduce: per-segment output gathered by FillTargetEntry and
+// merged into the final hit order by MergeDataArray, as
+// search_result_export_c.cpp does.
+void
+CheckMergedSearchOutput(const std::vector<const OutputSegment*>& segments,
+                        const ElementLevelFixture& f) {
+    // (segment, offset) in final hit order, alternating segments.
+    std::vector<std::pair<size_t, int64_t>> hits;
+    for (int64_t k = 0; k < 12; ++k) {
+        const auto s = static_cast<size_t>(k) % segments.size();
+        hits.emplace_back(s, (k * 5 + 2) % segments[s]->num_rows);
+    }
+    const auto fields = AllOutputFields(f);
+    std::vector<std::vector<int64_t>> offsets(segments.size());
+    std::vector<std::vector<size_t>> positions(segments.size());
+    for (size_t pos = 0; pos < hits.size(); ++pos) {
+        offsets[hits[pos].first].push_back(hits[pos].second);
+        positions[hits[pos].first].push_back(pos);
+    }
+    std::vector<std::map<FieldId, std::unique_ptr<DataArray>>> outputs;
+    for (size_t s = 0; s < segments.size(); ++s) {
+        outputs.push_back(FillSearchOutput(*segments[s], fields, offsets[s]));
+    }
+    const auto& schema = *segments.front()->schema;
+    std::vector<MergeBase> bases(hits.size());
+    for (size_t s = 0; s < segments.size(); ++s) {
+        for (size_t i = 0; i < positions[s].size(); ++i) {
+            bases[positions[s][i]] = MergeBase(&outputs[s], i);
+        }
+    }
+    std::map<FieldId, std::unique_ptr<DataArray>> merged;
+    for (auto id : fields) {
+        merged[id] = MergeDataArray(bases, schema[id]);
+    }
+    std::vector<OutputRow> rows;
+    for (const auto& [s, offset] : hits) {
+        rows.push_back(
+            ExpectedOutputRow(f, offset, segments[s]->first_written_batch));
+    }
+    std::string kinds;
+    for (const auto* s : segments) {
+        kinds += (kinds.empty() ? "" : " + ") + s->kind;
+    }
+    ExpectStructOutput(
+        schema, f, OutputColumns(merged), rows, "merged search of " + kinds);
+}
+
+}  // namespace
+
+// 7.1.4: a sealed segment written before s[lang], s[lnum], s[ltags] and
+// s[lvec] were added. Read with the newer plan schema and no Reopen, the
+// added sub-fields have no column (CreateNullStructSubFieldDataArray); after
+// Reopen they are read from the backfilled column. Both must give dense rows
+// that line up with the stored sub-fields, including on the NULL struct row.
+TEST(StructSubFieldOutput, SealedSegmentWrittenBeforeSubFieldsWereAdded) {
+    auto f = BuildElementLevelMatrixFixture();
+    const auto segment_path = ElementLevelSegmentPath("output");
+    std::filesystem::remove_all(segment_path);
+    std::filesystem::remove_all(segment_path + "_reopened");
+    auto directory_guard = folly::makeGuard([&segment_path] {
+        std::filesystem::remove_all(segment_path);
+        std::filesystem::remove_all(segment_path + "_reopened");
+    });
+
+    auto history = LoadElementLevelSealed(f, segment_path);
+    ASSERT_GT(history->num_chunk(f.b), 1);
+    const OutputSegment absent{
+        "sealed, sub-fields absent",
+        history.get(),
+        WithAddedOutputSubFields(*history->get_schema_snapshot(), f),
+        f.num_rows(),
+        1};
+    for (auto [added, sibling] : AddedAndSiblingSubFields(f)) {
+        ASSERT_FALSE(history->is_field_exist(added));
+    }
+    CheckStructOutput(absent, f);
+
+    auto reopened_segment =
+        LoadElementLevelSealed(f, segment_path + "_reopened");
+    reopened_segment->Reopen(
+        WithAddedOutputSubFields(*reopened_segment->get_schema_snapshot(), f));
+    const OutputSegment reopened{"sealed, reopened",
+                                 reopened_segment.get(),
+                                 reopened_segment->get_schema_snapshot(),
+                                 f.num_rows(),
+                                 1};
+    for (auto [added, sibling] : AddedAndSiblingSubFields(f)) {
+        ASSERT_TRUE(reopened_segment->is_field_exist(added));
+    }
+    CheckStructOutput(reopened, f);
+
+    for (const auto& offsets : OutputOffsetSets(f.num_rows())) {
+        ExpectSameOutput(absent, reopened, AllOutputFields(f), offsets);
+    }
+}
+
+// 7.1.4 on growing segments, with chunks of two rows:
+// - "absent": rows inserted with the old schema, read with the newer plan
+//   schema before the segment is reopened;
+// - "mixed": the same rows backfilled by Reopen (batch 0), then a batch from
+//   a proxy that predates the change (no added sub-fields in the message,
+//   batch 1), then a batch written with values (batch 2).
+// A sealed segment from before the change is merged with the mixed one as
+// the C++ search reduce does.
+TEST(StructSubFieldOutput, GrowingSegmentWrittenBeforeSubFieldsWereAdded) {
+    auto f = BuildElementLevelMatrixFixture();
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    config.set_chunk_rows(2);
+
+    auto history = LoadElementLevelGrowing(f);
+    ASSERT_GT(history->num_chunk(f.b), 1);
+    const OutputSegment absent{"growing, sub-fields absent",
+                               history.get(),
+                               WithAddedOutputSubFields(*f.schema, f),
+                               f.num_rows(),
+                               1};
+    for (auto [added, sibling] : AddedAndSiblingSubFields(f)) {
+        ASSERT_FALSE(history->is_field_exist(added));
+    }
+    CheckStructOutput(absent, f);
+
+    auto mixed_segment = LoadElementLevelGrowing(f);
+    mixed_segment->Reopen(WithAddedOutputSubFields(*f.schema, f));
+    InsertOutputBatch(mixed_segment.get(), f, 1, false);
+    InsertOutputBatch(mixed_segment.get(), f, 2, true);
+    const OutputSegment mixed{"growing, reopened and written",
+                              mixed_segment.get(),
+                              mixed_segment->get_schema_snapshot(),
+                              3 * f.num_rows(),
+                              2};
+    CheckStructOutput(mixed, f);
+
+    for (const auto& offsets : OutputOffsetSets(f.num_rows())) {
+        ExpectSameOutput(absent, mixed, AllOutputFields(f), offsets);
+    }
+
+    const auto segment_path = ElementLevelSegmentPath("output_merge");
+    std::filesystem::remove_all(segment_path);
+    auto directory_guard = folly::makeGuard(
+        [&segment_path] { std::filesystem::remove_all(segment_path); });
+    auto sealed_history = LoadElementLevelSealed(f, segment_path);
+    const OutputSegment sealed_absent{
+        "sealed, sub-fields absent",
+        sealed_history.get(),
+        WithAddedOutputSubFields(*sealed_history->get_schema_snapshot(), f),
+        f.num_rows(),
+        1};
+    {
+        // Only the added sub-fields: a stored NULL struct row of the growing
+        // segment keeps the typed placeholder of the fixture's insert message.
+        SCOPED_TRACE("growing vs sealed");
+        std::vector<FieldId> added_fields;
+        for (const auto& [added, sibling] : AddedAndSiblingSubFields(f)) {
+            added_fields.push_back(added);
+        }
+        for (const auto& offsets : OutputOffsetSets(f.num_rows())) {
+            ExpectSameOutput(absent, sealed_absent, added_fields, offsets);
+        }
+    }
+    CheckMergedSearchOutput({&sealed_absent, &mixed}, f);
+    CheckMergedSearchOutput({&mixed, &absent, &sealed_absent}, f);
 }
