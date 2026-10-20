@@ -8002,7 +8002,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 	// path, which every version understands.
 	p.ImportEnableIDRangeMsg = ParamItem{
 		Key:          "dataCoord.import.enableIDRangeMsg",
-		Version:      "3.0.3-beta",
+		Version:      "3.0.4",
 		Export:       false,
 		PanicIfEmpty: false,
 		Doc: "Whether import assigns a per-file ID range after preimport and broadcasts it via " +
@@ -8015,7 +8015,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		VersionGateSwitcher: &VersionGateSwitcher{
 			EnableAutoSwitchValue: "auto",
 			PreSwitchValue:        "false",
-			GateVersion:           "3.0.3-beta",
+			GateVersion:           "3.0.4",
 			TargetValue:           "true",
 			SwitchDelay:           1 * time.Minute,
 		},
