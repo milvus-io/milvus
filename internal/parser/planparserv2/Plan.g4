@@ -53,8 +53,8 @@ expr:
 	| expr BOR expr											                                                # BitOr
 	| expr AND expr											                                                # LogicalAnd
 	| expr OR expr											                                                # LogicalOr
-	| (fieldName | JSONIdentifier | StructFieldIdentifier | StructIndexFieldIdentifier) ISNULL             # IsNull
-	| (fieldName | JSONIdentifier | StructFieldIdentifier | StructIndexFieldIdentifier) ISNOTNULL          # IsNotNull;
+	| (fieldName | JSONIdentifier | StructFieldIdentifier | StructIndexFieldIdentifier | StructSubFieldIdentifier) ISNULL             # IsNull
+	| (fieldName | JSONIdentifier | StructFieldIdentifier | StructIndexFieldIdentifier | StructSubFieldIdentifier) ISNOTNULL          # IsNotNull;
 
 // These keywords retain their specialized syntax while also naming fields.
 // Operators and constants remain reserved, and generic function names and
