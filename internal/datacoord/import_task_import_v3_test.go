@@ -321,8 +321,7 @@ func TestImportTaskV3CreateTaskOnWorkerUsesPlanStorageVersion(t *testing.T) {
 // every accepted segment waiting for the next TaskCheckInterval (60s) scan,
 // which makes index building effectively start only after the whole merge
 // stage (V2 parity: postFlush and mixCompaction push each finished segment).
-// A zero-row placeholder is dropped at acceptance and must NOT be pushed:
-// the buildIndexCh consumer does not re-check the segment state.
+// A zero-row placeholder is dropped at acceptance and must NOT be pushed.
 func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
 	ctx := context.Background()
 	drainBuildIndexChForTest()

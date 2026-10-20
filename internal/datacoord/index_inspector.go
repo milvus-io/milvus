@@ -422,9 +422,6 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 }
 
 func (i *indexInspector) isExternalCollection(collectionID int64) bool {
-	if i.meta == nil || i.meta.metaStore == nil {
-		return false
-	}
 	coll := i.meta.GetCollection(collectionID)
 	return coll != nil && coll.IsExternal()
 }
