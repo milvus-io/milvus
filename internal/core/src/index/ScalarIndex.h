@@ -19,6 +19,7 @@
 #include <boost/dynamic_bitset.hpp>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "common/Types.h"
@@ -35,6 +36,66 @@ using MemFileManagerImplPtr = std::shared_ptr<MemFileManagerImpl>;
 }  // namespace milvus::storage
 
 namespace milvus::index {
+
+// Immutable row-validity snapshot. The owner keeps the data alive independently
+// of index/executor eviction. An empty bitmap is an explicit all-valid sentinel,
+// not an empty row space. Consumers must materialize their own writable batches.
+class ScalarIndexValidity {
+ public:
+    ScalarIndexValidity(int64_t row_count,
+                        std::shared_ptr<const TargetBitmap> bitmap)
+        : row_count_(row_count), bitmap_(std::move(bitmap)) {
+        AssertInfo(row_count_ >= 0 && bitmap_ != nullptr,
+                   "invalid index validity snapshot");
+        AssertInfo(bitmap_->size() == 0 || bitmap_->size() == row_count_,
+                   "index validity size {} does not match row count {}",
+                   bitmap_->size(),
+                   row_count_);
+    }
+
+    int64_t
+    size() const {
+        return row_count_;
+    }
+
+    bool
+    all() const {
+        return bitmap_->size() == 0 || bitmap_->all();
+    }
+
+    bool
+    operator[](int64_t offset) const {
+        AssertInfo(offset >= 0 && offset < row_count_,
+                   "validity offset {} outside {} rows",
+                   offset,
+                   row_count_);
+        return bitmap_->size() == 0 || (*bitmap_)[offset];
+    }
+
+    void
+    AppendTo(TargetBitmap& result, int64_t offset, int64_t count) const {
+        AssertInfo(offset >= 0 && count >= 0 && offset <= row_count_ &&
+                       count <= row_count_ - offset,
+                   "validity range [{}, +{}) outside {} rows",
+                   offset,
+                   count,
+                   row_count_);
+        if (bitmap_->size() == 0) {
+            result.resize(result.size() + count, true);
+        } else {
+            result.append(*bitmap_, offset, count);
+        }
+    }
+
+    const std::shared_ptr<const TargetBitmap>&
+    bitmap() const {
+        return bitmap_;
+    }
+
+ private:
+    int64_t row_count_;
+    std::shared_ptr<const TargetBitmap> bitmap_;
+};
 
 enum class ScalarIndexType {
     NONE = 0,
@@ -126,6 +187,14 @@ class ScalarIndex : public IndexBase {
 
     virtual TargetBitmap
     IsNotNull() = 0;
+
+    // Optional zero-copy counterpart to IsNotNull(). Implementations must expose
+    // exactly the same validity semantics and immutable ownership. Growing or
+    // predicate-specific validity may decline and keep the owned-bitmap path.
+    virtual std::optional<ScalarIndexValidity>
+    GetImmutableValidity() {
+        return std::nullopt;
+    }
 
     // Some indexes persist absolute null offsets independently of Count().
     // They may override this to project validity into a caller-owned row

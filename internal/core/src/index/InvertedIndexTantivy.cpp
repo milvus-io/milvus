@@ -433,6 +433,15 @@ InvertedIndexTantivy<T>::ApplyValidityMask(TargetBitmap& bitset) {
 }
 
 template <typename T>
+std::optional<ScalarIndexValidity>
+InvertedIndexTantivy<T>::GetImmutableValidity() {
+    if (is_growing_ || valid_bitmap_ == nullptr) {
+        return std::nullopt;
+    }
+    return ScalarIndexValidity(Count(), valid_bitmap_);
+}
+
+template <typename T>
 TargetBitmap
 InvertedIndexTantivy<T>::IsNotNull() {
     tracer::AutoSpan span("InvertedIndexTantivy::IsNotNull",

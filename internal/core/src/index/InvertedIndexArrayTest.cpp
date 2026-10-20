@@ -643,3 +643,242 @@ TEST(ArrayInvertedIndexRegression,
         }
     }
 }
+
+namespace {
+struct ValidityCloneCounters {
+    size_t owned = 0;
+    std::vector<const TargetBitmap*> shared_owners;
+};
+
+class TrackedArrayValidityIndex : public index::InvertedIndexTantivy<int64_t> {
+ public:
+    explicit TrackedArrayValidityIndex(
+        std::shared_ptr<ValidityCloneCounters> counters)
+        : counters_(std::move(counters)) {
+    }
+
+    void
+    SetNullOffsets(std::vector<size_t> offsets) {
+        null_offset_ = std::move(offsets);
+    }
+
+    TargetBitmap
+    IsNotNull() override {
+        ++counters_->owned;
+        return index::InvertedIndexTantivy<int64_t>::IsNotNull();
+    }
+
+    std::optional<index::ScalarIndexValidity>
+    GetImmutableValidity() override {
+        auto validity =
+            index::InvertedIndexTantivy<int64_t>::GetImmutableValidity();
+        if (validity) {
+            counters_->shared_owners.push_back(validity->bitmap().get());
+        }
+        return validity;
+    }
+
+ private:
+    std::shared_ptr<ValidityCloneCounters> counters_;
+};
+}  // namespace
+
+TEST(ArrayInvertedIndexRegression, ContainsLeavesShareValidityAcrossBatches) {
+    ExprBatchSizeGuard batch_size_guard(7);
+    constexpr int64_t rows = 33;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto field = schema->AddDebugArrayField("array", DataType::INT64, true);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+    auto raw = DataGen(schema, rows, 42, 0, 1, 3);
+    proto::schema::FieldData* data = nullptr;
+    for (auto& f : *raw.raw_->mutable_fields_data()) {
+        if (f.field_id() == field.get()) {
+            data = &f;
+        }
+    }
+    ASSERT_NE(data, nullptr);
+    std::vector<boost::container::vector<int64_t>> arrays;
+    std::vector<size_t> nulls;
+    for (int64_t row = 0; row < rows; ++row) {
+        const bool valid = row % 5 != 0;
+        data->mutable_valid_data()->Set(row, valid);
+        auto* values = data->mutable_scalars()
+                           ->mutable_array_data()
+                           ->mutable_data(row)
+                           ->mutable_long_data()
+                           ->mutable_data();
+        values->Clear();
+        arrays.emplace_back();
+        if (valid) {
+            // Include empty arrays and both single/multiple matching elements.
+            if (row % 11 != 0) {
+                const auto value = row % 7 == 0 ? 100 : row % 3;
+                values->Add(value);
+                arrays.back().push_back(value);
+                if (row % 2 == 0) {
+                    values->Add(101);
+                    arrays.back().push_back(101);
+                }
+            }
+        } else {
+            nulls.push_back(row);
+        }
+    }
+    auto raw_segment = CreateSealedWithFieldDataLoaded(schema, raw);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
+    auto counters = std::make_shared<ValidityCloneCounters>();
+    auto idx = std::make_unique<TrackedArrayValidityIndex>(counters);
+    idx->SetNullOffsets(nulls);
+    Config config;
+    config["is_array"] = true;
+    idx->BuildWithRawDataForUT(rows, arrays.data(), config);
+    LoadIndexInfo info{};
+    info.field_id = field.get();
+    info.field_type = DataType::ARRAY;
+    info.element_type = DataType::INT64;
+    info.index_params = GenIndexParams(idx.get());
+    info.cache_index =
+        CreateTestCacheIndex("shared_array_validity", std::move(idx));
+    segment->LoadIndex(info);
+
+    expr::TypedExprPtr root;
+    for (int i = 0; i < 20; ++i) {
+        proto::plan::GenericValue value;
+        value.set_int64_val(100 + i);
+        auto leaf = std::make_shared<expr::JsonContainsExpr>(
+            expr::ColumnInfo(field, DataType::ARRAY, DataType::INT64, {}, true),
+            proto::plan::JSONContainsExpr_JSONOp_Contains,
+            true,
+            std::vector<proto::plan::GenericValue>{value});
+        root = root ? std::make_shared<expr::LogicalBinaryExpr>(
+                          expr::LogicalBinaryExpr::OpType::Or, root, leaf)
+                    : std::static_pointer_cast<const expr::ITypeExpr>(leaf);
+    }
+    auto expected = EvalFilterInBatches(root, raw_segment.get(), rows);
+    auto actual = EvalFilterInBatches(root, segment.get(), rows);
+    ASSERT_EQ(counters->shared_owners.size(), 20);
+    EXPECT_EQ(counters->owned, 0);
+    for (auto* owner : counters->shared_owners) {
+        EXPECT_EQ(owner, counters->shared_owners.front());
+    }
+    TargetBitmapView values(actual->GetRawData(), rows);
+    TargetBitmapView valid(actual->GetValidRawData(), rows);
+    TargetBitmapView expected_values(expected->GetRawData(), rows);
+    TargetBitmapView expected_valid(expected->GetValidRawData(), rows);
+    for (int64_t row = 0; row < rows; ++row) {
+        EXPECT_EQ(valid[row], expected_valid[row]) << row;
+        EXPECT_EQ(values[row], expected_values[row]) << row;
+    }
+
+    // Null predicates exercise both sequential validity-only and offset reads.
+    auto non_null = std::make_shared<expr::NullExpr>(
+        expr::ColumnInfo(field, DataType::ARRAY, DataType::INT64, {}, true),
+        proto::plan::NullExpr_NullOp_IsNotNull);
+    auto null_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, non_null);
+    exec::OffsetVector offsets = {32, 0, 5, 7, 7, 1};
+    auto selected = test::gen_filter_res(
+        null_plan.get(), segment.get(), rows, MAX_TIMESTAMP, &offsets);
+    TargetBitmapView selected_values(selected->GetRawData(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_EQ(selected_values[i], offsets[i] % 5 != 0);
+    }
+    auto sequential = EvalFilterInBatches(non_null, segment.get(), rows);
+    TargetBitmapView sequential_values(sequential->GetRawData(), rows);
+    for (int64_t row = 0; row < rows; ++row) {
+        EXPECT_EQ(sequential_values[row], row % 5 != 0);
+    }
+
+    // Exercise the physical executor equivalence used by the plan rewrite,
+    // including SQL null validity, empty arrays, and duplicate candidates.
+    auto contains = [&](proto::plan::JSONContainsExpr_JSONOp op,
+                        const std::vector<int64_t>& candidates) {
+        std::vector<proto::plan::GenericValue> literals;
+        for (auto candidate : candidates) {
+            proto::plan::GenericValue literal;
+            literal.set_int64_val(candidate);
+            literals.emplace_back(std::move(literal));
+        }
+        return std::make_shared<expr::JsonContainsExpr>(
+            expr::ColumnInfo(field, DataType::ARRAY, DataType::INT64, {}, true),
+            op,
+            true,
+            std::move(literals));
+    };
+    auto compare = [&](const ColumnVectorPtr& left,
+                       const ColumnVectorPtr& right) {
+        TargetBitmapView left_values(left->GetRawData(), rows);
+        TargetBitmapView left_valid(left->GetValidRawData(), rows);
+        TargetBitmapView right_values(right->GetRawData(), rows);
+        TargetBitmapView right_valid(right->GetValidRawData(), rows);
+        for (int64_t row = 0; row < rows; ++row) {
+            EXPECT_EQ(left_valid[row], right_valid[row]) << row;
+            if (left_valid[row] && right_valid[row]) {
+                EXPECT_EQ(left_values[row], right_values[row]) << row;
+            }
+        }
+    };
+    for (const auto& candidates : std::vector<std::vector<int64_t>>{
+             {100}, {100, 101}, {100, 100}, {99, 100}}) {
+        for (bool conjunction : {false, true}) {
+            expr::TypedExprPtr separate;
+            for (auto candidate : candidates) {
+                auto leaf = contains(
+                    proto::plan::JSONContainsExpr_JSONOp_Contains, {candidate});
+                separate =
+                    separate
+                        ? std::make_shared<expr::LogicalBinaryExpr>(
+                              conjunction ? expr::LogicalBinaryExpr::OpType::And
+                                          : expr::LogicalBinaryExpr::OpType::Or,
+                              separate,
+                              leaf)
+                        : std::static_pointer_cast<const expr::ITypeExpr>(leaf);
+            }
+            auto merged = contains(
+                conjunction ? proto::plan::JSONContainsExpr_JSONOp_ContainsAll
+                            : proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                candidates);
+            auto raw_separate =
+                EvalFilterInBatches(separate, raw_segment.get(), rows);
+            auto raw_merged =
+                EvalFilterInBatches(merged, raw_segment.get(), rows);
+            auto indexed_separate =
+                EvalFilterInBatches(separate, segment.get(), rows);
+            auto indexed_merged =
+                EvalFilterInBatches(merged, segment.get(), rows);
+            compare(raw_separate, raw_merged);
+            compare(raw_separate, indexed_separate);
+            compare(raw_separate, indexed_merged);
+        }
+    }
+    // No zero-leaf rewrite is performed; preserve the existing empty-candidate
+    // executor semantics on both raw and indexed paths.
+    for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                    proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+        auto empty = contains(op, {});
+        compare(EvalFilterInBatches(empty, raw_segment.get(), rows),
+                EvalFilterInBatches(empty, segment.get(), rows));
+
+        const bool conjunction =
+            op == proto::plan::JSONContainsExpr_JSONOp_ContainsAll;
+        auto single =
+            contains(proto::plan::JSONContainsExpr_JSONOp_Contains, {100});
+        auto separate = std::make_shared<expr::LogicalBinaryExpr>(
+            conjunction ? expr::LogicalBinaryExpr::OpType::And
+                        : expr::LogicalBinaryExpr::OpType::Or,
+            empty,
+            single);
+        auto merged = contains(op, {100});
+        auto raw_separate =
+            EvalFilterInBatches(separate, raw_segment.get(), rows);
+        compare(raw_separate,
+                EvalFilterInBatches(merged, raw_segment.get(), rows));
+        compare(raw_separate,
+                EvalFilterInBatches(separate, segment.get(), rows));
+        compare(raw_separate, EvalFilterInBatches(merged, segment.get(), rows));
+    }
+    EXPECT_EQ(counters->owned, 0);
+}

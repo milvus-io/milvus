@@ -173,6 +173,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     TargetBitmap
     IsNotNull() override;
 
+    std::optional<ScalarIndexValidity>
+    GetImmutableValidity() override;
+
     const TargetBitmap
     InApplyFilter(
         size_t n,
