@@ -264,7 +264,6 @@ RunOrdinaryDiskSearch(bool mmap) {
     }
 }
 
-
 TEST(VectorDiskFileManagerTest, PreparedInputsAreBorrowedReadOnly) {
     auto inputs = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_inputs_XXXXXX", "prepared input test");
