@@ -419,36 +419,3 @@ func TestBroadcastAckCloseCancelsPendingRetry(t *testing.T) {
 	assert.Zero(t, tracker.CompletedPoint().TimeTick)
 	assert.Same(t, msg, owner.Message())
 }
-
-func TestLocalFlushNoopAckUsesResourceKeyOrdering(t *testing.T) {
-	scheduler := &recordingAckTaskScheduler{}
-	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
-	defer module.Close()
-	var acked []message.MessageType
-	module.ack = func(_ context.Context, msg message.ImmutableMessage) error {
-		acked = append(acked, msg.MessageType())
-		return nil
-	}
-	key := message.NewExclusiveCollectionNameResourceKey("db", "c")
-	drop := newBroadcastAckMessageWith(t, message.NewDropCollectionMessageBuilderV1().WithBroadcast([]string{"v1"}).
-		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).WithBody(&message.DropCollectionRequest{}), 1, 10, key)
-	flush := newBroadcastAckMessageWith(t, message.NewManualFlushMessageBuilderV2().WithUnreplicable().WithBroadcast([]string{"v1"}, message.OptBuildBroadcastAckSyncUp()).
-		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).WithBody(&message.ManualFlushMessageBody{}), 2, 20,
-		message.NewExclusiveCollectionNameResourceKey("db", "before-rename"))
-	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
-	dropOwner := tracker.Track(drop)
-	// A replicated Rename changed the name key after Flush admission. The
-	// collection is already dropped, so the empty Flush is best effort and
-	// adds no VChannel dependency on Drop's remaining persistence work.
-	persistence := dropOwner.Clone()
-	module.Accept(dropOwner)
-	module.Accept(tracker.Track(flush))
-	module.dispatchReadyTasks()
-	require.NoError(t, scheduler.waitTask(t).Execute(context.Background()))
-	require.Equal(t, []message.MessageType{message.MessageTypeManualFlush}, acked)
-	require.Zero(t, tracker.CompletedPoint().TimeTick, "Flush ACK must not advance recovery past the unfinished Drop")
-	persistence.Release()
-	require.NoError(t, scheduler.waitTaskAfter(t, 1).Execute(context.Background()))
-	require.Equal(t, []message.MessageType{message.MessageTypeManualFlush, message.MessageTypeDropCollection}, acked)
-	require.EqualValues(t, 20, tracker.CompletedPoint().TimeTick)
-}

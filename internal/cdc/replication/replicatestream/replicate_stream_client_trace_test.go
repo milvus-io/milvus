@@ -7,12 +7,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/cdc/meta"
+	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
@@ -93,15 +95,17 @@ func TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan(t *testing.T) {
 	primarySC := trace.SpanContextFromContext(primaryCtx)
 	primarySpan.End()
 
-	seal := func(msg message.MutableMessage, id int64) message.ImmutableMessage {
-		message.InjectTraceContext(primaryCtx, msg)
-		return msg.WithTxnContext(message.TxnContext{TxnID: 1}).WithTimeTick(uint64(id)).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(id))
-	}
-	beginMsg := seal(message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable(), 1)
-	bodyMsg := seal(message.CreateTestEmptyInsertMesage(1, nil), 2)
-	commitMsg := seal(message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable(), 3)
-	txnMsg, err := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(beginMsg)).Add(bodyMsg).Build(message.MustAsImmutableCommitTxnMessageV2(commitMsg))
-	assert.NoError(t, err)
+	beginMsg := buildTestCDCImmutableMessage(t, primaryCtx)
+	bodyMsg := buildTestCDCImmutableMessage(t, context.Background())
+	commitMsg := buildTestCDCImmutableMessage(t, context.Background())
+
+	// Build a mock ImmutableTxnMessage.
+	txnMock := mock_message.NewMockImmutableTxnMessage(t)
+	txnMock.EXPECT().Begin().Return(beginMsg)
+	txnMock.EXPECT().RangeOver(mock.Anything).RunAndReturn(func(fn func(message.ImmutableMessage) error) error {
+		return fn(bodyMsg)
+	})
+	txnMock.EXPECT().Commit().Return(commitMsg)
 
 	client := newMockReplicateStreamClient(t)
 	c := &replicateStreamClient{
@@ -110,7 +114,7 @@ func TestSendTxnMessage_SendsEachMessageWithItsOwnCdcSpan(t *testing.T) {
 		channel:   &meta.ReplicateChannel{Key: "test-replicate-key"},
 		metrics:   NewReplicateMetrics(nil),
 	}
-	err = c.sendTxnMessage(txnMsg)
+	err := c.sendTxnMessage(txnMock)
 	assert.NoError(t, err)
 
 	// begin + 1 body + commit = 3 sends.
