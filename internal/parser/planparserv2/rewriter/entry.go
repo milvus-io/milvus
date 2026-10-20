@@ -62,9 +62,9 @@ func (v *visitor) visitExpr(expr *planpb.Expr) interface{} {
 }
 
 func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
-	left := v.visitExpr(expr.GetLeft()).(*planpb.Expr)
-	right := v.visitExpr(expr.GetRight()).(*planpb.Expr)
 	if !v.optimizeEnabled {
+		left := v.visitExpr(expr.GetLeft()).(*planpb.Expr)
+		right := v.visitExpr(expr.GetRight()).(*planpb.Expr)
 		return &planpb.Expr{
 			Expr: &planpb.Expr_BinaryExpr{
 				BinaryExpr: &planpb.BinaryExpr{
@@ -77,7 +77,10 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 	}
 	switch expr.GetOp() {
 	case planpb.BinaryExpr_LogicalOr:
-		parts := flattenOr(left, right)
+		// Collect the whole same-op chain before visiting its operands. Otherwise
+		// a left-deep contains chain repeatedly copies and deduplicates every
+		// growing prefix, making a single merge quadratic in the leaf count.
+		parts := v.visitLogicalOperands(expr)
 		parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAny)
 		parts = v.combineOrEqualsToIn(parts)
 		parts = v.combineOrTextMatchToMerged(parts)
@@ -88,8 +91,11 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 		parts = v.combineOrInWithEqual(parts)
 		return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
 	case planpb.BinaryExpr_LogicalAnd:
-		return v.mergeAnd(left, right)
+		parts := v.visitLogicalOperands(expr)
+		return v.mergeAndParts(parts)
 	default:
+		left := v.visitExpr(expr.GetLeft()).(*planpb.Expr)
+		right := v.visitExpr(expr.GetRight()).(*planpb.Expr)
 		return &planpb.Expr{
 			Expr: &planpb.Expr_BinaryExpr{
 				BinaryExpr: &planpb.BinaryExpr{
@@ -103,7 +109,10 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 }
 
 func (v *visitor) mergeAnd(left, right *planpb.Expr) *planpb.Expr {
-	parts := flattenAnd(left, right)
+	return v.mergeAndParts(flattenAnd(left, right))
+}
+
+func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
 	parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAll)
 	parts = v.combineAndRangePredicates(parts)
 	parts = v.combineAndBinaryRanges(parts)
@@ -113,6 +122,48 @@ func (v *visitor) mergeAnd(left, right *planpb.Expr) *planpb.Expr {
 	parts = v.combineAndInWithEqual(parts)
 	parts = v.combineAndNotEqualsToNotIn(parts)
 	return foldBinary(planpb.BinaryExpr_LogicalAnd, parts)
+}
+
+// visitLogicalOperands visits each original operand once, then exposes any
+// same-op chain produced by simplifying an opposite-op child (for example,
+// ((A AND B) OR false) AND C). Do not revisit those already rewritten operands.
+func (v *visitor) visitLogicalOperands(expr *planpb.BinaryExpr) []*planpb.Expr {
+	parts := flattenLogicalExpr(expr)
+	var expanded []*planpb.Expr
+	for i, part := range parts {
+		part = v.visitExpr(part).(*planpb.Expr)
+		parts[i] = part
+		if binary := part.GetBinaryExpr(); binary != nil && binary.GetOp() == expr.GetOp() {
+			if expanded == nil {
+				expanded = make([]*planpb.Expr, 0, len(parts))
+				expanded = append(expanded, parts[:i]...)
+			}
+			expanded = append(expanded, flattenLogicalExpr(binary)...)
+		} else if expanded != nil {
+			expanded = append(expanded, part)
+		}
+	}
+	if expanded != nil {
+		return expanded
+	}
+	return parts
+}
+
+// flattenLogicalExpr preserves operand order and stops at NOT, opposite-op,
+// and non-binary wrappers. Its explicit stack also accepts deep parser trees.
+func flattenLogicalExpr(expr *planpb.BinaryExpr) []*planpb.Expr {
+	parts := make([]*planpb.Expr, 0, 4)
+	stack := []*planpb.Expr{expr.GetRight(), expr.GetLeft()}
+	for len(stack) > 0 {
+		part := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if binary := part.GetBinaryExpr(); binary != nil && binary.GetOp() == expr.GetOp() {
+			stack = append(stack, binary.GetRight(), binary.GetLeft())
+			continue
+		}
+		parts = append(parts, part)
+	}
+	return parts
 }
 
 func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
@@ -350,17 +401,23 @@ func foldBinary(op planpb.BinaryExpr_BinaryOp, exprs []*planpb.Expr) *planpb.Exp
 	if len(exprs) == 1 {
 		return exprs[0]
 	}
-	cur := exprs[0]
-	for i := 1; i < len(exprs); i++ {
-		cur = &planpb.Expr{
-			Expr: &planpb.Expr_BinaryExpr{
-				BinaryExpr: &planpb.BinaryExpr{
-					Left:  cur,
-					Right: exprs[i],
-					Op:    op,
-				},
-			},
+	// Preserve source order and template metadata without rebuilding a deep
+	// chain for protobuf serialization or later recursive consumers.
+	for len(exprs) > 1 {
+		next := make([]*planpb.Expr, 0, (len(exprs)+1)/2)
+		for i := 0; i < len(exprs); i += 2 {
+			if i+1 == len(exprs) {
+				next = append(next, exprs[i])
+				continue
+			}
+			next = append(next, &planpb.Expr{
+				Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
+					Left: exprs[i], Right: exprs[i+1], Op: op,
+				}},
+				IsTemplate: exprs[i].GetIsTemplate() || exprs[i+1].GetIsTemplate(),
+			})
 		}
+		exprs = next
 	}
-	return cur
+	return exprs[0]
 }

@@ -52,9 +52,15 @@ The rewriter can be configured via the following parameter (refreshable at runti
   - `array_contains(a, x) AND array_contains(a, y)` → `array_contains_all(a, [x, y])`
   - Existing `array_contains_all` nodes are absorbed, so arbitrarily long and nested AND chains close into one node.
 - At least two compatible source nodes are required. Values retain first-encounter order, duplicates are removed without sorting, and the merged node is emitted at the group's first position.
-- The rule is keyed by `ColumnInfo`, including nested path and element-level identity. Different fields and the opposite Any/All operator remain separate.
+- The candidate key is field ID plus nested path; the complete `ColumnInfo` must also match, including element type and nullability. Different metadata and the opposite Any/All operator remain separate.
 - Only `ColumnInfo.DataType == Array` participates. JSON columns remain unchanged even though ARRAY and JSON predicates share `JSONContainsExpr` and either function spelling may be used on an ARRAY column.
 - Nil, array-valued, unknown, and NaN elements are excluded from merging. `ElementsSameType` is recomputed and consumed template metadata is cleared on the merged node.
+
+- Backported from master PR #52138 (`95ea35866b`) with 2.6 protobuf and parser adaptations.
+- FLOAT/DOUBLE values are deduplicated using the executor's numeric conversions while preserving the first literal representation.
+- Each same-operator chain is flattened once before visiting operands. Chains exposed by child simplification are flattened without revisiting their operands; remaining operands form a balanced tree in source order.
+- NOT and opposite logical operators remain boundaries. NULL rows and valid empty arrays retain membership semantics; empty ANY/ALL lists are OR/AND identities respectively.
+- In 2.6, filling a list template retains its name but sets `ElementsSameType=true` for an empty list. Pending list placeholders have no elements and `ElementsSameType=false` and are left unmerged.
 
 4) Range predicate simplification (`range.go`)
 - AND tighten (same column):
@@ -102,7 +108,6 @@ The rewriter can be configured via the following parameter (refreshable at runti
 ### General Notes
 - All merges require operands to target the same column (same `ColumnInfo`, including nested path/element type).
 - Rewrite runs after template value filling; template placeholders do not appear here.
-- Optional visitor rewrites do not descend into `MatchExpr` or `ElementFilterExpr` predicates.
 - Sorting/dedup for IN/NOT IN is deterministic; duplicates are removed post-sort.
 - Numeric-threshold for OR→IN / AND≠→NOT IN is defined in `util.go` (`defaultConvertOrToInNumericLimit`, default 150).
 - Nullable fields keep contradiction/tautology predicates instead of folding to valid `true`/`false`, because NULL must remain unknown under outer logical operators such as `NOT`. Fixed JSON/array paths also avoid domain-wide folds that assume every path/index exists.

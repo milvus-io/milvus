@@ -256,3 +256,39 @@ func arrayContainsIntegrationFloatValues(values []*planpb.GenericValue) []float6
 	}
 	return result
 }
+
+func TestRewriteArrayContainsPendingAndFilledListTemplates(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+	for _, filter := range []string{
+		`array_contains_any(NullableArrayInt, {values}) or array_contains(NullableArrayInt, 1)`,
+		`array_contains_all(NullableArrayInt, {values}) and array_contains(NullableArrayInt, 1)`,
+	} {
+		pending, err := parser.ParseExprTemplate(helper, filter, nil)
+		require.NoError(t, err)
+		pendingContains := pending.GetBinaryExpr().GetLeft().GetJsonContainsExpr()
+		require.Equal(t, "values", pendingContains.GetTemplateVariableName())
+		require.Empty(t, pendingContains.GetElements())
+		require.False(t, pendingContains.GetElementsSameType())
+		pendingResult := rewriter.RewriteExprWithConfig(pending, true)
+		require.NotNil(t, pendingResult.GetBinaryExpr(), "pending list must not be consumed as empty")
+		require.Equal(t, "values", pendingResult.GetBinaryExpr().GetLeft().GetJsonContainsExpr().GetTemplateVariableName())
+		for _, values := range [][]int64{nil, {2, 3}} {
+			templates := map[string]*schemapb.TemplateValue{"values": {Val: &schemapb.TemplateValue_ArrayVal{ArrayVal: &schemapb.TemplateArrayValue{Data: &schemapb.TemplateArrayValue_LongData{LongData: &schemapb.LongArray{Data: values}}}}}}
+			filled, err := parser.ParseExprTemplate(helper, filter, nil)
+			require.NoError(t, err)
+			valueMap, err := parser.UnmarshalExpressionValues(templates)
+			require.NoError(t, err)
+			require.NoError(t, parser.FillExpressionValue(filled, valueMap))
+			filledContains := filled.GetBinaryExpr().GetLeft().GetJsonContainsExpr()
+			require.Equal(t, "values", filledContains.GetTemplateVariableName(), "2.6 keeps the template name after fill")
+			require.True(t, filledContains.GetElementsSameType(), "even a filled empty list has same-type=true")
+			result := rewriter.RewriteExprWithConfig(filled, true)
+			require.NotNil(t, result.GetJsonContainsExpr())
+			require.Equal(t, append(append([]int64{}, values...), 1), arrayContainsIntegrationIntValues(result.GetJsonContainsExpr().GetElements()))
+			require.Empty(t, result.GetJsonContainsExpr().GetTemplateVariableName())
+			require.False(t, result.GetIsTemplate())
+			_, err = parser.ParseExpr(helper, filter, nil)
+			require.Error(t, err, "production entry rejects missing template values before rewrite")
+		}
+	}
+}

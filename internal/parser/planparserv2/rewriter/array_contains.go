@@ -3,6 +3,8 @@ package rewriter
 import (
 	"math"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 )
@@ -23,6 +25,7 @@ type arrayContainsElementKey struct {
 	stringVal string
 }
 
+// Backported from master PR #52138 (95ea35866b).
 // combineArrayContains merges compatible ARRAY contains predicates on the same
 // column. OR chains target ContainsAny, while AND chains target ContainsAll.
 // JSON columns deliberately remain unchanged.
@@ -48,6 +51,10 @@ func combineArrayContains(parts []*planpb.Expr, targetOp planpb.JSONContainsExpr
 				firstIndex: index,
 			}
 			groups[key] = group
+		} else if !proto.Equal(group.columnInfo, contains.GetColumnInfo()) {
+			// Field/path identify candidates, but nullable/type/index metadata
+			// must also agree before sharing one executable predicate.
+			continue
 		}
 		for _, element := range contains.GetElements() {
 			elementKey, ok := arrayContainsDedupKey(group.columnInfo, element)
@@ -91,6 +98,13 @@ func combineArrayContains(parts []*planpb.Expr, targetOp planpb.JSONContainsExpr
 
 func canCombineArrayContains(expr *planpb.JSONContainsExpr, targetOp planpb.JSONContainsExpr_JSONOp) bool {
 	if expr == nil || expr.GetColumnInfo() == nil || expr.GetColumnInfo().GetDataType() != schemapb.DataType_Array {
+		return false
+	}
+
+	// In 2.6 a pending ANY/ALL placeholder has no elements and same-type=false.
+	// Filling even an empty list sets same-type=true, while retaining the name.
+	// A pending scalar CONTAINS is rejected by the arity check below.
+	if expr.GetTemplateVariableName() != "" && len(expr.GetElements()) == 0 && !expr.GetElementsSameType() {
 		return false
 	}
 
