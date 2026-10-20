@@ -23,6 +23,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -46,6 +47,7 @@
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
+#include "index/InvertedIndexTantivy.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
@@ -56,6 +58,7 @@
 #include "query/PlanNode.h"
 #include "query/Utils.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
@@ -393,6 +396,263 @@ AssertSegmentFieldValidDataByOffsets(
             << ", offset " << offsets[i];
     }
 }
+
+// Delegate to the real loaded column and count the view requests that pin chunks.
+class ArrayEqualityCountingColumn : public ChunkedColumnInterface {
+ public:
+    explicit ArrayEqualityCountingColumn(
+        std::shared_ptr<ChunkedColumnInterface> column)
+        : column_(std::move(column)) {
+    }
+    mutable int64_t materialized_array_rows = 0;
+    mutable int64_t candidate_array_rows = 0;
+    mutable std::map<int64_t, int64_t> candidate_chunk_reads;
+
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
+    ArrayViews(
+        milvus::OpContext* ctx,
+        int64_t id,
+        std::optional<std::pair<int64_t, int64_t>> range) const override {
+        auto views = column_->ArrayViews(ctx, id, range);
+        materialized_array_rows += views.get().first.size();
+        return views;
+    }
+    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    ArrayViewsByOffsets(milvus::OpContext* ctx,
+                        int64_t id,
+                        const FixedVector<int32_t>& offsets) const override {
+        candidate_array_rows += offsets.size();
+        ++candidate_chunk_reads[id];
+        return column_->ArrayViewsByOffsets(ctx, id, offsets);
+    }
+    PinWrapper<const char*>
+    DataOfChunk(milvus::OpContext* ctx, int id) const override {
+        return column_->DataOfChunk(ctx, id);
+    }
+    bool
+    IsValid(milvus::OpContext* ctx, size_t offset) const override {
+        return column_->IsValid(ctx, offset);
+    }
+    void
+    BulkIsValid(milvus::OpContext* ctx,
+                std::function<void(bool, size_t)> fn,
+                const int64_t* offsets,
+                int64_t count) const override {
+        return column_->BulkIsValid(ctx, fn, offsets, count);
+    }
+    bool
+    IsNullable() const override {
+        return column_->IsNullable();
+    }
+    size_t
+    NumRows() const override {
+        return column_->NumRows();
+    }
+    int64_t
+    num_chunks() const override {
+        return column_->num_chunks();
+    }
+    size_t
+    DataByteSize() const override {
+        return column_->DataByteSize();
+    }
+    int64_t
+    chunk_row_nums(int64_t id) const override {
+        return column_->chunk_row_nums(id);
+    }
+    PinWrapper<SpanBase>
+    Span(milvus::OpContext* ctx, int64_t id) const override {
+        return column_->Span(ctx, id);
+    }
+    void
+    PrefetchChunks(milvus::OpContext* ctx,
+                   const std::vector<int64_t>& ids) const override {
+        return column_->PrefetchChunks(ctx, ids);
+    }
+    bool
+    CellsLoaded(const int64_t* offsets, int64_t count) const override {
+        return column_->CellsLoaded(offsets, count);
+    }
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
+    StringViews(
+        milvus::OpContext* ctx,
+        int64_t id,
+        std::optional<std::pair<int64_t, int64_t>> range) const override {
+        return column_->StringViews(ctx, id, range);
+    }
+    PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
+    VectorArrayViews(
+        milvus::OpContext* ctx,
+        int64_t id,
+        std::optional<std::pair<int64_t, int64_t>> range) const override {
+        return column_->VectorArrayViews(ctx, id, range);
+    }
+    PinWrapper<const size_t*>
+    VectorArrayOffsets(milvus::OpContext* ctx, int64_t id) const override {
+        return column_->VectorArrayOffsets(ctx, id);
+    }
+    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    StringViewsByOffsets(milvus::OpContext* ctx,
+                         int64_t id,
+                         const FixedVector<int32_t>& offsets) const override {
+        return column_->StringViewsByOffsets(ctx, id, offsets);
+    }
+    std::pair<size_t, size_t>
+    GetChunkIDByOffset(int64_t offset) const override {
+        return column_->GetChunkIDByOffset(offset);
+    }
+    std::pair<std::vector<cachinglayer::cid_t>, std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
+        return column_->GetChunkIDsByOffsets(offsets, count);
+    }
+    PinWrapper<Chunk*>
+    GetChunk(milvus::OpContext* ctx, int64_t id) const override {
+        return column_->GetChunk(ctx, id);
+    }
+    std::vector<PinWrapper<Chunk*>>
+    GetAllChunks(milvus::OpContext* ctx) const override {
+        return column_->GetAllChunks(ctx);
+    }
+    int64_t
+    GetNumRowsUntilChunk(int64_t id) const override {
+        return column_->GetNumRowsUntilChunk(id);
+    }
+    const std::vector<int64_t>&
+    GetNumRowsUntilChunk() const override {
+        return column_->GetNumRowsUntilChunk();
+    }
+    void
+    BulkValueAt(milvus::OpContext* ctx,
+                std::function<void(const char*, size_t)> fn,
+                const int64_t* offsets,
+                int64_t count) override {
+        return column_->BulkValueAt(ctx, fn, offsets, count);
+    }
+    void
+    BulkPrimitiveValueAt(milvus::OpContext* ctx,
+                         void* dst,
+                         const int64_t* offsets,
+                         int64_t count,
+                         bool small_int) override {
+        return column_->BulkPrimitiveValueAt(
+            ctx, dst, offsets, count, small_int);
+    }
+    void
+    BulkVectorValueAt(milvus::OpContext* ctx,
+                      void* dst,
+                      const int64_t* offsets,
+                      int64_t size,
+                      int64_t count) override {
+        return column_->BulkVectorValueAt(ctx, dst, offsets, size, count);
+    }
+
+ private:
+    std::shared_ptr<ChunkedColumnInterface> column_;
+};
+
+class ArrayEqualityCountingSnapshot : public SegmentReadSnapshot {
+ public:
+    ArrayEqualityCountingSnapshot(
+        std::shared_ptr<const SegmentReadSnapshot> snapshot,
+        FieldId field,
+        std::shared_ptr<ArrayEqualityCountingColumn> column)
+        : snapshot_(std::move(snapshot)),
+          field_(field),
+          column_(std::move(column)) {
+    }
+    mutable int64_t data_resource_reads = 0;
+    int64_t
+    chunk_size(FieldId f, int64_t c) const override {
+        return snapshot_->chunk_size(f, c);
+    }
+    int64_t
+    num_rows_until_chunk(FieldId f, int64_t c) const override {
+        return snapshot_->num_rows_until_chunk(f, c);
+    }
+    std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId f, int64_t off) const override {
+        return snapshot_->get_chunk_by_offset(f, off);
+    }
+    int64_t
+    num_chunk_data(FieldId f) const override {
+        return snapshot_->num_chunk_data(f);
+    }
+    int64_t
+    get_row_count() const override {
+        return snapshot_->get_row_count();
+    }
+    std::shared_ptr<ChunkedColumnInterface>
+    GetDataScanResources(FieldId field) const override {
+        ++data_resource_reads;
+        return field == field_ ? column_
+                               : snapshot_->GetDataScanResources(field);
+    }
+    const ChunkedColumnInterface*
+    GetColumn(FieldId field) const override {
+        return field == field_ ? column_.get() : snapshot_->GetColumn(field);
+    }
+
+ private:
+    std::shared_ptr<const SegmentReadSnapshot> snapshot_;
+    FieldId field_;
+    std::shared_ptr<ArrayEqualityCountingColumn> column_;
+};
+
+// Keep the real sealed loading and expression paths; intercept column reads
+// only after the loaded test column has been wrapped.
+class ArrayEqualityCountingSegment : public ChunkedSegmentSealedImpl {
+ public:
+    using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+    mutable int64_t materialized_array_rows = 0;
+    mutable int64_t data_resource_reads = 0;
+    std::shared_ptr<ArrayEqualityCountingColumn> counting_column;
+    FieldId counting_field{-1};
+
+    std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field_id) const override {
+        ++data_resource_reads;
+        if (counting_column && field_id == counting_field) {
+            return counting_column;
+        }
+        return ChunkedSegmentSealedImpl::GetChunkedColumn(field_id);
+    }
+
+ protected:
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
+    chunk_array_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        auto views = ChunkedSegmentSealedImpl::chunk_array_view_impl(
+            op_ctx, field_id, chunk_id, offset_len);
+        materialized_array_rows += views.get().first.size();
+        return views;
+    }
+};
+
+class ArrayEqualityCountingIndex : public index::InvertedIndexTantivy<int64_t> {
+ public:
+    using InvertedIndexTantivy::InvertedIndexTantivy;
+    int64_t callback_calls = 0;
+
+    void
+    BuildForTest(const FieldDataPtr& data) {
+        BuildWithFieldData({data});
+        wrapper_->create_reader(milvus::index::SetBitsetSealed);
+        finish();
+        wrapper_->reload();
+        FinalizeSealed();
+    }
+
+    void
+    InApplyCallback(size_t n,
+                    const int64_t* values,
+                    const std::function<void(size_t)>& callback) override {
+        ++callback_calls;
+        InvertedIndexTantivy::InApplyCallback(n, values, callback);
+    }
+};
 
 }  // namespace
 
@@ -1011,6 +1271,246 @@ TEST(Expr, TestArrayEqual) {
             ASSERT_EQ(ans, ref);
             if (i % 2 == 0) {
                 ASSERT_EQ(view[int(i / 2)], ref);
+            }
+        }
+    }
+}
+
+TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
+    constexpr int64_t N = 1536;
+    for (bool nested : {false, true}) {
+        for (bool mmap : {false, true}) {
+            for (bool sparse : {false, true}) {
+                SCOPED_TRACE(fmt::format(
+                    "nested={}, mmap={}, sparse={}", nested, mmap, sparse));
+                auto schema = std::make_shared<Schema>();
+                const auto pk = schema->AddDebugField("id", DataType::INT64);
+                const auto field_name = nested ? "structA[array]" : "array";
+                const auto field = schema->AddDebugField(
+                    field_name, DataType::ARRAY, DataType::INT64, true);
+                schema->set_primary_field_id(pk);
+                auto raw_data = DataGen(schema, N);
+                const std::vector<std::vector<int64_t>> patterns{
+                    {1, 2, 1}, {1, 1, 2}, {1, 2}, {1, 2, 1, 1}, {}, {4, 5}};
+                std::vector<std::vector<int64_t>> rows(N);
+                std::vector<bool> validity(N, true);
+                for (int64_t i = 0; i < N; ++i) {
+                    rows[i] = sparse ? std::vector<int64_t>{4, 5}
+                                     : patterns[i % patterns.size()];
+                    validity[i] = i % 11 != 0;
+                }
+                if (sparse) {
+                    rows[1] = {1, 2, 1};
+                    rows[N / 2] = {1, 1, 2};
+                    rows[N - 1] = {1, 2, 1};
+                }
+                ArrayEqualityCountingSegment segment(
+                    schema,
+                    empty_index_meta,
+                    SegcoreConfig::default_config(),
+                    kSegmentID + nested * 4 + mmap * 2 + sparse);
+                LoadGeneratedDataIntoSegment(
+                    raw_data, &segment, mmap, {field.get()});
+
+                int64_t expected_candidate_rows = 0;
+                FixedVector<Array> arrays;
+                std::vector<uint8_t> valid_bitmap((N + 7) / 8, 0);
+                for (int64_t i = 0; i < N; ++i) {
+                    ScalarFieldProto row;
+                    for (auto value : rows[i]) {
+                        row.mutable_long_data()->add_data(value);
+                    }
+                    arrays.emplace_back(row);
+                    if (validity[i] &&
+                        std::find(rows[i].begin(), rows[i].end(), 1) !=
+                            rows[i].end()) {
+                        ++expected_candidate_rows;
+                    }
+                    if (validity[i]) {
+                        valid_bitmap[i >> 3] |= 1 << (i & 7);
+                    }
+                }
+                auto field_data = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                field_data->FillFieldData(
+                    arrays.data(), valid_bitmap.data(), N, 0);
+                // Different physical chunk sizes exercise global candidate
+                // offsets on both sides of the boundary.
+                constexpr int64_t split = 513;
+                auto first = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                auto second = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                first->FillFieldData(
+                    arrays.data(), valid_bitmap.data(), split, 0);
+                second->FillFieldData(arrays.data() + split,
+                                      valid_bitmap.data(),
+                                      N - split,
+                                      split);
+                auto load_info = PrepareSingleFieldInsertBinlog(
+                    kCollectionID,
+                    kPartitionID,
+                    kSegmentID,
+                    field.get(),
+                    {first, second},
+                    storage::RemoteChunkManagerSingleton::GetInstance()
+                        .GetRemoteChunkManager(),
+                    mmap ? "./data/mmap-test" : "");
+                segment.LoadFieldData(load_info);
+                ASSERT_EQ(segment.num_chunk_data(field), 2);
+                if (nested) {
+                    ASSERT_NE(segment.GetArrayOffsets(field), nullptr);
+                }
+                proto::schema::FieldSchema field_schema;
+                field_schema.set_name(field_name);
+                field_schema.set_fieldid(field.get());
+                field_schema.set_data_type(proto::schema::DataType::Array);
+                field_schema.set_element_type(proto::schema::DataType::Int64);
+                field_schema.set_nullable(true);
+                storage::FileManagerContext index_ctx;
+                index_ctx.fieldDataMeta = storage::FieldDataMeta{kCollectionID,
+                                                                 kPartitionID,
+                                                                 kSegmentID,
+                                                                 field.get(),
+                                                                 field_schema};
+                index_ctx.indexMeta =
+                    storage::IndexMeta{kSegmentID, field.get(), 4100, 4100};
+                auto index = std::make_unique<ArrayEqualityCountingIndex>(
+                    index::TANTIVY_INDEX_LATEST_VERSION,
+                    index_ctx,
+                    false,
+                    true,
+                    nested);
+                index->BuildForTest(field_data);
+                auto* index_ptr = index.get();
+                LoadIndexInfo info;
+                info.field_id = field.get();
+                info.field_type = DataType::ARRAY;
+                info.element_type = DataType::INT64;
+                info.index_params = GenIndexParams(index.get());
+                info.cache_index = CreateTestCacheIndex(
+                    "array_equality_candidates", std::move(index));
+                segment.LoadIndex(info);
+                ASSERT_TRUE(segment.HasIndex(field));
+
+                segment.counting_field = field;
+                segment.counting_column =
+                    std::make_shared<ArrayEqualityCountingColumn>(
+                        segment.ChunkedSegmentSealedImpl::GetChunkedColumn(
+                            field));
+                auto snapshot = std::make_shared<ArrayEqualityCountingSnapshot>(
+                    segment.CaptureReadSnapshot(),
+                    field,
+                    segment.counting_column);
+                const std::vector<std::vector<int64_t>> targets{
+                    {1, 2, 1}, {9, 9}, {}};
+                for (bool pinned : {false, true}) {
+                    SCOPED_TRACE(fmt::format("pinned={}", pinned));
+                    for (const auto& target : targets) {
+                        for (bool reverse : {false, true}) {
+                            proto::plan::GenericValue value;
+                            auto* array = value.mutable_array_val();
+                            array->set_element_type(
+                                proto::schema::DataType::Int64);
+                            array->set_same_type(true);
+                            for (auto element : target) {
+                                array->add_array()->set_int64_val(element);
+                            }
+                            auto expression =
+                                std::make_shared<expr::UnaryRangeFilterExpr>(
+                                    expr::ColumnInfo(field,
+                                                     DataType::ARRAY,
+                                                     DataType::INT64,
+                                                     {},
+                                                     true),
+                                    reverse ? proto::plan::NotEqual
+                                            : proto::plan::Equal,
+                                    value);
+                            auto query_config =
+                                std::make_shared<exec::QueryConfig>(
+                                    std::unordered_map<std::string,
+                                                       std::string>{
+                                        {exec::QueryConfig::kExprEvalBatchSize,
+                                         "128"}});
+                            auto query_context =
+                                std::make_shared<exec::QueryContext>(
+                                    DEAFULT_QUERY_ID,
+                                    &segment,
+                                    N,
+                                    MAX_TIMESTAMP,
+                                    0,
+                                    0,
+                                    query::PlanOptions(),
+                                    query_config);
+                            if (pinned) {
+                                query_context->set_read_snapshot(snapshot);
+                            }
+                            exec::ExecContext exec_context(query_context.get());
+                            exec::ExprSet exprs({expression}, &exec_context);
+                            exec::EvalCtx eval_ctx(&exec_context);
+                            segment.materialized_array_rows = 0;
+                            segment.data_resource_reads = 0;
+                            snapshot->data_resource_reads = 0;
+                            segment.counting_column->materialized_array_rows =
+                                0;
+                            segment.counting_column->candidate_array_rows = 0;
+                            segment.counting_column->candidate_chunk_reads
+                                .clear();
+                            index_ptr->callback_calls = 0;
+                            int64_t processed = 0;
+                            while (processed < N) {
+                                std::vector<VectorPtr> results;
+                                exprs.Eval(0, 1, true, eval_ctx, results);
+                                ASSERT_EQ(results.size(), 1);
+                                ASSERT_NE(results[0], nullptr);
+                                auto result =
+                                    milvus::test::GetColumnVectorForTest(
+                                        results[0]);
+                                ASSERT_GT(result->size(), 0);
+                                ASSERT_LE(result->size(), 128);
+                                BitsetTypeView bits(result->GetRawData(),
+                                                    result->size());
+                                BitsetTypeView valid(result->GetValidRawData(),
+                                                     result->size());
+                                for (int64_t i = 0; i < result->size(); ++i) {
+                                    const auto row = processed + i;
+                                    EXPECT_EQ(valid[i], validity[row]) << row;
+                                    EXPECT_EQ(
+                                        bits[i],
+                                        validity[row] &&
+                                            ((rows[row] == target) ^ reverse))
+                                        << row;
+                                }
+                                processed += result->size();
+                            }
+                            ASSERT_EQ(processed, N);
+                            if (!target.empty()) {
+                                // Both the index and exact array recheck execute;
+                                // later expression batches reuse the cached bitmap.
+                                EXPECT_GT(index_ptr->callback_calls, 0);
+                                EXPECT_EQ(pinned ? snapshot->data_resource_reads
+                                                 : segment.data_resource_reads,
+                                          target.front() == 1 ? 1 : 0);
+                                EXPECT_EQ(segment.materialized_array_rows, 0);
+                                EXPECT_EQ(segment.counting_column
+                                              ->materialized_array_rows,
+                                          0);
+                                const auto& reads = segment.counting_column
+                                                        ->candidate_chunk_reads;
+                                EXPECT_EQ(reads.size(),
+                                          target.front() == 1 ? 2 : 0);
+                                for (const auto& [chunk, count] : reads) {
+                                    EXPECT_EQ(count, 1) << chunk;
+                                }
+                                EXPECT_EQ(segment.counting_column
+                                              ->candidate_array_rows,
+                                          target.front() == 9
+                                              ? 0
+                                              : expected_candidate_rows);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
