@@ -40,6 +40,16 @@ func CreateEventStream(
 		cancel()
 		return nil, err
 	}
+	// Wait for server-side owner validation and stream acquisition before returning.
+	resp, err := streamClient.Recv()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if resp.GetCreateStream() == nil {
+		cancel()
+		return nil, status.NewInvalidRequestSeq("first transform response must acknowledge stream creation")
+	}
 	mlog.Debug(ctx, "handler transform log event stream created",
 		mlog.FieldPChannel(pchannel),
 		mlog.Int64("serverID", opts.Assignment.Node.ServerID),

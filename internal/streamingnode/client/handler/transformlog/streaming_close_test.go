@@ -37,6 +37,9 @@ func (h *closeTestHandler) Close() {
 }
 
 func (s *closeTestServer) SubscribeTransform(stream streamingpb.StreamingNodeHandlerService_SubscribeTransformServer) error {
+	if err := stream.Send(&streamingpb.TransformResponse{Response: &streamingpb.TransformResponse_CreateStream{CreateStream: &streamingpb.CreateTransformStreamResponse{}}}); err != nil {
+		return err
+	}
 	return s.serve(stream)
 }
 

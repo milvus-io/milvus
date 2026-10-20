@@ -217,6 +217,9 @@ func TestTransformRPCRejectsMalformedRequests(t *testing.T) {
 	ctx = contextutil.WithCreateTransformStream(ctx, &streamingpb.CreateTransformStreamRequest{Pchannel: types.NewProtoFromPChannelInfo(rpcOptions(1).Assignment.Channel)})
 	raw, err := client.SubscribeTransform(ctx)
 	require.NoError(t, err)
+	created, err := raw.Recv()
+	require.NoError(t, err)
+	require.NotNil(t, created.GetCreateStream())
 	// Bad subscription input is scoped to that subscription, preserving the RPC.
 	require.NoError(t, raw.Send(&streamingpb.TransformRequest{Request: &streamingpb.TransformRequest_Create{Create: &streamingpb.CreateTransformSubscriptionRequest{SubscriptionId: 1}}}))
 	resp, err := raw.Recv()

@@ -367,9 +367,19 @@ unchanged by this TODO.
 `WALAccesser.TransformLogStreamManager` opens a logical PChannel stream.
 `HandlerClient.AcquireTransformLogStream` resolves its current assignment and
 selects a local WAL accessor or a bidirectional `SubscribeTransform` RPC.
-Creation metadata carries the PChannel name and term. Create acknowledgements
-precede all subscription events. Multiple VChannels share one physical stream;
-each retains its own exclusive cursor and optional end timestamp.
+Creation metadata carries the PChannel name and term. After validating that
+owner and acquiring its Summary stream, the server sends a stream-level
+`CreateTransformStreamResponse` without waiting for a VChannel request. The
+remote factory waits for this confirmation before returning success, like the
+WAL consumer factory. A rejected owner/term therefore returns through the shared
+HandlerClient assignment-error reporting and assignment-watch/backoff path.
+Failure to send the confirmation closes the acquired Summary stream.
+
+Subscription Create acknowledgements still precede all subscription events.
+Multiple VChannels share one physical stream; each retains its own exclusive
+cursor and optional end timestamp. Owner loss after creation is handled by the
+existing resumable layer; its next factory call validates the owner again.
+The handshake does not change logical subscription lifetime or accepted cursors.
 
 The resumable layer checkpoints only Entries/SyncUp accepted by the handler.
 On owner cancellation, fencing or transport loss it closes that attempt and

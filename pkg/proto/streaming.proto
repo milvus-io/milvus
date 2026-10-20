@@ -1071,8 +1071,13 @@ message TransformResponse {
         TransformSubscriptionError subscription_error = 4;
         CloseTransformSubscriptionResponse close_subscription = 5;
         CloseTransformStreamResponse close_stream = 6;
+        // Sent after validating the PChannel owner and acquiring its stream,
+        // before receiving any VChannel subscription requests.
+        CreateTransformStreamResponse create_stream = 7;
     }
 }
+
+message CreateTransformStreamResponse {}
 
 message CreateTransformSubscriptionResponse {
     uint64 end_time_tick = 5;

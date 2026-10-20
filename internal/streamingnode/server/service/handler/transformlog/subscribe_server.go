@@ -43,6 +43,12 @@ func CreateSubscribeServer(
 	if err != nil {
 		return nil, err
 	}
+	if err := stream.Send(&streamingpb.TransformResponse{
+		Response: &streamingpb.TransformResponse_CreateStream{CreateStream: &streamingpb.CreateTransformStreamResponse{}},
+	}); err != nil {
+		_ = logStream.Close()
+		return nil, err
+	}
 	return &SubscribeServer{
 		walManager: walManager,
 		logStream:  logStream,

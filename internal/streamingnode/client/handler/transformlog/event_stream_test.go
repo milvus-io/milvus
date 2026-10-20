@@ -220,13 +220,15 @@ type fakeSubscribeTransformClient struct {
 }
 
 func newFakeSubscribeTransformClient(ctx context.Context) *fakeSubscribeTransformClient {
-	return &fakeSubscribeTransformClient{
+	f := &fakeSubscribeTransformClient{
 		ctx:     ctx,
 		sendCh:  make(chan *streamingpb.TransformRequest, 16),
 		recvCh:  make(chan *streamingpb.TransformResponse, 16),
 		errCh:   make(chan error, 1),
 		closeCh: make(chan struct{}),
 	}
+	f.recv(&streamingpb.TransformResponse{Response: &streamingpb.TransformResponse_CreateStream{CreateStream: &streamingpb.CreateTransformStreamResponse{}}})
+	return f
 }
 
 func (f *fakeSubscribeTransformClient) sent(t *testing.T) *streamingpb.TransformRequest {
@@ -373,10 +375,10 @@ func TestEventStreamCreationAndSendFailures(t *testing.T) {
 	transport := newFakeSubscribeTransformClient(t.Context())
 	patch = mockey.Mock(mockey.GetMethod(client, "SubscribeTransform")).Return(transport, nil).Build()
 	defer patch.UnPatch()
-	send := mockey.Mock((*fakeSubscribeTransformClient).Send).Return(failure).Build()
-	defer send.UnPatch()
 	stream, err := CreateEventStream(t.Context(), &EventStreamOptions{Assignment: testAssignment()}, client)
 	require.NoError(t, err)
+	send := mockey.Mock((*fakeSubscribeTransformClient).Send).Return(failure).Build()
+	defer send.UnPatch()
 	defer transport.CloseSend()
 	_, err = stream.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: "v1", Handler: newRecordingHandler()})
 	require.ErrorIs(t, err, failure)

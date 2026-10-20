@@ -97,28 +97,6 @@ Input-vs-System) and [error_handling_casebook.md](docs/dev/error_handling_casebo
 
 ## PR and Commit Conventions
 
-### Extracted Child PRs (MANDATORY)
-
-When a PR extracts part of a parent PR or feature branch, evaluate reviews and
-changes in the context of the parent's complete implementation and design.
-Do not assess the child PR in isolation and introduce changes that make the
-parent's code semantically incorrect when it absorbs the child PR.
-
-- Read the parent source revision, relevant design documents, callers and
-  consumers before removing or changing extracted behavior. Check ordering,
-  synchronization, lifecycle and protocol invariants across the extraction
-  boundary, including dependencies intentionally left in the parent.
-- Preserve implementations that are valid in the parent. A path being unused,
-  unnecessary or not yet wired in master/the child PR is not sufficient reason
-  to delete it, weaken its guarantees or replace its algorithm.
-- Before accepting a review fix, establish whether the defect also exists under
-  the parent's actual preconditions. Distinguish confirmed defects from
-  hypothetical inputs, extraction-scope preferences and independent redesigns.
-- Validate both the child's compatibility with its base and the parent's
-  semantics after absorbing the change. Record the parent revision, reasoning
-  and validation limits in docs/plans. If parent compatibility is unproven,
-  preserve the original behavior and record the concern for follow-up.
-
 PR title format: `{type}: {description}`. Valid types: `feat:`, `fix:`, `enhance:`, `test:`, `doc:`, `auto:`, `build(deps):`.
 PR body must be non-empty. Issue/doc linking rules:
 - `fix:` — must link issue (e.g. `issue: #123`)
