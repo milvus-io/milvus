@@ -52,6 +52,11 @@ per-channel RPC or L0 materialization is required for these jobs. Absent/false
 flags retain legacy completion: BroadcastAckModule calls HandleCommitVchannel
 before Ack on each business VChannel, and the checker completes the job after
 all channel commits. The RPC is a no-op for new jobs when sent by old nodes.
+Both the RPC and the callback treat a job that importMeta no longer holds as
+already committed and garbage collected, except on a CDC secondary, where the
+replicated CommitImport can precede the local job and the caller keeps waiting.
+A secondary that already garbage collected the job waits forever. A GC tombstone
+(#54425) is the follow-up that closes this case.
 See [Import commit ownership](../../../design-docs/design_docs/wal/broadcast_ack_module.md#8-import-commit-ownership).
 
 ## Resource Key Locking

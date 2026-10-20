@@ -1356,10 +1356,59 @@ func TestCommitImportCallback_BeforeUncommitted_Retry(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Importing, updatedJob.GetState())
 }
 
-func TestCommitImportCallback_MissingJob_Retry(t *testing.T) {
+// mockReplicateConfiguration makes getReplicationRole see cfg as the live
+// channel assignment for the rest of the test. nil means no replication.
+func mockReplicateConfiguration(t *testing.T, cfg *commonpb.ReplicateConfiguration) {
+	t.Helper()
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{ReplicateConfiguration: cfg}, nil
+		}).Build()
+	t.Cleanup(func() {
+		mockAssignment.UnPatch()
+		mockBalance.UnPatch()
+	})
+}
+
+// secondaryReplicateConfiguration returns a topology in which this cluster
+// is the CDC secondary of "primary-cluster".
+func secondaryReplicateConfiguration() *commonpb.ReplicateConfiguration {
+	current := Params.CommonCfg.ClusterPrefix.GetValue()
+	return &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "primary-cluster"},
+			{ClusterId: current},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "primary-cluster", TargetClusterId: current},
+		},
+	}
+}
+
+func TestCommitImportCallback_MissingJob_PrimaryIsNoOp(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, nil)
 
+	// A replayed CommitImport for a job that checkGC already removed must not
+	// keep the broadcast task alive: nothing can create that job again.
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err := callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
+	assert.NoError(t, err)
+	assert.Nil(t, importMeta.GetJob(ctx, 13))
+}
+
+func TestCommitImportCallback_MissingJob_SecondaryRetries(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, secondaryReplicateConfiguration())
+
+	// On a secondary the replicated CommitImport can arrive before the local
+	// Import ack callback creates the job, so the callback must wait.
 	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
 	err := callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
 	assert.Error(t, err)

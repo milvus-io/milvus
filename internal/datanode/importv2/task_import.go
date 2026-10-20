@@ -262,8 +262,12 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 				err = fn(t.ctx, file, rowBuffer, budget, nil)
 				return err, err
 			}
-			// Use blocking allocation - this will wait until memory is available
-			GetMemoryAllocator().BlockingAllocate(t.GetTaskID(), bufferSize)
+			// Wait until memory is available. A canceled task leaves the wait
+			// without charging memory, so there is nothing to release.
+			if err := GetMemoryAllocator().BlockingAllocate(t.ctx, t.GetTaskID(), bufferSize); err != nil {
+				mlog.Warn(t.ctx, "import task canceled while waiting for memory", WrapLogFields(t, mlog.Err(err))...)
+				return err, err
+			}
 			defer func() {
 				GetMemoryAllocator().Release(t.GetTaskID(), bufferSize)
 				debug.FreeOSMemory()

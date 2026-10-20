@@ -3567,6 +3567,15 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		return merr.Status(err), nil
 	}
 	job := s.importMeta.GetJob(ctx, req.GetJobId())
+	if job == nil {
+		forgotten, err := s.importJobForgotten(ctx, req.GetJobId())
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if forgotten {
+			return merr.Success(), nil
+		}
+	}
 	if job != nil && job.GetCommitByCoordinator() {
 		return merr.Success(), nil
 	}
