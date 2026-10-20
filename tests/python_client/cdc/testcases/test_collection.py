@@ -669,7 +669,9 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
                 logger.warning(f"Error flushing or checking downstream stats: {e}")
                 return False
 
-        assert self.wait_for_sync(check_flush, sync_timeout, f"replicate and locally flush collection {collection_name}")
+        assert self.wait_for_sync(
+            check_flush, sync_timeout, f"replicate and locally flush collection {collection_name}"
+        )
 
     def test_load_collection_with_load_fields(self, upstream_client, downstream_client, sync_timeout):
         """Test LOAD_COLLECTION operation with load_fields parameter sync."""
