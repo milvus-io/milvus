@@ -3374,6 +3374,15 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	}
 	jobID := req.GetJobId()
 	vchannel := req.GetVchannel()
+	if s.importMeta.GetJob(ctx, jobID) == nil {
+		forgotten, err := s.importJobForgotten(ctx, jobID)
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if forgotten {
+			return merr.Success(), nil
+		}
+	}
 
 	// Pre-fetch segment IDs for this job+vchannel BEFORE calling HandleCommitVchannel.
 	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);

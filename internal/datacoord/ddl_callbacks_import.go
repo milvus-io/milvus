@@ -211,6 +211,34 @@ func (s *Server) getReplicationRole(ctx context.Context) (replicateutil.Role, bo
 	return helper.GetCurrentCluster().Role(), true, nil
 }
 
+// importJobForgotten reports whether a CommitImport for a job that importMeta
+// does not hold can be acknowledged as already applied.
+//
+// A job is created before any CommitImport for it exists: by ImportV2 on the
+// primary, or by the Import ack callback. So on a cluster that is not a CDC
+// secondary, a missing job at commit time is a job that reached a terminal
+// state and that importChecker.checkGC removed after the retention period. A
+// WAL replay of that CommitImport (StreamingNode restart with an old channel
+// checkpoint) has nothing left to commit, and waiting for the job to appear
+// would block forever.
+//
+// A secondary can receive the replicated CommitImport before its own Import
+// ack callback creates the job, so there the caller must keep waiting. An
+// unknown role (balancer not ready) is reported as an error, so the caller
+// retries instead of guessing.
+func (s *Server) importJobForgotten(ctx context.Context, jobID int64) (bool, error) {
+	role, _, err := s.getReplicationRole(ctx)
+	if err != nil {
+		return false, merr.Wrap(err, "cannot tell whether the import job can still be created")
+	}
+	if role == replicateutil.RoleSecondary {
+		return false, nil
+	}
+	mlog.Info(ctx, "CommitImport refers to a job that was completed and garbage collected, nothing to commit",
+		mlog.FieldJobID(jobID))
+	return true, nil
+}
+
 // jobIDFromDuplicatedBroadcast recovers the original import jobID from the broadcast
 // message the broadcaster returned on an idempotency hit. The broadcaster does not
 // know about import-specific structures, so the decode happens here.
@@ -451,6 +479,13 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 
 	job := c.importMeta.GetJob(ctx, jobID)
 	if job == nil {
+		forgotten, err := c.importJobForgotten(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		if forgotten {
+			return nil
+		}
 		mlog.Info(ctx, "CommitImport: job not found, retry later", mlog.FieldJobID(jobID))
 		return merr.WrapErrImportSysFailedMsg("job %d not found, waiting for import job creation", jobID)
 	}
