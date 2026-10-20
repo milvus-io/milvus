@@ -73,6 +73,11 @@ type Executor struct {
 	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
 	pacer             loadPacer                       // per-node cap on segment loads in flight
 
+	// rejections counts, per segment, the loads in a row the QueryNodes
+	// refused for memory; past ForceLoadAfterRejections the next load goes
+	// out with force_load (see loadSegment).
+	rejections *typeutil.ConcurrentMap[int64, int]
+
 	collectionInfoSingleflight conc.Singleflight[*milvuspb.DescribeCollectionResponse]
 }
 
@@ -95,6 +100,7 @@ func NewExecutor(nodeID int64,
 		nodeMgr:   nodeMgr,
 
 		executingTasks: typeutil.NewConcurrentSet[string](),
+		rejections:     typeutil.NewConcurrentMap[int64, int](),
 	}
 }
 
@@ -287,6 +293,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		loadInfo,
 		indexInfos,
 	)
+	req.ForceLoad = ex.forceLoad(action.SegmentID)
 
 	// get segment's replica first, then get shard leader by replica
 	replica := ex.meta.Get(ctx, task.ReplicaID())
@@ -313,6 +320,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	mlog.Info(context.TODO(), "load segments...")
 	status, err := ex.cluster.LoadSegments(task.Context(), view.Node, req)
 	err = merr.CheckRPCCall(status, err)
+	ex.noteLoadResult(action.SegmentID, req.GetForceLoad(), err)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to load segment", mlog.Err(err))
 		return err
@@ -322,6 +330,37 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	mlog.Info(context.TODO(), "load segments done", mlog.Duration("elapsed", elapsed))
 
 	return nil
+}
+
+// forceLoad reports whether the segment's next load goes out with
+// force_load: its last ForceLoadAfterRejections loads in a row were refused
+// for memory. Every node then sits just under the overload threshold while
+// the cluster as a whole has room; the QueryNode admits the load up to a
+// higher threshold and balance moves memory off the node afterwards.
+func (ex *Executor) forceLoad(segmentID int64) bool {
+	n := paramtable.Get().QueryCoordCfg.ForceLoadAfterRejections.GetAsInt()
+	if n <= 0 {
+		return false
+	}
+	count, _ := ex.rejections.Get(segmentID)
+	return count >= n
+}
+
+// noteLoadResult keeps the rejection count: up on a memory refusal, cleared
+// on any other outcome (a success, or a different failure).
+func (ex *Executor) noteLoadResult(segmentID int64, forced bool, err error) {
+	if forced {
+		metrics.QueryCoordForceLoadTotal.Inc()
+	}
+	if errors.Is(err, merr.ErrSegmentRequestResourceFailed) {
+		metrics.QueryCoordLoadRejectedTotal.WithLabelValues(fmt.Sprint(ex.nodeID)).Inc()
+		count, _ := ex.rejections.Get(segmentID)
+		ex.rejections.Insert(segmentID, count+1)
+		return
+	}
+	if _, had := ex.rejections.GetAndRemove(segmentID); had && forced && err == nil {
+		mlog.Info(context.TODO(), "segment loaded with force_load after repeated memory refusals", mlog.Int64("segmentID", segmentID))
+	}
 }
 
 // If we enable following checking when loading segments,

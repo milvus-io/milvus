@@ -1669,6 +1669,27 @@ func JoinIDPath(ids ...int64) string {
 	return path.Join(idStr...)
 }
 
+// forceLoadKey marks a context whose loads carry force_load from QueryCoord.
+type forceLoadKey struct{}
+
+// WithForceLoad marks ctx so the loads under it are admitted up to
+// ForceLoadMemoryThresholdPercentage instead of the overloaded threshold:
+// QueryCoord sets force_load after a segment was refused for memory several
+// times in a row, when every node sits just under the threshold while the
+// cluster has room; balance moves memory off the node afterwards.
+func WithForceLoad(ctx context.Context) context.Context {
+	return context.WithValue(ctx, forceLoadKey{}, true)
+}
+
+// memoryThresholdFactor is the fraction of total memory a load may fill:
+// the overloaded threshold, or the force-load one for a forced context.
+func memoryThresholdFactor(ctx context.Context) float64 {
+	if forced, _ := ctx.Value(forceLoadKey{}).(bool); forced {
+		return paramtable.Get().QueryNodeCfg.ForceLoadMemoryThresholdPercentage.GetAsFloat()
+	}
+	return paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()
+}
+
 // After introducing the caching layer's lazy loading and eviction mechanisms, most parts of a segment won't be
 // loaded into memory or disk immediately, even if the segment is marked as LOADED. This means physical resource
 // usage may be very low.
@@ -1728,7 +1749,7 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 		mlog.Float64("predictLogicalDiskUsage(MB)", logutil.ToMB(float64(predictLogicalDiskUsage))),
 	)
 
-	logicalMemUsageLimit := uint64(float64(totalMem) * paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
+	logicalMemUsageLimit := uint64(float64(totalMem) * memoryThresholdFactor(ctx))
 	logicalDiskUsageLimit := uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()) * paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
 
 	if predictLogicalMemUsage > logicalMemUsageLimit {
@@ -1867,14 +1888,16 @@ func (loader *segmentLoader) checkLoadingResource(
 		reservedLoadingResource = true
 	} else {
 		// fallback to original segment loading logic
-		if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
+		// The tiered-storage branch above reserves through the caching
+		// layer, whose limit is its own; a forced load relaxes this branch.
+		if predictMemUsage > uint64(float64(totalMem)*memoryThresholdFactor(ctx)) {
 			mlog.Warn(context.TODO(), "load segment failed, OOM if load",
 				mlog.String("resourceType", "Memory"),
 				mlog.Float64("maxSegmentSizeMB", logutil.ToMB(float64(maxSegmentSize))),
 				mlog.Float64("memUsageMB", logutil.ToMB(float64(memUsage))),
 				mlog.Float64("predictMemUsageMB", logutil.ToMB(float64(predictMemUsage))),
 				mlog.Float64("totalMemMB", logutil.ToMB(float64(totalMem))),
-				mlog.Float64("thresholdFactor", paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()),
+				mlog.Float64("thresholdFactor", memoryThresholdFactor(ctx)),
 			)
 			return merr.WrapErrSegmentRequestResourceFailed("Memory")
 		}

@@ -212,6 +212,22 @@ var (
 			Name:      "load_pacer_wait_total",
 			Help:      "segment loads the pacer held back in QueryCoord because the node was at its cap",
 		}, []string{nodeIDLabelName})
+
+	QueryCoordLoadRejectedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "load_rejected_total",
+			Help:      "segment loads a QueryNode refused for memory",
+		}, []string{nodeIDLabelName})
+
+	QueryCoordForceLoadTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "force_load_total",
+			Help:      "segment loads sent with force_load after repeated memory refusals",
+		})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
@@ -238,6 +254,8 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordLastHeartbeatTimeStamp)
 	registry.MustRegister(QueryCoordLoadPacerCap)
 	registry.MustRegister(QueryCoordLoadPacerWaitTotal)
+	registry.MustRegister(QueryCoordLoadRejectedTotal)
+	registry.MustRegister(QueryCoordForceLoadTotal)
 }
 
 // CleanQueryCoordMetricsWithNodeID drops a gone node's per-node gauges.
