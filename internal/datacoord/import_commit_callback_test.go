@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -45,7 +46,7 @@ func newImportCommitCallbackTest(t *testing.T) (*DDLCallbacks, *datacoordkv.Cata
 		ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Uncommitted, CommitByCoordinator: true},
 		tr:        timerecord.NewTimeRecorder("import-commit"),
 	}))
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 	for id, channel := range map[int64]string{10: "v1", 11: "v1", 20: "v2"} {
 		segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: id, CollectionID: 100, PartitionID: 1, InsertChannel: channel,
@@ -306,7 +307,7 @@ func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
 		},
 		tr: timerecord.NewTimeRecorder("import-commit"),
 	}))
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "v1",
 		State: commonpb.SegmentState_Flushed, IsImporting: true, NumOfRows: 10,
