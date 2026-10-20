@@ -3595,6 +3595,14 @@ type queryCoordConfig struct {
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
 
+	// load pacing and adaptive task timeouts
+	LoadPacingEnabled        ParamItem `refreshable:"true"`
+	LoadBandwidthPerCoreMBps ParamItem `refreshable:"true"`
+	LoadPacingSlowFraction   ParamItem `refreshable:"true"`
+	LoadPacingWaitForTick    ParamItem `refreshable:"true"`
+	SegmentTaskRetryTimeout  ParamItem `refreshable:"true"`
+	ChannelTaskRetryTimeout  ParamItem `refreshable:"true"`
+
 	AutoscalePrecheckEnabled ParamItem `refreshable:"true"`
 	AutoscaleEnabled         ParamItem `refreshable:"true"`
 	AutoscaleMaxMemoryLimit  ParamItem `refreshable:"true"`
@@ -3897,22 +3905,48 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.ChannelTaskTimeout = ParamItem{
 		Key:          "queryCoord.channelTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "120000",
+		DefaultValue: "60000",
 		PanicIfEmpty: true,
-		Doc:          "2 minutes",
-		Export:       true,
+		Doc: `Timeout of a channel task's first attempt, in milliseconds (1 minute). A watch that does not finish
+within it is canceled and retried with channelTaskRetryTimeout.`,
+		Export: true,
 	}
 	p.ChannelTaskTimeout.Init(base.mgr)
+
+	p.ChannelTaskRetryTimeout = ParamItem{
+		Key:          "queryCoord.channelTaskRetryTimeout",
+		Version:      "3.1.0",
+		DefaultValue: "300000",
+		Doc: `Timeout, in milliseconds, of a channel watch retried on the same node after its previous attempt ended
+on the deadline (5 minutes), so a delegator that needs longer to catch up converges instead of being
+killed and retried forever. A successful watch resets it. 0 keeps channelTaskTimeout for every attempt.`,
+		Export: true,
+	}
+	p.ChannelTaskRetryTimeout.Init(base.mgr)
 
 	p.SegmentTaskTimeout = ParamItem{
 		Key:          "queryCoord.segmentTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "300000",
+		DefaultValue: "60000",
 		PanicIfEmpty: true,
-		Doc:          "5 minutes",
-		Export:       true,
+		Doc: `Timeout of a segment task's first attempt, in milliseconds (1 minute). The load pacer keeps a
+node from queueing loads, so a load that does not finish within it is unusually slow; it is then
+canceled and retried with segmentTaskRetryTimeout. With loadPacingEnabled=false loads queue on the
+node again and every attempt uses segmentTaskRetryTimeout.`,
+		Export: true,
 	}
 	p.SegmentTaskTimeout.Init(base.mgr)
+
+	p.SegmentTaskRetryTimeout = ParamItem{
+		Key:          "queryCoord.segmentTaskRetryTimeout",
+		Version:      "3.1.0",
+		DefaultValue: "300000",
+		Doc: `Timeout, in milliseconds, of a segment load retried after its previous attempt ended on the deadline
+(5 minutes), so an oversized segment is not canceled and retried forever. A successful load resets the
+segment to segmentTaskTimeout. 0 keeps segmentTaskTimeout for every attempt.`,
+		Export: true,
+	}
+	p.SegmentTaskRetryTimeout.Init(base.mgr)
 
 	p.DistPullInterval = ParamItem{
 		Key:          "queryCoord.distPullInterval",
@@ -4299,6 +4333,51 @@ Set to 0 to disable the penalty period.`,
 		Export: true,
 	}
 	p.ResourceExhaustionPenaltyDuration.Init(base.mgr)
+
+	p.LoadPacingEnabled = ParamItem{
+		Key:          "queryCoord.loadPacingEnabled",
+		Version:      "3.1.0",
+		DefaultValue: "true",
+		Doc: `Pace segment loads per QueryNode by the bytes in flight: the node is sent what it drains within a
+quarter of the task timeout at its believed bandwidth (loadBandwidthPerCoreMBps per core to start, adapted
+to how long loads take), and at most one load per core. The executor otherwise admits far more loads
+than a node's bandwidth serves at once, the rest wait inside the node against the task timeout, and a
+burst of loads times out and is redone. Loads over the budget wait in QueryCoord, where no deadline runs.`,
+		Export: true,
+	}
+	p.LoadPacingEnabled.Init(base.mgr)
+
+	p.LoadBandwidthPerCoreMBps = ParamItem{
+		Key:          "queryCoord.loadBandwidthPerCoreMBps",
+		Version:      "3.1.0",
+		DefaultValue: "32",
+		Doc: `Segment load bandwidth a QueryNode is assumed to have per CPU core, in MiB/s, when the pacer first
+sends it loads (a 16-core node: 512 MiB/s, so up to 7.5 GiB in flight under a 60 s task timeout). The
+pacer then adapts it between an eighth and eight times this: halved after a window of loads that
+took more than loadPacingSlowFraction of their timeout on a saturated node, raised by one core's worth
+per window of fast ones. Measured nodes with local NVMe load at 30-50 MiB/s per core.`,
+		Export: true,
+	}
+	p.LoadBandwidthPerCoreMBps.Init(base.mgr)
+
+	p.LoadPacingSlowFraction = ParamItem{
+		Key:          "queryCoord.loadPacingSlowFraction",
+		Version:      "3.1.0",
+		DefaultValue: "0.5",
+		Doc: `A load that takes more than this fraction of its task timeout on a saturated node counts as slow;
+a window of slow loads halves the node's believed bandwidth, a window of fast ones raises it by one
+core's worth.`,
+		Export: true,
+	}
+	p.LoadPacingSlowFraction.Init(base.mgr)
+
+	p.LoadPacingWaitForTick = ParamItem{
+		Key:          "queryCoord.loadPacingWaitForTick",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Doc:          "Test knob: a load the pacer held back waits for the next dispatch tick instead of being dispatched as soon as a slot frees.",
+	}
+	p.LoadPacingWaitForTick.Init(base.mgr)
 
 	p.ResourceExhaustionCleanupInterval = ParamItem{
 		Key:          "queryCoord.resourceExhaustionCleanupInterval",

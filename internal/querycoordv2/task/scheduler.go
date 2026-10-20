@@ -648,6 +648,7 @@ func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
 	if _, exist := scheduler.executors.GetOrInsert(nodeID, executor); exist {
 		return
 	}
+	executor.dispatch = func() { scheduler.Dispatch(nodeID) }
 	executor.Start(scheduler.ctx)
 	mlog.Info(scheduler.ctx, "add executor for new QueryNode", mlog.Int64("nodeID", nodeID))
 }
@@ -1306,6 +1307,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaSegmentIndex(task)
 		scheduler.segmentTasks.Remove(index)
 		log = mlog.With(mlog.Int64("segmentID", task.SegmentID()))
+		noteSegmentTaskDone(task)
 		if task.Status() == TaskStatusFailed &&
 			task.Err() != nil &&
 			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceTooManyRequests) {
@@ -1316,6 +1318,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		scheduler.channelTasks.Remove(index)
 		log = mlog.With(mlog.String("channel", task.Channel()))
+		noteChannelTaskDone(task)
 
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
