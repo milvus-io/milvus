@@ -519,7 +519,8 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             return;
         }
         if (expr_->column_.data_type_ == DataType::ARRAY &&
-            (expr_->column_.element_level_ || expr_->vals_.empty())) {
+            (expr_->column_.element_level_ || expr_->vals_.empty() ||
+             is_native_list_array_)) {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
@@ -561,6 +562,29 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     template <typename ArrayType, typename ExprValueType, bool ElementLevel>
     VectorPtr
     ExecArrayContainsImpl(EvalCtx& context);
+
+    // Struct element index i for array_contains*(s[i][tags], ...) on a
+    // nested Array field, or kWholeArrayOperand when the row itself is the
+    // operand.
+    template <typename ArrayType, bool ElementLevel>
+    int
+    ArrayContainsNestedIndex() const {
+        if constexpr (std::is_same_v<ArrayType, ArrayValueView> &&
+                      !ElementLevel) {
+            if (IsNestedArrayElementOperand()) {
+                return ParseArraySubscript(expr_->column_.nested_path_);
+            }
+            if (is_nested_array_field_) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "array_contains on nested ARRAY field {} requires "
+                          "a struct element index",
+                          field_id_.get());
+            }
+        }
+        AssertInfo(expr_->column_.nested_path_.empty(),
+                   "[ExecArrayContains]nested path must be null");
+        return kWholeArrayOperand;
+    }
 
     template <typename ExprValueType>
     VectorPtr

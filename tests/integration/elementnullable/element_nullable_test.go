@@ -491,10 +491,10 @@ func (s *ElementNullableSuite) TestGrowingSealedSearchAndExpressions() {
 		s.Contains(err.Error(), "embedding-list search is not supported for element-nullable vector array field "+nullName)
 	}
 
+	// Element-level predicates on element-nullable sub-fields stay rejected.
 	for _, expr := range []string{
 		"element_filter(items, $[ints] > 0)",
 		"MATCH_ANY(items, $[ints] > 0)",
-		"array_contains(items[ints], 11)",
 	} {
 		result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 			CollectionName: name, Expr: expr, OutputFields: []string{"pk"},
@@ -503,6 +503,34 @@ func (s *ElementNullableSuite) TestGrowingSealedSearchAndExpressions() {
 		err = merr.Error(result.GetStatus())
 		s.Require().Error(err)
 		s.Contains(err.Error(), "not supported")
+	}
+
+	// Row-level filters: ints is [11, NULL], [] and a NULL struct row. A null
+	// element matches nothing in array_contains and a subscript on it is
+	// UNKNOWN, so NOT selects neither the null element nor the null row.
+	for expr, want := range map[string][]int64{
+		"array_contains(items[ints], 11)":           {1},
+		"not array_contains(items[ints], 11)":       {2},
+		"array_contains(items[ints], 0)":            nil,
+		"array_length(items[ints]) == 2":            {1},
+		"items[1][ints] == 0":                       nil,
+		"not (items[1][ints] == 0)":                 nil,
+		"items[0][ints] == 11":                      {1},
+		"items[ints] != [11]":                       {1, 2},
+		"array_length(items[0][nested_ints]) == 3":  {1},
+		"array_contains(items[0][nested_ints], 23)": {1},
+		"array_contains(items[0][nested_ints], 0)":  nil,
+		"items[1][nested_ints] == []":               nil,
+	} {
+		resp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+			CollectionName: name, Expr: expr, OutputFields: []string{"pk"},
+		})
+		s.Require().NoError(merr.CheckRPCCall(resp, err), expr)
+		var got []int64
+		if fields := resp.GetFieldsData(); len(fields) > 0 {
+			got = fields[0].GetScalars().GetLongData().GetData()
+		}
+		s.ElementsMatch(want, got, expr)
 	}
 
 	resp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{

@@ -4197,6 +4197,393 @@ func TestExpr_NestedArrayContainsInMatch(t *testing.T) {
 	}
 }
 
+// newStructRowFilterSchema adds to struct_array an Array<VarChar> sub-field
+// (nested), an Array<Array<Int64>> sub-field (deeper), an element-nullable
+// scalar sub-field (en) and an element-nullable vector sub-field (en_vec).
+func newStructRowFilterSchema(t *testing.T) *typeutil.SchemaHelper {
+	schema := newTestSchema(true)
+	leaf := func(dataType schemapb.DataType) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: dataType}}
+	}
+	array := func(element *schemapb.TypeSchema) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: element}}
+	}
+	schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields,
+		&schemapb.FieldSchema{
+			FieldID: 10001, Name: "struct_array[nested]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array, TypeSchema: array(array(leaf(schemapb.DataType_VarChar))),
+		},
+		&schemapb.FieldSchema{
+			FieldID: 10002, Name: "struct_array[deeper]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array, TypeSchema: array(array(array(leaf(schemapb.DataType_Int64)))),
+		},
+		&schemapb.FieldSchema{
+			FieldID: 10003, Name: "struct_array[en]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64, ElementNullable: true,
+		},
+		&schemapb.FieldSchema{
+			FieldID: 10004, Name: "struct_array[en_vec]", DataType: schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+		},
+	)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return helper
+}
+
+func parseSearchPredicates(t *testing.T, helper *typeutil.SchemaHelper, expr string) *planpb.Expr {
+	plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{}, nil, nil)
+	require.NoError(t, err, expr)
+	predicates := plan.GetVectorAnns().GetPredicates()
+	require.NotNil(t, predicates, expr)
+	return predicates
+}
+
+func assertExprErrorContains(t *testing.T, helper *typeutil.SchemaHelper, expr string, want string) {
+	_, err := ParseExpr(helper, expr, nil)
+	require.Error(t, err, expr)
+	assert.Contains(t, err.Error(), want, expr)
+}
+
+// struct_array[i][sub] on an Array<T> sub-field is one Array<T> value:
+// data_type=Array, nested_path=[i], element_type=T.
+func TestExpr_StructIndexNestedArrayAsArray(t *testing.T) {
+	helper := newStructRowFilterSchema(t)
+	assertColumn := func(t *testing.T, columnInfo *planpb.ColumnInfo, index string) {
+		require.NotNil(t, columnInfo)
+		assert.Equal(t, int64(10001), columnInfo.GetFieldId())
+		assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType())
+		assert.Equal(t, schemapb.DataType_VarChar, columnInfo.GetElementType())
+		assert.Equal(t, []string{index}, columnInfo.GetNestedPath())
+		assert.False(t, columnInfo.GetIsElementLevel())
+	}
+
+	equalities := []struct {
+		expr   string
+		op     planpb.OpType
+		values []string
+	}{
+		{`struct_array[0][nested] == ["A", "B"]`, planpb.OpType_Equal, []string{"A", "B"}},
+		{`struct_array[0][nested] != ["A"]`, planpb.OpType_NotEqual, []string{"A"}},
+		{`["A"] == struct_array[0][nested]`, planpb.OpType_Equal, []string{"A"}},
+		{`struct_array[0][nested] == []`, planpb.OpType_Equal, nil},
+	}
+	for _, test := range equalities {
+		ure := parseSearchPredicates(t, helper, test.expr).GetUnaryRangeExpr()
+		require.NotNil(t, ure, test.expr)
+		assert.Equal(t, test.op, ure.GetOp(), test.expr)
+		assertColumn(t, ure.GetColumnInfo(), "0")
+		arrayVal := ure.GetValue().GetArrayVal()
+		require.NotNil(t, arrayVal, test.expr)
+		assert.Equal(t, schemapb.DataType_VarChar, arrayVal.GetElementType(), test.expr)
+		require.Len(t, arrayVal.GetArray(), len(test.values), test.expr)
+		for i, value := range test.values {
+			assert.Equal(t, value, arrayVal.GetArray()[i].GetStringVal(), test.expr)
+		}
+	}
+
+	notExpr := parseSearchPredicates(t, helper, `not (struct_array[1][nested] == ["A"])`).GetUnaryExpr()
+	require.NotNil(t, notExpr)
+	assertColumn(t, notExpr.GetChild().GetUnaryRangeExpr().GetColumnInfo(), "1")
+
+	contains := []struct {
+		expr     string
+		op       planpb.JSONContainsExpr_JSONOp
+		elements []string
+	}{
+		{`array_contains(struct_array[2][nested], "A")`, planpb.JSONContainsExpr_Contains, []string{"A"}},
+		{`array_contains_any(struct_array[2][nested], ["A", "B"])`, planpb.JSONContainsExpr_ContainsAny, []string{"A", "B"}},
+		{`array_contains_all(struct_array[2][nested], ["A", "B"])`, planpb.JSONContainsExpr_ContainsAll, []string{"A", "B"}},
+	}
+	for _, test := range contains {
+		jce := parseSearchPredicates(t, helper, test.expr).GetJsonContainsExpr()
+		require.NotNil(t, jce, test.expr)
+		assert.Equal(t, test.op, jce.GetOp(), test.expr)
+		assertColumn(t, jce.GetColumnInfo(), "2")
+		require.Len(t, jce.GetElements(), len(test.elements), test.expr)
+		for i, element := range test.elements {
+			assert.Equal(t, element, jce.GetElements()[i].GetStringVal(), test.expr)
+		}
+	}
+
+	length := parseSearchPredicates(t, helper, `array_length(struct_array[3][nested]) == 2`).GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, length)
+	assert.Equal(t, planpb.ArithOpType_ArrayLength, length.GetArithOp())
+	assert.Equal(t, planpb.OpType_Equal, length.GetOp())
+	assert.Equal(t, int64(2), length.GetValue().GetInt64Val())
+	assertColumn(t, length.GetColumnInfo(), "3")
+
+	t.Run("contains template values use leaf type", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `array_contains_any(struct_array[0][nested], {values})`,
+			map[string]*schemapb.TemplateValue{
+				"values": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_VarChar, []string{"A", "B"})),
+			})
+		require.NoError(t, err)
+		jce := expr.GetJsonContainsExpr()
+		require.NotNil(t, jce)
+		assertColumn(t, jce.GetColumnInfo(), "0")
+		require.Len(t, jce.GetElements(), 2)
+
+		_, err = ParseExpr(helper, `array_contains_any(struct_array[0][nested], {values})`,
+			map[string]*schemapb.TemplateValue{
+				"values": generateTemplateValue(schemapb.DataType_Array,
+					generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1})),
+			})
+		require.Error(t, err)
+	})
+
+	// Literals are type checked against the leaf type T.
+	for _, expr := range []string{
+		`struct_array[0][nested] == [1]`,
+		`struct_array[0][nested] != [1, 2]`,
+		`array_contains(struct_array[0][nested], 1)`,
+		`array_contains_any(struct_array[0][nested], [1])`,
+		`array_contains_all(struct_array[0][nested], [1])`,
+	} {
+		assertInvalidExpr(t, helper, expr)
+	}
+
+	// Scalar operators on the Array<T> element stay rejected.
+	const scalarErr = "scalar operations are not supported on an element of a nested array field"
+	for _, expr := range []string{
+		`struct_array[0][nested] > 1`,
+		`struct_array[0][nested] <= "a"`,
+		`struct_array[0][nested] in ["a"]`,
+		`struct_array[0][nested] not in [["a"]]`,
+		`struct_array[0][nested] like "a%"`,
+		`struct_array[0][nested] =~ "a"`,
+		`"a" < struct_array[0][nested] < "c"`,
+		`"c" > struct_array[0][nested] > "a"`,
+		`struct_array[0][nested] + 1 == 2`,
+		`MATCH_ANY(struct_array, $[nested] in [["abc"]])`,
+	} {
+		assertExprErrorContains(t, helper, expr, scalarErr)
+	}
+	const literalErr = "an element of a nested array struct sub-field can only be compared with an array literal"
+	assertExprErrorContains(t, helper, `struct_array[0][nested] == "a"`, literalErr)
+	assertExprErrorContains(t, helper, `struct_array[0][nested] != struct_array[1][nested]`, literalErr)
+	_, err := ParseExpr(helper, `struct_array[0][nested] == {values}`, map[string]*schemapb.TemplateValue{
+		"values": generateTemplateValue(schemapb.DataType_Array,
+			generateTemplateArrayValue(schemapb.DataType_VarChar, []string{"A"})),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template values are not supported when comparing an element of a nested array struct sub-field")
+
+	// Only an Array<scalar> element can be used as an array.
+	const deeperErr = "only an element of an Array<scalar> struct sub-field can be used as an array"
+	assertExprErrorContains(t, helper, `struct_array[0][deeper] == [1]`, deeperErr)
+	assertExprErrorContains(t, helper, `array_contains(struct_array[0][deeper], 1)`, deeperErr)
+	assertExprErrorContains(t, helper, `array_length(struct_array[0][deeper]) == 1`, deeperErr)
+	assertExprErrorContains(t, helper, `array_length(struct_array[0][sub_int]) == 1`,
+		"array_length on struct_array[index][sub_field] requires an Array<scalar> struct sub-field")
+}
+
+func TestExpr_StructSubFieldRowFilterRejections(t *testing.T) {
+	helper := newStructRowFilterSchema(t)
+
+	// A whole Array<T> sub-field column holds Array<Array<T>> per row.
+	for _, test := range []struct{ expr, want string }{
+		{`array_contains(struct_array[nested], "a")`, "rewrite it as MATCH_ANY(struct_array, array_contains($[nested], ...))"},
+		{`array_contains_any(struct_array[nested], ["a"])`, "rewrite it as MATCH_ANY(struct_array, array_contains_any($[nested], ...))"},
+		{`array_contains_all(struct_array[nested], ["a"])`, "rewrite it as MATCH_ANY(struct_array, array_contains_all($[nested], ...))"},
+		{`ARRAY_CONTAINS(struct_array[nested], "a")`, "rewrite it as MATCH_ANY(struct_array, ARRAY_CONTAINS($[nested], ...))"},
+	} {
+		assertExprErrorContains(t, helper, test.expr, test.want)
+	}
+
+	const wholeColumnErr = "== and != are not supported on nested array field, only single-level array fields can be compared with an array literal"
+	for _, expr := range []string{
+		`struct_array[nested] == [["a"], ["b"]]`,
+		`struct_array[nested] != [["a"], ["b"]]`,
+		`struct_array[nested] == []`,
+		`[["a"]] != struct_array[nested]`,
+	} {
+		assertExprErrorContains(t, helper, expr, wholeColumnErr)
+	}
+	_, err := ParseExpr(helper, `struct_array[nested] == {values}`, map[string]*schemapb.TemplateValue{
+		"values": generateTemplateValue(schemapb.DataType_Array,
+			generateTemplateArrayValue(schemapb.DataType_VarChar, []string{"A"})),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), wholeColumnErr)
+
+	for _, test := range []struct{ expr, want string }{
+		{`struct_array[en] is null`, "IS NULL / IS NOT NULL is not supported on struct sub-field struct_array[en]; it can only be applied to the struct array field struct_array"},
+		{`struct_array[en] IS NOT NULL`, "IS NULL / IS NOT NULL is not supported on struct sub-field struct_array[en]"},
+		{`struct_array[0][en] is null`, "IS NULL / IS NOT NULL is not supported on struct sub-field struct_array[0][en]"},
+		{`struct_array[0][nested] is not null`, "IS NULL / IS NOT NULL is not supported on struct sub-field struct_array[0][nested]"},
+	} {
+		assertExprErrorContains(t, helper, test.expr, test.want)
+	}
+	assertValidExpr(t, helper, `struct_array is null`)
+	assertValidExpr(t, helper, `struct_array is not null`)
+
+	// Sub-field first, then index, stays unsupported by the grammar.
+	for _, expr := range []string{
+		`struct_array[en][0] > 1`,
+		`struct_array[sub_int][0] in [1]`,
+		`struct_array[nested][0] == ["a"]`,
+	} {
+		assertExprErrorContains(t, helper, expr, "invalid expression")
+	}
+	assertInvalidExpr(t, helper, `array_contains(struct_array[nested][0], "a")`)
+}
+
+// ArrayField[i] and struct_array[i][sub] on a scalar sub-field address one
+// scalar element, so array functions on them are rejected.
+func TestExpr_ArrayFuncOnScalarArrayElement(t *testing.T) {
+	helper := newStructRowFilterSchema(t)
+	assertRejected := func(t *testing.T, expr string, values map[string]*schemapb.TemplateValue, want string) {
+		_, err := ParseExpr(helper, expr, values)
+		require.Error(t, err, expr)
+		require.ErrorIs(t, err, merr.ErrQueryPlan, expr)
+		assert.Contains(t, err.Error(), want, expr)
+	}
+	const notArray = "is a single array element, not an array"
+
+	for _, test := range []struct{ expr, want string }{
+		{`array_contains(ArrayField[0], 1)`, "array_contains requires an array operand, but ArrayField[0] " + notArray},
+		{`array_contains_any(ArrayField[0], [1, 2])`, "array_contains_any requires an array operand, but ArrayField[0] " + notArray},
+		{`array_contains_all(ArrayField[1], [1, 2])`, "array_contains_all requires an array operand, but ArrayField[1] " + notArray},
+		{`json_contains(ArrayField[0], 1)`, "json_contains requires an array operand, but ArrayField[0] " + notArray},
+		{`ARRAY_CONTAINS(StringArrayField[0], "a")`, "ARRAY_CONTAINS requires an array operand, but StringArrayField[0] " + notArray},
+		{`not array_contains(ArrayField[0], 1)`, notArray},
+		{`array_contains(struct_array[0][sub_int], 1)`, "array_contains requires an array operand, but struct_array[0][sub_int] " + notArray},
+		{`array_contains_any(struct_array[0][sub_int], [1, 2])`, "array_contains_any requires an array operand, but struct_array[0][sub_int] " + notArray},
+		{`array_contains_all(struct_array[1][sub_str], ["a"])`, "array_contains_all requires an array operand, but struct_array[1][sub_str] " + notArray},
+		{`array_contains(struct_array[0][en], 1)`, "array_contains requires an array operand, but struct_array[0][en] " + notArray},
+		{`array_length(ArrayField[0]) == 1`, "array_length requires an array operand, but ArrayField[0] " + notArray},
+		{`array_length(StringArrayField[2]) > 0`, "array_length requires an array operand, but StringArrayField[2] " + notArray},
+	} {
+		assertRejected(t, test.expr, nil, test.want)
+	}
+
+	int64Value := generateTemplateValue(schemapb.DataType_Int64, int64(1))
+	int64Array := generateTemplateValue(schemapb.DataType_Array,
+		generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2}))
+	for _, test := range []struct {
+		expr  string
+		value *schemapb.TemplateValue
+	}{
+		{`array_contains(ArrayField[0], {v})`, int64Value},
+		{`array_contains_any(struct_array[0][sub_int], {v})`, int64Array},
+		{`array_contains_all(ArrayField[0], {v})`, int64Array},
+		{`array_length(ArrayField[0]) == {v}`, int64Value},
+	} {
+		assertRejected(t, test.expr, map[string]*schemapb.TemplateValue{"v": test.value}, notArray)
+	}
+
+	// ==/!= of a scalar element with an array literal was already rejected by
+	// the cast to the element type, as was array_length(struct_array[i][sub])
+	// on a scalar sub-field.
+	for _, expr := range []string{
+		`ArrayField[0] == [1, 2]`,
+		`ArrayField[0] != [1, 2]`,
+		`[1, 2] == ArrayField[0]`,
+		`ArrayField[0] == []`,
+		`struct_array[0][sub_int] == [1, 2]`,
+		`struct_array[0][sub_int] != [1]`,
+		`[1] != struct_array[0][sub_int]`,
+		`array_length(struct_array[0][sub_int]) == 1`,
+	} {
+		assertInvalidExpr(t, helper, expr)
+	}
+	_, err := ParseExpr(helper, `ArrayField[0] == {v}`, map[string]*schemapb.TemplateValue{"v": int64Array})
+	require.Error(t, err)
+
+	for _, expr := range []string{
+		// An element of an Array<T> struct sub-field is an Array<T>.
+		`array_contains(struct_array[0][nested], "a")`,
+		`array_contains_any(struct_array[0][nested], ["a", "b"])`,
+		`array_contains_all(struct_array[0][nested], ["a", "b"])`,
+		`array_length(struct_array[0][nested]) == 1`,
+		// Whole columns.
+		`array_contains(ArrayField, 1)`,
+		`array_contains_any(ArrayField, [1, 2])`,
+		`array_contains_all(StringArrayField, ["a"])`,
+		`array_length(ArrayField) == 1`,
+		`array_contains(struct_array[sub_int], 1)`,
+		`array_contains_any(struct_array[sub_str], ["a"])`,
+		// JSON paths, including the dynamic field.
+		`json_contains(JSONField["a"][0], 1)`,
+		`array_contains(JSONField["a"], 1)`,
+		`json_contains_any(JSONField["a"][0], [1, 2])`,
+		`array_length(JSONField["a"][0]) == 1`,
+		`json_contains(dyn[0], 1)`,
+		// Scalar operators on a scalar element.
+		`ArrayField[0] == 1`,
+		`struct_array[0][sub_int] > 1`,
+	} {
+		assertValidExpr(t, helper, expr)
+	}
+}
+
+// Row-level operators on element-nullable sub-fields parse like those on any
+// other single-level sub-field.
+func TestExpr_ElementNullableStructSubFieldRowFilter(t *testing.T) {
+	helper := newStructRowFilterSchema(t)
+	assertColumn := func(t *testing.T, expr string, columnInfo *planpb.ColumnInfo, nestedPath []string) {
+		require.NotNil(t, columnInfo, expr)
+		assert.Equal(t, int64(10003), columnInfo.GetFieldId(), expr)
+		assert.Equal(t, schemapb.DataType_Array, columnInfo.GetDataType(), expr)
+		assert.Equal(t, schemapb.DataType_Int64, columnInfo.GetElementType(), expr)
+		assert.Equal(t, nestedPath, columnInfo.GetNestedPath(), expr)
+	}
+
+	for _, expr := range []string{`struct_array[0][en] > 1`, `struct_array[0][en] == 1`, `struct_array[0][en] != 1`} {
+		assertColumn(t, expr, parseSearchPredicates(t, helper, expr).GetUnaryRangeExpr().GetColumnInfo(), []string{"0"})
+	}
+	expr := `struct_array[1][en] in [1, 2]`
+	assertColumn(t, expr, parseSearchPredicates(t, helper, expr).GetTermExpr().GetColumnInfo(), []string{"1"})
+	expr = `1 < struct_array[0][en] < 3`
+	assertColumn(t, expr, parseSearchPredicates(t, helper, expr).GetBinaryRangeExpr().GetColumnInfo(), []string{"0"})
+
+	for _, test := range []struct {
+		expr string
+		op   planpb.OpType
+	}{
+		{`struct_array[en] == [1, 2]`, planpb.OpType_Equal},
+		{`struct_array[en] != [1, 2]`, planpb.OpType_NotEqual},
+	} {
+		ure := parseSearchPredicates(t, helper, test.expr).GetUnaryRangeExpr()
+		require.NotNil(t, ure, test.expr)
+		assert.Equal(t, test.op, ure.GetOp(), test.expr)
+		assertColumn(t, test.expr, ure.GetColumnInfo(), nil)
+	}
+	assertValidExpr(t, helper, `struct_array[sub_int] == [1, 2]`)
+	assertValidExpr(t, helper, `struct_array[sub_int] != [1, 2]`)
+
+	// A whole-column == [] is normalized to array_length == 0.
+	expr = `struct_array[en] == []`
+	emptyLength := parseSearchPredicates(t, helper, expr).GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, emptyLength)
+	assert.Equal(t, planpb.ArithOpType_ArrayLength, emptyLength.GetArithOp())
+	assertColumn(t, expr, emptyLength.GetColumnInfo(), nil)
+
+	for _, expr := range []string{
+		`array_contains(struct_array[en], 1)`,
+		`array_contains_any(struct_array[en], [1, 2])`,
+		`array_contains_all(struct_array[en], [1, 2])`,
+	} {
+		assertColumn(t, expr, parseSearchPredicates(t, helper, expr).GetJsonContainsExpr().GetColumnInfo(), nil)
+	}
+
+	expr = `array_length(struct_array[en]) == 2`
+	length := parseSearchPredicates(t, helper, expr).GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, length)
+	assert.Equal(t, planpb.ArithOpType_ArrayLength, length.GetArithOp())
+	assertColumn(t, expr, length.GetColumnInfo(), nil)
+
+	vectorLength := parseSearchPredicates(t, helper, `array_length(struct_array[en_vec]) > 0`).GetBinaryArithOpEvalRangeExpr()
+	require.NotNil(t, vectorLength)
+	assert.Equal(t, planpb.ArithOpType_ArrayLength, vectorLength.GetArithOp())
+	assert.Equal(t, int64(10004), vectorLength.GetColumnInfo().GetFieldId())
+	assert.Equal(t, schemapb.DataType_ArrayOfVector, vectorLength.GetColumnInfo().GetDataType())
+	assert.Equal(t, schemapb.DataType_FloatVector, vectorLength.GetColumnInfo().GetElementType())
+}
+
 func TestExpr_StructIndexField(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

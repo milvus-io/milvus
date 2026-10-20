@@ -41,7 +41,7 @@ expr:
 	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' fieldName ',' expr ')'  # SpatialBinary
 	| STDWithin'('fieldName',' expr',' expr')'                                                             # STDWithin
 	| STIsValid'('fieldName')'                                  			 	                            # STIsValid
-	| ArrayLength'('(fieldName | JSONIdentifier | StructFieldIdentifier | StructSubFieldIdentifier)')'      # ArrayLength
+	| ArrayLength'('(fieldName | JSONIdentifier | StructFieldIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier)')'      # ArrayLength
 	| function=Identifier '(' field=fieldReference ',' expr ',' option=Identifier ASSIGN kind=Identifier ')' # MembershipMatchWithOption
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
 	| expr op1 = (LT | LE) (fieldName | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (LT | LE) expr	# Range
@@ -53,8 +53,8 @@ expr:
 	| expr BOR expr											                                                # BitOr
 	| expr AND expr											                                                # LogicalAnd
 	| expr OR expr											                                                # LogicalOr
-	| (fieldName | JSONIdentifier) ISNULL                                                                  # IsNull
-	| (fieldName | JSONIdentifier) ISNOTNULL                                                               # IsNotNull;
+	| (fieldName | JSONIdentifier | StructFieldIdentifier | StructIndexFieldIdentifier) ISNULL             # IsNull
+	| (fieldName | JSONIdentifier | StructFieldIdentifier | StructIndexFieldIdentifier) ISNOTNULL          # IsNotNull;
 
 // These keywords retain their specialized syntax while also naming fields.
 // Operators and constants remain reserved, and generic function names and

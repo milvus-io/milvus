@@ -404,26 +404,31 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
-    int index = -1;
-    if (expr_->column_.nested_path_.size() > 0) {
-        index = std::stoi(expr_->column_.nested_path_[0]);
-    }
+    int index = ParseArraySubscript(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
         arg_inited_ = true;
     }
 
-    if (arg_set_->Empty()) {
+    // An empty set matches nothing. A subscripted operand is still read,
+    // because a missing or null element is UNKNOWN, not FALSE.
+    if (arg_set_->Empty() && index == kWholeArrayOperand) {
         res.reset();
         MoveCursor();
         return res_vec;
     }
 
+    if (is_nested_array_field_) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "nested ARRAY field {} does not support element term "
+                  "predicates",
+                  field_id_.get());
+    }
     int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayView* data,
+    auto make_sub_batch = [&]<typename ArrayType>() {
+        return [&processed_cursor, &
+                bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+            const ArrayType* data,
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
@@ -431,62 +436,48 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             TargetBitmapView valid_res,
             int index,
             const std::shared_ptr<MultiElement>& term_set) {
-        if (!term_set->Empty()) {
             AssertInfo(index >= 0,
                        "array element term predicate requires nested path");
-        }
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
-        if (data == nullptr) {
+            // If data is nullptr, this chunk was skipped by SkipIndex.
+            // We only need to update processed_cursor for bitmap_input indexing.
+            if (data == nullptr) {
+                processed_cursor += size;
+                return;
+            }
+            bool has_bitmap_input = !bitmap_input.empty();
+            for (int i = 0; i < size; ++i) {
+                auto offset = i;
+                if constexpr (filter_type == FilterType::random) {
+                    offset = (offsets) ? offsets[i] : i;
+                }
+                if (valid_data && !valid_data[offset]) {
+                    res[i] = valid_res[i] = false;
+                    continue;
+                }
+                if (!HasArrayElementAt(data[offset], index)) {
+                    res[i] = false;
+                    valid_res[i] = false;
+                    continue;
+                }
+                // Checked before the read: an empty set's value type is a
+                // placeholder, not the element type.
+                if (term_set->Empty()) {
+                    res[i] = false;
+                    continue;
+                }
+                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                    continue;
+                }
+                auto value =
+                    data[offset].template get_data_unchecked<GetType>(index);
+                res[i] = term_set->In(ValueType(value));
+            }
             processed_cursor += size;
-            return;
-        }
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (term_set->Empty()) {
-                res[i] = false;
-                continue;
-            }
-            if (index >= data[offset].length()) {
-                res[i] = false;
-                valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            auto value = data[offset].get_data_unchecked<GetType>(index);
-            res[i] = term_set->In(ValueType(value));
-        }
-        processed_cursor += size;
+        };
     };
 
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size =
-            ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    index,
-                                                    arg_set_);
-    } else {
-        processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
-                                                              std::nullptr_t{},
-                                                              res,
-                                                              valid_res,
-                                                              index,
-                                                              arg_set_);
-    }
+    int64_t processed_size = ProcessArrayRows(
+        make_sub_batch, input, res, valid_res, index, arg_set_);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
