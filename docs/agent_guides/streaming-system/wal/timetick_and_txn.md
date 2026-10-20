@@ -56,6 +56,14 @@ A replicated Commit interrupted by WAL cancellation/fencing stays unresolved unt
 recovery; it is neither marked committed nor reset for retry on the old writer.
 Ordinary backend errors retry below the interceptor. See
 [Append retry and writer lifetime](../walbackend/walbackend.md#append-retry-and-writer-lifetime).
+
+Force-fail, local Flush and ForcePromote use the same terminal-session cleanup:
+mark unfinished sessions rolled back, release references, remove them from active
+and recovered maps, and notify recovery/shutdown waiters. Completed sessions keep
+their committed outcome. Only the selection differs: ordinary exclusive operations
+select local sessions, local Flush also selects receiving sessions in its scope,
+and ForcePromote selects all sessions. Terminal state releases confirmation
+barriers immediately instead of relying on the local lease to expire.
 Local Flush durably aborts scoped receiving sessions, allowing CDC to replay the
 full transaction. See [Local Flush Control](local-flush.md).
 
@@ -66,6 +74,10 @@ ManualFlush therefore resolves only that business VChannel's transactions; Flush
 resolves the whole PChannel. Incomplete replicated transactions need not finish
 before a local Flush: its durable abort boundary allows the complete transaction
 to be replayed with new local segment assignments.
+
+At consumption, every ManualFlush/FlushAll immediately discards unfinished
+transactions in the same scope, regardless of `_ur` or replication origin.
+ManualFlush on CChannel does not abort business transactions.
 
 Distinguish three kinds of duplicate when reasoning about `body_cnt`:
 

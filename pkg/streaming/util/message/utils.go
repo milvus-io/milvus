@@ -61,7 +61,7 @@ type ReplicateHeader struct {
 	VChannel               string
 }
 
-// IsLocalFlush reports whether this is a cluster-local transaction abort boundary.
+// IsLocalFlush reports whether this is a locally originated, unreplicable explicit flush.
 func IsLocalFlush(msg BasicMessage) bool {
 	return msg.IsUnreplicable() && msg.ReplicateHeader() == nil &&
 		(msg.MessageType() == MessageTypeManualFlush || msg.MessageType() == MessageTypeFlushAll)

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -17,6 +18,62 @@ import (
 )
 
 var idAllocator = typeutil.NewIDAllocator()
+
+func TestFlushAbortsScopedTransactions(t *testing.T) {
+	for _, origin := range []string{"local", "historical", "replicated"} {
+		t.Run(origin, func(t *testing.T) {
+			b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+			for i, vchannel := range []string{"v1", "v2"} {
+				begin := message.NewBeginTxnMessageBuilderV2().WithVChannel(vchannel).
+					WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
+					MustBuildMutable().WithTimeTick(uint64(i + 1)).WithLastConfirmedUseMessageID().
+					WithTxnContext(message.TxnContext{TxnID: message.TxnID(i + 1), Keepalive: message.TxnKeepaliveInfinite}).
+					IntoImmutableMessage(walimplstest.NewTestMessageID(int64(i + 1)))
+				b.HandleImmutableMessages([]message.ImmutableMessage{begin}, begin.TimeTick())
+			}
+			flush := func(msg message.MutableMessage, ts uint64) {
+				if origin == "replicated" {
+					msg = msg.WithReplicateHeader(&message.ReplicateHeader{
+						ClusterID: "source", VChannel: msg.VChannel(), TimeTick: ts,
+						MessageID:              walimplstest.NewTestMessageID(int64(ts)),
+						LastConfirmedMessageID: walimplstest.NewTestMessageID(0),
+					})
+				}
+				immutable := msg.WithTimeTick(ts).WithLastConfirmedUseMessageID().
+					IntoImmutableMessage(walimplstest.NewTestMessageID(int64(ts)))
+				require.Equal(t, []message.ImmutableMessage{immutable}, b.HandleImmutableMessages([]message.ImmutableMessage{immutable}, ts))
+			}
+			manualFlush := func(vchannel string) message.MutableMessage {
+				builder := message.NewManualFlushMessageBuilderV2().WithVChannel(vchannel).
+					WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{})
+				if origin == "local" {
+					builder.WithUnreplicable()
+				}
+				return builder.MustBuildMutable()
+			}
+
+			bytesBefore := b.Bytes()
+			flush(manualFlush("p1_vcchan"), 3)
+			require.Len(t, b.builders, 2, "control-channel flush must not abort data transactions")
+			require.Equal(t, bytesBefore, b.Bytes())
+
+			flush(manualFlush("v1"), 4)
+			require.NotContains(t, b.builders, message.TxnID(1))
+			require.Contains(t, b.builders, message.TxnID(2))
+			require.Less(t, b.Bytes(), bytesBefore)
+			require.Len(t, b.Snapshot().builders, 1, "recovery must not revive the aborted prefix")
+
+			all := message.NewFlushAllMessageBuilderV2().WithAllVChannel().
+				WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{})
+			if origin == "local" {
+				all.WithUnreplicable()
+			}
+			flush(all.MustBuildMutable(), 5)
+			require.Empty(t, b.builders)
+			require.Zero(t, b.Bytes())
+		})
+	}
+}
 
 func TestTxnBuffer(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())

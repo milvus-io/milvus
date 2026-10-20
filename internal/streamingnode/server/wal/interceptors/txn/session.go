@@ -240,7 +240,7 @@ func (s *TxnSession) Cleanup() {
 }
 
 // abort terminates a session under the exclusive WAL lock. Marking the outcome
-// is necessary for LastConfirmedMessageID to pass an infinite-lease replica txn.
+// lets LastConfirmedMessageID advance without waiting for the session's lease.
 func (s *TxnSession) abort() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

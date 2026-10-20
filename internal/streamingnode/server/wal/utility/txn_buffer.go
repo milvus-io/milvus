@@ -59,7 +59,8 @@ func (b *TxnBuffer) Snapshot() *TxnBuffer {
 func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts uint64) []message.ImmutableMessage {
 	result := make([]message.ImmutableMessage, 0, len(msgs))
 	for _, msg := range msgs {
-		if message.IsLocalFlush(msg) {
+		// Flush is an abort boundary regardless of origin or replication policy.
+		if msg.MessageType() == message.MessageTypeManualFlush || msg.MessageType() == message.MessageTypeFlushAll {
 			for id, builder := range b.builders {
 				begin, _ := builder.Messages()
 				if msg.MessageType() == message.MessageTypeFlushAll ||

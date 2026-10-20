@@ -31,8 +31,9 @@ promise that the preceding Drop has completed persistence or ACK. BroadcastAck
 retains normal ResourceKey ordering without a special VChannel dependency; if a
 replicated rename changed the name keys, the empty Flush may ACK ahead of Drop.
 The unfinished Drop still blocks the global recovery checkpoint through its own
-handle. Other errors and historical/replicated flushes retain their existing behavior. Replicated DDL does not acquire the local API resource locks;
-those locks alone cannot prevent this race. No ACK is synthesized outside WAL.
+handle. Other errors and historical/replicated flushes retain their existing
+append-error behavior. Replicated DDL does not acquire the local API resource
+locks; those locks alone cannot prevent this race. No ACK is synthesized outside WAL.
 
 ## Abort and replay against replication
 
@@ -48,9 +49,12 @@ ManualFlush's CChannel copy does not abort business transactions. Other VChannel
 on the same PChannel remain unaffected. Ordinary non-flush exclusive operations
 continue to skip replicated sessions.
 
-The consumer TxnBuffer applies the same abort boundary before forwarding a local
-flush. Thus a WAL reopen cannot recover a pre-flush partial transaction. Only the
-replayed body's newly assigned local segments can appear in the committed txn.
+The consumer TxnBuffer treats every ManualFlush and FlushAll as a scoped abort
+boundary, including historical unmarked and replicated flushes. `_ur` controls
+replication policy, not transaction abort semantics. Cleanup is immediate rather
+than waiting for transaction expiry. Thus a WAL reopen cannot recover a pre-flush
+partial transaction. Only the replayed body's newly assigned local segments can
+appear in the committed txn.
 No rollback message is sent back to the source and no replication checkpoint is
 advanced. The local flush itself is the durable abort record.
 
@@ -182,7 +186,8 @@ skips all count checks even for nonempty transactions. New producers set nonzero
 counts for nonempty transactions; CDC preserves historical zero-count commits
 without adding validation. Upgrading all nodes does not retrofit counts onto old
 WAL records, so their replication also skips the completeness check. Historical
-unmarked flushes retain their old behavior.
+unmarked flushes retain their replication and append-admission behavior; their
+consumers also apply the scoped abort boundary.
 
 Operators must upgrade **all participating source CDC, Proxy, StreamingNode and
 consumer processes before invoking local Flush on a secondary**. Coordinating this

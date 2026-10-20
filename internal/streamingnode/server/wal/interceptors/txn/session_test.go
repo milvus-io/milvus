@@ -252,7 +252,11 @@ func TestManagerRecoverAndFailAll(t *testing.T) {
 	case <-time.After(1 * time.Millisecond):
 	}
 
+	first := m.sessions[1]
 	m.FailTxnAtVChannel("v1")
+	require.Equal(t, message.TxnStateRollbacked, first.State())
+	require.True(t, first.IsExpiredOrDone(beginMsg1.TimeTick()), "force-fail must resolve the session without waiting for its lease")
+	require.Equal(t, message.TxnStateInFlight, m.sessions[2].State())
 	select {
 	case <-m.RecoverDone():
 		t.Errorf("txn manager should not be recovered")
@@ -373,6 +377,10 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 
 		// Rollback all in-flight transactions
 		m.RollbackAllInFlightTransactions()
+
+		require.Equal(t, message.TxnStateRollbacked, session1.State())
+		require.Equal(t, message.TxnStateCommitted, session2.State())
+		require.Equal(t, message.TxnStateRollbacked, session3.State())
 
 		// Verify all sessions are cleaned up
 		m.mu.Lock()

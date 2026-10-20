@@ -132,7 +132,7 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	m.failTxnAtVChannel(vchannel, false)
 }
 
-// AbortTxnAtVChannel aborts all receiving sessions after a durable local flush.
+// AbortTxnAtVChannel aborts both local and replicated sessions after a durable local flush.
 // An empty vchannel covers the whole PChannel.
 func (m *TxnManager) AbortTxnAtVChannel(vchannel string) {
 	m.failTxnAtVChannel(vchannel, true)
@@ -145,11 +145,7 @@ func (m *TxnManager) failTxnAtVChannel(vchannel string, includeReplicated bool) 
 	ids := make([]int64, 0, len(m.sessions))
 	for id, session := range m.sessions {
 		if (includeReplicated || !session.replicated) && (vchannel == "" || session.VChannel() == vchannel) {
-			if includeReplicated {
-				session.abort()
-			} else {
-				session.Cleanup()
-			}
+			session.abort()
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)
 			ids = append(ids, int64(id))
@@ -208,32 +204,7 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 // RollbackAllInFlightTransactions rolls back all active transaction sessions.
 // Called ONLY in the failover scenario.
 func (m *TxnManager) RollbackAllInFlightTransactions() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if len(m.sessions) == 0 {
-		m.Logger().Info(context.TODO(), "No in-flight transactions to rollback")
-		return
-	}
-
-	m.Logger().Info(context.TODO(), "Rolling back all in-flight transactions", mlog.Int("sessionCount", len(m.sessions)))
-
-	ids := make([]int64, 0, len(m.sessions))
-	for txnID, session := range m.sessions {
-		ids = append(ids, int64(txnID))
-		session.Cleanup()
-		delete(m.sessions, txnID)
-		delete(m.recoveredSessions, txnID)
-	}
-
-	m.Logger().Info(context.TODO(), "Rolled back in-flight transactions", mlog.Int64s("txnIDs", ids))
-
-	// Signal GracefulClose if it's already waiting and all sessions are now cleared.
-	if len(m.sessions) == 0 && m.closed != nil {
-		m.closed.Close()
-	}
-
-	m.notifyRecoverDone()
+	m.failTxnAtVChannel("", true)
 }
 
 // GracefulClose waits for all transactions to be cleaned up.
