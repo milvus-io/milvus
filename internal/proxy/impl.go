@@ -3573,10 +3573,6 @@ func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.Se
 				"collection id %d is not consistent with resolved collection %d", requestedID, collectionInfo.collID)
 		}
 	}
-	canonicalDBName := collectionInfo.dbName
-	if canonicalDBName == "" {
-		canonicalDBName = request.GetDbName()
-	}
 	return &searchByPKPreflight{
 		collectionInfo: collectionInfo,
 	}, nil
