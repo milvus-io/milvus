@@ -26,6 +26,15 @@ filter runs after ordering and transaction assembly; raw transaction fragments
 before the checkpoint remain available to assemble commits beyond it. The exact
 RecoveryBarrier is still recognized independently of this observation filter.
 
+Legacy DataCoord seek timestamps are inclusive replay positions, not completed
+prefixes. Migration preserves the safe physical MessageID but publishes the
+final V2 checkpoint with TimeTick zero. Replay therefore includes the legacy
+boundary, even if the process restarts immediately after migration commits.
+Component checkpoints and the independent control frontier retain their existing
+values and provide deduplication. The preliminary legacy-format rewind keeps its
+original seek timestamp so an interrupted migration can still rebuild component
+baselines; only the final V2 global TimeTick is reset.
+
 The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
 Size, buffer age, explicit Flush and recovery-tail requests trigger output.
 Earlier L1 segments must be registered in DataCoord, but need not be flushed.

@@ -110,6 +110,12 @@ prevents the overlapping completed prefix from generating new broadcast ACKs
 after tombstone GC. RecoveryBarrier recognition and the retained live scanner
 remain unchanged; ordinary readers are unaffected.
 
+When migrating legacy recovery metadata, the inclusive DataCoord seek timestamp
+must not be treated as a completed WAL prefix. The final migrated V2 checkpoint
+keeps the safe physical start but sets its global TimeTick to zero; replay then
+establishes the actual completed prefix. Until the persisted checkpoint advances,
+this GC gate retains tombstones. Component and control frontiers are preserved.
+
 The checkpoint proves completion of the consuming ACK needed to advance that
 prefix. It does not drain all historical RPC attempts. The TTL additionally
 protects against delayed duplicate requests, including server-side ACK handlers

@@ -812,13 +812,13 @@ func TestMigrateLegacyRecoveryInfoUsesSafeCheckpoint(t *testing.T) {
 	require.NotNil(t, persisted)
 	assert.Equal(t, utility.RecoveryMagicRecoveryStorageV2, persisted.Magic)
 	assert.True(t, walimplstest.NewTestMessageID(20).EQ(persisted.MessageID))
-	assert.Equal(t, uint64(20), persisted.TimeTick)
+	assert.Zero(t, persisted.TimeTick)
 	assert.True(t, walimplstest.NewTestMessageID(20).EQ(storage.checkpoint.MessageID))
 	assert.Equal(t, utility.RecoveryMagicRecoveryStorageV2, storage.checkpoint.Magic)
 	assert.True(t, walimplstest.NewTestMessageID(20).EQ(storage.checkpoint.MessageID))
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, walimplstest.NewTestMessageID(20).EQ(completed.MessageID))
-	assert.Equal(t, uint64(20), completed.TimeTick)
+	assert.Zero(t, completed.TimeTick)
 	assert.Equal(t, uint64(100), vchannels["v1"].GetCheckpointTimeTick())
 	assert.Equal(t, streamingpb.PartitionState_PARTITION_STATE_NORMAL, vchannels["v1"].CollectionInfo.Partitions[0].GetState())
 	assert.Equal(t, uint64(0), vchannels["v1"].CollectionInfo.Schemas[0].GetCheckpointTimeTick())
@@ -974,7 +974,7 @@ func TestMigrateLegacyRecoveryInfoCapsGlobalCheckpointAtVChannelCheckpoint(t *te
 	require.NoError(t, err)
 	require.True(t, migrated)
 	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, uint64(100), storage.checkpoint.TimeTick)
+	assert.Zero(t, storage.checkpoint.TimeTick)
 }
 
 func TestMigrateLegacyRecoveryInfoFailsClosed(t *testing.T) {
@@ -1104,7 +1104,7 @@ func TestMigrateLegacyRecoveryInfoWithoutActiveVChannels(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, migrated)
 	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, uint64(100), storage.checkpoint.TimeTick)
+	assert.Zero(t, storage.checkpoint.TimeTick)
 }
 
 func TestLegacyCheckpointFromPosition(t *testing.T) {

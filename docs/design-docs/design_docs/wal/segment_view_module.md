@@ -249,6 +249,13 @@ It then writes component snapshots/removals and publishes the new format marker
 last. A crash during a chunked catalog update therefore reopens at the safe cursor
 and reruns migration instead of skipping the removed allocation's creation.
 
+The legacy rewind retains its inclusive seek timestamp for migration retry and
+component reconstruction. The final V2 checkpoint uses the same physical start
+with global TimeTick zero: a legacy seek timestamp does not prove completion of
+that message. Component checkpoints and the independent control frontier are
+preserved. Normal replay rebuilds the completed global prefix, including Inserts
+and CreateSegment at the old boundary, also after a crash following V2 publication.
+
 ## 7. Cleanup
 
 Segment deletion persists a tombstone before removing recovery metadata or
