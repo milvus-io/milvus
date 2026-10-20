@@ -508,6 +508,11 @@ message LoadSegmentsRequest {
     LoadScope load_scope = 12;
     repeated index.IndexInfo index_info_list = 13;
     bool lazy_load = 14;
+    // The load was refused for memory several times while every node sat
+    // just under the overload threshold: the QueryNode may admit it up to
+    // its forceLoadMemoryThresholdPercentage instead; balance moves memory
+    // off the node afterwards.
+    bool force_load = 15;
 }
 
 message ReleaseSegmentsRequest {

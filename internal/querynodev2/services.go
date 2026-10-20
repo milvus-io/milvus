@@ -578,6 +578,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// Actual load segment
 	log.Info(ctx, "start to load segments...")
+	if req.GetForceLoad() {
+		ctx = segments.WithForceLoad(ctx)
+	}
 	loaded, err := node.loader.Load(ctx,
 		req.GetCollectionID(),
 		segments.SegmentTypeSealed,

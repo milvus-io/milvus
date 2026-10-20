@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -69,6 +71,12 @@ type Executor struct {
 	executingTasks    *typeutil.ConcurrentSet[string] // task index
 	channelTaskNum    atomic.Int32                    // channel task pool counter
 	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
+	pacer             loadPacer                       // per-node cap on segment loads in flight
+
+	// rejections counts, per segment, the loads in a row the QueryNodes
+	// refused for memory; past ForceLoadAfterRejections the next load goes
+	// out with force_load (see loadSegment).
+	rejections *typeutil.ConcurrentMap[int64, int]
 
 	collectionInfoSingleflight conc.Singleflight[*milvuspb.DescribeCollectionResponse]
 }
@@ -92,6 +100,7 @@ func NewExecutor(nodeID int64,
 		nodeMgr:   nodeMgr,
 
 		executingTasks: typeutil.NewConcurrentSet[string](),
+		rejections:     typeutil.NewConcurrentMap[int64, int](),
 	}
 }
 
@@ -175,6 +184,26 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		}
 	}
 
+	// Pace segment loads per node: a load over the cap waits here in
+	// QueryCoord, where no deadline is armed yet.
+	pacerCfg := getLoadPacerConfig()
+	paced := false
+	if sa, ok := task.Actions()[step].(*SegmentAction); ok && pacerCfg.enabled && sa.Type() == ActionTypeGrow {
+		// The cap starts at the node's load budget (half a load per core),
+		// the same number placement spreads loads by, so a burst keeps the
+		// QueryNode's load pool fed; it then adapts to how loads go.
+		if info := ex.nodeMgr.Get(ex.nodeID); info != nil && info.CPUNum() > 0 {
+			pacerCfg.initial = max(pacerCfg.initial, float64(info.CPUNum())*paramtable.Get().QueryCoordCfg.LoadBudgetPerCore.GetAsFloat())
+		}
+		if !ex.pacer.tryAcquire(pacerCfg) {
+			metrics.QueryCoordLoadPacerWaitTotal.WithLabelValues(fmt.Sprint(ex.nodeID)).Inc()
+			ex.nonChannelTaskNum.Dec()
+			ex.executingTasks.Remove(task.Index())
+			return false
+		}
+		paced = true
+	}
+
 	// Only now is this step actually admitted to run: it cleared the wait
 	// queue and the executor's capacity gates above. Arm a fresh deadline for
 	// this step here (no-op if already armed for it) so time spent queued or
@@ -187,7 +216,12 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		mlog.Info(context.TODO(), "execute the action of task")
 		switch task.Actions()[step].(type) {
 		case *SegmentAction:
+			start := time.Now()
 			ex.executeSegmentAction(task.(*SegmentTask), step)
+			if paced {
+				ex.pacer.release(pacerCfg, time.Since(start), task.(*SegmentTask).timeout)
+				metrics.QueryCoordLoadPacerCap.WithLabelValues(fmt.Sprint(ex.nodeID)).Set(ex.pacer.Cap())
+			}
 
 		case *ChannelAction:
 			ex.executeDmChannelAction(task.(*ChannelTask), step)
@@ -259,6 +293,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		loadInfo,
 		indexInfos,
 	)
+	req.ForceLoad = ex.forceLoad(action.SegmentID)
 
 	// get segment's replica first, then get shard leader by replica
 	replica := ex.meta.Get(ctx, task.ReplicaID())
@@ -285,6 +320,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	mlog.Info(context.TODO(), "load segments...")
 	status, err := ex.cluster.LoadSegments(task.Context(), view.Node, req)
 	err = merr.CheckRPCCall(status, err)
+	ex.noteLoadResult(action.SegmentID, req.GetForceLoad(), err)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to load segment", mlog.Err(err))
 		return err
@@ -294,6 +330,37 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	mlog.Info(context.TODO(), "load segments done", mlog.Duration("elapsed", elapsed))
 
 	return nil
+}
+
+// forceLoad reports whether the segment's next load goes out with
+// force_load: its last ForceLoadAfterRejections loads in a row were refused
+// for memory. Every node then sits just under the overload threshold while
+// the cluster as a whole has room; the QueryNode admits the load up to a
+// higher threshold and balance moves memory off the node afterwards.
+func (ex *Executor) forceLoad(segmentID int64) bool {
+	n := paramtable.Get().QueryCoordCfg.ForceLoadAfterRejections.GetAsInt()
+	if n <= 0 {
+		return false
+	}
+	count, _ := ex.rejections.Get(segmentID)
+	return count >= n
+}
+
+// noteLoadResult keeps the rejection count: up on a memory refusal, cleared
+// on any other outcome (a success, or a different failure).
+func (ex *Executor) noteLoadResult(segmentID int64, forced bool, err error) {
+	if forced {
+		metrics.QueryCoordForceLoadTotal.Inc()
+	}
+	if errors.Is(err, merr.ErrSegmentRequestResourceFailed) {
+		metrics.QueryCoordLoadRejectedTotal.WithLabelValues(fmt.Sprint(ex.nodeID)).Inc()
+		count, _ := ex.rejections.Get(segmentID)
+		ex.rejections.Insert(segmentID, count+1)
+		return
+	}
+	if _, had := ex.rejections.GetAndRemove(segmentID); had && forced && err == nil {
+		mlog.Info(context.TODO(), "segment loaded with force_load after repeated memory refusals", mlog.Int64("segmentID", segmentID))
+	}
 }
 
 // If we enable following checking when loading segments,

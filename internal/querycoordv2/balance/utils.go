@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -53,7 +55,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 		}
 		t, err := task.NewSegmentTask(
 			ctx,
-			timeout,
+			segmentTaskTimeout(p.Segment, timeout),
 			source,
 			p.Segment.GetCollectionID(),
 			p.Replica,
@@ -109,7 +111,11 @@ func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeou
 			action := task.NewChannelAction(p.From, task.ActionTypeReduce, p.Channel.GetChannelName())
 			actions = append(actions, action)
 		}
-		t, err := task.NewChannelTask(ctx, timeout, source, p.Channel.GetCollectionID(), p.Replica, actions...)
+		chTimeout := timeout
+		if p.To != -1 {
+			chTimeout = channelTaskTimeout(p.Channel.GetChannelName(), p.To, timeout)
+		}
+		t, err := task.NewChannelTask(ctx, chTimeout, source, p.Channel.GetCollectionID(), p.Replica, actions...)
 		if err != nil {
 			mlog.Warn(ctx, "create channel task failed",
 				mlog.Int64("collection", p.Channel.GetCollectionID()),
@@ -240,4 +246,68 @@ func sortIfChannelAtWALLocated(channels []*meta.DmChannel) []*meta.DmChannel {
 		return weighter(channels[i]) < weighter(channels[j])
 	})
 	return channels
+}
+
+// segmentTaskTimeout stretches the configured timeout for a segment whose
+// loads timed out before (queryCoord.adaptiveSegmentTimeout) and for one too
+// big to load within it at a conservative bandwidth
+// (queryCoord.minLoadBandwidthMBps, off at 0), so an oversized segment is not
+// cancelled and retried forever.
+func segmentTaskTimeout(s *meta.Segment, timeout time.Duration) time.Duration {
+	cfg := &paramtable.Get().QueryCoordCfg
+	if s != nil && cfg.AdaptiveSegmentTimeout.GetAsBool() {
+		timeout *= task.SegmentTimeoutFactor(s.GetID())
+	}
+	bw := cfg.MinLoadBandwidthMBps.GetAsFloat()
+	if bw <= 0 || s == nil {
+		return timeout
+	}
+	need := time.Duration(2 * task.SegmentBytes(s) / (bw * 1024 * 1024) * float64(time.Second))
+	if need > timeout {
+		return need
+	}
+	return timeout
+}
+
+// channelAttempts tracks repeated watch attempts per (channel, node).
+var channelAttempts = struct {
+	sync.Mutex
+	m map[string]channelAttempt
+}{m: make(map[string]channelAttempt)}
+
+type channelAttempt struct {
+	n    int
+	last time.Time
+	tout time.Duration
+}
+
+// channelTaskTimeout doubles the timeout (up to 8x) each time a watch of the
+// same channel on the same node is re-created within its previous timeout
+// window, i.e. after it timed out. A delegator that needs longer than the
+// configured timeout to catch up then converges instead of being killed and
+// retried forever (queryCoord.adaptiveChannelTimeout).
+func channelTaskTimeout(channel string, node int64, timeout time.Duration) time.Duration {
+	if !paramtable.Get().QueryCoordCfg.AdaptiveChannelTimeout.GetAsBool() {
+		return timeout
+	}
+	key := fmt.Sprintf("%s/%d", channel, node)
+	channelAttempts.Lock()
+	defer channelAttempts.Unlock()
+	now := time.Now()
+	a := channelAttempts.m[key]
+	if !a.last.IsZero() && now.Sub(a.last) <= a.tout+timeout {
+		a.n = min(a.n+1, 3)
+	} else {
+		a.n = 0
+	}
+	a.last, a.tout = now, timeout<<a.n
+	channelAttempts.m[key] = a
+	if len(channelAttempts.m) > 100000 {
+		for k, v := range channelAttempts.m {
+			if now.Sub(v.last) > 2*v.tout {
+				delete(channelAttempts.m, k)
+			}
+		}
+	}
+	return a.tout
 }
