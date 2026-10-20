@@ -1,8 +1,9 @@
 package fileresource
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 const remoteDictionaryParams = `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"dictionary","file_name":"stop.txt"}}]}`
@@ -17,9 +18,11 @@ func TestAnalyzerResourceNames(t *testing.T) {
 	}}`
 	require.Equal(t, map[string]struct{}{"dictionary": {}, "synonyms": {}},
 		analyzerResourceNames([]string{params, remoteDictionaryParams}))
-	for _, params := range []string{"", "{}", `{"tokenizer":"standard"}`, `{"tokenizer":{"type":"jieba","dict":["default"]}}`,
+	for _, params := range []string{
+		"", "{}", `{"tokenizer":"standard"}`, `{"tokenizer":{"type":"jieba","dict":["default"]}}`,
 		`{"file":{"type":"local","path":"a","resource_name":"not-a-reference"}}`, `{"broken":`,
-		`{"type":"remote","resource_name":123}`} {
+		`{"type":"remote","resource_name":123}`,
+	} {
 		require.Empty(t, analyzerResourceNames([]string{params}), params)
 	}
 }
