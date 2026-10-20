@@ -905,6 +905,10 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 	suite.Run("wait_completed_before_wait", func() {
 		suite.SetupTest()
 
+		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).Return(nil)
+		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
+
 		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:     suite.segmentID,
 			PartitionID:   suite.partitionID,
@@ -921,6 +925,10 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 
 	suite.Run("wait_concurrent_waiters_all_woken", func() {
 		suite.SetupTest()
+
+		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).Return(nil)
+		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
 
 		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:     suite.segmentID,
