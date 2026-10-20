@@ -3729,6 +3729,7 @@ type queryCoordConfig struct {
 	LoadPacingWaitForTick    ParamItem `refreshable:"true"`
 	SegmentTaskRetryTimeout  ParamItem `refreshable:"true"`
 	ChannelTaskRetryTimeout  ParamItem `refreshable:"true"`
+	ForceLoadAfterRejections ParamItem `refreshable:"true"`
 
 	AutoscalePrecheckEnabled ParamItem `refreshable:"true"`
 	AutoscaleEnabled         ParamItem `refreshable:"true"`
@@ -4505,6 +4506,19 @@ core's worth.`,
 	}
 	p.LoadPacingWaitForTick.Init(base.mgr)
 
+	p.ForceLoadAfterRejections = ParamItem{
+		Key:          "queryCoord.forceLoadAfterRejections",
+		Version:      "3.1.0",
+		DefaultValue: "3",
+		Doc: `After a segment's load was refused for memory this many times in a row, the next load is sent
+with force_load: the QueryNode admits it up to queryNode.forceLoadMemoryThresholdPercentage instead of
+the overloaded threshold, and balance moves memory off the node afterwards. A cluster whose nodes all
+sit just under the threshold could otherwise never load a large segment although it has room overall.
+Set to 0 to disable.`,
+		Export: true,
+	}
+	p.ForceLoadAfterRejections.Init(base.mgr)
+
 	p.ResourceExhaustionCleanupInterval = ParamItem{
 		Key:          "queryCoord.resourceExhaustionCleanupInterval",
 		Version:      "2.6.7",
@@ -4638,6 +4652,8 @@ type queryNodeConfig struct {
 	DiskCapacityLimit      ParamItem `refreshable:"true"`
 	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 	DiskCacheCapacityLimit ParamItem `refreshable:"true"`
+
+	ForceLoadMemoryThresholdPercentage ParamItem `refreshable:"true"`
 
 	// cache limit
 	// Deprecated: Never used
@@ -5815,6 +5831,20 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export: true,
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)
+
+	p.ForceLoadMemoryThresholdPercentage = ParamItem{
+		Key:          "queryNode.forceLoadMemoryThresholdPercentage",
+		Version:      "3.1.0",
+		DefaultValue: "95",
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+		Doc: `Memory threshold (percentage) for a load request marked force_load by QueryCoord (see
+queryCoord.forceLoadAfterRejections); other loads use overloadedMemoryThresholdPercentage.`,
+		Export: true,
+	}
+	p.ForceLoadMemoryThresholdPercentage.Init(base.mgr)
 
 	p.DiskCacheCapacityLimit = ParamItem{
 		Key:     "queryNode.diskCacheCapacityLimit",
