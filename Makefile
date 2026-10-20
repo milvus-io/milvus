@@ -90,7 +90,7 @@ MOCKERY_VERSION := 2.53.3
 MOCKERY_OUTPUT := $(shell $(INSTALL_PATH)/mockery --version 2>/dev/null)
 INSTALL_MOCKERY := $(findstring $(MOCKERY_VERSION),$(MOCKERY_OUTPUT))
 # gci
-GCI_VERSION := 0.13.4
+GCI_VERSION := 0.13.7
 GCI_OUTPUT := $(shell $(INSTALL_PATH)/gci --version 2>/dev/null)
 INSTALL_GCI := $(findstring $(GCI_VERSION),$(GCI_OUTPUT))
 # gofumpt
