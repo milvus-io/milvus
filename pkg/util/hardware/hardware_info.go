@@ -92,7 +92,7 @@ func GetMemoryCount() uint64 {
 		return limit
 	}
 
-	if err != nil || limit > stats.Total {
+	if err != nil {
 		log.RatedWarn(3600, "failed to get container memory limit",
 			zap.Uint64("containerLimit", limit),
 			zap.Error(err))
