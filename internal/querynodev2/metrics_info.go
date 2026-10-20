@@ -251,6 +251,9 @@ func getSegmentJSON(node *QueryNode, collectionID int64) string {
 		})
 	}
 
+	if resources := node.queryViewSegments.Load(); resources != nil {
+		ms = append(ms, resources.SegmentMetrics(collectionID, node.GetNodeID())...)
+	}
 	ret, err := json.Marshal(ms)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to marshal segments", mlog.Err(err))

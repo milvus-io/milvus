@@ -116,7 +116,6 @@ class GroupChunkTranslator
     std::vector<std::string> insert_files_;
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list_;
     std::vector<size_t> file_row_group_prefix_sum_;
-    SchemaPtr schema_;
     std::unique_ptr<milvus::segcore::InsertRecord<true>> ir_;
     GroupCTMeta meta_;
     bool use_mmap_;

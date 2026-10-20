@@ -58,6 +58,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -70,6 +72,9 @@ import (
 var Params = params.Params
 
 type Server struct {
+	loadInfos interface {
+		GetLoadInfo(context.Context, int64, uint64) (*querypb.GetQueryViewLoadInfoResponse, error)
+	}
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	wg                  sync.WaitGroup
@@ -381,6 +386,14 @@ func (s *Server) initMeta() error {
 
 	mlog.Info(s.ctx, "init meta")
 	s.store = querycoord.NewCatalog(s.kv)
+	s.loadInfos = &queryViewLoadInfoReader{storage: s.kv, indexes: func(id int64, indexIDs ...int64) []*indexpb.IndexInfo {
+		if source, ok := s.mixCoord.(interface {
+			QueryViewCollectionIndexInfos(int64, ...int64) []*indexpb.IndexInfo
+		}); ok {
+			return source.QueryViewCollectionIndexInfos(id, indexIDs...)
+		}
+		return nil
+	}}
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr, s.metaView)
 
 	s.broker = meta.NewCoordinatorBroker(

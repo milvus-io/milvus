@@ -1,6 +1,8 @@
 package qnview
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -33,8 +35,10 @@ type ReleaseSegments struct {
 	// Key identifies the query view whose segment references are being released.
 	Key qviews.QueryViewKey
 
-	// OnDropped is called when the release operation completes (segments actually
-	// unloaded or ref counts decremented).
+	// OnDropped is called after this View's segment operations and references
+	// are released and any unshared segment owners have finished destruction.
+	// Shared segments may remain; this does not promise synchronous pruning of
+	// their individual fields, indexes, or cached ReadStates.
 	// Must NOT be called synchronously during Release.
 	OnDropped func()
 }
@@ -62,11 +66,27 @@ type ReleaseSegments struct {
 // All callbacks MUST be invoked asynchronously (not during the Acquire /
 // Release call itself) to avoid deadlocking the caller's mutex.
 type SegmentManager interface {
+	// Close drains all physical resources after the handler withdraws its views.
+	Close()
+
 	// Acquire creates a view-scoped segment reference, starts missing segment
 	// loads, and reports readiness for all assigned segments.
+	// References to compatible existing resources must be registered before
+	// returning: ApplyViews may next release an older failed view sharing them.
+	// Loading and callbacks remain asynchronous. A failure must preserve already
+	// acquired resources until Release, so a replacement can take over references.
 	Acquire(req AcquireSegments)
 
 	// Release decrements reference counts for all segments held by this view.
 	// Segments whose count reaches zero will be unloaded.
 	Release(req ReleaseSegments)
+
+	// AcquireSealedSegmentHandles acquires query lifecycle refs for selected
+	// sealed segments that already reached QueryView transform readiness, then
+	// waits for timetick on those exact instances before returning.
+	AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode, timetick uint64) ([]SealedSegmentHandle, error)
+
+	// WaitTransformVisible waits until the view-scoped TransformLogBuffer can
+	// serve the QueryPlan transforming timetick boundary.
+	WaitTransformVisible(ctx context.Context, key qviews.QueryViewKey, timetick uint64) error
 }

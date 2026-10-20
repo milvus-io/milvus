@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -83,12 +84,7 @@ func (s *LoadInfoStore) Ensure(ctx context.Context, cfg *LoadConfig) error {
 		return nil
 	}
 	owned := cfg.Clone()
-	info := &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: cfg.CollectionID, Version: key.version, PartitionIDs: owned.PartitionIDs, LoadFields: owned.LoadFields, RequiredFields: owned.RequiredFields}
-	for _, fields := range [][]*messagespb.LoadFieldConfig{info.LoadFields, info.RequiredFields} {
-		for _, field := range fields {
-			field.IndexId = 0
-		}
-	}
+	info := &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: cfg.CollectionID, Version: key.version, PartitionIDs: owned.PartitionIDs, LoadFields: loadInfoFields(owned.LoadFields), RequiredFields: loadInfoFields(owned.RequiredFields)}
 	if err := s.catalog.SaveLoadInfo(ctx, info); err != nil {
 		return err
 	}
@@ -102,7 +98,7 @@ func (s *LoadInfoStore) withCurrentIndexes(stored *querypb.GetQueryViewLoadInfoR
 	info := proto.Clone(stored).(*querypb.GetQueryViewLoadInfoResponse)
 	fields := make(map[int64]struct{}, len(info.RequiredFields))
 	for _, field := range info.RequiredFields {
-		field.IndexId = 0
+		field.IndexIds = nil
 		fields[field.FieldId] = struct{}{}
 	}
 	info.IndexInfoList = nil
@@ -129,4 +125,14 @@ func (s *LoadInfoStore) normalize(ctx context.Context, cfg *LoadConfig) (*LoadCo
 		}
 	}
 	return cfg, nil
+}
+
+// loadInfoFields projects the baseline scope-only configuration onto the RPC
+// type. Version publication remains owned by the existing coordinator path.
+func loadInfoFields(fields []*messagespb.LoadFieldConfig) []*viewpb.LoadFieldConfig {
+	out := make([]*viewpb.LoadFieldConfig, 0, len(fields))
+	for _, field := range fields {
+		out = append(out, &viewpb.LoadFieldConfig{FieldId: field.GetFieldId()})
+	}
+	return out
 }

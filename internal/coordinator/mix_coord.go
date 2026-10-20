@@ -1620,11 +1620,13 @@ func (s *mixCoordImpl) ListRefreshExternalCollectionJobs(ctx context.Context, re
 }
 
 func (s *mixCoordImpl) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
-	resp, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, req)
-	if merr.CheckRPCCall(resp, err) == nil {
-		resp.IndexInfoList = s.datacoordServer.GetQueryViewCollectionIndexInfos(req.GetCollectionID())
-	}
-	return resp, err
+	return s.queryCoordServer.GetQueryViewLoadInfo(ctx, req)
+}
+
+// QueryViewCollectionIndexInfos supplies current index descriptors to the load-info
+// store, which filters them by the retained required field scope on every read.
+func (s *mixCoordImpl) QueryViewCollectionIndexInfos(collectionID int64, indexIDs ...int64) []*indexpb.IndexInfo {
+	return s.datacoordServer.GetQueryViewCollectionIndexInfos(collectionID, indexIDs...)
 }
 
 func (s *mixCoordImpl) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
@@ -1651,4 +1653,12 @@ func (s *mixCoordImpl) GetStreamingNodeQueryViewResources(ctx context.Context, r
 		}
 	}
 	return s.datacoordServer.GetStreamingNodeQueryViewResources(ctx, req)
+}
+
+func (s *mixCoordImpl) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	return s.datacoordServer.GetQueryViewSegmentLoadInfos(ctx, collectionID, segmentIDs)
+}
+
+func (s *mixCoordImpl) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	return s.queryCoordServer.GetQueryViewSegmentLoadInfo(ctx, req)
 }

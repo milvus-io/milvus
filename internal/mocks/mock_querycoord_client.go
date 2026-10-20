@@ -3192,3 +3192,8 @@ func NewMockQueryCoordClient(t interface {
 
 	return mock
 }
+
+// GetQueryViewSegmentLoadInfo is patched with mockey by QueryView tests.
+func (_m *MockQueryCoordClient) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
+}
