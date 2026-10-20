@@ -227,7 +227,7 @@ func TestAcquireRetriesTransientFailuresLocally(t *testing.T) {
 
 func TestAcquireFailureIsNotCachedAndDoesNotBlockOtherIDs(t *testing.T) {
 	mockey.PatchConvey("failure is scoped to one immutable identity", t, func() {
-		failure := merr.ErrIoPermissionDenied
+		var failure error = merr.ErrIoPermissionDenied
 		loader := setupResourceLoader(t, func(_ context.Context, id int64) (*internalpb.FileResourceInfo, error) {
 			if id == 7 && failure != nil {
 				return nil, failure
