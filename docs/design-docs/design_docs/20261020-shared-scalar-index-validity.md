@@ -23,49 +23,50 @@ ARRAY contains compilation merging is a separate optimization implemented in
 number of hit bitmaps, while this change independently reduces validity copies
 for predicates that remain separate.
 
-## Optional immutable validity capability
+## Optional borrowed validity view
 
-Expose an optional internal snapshot containing a row count and either an
-owning `shared_ptr<const TargetBitmap>` or an explicit all-valid marker. The
-snapshot owns its storage and can outlive the index reader. An unsupported
-capability is different from all-valid; it must invoke the existing virtual
-`IsNotNull()` path and retain the resulting owned snapshot.
+`INullReader::GetValidityView() const` returns `std::optional<BitsetView>` using
+Milvus's existing read-only view. No new owning bitmap wrapper is introduced.
+`nullopt` means unsupported. An engaged view with `size()==0` means every
+coordinate is valid, with the logical length supplied separately by `Count()`.
+A nonempty view is dense and unmapped, has non-null data, and its size equals
+the reader's coordinate count. The view is a validity mask (one means valid).
 
-On master, `INullReader::GetImmutableValidity() const` returns an optional
-`ScalarIndexValidity`, with an implementation in the sealed inverted reader.
-The master snapshot uses a null owner as its explicit all-valid marker. On 2.6
-the capability belongs to `ScalarIndex`, with an
-implementation in sealed `InvertedIndexTantivy`. The different index interfaces
-require separate implementations rather than copying class hierarchies across
-branches.
+The sealed inverted reader retains its ordinary, by-value `TargetBitmap` and
+returns a borrowed view into it. The all-valid case allocates no full bitmap.
+Expression-selected readers already remain alive through `selected_root_pin_`
+(and the selected JSON view/root pin). A returned view may only be read while
+that pin remains alive. Views are cleared before index selection is released;
+they do not extend lifetime independently and must not survive index eviction
+without a pin. No view is published through the expression-result cache.
 
-Only immutable, finalized validity may be shared. Growing indexes retain
-snapshot behavior. The provider's row count and bitmap coordinate domain must
-agree. An empty bitmap used internally as an all-valid sentinel is not an empty
-row space.
+Unsupported readers still call the existing virtual `IsNotNull()`. The expression
+owns that fallback bitmap and borrows a view of it. Its logical length comes
+from the returned bitmap, not a second reader count that could change during
+concurrent insertion. `IsNotNull()` itself keeps its owned/writable contract.
 
-## Expression consumption
+Knowhere view construction does not scan the bitmap. This API uses only
+`size`, `data`, and `test`; the existing Milvus `all()` check may scan once for
+an expression's offset fast path. No count/filter-ratio cache is assumed.
 
-Expressions retain the immutable handle and materialize only the requested
-batch or offset selection. Returned data and validity remain independently
-writable because logical operators and final exclusion-mask construction
-mutate their operands. A full-range evaluation may move an owned hit bitmap,
-but must materialize shared validity rather than move from its owner.
+## Expression ownership and writes
 
-The all-valid path extends the result with true bits without allocating a
-temporary full-segment bitmap. Existing output bits must survive non-aligned
-appends. A snapshot is reused across batches, preserving the existing index
-cursor and offset-evaluation behavior.
+An expression caches the borrowed view and logical coordinate count. Batches
+copy the requested range into independent writable output with the existing
+bit-copy primitive. All-valid output is extended with true bits. Non-aligned
+prefixes and suffixes retain neighboring bits, and range checks use the logical
+length, including the all-valid sentinel case.
 
-Raw-data and statistics paths retain their existing mutable caches. This
-proposal does not change cache invalidation, query scheduling, early release,
-or the ownership contract of the existing `IsNotNull()` API.
+Whole-range execution may move its local hit bitmap, but it materializes valid
+output rather than moving reader storage. Raw-data/statistics caches and
+cache-enabled evaluation keep their existing owned representation. No output
+mutation can modify the borrowed index validity.
 
 ## JSON and derived-reader semantics
 
 Field validity, JSON path existence, and typed comparable-value masks are
 different concepts. A derived reader may expose the capability only when its
-snapshot exactly matches its own `IsNotNull()` semantics.
+view exactly matches its own `IsNotNull()` semantics.
 
 For the 2.6 implementation, ARRAY-cast JSON inverted indexes may delegate to
 their sealed base validity. Scalar JSON inverted indexes, JSON-flat indexes,
@@ -87,7 +88,7 @@ Master's expression-result cache currently owns a writable result/validity
 pair. The initial implementation preserves that contract: paths participating
 in that cache retain their existing owned validity materialization. Ordinary
 uncached index evaluation, validity-only evaluation, and offset reads may use
-immutable snapshots where their reader supports them.
+borrowed validity views where their reader supports them.
 
 Changing the cache value representation is a separate follow-up. This proposal
 does not claim to remove validity copies from every cache-enabled execution.
@@ -106,9 +107,10 @@ ARRAY predicates before execution.
 
 - Audit every concrete provider and derived override of `IsNotNull()` to verify
   that shared storage has the same semantics as the owned result.
-- Verify that many independent leaves share one owner and never call the
+- Verify that many independent leaves borrow the same pinned storage and never call the
   full-segment owned path when the capability is supported.
-- Release the reader while retaining a handle; verify ownership remains valid.
+- Retain the reader pin while reading borrowed views; release all views before
+  dropping that pin. No view promises to outlive the reader.
 - Mutate one returned batch and confirm neither the owner nor another batch
   changes. Cover non-aligned appends, partial final batches, arbitrary/repeated
   offsets, zero rows, nullable rows, and all-valid storage.
@@ -119,7 +121,7 @@ ARRAY predicates before execution.
 - Run focused native index/expression tests and record source revisions,
   dependency configuration, and any unexecuted integration coverage.
 
-Copy counters and ownership tests establish the eliminated validity copies.
+Copy counters and pinned-lifetime tests establish the eliminated validity copies.
 They do not establish production peak-memory savings, latency, throughput, or
 the cause of every OOM. Those outcomes require matched workload replay with
 the same indexes, segment concurrency, and cache configuration.

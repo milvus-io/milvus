@@ -453,8 +453,15 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
             AssertInfo(reader != nullptr, "invalid scalar predicate type");
             cached_result_ = std::make_shared<TargetBitmap>(
                 execute_sub_batch(reader, val1, val2));
-            cached_valid_result_ = std::make_shared<TargetBitmap>(
-                GetCachedIndexValidBitmap().clone());
+            const auto& validity = GetCachedIndexValidBitmap();
+            cached_valid_result_ = std::make_shared<TargetBitmap>();
+            // This offset cache retains owned output. The borrowed all-valid
+            // sentinel has size zero; materialize the cached coordinate count.
+            AppendValidityView(*cached_valid_result_,
+                               validity,
+                               cached_index_valid_count_,
+                               0,
+                               cached_index_valid_count_);
             AssertInfo(
                 cached_result_->size() == static_cast<size_t>(active_count_),
                 "index range result size {} does not match row count {}",

@@ -25,7 +25,7 @@ namespace {
 
 struct ValidityCalls {
     size_t owned = 0;
-    std::vector<const TargetBitmap*> owners;
+    std::vector<const uint8_t*> owners;
 };
 
 // Keep the production inverted reader and its loader; count only the consumer
@@ -93,11 +93,11 @@ class CountingValidityReader final
         ++calls_->owned;
         return Nulls().IsNotNull();
     }
-    std::optional<index::ScalarIndexValidity>
-    GetImmutableValidity() const override {
-        auto snapshot = Nulls().GetImmutableValidity();
+    std::optional<BitsetView>
+    GetValidityView() const override {
+        auto snapshot = Nulls().GetValidityView();
         if (snapshot) {
-            calls_->owners.push_back(snapshot->bitmap().get());
+            calls_->owners.push_back(snapshot->data());
         }
         return snapshot;
     }
@@ -273,6 +273,98 @@ TEST_P(IndexValidityExpressionTest, NullableContainsLeavesBatchOffsetAndMove) {
     }
 }
 
+TEST_P(IndexValidityExpressionTest,
+       BinaryRangeOffsetsMaterializeAllValidAndReuseOwnedCache) {
+    constexpr int64_t rows = 33;
+    for (bool nullable : {false, true}) {
+        SCOPED_TRACE(nullable ? "nullable" : "all-valid");
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        auto field = schema->AddDebugField("value", DataType::INT64, nullable);
+        schema->set_primary_field_id(pk);
+        auto raw = segcore::DataGen(schema, rows, 42);
+        proto::schema::FieldData* data = nullptr;
+        for (auto& f : *raw.raw_->mutable_fields_data()) {
+            if (f.field_id() == field.get()) {
+                data = &f;
+            }
+        }
+        ASSERT_NE(data, nullptr);
+        std::vector<int64_t> values(rows);
+        std::vector<uint8_t> validity((rows + 7) / 8, 0xff);
+        for (int64_t row = 0; row < rows; ++row) {
+            values[row] = row;
+            data->mutable_scalars()->mutable_long_data()->set_data(row, row);
+            if (nullable) {
+                const bool valid = row % 5 != 0;
+                data->mutable_valid_data()->Set(row, valid);
+                if (!valid) {
+                    validity[row >> 3] &= ~(1 << (row & 7));
+                }
+            }
+        }
+        auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
+        auto field_data =
+            storage::CreateFieldData(DataType::INT64, DataType::NONE, nullable);
+        if (nullable) {
+            field_data->FillFieldData(values.data(), validity.data(), rows, 0);
+        } else {
+            field_data->FillFieldData(values.data(), rows);
+        }
+        auto opened = expr_index::BuildIndex(
+            field, DataType::INT64, index::INVERTED_INDEX_TYPE, {field_data});
+        auto calls = std::make_shared<ValidityCalls>();
+        opened.reader = std::make_unique<CountingValidityReader>(
+            std::move(opened.reader), calls);
+        expr_index::InstallIndex(
+            *segment, field, DataType::INT64, std::move(opened));
+        proto::plan::GenericValue lower, upper;
+        lower.set_int64_val(3);
+        upper.set_int64_val(20);
+        auto range = std::make_shared<expr::BinaryRangeFilterExpr>(
+            expr::ColumnInfo(
+                field, DataType::INT64, DataType::NONE, {}, nullable),
+            lower,
+            upper,
+            true,
+            true);
+        auto query = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment.get(), rows, MAX_TIMESTAMP);
+        exec::ExecContext execution(query.get());
+        auto compiled =
+            exec::CompileExpressions({range}, &execution, {}, false);
+        exec::EvalCtx context(&execution);
+        std::vector<exec::OffsetVector> batches{{32, 0, 5, 7, 7, 1},
+                                                {20, 3, 21, 10, 10, 32}};
+        for (auto& offsets : batches) {
+            context.set_offset_input(&offsets);
+            VectorPtr output;
+            compiled[0]->Eval(context, output);
+            auto column = std::dynamic_pointer_cast<ColumnVector>(output);
+            ASSERT_NE(column, nullptr);
+            ASSERT_EQ(column->size(), offsets.size());
+            TargetBitmapView actual(column->GetRawData(), offsets.size());
+            TargetBitmapView valid(column->GetValidRawData(), offsets.size());
+            for (size_t i = 0; i < offsets.size(); ++i) {
+                const auto row = offsets[i];
+                const bool expected_valid = !nullable || row % 5 != 0;
+                EXPECT_EQ(valid[i], expected_valid) << "row=" << row;
+                if (expected_valid) {
+                    EXPECT_EQ(actual[i], row >= 3 && row <= 20)
+                        << "row=" << row;
+                }
+            }
+            // The second Eval reuses this exact compiled expression's owned
+            // full-range cache, not the output batch that the caller can write.
+            valid.flip();
+            ASSERT_EQ(calls->owners.size(), 1);
+            EXPECT_EQ(calls->owned, 0);
+            EXPECT_EQ(calls->owners.front() == nullptr, !nullable);
+        }
+        context.set_offset_input(nullptr);
+    }
+}
+
 INSTANTIATE_TEST_SUITE_P(CacheModes,
                          IndexValidityExpressionTest,
                          testing::Values(false, true));
@@ -296,15 +388,56 @@ TEST(IndexValidityExpressionFallback, UsesOwnedSnapshotForMutableReader) {
         mutable int calls = 0;
         int null_offset = 1;
     } reader;
-    auto first = exec::SegmentExpr::GetIndexValiditySnapshot(reader);
+    std::shared_ptr<TargetBitmap> first_owner, second_owner;
+    auto first = exec::SegmentExpr::GetIndexValidityView(reader, first_owner);
     reader.null_offset = 2;
-    auto second = exec::SegmentExpr::GetIndexValiditySnapshot(reader);
+    auto second = exec::SegmentExpr::GetIndexValidityView(reader, second_owner);
     EXPECT_EQ(reader.calls, 2);
-    EXPECT_NE(first.bitmap().get(), second.bitmap().get());
-    EXPECT_FALSE(first[1]);
-    EXPECT_TRUE(first[2]);
-    EXPECT_TRUE(second[1]);
-    EXPECT_FALSE(second[2]);
+    ASSERT_NE(first_owner, nullptr);
+    ASSERT_NE(second_owner, nullptr);
+    EXPECT_NE(first.data(), second.data());
+    EXPECT_FALSE(first.test(1));
+    EXPECT_TRUE(first.test(2));
+    EXPECT_TRUE(second.test(1));
+    EXPECT_FALSE(second.test(2));
+}
+
+TEST(IndexValidityView, AppendsUnalignedWindowsAndAllValidSentinel) {
+    TargetBitmap source(130, true);
+    source.reset(65);
+    source.reset(129);
+    BitsetView view(reinterpret_cast<const uint8_t*>(source.data()),
+                    source.size());
+    TargetBitmap output(5, false);
+    output.set(2);
+    exec::SegmentExpr::AppendValidityView(output, view, 130, 63, 7);
+    ASSERT_EQ(output.size(), 12);
+    for (size_t i = 0; i < 12; ++i) {
+        EXPECT_EQ(output[i], i < 5 ? i == 2 : i != 7);
+    }
+    output.flip();
+    EXPECT_FALSE(view.test(65));
+    EXPECT_TRUE(view.test(64));
+    EXPECT_ANY_THROW(
+        exec::SegmentExpr::AppendValidityView(output, view, 130, 129, 2));
+    EXPECT_ANY_THROW(
+        exec::SegmentExpr::AppendValidityView(output, view, 129, 0, 1));
+    TargetBitmap all_valid(5, false);
+    all_valid.set(2);
+    exec::SegmentExpr::AppendValidityView(all_valid, BitsetView{}, 130, 123, 7);
+    ASSERT_EQ(all_valid.size(), 12);
+    for (size_t i = 0; i < 12; ++i) {
+        EXPECT_EQ(all_valid[i], i == 2 || i >= 5);
+    }
+    exec::SegmentExpr::AppendValidityView(all_valid, BitsetView{}, 130, 130, 0);
+    EXPECT_EQ(all_valid.size(), 12);
+    EXPECT_ANY_THROW(exec::SegmentExpr::AppendValidityView(
+        all_valid, BitsetView{}, 130, -1, 1));
+    // A nonempty all-zero mask is all-null, never the all-valid sentinel.
+    TargetBitmap all_null(17, false), null_batch;
+    BitsetView null_view(reinterpret_cast<const uint8_t*>(all_null.data()), 17);
+    exec::SegmentExpr::AppendValidityView(null_batch, null_view, 17, 1, 9);
+    EXPECT_EQ(null_batch.count(), 0);
 }
 
 }  // namespace

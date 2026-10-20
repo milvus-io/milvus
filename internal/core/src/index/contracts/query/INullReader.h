@@ -19,7 +19,7 @@
 #include <optional>
 
 #include "common/Types.h"
-#include "index/contracts/query/ScalarIndexValidity.h"
+#include "common/BitsetView.h"
 
 // Null predicates, independent of point/range support. Scalar predicate and
 // candidate families provide this mixin even when they do not implement
@@ -39,10 +39,13 @@ class INullReader {
     virtual TargetBitmap
     IsNotNull() const = 0;
 
-    // Optional immutable equivalent of IsNotNull(). Unsupported, mutable, or
-    // path-specific readers retain their existing owned-bitmap semantics.
-    virtual std::optional<ScalarIndexValidity>
-    GetImmutableValidity() const {
+    // Borrowed dense validity in this reader's coordinate domain. nullopt means
+    // unsupported; an engaged zero-size view means all Count() coordinates are
+    // valid. Otherwise size() equals Count(), with no ID mapping. The view must
+    // never outlive the pinned reader and its storage must remain immutable.
+    // Mutable/path-specific readers keep the owned IsNotNull() fallback.
+    virtual std::optional<BitsetView>
+    GetValidityView() const {
         return std::nullopt;
     }
 };
