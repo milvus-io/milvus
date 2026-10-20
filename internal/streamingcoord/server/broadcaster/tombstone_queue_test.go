@@ -95,6 +95,7 @@ func TestTombstoneQueueDoesNotHoldCallbackLockDuringGC(t *testing.T) {
 	defer callbackPatch.UnPatch()
 	ackScheduler := newAckCallbackScheduler(mlog.With())
 	ackScheduler.tombstoneScheduler = s
+	ackScheduler.triggerChan <- struct{}{} // Completion must not wait for an outstanding wakeup.
 	proto := gcTestTombstone(2, []string{"p0_vcchan"}, true)
 	proto.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED
 	task := newBroadcastTaskFromProto(proto, bm.metrics, ackScheduler)

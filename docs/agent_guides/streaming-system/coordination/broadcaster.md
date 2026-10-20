@@ -17,6 +17,14 @@ Non-primary clusters reject all broadcasts with `ErrNotPrimary`. The exception i
 5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`; a broadcast without CChannel is enqueued when all target VChannels have ACKed. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
 6. **Tombstone & GC**: After callbacks complete, task transitions to TOMBSTONE. `tombstoneScheduler` removes checkpoint-eligible tasks when their TTL expires or their count exceeds `maxCount`, evicting smaller BroadcastIDs first for count pressure (see below).
 
+Both `ackCallbackScheduler` and `tombstoneScheduler` use unbounded
+`typeutil.MultipartQueue` inboxes. A short mutex protects enqueue and queue
+exchange; task inspection, resource locking, callbacks, and GC run outside that
+mutex. ACK enqueue and callback completion send coalesced, nonblocking wakeups.
+The ACK loop drains its inbox before each scheduling pass, appending new tasks
+after existing blocked tasks to preserve FIFO scheduling for conflicting keys.
+Tombstone GC remains timer-driven.
+
 ## Idempotent Broadcast
 
 A broadcast message carrying the `_ik` idempotency key property is additionally indexed by that key. A later broadcast presenting the same key short-circuits: it creates no task, **waits for the original broadcast's ack callback to complete**, and returns the ORIGINAL broadcast's result, with the original message in `BroadcastAppendResult.Duplicated`. The lookup and the registration are one critical section on the manager's lock, so two concurrent same-key requests cannot both miss regardless of which resource keys they hold. The wait is what makes the duplicate answer equivalent to a fresh one: the original is not always serialized in front of the retry by a resource lock — a retry that raced a rename holds the stale name's lock, and a task recovered from a replicated WAL holds no lock at all — and without the wait such a retry would be answered with a broadcastID whose effects (for import, the job created in the ack callback) do not exist yet. After the wait, `AppendResults` is rebuilt from the original's persisted per-vchannel checkpoints and is never nil, so a caller that only reads append results cannot tell a duplicate from a fresh broadcast. The wait is bounded by the request context; a caller whose context expires gets its own timeout, not an unbacked ID.
