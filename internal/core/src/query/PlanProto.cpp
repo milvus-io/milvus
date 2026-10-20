@@ -1661,7 +1661,16 @@ ProtoParser::ParseJsonContainsExprs(
                static_cast<DataType>(columnInfo.element_type()));
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
-        Assert(!field.is_nested_array());
+        if (field.is_nested_array()) {
+            // array_contains*(s[i][tags], ...): the inner Array of struct
+            // element i, typed by its leaf.
+            Assert(columnInfo.nested_path_size() == 1);
+            const auto& leaf =
+                field.get_array_type_schema().array_element().array_element();
+            Assert(leaf.has_leaf_type() &&
+                   static_cast<DataType>(leaf.leaf_type()) ==
+                       static_cast<DataType>(columnInfo.element_type()));
+        }
     }
     std::vector<::milvus::proto::plan::GenericValue> values;
     values.reserve(expr_pb.elements_size());
