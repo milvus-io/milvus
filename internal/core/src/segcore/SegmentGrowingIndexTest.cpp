@@ -403,6 +403,8 @@ TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
     };
 
     auto growing = CreateGrowingSegment(schema, index_meta, 1, config);
+    auto* growing_impl = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_impl, nullptr);
     for (const auto& [begin, count] : {std::pair{0, 60}, std::pair{60, 40}}) {
         auto data = make_data(begin, count);
         auto offset = growing->PreInsert(count);
@@ -410,11 +412,14 @@ TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
                         count,
                         data.row_ids_.data(),
                         data.timestamps_.data(),
-                        data.SharedRaw());
-        auto pin = growing->PinGrowingIndex(vec);
-        ASSERT_TRUE(pin)
+                        data.raw_);
+        ASSERT_TRUE(growing_impl->get_indexing_record().SyncDataWithIndex(vec))
             << "algorithm must build an index instead of falling back";
-        EXPECT_EQ(pin.CoveredRowEnd(), begin + count);
+        auto pin = growing_impl->get_indexing_record()
+                       .get_vec_field_indexing(vec)
+                       .get_segment_indexing();
+        ASSERT_NE(pin.get(), nullptr);
+        EXPECT_EQ(pin.get()->Count(), begin + count);
         check(*growing, begin + count);
     }
 

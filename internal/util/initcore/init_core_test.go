@@ -61,7 +61,8 @@ func TestInitSparseInterimIndexAlgorithms(t *testing.T) {
 			err := InitInterminIndexConfig(params)
 			if tc.wantErr {
 				require.Error(t, err)
-				assert.Equal(t, int32(merr.CodeConfigInvalid), merr.Code(err))
+				// 3.0 maps ConfigInvalid to the generic segcore sentinel.
+				assert.ErrorIs(t, err, merr.ErrSegcore)
 				assert.False(t, merr.IsRetryableErr(err))
 			} else {
 				require.NoError(t, err)

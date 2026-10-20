@@ -17,6 +17,7 @@
 #include <string>
 
 #include "cachinglayer/Manager.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
