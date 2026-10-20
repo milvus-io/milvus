@@ -437,6 +437,7 @@ TEST(IndexValidityView, AppendsUnalignedWindowsAndAllValidSentinel) {
     TargetBitmap all_null(17, false), null_batch;
     BitsetView null_view(reinterpret_cast<const uint8_t*>(all_null.data()), 17);
     exec::SegmentExpr::AppendValidityView(null_batch, null_view, 17, 1, 9);
+    ASSERT_EQ(null_batch.size(), 9);
     EXPECT_EQ(null_batch.count(), 0);
 }
 
