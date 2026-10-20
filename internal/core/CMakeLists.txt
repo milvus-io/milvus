@@ -183,7 +183,6 @@ find_package(benchmark REQUIRED)
 find_package(googleapis REQUIRED)
 find_package(libavrocpp REQUIRED)
 find_package(AWSSDK REQUIRED CONFIG)
-find_package(aws-crt-cpp REQUIRED CONFIG)
 find_package(Azure REQUIRED)
 
 include( CTest )
