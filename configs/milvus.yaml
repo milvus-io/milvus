@@ -1787,6 +1787,9 @@ streaming:
 # Any configuration related to the knowhere vector search engine
 knowhere:
   enable: true # When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.
+  MRL:
+    search:
+      refine_ratio: 1.0 # Server-only; finite and >= 1. QueryNode restart required. With MRL refinement enabled, retrieve int(topk * ratio) candidates before full-dimensional reranking. Does not change base-index refinement.
   AISAQ:
     build:
       max_degree: 56 # Maximum degree of the Vamana graph

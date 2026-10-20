@@ -39,7 +39,9 @@
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorMemBuilder.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/comp/knowhere_config.h"
 #include "knowhere/version.h"
+#include "segcore/segcore_init_c.h"
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index::test {
@@ -585,6 +587,23 @@ TEST(VectorFamilyEdgeTest, MRLRefinesWithSourceRowsAfterReload) {
     ASSERT_EQ(result.seg_offsets_.size(), 2);
     EXPECT_EQ(result.seg_offsets_[0], 1);
     EXPECT_FLOAT_EQ(result.distances_[0], 0.0F);
+
+    const auto previous = knowhere::KnowhereConfig::GetMRLRefineRatio();
+    search.topk_ = 1;
+    for (float ratio : {1.0f, 2.9f}) {
+        EXPECT_EQ(SegcoreSetMRLRefineRatio(ratio).error_code, 0);
+        result = SearchResult{};
+        reader->Search(GenDataset(1, kDim, values.data() + kDim),
+                       search,
+                       BitsetView{},
+                       nullptr,
+                       result);
+        EXPECT_EQ(result.seg_offsets_.size(), 1);
+        if (result.seg_offsets_.size() == 1) {
+            EXPECT_EQ(result.seg_offsets_[0], ratio == 1.0f ? 0 : 1);
+        }
+    }
+    EXPECT_TRUE(knowhere::KnowhereConfig::SetMRLRefineRatio(previous));
 }
 
 TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
