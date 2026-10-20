@@ -416,7 +416,32 @@ func TestOpsToManifestUpdates(t *testing.T) {
 		}}}
 		_, err := opsToManifestUpdates(entry, "files/seg812")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "outside segment manifest base")
+		assert.Contains(t, err.Error(), "not an absolute path under the segment manifest data dir")
+	})
+
+	// milvus-storage only relativizes files under `<base>/_data/`; a bare
+	// `<base>/x` passes a base-prefix check but is read from
+	// `<base>/_data/<base>/x`, so it must be rejected too.
+	t.Run("file under base but outside data dir rejected", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{
+			Type: "add", Columns: []string{"100"}, RowCount: 5,
+			Files: []BackfillManifestFile{{Path: "files/seg812/100.parquet", StartIndex: 0, EndIndex: 5}},
+		}}}
+		_, err := opsToManifestUpdates(entry, "files/seg812")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not an absolute path under the segment manifest data dir")
+	})
+
+	// `..` traversal that still starts with `<base>/_data/` normalizes to
+	// another segment's file; a clean path is required.
+	t.Run("path traversal rejected", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{
+			Type: "add", Columns: []string{"100"}, RowCount: 5,
+			Files: []BackfillManifestFile{{Path: "files/seg812/_data/../../other_seg/_data/100.parquet", StartIndex: 0, EndIndex: 5}},
+		}}}
+		_, err := opsToManifestUpdates(entry, "files/seg812")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not an absolute path under the segment manifest data dir")
 	})
 
 	t.Run("file inside segment base accepted", func(t *testing.T) {

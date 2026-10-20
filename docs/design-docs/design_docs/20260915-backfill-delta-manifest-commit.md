@@ -169,11 +169,13 @@ Column names are Milvus field-ID strings — the same convention the Spark job
 and `ColumnGroupEntry.Columns` use — so `DropColumns` and the added group
 reference the same identity.
 
-Every op file path is validated to lie under the target segment's manifest base
-(`<base>/_data/<file>`): a path pointing at another segment's files would break
-reads once that segment is GC'd, and a path outside the base would never be
-collected. This mirrors the V2 path normalization (which rebuilds paths from the
-segment ID) for the delta form.
+Every op file path is validated to be an **absolute** path under the target
+segment's `<base>/_data/` directory (prefix + `path.Clean(p) == p`): milvus-storage
+only relativizes column-group files under `<base>/_data/` (`ToRelative` with
+`kDataPath`), so a bare `<base>/x` would be read back from
+`<base>/_data/<base>/x`, and a `..` traversal would normalize to another
+segment's files and never get collected. This mirrors the V2 path normalization
+(which rebuilds paths from the segment ID) for the delta form.
 
 ### 3. CommitBackfillResult: no broadcast, direct framework call
 
@@ -217,16 +219,24 @@ CommitBackfillResult
   dispatched through the per-segment `CommitSegmentManifest` (the single-commit
   path), never the batch. The batch publishes segment records only and cannot
   stage the SegmentIndex removal that a column drop requires; the single-commit
-  path resolves the index-removal set from the CURRENT index definitions under
-  the manifest lock (an index created during the commit window is still caught)
-  and retracts the records atomically with the new pointer.
+  path always derives the index-removal set from the commit's `DropColumns`
+  against the CURRENT index definitions (an index created during the commit
+  window is still caught) and retracts the records atomically with the new
+  pointer.
 - `CommitSegmentManifests` is one catalog transaction per batch
   (all-or-nothing per batch, dropped/unhealthy segments skipped benignly),
   preserving the batch atomicity the broadcast ack callback deliberately kept.
   Both V2 and V3 dispatch use bounded batches of `maxBackfillCommitBatch`
   (512), so a large result cannot hold `segMu` (V2) or the manifest locks (V3)
   for the whole commit; per-segment manifest reads and single-segment commits
-  run with bounded concurrency inside the RPC instead of serially.
+  run under an `errgroup.SetLimit`-bounded worker pool inside the RPC (no
+  goroutine per segment) instead of serially.
+- **Lock hygiene in the single-segment commit:** the backfill index-removal set
+  is re-resolved from current definitions AFTER manifest I/O but BEFORE taking
+  `segMu`; the publication section only scans the segment's records. No
+  `fieldIndexLock` is acquired inside `segMu`, so a replace commit overlapping a
+  `CreateIndex`/`DropIndex` (which holds that lock's write side across an etcd
+  round trip) cannot stall every segment reader behind `segMu`.
 - **DataView reconciliation:** after any V3 commit succeeds, the handler calls
   `meta.recomputeDataView` (matching the old ack callback and every other
   manifest-commit caller); V2-only results skip it because V2 upserts do not
