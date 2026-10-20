@@ -5,7 +5,10 @@ import (
 	"sort"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -91,7 +94,6 @@ func (s *tombstoneScheduler) background() {
 	defer ticker.Stop()
 
 	for {
-		s.triggerGCTombstone()
 		select {
 		case <-s.notifier.Context().Done():
 			return
@@ -101,6 +103,7 @@ func (s *tombstoneScheduler) background() {
 				createTime:  time.Now(),
 			})
 		case <-ticker.C:
+			s.triggerGCTombstone()
 		}
 	}
 }
@@ -109,29 +112,56 @@ func (s *tombstoneScheduler) background() {
 func (s *tombstoneScheduler) triggerGCTombstone() {
 	maxTombstoneLifetime := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse()
 	maxTombstoneCount := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.GetAsInt()
-
+	ctx := s.notifier.Context()
 	expiredTime := time.Now().Add(-maxTombstoneLifetime)
-	expiredOffset := 0
 	if len(s.tombstones) > maxTombstoneCount {
-		expiredOffset = len(s.tombstones) - maxTombstoneCount
+		s.Logger().RatedWarn(ctx, 1.0, "tombstone count exceeds soft limit; TTL and WAL checkpoints still gate GC",
+			mlog.Int("tombstoneCount", len(s.tombstones)), mlog.Int("maxCount", maxTombstoneCount))
 	}
-	s.Logger().Info(context.TODO(),
-		"triggerGCTombstone",
-		mlog.Int("tombstone count", len(s.tombstones)),
-		mlog.Int("expired offset", expiredOffset),
-		mlog.Time("expired time", expiredTime))
+	// Items are ordered by enqueue time. Avoid catalog I/O until one expires.
+	if len(s.tombstones) == 0 || s.tombstones[0].createTime.After(expiredTime) {
+		return
+	}
+	checkpoints, err := s.loadCheckpoints(ctx)
+	if err != nil {
+		s.Logger().Warn(ctx, "failed to load WAL checkpoints for tombstone GC", mlog.Err(err))
+		return
+	}
+	retained := s.tombstones[:0]
 	for idx, tombstone := range s.tombstones {
-		// drop tombstone until the expired time or until the expired offset.
-		if idx >= expiredOffset && tombstone.createTime.After(expiredTime) {
-			s.tombstones = s.tombstones[idx:]
-			return
+		if tombstone.createTime.After(expiredTime) {
+			retained = append(retained, s.tombstones[idx:]...)
+			break
 		}
-		if err := s.bm.DropTombstone(s.notifier.Context(), tombstone.broadcastID); err != nil {
-			s.Logger().Error(context.TODO(), "failed to drop tombstone", mlog.Err(err))
-			s.tombstones = s.tombstones[idx:]
-			return
+		dropped, err := s.bm.DropTombstone(ctx, tombstone.broadcastID, checkpoints)
+		if err != nil {
+			s.Logger().Warn(ctx, "failed to drop tombstone", mlog.Err(err))
+			retained = append(retained, s.tombstones[idx:]...)
+			break
+		}
+		if !dropped {
+			// A lagging PChannel must not block unrelated eligible tombstones.
+			retained = append(retained, tombstone)
 		}
 	}
-	// all the tombstones are dropped, reset the tombstones.
-	s.tombstones = make([]tombstoneItem, 0)
+	s.tombstones = retained
+}
+
+// loadCheckpoints reads the durable recovery boundary once per PChannel per GC
+// pass. Collect the entire map before deleting tasks; never reuse a prior pass.
+func (s *tombstoneScheduler) loadCheckpoints(ctx context.Context) (map[string]*streamingpb.WALCheckpoint, error) {
+	channels, err := resource.Resource().StreamingCatalog().ListPChannel(ctx)
+	if err != nil {
+		return nil, merr.Wrap(err, "list PChannels for tombstone GC")
+	}
+	checkpoints := make(map[string]*streamingpb.WALCheckpoint, len(channels))
+	for _, channel := range channels {
+		name := channel.GetChannel().GetName()
+		checkpoint, err := resource.Resource().StreamingNodeCatalog().GetConsumeCheckpoint(ctx, name)
+		if err != nil {
+			return nil, merr.Wrapf(err, "read WAL checkpoint for tombstone GC on %s", name)
+		}
+		checkpoints[name] = checkpoint
+	}
+	return checkpoints, nil
 }

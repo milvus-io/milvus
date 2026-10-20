@@ -15,7 +15,7 @@ Non-primary clusters reject all broadcasts with `ErrNotPrimary`. The exception i
 3. **Append**: `broadcastScheduler` dispatches the task to a worker that calls `AppendMessages()` to write to all target PChannels.
 4. **FastAck**: If `AckSyncUp` is not set, the broadcaster immediately self-acks all VChannels using the append results (no need to wait for consumer-side ACK). Otherwise, waits for StreamingNode consumers to ACK each VChannel.
 5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`; a broadcast without CChannel is enqueued when all target VChannels have ACKed. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
-6. **Tombstone & GC**: After callbacks complete, task transitions to TOMBSTONE. `tombstoneScheduler` garbage-collects aged-out tasks from the catalog.
+6. **Tombstone & GC**: After callbacks complete, task transitions to TOMBSTONE. `tombstoneScheduler` removes a task only after its retention TTL expires and every participating PChannel's persisted WAL checkpoint has passed that channel's broadcast TimeTick (see below).
 
 ## Idempotent Broadcast
 
@@ -36,9 +36,82 @@ The broadcaster runs no admission check of its own, so **everything a caller val
 
 **The one case that rule does not cover is a failed original.** The duplicate branch resolves a key to the original ID without consulting that job's state, so if the original ended `Failed`, every retry under the same key returns that same failed ID for the rest of the window and the client never makes progress. That is ordinary idempotency semantics -- the key names an attempt that did happen -- but it is the one situation where a fresh key is the correct move rather than the duplicating one. A client that generalizes the rule above will spin instead. `ImportV2` logs the original job's state on every dedup hit so an operator can tell a key stuck this way from one waiting on a healthy job.
 
-The index lives and dies with the task entry, so **the idempotency window a client observes equals the tombstone retention**: `maxLifetime` or `maxCount`, whichever comes first. The count bound is hard — a busy cluster can evict tombstones well before `maxLifetime`, ending the window early. Any subsystem that advertises this guarantee (currently BulkImport) must keep its own retention at least as long as `maxLifetime`, or an in-window retry can resolve to an ID its own metadata has already GC'd. Matching the two exactly is not enough: `tombstoneScheduler.Initialize` stamps every recovered tombstone with `time.Now()`, so a tombstone's age is measured from the last StreamingCoord start and each restart extends its remaining life, while the subsystem's own retention keeps counting from the original event. Leave margin.
+The index lives and dies with the task entry. Tombstones remain for at least
+`streaming.walBroadcaster.tombstone.maxLifetime` (24h by default), and longer
+when a participating WAL checkpoint has not passed the broadcast. `maxCount`
+is a soft pressure threshold; it cannot shorten this retention. Recovery resets
+the in-memory retention clock, so each restart extends the window. Subsystems
+returning retained IDs (currently BulkImport) must account for this extension and
+checkpoint lag in their own metadata retention; `maxLifetime` is no longer an
+upper bound on the idempotency window.
 
 Replicated tasks are indexed too: the query path is unreachable on a secondary (`WithResourceKeys` rejects non-primary clusters), and indexing there lets a promoted secondary honor pre-failover keys.
+
+## Tombstone GC: TTL and persisted WAL checkpoints
+
+Issue [#54425](https://github.com/milvus-io/milvus/issues/54425) exposes a gap
+between task completion and WAL recovery. A callback may finish while an earlier
+unfinished message or Summary publication holds the durable WAL checkpoint back.
+Deleting the tombstone by age or count alone then allows replayed replicated ACKs
+to recreate the task, rebuild a partial ACK bitmap, or schedule its callback again.
+
+Apply the same GC rule to **all** tombstones: primary broadcasts, replicated
+broadcasts on a secondary, and local unreplicable broadcasts. For tombstone `T`:
+
+```text
+age(T) >= streaming.walBroadcaster.tombstone.maxLifetime
+AND, for every VChannel v in T's broadcast header:
+    persistedCheckpoint[ToPhysicalChannel(v)].TimeTick
+        > T.AckedCheckpoints[v].TimeTick
+```
+
+TimeTick is the PChannel's LSN. Use each receiving channel's local broadcast
+TimeTick, including CChannel; neither the source replication TimeTick nor
+MessageID ordering participates in this comparison. When several VChannels
+share a PChannel, its checkpoint must pass every corresponding broadcast copy.
+Equality is insufficient. Missing checkpoints and missing/zero legacy ACK
+positions retain the tombstone because they cannot prove eligibility.
+
+GC runs on `checkInternal` ticks, rather than on each newly enqueued tombstone.
+Each GC pass that has expired tombstones first lists all PChannels from the
+StreamingCoord catalog, then reads each persisted `WALCheckpoint` through
+`StreamingNodeCataLog.GetConsumeCheckpoint`. StreamingCoord constructs that
+catalog with the same cluster MetaKV root used by StreamingNode. This requires
+no StreamingNode RPC, new metadata key, protobuf field, or catalog interface.
+The pass collects the checkpoint map before deleting any task and discards it
+afterward. A read failure aborts the pass without deleting tombstones. A channel
+missing from the collected map blocks only tombstones involving that channel.
+No manager/task lock is held during catalog reads. Under monotonic WAL checkpoint
+publication, advancing checkpoints during the pass only makes this map conservative;
+a cross-channel atomic snapshot is unnecessary.
+
+Only expired tombstones are considered. `maxCount` remains a soft pressure
+threshold for logging; it cannot bypass either prerequisite. A blocked tombstone
+does not prevent eligible, unrelated tombstones from being collected. Failed
+catalog deletion retains the entry for retry. Task and idempotency-index removal
+continue through the existing DONE transition.
+
+The existing retention clock starts when the scheduler receives the persisted
+TOMBSTONE. It is not stored in the task proto: coordinator recovery starts a new
+full TTL. This conservatively extends retention and avoids a format change.
+StreamingNode restart/handoff before checkpoint advancement therefore still sees
+the retained tombstone when it replays partial or complete sets of ACKs. Existing
+ACK lookup suppresses those messages; no global TimeTick filter is added.
+
+The checkpoint proves completion of the consuming ACK needed to advance that
+prefix. It does not drain all historical RPC attempts. The TTL additionally
+protects against delayed duplicate requests, including server-side ACK handlers
+that survive client cancellation. This is a bounded operational protection,
+not an exactly-once guarantee against arbitrarily delayed requests. Epoch fencing,
+WAL replay filtering, append deduplication, and changes to checkpoint ownership
+publication are outside this fix. The rule assumes recovery uses the published
+checkpoint and that its logical position does not regress across ownership changes.
+
+Regression coverage must check TTL expiry and count pressure independently,
+checkpoint behind/equal/ahead, per-channel local timestamps, missing/legacy
+positions, catalog read/delete failures, partial/all-channel ACK replay,
+coordinator recovery and checkpoint term changes during handoff. New replicated
+broadcasts must still be recoverable through the existing ACK path.
 
 ## Import Completion
 

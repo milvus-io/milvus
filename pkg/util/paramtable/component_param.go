@@ -7830,7 +7830,7 @@ neither Completed nor Failed -- so this value alone decides how many finished
 importJob entries stay in etcd, each carrying its schema, file list and options
 plus every preimport and import task under it.
 The 48h default exists for BulkImport idempotency and only for it: the idempotency
-window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+window lasts at least streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
 earlier than its tombstone lets an in-window retry resolve to a jobID that
 GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
 as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
@@ -7838,7 +7838,8 @@ age is measured from the last StreamingCoord start: every restart extends its
 remaining life by up to another maxLifetime, while this retention keeps counting
 from the job's own completion. Equal values hold only for a window with no restart,
 which is not a property a default may assume. Raise it further if StreamingCoord
-restarts more than once inside one tombstone lifetime.
+restarts more than once inside one tombstone lifetime or WAL checkpoint lag extends
+tombstone retention. No fixed multiple bounds retention during a checkpoint stall.
 A cluster whose clients never send an Idempotency-Key is under no such requirement
 and can lower this freely; 10800 was the default before idempotency keys existed.`,
 		DefaultValue: "172800",
@@ -9641,9 +9642,8 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALBroadcasterTombstoneMaxCount = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxCount",
 		Version: "2.6.0",
-		Doc: `The max count of tombstone, 8192 by default. 
-Tombstone is used to reject duplicate submissions of DDL messages,
-too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		Doc: `The soft tombstone count threshold for GC pressure warnings, 8192 by default.
+Exceeding it never bypasses the retention TTL or persisted WAL checkpoint checks.`,
 		DefaultValue: "8192",
 		Export:       false,
 	}
@@ -9652,9 +9652,9 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALBroadcasterTombstoneMaxLifetime = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxLifetime",
 		Version: "2.6.0",
-		Doc: `The max lifetime of tombstone, 24h by default.
-Tombstone is used to reject duplicate submissions of DDL messages,
-too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		Doc: `The minimum tombstone retention before GC, 24h by default (legacy key name).
+GC also requires every participating persisted WAL checkpoint to pass the broadcast.
+Coordinator recovery restarts the retention clock; checkpoint lag can extend it further.`,
 		DefaultValue: "24h",
 		Export:       false,
 	}
