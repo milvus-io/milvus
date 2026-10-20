@@ -51,6 +51,8 @@ FetchContent_Declare(
         knowhere
         GIT_REPOSITORY  ${GIT_REPOSITORY}
         GIT_TAG         ${KNOWHERE_VERSION}
+        # Temporary dependency on Knowhere PR #1904; remove after it merges.
+        GIT_CONFIG      remote.origin.fetch=+refs/pull/1904/head:refs/remotes/origin/pull/1904/head
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )

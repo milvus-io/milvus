@@ -14,8 +14,9 @@ import (
 )
 
 type knowhereConfig struct {
-	Enable     ParamItem  `refreshable:"true"`
-	IndexParam ParamGroup `refreshable:"true"`
+	Enable         ParamItem  `refreshable:"true"`
+	IndexParam     ParamGroup `refreshable:"true"`
+	MRLRefineRatio ParamItem  `refreshable:"false"`
 }
 
 const (
@@ -71,6 +72,15 @@ func (p *knowhereConfig) init(base *BaseTable) {
 		Doc:          "When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.",
 	}
 	p.Enable.Init(base.mgr)
+
+	p.MRLRefineRatio = ParamItem{
+		Key:          "knowhere.MRL.search.refine_ratio",
+		Version:      "3.0.0",
+		DefaultValue: "1.0",
+		Export:       true,
+		Doc:          "Server-only MRL refinement candidate multiplier, finite and >= 1. Applied at QueryNode startup; indexed search retrieves int(topk * ratio) candidates before full-dimensional reranking. SDK search parameters cannot override it.",
+	}
+	p.MRLRefineRatio.Init(base.mgr)
 }
 
 func (p *knowhereConfig) getIndexParam(indexType string, stage string) map[string]string {
