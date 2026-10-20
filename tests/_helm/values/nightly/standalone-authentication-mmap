@@ -61,11 +61,17 @@ extraConfigFiles:
         scalarIndex: true
         growingMmapEnabled: true
     common:
+      fileResource:
+        mode:
+          proxy: sync
       storage:
         # enable storage v3
         useLoonFFI: true
       security:
         authorizationEnabled: true
+    function:
+      pyUDF:
+        enabled: true
 metrics:
   serviceMonitor:
     enabled: true
