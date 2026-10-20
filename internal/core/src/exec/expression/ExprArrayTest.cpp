@@ -16,12 +16,16 @@
 
 #include <boost/container/vector.hpp>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <map>
+#include <numeric>
 #include <memory>
 #include <optional>
 #include <string>
@@ -72,8 +76,11 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/arrow_field_utils.h"
+#include "storage/MmapManager.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -633,6 +640,13 @@ TEST(Expr, TestArraySubscriptMissingElementIsUnknown) {
              {true, false, false},
              {true, false, false},
              {false, false, false},
+             {true, false, false}},
+            {"term_empty",
+             std::make_shared<expr::TermFilterExpr>(
+                 column, std::vector<proto::plan::GenericValue>{}),
+             {false, false, false},
+             {true, false, false},
+             {true, false, false},
              {true, false, false}},
             {"arith",
              std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
@@ -3936,6 +3950,13 @@ TEST(Expr, TestArrayInTerm) {
                  auto val = array.get_data_unchecked<std::string_view>(1024);
                  return val == "abc" || val == "idhgf1s";
              }},
+            // A subscript beyond int is out of bounds on every row.
+            {"long_array[2147483648] in [1, 2, 3]",
+             "long",
+             [](milvus::Array& array) { return false; }},
+            {"long_array[2147483648] in []",
+             "long",
+             [](milvus::Array& array) { return false; }},
         };
 
     for (auto [expr, array_type, ref_func] : testcases) {
@@ -4602,4 +4623,757 @@ TEST(Expr, TestArrayLengthExprCanExecuteAllAtOnce) {
         Int64Value(0));
     EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(expr, sealed.get(), N));
     EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(expr, growing.get(), N));
+}
+
+namespace {
+
+// Rows of the struct `s` used by the element-nullable row filter tests.
+// Row 3 is a NULL struct row in every sub-field.
+//   s[b]    (Array<Int64>, element nullable):
+//           [1, NULL, 3], [], [NULL], NULL, [5, 6]
+//   s[name] (Array<VarChar>, element nullable):
+//           ["ab", NULL], [], [NULL], NULL, ["ac"]
+//   s[tags] (Array<Array<Int64>>, inner Arrays and leaves nullable):
+//           [[1, 2], [NULL, 4]], [], [NULL, [7]], NULL, [[5], [6, 6]]
+//   s[vec]  (ArrayOfVector, element nullable):
+//           [v, NULL, v], [], [NULL], NULL, [v, v]
+constexpr int64_t kElementNullRows = 5;
+constexpr int64_t kElementNullVecDim = 4;
+
+struct ElementNullableStruct {
+    SchemaPtr schema;
+    FieldId pk;
+    FieldId b;
+    FieldId name;
+    FieldId tags;
+    FieldId vec;
+    std::unique_ptr<InsertRecordProto> insert;
+};
+
+// Expected per-row result: 1 TRUE, 0 FALSE, -1 UNKNOWN.
+using ElementNullExpected = std::vector<int>;
+
+ElementNullableStruct
+BuildElementNullableStruct() {
+    ElementNullableStruct out;
+    auto schema = std::make_shared<Schema>();
+    out.pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(out.pk);
+    out.b = schema->AddDebugArrayField("s[b]", DataType::INT64, true, true);
+    out.name =
+        schema->AddDebugArrayField("s[name]", DataType::VARCHAR, true, true);
+    out.vec = schema->AddDebugVectorArrayField("s[vec]",
+                                               DataType::VECTOR_FLOAT,
+                                               kElementNullVecDim,
+                                               knowhere::metric::L2,
+                                               true,
+                                               true);
+    out.tags = FieldId(out.vec.get() + 100);
+    proto::schema::TypeSchema tags_type;
+    tags_type.set_nullable(true);
+    auto* inner = tags_type.mutable_array_element();
+    inner->set_nullable(true);
+    inner->mutable_array_element()->set_leaf_type(
+        proto::schema::DataType::Int64);
+    inner->mutable_array_element()->set_nullable(true);
+    schema->AddField(FieldMeta(FieldName("s[tags]"),
+                               out.tags,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               true,
+                               true,
+                               std::nullopt,
+                               std::string{},
+                               LOCAL_FORMAT_RAW,
+                               std::make_optional(std::move(tags_type))));
+    out.schema = schema;
+
+    const std::vector<bool> row_valid = {true, true, true, false, true};
+    auto insert = std::make_unique<InsertRecordProto>();
+    insert->set_num_rows(kElementNullRows);
+
+    auto* pk = insert->add_fields_data();
+    pk->set_field_id(out.pk.get());
+    pk->set_type(proto::schema::DataType::Int64);
+    for (int64_t i = 0; i < kElementNullRows; ++i) {
+        pk->mutable_scalars()->mutable_long_data()->add_data(i);
+    }
+
+    auto add_array_field = [&](FieldId id, proto::schema::DataType element) {
+        auto* field = insert->add_fields_data();
+        field->set_field_id(id.get());
+        field->set_type(proto::schema::DataType::Array);
+        for (bool valid : row_valid) {
+            field->mutable_scalars()->add_valid_data(valid);
+        }
+        auto* rows = field->mutable_scalars()->mutable_array_data();
+        rows->set_element_type(element);
+        return rows;
+    };
+
+    // Null slots carry a zero payload so a predicate that ignores element
+    // validity would match them.
+    using Leaves = std::vector<std::optional<int64_t>>;
+    auto fill_long = [](ScalarFieldProto* row, const Leaves& leaves) {
+        auto* data = row->mutable_long_data();
+        for (const auto& leaf : leaves) {
+            data->add_data(leaf.value_or(0));
+            row->add_valid_data(leaf.has_value());
+        }
+    };
+    auto* b_rows = add_array_field(out.b, proto::schema::DataType::Int64);
+    for (const auto& row : std::vector<Leaves>{
+             {1, std::nullopt, 3}, {}, {std::nullopt}, {}, {5, 6}}) {
+        fill_long(b_rows->add_data(), row);
+    }
+
+    using Strings = std::vector<std::optional<std::string>>;
+    auto* name_rows =
+        add_array_field(out.name, proto::schema::DataType::VarChar);
+    for (const auto& row : std::vector<Strings>{
+             {"ab", std::nullopt}, {}, {std::nullopt}, {}, {"ac"}}) {
+        auto* proto_row = name_rows->add_data();
+        auto* data = proto_row->mutable_string_data();
+        for (const auto& leaf : row) {
+            data->add_data(leaf.value_or(""));
+            proto_row->add_valid_data(leaf.has_value());
+        }
+    }
+
+    using Inner = std::optional<Leaves>;
+    auto* tags_rows = add_array_field(out.tags, proto::schema::DataType::Array);
+    for (const auto& row : std::vector<std::vector<Inner>>{
+             {Leaves{1, 2}, Leaves{std::nullopt, 4}},
+             {},
+             {std::nullopt, Leaves{7}},
+             {},
+             {Leaves{5}, Leaves{6, 6}}}) {
+        auto* proto_row = tags_rows->add_data();
+        auto* children = proto_row->mutable_array_data();
+        children->set_element_type(proto::schema::DataType::Int64);
+        for (const auto& child : row) {
+            auto* proto_child = children->add_data();
+            if (child.has_value()) {
+                fill_long(proto_child, *child);
+            } else {
+                proto_child->mutable_long_data();
+            }
+            proto_row->add_valid_data(child.has_value());
+        }
+    }
+
+    auto* vec = insert->add_fields_data();
+    vec->set_field_id(out.vec.get());
+    vec->set_type(proto::schema::DataType::ArrayOfVector);
+    vec->mutable_vectors()->set_dim(kElementNullVecDim);
+    auto* vec_rows = vec->mutable_vectors()->mutable_vector_array();
+    vec_rows->set_dim(kElementNullVecDim);
+    vec_rows->set_element_type(proto::schema::DataType::FloatVector);
+    for (const auto& elements : std::vector<std::vector<bool>>{
+             {true, false, true}, {}, {false}, {}, {true, true}}) {
+        auto* row = vec_rows->add_data();
+        row->set_dim(kElementNullVecDim);
+        row->mutable_float_vector();
+        for (bool valid : elements) {
+            row->add_valid_data(valid);
+            if (valid) {
+                for (int64_t d = 0; d < kElementNullVecDim; ++d) {
+                    row->mutable_float_vector()->add_data(1.0f);
+                }
+            }
+        }
+    }
+    for (bool valid : row_valid) {
+        vec->mutable_vectors()->add_valid_data(valid);
+    }
+    out.insert = std::move(insert);
+    return out;
+}
+
+std::unique_ptr<SegmentGrowing>
+LoadElementNullableGrowing(const ElementNullableStruct& data) {
+    auto growing = CreateGrowingSegment(
+        data.schema, empty_index_meta, 1, SegcoreConfig::default_config());
+    std::vector<int64_t> row_ids(kElementNullRows);
+    std::vector<Timestamp> timestamps(kElementNullRows);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+    std::iota(timestamps.begin(), timestamps.end(), 0);
+    const auto offset = growing->PreInsert(kElementNullRows);
+    growing->Insert(offset,
+                    kElementNullRows,
+                    row_ids.data(),
+                    timestamps.data(),
+                    std::make_shared<InsertRecordProto>(*data.insert));
+    return growing;
+}
+
+// Native-list fields load only from Storage V2/V3, so write the rows as a
+// V3 segment in two-row batches.
+std::unique_ptr<SegmentSealed>
+LoadElementNullableSealed(const ElementNullableStruct& data,
+                          const std::string& segment_path) {
+    proto::schema::CollectionSchema storage_proto;
+    for (auto [id, name] : {std::pair{RowFieldID, "RowID"},
+                            std::pair{TimestampFieldID, "Timestamp"}}) {
+        auto* field = storage_proto.add_fields();
+        field->set_fieldid(id.get());
+        field->set_name(name);
+        field->set_data_type(proto::schema::DataType::Int64);
+    }
+    const auto user_proto = data.schema->ToProto();
+    for (const auto& field : user_proto.fields()) {
+        *storage_proto.add_fields() = field;
+    }
+    auto schema = Schema::ParseFrom(storage_proto);
+
+    auto build_int64 = [](int64_t base) {
+        arrow::Int64Builder builder;
+        for (int64_t i = 0; i < kElementNullRows; ++i) {
+            AssertInfo(builder.Append(base + i).ok(), "append int64");
+        }
+        std::shared_ptr<arrow::Array> output;
+        AssertInfo(builder.Finish(&output).ok(), "finish int64");
+        return output;
+    };
+    std::unordered_map<FieldId, std::shared_ptr<arrow::Array>> columns = {
+        {RowFieldID, build_int64(0)}, {TimestampFieldID, build_int64(0)}};
+    for (const auto& field_data : data.insert->fields_data()) {
+        const FieldId id(field_data.field_id());
+        auto converted = FieldDataToArrow(std::to_string(id.get()),
+                                          field_data,
+                                          kElementNullRows,
+                                          false,
+                                          nullptr,
+                                          &(*schema)[id]);
+        AssertInfo(converted.ok(),
+                   "convert field {}: {}",
+                   id.get(),
+                   converted.status().ToString());
+        columns[id] = converted->second;
+    }
+    auto loon_schema = schema->ConvertToLoonArrowSchema();
+    std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
+    for (int64_t offset = 0; offset < kElementNullRows; offset += 2) {
+        const auto length = std::min<int64_t>(2, kElementNullRows - offset);
+        arrow::ArrayVector sliced;
+        for (const auto& id : schema->get_field_ids()) {
+            sliced.push_back(columns.at(id)->Slice(offset, length));
+        }
+        batches.push_back(
+            arrow::RecordBatch::Make(loon_schema, length, sliced));
+    }
+    const auto version =
+        test::WriteRecordBatchesToV3(schema,
+                                     segment_path,
+                                     batches,
+                                     test::GenerateColumnGroupPattern(schema));
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(3);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(kElementNullRows);
+    load_info.set_manifest_path("{\"base_path\":\"" + segment_path +
+                                "\",\"ver\":" + std::to_string(version) + "}");
+    load_info.set_insert_channel("element-nullable-row-filter-test");
+    auto sealed = CreateSealedSegment(schema, empty_index_meta, 3);
+    sealed->SetLoadInfo(load_info);
+    tracer::TraceContext trace_ctx;
+    sealed->Load(trace_ctx, nullptr);
+    return sealed;
+}
+
+// Evaluate expr on the batch path, the offsets path and under NOT, and check
+// UNKNOWN stays UNKNOWN under NOT while TRUE/FALSE flip.
+void
+CheckElementNullExpr(SegmentInternalInterface* segment,
+                     const expr::TypedExprPtr& typed_expr,
+                     const ElementNullExpected& expected,
+                     const std::string& label) {
+    ASSERT_EQ(expected.size(), kElementNullRows) << label;
+    auto check = [&](const ColumnVectorPtr& vec,
+                     const std::vector<int64_t>& rows,
+                     bool negated,
+                     const std::string& path) {
+        ASSERT_EQ(vec->size(), rows.size()) << label << " " << path;
+        BitsetTypeView bits(vec->GetRawData(), vec->size());
+        BitsetTypeView valid(vec->GetValidRawData(), vec->size());
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const auto want = expected[rows[i]];
+            const auto where =
+                label + " " + path + ", row " + std::to_string(rows[i]);
+            if (want < 0) {
+                EXPECT_FALSE(valid[i]) << where;
+                EXPECT_FALSE(bits[i]) << where;
+            } else {
+                EXPECT_TRUE(valid[i]) << where;
+                EXPECT_EQ(bits[i], (want == 1) != negated) << where;
+            }
+        }
+    };
+    const std::vector<int64_t> all_rows = {0, 1, 2, 3, 4};
+    auto not_expr = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, typed_expr);
+    for (bool negated : {false, true}) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID,
+            negated ? expr::TypedExprPtr(not_expr) : typed_expr);
+        const std::string tag = negated ? "NOT " : "";
+        check(milvus::test::gen_filter_res(
+                  plan.get(), segment, kElementNullRows, MAX_TIMESTAMP),
+              all_rows,
+              negated,
+              tag + "batch");
+
+        exec::OffsetVector offsets = {4, 0, 3, 2, 1};
+        check(
+            milvus::test::gen_filter_res(
+                plan.get(), segment, kElementNullRows, MAX_TIMESTAMP, &offsets),
+            {4, 0, 3, 2, 1},
+            negated,
+            tag + "offsets");
+
+        // Two-row batches cross chunk boundaries on the batch path.
+        const auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+        auto final =
+            ExecuteQueryExpr(plan, segment, kElementNullRows, MAX_TIMESTAMP);
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+        ASSERT_EQ(final.size(), kElementNullRows) << label;
+        for (int64_t i = 0; i < kElementNullRows; ++i) {
+            const bool want =
+                expected[i] >= 0 && ((expected[i] == 1) != negated);
+            EXPECT_EQ(final[i], want)
+                << label << " " << tag << "filter, row " << i;
+        }
+    }
+}
+
+proto::plan::GenericValue
+ElementNullInt(int64_t value) {
+    proto::plan::GenericValue val;
+    val.set_int64_val(value);
+    return val;
+}
+
+proto::plan::GenericValue
+ElementNullString(const std::string& value) {
+    proto::plan::GenericValue val;
+    val.set_string_val(value);
+    return val;
+}
+
+proto::plan::GenericValue
+ElementNullIntArray(const std::vector<int64_t>& values) {
+    proto::plan::GenericValue val;
+    auto* array = val.mutable_array_val();
+    array->set_same_type(true);
+    array->set_element_type(proto::schema::DataType::Int64);
+    for (auto value : values) {
+        array->add_array()->set_int64_val(value);
+    }
+    return val;
+}
+
+proto::plan::GenericValue
+ElementNullStringArray(const std::vector<std::string>& values) {
+    proto::plan::GenericValue val;
+    auto* array = val.mutable_array_val();
+    array->set_same_type(true);
+    array->set_element_type(proto::schema::DataType::VarChar);
+    for (const auto& value : values) {
+        array->add_array()->set_string_val(value);
+    }
+    return val;
+}
+
+void
+RunElementNullableRowFilters(SegmentInternalInterface* segment,
+                             const ElementNullableStruct& data) {
+    struct Case {
+        std::string name;
+        expr::TypedExprPtr expr;
+        ElementNullExpected expected;
+    };
+    auto column =
+        [](FieldId id, DataType element, std::vector<std::string> path = {}) {
+            return expr::ColumnInfo(
+                id, DataType::ARRAY, element, std::move(path), true);
+        };
+    auto unary = [](expr::ColumnInfo col,
+                    proto::plan::OpType op,
+                    proto::plan::GenericValue val) {
+        return std::make_shared<expr::UnaryRangeFilterExpr>(col, op, val);
+    };
+    auto contains = [](expr::ColumnInfo col,
+                       proto::plan::JSONContainsExpr_JSONOp op,
+                       std::vector<proto::plan::GenericValue> vals) {
+        return std::make_shared<expr::JsonContainsExpr>(col, op, true, vals);
+    };
+    auto length = [](expr::ColumnInfo col, int64_t len) {
+        return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+            col,
+            proto::plan::OpType::Equal,
+            proto::plan::ArithOpType::ArrayLength,
+            ElementNullInt(len),
+            ElementNullInt(0));
+    };
+    using proto::plan::OpType;
+    constexpr auto kContains = proto::plan::JSONContainsExpr_JSONOp_Contains;
+    constexpr auto kAny = proto::plan::JSONContainsExpr_JSONOp_ContainsAny;
+    constexpr auto kAll = proto::plan::JSONContainsExpr_JSONOp_ContainsAll;
+    const auto b = column(data.b, DataType::INT64);
+    const auto b0 = column(data.b, DataType::INT64, {"0"});
+    const auto b1 = column(data.b, DataType::INT64, {"1"});
+    const auto name = column(data.name, DataType::VARCHAR);
+    const auto name0 = column(data.name, DataType::VARCHAR, {"0"});
+    const auto name1 = column(data.name, DataType::VARCHAR, {"1"});
+    const auto tags0 = column(data.tags, DataType::INT64, {"0"});
+    const auto tags1 = column(data.tags, DataType::INT64, {"1"});
+    const auto vec = expr::ColumnInfo(
+        data.vec, DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, {}, true);
+    // Subscripts beyond int (and beyond int64) or negative name no element.
+    const auto b_huge = column(data.b, DataType::INT64, {"2147483648"});
+    const auto b_beyond_int64 =
+        column(data.b, DataType::INT64, {"99999999999999999999"});
+    const auto b_negative = column(data.b, DataType::INT64, {"-1"});
+    const auto tags_huge = column(data.tags, DataType::INT64, {"2147483648"});
+    const ElementNullExpected all_unknown = {-1, -1, -1, -1, -1};
+    auto term = [](expr::ColumnInfo col,
+                   std::vector<proto::plan::GenericValue> vals) {
+        return std::make_shared<expr::TermFilterExpr>(col, std::move(vals));
+    };
+
+    const std::vector<Case> cases = {
+        // C7: null elements match nothing; only the NULL row is UNKNOWN.
+        {"contains(b, 3)",
+         contains(b, kContains, {ElementNullInt(3)}),
+         {1, 0, 0, -1, 0}},
+        {"contains(b, 0)",
+         contains(b, kContains, {ElementNullInt(0)}),
+         {0, 0, 0, -1, 0}},
+        {"contains_any(b, [0, 6])",
+         contains(b, kAny, {ElementNullInt(0), ElementNullInt(6)}),
+         {0, 0, 0, -1, 1}},
+        {"contains_all(b, [1, 3])",
+         contains(b, kAll, {ElementNullInt(1), ElementNullInt(3)}),
+         {1, 0, 0, -1, 0}},
+        {"contains_all(b, [0, 1])",
+         contains(b, kAll, {ElementNullInt(0), ElementNullInt(1)}),
+         {0, 0, 0, -1, 0}},
+        {"contains_all(b, [])", contains(b, kAll, {}), {1, 1, 1, -1, 1}},
+        {"contains(name, \"\")",
+         contains(name, kContains, {ElementNullString("")}),
+         {0, 0, 0, -1, 0}},
+        // array_length counts null elements.
+        {"length(b) == 3", length(b, 3), {1, 0, 0, -1, 0}},
+        {"length(b) == 1", length(b, 1), {0, 0, 1, -1, 0}},
+        {"length(b) == 0", length(b, 0), {0, 1, 0, -1, 0}},
+        {"length(vec) == 3", length(vec, 3), {1, 0, 0, -1, 0}},
+        {"length(vec) == 1", length(vec, 1), {0, 0, 1, -1, 0}},
+        {"length(vec) == 0", length(vec, 0), {0, 1, 0, -1, 0}},
+        // C3: a null or missing element is UNKNOWN.
+        {"b[0] > 0",
+         unary(b0, OpType::GreaterThan, ElementNullInt(0)),
+         {1, -1, -1, -1, 1}},
+        {"b[1] == 0",
+         unary(b1, OpType::Equal, ElementNullInt(0)),
+         {-1, -1, -1, -1, 0}},
+        {"b[1] != 0",
+         unary(b1, OpType::NotEqual, ElementNullInt(0)),
+         {-1, -1, -1, -1, 1}},
+        {"b[1] <= 6",
+         unary(b1, OpType::LessEqual, ElementNullInt(6)),
+         {-1, -1, -1, -1, 1}},
+        {"b[1] in [0, 6]",
+         std::make_shared<expr::TermFilterExpr>(
+             b1,
+             std::vector<proto::plan::GenericValue>{ElementNullInt(0),
+                                                    ElementNullInt(6)}),
+         {-1, -1, -1, -1, 1}},
+        {"0 <= b[1] <= 6",
+         std::make_shared<expr::BinaryRangeFilterExpr>(
+             b1, ElementNullInt(0), ElementNullInt(6), true, true),
+         {-1, -1, -1, -1, 1}},
+        {"b[1] + 1 == 1",
+         std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+             b1,
+             OpType::Equal,
+             proto::plan::ArithOpType::Add,
+             ElementNullInt(1),
+             ElementNullInt(1)),
+         {-1, -1, -1, -1, 0}},
+        {"name[0] like \"a%\"",
+         unary(name0, OpType::Match, ElementNullString("a%")),
+         {1, -1, -1, -1, 1}},
+        {"name[1] like \"%\"",
+         unary(name1, OpType::Match, ElementNullString("%")),
+         {-1, -1, -1, -1, -1}},
+        {"name[0] prefix \"a\"",
+         unary(name0, OpType::PrefixMatch, ElementNullString("a")),
+         {1, -1, -1, -1, 1}},
+        {"name[1] == \"\"",
+         unary(name1, OpType::Equal, ElementNullString("")),
+         {-1, -1, -1, -1, -1}},
+        // 4.6.1: an Array holding a null never equals a literal.
+        {"b == [5, 6]",
+         unary(b, OpType::Equal, ElementNullIntArray({5, 6})),
+         {0, 0, 0, -1, 1}},
+        {"b == [1, 0, 3]",
+         unary(b, OpType::Equal, ElementNullIntArray({1, 0, 3})),
+         {0, 0, 0, -1, 0}},
+        {"b == [0]",
+         unary(b, OpType::Equal, ElementNullIntArray({0})),
+         {0, 0, 0, -1, 0}},
+        {"b == []",
+         unary(b, OpType::Equal, ElementNullIntArray({})),
+         {0, 1, 0, -1, 0}},
+        {"b != [5, 6]",
+         unary(b, OpType::NotEqual, ElementNullIntArray({5, 6})),
+         {1, 1, 1, -1, 0}},
+        {"name == [\"ac\"]",
+         unary(name, OpType::Equal, ElementNullStringArray({"ac"})),
+         {0, 0, 0, -1, 1}},
+        {"name != [\"ab\", \"\"]",
+         unary(name, OpType::NotEqual, ElementNullStringArray({"ab", ""})),
+         {1, 1, 1, -1, 1}},
+        // 4.2.2: s[i][tags] is the inner Array of struct element i; a
+        // missing or null one is UNKNOWN, its leaves follow C7/4.6.1/length.
+        {"tags[0] == [1, 2]",
+         unary(tags0, OpType::Equal, ElementNullIntArray({1, 2})),
+         {1, -1, -1, -1, 0}},
+        {"tags[1] == [0, 4]",
+         unary(tags1, OpType::Equal, ElementNullIntArray({0, 4})),
+         {0, -1, 0, -1, 0}},
+        {"tags[1] != [7]",
+         unary(tags1, OpType::NotEqual, ElementNullIntArray({7})),
+         {1, -1, 0, -1, 1}},
+        {"contains(tags[1], 4)",
+         contains(tags1, kContains, {ElementNullInt(4)}),
+         {1, -1, 0, -1, 0}},
+        {"contains(tags[1], 0)",
+         contains(tags1, kContains, {ElementNullInt(0)}),
+         {0, -1, 0, -1, 0}},
+        {"contains_any(tags[0], [2, 5])",
+         contains(tags0, kAny, {ElementNullInt(2), ElementNullInt(5)}),
+         {1, -1, -1, -1, 1}},
+        {"contains_all(tags[1], [6])",
+         contains(tags1, kAll, {ElementNullInt(6)}),
+         {0, -1, 0, -1, 1}},
+        {"contains_all(tags[0], [])",
+         contains(tags0, kAll, {}),
+         {1, -1, -1, -1, 1}},
+        {"contains_any(tags[0], [])",
+         contains(tags0, kAny, {}),
+         {0, -1, -1, -1, 0}},
+        {"length(tags[1]) == 2", length(tags1, 2), {1, -1, 0, -1, 1}},
+        {"length(tags[0]) == 1", length(tags0, 1), {0, -1, -1, -1, 1}},
+        // C3 with an empty set: an existing element is FALSE, a missing or
+        // null one is still UNKNOWN.
+        {"b[0] in []", term(b0, {}), {0, -1, -1, -1, 0}},
+        {"b[1] in []", term(b1, {}), {-1, -1, -1, -1, 0}},
+        {"b[2147483648] in []", term(b_huge, {}), all_unknown},
+        // C3 / 4.2.2 with a subscript beyond int: out of bounds, UNKNOWN.
+        {"b[2147483648] > 0",
+         unary(b_huge, OpType::GreaterThan, ElementNullInt(0)),
+         all_unknown},
+        {"b[99999999999999999999] == 0",
+         unary(b_beyond_int64, OpType::Equal, ElementNullInt(0)),
+         all_unknown},
+        {"b[-1] > 0",
+         unary(b_negative, OpType::GreaterThan, ElementNullInt(0)),
+         all_unknown},
+        {"b[2147483648] in [0, 6]",
+         term(b_huge, {ElementNullInt(0), ElementNullInt(6)}),
+         all_unknown},
+        {"0 <= b[2147483648] <= 6",
+         std::make_shared<expr::BinaryRangeFilterExpr>(
+             b_huge, ElementNullInt(0), ElementNullInt(6), true, true),
+         all_unknown},
+        {"b[2147483648] + 1 == 1",
+         std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+             b_huge,
+             OpType::Equal,
+             proto::plan::ArithOpType::Add,
+             ElementNullInt(1),
+             ElementNullInt(1)),
+         all_unknown},
+        {"contains(tags[2147483648], 4)",
+         contains(tags_huge, kContains, {ElementNullInt(4)}),
+         all_unknown},
+        {"contains_all(tags[2147483648], [])",
+         contains(tags_huge, kAll, {}),
+         all_unknown},
+        {"length(tags[2147483648]) == 0", length(tags_huge, 0), all_unknown},
+        {"tags[2147483648] == [1, 2]",
+         unary(tags_huge, OpType::Equal, ElementNullIntArray({1, 2})),
+         all_unknown},
+        {"tags[2147483648] != [1, 2]",
+         unary(tags_huge, OpType::NotEqual, ElementNullIntArray({1, 2})),
+         all_unknown},
+    };
+    for (const auto& c : cases) {
+        CheckElementNullExpr(segment, c.expr, c.expected, c.name);
+    }
+
+    // Operators outside this scope stay rejected.
+    const std::vector<std::pair<std::string, expr::TypedExprPtr>> rejected = {
+        {"1 in b (is_in_field)",
+         std::make_shared<expr::TermFilterExpr>(
+             b,
+             std::vector<proto::plan::GenericValue>{ElementNullInt(1)},
+             true)},
+        {"contains(tags, 1)",
+         contains(column(data.tags, DataType::INT64),
+                  kContains,
+                  {ElementNullInt(1)})},
+        {"tags == [1]",
+         unary(column(data.tags, DataType::INT64),
+               OpType::Equal,
+               ElementNullIntArray({1}))},
+        {"tags[0] > 1", unary(tags0, OpType::GreaterThan, ElementNullInt(1))},
+        {"tags[0] in [1]",
+         std::make_shared<expr::TermFilterExpr>(
+             tags0, std::vector<proto::plan::GenericValue>{ElementNullInt(1)})},
+    };
+    for (const auto& [label, typed_expr] : rejected) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           typed_expr);
+        EXPECT_THROW(
+            {
+                auto vec = milvus::test::gen_filter_res(
+                    plan.get(), segment, kElementNullRows, MAX_TIMESTAMP);
+                (void)vec;
+            },
+            SegcoreError)
+            << label;
+    }
+}
+
+// Same rows through the Go plan parser. The parser resolves `s[i][x]` only
+// for sub-fields of a registered struct, so group the `s[...]` fields into
+// struct `s` before registering the schema.
+void
+RunElementNullableParsedRowFilters(SegmentInternalInterface* segment,
+                                   const ElementNullableStruct& data) {
+    auto flat = data.schema->ToProto();
+    proto::schema::CollectionSchema parser_schema;
+    parser_schema.set_name("element_nullable_row_filter");
+    auto* s = parser_schema.add_struct_array_fields();
+    s->set_fieldid(data.tags.get() + 1);
+    s->set_name("s");
+    s->set_nullable(true);
+    for (const auto& field : flat.fields()) {
+        if (field.name().rfind("s[", 0) == 0) {
+            *s->add_fields() = field;
+        } else {
+            *parser_schema.add_fields() = field;
+        }
+    }
+    std::string schema_bytes;
+    parser_schema.SerializeToString(&schema_bytes);
+    auto handle = planparserv2::PlanParser::RegisterSchema(
+        std::vector<uint8_t>(schema_bytes.begin(), schema_bytes.end()));
+    auto unregister = folly::makeGuard(
+        [handle] { planparserv2::PlanParser::UnregisterSchema(handle); });
+
+    auto parse = [&](const std::string& text) -> expr::TypedExprPtr {
+        const auto bytes = planparserv2::PlanParser::Parse(handle, text);
+        auto plan =
+            CreateRetrievePlanByExpr(data.schema, bytes.data(), bytes.size());
+        AssertInfo(plan != nullptr, "failed to parse {}", text);
+        const auto& sources = plan->plan_node_->plannodes_->sources();
+        AssertInfo(sources.size() == 1, "unexpected plan shape for {}", text);
+        auto* filter =
+            dynamic_cast<plan::FilterBitsNode*>(sources.front().get());
+        AssertInfo(filter != nullptr, "no filter node for {}", text);
+        return filter->filter();
+    };
+
+    const std::vector<std::pair<std::string, ElementNullExpected>> cases = {
+        // C3
+        {"s[0][b] > 0", {1, -1, -1, -1, 1}},
+        {"s[1][b] == 0", {-1, -1, -1, -1, 0}},
+        {"s[1][b] in [0, 6]", {-1, -1, -1, -1, 1}},
+        {"s[0][name] like \"a%\"", {1, -1, -1, -1, 1}},
+        // C7
+        {"array_contains(s[b], 3)", {1, 0, 0, -1, 0}},
+        {"array_contains(s[b], 0)", {0, 0, 0, -1, 0}},
+        {"array_contains_any(s[b], [0, 6])", {0, 0, 0, -1, 1}},
+        {"array_contains_all(s[b], [1, 3])", {1, 0, 0, -1, 0}},
+        // 4.6.1
+        {"s[b] == [5, 6]", {0, 0, 0, -1, 1}},
+        {"s[b] != [5, 6]", {1, 1, 1, -1, 0}},
+        {"s[b] == [1, 0, 3]", {0, 0, 0, -1, 0}},
+        // array_length
+        {"array_length(s[b]) == 1", {0, 0, 1, -1, 0}},
+        {"array_length(s[vec]) == 3", {1, 0, 0, -1, 0}},
+        // 4.2.2
+        {"s[0][tags] == [1, 2]", {1, -1, -1, -1, 0}},
+        {"s[1][tags] != [7]", {1, -1, 0, -1, 1}},
+        {"array_contains_any(s[0][tags], [2, 5])", {1, -1, -1, -1, 1}},
+        {"array_contains(s[1][tags], 0)", {0, -1, 0, -1, 0}},
+        {"array_length(s[1][tags]) == 2", {1, -1, 0, -1, 1}},
+        // C3 with an empty set
+        {"s[0][b] in []", {0, -1, -1, -1, 0}},
+        {"s[1][b] in []", {-1, -1, -1, -1, 0}},
+        // Subscripts beyond int / int64: out of bounds, UNKNOWN
+        {"s[2147483648][b] > 0", {-1, -1, -1, -1, -1}},
+        {"s[99999999999999999999][b] == 0", {-1, -1, -1, -1, -1}},
+        {"s[2147483648][b] in []", {-1, -1, -1, -1, -1}},
+        {"array_contains(s[2147483648][tags], 4)", {-1, -1, -1, -1, -1}},
+        {"array_length(s[2147483648][tags]) == 0", {-1, -1, -1, -1, -1}},
+        {"s[2147483648][tags] == [1, 2]", {-1, -1, -1, -1, -1}},
+    };
+    for (const auto& [text, expected] : cases) {
+        CheckElementNullExpr(segment, parse(text), expected, "parsed " + text);
+        // NOT from the parser: TRUE/FALSE flip, UNKNOWN stays.
+        ElementNullExpected negated;
+        for (auto value : expected) {
+            negated.push_back(value < 0 ? -1 : 1 - value);
+        }
+        CheckElementNullExpr(segment,
+                             parse("not (" + text + ")"),
+                             negated,
+                             "parsed not (" + text + ")");
+    }
+}
+
+}  // namespace
+
+TEST(Expr, ElementNullableRowFilterGrowing) {
+    auto data = BuildElementNullableStruct();
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    config.set_chunk_rows(2);
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const auto saved_growing_mmap = mmap_config.GetEnableGrowingMmap();
+    auto mmap_guard = folly::makeGuard([&mmap_config, saved_growing_mmap] {
+        mmap_config.growing_enable_mmap = saved_growing_mmap;
+    });
+    for (bool enable_mmap : {false, true}) {
+        SCOPED_TRACE(enable_mmap ? "growing mmap" : "growing");
+        mmap_config.growing_enable_mmap = enable_mmap;
+        auto growing = LoadElementNullableGrowing(data);
+        ASSERT_GT(growing->num_chunk(data.b), 1);
+        RunElementNullableRowFilters(growing.get(), data);
+        RunElementNullableParsedRowFilters(growing.get(), data);
+    }
+}
+
+TEST(Expr, ElementNullableRowFilterSealed) {
+    auto data = BuildElementNullableStruct();
+    const auto segment_path =
+        (std::filesystem::temp_directory_path() /
+         ("milvus_element_null_row_filter_" +
+          std::to_string(
+              std::chrono::steady_clock::now().time_since_epoch().count())))
+            .string();
+    std::filesystem::remove_all(segment_path);
+    auto directory_guard = folly::makeGuard(
+        [&segment_path] { std::filesystem::remove_all(segment_path); });
+    auto sealed = LoadElementNullableSealed(data, segment_path);
+    RunElementNullableRowFilters(sealed.get(), data);
+    RunElementNullableParsedRowFilters(sealed.get(), data);
 }

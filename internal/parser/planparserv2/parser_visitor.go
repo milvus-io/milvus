@@ -316,7 +316,39 @@ func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
 	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 && !columnInfo.GetIsElementLevel() {
 		return merr.WrapErrQueryPlanMsg("can not comparisons array fields directly")
 	}
+	if isNestedArrayElement(columnInfo) {
+		return errScalarOpOnNestedArrayElement()
+	}
 	return nil
+}
+
+// isNestedArrayElement reports whether columnInfo addresses one element of a
+// nested Array column, such as struct_array[0][sub] or $[sub] on an Array<T>
+// struct sub-field. That element is an Array<T>, not a scalar.
+func isNestedArrayElement(columnInfo *planpb.ColumnInfo) bool {
+	return typeutil.IsArrayType(columnInfo.GetDataType()) &&
+		columnInfo.GetElementType() == schemapb.DataType_Array &&
+		(len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel())
+}
+
+func errScalarOpOnNestedArrayElement() error {
+	return merr.WrapErrQueryPlanMsg(
+		"scalar operations are not supported on an element of a nested array field because the element is itself an array")
+}
+
+// isScalarArrayElement reports whether columnInfo addresses one element of a
+// single-level Array column, such as ArrayField[0] or struct_array[0][sub] on
+// a scalar struct sub-field. That element is a scalar, not an array.
+func isScalarArrayElement(columnInfo *planpb.ColumnInfo) bool {
+	return typeutil.IsArrayType(columnInfo.GetDataType()) &&
+		columnInfo.GetElementType() != schemapb.DataType_Array &&
+		len(columnInfo.GetNestedPath()) != 0 && !columnInfo.GetIsElementLevel()
+}
+
+func errArrayFuncOnScalarArrayElement(funcName, operand string) error {
+	return merr.WrapErrQueryPlanMsg(
+		"%s requires an array operand, but %s is a single array element, not an array",
+		funcName, operand)
 }
 
 // contextualizeEmptyArrayLiteral assigns the element type of a whole ARRAY
@@ -535,6 +567,9 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
+	if ret, handled := v.visitNestedArrayEquality(ctx, leftExpr, rightExpr); handled {
+		return ret
+	}
 	contextualizeEmptyArrayLiteral(leftExpr, rightExpr)
 	contextualizeEmptyArrayLiteral(rightExpr, leftExpr)
 
@@ -568,6 +603,70 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		expr:     expr,
 		dataType: schemapb.DataType_Bool,
 	}
+}
+
+// visitNestedArrayEquality handles ==/!= on a nested Array column. An element
+// struct_array[i][sub] of an Array<T> struct sub-field is an Array<T> value and
+// compares with an array literal like a single-level Array field. A whole
+// nested Array column cannot be compared. Other operands are not handled.
+func (v *ParserVisitor) visitNestedArrayEquality(ctx *parser.EqualityContext, leftExpr, rightExpr *ExprWithType) (interface{}, bool) {
+	if leftExpr == nil || rightExpr == nil {
+		return nil, false
+	}
+	columnExpr, otherExpr := leftExpr, rightExpr
+	if columnInfo := toColumnInfo(columnExpr); columnInfo == nil || columnInfo.GetElementType() != schemapb.DataType_Array {
+		columnExpr, otherExpr = rightExpr, leftExpr
+	}
+	columnInfo := toColumnInfo(columnExpr)
+	if columnInfo == nil || !typeutil.IsArrayType(columnInfo.GetDataType()) ||
+		columnInfo.GetElementType() != schemapb.DataType_Array || columnInfo.GetIsElementLevel() {
+		return nil, false
+	}
+	if len(columnInfo.GetNestedPath()) == 0 {
+		return merr.WrapErrQueryPlanMsg(
+			"== and != are not supported on nested array field, only single-level array fields can be compared with an array literal: %s",
+			ctx.GetText()), true
+	}
+
+	leafType, ok, err := v.structIndexArrayLeafType(columnInfo)
+	if err != nil {
+		return err, true
+	}
+	if !ok {
+		return nil, false
+	}
+	valueExpr := otherExpr.expr.GetValueExpr()
+	if isTemplateExpr(valueExpr) {
+		return merr.WrapErrQueryPlanMsg(
+			"template values are not supported when comparing an element of a nested array struct sub-field, use an array literal: %s",
+			ctx.GetText()), true
+	}
+	if valueExpr == nil || !IsArray(valueExpr.GetValue()) {
+		return merr.WrapErrQueryPlanMsg(
+			"an element of a nested array struct sub-field can only be compared with an array literal: %s",
+			ctx.GetText()), true
+	}
+
+	columnInfo.ElementType = leafType
+	if array := valueExpr.GetValue().GetArrayVal(); len(array.GetArray()) == 0 && array.GetElementType() == schemapb.DataType_None {
+		array.ElementType = leafType
+	}
+	if !canBeCompared(columnExpr, otherExpr) {
+		return merr.WrapErrQueryPlanMsg("comparisons between %s and %s are not supported",
+			getDataType(columnExpr), getDataType(otherExpr)), true
+	}
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo: columnInfo,
+					Op:         cmpOpMap[ctx.GetOp().GetTokenType()],
+					Value:      valueExpr.GetValue(),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}, true
 }
 
 // VisitRelational translates expr to range/compare plan.
@@ -1192,6 +1291,9 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 		return merr.WrapErrParameterInvalidMsg("'term' can only be used on single field, but got: %s", ctx.Expr(0).GetText())
 	}
 
+	if isNestedArrayElement(columnInfo) {
+		return errScalarOpOnNestedArrayElement()
+	}
 	dataType := columnInfo.GetDataType()
 	// Use element type for IN operation in two cases:
 	// 1. Array with nested path (e.g., arr[0] IN [1, 2, 3])
@@ -1412,6 +1514,32 @@ func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*p
 		ElementType: field.GetElementType(),
 		Nullable:    nullable,
 	}, nil
+}
+
+// structIndexArrayLeafType returns the leaf type T when columnInfo is
+// struct_array[i][sub] on an Array<T> struct sub-field (stored as
+// Array<Array<T>>). That element is used as an Array<T> value.
+func (v *ParserVisitor) structIndexArrayLeafType(columnInfo *planpb.ColumnInfo) (schemapb.DataType, bool, error) {
+	if columnInfo == nil || columnInfo.GetIsElementLevel() ||
+		!typeutil.IsArrayType(columnInfo.GetDataType()) || len(columnInfo.GetNestedPath()) != 1 {
+		return schemapb.DataType_None, false, nil
+	}
+	field, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+	if err != nil {
+		return schemapb.DataType_None, false, err
+	}
+	if !typeutil.IsStructSubField(field.GetName()) || !typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return schemapb.DataType_None, false, nil
+	}
+	leafType, _, depth, err := typeutil.GetArrayLeaf(field.GetTypeSchema())
+	if err != nil {
+		return schemapb.DataType_None, false, err
+	}
+	if depth != 2 || !typeutil.IsPrimitiveType(leafType) {
+		return schemapb.DataType_None, false, merr.WrapErrParameterInvalidMsg(
+			"only an element of an Array<scalar> struct sub-field can be used as an array, got: %s", field.GetName())
+	}
+	return leafType, true, nil
 }
 
 func (v *ParserVisitor) getChildColumnInfo(identifier parser.IFieldNameContext, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
@@ -2624,7 +2752,28 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 	}
 }
 
+// checkStructSubFieldNullExpr rejects IS NULL / IS NOT NULL on a struct
+// sub-field (struct_array[sub] or struct_array[i][sub]).
+func checkStructSubFieldNullExpr(structField, structIndexField antlr.TerminalNode) error {
+	var identifier string
+	switch {
+	case structField != nil:
+		identifier = structField.GetText()
+	case structIndexField != nil:
+		identifier = structIndexField.GetText()
+	default:
+		return nil
+	}
+	structName, _, _ := strings.Cut(identifier, "[")
+	return merr.WrapErrParameterInvalidMsg(
+		"IS NULL / IS NOT NULL is not supported on struct sub-field %s; it can only be applied to the struct array field %s",
+		identifier, structName)
+}
+
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
+	if err := checkStructSubFieldNullExpr(ctx.StructFieldIdentifier(), ctx.StructIndexFieldIdentifier()); err != nil {
+		return err
+	}
 	column, err := v.getNullExprColumnInfo(ctx.FieldName(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
@@ -2668,6 +2817,9 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
+	if err := checkStructSubFieldNullExpr(ctx.StructFieldIdentifier(), ctx.StructIndexFieldIdentifier()); err != nil {
+		return err
+	}
 	column, err := v.getNullExprColumnInfo(ctx.FieldName(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
@@ -2718,6 +2870,8 @@ func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 
 func (v *ParserVisitor) resolveContainsField(
 	field *ExprWithType,
+	funcName string,
+	operand string,
 ) (*planpb.ColumnInfo, error) {
 	columnInfo := toColumnInfo(field)
 	if columnInfo == nil {
@@ -2727,14 +2881,32 @@ func (v *ParserVisitor) resolveContainsField(
 		if !typeutil.IsArrayType(columnInfo.GetDataType()) {
 			return columnInfo, nil
 		}
+		// struct_array[i][sub] on an Array<T> sub-field is one Array<T> value.
+		leafType, ok, err := v.structIndexArrayLeafType(columnInfo)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			columnInfo.ElementType = leafType
+			return columnInfo, nil
+		}
 		fieldSchema, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
 		if err != nil {
 			return nil, err
 		}
 		if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+			if structName, subField, isSub := strings.Cut(fieldSchema.GetName(), "["); isSub && len(columnInfo.GetNestedPath()) == 0 {
+				subField = strings.TrimSuffix(subField, "]")
+				return nil, merr.WrapErrQueryPlanMsg(
+					"%s is not supported on the whole nested array struct sub-field %s; rewrite it as MATCH_ANY(%s, %s($[%s], ...))",
+					funcName, fieldSchema.GetName(), structName, funcName, subField)
+			}
 			return nil, merr.WrapErrQueryPlanMsg(
 				"contains operation is not supported on nested array field: %s",
 				fieldSchema.GetName())
+		}
+		if isScalarArrayElement(columnInfo) {
+			return nil, errArrayFuncOnScalarArrayElement(funcName, operand)
 		}
 		return columnInfo, nil
 	}
@@ -2781,7 +2953,7 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 	}
 
 	fieldExpr := field.(*ExprWithType)
-	columnInfo, err := v.resolveContainsField(fieldExpr)
+	columnInfo, err := v.resolveContainsField(fieldExpr, ctx.GetStart().GetText(), ctx.Expr(0).GetText())
 	if err != nil {
 		return err
 	}
@@ -2836,7 +3008,7 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 	}
 
 	fieldExpr := field.(*ExprWithType)
-	columnInfo, err := v.resolveContainsField(fieldExpr)
+	columnInfo, err := v.resolveContainsField(fieldExpr, ctx.GetStart().GetText(), ctx.Expr(0).GetText())
 	if err != nil {
 		return err
 	}
@@ -2893,7 +3065,7 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 	}
 
 	fieldExpr := field.(*ExprWithType)
-	columnInfo, err := v.resolveContainsField(fieldExpr)
+	columnInfo, err := v.resolveContainsField(fieldExpr, ctx.GetStart().GetText(), ctx.Expr(0).GetText())
 	if err != nil {
 		return err
 	}
@@ -2959,6 +3131,21 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			ElementType: field.GetElementType(),
 			Nullable:    field.GetNullable(),
 		}
+	} else if ctx.StructIndexFieldIdentifier() != nil {
+		// struct_array[i][sub]: only an Array<T> element has a length.
+		columnInfo, err = v.getColumnInfoFromStructIndexField(ctx.StructIndexFieldIdentifier().GetText())
+		if err != nil {
+			return err
+		}
+		leafType, ok, leafErr := v.structIndexArrayLeafType(columnInfo)
+		if leafErr != nil {
+			return leafErr
+		}
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg(
+				"array_length on struct_array[index][sub_field] requires an Array<scalar> struct sub-field, got: %s", ctx.GetText())
+		}
+		columnInfo.ElementType = leafType
 	} else {
 		if ctx.FieldName() != nil {
 			if parentColumnInfo, ok, parentErr := v.getStructArrayParentColumnInfo(ctx.FieldName().GetText()); ok || parentErr != nil {
@@ -2976,6 +3163,9 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 		}
 		if err != nil {
 			return err
+		}
+		if ctx.JSONIdentifier() != nil && isScalarArrayElement(columnInfo) {
+			return errArrayFuncOnScalarArrayElement(ctx.GetStart().GetText(), ctx.JSONIdentifier().GetText())
 		}
 	}
 	if columnInfo == nil ||
