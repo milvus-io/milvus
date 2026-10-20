@@ -15,7 +15,7 @@
 # limitations under the License.
 
 function(milvus_check_aws_runtime target)
-    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT MILVUS_AUDIT_AWS_RUNTIME)
         return()
     endif()
 
@@ -41,10 +41,17 @@ function(milvus_check_aws_runtime target)
         # A FetchContent target is defined in another directory, where CMake
         # does not allow us to attach a POST_BUILD command. Consumers depend
         # on this check so it also runs when building all_tests directly.
-        add_custom_target(${target}_aws_runtime_check ALL
+        # Record successful checks to avoid rescanning unchanged libraries.
+        # CMAKE_CFG_INTDIR keeps configurations separate on CMake 3.18 too.
+        set(stamp_dir "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}")
+        set(stamp_file "${stamp_dir}/${target}.aws.checked")
+        add_custom_command(OUTPUT "${stamp_file}"
             COMMAND ${check_command}
-            DEPENDS ${target}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${stamp_dir}"
+            COMMAND ${CMAKE_COMMAND} -E touch "${stamp_file}"
+            DEPENDS ${target} "${check_script}"
             COMMENT "Checking ${target} uses a shared AWS runtime"
             VERBATIM)
+        add_custom_target(${target}_aws_runtime_check ALL DEPENDS "${stamp_file}")
     endif()
 endfunction()

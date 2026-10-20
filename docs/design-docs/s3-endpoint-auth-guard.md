@@ -137,10 +137,25 @@ archives in multiple ELF objects creates private JSON allocator state;
 `Aws::InitAPI` can initialize one copy while an endpoint provider uses another.
 Whether the original provider tests expose this depends on compiler inlining.
 
-The root Conan recipe rejects static AWS option overrides. Linux builds also
-check linker maps for AWS archives and inspect the full, unstripped symbol table
-of milvus-storage, milvus_core and all_tests for embedded SDK/CRT functions.
-`nm -D` alone is insufficient because it omits hidden runtime copies.
+The root Conan recipe always rejects static AWS option overrides. With
+`MILVUS_AUDIT_AWS_RUNTIME=ON`, Linux builds also check linker maps for AWS
+archives and inspect the full, unstripped symbol table of milvus-storage,
+milvus_core and all_tests for embedded SDK/CRT functions. `nm -D` alone is
+insufficient because it omits hidden runtime copies. Successful storage audits
+are cached until the library or checker changes.
+
+The audit defaults to the unit-test build setting. `scripts/core_build.sh`
+passes that setting explicitly on every configure, so switching from a normal
+build to the CI unit/coverage build enables it even with an existing CMake
+cache. `make install` and `make gpu-install` also default the audit to ON for
+packaged builds. Developers can opt in or out with the
+`MILVUS_AUDIT_AWS_RUNTIME=ON/OFF` environment or make variable; direct CMake
+invocations use `-DMILVUS_AUDIT_AWS_RUNTIME=ON/OFF`.
+
+Tests need a direct CRT Conan requirement to expose its link libraries through
+the shared SDK dependency graph. Its version tracks the SDK recipe without
+`force=True`, so an incompatible SDK upgrade fails dependency resolution.
+`find_package(AWSSDK)` already loads the CRT CMake target.
 
 Regenerate Conan inputs and rebuild Arrow and the native consumers when changing
 this policy. Existing Conan shared-library imports and the native install step
@@ -155,10 +170,13 @@ endpoint-provider constructor inlining. The original guard tests are retained.
 The checksum test also balances its own SDK initialization after its client
 configuration is destroyed; leaving CRT workers alive during shared-library
 teardown can race with SDK logger destruction.
-The link checker has a separate positive/negative test:
+Both the full C++ unit-test runner and the coverage runner execute the link
+checker's separate positive/negative CTest on Linux. A failed or missing test
+fails the runner. `MILVUS_CMAKE_BUILD_DIR` can select a nondefault build tree.
+To run it separately:
 
 ```sh
-ctest --test-dir cmake_build -R '^aws_runtime_link_check$' --output-on-failure
+(cd cmake_build/unittest && ctest -R '^aws_runtime_link_check$' --output-on-failure --no-tests=error)
 ```
 
 Verification used Linux x86-64, GCC 14, Release, coverage disabled and

@@ -138,8 +138,11 @@ class MilvusConan(ConanFile):
         # Without this, find_package(Azure) can't find include directories.
         self.requires("azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137", force=True)
         self.requires("aws-sdk-cpp/1.11.842@milvus/dev#363556887f622db23a10168c108dd55d", force=True)
-        # Tests directly use CRT APIs; generate its own CMake dependency target.
-        self.requires("aws-crt-cpp/0.40.1#c85891382919486534ac53902c013750", force=True)
+        # Tests call CRT APIs directly. A direct requirement exposes its link
+        # libraries even when the shared SDK hides transitive libraries.
+        # Keep this version in sync with the SDK recipe; do not force it, so
+        # an incompatible SDK upgrade produces a Conan dependency conflict.
+        self.requires("aws-crt-cpp/0.40.1#c85891382919486534ac53902c013750")
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)

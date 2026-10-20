@@ -545,6 +545,10 @@ codecov-cpp: build-cpp-with-coverage
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
 # Build each component and install binary to $GOPATH/bin.
+# Package builds audit the AWS runtime even without native unit tests.
+# An explicit environment or command-line value can override this default.
+install gpu-install: export MILVUS_AUDIT_AWS_RUNTIME ?= ON
+
 install: milvus build-pyudf-runtime-wheel
 	@echo "Installing binary to './bin'"
 	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
