@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
@@ -100,4 +102,30 @@ func TestComputeScorerScoresOnChunkedOffsetsReleasedSegment(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, scores)
 	require.Contains(t, err.Error(), "segment released")
+}
+
+func TestBoostUsesPinnedReadStateInsteadOfLatestSegment(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		mockey.PatchConvey("borrow the operation read state", t, func() {
+			current := &mock_segcore.MockCSegment{}
+			pinned := &mock_segcore.MockCSegment{}
+			read := &sealedReadState{parent: &LocalSegment{csegment: current}, native: pinned}
+			read.refs.Store(1)
+			if async {
+				mockey.Mock(segcore.AsyncComputeScorerScoresOnChunkedOffsets).To(func(_ context.Context, actual segcore.CSegment, _ *segcore.SearchRequest, _ *planpb.ScoreFunction, _ *arrow.Chunked) (*arrow.Chunked, error) {
+					require.Same(t, pinned, actual)
+					require.EqualValues(t, 1, read.refs.Load())
+					return nil, context.Canceled
+				}).Build()
+			} else {
+				mockey.Mock(segcore.ComputeScorerScoresOnChunkedOffsets).To(func(actual segcore.CSegment, _ *segcore.SearchRequest, _ *planpb.ScoreFunction, _ *arrow.Chunked) (*arrow.Chunked, error) {
+					require.Same(t, pinned, actual)
+					return nil, context.Canceled
+				}).Build()
+			}
+			_, err := computeScorerScoresOnChunkedOffsets(context.Background(), read, nil, nil, nil, async)
+			require.ErrorIs(t, err, context.Canceled)
+			require.EqualValues(t, 1, read.refs.Load(), "the outer operation owns the reference")
+		})
+	}
 }

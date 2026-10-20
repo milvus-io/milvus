@@ -12120,3 +12120,13 @@ func NewMixCoord(t interface {
 
 	return mock
 }
+
+// GetQueryViewSegmentLoadInfos is patched with mockey by QueryView tests.
+func (_m *MixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	panic("patch GetQueryViewSegmentLoadInfos with mockey")
+}
+
+// GetQueryViewSegmentLoadInfo is patched with mockey by QueryView tests.
+func (_m *MixCoord) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
+}

@@ -157,8 +157,14 @@ func dataViewShardSegmentIDs(shard *viewpb.DataViewOfShard, partitionIDs []int64
 	return segmentIDs
 }
 
-func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
-	return s.queryViewCollectionIndexInfos(collectionID)
+// GetQueryViewCollectionIndexInfos resolves the exact references of a LoadInfo.
+// With no IDs it lists current selections for publication. Explicit IDs also
+// resolve retained, logically deleted definitions for an older live View.
+func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64, indexIDs ...int64) []*indexpb.IndexInfo {
+	if len(indexIDs) == 0 {
+		return s.queryViewCollectionIndexInfos(collectionID)
+	}
+	return packQueryViewCollectionIndexInfos(s.meta.indexMeta.GetIndexesByID(collectionID, indexIDs))
 }
 
 func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {

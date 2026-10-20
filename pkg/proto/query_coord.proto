@@ -5,6 +5,7 @@ package milvus.proto.query;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/querypb";
 
 import "common.proto";
+import "view.proto";
 import "messages.proto";
 import "milvus.proto";
 import "rg.proto";
@@ -39,6 +40,8 @@ service QueryCoord {
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
+    rpc GetQueryViewSegmentLoadInfo(GetQueryViewSegmentLoadInfoRequest)
+        returns (GetQueryViewSegmentLoadInfoResponse) {}
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }
 
@@ -325,6 +328,28 @@ message GetSegmentInfoResponse {
     repeated SegmentInfo infos = 2;
 }
 
+// Current complete loading snapshots for segments in one collection. Consumers
+// validate each manifest against their View requirement; this is not a history API.
+message GetQueryViewSegmentLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    repeated int64 segmentIDs = 3;
+}
+
+message GetQueryViewSegmentLoadInfoResponse {
+    // Request-wide errors only. Segment-specific failures belong in results.
+    common.Status status = 1;
+    // One result per distinct requested ID, including failed segments.
+    repeated QueryViewSegmentLoadInfoResult results = 2;
+    repeated index.IndexInfo index_info_list = 3;
+}
+
+message QueryViewSegmentLoadInfoResult {
+    int64 segmentID = 1;
+    common.Status status = 2;
+    SegmentLoadInfo load_info = 3;
+}
+
 message GetShardLeadersRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
@@ -463,6 +488,8 @@ message SegmentLoadInfo {
     repeated string child_manifest_paths = 29;
     // stats carries the durable segment aggregates used for resource estimation.
     data.Statistics stats = 30;
+    // Replay cursor of the exact physical base in this snapshot.
+    uint64 transform_start_after_timetick = 31;
 }
 
 message FieldIndexInfo {
@@ -1217,7 +1244,7 @@ message GetQueryViewLoadInfoResponse {
     int64 collectionID = 2;
     uint64 version = 3;
     repeated int64 partitionIDs = 4;
-    repeated messages.LoadFieldConfig load_fields = 5;
+    repeated view.LoadFieldConfig load_fields = 5;
     repeated index.IndexInfo index_info_list = 6;
-    repeated messages.LoadFieldConfig required_fields = 7;
+    repeated view.LoadFieldConfig required_fields = 7;
 }
