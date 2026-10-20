@@ -56,5 +56,4 @@ all_tests --gtest_filter='AwsRuntimeDeathTest.*:MinioChecksumConfig.*'
 ```
 
 Backport validation must use 3.0's native consumers and installed libraries.
-The master PR's successful CI and runtime tests establish the original fix's
-coverage; they do not replace building and testing this branch.
+Validation on master does not replace building and testing this branch.
