@@ -102,9 +102,8 @@ new guard changes the dangerous behavior.
 integration test, `test_minio_endpoint_auth.cpp`, deliberately does **not** install
 the guard in its setup. It invokes real PreCheck, ListObjects and the CStatus catch
 tail, so it will detect removal of the production installation call. It is
-registered in `all_tests`. The follow-up AWS runtime verification for #54101
-compiled and ran it with the pinned native dependencies, together with the SDK
-guard tests and the direct CRT regression described below.
+registered in `all_tests` alongside the SDK guard tests and the direct CRT
+regression described below.
 
 Before merging, build Milvus with its pinned Conan dependencies and run:
 
@@ -113,9 +112,8 @@ all_tests --gtest_filter='S3EndpointAuthGuardDeathTest.*:MinioEndpointAuthGuardD
 ```
 
 The complete Go server startup path and a production upgrade remain unverified.
-The follow-up verification built all default native targets and tested installed
-native libraries through CGO and a live MinIO, as described below. No shared merr
-code, wire projection, oldCode or metric label was changed.
+The AWS runtime build policy does not change shared merr code, wire projection,
+oldCode or metric labels.
 
 ## Limitations and follow-up
 
@@ -178,13 +176,3 @@ To run it separately:
 ```sh
 (cd cmake_build/unittest && ctest -R '^aws_runtime_link_check$' --output-on-failure --no-tests=error)
 ```
-
-Verification used Linux x86-64, GCC 14, Release, coverage disabled and
-`WITH_CRT=OFF`. The new CRT test aborts with the old static-runtime executable;
-all ten endpoint tests pass with the shared graph. The installed output contains
-26 AWS shared objects with valid SONAME links. The complete installed test
-executable passes the same ten tests in a container with no Conan cache mounted.
-An installed-library CGO smoke test and the existing live-MinIO CRUD test also
-pass; the latter exercises both the storage Arrow data plane and the legacy
-Minio control plane, including missing-object classification. The reporter's
-Ubuntu 20/GCC 11.4 configuration and macOS have not been run locally.
