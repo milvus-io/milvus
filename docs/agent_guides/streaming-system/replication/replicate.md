@@ -85,6 +85,7 @@ Local Flush/FlushAll use `_ur`, abort incomplete receiving transactions in their
 scope, and do not advance the source checkpoint. CDC resends complete transactions;
 the persisted Commit `body_cnt` is checked against the accepted source-ID set size
 to prevent incomplete Commit across overlapping streams. Zero skips validation.
-CDC preserves nonzero source counts and fills legacy zero-count Commit copies
-from the assembled body count. See [Local Flush Control](../wal/local-flush.md)
+CDC forwards the original Commit count, including zero. Historical transactions
+remain unchecked even after upgrade; CDC does not backfill counts.
+See [Local Flush Control](../wal/local-flush.md)
 for recovery, final append failure and the operator-managed upgrade boundary.

@@ -53,16 +53,17 @@ func TestTxnBodyCountSurvivesReconnectAndReconstruction(t *testing.T) {
 	sent = nil
 	failBody = false
 	require.NoError(t, client.sendTxnMessage(txn))
-	expected := []sentMessage{{"1", 0}, {"3", 0}, {"2", 0}, {"4", 2}}
+	expected := []sentMessage{{"1", 0}, {"3", 0}, {"2", 0}, {"4", 0}}
 	require.Equal(t, expected, sent)
 	require.Zero(t, message.MustAsImmutableCommitTxnMessageV2(txn.Commit()).Header().BodyCnt, "legacy source Commit must stay unchanged")
 	require.Equal(t, expected[:3], partial)
 	sent = nil
 	require.NoError(t, (&replicateStreamClient{}).sendTxnMessage(build(0)))
-	require.Equal(t, expected, sent, "CDC restart must reconstruct the same body count")
+	require.Equal(t, expected, sent, "CDC restart must preserve the legacy zero count")
 	sent = nil
 	counted := build(2)
 	require.NoError(t, client.sendTxnMessage(counted))
+	expected[3].count = 2
 	require.Equal(t, expected, sent)
 	require.EqualValues(t, 2, message.MustAsImmutableCommitTxnMessageV2(counted.Commit()).Header().BodyCnt)
 }

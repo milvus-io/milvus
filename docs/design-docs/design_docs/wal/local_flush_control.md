@@ -83,10 +83,10 @@ Commit is a data-integrity failure and stops consumption/recovery rather than
 silently publishing or dropping an incomplete transaction. The source consumer
 performs this validation before CDC sees a transaction.
 
-CDC forwards a nonzero source count unchanged. For old commits with zero count,
-it fills the number of assembled bodies on a copy of the Commit header; it does
-not mutate retained source messages. Empty transactions retain zero. Each replay
-preserves the assembled source order and the same immutable source body IDs.
+CDC forwards the source Commit unchanged, including a zero count. Historical
+transactions deliberately remain unchecked: CDC does not backfill a count from
+the assembled bodies. Each replay preserves the assembled source order and the
+same immutable source body IDs.
 There is no per-body predecessor property, ID manifest, replication term or owner.
 
 Under its existing mutex, held through append and acker completion, ReplicatesManager:
@@ -174,8 +174,10 @@ replication progress must be checked separately when that is required.
 
 The Commit count is additive. Missing fields decode to zero, and zero explicitly
 skips all count checks even for nonempty transactions. New producers set nonzero
-counts for nonempty transactions; CDC fills old zero-count commits from the
-assembled source transaction. Historical unmarked flushes retain their old behavior.
+counts for nonempty transactions; CDC preserves historical zero-count commits
+without adding validation. Upgrading all nodes does not retrofit counts onto old
+WAL records, so their replication also skips the completeness check. Historical
+unmarked flushes retain their old behavior.
 
 Operators must upgrade **all participating source CDC, Proxy, StreamingNode and
 consumer processes before invoking local Flush on a secondary**. Coordinating this
@@ -199,7 +201,7 @@ understand the durable local-flush abort boundary.
 ## Key Packages
 
 - `internal/datacoord/` — local producers and resource keys
-- `internal/cdc/replication/replicatestream/` — full transaction forwarding and legacy Commit count decoration
+- `internal/cdc/replication/replicatestream/` — full transaction forwarding with the original Commit count
 - `pkg/streaming/util/message/` — Commit body-count format and assembly validation
 - `internal/streamingnode/server/wal/interceptors/replicate/` — deduplicated body counting and durable-flush abort
 - `internal/streamingnode/server/wal/interceptors/txn/` — scoped session cleanup

@@ -291,13 +291,9 @@ func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessag
 	if err = txnMsg.RangeOver(r.sendMessage); err != nil {
 		return err
 	}
-	commit := txnMsg.Commit()
-	if message.MustAsImmutableCommitTxnMessageV2(commit).Header().BodyCnt == 0 {
-		// Old source WALs have no count. Decorate only a copy retained for this
-		// send; never overwrite a nonzero producer count and hide lost bodies.
-		commit = message.WithTxnBodyCount(commit, uint64(txnMsg.Size()))
-	}
-	return r.sendMessage(commit)
+	// Preserve the source body count, including zero. Historical transactions
+	// intentionally skip count validation; CDC does not backfill it.
+	return r.sendMessage(txnMsg.Commit())
 }
 
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {

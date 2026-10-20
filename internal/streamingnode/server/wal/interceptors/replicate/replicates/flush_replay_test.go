@@ -41,11 +41,10 @@ func TestLocalFlushReplayAndRecovery(t *testing.T) {
 				for i, msg := range source {
 					wire := msg.IntoImmutableMessageProto()
 					wire.Id = walimplstest.NewTestMessageID(ids[i]).IntoProto()
-					copy := message.MilvusMessageToImmutableMessage(wire)
-					if copy.MessageType() == message.MessageTypeCommitTxn {
-						copy = message.WithTxnBodyCount(copy, 2)
+					replicated := message.MustNewReplicateMessage("test2", wire)
+					if replicated.MessageType() == message.MessageTypeCommitTxn {
+						message.MustAsMutableCommitTxnMessageV2(replicated).OverwriteHeader(&message.CommitTxnMessageHeader{BodyCnt: 2})
 					}
-					replicated := message.MustNewReplicateMessage("test2", copy.IntoImmutableMessageProto())
 					replicated.OverwriteReplicateVChannel("test1-rootcoord-dml_0")
 					out[i] = replicated
 				}
