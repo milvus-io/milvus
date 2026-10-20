@@ -388,6 +388,62 @@ func (_c *MockScheduler_GetTasksJSON_Call) RunAndReturn(run func() string) *Mock
 	return _c
 }
 
+// LoadBudget provides a mock function with given fields: nodeID
+func (_m *MockScheduler) LoadBudget(nodeID int64) (float64, int) {
+	ret := _m.Called(nodeID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadBudget")
+	}
+
+	var r0 float64
+	var r1 int
+	if rf, ok := ret.Get(0).(func(int64) (float64, int)); ok {
+		return rf(nodeID)
+	}
+	if rf, ok := ret.Get(0).(func(int64) float64); ok {
+		r0 = rf(nodeID)
+	} else {
+		r0 = ret.Get(0).(float64)
+	}
+
+	if rf, ok := ret.Get(1).(func(int64) int); ok {
+		r1 = rf(nodeID)
+	} else {
+		r1 = ret.Get(1).(int)
+	}
+
+	return r0, r1
+}
+
+// MockScheduler_LoadBudget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadBudget'
+type MockScheduler_LoadBudget_Call struct {
+	*mock.Call
+}
+
+// LoadBudget is a helper method to define mock.On call
+//   - nodeID int64
+func (_e *MockScheduler_Expecter) LoadBudget(nodeID interface{}) *MockScheduler_LoadBudget_Call {
+	return &MockScheduler_LoadBudget_Call{Call: _e.mock.On("LoadBudget", nodeID)}
+}
+
+func (_c *MockScheduler_LoadBudget_Call) Run(run func(nodeID int64)) *MockScheduler_LoadBudget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockScheduler_LoadBudget_Call) Return(bytes float64, loads int) *MockScheduler_LoadBudget_Call {
+	_c.Call.Return(bytes, loads)
+	return _c
+}
+
+func (_c *MockScheduler_LoadBudget_Call) RunAndReturn(run func(int64) (float64, int)) *MockScheduler_LoadBudget_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveByNode provides a mock function with given fields: node
 func (_m *MockScheduler) RemoveByNode(node int64) {
 	_m.Called(node)
@@ -523,8 +579,7 @@ func (_c *MockScheduler_Stop_Call) RunAndReturn(run func()) *MockScheduler_Stop_
 func NewMockScheduler(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockScheduler {
+}) *MockScheduler {
 	mock := &MockScheduler{}
 	mock.Mock.Test(t)
 

@@ -162,6 +162,14 @@ func (ex *Executor) segmentBytes(task Task, segmentID int64) float64 {
 	return SegmentBytes(&meta.Segment{SegmentInfo: info})
 }
 
+// LoadBudget is what the pacer lets this node have in flight: bytes under
+// the segment task timeout, and loads (one per core). Placement and balance
+// plan against it so a load they send starts at once.
+func (ex *Executor) LoadBudget() (bytes float64, loads int) {
+	timeout := paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond)
+	return ex.pacer.Budget(getLoadPacerConfig(), ex.cpuNum(), timeout)
+}
+
 // wake dispatches the node again, once, as soon as the dispatcher is free.
 func (ex *Executor) wake() {
 	select {

@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -34,6 +35,18 @@ const (
 	// PolicyTypeScoreBased uses comprehensive score-based assignment with benefit evaluation
 	PolicyTypeScoreBased = "score_based"
 )
+
+// PlacementPolicyType is the assign policy to place segments with (recovery
+// in the segment checker, draining in stopping balance). With the two-level
+// balancer configured it is always the two-level policy, so a segment is
+// placed where balance would keep it and balance has nothing to redo;
+// otherwise the caller's own choice.
+func PlacementPolicyType(fallback string) string {
+	if paramtable.Get().QueryCoordCfg.Balancer.GetValue() == meta.TwoLevelBalancerName {
+		return PolicyTypeTwoLevel
+	}
+	return fallback
+}
 
 // AssignPolicyFactory is responsible for creating and caching assign policy instances.
 // It supports dynamic policy switching based on configuration changes.
@@ -121,6 +134,8 @@ func (f *AssignPolicyFactory) GetPolicy(policyType string) AssignPolicy {
 		policy = newRowCountBasedAssignPolicy(f.nodeManager, f.scheduler, f.dist)
 	case PolicyTypeScoreBased:
 		policy = newScoreBasedAssignPolicy(f.nodeManager, f.scheduler, f.dist, f.meta)
+	case PolicyTypeTwoLevel:
+		policy = newTwoLevelAssignPolicy(f.nodeManager, f.scheduler, f.dist, f.meta)
 	default:
 		mlog.Info(context.TODO(), "Unknown assign policy type, using default",
 			mlog.String("requested", policyType),

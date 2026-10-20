@@ -51,12 +51,11 @@ type collectionVersionCache struct {
 
 type SegmentChecker struct {
 	*checkerActivation
-	meta         *meta.Meta
-	dist         *meta.DistributionManager
-	targetMgr    meta.TargetManagerInterface
-	nodeMgr      *session.NodeManager
-	scheduler    task.Scheduler
-	assignPolicy assign.AssignPolicy
+	meta      *meta.Meta
+	dist      *meta.DistributionManager
+	targetMgr meta.TargetManagerInterface
+	nodeMgr   *session.NodeManager
+	scheduler task.Scheduler
 
 	// version cache for fast skip when nothing changed
 	versionCache map[int64]*collectionVersionCache
@@ -69,10 +68,6 @@ func NewSegmentChecker(
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 ) *SegmentChecker {
-	// Create RoundRobin assign policy in constructor to maximize loading speed
-	// Note: RoundRobin may break short-term balance but prioritizes loading speed
-	assignPolicy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeRoundRobin)
-
 	return &SegmentChecker{
 		checkerActivation: newCheckerActivation(),
 		meta:              meta,
@@ -80,9 +75,15 @@ func NewSegmentChecker(
 		targetMgr:         targetMgr,
 		nodeMgr:           nodeMgr,
 		scheduler:         scheduler,
-		assignPolicy:      assignPolicy,
 		versionCache:      make(map[int64]*collectionVersionCache),
 	}
+}
+
+// placementPolicy places missing segments: RoundRobin, which loads fastest
+// (it may break short-term balance), unless the balancer is two-level, which
+// placement then follows (resolved per call: the balancer is refreshable).
+func (c *SegmentChecker) placementPolicy() assign.AssignPolicy {
+	return assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PlacementPolicyType(assign.PolicyTypeRoundRobin))
 }
 
 func (c *SegmentChecker) ID() utils.CheckerType {
@@ -555,7 +556,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 				SegmentInfo: s,
 			}
 		})
-		shardPlans := c.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
+		shardPlans := c.placementPolicy().AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
 			shardPlans[i].LoadPriority = priorityMap[shardPlans[i].Segment.GetID()]

@@ -1,0 +1,137 @@
+{
+ "name": "day_09_multi_replica",
+ "category": "replicas",
+ "source": "synthetic day (gen_days.py)",
+ "streaming": false,
+ "qns": 10,
+ "sns": 0,
+ "qn_cores": 16,
+ "qn_memory_gb": 64,
+ "load": {
+  "concurrency": 80,
+  "bandwidth_mb": 720,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 0,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0
+ },
+ "time_scale": 6,
+ "collections": [
+  {
+   "count": 10,
+   "replicas": 2,
+   "channels": 1,
+   "segments_per_channel": 20,
+   "rows_median": 163840,
+   "rows_sigma": 0.5,
+   "flush_every_seconds": 30.0,
+   "flush_rows": 1300,
+   "compact_every_seconds": 120.0
+  },
+  {
+   "count": 50,
+   "replicas": 2,
+   "channels": 1,
+   "segments_per_channel": 20,
+   "rows_median": 163840,
+   "rows_sigma": 0.5
+  },
+  {
+   "count": 40,
+   "replicas": 3,
+   "channels": 1,
+   "segments_per_channel": 10,
+   "rows_median": 163840,
+   "rows_sigma": 0.5
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 0,
+  "flush_every_seconds": 0,
+  "compact_every_seconds": 0
+ },
+ "events": [
+  {
+   "at": 360.0,
+   "op": "ingest_rate",
+   "multiplier": 8
+  },
+  {
+   "at": 1080.0,
+   "op": "ingest_rate",
+   "multiplier": 1
+  },
+  {
+   "at": 1800.0,
+   "op": "kill_qn",
+   "node": 2
+  },
+  {
+   "at": 1890.0,
+   "op": "restart_qn",
+   "node": 2
+  },
+  {
+   "at": 2520.0,
+   "op": "add_qn",
+   "count": 2
+  },
+  {
+   "at": 3240.0,
+   "op": "ingest_rate",
+   "multiplier": 3
+  },
+  {
+   "at": 3600.0,
+   "op": "load_tables",
+   "tables": {
+    "count": 10,
+    "replicas": 2,
+    "channels": 1,
+    "segments_per_channel": 20,
+    "rows_median": 163840,
+    "rows_sigma": 0.5
+   }
+  },
+  {
+   "at": 4320.0,
+   "op": "ingest_rate",
+   "multiplier": 1
+  },
+  {
+   "at": 4680.0,
+   "op": "release_tables",
+   "count": 10
+  },
+  {
+   "at": 4860.0,
+   "op": "reload_tables",
+   "count": 10
+  },
+  {
+   "at": 5400.0,
+   "op": "rolling_replace",
+   "count": 3,
+   "gap_seconds": 30.0
+  },
+  {
+   "at": 6480.0,
+   "op": "restart_qc"
+  },
+  {
+   "at": 7200.0,
+   "op": "ingest_rate",
+   "multiplier": 0.5
+  },
+  {
+   "at": 7920.0,
+   "op": "stop_qn",
+   "count": 2
+  }
+ ],
+ "duration_seconds": 8640.0
+}
