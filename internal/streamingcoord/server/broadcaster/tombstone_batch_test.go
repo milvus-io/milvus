@@ -307,7 +307,6 @@ func TestTombstoneGCRetiresIdempotencyOnlyAfterCatalogSuccess(t *testing.T) {
 		msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, []byte{1}), newBroadcasterMetrics(), nil)
 	task.SetLogger(mlog.With())
 	s.bm.tasks[1] = task
-	s.bm.idempotencyIndex = newIdempotencyIndex()
 	scope := task.IdempotencyScope()
 	require.NotEmpty(t, scope)
 	s.bm.idempotencyIndex.Add(scope, 1)

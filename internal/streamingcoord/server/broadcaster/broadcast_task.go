@@ -229,6 +229,13 @@ func (b *broadcastTask) State() streamingpb.BroadcastTaskState {
 	return b.task.State
 }
 
+// isTerminalState reports whether a task is a tombstone or was dropped from the
+// catalog; such a task takes no further ACKs and references no pending schema.
+func isTerminalState(state streamingpb.BroadcastTaskState) bool {
+	return state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
+		state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
+}
+
 // PendingBroadcastMessages returns the pending broadcast message of current broadcast.
 // If the vchannel is already acked, it will be filtered out.
 func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
@@ -273,14 +280,12 @@ func (b *broadcastTask) MessageTypeWithVersion() message.MessageTypeWithVersion 
 }
 
 // PendingSchemaFileResourceSnapshot returns the collection and file resource
-// IDs referenced by a CreateCollection or AlterCollection task that is neither
-// tombstoned nor retired.
+// IDs referenced by a non-terminal CreateCollection or AlterCollection task.
 func (b *broadcastTask) PendingSchemaFileResourceSnapshot() (int64, []int64, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
-		b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+	if isTerminalState(b.task.State) {
 		return 0, nil, false
 	}
 	switch b.messageTypeWithVersion {
@@ -425,8 +430,7 @@ func (b *broadcastTask) Ack(ctx context.Context, msgs message.ImmutableMessage) 
 func (b *broadcastTask) ack(ctx context.Context, callback registry.ResolvedMessageAckOnceCallback, msgs ...message.ImmutableMessage) (err error) {
 	// A caller may have obtained this task before its callback completed. Never
 	// let a late ACK recreate a tombstone concurrently with catalog deletion.
-	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
-		b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+	if isTerminalState(b.task.State) {
 		return nil
 	}
 	isControlChannelAcked := b.copyAndSetAckedCheckpoints(msgs...)
@@ -563,10 +567,6 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 		// so we can not make a fast ack operation here to speed up the ack operation.
 		b.mu.Unlock()
 		return nil
-	}
-	if len(broadcastResult) == 0 {
-		defer b.mu.Unlock()
-		return b.ack(ctx, nil)
 	}
 	b.mu.Unlock()
 

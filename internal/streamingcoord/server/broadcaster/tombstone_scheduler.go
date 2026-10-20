@@ -67,7 +67,7 @@ func (s *tombstoneScheduler) AddPending(broadcastID uint64) {
 		s.pendingMu.Unlock()
 		// MarkAckCallbackDone already persisted TOMBSTONE. Recovery will enqueue
 		// it again if shutdown races with this handoff.
-		s.Logger().Info(s.notifier.Context(), "tombstone scheduler is closing, skip adding pending tombstone", mlog.Uint64("broadcastID", broadcastID))
+		s.Logger().Info(s.notifier.Context(), "tombstone scheduler is closing, skip adding pending tombstone", mlog.FieldBroadcastID(broadcastID))
 		return
 	}
 	s.pending = append(s.pending, tombstoneItem{broadcastID: broadcastID, createTime: time.Now()})

@@ -148,7 +148,7 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 	for _, task := range s.pendingAckedTasks {
 		if task.IsForcePromoteMessage() {
 			// Force promote: handle fix + ack callback entirely in background goroutine.
-			// No FastLock needed upfront — fix doesn't require resource key lock,
+			// No TryLock needed upfront — fix doesn't require resource key lock,
 			// and the goroutine acquires the lock itself before running ack callback.
 			go s.doForcePromoteFixIncompleteBroadcasts(task)
 			continue
@@ -275,7 +275,7 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) e
 
 func (s *ackCallbackScheduler) executeAckCallback(bt *broadcastTask, g *lockGuards) (err error) {
 	ctx := s.notifier.Context()
-	logger := s.Logger().With(mlog.Uint64("broadcastID", bt.Header().BroadcastID))
+	logger := s.Logger().With(mlog.FieldBroadcastID(bt.Header().BroadcastID))
 	defer func() {
 		s.rkLockerMu.Lock()
 		g.Unlock()
