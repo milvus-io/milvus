@@ -1869,7 +1869,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// normal case
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		mixCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, nil)
+		mixCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{Status: merr.Success()}, nil)
 		node.mixCoord = mixCoord
 		rsp, err = node.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{})
 		assert.NoError(t, err)
@@ -1890,7 +1890,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		node.setMetaCache(mc)
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		mixCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(nil, nil)
+		mixCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{Status: merr.Success()}, nil)
 		node.mixCoord = mixCoord
 		rsp, err = node.ListImports(ctx, &internalpb.ListImportsRequest{
 			CollectionName: "col",
