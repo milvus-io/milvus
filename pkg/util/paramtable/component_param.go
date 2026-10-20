@@ -80,13 +80,6 @@ const (
 	// client send limit so the rest of the internal request retains headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
-	DefaultMaxDegree                     = 56
-	DefaultSearchListSize                = 100
-	DefaultPQCodeBudgetGBRatio           = 0.125
-	DefaultBuildNumThreadsRatio          = 1.0
-	DefaultSearchCacheBudgetGBRatio      = 0.10
-	DefaultLoadNumThreadRatio            = 8.0
-	DefaultBeamWidthRatio                = 4.0
 	MaxClusterIDBits                     = 3
 	defaultTakeForOutputResultCountLimit = "10000"
 )
@@ -361,13 +354,6 @@ type commonConfig struct {
 	IndexBuildReadWindowBytes           ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
-	MaxDegree                           ParamItem `refreshable:"true"`
-	SearchListSize                      ParamItem `refreshable:"true"`
-	PQCodeBudgetGBRatio                 ParamItem `refreshable:"true"`
-	BuildNumThreadsRatio                ParamItem `refreshable:"true"`
-	SearchCacheBudgetGBRatio            ParamItem `refreshable:"true"`
-	LoadNumThreadRatio                  ParamItem `refreshable:"true"`
-	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
 	// Not refreshable: this flag decides the row-group -> cell packing of
@@ -766,63 +752,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		DefaultValue: "true", // 2.5.4 version becomes default true
 	}
 	p.EnableMaterializedView.Init(base.mgr)
-
-	p.MaxDegree = ParamItem{
-		Key:          "common.DiskIndex.MaxDegree",
-		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultMaxDegree),
-		Export:       true,
-	}
-	p.MaxDegree.Init(base.mgr)
-
-	p.SearchListSize = ParamItem{
-		Key:          "common.DiskIndex.SearchListSize",
-		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultSearchListSize),
-		Export:       true,
-	}
-	p.SearchListSize.Init(base.mgr)
-
-	p.PQCodeBudgetGBRatio = ParamItem{
-		Key:          "common.DiskIndex.PQCodeBudgetGBRatio",
-		Version:      "2.0.0",
-		DefaultValue: fmt.Sprintf("%f", DefaultPQCodeBudgetGBRatio),
-		Export:       true,
-	}
-	p.PQCodeBudgetGBRatio.Init(base.mgr)
-
-	p.BuildNumThreadsRatio = ParamItem{
-		Key:          "common.DiskIndex.BuildNumThreadsRatio",
-		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultBuildNumThreadsRatio),
-		Export:       true,
-	}
-	p.BuildNumThreadsRatio.Init(base.mgr)
-
-	p.SearchCacheBudgetGBRatio = ParamItem{
-		Key:          "common.DiskIndex.SearchCacheBudgetGBRatio",
-		Version:      "2.0.0",
-		DefaultValue: fmt.Sprintf("%f", DefaultSearchCacheBudgetGBRatio),
-		Export:       true,
-	}
-	p.SearchCacheBudgetGBRatio.Init(base.mgr)
-
-	p.LoadNumThreadRatio = ParamItem{
-		Key:          "common.DiskIndex.LoadNumThreadRatio",
-		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultLoadNumThreadRatio),
-		Export:       true,
-	}
-	p.LoadNumThreadRatio.Init(base.mgr)
-
-	p.BeamWidthRatio = ParamItem{
-		Key:          "common.DiskIndex.BeamWidthRatio",
-		Version:      "2.0.0",
-		DefaultValue: strconv.Itoa(DefaultBeamWidthRatio),
-		Doc:          "",
-		Export:       true,
-	}
-	p.BeamWidthRatio.Init(base.mgr)
 
 	p.GracefulTime = ParamItem{
 		Key:          "common.gracefulTime",

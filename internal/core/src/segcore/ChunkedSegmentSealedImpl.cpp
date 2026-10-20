@@ -1122,7 +1122,8 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
                                                 info.index_params,
                                                 info.enable_mmap,
                                                 info.num_rows,
-                                                info.dim);
+                                                info.dim,
+                                                &info.GetMetadataIndexParams());
     }
     request.has_raw_data = milvus::index::CanUseIndexRawDataForField(
         field_meta.get_data_type(), request.has_raw_data);

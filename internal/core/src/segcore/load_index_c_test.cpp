@@ -440,6 +440,62 @@ TEST(LoadIndexCTest, FinishLoadIndexInfoPreservesIndexStorePathVersion) {
                   INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
 }
 
+TEST(LoadIndexCTest, RuntimeLoadParamsPreserveArtifactCapability) {
+    milvus::proto::cgo::LoadIndexInfo proto;
+    proto.set_index_engine_version(
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    proto.set_index_file_size(1 << 20);
+    proto.set_num_rows(1000);
+    auto* field = proto.mutable_field();
+    field->set_fieldid(101);
+    field->set_name("vector");
+    field->set_data_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim = field->add_type_params();
+    dim->set_key("dim");
+    dim->set_value("128");
+    auto& metadata = *proto.mutable_index_params();
+    metadata["index_type"] = "AISAQ";
+    metadata["metric_type"] = "L2";
+    metadata["search_cache_budget_gb_ratio"] = "0";
+    auto& runtime = *proto.mutable_load_params();
+    runtime["disk_pq_dims"] = "0";
+    runtime["search_cache_budget_gb_ratio"] = "0.5";
+    const auto serialized = proto.SerializeAsString();
+    LoadResourceRequest estimate{};
+    auto status = EstimateLoadIndexResourceFromSerializedInfo(
+        reinterpret_cast<const uint8_t*>(serialized.data()),
+        serialized.size(),
+        &estimate);
+    ASSERT_EQ(status.error_code, milvus::Success);
+    EXPECT_FALSE(estimate.has_raw_data)
+        << "a load-time override cannot change default AISAQ disk PQ";
+
+    milvus::segcore::LoadIndexInfo info{};
+    status =
+        FinishLoadIndexInfo(static_cast<CLoadIndexInfo>(&info),
+                            reinterpret_cast<const uint8_t*>(serialized.data()),
+                            serialized.size());
+    ASSERT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(info.index_params.at("disk_pq_dims"), "0");
+    EXPECT_EQ(info.index_params.at("search_cache_budget_gb_ratio"), "0");
+    EXPECT_EQ(info.GetMetadataIndexParams().count("disk_pq_dims"), 0);
+
+    // The translator takes a copy of LoadIndexInfo. Both copy paths must keep
+    // the artifact configuration used for its reservation and publication.
+    milvus::segcore::LoadIndexInfo copied(info);
+    milvus::segcore::LoadIndexInfo assigned{};
+    assigned = info;
+    for (auto* load : {&copied, &assigned}) {
+        LoadResourceRequest copied_estimate{};
+        status = EstimateLoadIndexResource(static_cast<CLoadIndexInfo>(load),
+                                           &copied_estimate);
+        ASSERT_EQ(status.error_code, milvus::Success);
+        EXPECT_FALSE(copied_estimate.has_raw_data);
+        EXPECT_EQ(copied_estimate.max_memory_cost, estimate.max_memory_cost);
+        EXPECT_EQ(load->index_params.at("disk_pq_dims"), "0");
+    }
+}
+
 TEST(LoadIndexCTest, CleanLoadedIndexDoesNotRemoveSiblingGeneration) {
     auto local_chunk_manager =
         milvus::storage::LocalChunkManagerSingleton::GetInstance()

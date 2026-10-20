@@ -51,6 +51,11 @@ struct LoadIndexInfo {
         proto::index::IndexStorePathVersion::
             INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
     std::map<std::string, std::string> index_params;
+    // Runtime load defaults do not describe the representation of an existing
+    // artifact. Keep its metadata parameters for capability planning, while
+    // index_params contains the effective settings used by the loader.
+    std::optional<std::map<std::string, std::string>>
+        index_params_from_metadata;
     std::vector<std::string> index_files;
     std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>>
         cache_index;
@@ -82,6 +87,12 @@ struct LoadIndexInfo {
     // Default constructor
     LoadIndexInfo() = default;
 
+    const std::map<std::string, std::string>&
+    GetMetadataIndexParams() const {
+        return index_params_from_metadata ? *index_params_from_metadata
+                                          : index_params;
+    }
+
     // Move constructor and assignment - use defaults
     LoadIndexInfo(LoadIndexInfo&&) = default;
     LoadIndexInfo&
@@ -103,6 +114,7 @@ struct LoadIndexInfo {
           index_version(other.index_version),
           index_store_path_version(other.index_store_path_version),
           index_params(other.index_params),
+          index_params_from_metadata(other.index_params_from_metadata),
           index_files(other.index_files),
           cache_index(nullptr),
           index_family(other.index_family),
@@ -136,6 +148,7 @@ struct LoadIndexInfo {
             index_version = other.index_version;
             index_store_path_version = other.index_store_path_version;
             index_params = other.index_params;
+            index_params_from_metadata = other.index_params_from_metadata;
             index_files = other.index_files;
             cache_index = nullptr;
             index_family = other.index_family;

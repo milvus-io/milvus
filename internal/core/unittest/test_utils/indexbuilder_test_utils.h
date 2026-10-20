@@ -90,11 +90,11 @@ generate_build_conf(const milvus::IndexType& index_type,
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
-            {milvus::index::DISK_ANN_MAX_DEGREE, std::to_string(48)},
-            {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, std::to_string(128)},
-            {milvus::index::DISK_ANN_PQ_CODE_BUDGET, std::to_string(0.001)},
-            {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(32)},
-            {milvus::index::DISK_ANN_BUILD_THREAD_NUM, std::to_string(2)},
+            {"max_degree", std::to_string(48)},
+            {"search_list_size", std::to_string(128)},
+            {"pq_code_budget_gb", std::to_string(0.001)},
+            {"build_dram_budget_gb", std::to_string(32)},
+            {"num_build_thread", std::to_string(2)},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
                index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
@@ -129,8 +129,7 @@ generate_load_conf(const milvus::IndexType& index_type,
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
-            {milvus::index::DISK_ANN_LOAD_THREAD_NUM, std::to_string(2)},
-            {milvus::index::DISK_ANN_SEARCH_CACHE_BUDGET,
+            {"search_cache_budget_gb",
              std::to_string(0.05 * sizeof(DataType) * nb /
                             (1024.0 * 1024.0 * 1024.0))},
         };
@@ -165,7 +164,7 @@ generate_search_conf(const milvus::IndexType& index_type,
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         conf[knowhere::indexparam::EF] = 200;
     } else if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-        conf[milvus::index::DISK_ANN_QUERY_LIST] = K * 2;
+        conf["search_list"] = K * 2;
     }
     return conf;
 }
@@ -191,7 +190,7 @@ generate_range_search_conf(const milvus::IndexType& index_type,
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         conf[knowhere::indexparam::EF] = 200;
     } else if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-        conf[milvus::index::DISK_ANN_QUERY_LIST] = K * 2;
+        conf["search_list"] = K * 2;
     }
     return conf;
 }

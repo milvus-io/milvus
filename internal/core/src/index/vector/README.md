@@ -13,7 +13,7 @@ that implementations not yet wired in have completed behavior or performance ver
 | `KnowhereEngine` | Holds the native engine, the complete backing owner, and the actual type, metric, dim, and physical/embedding-list state |
 | `VectorIndexValidDataUtils` | Encodes and decodes the nullable row validity bitmap and publishes it into the knowhere IdMap (#50524; the mapping itself is owned by knowhere) |
 | `contracts/query/IVectorReader.h` | Unified vector query interface covering search, value retrieval, metadata, nullable, refine, and embedding-list operations |
-| `VectorIndexReader` | Non-template unified reader; at runtime it distinguishes only the memory/disk search shell and the DiskANN beamwidth, and dispatches on the physical type only at the retrieval leaf |
+| `VectorIndexReader` | Non-template unified reader; at runtime it distinguishes only the memory/disk search shell, passes algorithm parameters to Knowhere, and dispatches on the physical type only at the retrieval leaf |
 | `VectorMemBuilder` | `IArtifactBuilder<VectorBuildInput<T>>`; accepts the complete input in one call, and the caller owns the tensor and side inputs |
 | `VectorDiskBuilder` | `IArtifactBuilder<PreparedVectorBuildFiles<T>>`; knowhere reads the prepared complete files |
 | `VectorMemArtifact` | Named logical BinarySet entries; supports consuming the built engine/validity to produce a reader directly |

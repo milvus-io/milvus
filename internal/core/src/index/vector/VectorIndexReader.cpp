@@ -29,7 +29,6 @@
 #include "common/Utils.h"
 #include "index/Meta.h"
 #include "index/vector/RangeSearchParams.h"
-#include "index/vector/VectorDiskAnnUtils.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/VectorReaderUtils.h"
 #include "index/vector/VectorReaderValidation.h"
@@ -38,14 +37,6 @@
 
 namespace milvus::index {
 namespace {
-
-void
-ValidateDiskAnnBeamwidth(const KnowhereEngine& engine, uint32_t beamwidth) {
-    if (engine.KnowhereIndexType() != knowhere::IndexEnum::INDEX_DISKANN) {
-        return;
-    }
-    vector_disk_ann::ValidateBeamwidth(beamwidth);
-}
 
 [[noreturn]] void
 ThrowSearchError(const char* operation,
@@ -97,24 +88,13 @@ FillRegularSearchResult(const DatasetPtr& native_result,
 
 }  // namespace
 
-VectorIndexReader::VectorIndexReader(KnowhereEngine engine)
+VectorIndexReader::VectorIndexReader(KnowhereEngine engine, Backend backend)
     : engine_(std::move(engine)),
+      backend_(backend),
       physical_count_(IsAllNullNullable(IdMap()) ||
                               engine_.IsEmptyEmbListIndex()
                           ? 0
                           : engine_.native_index.Count()) {
-}
-
-VectorIndexReader::VectorIndexReader(uint32_t disk_ann_beamwidth,
-                                     KnowhereEngine engine)
-    : engine_(std::move(engine)),
-      backend_(Backend::Disk),
-      disk_ann_beamwidth_(disk_ann_beamwidth),
-      physical_count_(IsAllNullNullable(IdMap()) ||
-                              engine_.IsEmptyEmbListIndex()
-                          ? 0
-                          : engine_.native_index.Count()) {
-    ValidateDiskAnnBeamwidth(engine_, disk_ann_beamwidth_);
 }
 
 VectorIndexReader::VectorIndexReader(KnowhereEngine engine,
@@ -570,17 +550,6 @@ VectorIndexReader::SearchDisk(const DatasetPtr& dataset,
         result.total_nq_ = shape.logical_nq;
         result.unity_topK_ = topk;
         return;
-    }
-
-    if (engine_.KnowhereIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
-        ValidateDiskAnnBeamwidth(engine_, disk_ann_beamwidth_);
-        if (params.search_params_.contains(DISK_ANN_QUERY_LIST)) {
-            search_config[DISK_ANN_SEARCH_LIST_SIZE] =
-                params.search_params_.at(DISK_ANN_QUERY_LIST);
-        }
-        search_config[DISK_ANN_QUERY_BEAMWIDTH] =
-            static_cast<int32_t>(disk_ann_beamwidth_);
-        search_config[DISK_ANN_PQ_CODE_BUDGET] = 0.0;
     }
 
     auto final = [&] {

@@ -32,12 +32,16 @@ namespace milvus::index {
 
 class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
  public:
+    enum class Backend {
+        Memory,
+        Disk,
+    };
+
     // Nullable row mapping lives inside the engine's knowhere IdMap (#50524):
     // bitsets and result ids stay in the segment's logical row space and the
     // reader only exposes logical-row helpers.
-    explicit VectorIndexReader(KnowhereEngine engine);
-
-    VectorIndexReader(uint32_t disk_ann_beamwidth, KnowhereEngine engine);
+    explicit VectorIndexReader(KnowhereEngine engine,
+                               Backend backend = Backend::Memory);
 
     // A growing generation shares one live Add/Search engine -- including its
     // append-only IdMap -- but freezes the logical row prefix, the physical
@@ -137,11 +141,6 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
                     const std::string& metric_type) const override;
 
  private:
-    enum class Backend {
-        Memory,
-        Disk,
-    };
-
     static constexpr std::array<const char*, 5> kGrowingQueryOverrides = {
         "radius",
         "range_filter",
@@ -202,7 +201,6 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
 
     KnowhereEngine engine_;
     Backend backend_{Backend::Memory};
-    uint32_t disk_ann_beamwidth_{8};
     int64_t physical_count_;
     // Growing only: the frozen public row count this generation may answer
     // for. Sealed readers read their row domain from the immutable IdMap.

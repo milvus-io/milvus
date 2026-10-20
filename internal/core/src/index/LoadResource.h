@@ -42,14 +42,16 @@ bool
 CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
 
 LoadResourceRequest
-IndexLoadResource(DataType field_type,
-                  DataType element_type,
-                  IndexVersion index_version,
-                  uint64_t index_size_in_bytes,
-                  const std::map<std::string, std::string>& index_params,
-                  bool mmap_enable,
-                  int64_t num_rows,
-                  int64_t dim);
+IndexLoadResource(
+    DataType field_type,
+    DataType element_type,
+    IndexVersion index_version,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    int64_t dim,
+    const std::map<std::string, std::string>* metadata_index_params = nullptr);
 
 LoadResourceRequest
 ScalarIndexLoadResource(DataType field_type,

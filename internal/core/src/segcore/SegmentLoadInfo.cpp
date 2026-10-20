@@ -122,21 +122,27 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
                         ? mmap_config.GetVectorIndexEnableMmap()
                         : mmap_config.GetScalarIndexEnableMmap();
 
-    // Set index params
+    // Preserve artifact parameters before applying execution-stage defaults.
     for (const auto& kv_pair : field_index_info->index_params()) {
-        if (kv_pair.key() == "mmap.enabled") {
+        load_index_info.index_params[kv_pair.key()] = kv_pair.value();
+    }
+    load_index_info.index_params_from_metadata = load_index_info.index_params;
+    for (const auto& [key, value] : field_index_info->load_params()) {
+        load_index_info.index_params.try_emplace(key, value);
+    }
+    for (const auto& [key, value] : load_index_info.index_params) {
+        if (key == "mmap.enabled") {
             std::string lower;
-            std::transform(kv_pair.value().begin(),
-                           kv_pair.value().end(),
+            std::transform(value.begin(),
+                           value.end(),
                            std::back_inserter(lower),
                            ::tolower);
             use_mmap = (lower == "true");
         }
         // Extract warmup policy from index params
-        if (kv_pair.key() == "warmup") {
-            load_index_info.warmup_policy = kv_pair.value();
+        if (key == "warmup") {
+            load_index_info.warmup_policy = value;
         }
-        load_index_info.index_params[kv_pair.key()] = kv_pair.value();
     }
 
     // Inject scalar index version into index_params for scalar indexes

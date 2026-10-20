@@ -36,6 +36,7 @@
 #include "index/contracts/Registry.h"
 #include "index/contracts/build/VectorBuildInput.h"
 #include "index/contracts/query/IVectorReader.h"
+#include "index/test_utils/AssertHelpers.h"
 #include "index/vector/KnowhereEngine.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
@@ -118,9 +119,10 @@ BuildDisk(const std::string& raw_path,
           int64_t dim = kDim,
           int64_t logical_rows = kRows,
           const std::string& offsets_path = {},
-          bool mmap = false) {
+          bool mmap = false,
+          const IndexType& index_type = knowhere::IndexEnum::INDEX_DISKANN) {
     auto adapted = AdaptIndexType({
-        .index_type = knowhere::IndexEnum::INDEX_DISKANN,
+        .index_type = index_type,
         .field_type =
             offsets_path.empty() ? PhysicalType<T>() : DataType::VECTOR_ARRAY,
         .element_type =
@@ -129,11 +131,7 @@ BuildDisk(const std::string& raw_path,
             knowhere::Version::GetCurrentVersion().VersionNumber(),
         .params = {{METRIC_TYPE, metric},
                    {DIM_KEY, dim},
-                   {DISK_ANN_MAX_DEGREE, "24"},
-                   {DISK_ANN_SEARCH_LIST_SIZE, "56"},
-                   {DISK_ANN_PQ_CODE_BUDGET, "0.001"},
-                   {DISK_ANN_BUILD_DRAM_BUDGET, "2"},
-                   {DISK_ANN_BUILD_THREAD_NUM, "2"}},
+                   {"build_dram_budget_gb", "2"}},
     });
     adapted.params["local_dir"] = staging_dir;
     auto builder =
@@ -182,7 +180,6 @@ BuildDisk(const std::string& raw_path,
     storage::LoadOptions options;
     options.params = adapted.params;
     options.params[INDEX_NUM_ROWS_KEY] = logical_rows;
-    options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = mmap;
     options.mmap_dir_path = staging_dir;
     opened.base =
@@ -212,7 +209,7 @@ RunOrdinaryDiskSearch(bool mmap) {
     EXPECT_EQ(reader->Dim(), kDim);
     EXPECT_EQ(reader->KnowhereIndexType(), knowhere::IndexEnum::INDEX_DISKANN);
     VectorSearchParams params{
-        .search_params_ = {{DISK_ANN_QUERY_LIST, 8}},
+        .search_params_ = {{"search_list", 8}},
         .metric_type_ = "L2",
         .topk_ = 4,
     };
@@ -283,7 +280,7 @@ TEST(VectorDiskFamilyTest, RejectsQueryListSmallerThanTopK) {
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
     VectorSearchParams params{
-        .search_params_ = {{DISK_ANN_QUERY_LIST, 2}},
+        .search_params_ = {{"search_list", 2}},
         .metric_type_ = "L2",
         .topk_ = 4,
     };
@@ -294,6 +291,120 @@ TEST(VectorDiskFamilyTest, RejectsQueryListSmallerThanTopK) {
                                     nullptr,
                                     result));
 }
+
+class DiskParameterPassthroughTest
+    : public ::testing::TestWithParam<IndexType> {};
+
+TEST_P(DiskParameterPassthroughTest, DefaultsAndPerRequestSearchControls) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_params_XXXXXX", "vector disk parameters test");
+    const auto raw_path = files->Path() + "/raw";
+    auto values = MakeRows<float>();
+    WriteRaw(raw_path, values, kRows, kDim);
+    OpenedDiskIndex<float> opened;
+    // Only schema and the execution memory budget are supplied. Knowhere must
+    // supply algorithm defaults without Milvus-synthesized build/load threads.
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              "L2",
+              kDim,
+              kRows,
+              {},
+              false,
+              GetParam());
+    ASSERT_NE(opened.base, nullptr);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->KnowhereIndexType(), GetParam());
+    // Default AISAQ stores disk PQ codes; Milvus must use field data for
+    // original vector output instead of treating those codes as raw vectors.
+    EXPECT_EQ(reader->HasRawData(),
+              GetParam() == knowhere::IndexEnum::INDEX_DISKANN);
+    auto query = GenDataset(1, kDim, values.data());
+    VectorSearchParams params{
+        .search_params_ = nlohmann::json::object(),
+        .metric_type_ = "L2",
+        .topk_ = 4,
+    };
+    SearchResult result;
+    reader->Search(query, params, BitsetView{}, nullptr, result);
+    ASSERT_EQ(result.seg_offsets_.size(), 4);
+
+    for (int beamwidth : {1, 2}) {
+        params.search_params_ = {{"search_list", 8}, {"beamwidth", beamwidth}};
+        reader->Search(query, params, BitsetView{}, nullptr, result);
+        ASSERT_EQ(result.seg_offsets_.size(), 4);
+    }
+
+    // Previously the Milvus disk reader replaced every request beamwidth with
+    // its saved load-time value, hiding even invalid explicit inputs.
+    params.search_params_["beamwidth"] = 0;
+    ExpectSegcoreError(ErrorCode::InvalidParameter, [&] {
+        reader->Search(query, params, BitsetView{}, nullptr, result);
+    });
+    params.search_params_["beamwidth"] = "invalid";
+    ExpectSegcoreError(ErrorCode::InvalidParameter, [&] {
+        reader->Search(query, params, BitsetView{}, nullptr, result);
+    });
+
+    params.search_params_ = {{"search_list", 2}};
+    ExpectSegcoreError(ErrorCode::InvalidParameter, [&] {
+        reader->Search(query, params, BitsetView{}, nullptr, result);
+    });
+    if (GetParam() == knowhere::IndexEnum::INDEX_AISAQ) {
+        params.search_params_ = {{"vectors_beamwidth", 2}};
+        reader->Search(query, params, BitsetView{}, nullptr, result);
+        ASSERT_EQ(result.seg_offsets_.size(), 4);
+        params.search_params_["vectors_beamwidth"] = 0;
+        ExpectSegcoreError(ErrorCode::InvalidParameter, [&] {
+            reader->Search(query, params, BitsetView{}, nullptr, result);
+        });
+    } else {
+        // DiskANN supports range search and iterators through the same opaque
+        // parameter boundary. Exercise their own Config stages as well.
+        for (const auto& query_params :
+             {nlohmann::json::object(),
+              nlohmann::json{{"search_list", 8}, {"beamwidth", 2}}}) {
+            params.search_params_ = query_params;
+            auto iterators =
+                reader->Iterators(query,
+                                  reader->PrepareSearchParams(params),
+                                  BitsetView{},
+                                  nullptr);
+            ASSERT_TRUE(iterators.has_value()) << iterators.what();
+            ASSERT_EQ(iterators.value().size(), 1);
+            auto has_next = iterators.value()[0]->HasNext();
+            ASSERT_TRUE(has_next.has_value());
+            ASSERT_TRUE(has_next.value());
+            auto next = iterators.value()[0]->Next();
+            ASSERT_TRUE(next.has_value());
+            EXPECT_GE(next.value().first, 0);
+            EXPECT_LT(next.value().first, kRows);
+
+            params.search_params_["radius"] = 1000000.0f;
+            reader->Search(query, params, BitsetView{}, nullptr, result);
+            ASSERT_EQ(result.seg_offsets_.size(), 4);
+        }
+
+        params.search_params_ = {{"search_list", 8}, {"beamwidth", 0}};
+        auto invalid_iterator = reader->Iterators(
+            query, reader->PrepareSearchParams(params), BitsetView{}, nullptr);
+        ASSERT_FALSE(invalid_iterator.has_value());
+        EXPECT_EQ(invalid_iterator.error(),
+                  knowhere::Status::out_of_range_in_json);
+        params.search_params_["radius"] = 1000000.0f;
+        ExpectSegcoreError(ErrorCode::InvalidParameter, [&] {
+            reader->Search(query, params, BitsetView{}, nullptr, result);
+        });
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DiskAlgorithms,
+    DiskParameterPassthroughTest,
+    ::testing::Values(IndexType(knowhere::IndexEnum::INDEX_DISKANN),
+                      IndexType(knowhere::IndexEnum::INDEX_AISAQ)));
 
 TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
     auto files = storage::LocalDirectory::CreateOwned(
@@ -337,7 +448,7 @@ TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
     query->Set(knowhere::meta::EMB_LIST_COUNT, int64_t{2});
     query->Set(knowhere::meta::NQ, int64_t{2});
     VectorSearchParams params{
-        .search_params_ = {{DISK_ANN_QUERY_LIST, 8}},
+        .search_params_ = {{"search_list", 8}},
         .metric_type_ = knowhere::metric::MAX_SIM_L2,
         .topk_ = 4,
     };

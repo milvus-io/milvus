@@ -45,7 +45,6 @@ type AutoIndexConfig struct {
 	EnableDeduplicateIndex ParamItem  `refreshable:"true"`
 	PrepareParams          ParamItem  `refreshable:"true"`
 	LoadAdaptParams        ParamItem  `refreshable:"true"`
-	ExtraParams            ParamItem  `refreshable:"true"`
 	IndexType              ParamItem  `refreshable:"true"`
 	AutoIndexTypeName      ParamItem  `refreshable:"true"`
 	AutoIndexSearchConfig  ParamItem  `refreshable:"true"`
@@ -189,12 +188,6 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Version: "2.4.5",
 	}
 	p.LoadAdaptParams.Init(base.mgr)
-
-	p.ExtraParams = ParamItem{
-		Key:     "autoIndex.params.extra",
-		Version: "2.2.0",
-	}
-	p.ExtraParams.Init(base.mgr)
 
 	p.IndexType = ParamItem{
 		Version: "2.2.0",

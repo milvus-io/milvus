@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -21,6 +22,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -541,4 +544,64 @@ func TestConvertToSegcoreSegmentLoadInfo_V3ManifestErrorReturnsError(t *testing.
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
+}
+
+func TestConvertToSegcoreSegmentLoadInfoSeparatesRuntimeParams(t *testing.T) {
+	params := paramtable.Get()
+	for _, algorithm := range []string{"DISKANN", "AISAQ"} {
+		t.Run(algorithm, func(t *testing.T) {
+			prefix := "knowhere." + algorithm + ".load."
+			for _, key := range []string{"search_cache_budget_gb_ratio", "use_bfs_cache", "disk_pq_dims"} {
+				defer params.Remove(prefix + key)
+			}
+			for _, explicit := range []bool{false, true} {
+				metadata := &querypb.SegmentLoadInfo{IndexInfos: []*querypb.FieldIndexInfo{{
+					FieldID: 101, IndexID: 1, BuildID: 2,
+					IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: algorithm}},
+				}}}
+				if explicit {
+					metadata.IndexInfos[0].IndexParams = append(metadata.IndexInfos[0].IndexParams,
+						&commonpb.KeyValuePair{Key: "search_cache_budget_gb_ratio", Value: "0"},
+						&commonpb.KeyValuePair{Key: "use_bfs_cache", Value: "false"})
+				}
+				original := proto.Clone(metadata).(*querypb.SegmentLoadInfo)
+				for _, ratio := range []string{"0.25", "0.5"} {
+					require.NoError(t, params.Save(prefix+"search_cache_budget_gb_ratio", ratio))
+					require.NoError(t, params.Save(prefix+"use_bfs_cache", "true"))
+					require.NoError(t, params.Save(prefix+"disk_pq_dims", "0"))
+					converted, err := segcore.ConvertToSegcoreSegmentLoadInfo(metadata)
+					require.NoError(t, err)
+					raw, err := proto.Marshal(converted)
+					require.NoError(t, err)
+					wire := &segcorepb.SegmentLoadInfo{}
+					require.NoError(t, proto.Unmarshal(raw, wire))
+					require.True(t, proto.Equal(original, metadata))
+					index := wire.GetIndexInfos()[0]
+					require.True(t, proto.Equal(&segcorepb.FieldIndexInfo{IndexParams: original.IndexInfos[0].IndexParams}, &segcorepb.FieldIndexInfo{IndexParams: index.GetIndexParams()}))
+					if explicit {
+						require.NotContains(t, index.GetLoadParams(), "search_cache_budget_gb_ratio")
+						require.NotContains(t, index.GetLoadParams(), "use_bfs_cache")
+					} else {
+						require.Equal(t, ratio, index.GetLoadParams()["search_cache_budget_gb_ratio"])
+						require.Equal(t, "true", index.GetLoadParams()["use_bfs_cache"])
+					}
+					require.Equal(t, "0", index.GetLoadParams()["disk_pq_dims"])
+					// Modifying the DTO cannot mutate persisted request choices.
+					converted.IndexInfos[0].IndexParams[0].Value = "changed"
+					require.True(t, proto.Equal(original, metadata))
+				}
+			}
+		})
+	}
+}
+
+func TestConvertToSegcoreSegmentLoadInfoPropagatesRuntimePreparationError(t *testing.T) {
+	patch := mockey.Mock(indexparams.GetRuntimeLoadParams).
+		To(func(_ *paramtable.ComponentParam, _ map[string]string) (map[string]string, error) {
+			return nil, merr.ErrServiceUnavailable
+		}).Build()
+	defer patch.UnPatch()
+	info, err := segcore.ConvertToSegcoreSegmentLoadInfo(&querypb.SegmentLoadInfo{IndexInfos: []*querypb.FieldIndexInfo{{IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: "TEST_INDEX"}}}}})
+	require.Nil(t, info)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }

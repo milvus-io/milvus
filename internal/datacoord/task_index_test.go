@@ -1117,3 +1117,37 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
 	})
 }
+
+func (s *indexTaskSuite) TestPrepareJobRequestPreservesExplicitDiskParams() {
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	mt := &meta{indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID)}
+	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.Require().True(ok)
+	explicit := []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "DISKANN"},
+		{Key: common.MetricTypeKey, Value: "L2"},
+		{Key: "pq_code_budget_gb_ratio", Value: "0"},
+		{Key: "search_cache_budget_gb_ratio", Value: "0"},
+		{Key: "max_degree", Value: "32"},
+		{Key: "search_list_size", Value: "64"},
+	}
+	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = explicit
+	field := &schemapb.FieldSchema{FieldID: s.fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}}
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{ID: s.collID, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}, Partitions: []int64{s.partID}}, nil)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().RootPath().Return("root")
+	it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
+	req, err := it.prepareJobRequest(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: s.segID, CollectionID: s.collID, PartitionID: s.partID, NumOfRows: 4}}, segIndex, mt.indexMeta.GetIndexParams(s.collID, s.indexID), "DISKANN")
+	s.Require().NoError(err)
+	values := make(map[string]string)
+	for _, kv := range req.GetIndexParams() {
+		values[kv.GetKey()] = kv.GetValue()
+	}
+	s.Equal("0", values["search_cache_budget_gb_ratio"])
+	s.Equal("0", values["pq_code_budget_gb_ratio"])
+	s.Equal("32", values["max_degree"])
+	s.Equal("64", values["search_list_size"])
+	stored := mt.indexMeta.GetIndexParams(s.collID, s.indexID)
+	s.ElementsMatch(explicit, stored)
+}

@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -279,12 +278,14 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	indexType := it.newIndexParams[common.IndexTypeKey]
 	var fieldDataSize uint64
 
-	// Estimate field data size, only used for diskann and aisaq
+	// Supply the vector data footprint as a runtime resource fact.
 	dim := uint64(it.req.GetDim())
 	numRows := uint64(it.req.GetNumRows())
 	switch it.req.GetField().GetDataType() {
 	case schemapb.DataType_BinaryVector:
 		fieldDataSize = dim / 8 * numRows
+	case schemapb.DataType_Int8Vector:
+		fieldDataSize = dim * numRows
 	case schemapb.DataType_FloatVector:
 		fieldDataSize = dim * numRows * 4
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
@@ -292,15 +293,8 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	case schemapb.DataType_ArrayOfVector:
 		fieldDataSize = getFieldDataSizeFromBinlogs(it.req.GetInsertLogs(), it.req.GetField().GetFieldID())
 	}
-	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-		if err := indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize)); err != nil {
-			log.Warn(ctx, "failed to fill disk index params", mlog.Err(err))
-			return err
-		}
-	}
-
 	// system resource-related parameters, such as memory limits, CPU limits, and disk limits, are appended here to the parameter list
-	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) && paramtable.Get().KnowhereConfig.Enable.GetAsBool() {
+	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) {
 		it.newIndexParams, _ = paramtable.Get().KnowhereConfig.MergeResourceParams(fieldDataSize, paramtable.BuildStage, it.newIndexParams)
 	}
 

@@ -34,6 +34,7 @@
 #include "index/LoadResource.h"
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/version.h"
 #include "pb/common.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/index_coord.pb.h"
@@ -3877,6 +3878,86 @@ AddScalarIndex(proto::segcore::SegmentLoadInfo& proto,
 }
 
 }  // namespace
+
+TEST_F(SegmentLoadInfoTest, LoadDefaultsCannotChangeArtifactRawDataPlanning) {
+    struct Case {
+        std::map<std::string, std::string> metadata;
+        std::map<std::string, std::string> load;
+        bool has_raw_data;
+    };
+    const std::vector<Case> cases{
+        {{{"index_type", "AISAQ"}, {"metric_type", "L2"}},
+         {{"disk_pq_dims", "0"}},
+         false},
+        {{{"index_type", "AISAQ"},
+          {"metric_type", "L2"},
+          {"disk_pq_code_budget_gb_ratio", "0"}},
+         {{"disk_pq_dims", "8"}},
+         true},
+        {{{"index_type", "DISKANN"},
+          {"metric_type", "L2"},
+          {"disk_pq_code_budget_gb_ratio", "0.25"}},
+         {{"disk_pq_dims", "0"}},
+         false},
+        {{{"index_type", "DISKANN"}, {"metric_type", "L2"}},
+         {{"disk_pq_code_budget_gb_ratio", "0.25"}},
+         true},
+        {{{"index_type", "SCANN"}, {"metric_type", "L2"}},
+         {{"with_raw_data", "false"}},
+         true},
+    };
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.metadata.at("index_type"));
+        auto next_proto = MakeManifestProto("/manifest/index-params");
+        auto* index = next_proto.add_index_infos();
+        index->set_fieldid(101);
+        index->set_indexid(7001);
+        index->set_buildid(8001);
+        index->set_current_index_version(
+            knowhere::Version::GetCurrentVersion().VersionNumber());
+        index->set_index_size(1 << 20);
+        index->set_num_rows(1000);
+        index->add_index_file_paths("/idx/vector");
+        for (const auto& [key, value] : test.metadata) {
+            auto* kv = index->add_index_params();
+            kv->set_key(key);
+            kv->set_value(value);
+        }
+        for (const auto& [key, value] : test.load) {
+            (*index->mutable_load_params())[key] = value;
+        }
+        SegmentLoadInfo next(next_proto, schema_);
+        next.SetColumnGroupsForTesting(
+            MakeColumnGroups({{{101}, {"/cg/vector.parquet"}}}));
+        auto indexes = next.GetFieldIndexInfos(FieldId(101));
+        ASSERT_EQ(indexes.size(), 1);
+        ASSERT_TRUE(indexes[0].load_resource_request.has_value());
+        EXPECT_EQ(indexes[0].load_resource_request->has_raw_data,
+                  test.has_raw_data);
+        EXPECT_EQ(indexes[0].GetMetadataIndexParams(), test.metadata);
+        for (const auto& [key, value] : test.load) {
+            EXPECT_EQ(indexes[0].index_params.at(key), value);
+        }
+
+        SegmentLoadInfo empty(MakeManifestProto("/manifest/empty"), schema_);
+        empty.SetColumnGroupsForTesting(MakeColumnGroups({}));
+        const auto initial = empty.ComputeDiff(next);
+        const bool loads_vectors =
+            ColumnGroupFieldPresent(initial.column_groups_to_load, 101) ||
+            ColumnGroupFieldPresent(initial.column_groups_to_lazyload, 101);
+        EXPECT_EQ(loads_vectors, !test.has_raw_data);
+
+        // A changed live override on Reopen must not evict a raw column that
+        // the existing compressed artifact still needs for vector output.
+        auto previous_proto = next_proto;
+        previous_proto.mutable_index_infos(0)->clear_load_params();
+        SegmentLoadInfo previous(previous_proto, schema_);
+        previous.SetColumnGroupsForTesting(
+            MakeColumnGroups({{{101}, {"/cg/vector.parquet"}}}));
+        const auto reopen = previous.ComputeDiff(next);
+        EXPECT_EQ(reopen.field_data_to_drop.count(FieldId(101)), 0);
+    }
+}
 
 TEST_F(SegmentLoadInfoTest,
        ComputeDiffColumnGroupDoesNotSkipScalarRawDataIndex) {
