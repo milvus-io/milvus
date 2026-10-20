@@ -16,9 +16,13 @@
 
 package datacoord
 
-// This file is the terminal-job GC pipeline the checker's low-frequency loop
-// runs once per terminal job per tick. Its phases are derived from durable
-// facts on every tick; no separate GC record exists. It is not a state handler.
+// This file owns the terminal-job GC pipeline the checker's low-frequency loop
+// runs for each terminal job (see importCheckerV3.checkGC). The pipeline is
+// derived from durable facts on every pass; no separate GC record exists.
+// The only in-memory fact is the job's objCleaned flag: it short-circuits
+// the repeated LIST + delete of an empty prefix, lives on the job it describes,
+// so it disappears with the job, and a restart simply repeats that idempotent
+// delete. It is not a state handler.
 
 import (
 	"context"
@@ -31,16 +35,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-// collectImportV3JobGC runs the GC phases in order: quiesce makes progress as
-// soon as the job is terminal and keeps retrying version-aware Drops; task
-// removal inside it waits for cleanupTs. Delete only starts once cleanupTs has
-// passed and every task is unbound/removed.
+// Terminal-job GC pipeline. Its phases are ordered so each one only depends on
+// facts the previous ones have already made true; every step is idempotent and
+// a crash between two of them resumes on the next pass.
+//
+// collectImportV3JobGC runs the GC phases in order: prepare makes progress as
+// soon as the job is terminal and keeps retrying version-aware Drops; the
+// object prefix goes away once no task is bound; metadata removal only starts
+// once cleanupTs has passed.
 func collectImportV3JobGC(jc *importV3JobContext) {
 	if jc.job.GetState() != internalpb.ImportJobState_Completed &&
 		jc.job.GetState() != internalpb.ImportJobState_Failed {
 		return
 	}
-	if !quiesceImportV3JobGC(jc) {
+	if !prepareImportV3JobGC(jc) {
+		return
+	}
+	if !deleteImportV3JobObjects(jc) {
 		return
 	}
 	if !time.Now().After(tsoutil.PhysicalTime(jc.job.GetCleanupTs())) {
@@ -49,15 +60,17 @@ func collectImportV3JobGC(jc *importV3JobContext) {
 	if !rollbackFailedReplicateImportV3JobGC(jc) {
 		return
 	}
-	deleteImportV3JobGC(jc)
+	deleteImportV3JobMeta(jc)
 }
 
-// quiesceImportV3JobGC drops still-bound V3 tasks and removes tasks that are no
-// longer pinned to a node. Removal only starts once cleanupTs has passed so the
-// task records keep backing the job's row accounting during the retention
-// window. It reports true only when every task of the job is already unbound
-// and removed from catalog.
-func quiesceImportV3JobGC(jc *importV3JobContext) bool {
+// prepareImportV3JobGC drops still-bound V3 tasks and the failed job's import
+// segments. It reports true only when every task of the job is unbound, i.e.
+// no worker can still write under the job's object prefix. A task it had to
+// drop this pass keeps that answer false, so the prefix is only released on a
+// later pass, after a canceled run has had time to close its writers. Task
+// records are left to deleteImportV3JobMeta: they back the job's row
+// accounting (getImportRowsInfo) through the retention window, like V2 GC does.
+func prepareImportV3JobGC(jc *importV3JobContext) bool {
 	tasks := jc.importMeta.GetTaskByJob(jc.ctx, jc.job.GetJobID())
 	ready := true
 	for _, task := range tasks {
@@ -89,21 +102,31 @@ func quiesceImportV3JobGC(jc *importV3JobContext) bool {
 				}
 			}
 		}
-		// Task records back the job's row accounting (getImportRowsInfo sums
-		// them), so they must survive the retention window like V2 GC does;
-		// dropping their worker binding above is still safe to do early.
-		if !time.Now().After(tsoutil.PhysicalTime(jc.job.GetCleanupTs())) {
-			ready = false
-			continue
-		}
-		if err := jc.importMeta.RemoveTask(jc.ctx, task.GetTaskID()); err != nil {
-			jc.log.Warn(jc.ctx, "remove task failed during GC", WrapTaskLog(task, mlog.Err(err))...)
-			ready = false
-			continue
-		}
-		jc.log.Info(jc.ctx, "task removed during GC quiesce", WrapTaskLog(task)...)
 	}
 	return ready
+}
+
+// deleteImportV3JobObjects removes the job's temporary object prefix — the
+// reshard fragments and manifests — as soon as no worker can still write it,
+// without waiting for cleanupTs. Only reshard workers write this prefix (the
+// merge intermediates are local and the final segments use insert_log), and a
+// terminal job never dispatches one again. prepareImportV3JobGC reports false
+// on a pass that clears a binding, so the release never lands in that pass:
+// DataNode only cancels a run and releases its slot when the closure exits, and
+// a writer canceled in that pass may still flush a fragment afterwards; such an
+// object would be left to the orphan scan. It reports true once the prefix is
+// gone (or was already removed by this process).
+func deleteImportV3JobObjects(jc *importV3JobContext) bool {
+	if jc.job.GetObjCleaned() {
+		return true
+	}
+	prefix := path.Join(jc.meta.chunkManager.RootPath(), metautil.BuildImportV3JobPath(jc.job.GetJobID())) + "/"
+	if err := jc.meta.chunkManager.RemoveWithPrefix(jc.ctx, prefix); err != nil {
+		jc.log.Warn(jc.ctx, "remove import job temporary objects failed, will retry", mlog.Err(err))
+		return false
+	}
+	jc.job.(*importJob).markObjCleaned()
+	return true
 }
 
 // rollbackFailedReplicateImportV3JobGC releases the peer cluster before source
@@ -137,21 +160,17 @@ func rollbackFailedReplicateImportV3JobGC(jc *importV3JobContext) bool {
 	return true
 }
 
-// deleteImportV3JobGC removes the job's temporary OSS prefix, any remaining
-// task catalog entries, and the job itself. Every step is idempotent, so a
-// crash in between simply resumes on the next GC tick.
-func deleteImportV3JobGC(jc *importV3JobContext) {
-	prefix := path.Join(jc.meta.chunkManager.RootPath(), metautil.BuildImportV3JobPath(jc.job.GetJobID())) + "/"
-	if err := jc.meta.chunkManager.RemoveWithPrefix(jc.ctx, prefix); err != nil {
-		jc.log.Warn(jc.ctx, "remove import job temporary objects failed", mlog.Err(err))
-		return
-	}
+// deleteImportV3JobMeta removes the job's remaining task records and the job
+// itself. Every step is idempotent, so a crash in between simply resumes on the
+// next GC tick.
+func deleteImportV3JobMeta(jc *importV3JobContext) {
 	tasks := jc.importMeta.GetTaskByJob(jc.ctx, jc.job.GetJobID())
 	for _, task := range tasks {
 		if err := jc.importMeta.RemoveTask(jc.ctx, task.GetTaskID()); err != nil {
 			jc.log.Warn(jc.ctx, "remove task failed during GC delete", WrapTaskLog(task, mlog.Err(err))...)
 			return
 		}
+		jc.log.Info(jc.ctx, "task removed during GC", WrapTaskLog(task)...)
 	}
 	if err := jc.importMeta.RemoveJob(jc.ctx, jc.job.GetJobID()); err != nil {
 		jc.log.Warn(jc.ctx, "remove import job failed", mlog.Err(err))
