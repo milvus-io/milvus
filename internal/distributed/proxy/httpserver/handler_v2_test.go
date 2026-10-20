@@ -6896,8 +6896,7 @@ func TestCommitImportJob(t *testing.T) {
 
 		mp := mocks.NewMockProxy(t)
 		mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
-			Status:         &StatusSuccess,
-			CollectionName: DefaultCollectionName,
+			Status: merr.Status(merr.WrapErrPrivilegeNotPermitted("not allowed to access import job")),
 		}, nil).Once()
 		testEngine := initHTTPServerV2(mp, true)
 		req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CommitAction), bytes.NewReader([]byte(`{"jobId": "123"}`)))
@@ -6910,8 +6909,8 @@ func TestCommitImportJob(t *testing.T) {
 		returnBody := &ReturnErrMsg{}
 		err := json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
-		assert.Equal(t, int32(65535), returnBody.Code)
-		assert.Contains(t, returnBody.Message, "PrivilegeImport: permission deny to test")
+		assert.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "not allowed to access import job")
 		mp.AssertNotCalled(t, "CommitImport", mock.Anything, mock.Anything)
 	})
 
@@ -7070,8 +7069,7 @@ func TestAbortImportJob(t *testing.T) {
 
 		mp := mocks.NewMockProxy(t)
 		mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
-			Status:         &StatusSuccess,
-			CollectionName: DefaultCollectionName,
+			Status: merr.Status(merr.WrapErrPrivilegeNotPermitted("not allowed to access import job")),
 		}, nil).Once()
 		testEngine := initHTTPServerV2(mp, true)
 		req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, AbortAction), bytes.NewReader([]byte(`{"jobId": "123"}`)))
@@ -7084,8 +7082,8 @@ func TestAbortImportJob(t *testing.T) {
 		returnBody := &ReturnErrMsg{}
 		err := json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
-		assert.Equal(t, int32(65535), returnBody.Code)
-		assert.Contains(t, returnBody.Message, "PrivilegeImport: permission deny to test")
+		assert.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "not allowed to access import job")
 		mp.AssertNotCalled(t, "AbortImport", mock.Anything, mock.Anything)
 	})
 

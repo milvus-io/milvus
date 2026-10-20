@@ -484,6 +484,43 @@ VectorBuildMaterializer::SetScalarInfo(VectorScalarInfo scalar_info) {
     scalar_info_.emplace(std::move(scalar_info));
 }
 
+template <typename T>
+storage::ArtifactPtr
+VectorBuildMaterializer::BuildTyped(
+    TypedState<T>& state,
+    std::span<const index::VectorScalarFieldGroups> field_views) {
+    using ValueType = typename TypedState<T>::ValueType;
+    const std::span<const ValueType> physical_values = state.values;
+    const auto physical_rows = field_type_ == DataType::VECTOR_ARRAY
+                                   ? embedding_offsets_.back()
+                                   : layout_.PhysicalRows();
+    AssertInfo(physical_rows <=
+                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+               "vector physical row count exceeds int64");
+    std::optional<std::span<const size_t>> offsets;
+    if (field_type_ == DataType::VECTOR_ARRAY) {
+        offsets.emplace(embedding_offsets_);
+    }
+    index::VectorBuildInput<T> input{
+        .physical_values = physical_values,
+        .logical_rows = static_cast<int64_t>(layout_.LogicalRows()),
+        .physical_rows = static_cast<int64_t>(physical_rows),
+        .dim = observed_dim_,
+        .parent_validity = layout_.Validity(),
+        .embedding_offsets = offsets,
+        .scalar_fields = field_views,
+    };
+    auto builder = std::move(state.builder);
+    try {
+        return std::move(*builder).Build(input);
+    } catch (...) {
+        // Destroy the engine-side borrower while input owners and view arrays
+        // are still alive.
+        builder.reset();
+        throw;
+    }
+}
+
 storage::ArtifactPtr
 VectorBuildMaterializer::Build() && {
     AssertOpen("build");
@@ -695,43 +732,6 @@ VectorBuildMaterializer::AppendBatch(TypedState<T>& state,
         }
     }
     layout_.Append(batch->Length(), validity);
-}
-
-template <typename T>
-storage::ArtifactPtr
-VectorBuildMaterializer::BuildTyped(
-    TypedState<T>& state,
-    std::span<const index::VectorScalarFieldGroups> field_views) {
-    using ValueType = typename TypedState<T>::ValueType;
-    const std::span<const ValueType> physical_values = state.values;
-    const auto physical_rows = field_type_ == DataType::VECTOR_ARRAY
-                                   ? embedding_offsets_.back()
-                                   : layout_.PhysicalRows();
-    AssertInfo(physical_rows <=
-                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
-               "vector physical row count exceeds int64");
-    std::optional<std::span<const size_t>> offsets;
-    if (field_type_ == DataType::VECTOR_ARRAY) {
-        offsets.emplace(embedding_offsets_);
-    }
-    index::VectorBuildInput<T> input{
-        .physical_values = physical_values,
-        .logical_rows = static_cast<int64_t>(layout_.LogicalRows()),
-        .physical_rows = static_cast<int64_t>(physical_rows),
-        .dim = observed_dim_,
-        .parent_validity = layout_.Validity(),
-        .embedding_offsets = offsets,
-        .scalar_fields = field_views,
-    };
-    auto builder = std::move(state.builder);
-    try {
-        return std::move(*builder).Build(input);
-    } catch (...) {
-        // Destroy the engine-side borrower while input owners and view arrays
-        // are still alive.
-        builder.reset();
-        throw;
-    }
 }
 
 }  // namespace milvus::indexbuilder

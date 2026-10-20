@@ -23,17 +23,19 @@ import (
 )
 
 // RecoverBroadcaster recovers the broadcaster from the recovery info.
+// ctx only scopes recovery; the returned broadcaster owns its lifetime and must
+// be closed by the caller. It does not retain ctx or its values after recovery.
 func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
 	tasks, err := resource.Resource().StreamingCatalog().ListBroadcastTask(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return newBroadcastTaskManager(ctx, tasks), nil
+	return newBroadcastTaskManager(tasks), nil
 }
 
 // newBroadcastTaskManager creates a new broadcast task manager with recovery info.
-// return the manager, the pending broadcast tasks and the pending ack callback tasks.
-func newBroadcastTaskManager(parentCtx context.Context, protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
+// Its independent lifecycle ends when Close is called.
+func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
 	logger := resource.Resource().Logger().With(mlog.FieldComponent("broadcaster"))
 	metrics := newBroadcasterMetrics()
 	rkLocker := newResourceKeyLocker()
@@ -85,11 +87,11 @@ func newBroadcastTaskManager(parentCtx context.Context, protos []*streamingpb.Br
 		idxOfKeys.Add(task.IdempotencyScope(), task.Header().BroadcastID)
 	}
 
-	ctx, cancel := context.WithCancel(parentCtx)
+	managerCtx, cancel := context.WithCancel(context.Background())
 	m := &broadcastTaskManager{
-		ctx:                ctx,
-		cancel:             cancel,
 		lifetime:           typeutil.NewLifetime(),
+		ctx:                managerCtx,
+		cancel:             cancel,
 		mu:                 &sync.Mutex{},
 		tasks:              tasks,
 		schemaTasks:        schemaTasks,
@@ -113,9 +115,11 @@ func newBroadcastTaskManager(parentCtx context.Context, protos []*streamingpb.Br
 type broadcastTaskManager struct {
 	mlog.Binder
 
-	ctx                context.Context
-	cancel             context.CancelFunc
-	lifetime           *typeutil.Lifetime
+	lifetime *typeutil.Lifetime
+	ctx      context.Context
+	cancel   context.CancelFunc
+	// mu protects task membership and the idempotency index. Never acquire a
+	// published task's lock while holding mu; immutable task attributes are safe.
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
 	schemaTasks        *schemaTaskIndex
@@ -268,6 +272,8 @@ func (bm *broadcastTaskManager) broadcast(
 		return nil, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
 	}
 	defer bm.lifetime.Done()
+	ctx, cancel := contextutil.MergeContext(ctx, bm.ctx)
+	defer cancel()
 
 	// Validation is now done before calling broadcast (in DataCoord for import operations)
 	// CheckCallback mechanism has been removed as part of the import refactoring
@@ -326,8 +332,7 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 		return status.NewOnShutdownError("broadcaster is closing")
 	}
 	defer bm.lifetime.Done()
-
-	ctx, cancel := bm.withLifecycleContext(ctx)
+	ctx, cancel := contextutil.MergeContext(ctx, bm.ctx)
 	defer cancel()
 
 	t, ok := bm.getOrCreateBroadcastTask(msg)
@@ -347,7 +352,7 @@ func (bm *broadcastTaskManager) DropTombstones(ctx context.Context, broadcastIDs
 		return status.NewOnShutdownError("broadcaster is closing")
 	}
 	defer bm.lifetime.Done()
-	ctx, cancel := bm.withLifecycleContext(ctx)
+	ctx, cancel := contextutil.MergeContext(ctx, bm.ctx)
 	defer cancel()
 
 	// Snapshot and deduplicate IDs without taking task locks under the manager lock.
@@ -360,13 +365,11 @@ func (bm *broadcastTaskManager) DropTombstones(ctx context.Context, broadcastIDs
 	}
 	bm.mu.Unlock()
 	ids := make([]uint64, 0, len(tasks))
-	scopes := make(map[uint64]string, len(tasks))
 	for id, task := range tasks {
 		if state := task.State(); state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 			return merr.WrapErrServiceInternalMsg("cannot drop broadcast task %d in state %s", id, state.String())
 		}
 		ids = append(ids, id)
-		scopes[id] = task.IdempotencyScope()
 	}
 	if len(ids) == 0 {
 		return nil
@@ -379,29 +382,20 @@ func (bm *broadcastTaskManager) DropTombstones(ctx context.Context, broadcastIDs
 	for _, task := range tasks {
 		task.markTombstoneDropped()
 	}
-	bm.mu.Lock()
-	for id, task := range tasks {
-		if bm.tasks[id] != task {
-			continue
-		}
-		if bm.idempotencyIndex != nil {
-			bm.idempotencyIndex.Remove(scopes[id], id)
-		}
-		delete(bm.tasks, id)
-	}
-	bm.mu.Unlock()
+	bm.removeBroadcastTasks(tasks)
 	return nil
 }
 
-// Close closes the broadcast task manager.
+// Close cancels in-flight requests before waiting for them to exit. An ACK
+// callback whose result was not persisted can run again after recovery, so
+// callbacks must tolerate retries even when they already produced side effects.
 func (bm *broadcastTaskManager) Close() {
 	bm.lifetime.SetState(typeutil.LifetimeStateStopped)
-	if bm.cancel != nil {
-		bm.cancel()
-	}
-	bm.lifetime.Wait()
-
+	bm.cancel()
+	// Cancel the queue before waiting for requests: a request can be blocked
+	// submitting a registered task, independently of its completion wait.
 	bm.broadcastScheduler.Close()
+	bm.lifetime.Wait()
 	bm.ackScheduler.Close()
 }
 
@@ -441,7 +435,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 			return t, false
 		}
 		// tasks and idempotencyIndex are written together under this lock and
-		// DropTombstones drops the index entry first, so a scope whose owner
+		// removeBroadcastTasks drops the index entry first, so a scope whose owner
 		// has no task is unreachable. Say so rather than trusting the entry, and
 		// fall through to registration.
 		bm.Logger().Warn(ctx, "idempotency index entry has no task, treating it as a miss",
@@ -466,9 +460,8 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 // if the task is not found, it will create a new task.
 func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMessage) (*broadcastTask, bool) {
 	bm.mu.Lock()
-
 	bh := msg.BroadcastHeader()
-	t, ok := bm.tasks[msg.BroadcastHeader().BroadcastID]
+	t, ok := bm.tasks[bh.BroadcastID]
 	if ok {
 		bm.mu.Unlock()
 		state := t.State()
@@ -497,6 +490,20 @@ func (bm *broadcastTaskManager) getBroadcastTaskByID(broadcastID uint64) (*broad
 
 	t, ok := bm.tasks[broadcastID]
 	return t, ok
+}
+
+// removeBroadcastTasks removes the given tasks unless their IDs now map to other tasks.
+func (bm *broadcastTaskManager) removeBroadcastTasks(tasks map[uint64]*broadcastTask) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	for id, task := range tasks {
+		if bm.tasks[id] != task {
+			continue
+		}
+		bm.idempotencyIndex.Remove(task.IdempotencyScope(), id)
+		delete(bm.tasks, id)
+	}
 }
 
 // getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.
@@ -531,6 +538,19 @@ func (bm *broadcastTaskManager) GetPendingSchemaFileResources() map[int64][]int6
 	return result
 }
 
+// snapshotBroadcastTasks copies the task pointers while holding the manager
+// lock. Task-local inspection must happen after the manager lock is released.
+func (bm *broadcastTaskManager) snapshotBroadcastTasks() []*broadcastTask {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	tasks := make([]*broadcastTask, 0, len(bm.tasks))
+	for _, task := range bm.tasks {
+		tasks = append(tasks, task)
+	}
+	return tasks
+}
+
 func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, ids []int64) {
 	if len(ids) == 0 {
 		return
@@ -546,24 +566,4 @@ func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, 
 		result[collectionID] = append(result[collectionID], id)
 		seen[id] = struct{}{}
 	}
-}
-
-func (bm *broadcastTaskManager) snapshotBroadcastTasks() []*broadcastTask {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
-	tasks := make([]*broadcastTask, 0, len(bm.tasks))
-	for _, task := range bm.tasks {
-		tasks = append(tasks, task)
-	}
-	return tasks
-}
-
-func (bm *broadcastTaskManager) withLifecycleContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if bm.ctx == nil {
-		// Some focused tests build the manager directly. Production managers
-		// always have a lifecycle context from newBroadcastTaskManager.
-		return context.WithCancel(ctx)
-	}
-	return contextutil.MergeContext(ctx, bm.ctx)
 }

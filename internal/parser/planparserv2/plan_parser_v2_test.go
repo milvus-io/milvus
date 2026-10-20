@@ -4557,6 +4557,59 @@ func TestExpr_TimestamptzCompareInvalid(t *testing.T) {
 	}
 }
 
+// Timestamptz values are int64 unix microseconds in the plan. Consumers such as
+// the delegator segment pruner and segcore require GenericValue_Int64Val, so any
+// other literal kind must be rejected at parse time.
+func TestExpr_TimestamptzRejectsNonIntegerLiterals(t *testing.T) {
+	schema := newTestSchemaWithTimestamptz(t)
+
+	invalidExprs := []string{
+		`TimestamptzField in ["a", "b"]`,
+		`TimestamptzField in [1.5]`,
+		`TimestamptzField in [true]`,
+		`"a" < TimestamptzField < "z"`,
+		`1.5 < TimestamptzField < 2.5`,
+	}
+	for _, expr := range invalidExprs {
+		_, err := ParseExpr(schema, expr, nil)
+		assert.ErrorIs(t, err, merr.ErrQueryPlan, expr)
+	}
+
+	invalidTemplates := map[string]*schemapb.TemplateValue{
+		"str":   {Val: &schemapb.TemplateValue_StringVal{StringVal: "2025-01-01T00:00:00Z"}},
+		"float": {Val: &schemapb.TemplateValue_FloatVal{FloatVal: 1.5}},
+		"strs": {Val: &schemapb.TemplateValue_ArrayVal{ArrayVal: &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}},
+		}}},
+	}
+	for _, expr := range []string{
+		`TimestamptzField > {str}`,
+		`TimestamptzField > {float}`,
+		`TimestamptzField in {strs}`,
+		`{str} < TimestamptzField < {str}`,
+	} {
+		_, err := ParseExpr(schema, expr, invalidTemplates)
+		assert.ErrorIs(t, err, merr.ErrQueryPlan, expr)
+	}
+
+	// Raw integer literals are read as unix microseconds and keep working.
+	validTemplates := map[string]*schemapb.TemplateValue{
+		"ts": {Val: &schemapb.TemplateValue_Int64Val{Int64Val: 1735689600000000}},
+		"tss": {Val: &schemapb.TemplateValue_ArrayVal{ArrayVal: &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+		}}},
+	}
+	for _, expr := range []string{
+		`TimestamptzField in [1, 2, 3]`,
+		`1 < TimestamptzField < 100`,
+		`TimestamptzField > {ts}`,
+		`TimestamptzField in {tss}`,
+	} {
+		_, err := ParseExpr(schema, expr, validTemplates)
+		assert.NoError(t, err, expr)
+	}
+}
+
 // ============================================================================
 // Power Expression Tests
 // These tests cover VisitPower for constant power operations

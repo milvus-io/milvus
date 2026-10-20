@@ -167,9 +167,11 @@ func configureTombstoneGCTest(t *testing.T) {
 
 func newTombstoneGCTestManager() *broadcastTaskManager {
 	bm := &broadcastTaskManager{
-		lifetime: typeutil.NewLifetime(),
-		mu:       &sync.Mutex{},
-		tasks:    make(map[uint64]*broadcastTask),
+		lifetime:         typeutil.NewLifetime(),
+		ctx:              context.Background(),
+		mu:               &sync.Mutex{},
+		tasks:            make(map[uint64]*broadcastTask),
+		idempotencyIndex: newIdempotencyIndex(),
 	}
 	bm.SetLogger(mlog.With())
 	return bm

@@ -84,7 +84,7 @@ func TestSchemaTargetPersistenceBoundary(t *testing.T) {
 	mockey.PatchConvey("only successful saves publish snapshots and failed saves remain retryable", t, func() {
 		paramtable.Init()
 		resource.InitForTest(resource.OptStreamingCatalog(&schemaTestCatalog{}))
-		bm := newBroadcastTaskManager(context.Background(), nil)
+		bm := newBroadcastTaskManager(nil)
 		defer bm.Close()
 		msg := schemaTestMessage(100, 1)
 		task, created := bm.getOrAddBroadcastTask(t.Context(), msg, 1, bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey()))
@@ -168,7 +168,7 @@ func TestSchemaTargetSecondaryAndRecovery(t *testing.T) {
 		}).Build()
 		mockey.Mock(registry.CallMessageAckOnceCallbacks).Return(nil).Build()
 		resource.InitForTest(resource.OptStreamingCatalog(&schemaTestCatalog{}))
-		bm := newBroadcastTaskManager(context.Background(), nil)
+		bm := newBroadcastTaskManager(nil)
 		defer bm.Close()
 		// IDs straddle the lexicographic key boundary. Schemas deliberately share
 		// a version, as legacy ALTERs need not increment it.
@@ -216,14 +216,14 @@ func TestSchemaTargetCrashBeforeIndexUpdate(t *testing.T) {
 			return nil
 		}).Build()
 		resource.InitForTest(resource.OptStreamingCatalog(&schemaTestCatalog{}))
-		bm := newBroadcastTaskManager(context.Background(), nil)
+		bm := newBroadcastTaskManager(nil)
 		defer bm.Close()
 		task, _ := bm.getOrAddBroadcastTask(t.Context(), schemaTestMessage(100, 1), 1, bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey()))
 		lostUpdate := mockey.Mock((*schemaTaskIndex).update).Return().Build()
 		require.NoError(t, task.InitializeRecovery(t.Context()))
 		requireSchemaTarget(t, bm, 100, 0)
 		lostUpdate.UnPatch()
-		recovered := newBroadcastTaskManager(context.Background(), []*streamingpb.BroadcastTask{persisted})
+		recovered := newBroadcastTaskManager([]*streamingpb.BroadcastTask{persisted})
 		defer recovered.Close()
 		requireSchemaTarget(t, recovered, 100, 1)
 		// No task/manager locks are required even for the selected target.
@@ -295,7 +295,7 @@ func TestSchemaTargetRecoveredCallbackOrder(t *testing.T) {
 			return task
 		}
 		// Catalog order is reversed; IDs follow serial ALTER allocation order.
-		bm := newBroadcastTaskManager(context.Background(), []*streamingpb.BroadcastTask{newTask(200, 20, true), newTask(100, 10, false)})
+		bm := newBroadcastTaskManager([]*streamingpb.BroadcastTask{newTask(200, 20, true), newTask(100, 10, false)})
 		defer bm.Close()
 		target, err := bm.GetPendingSchemaTarget(100)
 		require.NoError(t, err)

@@ -169,8 +169,12 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 
 	latestNodeDist := utils.FindMaxVersionSegments(dist)
 	for _, s := range latestNodeDist {
-		segment := c.target.GetSealedSegment(ctx, leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
-		if segment == nil {
+		// Membership only -- the resolved proto is never read below, and a
+		// segment the shared store can no longer resolve is still part of the
+		// target. Skipping it here would leave the delegator's routing table
+		// permanently missing an entry that CheckDelegatorDataReady, which
+		// walks the target's ID set, keeps demanding.
+		if !c.target.HasSealedSegment(ctx, leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst) {
 			continue
 		}
 
@@ -220,8 +224,10 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 
 	for sid, s := range leaderView.Segments {
 		_, ok := distMap[sid]
-		segment := c.target.GetSealedSegment(ctx, leaderView.CollectionID, sid, meta.CurrentTargetFirst)
-		existInTarget := segment != nil
+		// Membership only: a segment the shared store can no longer resolve is
+		// still part of the target, and must not be removed from the delegator
+		// on that basis alone.
+		existInTarget := c.target.HasSealedSegment(ctx, leaderView.CollectionID, sid, meta.CurrentTargetFirst)
 		if ok || existInTarget {
 			continue
 		}

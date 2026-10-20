@@ -24,9 +24,9 @@ import (
 	"github.com/blang/semver/v4"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type compactionCheckBenchmarkAllocator struct{}
@@ -66,10 +66,11 @@ func BenchmarkCompactionPolicyNoCandidates(b *testing.B) {
 	for _, policyName := range []string{"schema", "storage"} {
 		for _, collectionCount := range []int{1000, 10000} {
 			b.Run(policyName+"/"+strconv.Itoa(collectionCount), func(b *testing.B) {
+				store := metacache.NewMetaStore(nil)
 				m := &meta{
-					ctx:         context.Background(),
-					collections: typeutil.NewConcurrentMap[int64, *collectionInfo](),
-					segments:    NewSegmentsInfo(),
+					ctx:       context.Background(),
+					metaStore: store,
+					segments:  NewSegmentsInfo(store),
 				}
 				schema := newBumpSchemaVersionTestCollection(1, 2).Schema
 				for fieldID := int64(102); fieldID < 116; fieldID++ {
@@ -78,7 +79,7 @@ func BenchmarkCompactionPolicyNoCandidates(b *testing.B) {
 					})
 				}
 				for id := int64(1); id <= int64(collectionCount); id++ {
-					m.collections.Insert(id, &collectionInfo{ID: id, Schema: schema})
+					store.PutCollection(&collectionInfo{ID: id, Schema: schema})
 					m.segments.SetSegment(id, newBumpSchemaVersionTestSegment(id, id, 2, storage.StorageV3, "manifest"))
 				}
 				alloc := &compactionCheckBenchmarkAllocator{}

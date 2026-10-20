@@ -37,6 +37,8 @@ class AsyncIndexEntryReader {
  public:
     // Parse the packed directory and metadata from an already-open stream.
     // Size() must be cached by the stream; no synchronous I/O is issued here.
+    // Directory inspection holds one shared load slot, released before metadata
+    // entries acquire their own slice reservations. Callers must not hold a slot.
     static folly::coro::Task<std::unique_ptr<AsyncIndexEntryReader>>
     Open(std::shared_ptr<milvus::InputStream> input,
          int64_t collection_id,
