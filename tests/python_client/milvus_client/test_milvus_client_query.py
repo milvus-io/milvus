@@ -5473,10 +5473,7 @@ class TestQueryArray(TestMilvusClientV2Base):
 
         arrays = [[], None, [1], [2], [1, 2], [1, 1, 2], [3]]
         vectors = cf.gen_vectors(len(arrays), default_dim)
-        rows = [
-            {"id": row_id, "vector": vectors[row_id], array_field: array}
-            for row_id, array in enumerate(arrays)
-        ]
+        rows = [{"id": row_id, "vector": vectors[row_id], array_field: array} for row_id, array in enumerate(arrays)]
         self.insert(client, collection_name, rows)
 
         predicate_cases = [
