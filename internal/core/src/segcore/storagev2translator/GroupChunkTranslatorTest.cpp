@@ -118,6 +118,41 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     int64_t segment_id_ = 0;
 };
 
+TEST_P(GroupChunkTranslatorTest, PreparedFilesAreOwnedByColumnGroup) {
+    auto metadata = LoadGroupChunkMetadata(paths_, {}, "test_footer_lifetime");
+    ASSERT_EQ(metadata.prepared_files.size(), paths_.size());
+    std::weak_ptr<milvus_storage::PreparedParquetFile> owner =
+        metadata.prepared_files.front();
+    auto reader_result = metadata.prepared_files.front()->MakeReader();
+    ASSERT_TRUE(reader_result.ok()) << reader_result.status();
+    auto reader = std::move(reader_result).ValueOrDie();
+    std::weak_ptr<parquet::FileMetaData> footer =
+        reader->file_metadata()->GetParquetMetadata();
+    ASSERT_TRUE(reader->Close().ok());
+    reader.reset();
+
+    auto translator = std::make_unique<GroupChunkTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        schema_->get_fields(),
+        FieldDataInfo(0, 3000, TestLocalPath),
+        std::move(metadata.prepared_files),
+        std::move(metadata.row_group_meta_list),
+        GetParam(),
+        true,
+        schema_->get_field_ids().size(),
+        milvus::proto::common::LoadPriority::LOW,
+        "disable",
+        MmapChunkWritebackMode::Disabled);
+    auto group = std::make_shared<ChunkedColumnGroup>(std::move(translator));
+
+    EXPECT_FALSE(owner.expired());
+    EXPECT_FALSE(footer.expired());
+    group.reset();
+    EXPECT_TRUE(owner.expired());
+    EXPECT_TRUE(footer.expired());
+}
+
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     const auto previous_enabled = StorageV2AsyncLoadEnabled();
     auto restore_mode = folly::makeGuard(
@@ -138,7 +173,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
             GroupChunkType::DEFAULT,
             field_metas,
             column_group_info,
-            paths_,
+            std::move(metadata.prepared_files),
             std::move(metadata.row_group_meta_list),
             use_mmap,
             true,
@@ -335,7 +370,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
-        multi_file_paths,
+        std::move(metadata.prepared_files),
         std::move(metadata.row_group_meta_list),
         use_mmap,
         true,
@@ -496,7 +531,7 @@ TEST_P(GroupChunkTranslatorTest,
             GroupChunkType::DEFAULT,
             field_metas,
             FieldDataInfo(0, 3000, temp_dir.string()),
-            paths_,
+            std::move(metadata.prepared_files),
             std::move(metadata.row_group_meta_list),
             GetParam(),
             true,
