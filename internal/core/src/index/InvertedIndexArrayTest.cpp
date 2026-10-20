@@ -29,6 +29,7 @@
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "gtest/gtest.h"
 #include "index/InvertedIndexTantivy.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -648,6 +649,40 @@ class TrackedArrayValidityIndex : public index::InvertedIndexTantivy<int64_t> {
  private:
     std::shared_ptr<ValidityCloneCounters> counters_;
 };
+class TrackedJsonValidityIndex : public index::JsonInvertedIndex<double> {
+ public:
+    TrackedJsonValidityIndex(std::shared_ptr<ValidityCloneCounters> counters,
+                             const proto::schema::FieldSchema& schema,
+                             const storage::FileManagerContext& context)
+        : index::JsonInvertedIndex<double>(
+              JsonCastType::FromString("DOUBLE"),
+              "/n",
+              JsonCastFunction::FromString("unknown"),
+              schema,
+              context,
+              index::TANTIVY_INDEX_LATEST_VERSION),
+          counters_(std::move(counters)) {
+    }
+
+    TargetBitmap
+    IsNotNull() override {
+        ++counters_->owned;
+        return index::JsonInvertedIndex<double>::IsNotNull();
+    }
+
+    std::optional<BitsetView>
+    GetValidityView() override {
+        auto validity = index::JsonInvertedIndex<double>::GetValidityView();
+        if (validity) {
+            counters_->shared_buffers.push_back(validity->data());
+        }
+        return validity;
+    }
+
+ private:
+    std::shared_ptr<ValidityCloneCounters> counters_;
+};
+
 class SharedArrayValidityTest : public testing::TestWithParam<bool> {
  protected:
     void
@@ -828,50 +863,77 @@ TEST_P(SharedArrayValidityTest, BatchOffsetAndWholeRange) {
     }
 }
 
-TEST_P(SharedArrayValidityTest, ScalarRangeOffsetsUseLogicalValidityCount) {
+TEST_P(SharedArrayValidityTest, JsonRangeOffsetsUseLogicalValidityCount) {
     constexpr int64_t rows = 33;
-    for (bool nullable_rows : {false, true}) {
+    for (bool has_nulls : {false, true}) {
         auto schema = std::make_shared<Schema>();
         auto pk = schema->AddDebugField("pk", DataType::INT64);
-        auto field = schema->AddDebugField("value", DataType::INT64, true);
+        auto field = schema->AddDebugField("json", DataType::JSON, true);
         schema->set_primary_field_id(pk);
+        ASSERT_TRUE((*schema)[field].is_nullable());
         auto raw = DataGen(schema, rows, 42);
-        std::vector<int64_t> values(rows);
-        std::vector<size_t> nulls;
+        std::vector<std::string> documents;
+        std::vector<milvus::Json> jsons;
         for (int64_t row = 0; row < rows; ++row) {
-            values[row] = row;
-            if (nullable_rows && row % 5 == 0) {
-                nulls.push_back(row);
+            if (has_nulls && row % 5 == 0) {
+                documents.push_back(row % 15 == 0   ? R"({"n":null})"
+                                    : row % 15 == 5 ? R"({"other":1})"
+                                                    : R"({"n":"wrong-type"})");
+            } else {
+                documents.push_back("{\"n\":" + std::to_string(row) + "}");
             }
+            jsons.emplace_back(simdjson::padded_string(documents.back()));
         }
         for (auto& data : *raw.raw_->mutable_fields_data()) {
             if (data.field_id() != field.get()) {
                 continue;
             }
+            ASSERT_EQ(data.valid_data_size(), rows);
+            ASSERT_EQ(data.scalars().json_data().data_size(), rows);
             for (int64_t row = 0; row < rows; ++row) {
-                data.mutable_scalars()->mutable_long_data()->set_data(row, row);
-                data.mutable_valid_data()->Set(row,
-                                               !nullable_rows || row % 5 != 0);
+                data.mutable_scalars()->mutable_json_data()->set_data(
+                    row, documents[row]);
+                data.mutable_valid_data()->Set(row, true);
             }
         }
-        auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
+        auto segment =
+            CreateSealedWithFieldDataLoaded(schema, raw, false, {field.get()});
+        ASSERT_FALSE(segment->HasFieldData(field));
+        auto json_field =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+        json_field->add_json_data(jsons);
+        std::fill(json_field->ValidData(),
+                  json_field->ValidData() + json_field->ValidDataSize(),
+                  uint8_t{0xFF});
         auto counters = std::make_shared<ValidityCloneCounters>();
-        auto idx = std::make_unique<TrackedArrayValidityIndex>(counters);
-        idx->SetNullOffsets(nulls);
-        idx->BuildWithRawDataForUT(rows, values.data(), Config::object());
+        proto::schema::FieldSchema json_schema;
+        json_schema.set_data_type(proto::schema::JSON);
+        json_schema.set_fieldid(field.get());
+        json_schema.set_nullable(true);
+        storage::FileManagerContext file_context;
+        file_context.fieldDataMeta.field_schema = json_schema;
+        file_context.fieldDataMeta.field_id = field.get();
+        auto idx = std::make_unique<TrackedJsonValidityIndex>(
+            counters, json_schema, file_context);
+        idx->BuildWithFieldData({json_field});
+        idx->finish();
+        idx->create_reader(milvus::index::SetBitsetSealed);
         LoadIndexInfo info{};
         info.field_id = field.get();
-        info.field_type = DataType::INT64;
-        info.index_params = GenIndexParams(idx.get());
+        info.field_type = DataType::JSON;
+        info.index_params = {{JSON_PATH, "/n"}, {JSON_CAST_TYPE, "DOUBLE"}};
         info.cache_index =
-            CreateTestCacheIndex("range_validity_view", std::move(idx));
+            CreateTestCacheIndex("json_range_validity_view", std::move(idx));
         segment->LoadIndex(info);
 
+        // Scalar offsets deliberately use raw-data evaluation. A non-flat
+        // JSON typed-path index is the reachable indexed-offset route here.
         proto::plan::GenericValue lower, upper;
-        lower.set_int64_val(7);
-        upper.set_int64_val(20);
+        lower.set_float_val(7);
+        upper.set_float_val(20);
         auto range = std::make_shared<expr::BinaryRangeFilterExpr>(
-            expr::ColumnInfo(field, DataType::INT64, DataType::NONE, {}, true),
+            expr::ColumnInfo(
+                field, DataType::JSON, DataType::NONE, {"n"}, true),
             lower,
             upper,
             true,
@@ -881,7 +943,7 @@ TEST_P(SharedArrayValidityTest, ScalarRangeOffsetsUseLogicalValidityCount) {
         exec::ExecContext execution(query.get());
         auto compiled =
             exec::CompileExpressions({range}, &execution, {}, false);
-        exec::OffsetVector offsets = {20, 0, 5, 7, 7, 32};
+        exec::OffsetVector offsets = {20, 0, 5, 10, 7, 7, 32};
         exec::EvalCtx context(&execution, &offsets);
         for (int repeat = 0; repeat < 2; ++repeat) {
             VectorPtr output;
@@ -893,7 +955,7 @@ TEST_P(SharedArrayValidityTest, ScalarRangeOffsetsUseLogicalValidityCount) {
             TargetBitmapView valid(column->GetValidRawData(), offsets.size());
             for (size_t i = 0; i < offsets.size(); ++i) {
                 const auto row = offsets[i];
-                const bool expected_valid = !nullable_rows || row % 5 != 0;
+                const bool expected_valid = !has_nulls || row % 5 != 0;
                 EXPECT_EQ(valid[i], expected_valid) << row;
                 if (expected_valid) {
                     EXPECT_EQ(hits[i], row >= 7 && row <= 20) << row;
@@ -903,6 +965,7 @@ TEST_P(SharedArrayValidityTest, ScalarRangeOffsetsUseLogicalValidityCount) {
         }
         EXPECT_EQ(counters->owned, 0);
         ASSERT_EQ(counters->shared_buffers.size(), 1);
+        EXPECT_EQ(counters->shared_buffers.front() == nullptr, !has_nulls);
     }
 }
 
