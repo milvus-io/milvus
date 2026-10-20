@@ -282,11 +282,13 @@ TEST_P(IndexValidityExpressionTest, NullableContainsLeavesBatchOffsetAndMove) {
 TEST_P(IndexValidityExpressionTest,
        BinaryRangeOffsetsMaterializeAllValidAndReuseOwnedCache) {
     constexpr int64_t rows = 33;
-    for (bool nullable : {false, true}) {
-        SCOPED_TRACE(nullable ? "nullable" : "all-valid");
+    for (bool has_nulls : {false, true}) {
+        SCOPED_TRACE(has_nulls ? "has-nulls" : "all-valid");
+        // Nullable metadata forces the validity path even when every row is
+        // valid, so the zero-size borrowed sentinel must be materialized.
         auto schema = std::make_shared<Schema>();
         auto pk = schema->AddDebugField("pk", DataType::INT64);
-        auto field = schema->AddDebugField("value", DataType::INT64, nullable);
+        auto field = schema->AddDebugField("value", DataType::INT64, true);
         schema->set_primary_field_id(pk);
         auto raw = segcore::DataGen(schema, rows, 42);
         proto::schema::FieldData* data = nullptr;
@@ -296,7 +298,7 @@ TEST_P(IndexValidityExpressionTest,
             }
         }
         ASSERT_NE(data, nullptr);
-        ASSERT_EQ((*schema)[field].is_nullable(), nullable);
+        ASSERT_TRUE((*schema)[field].is_nullable());
         ASSERT_EQ(data->scalars().long_data().data_size(), rows);
         auto* row_validity = MutableFieldDataRowValidData(data);
         row_validity->Resize(rows, true);
@@ -305,22 +307,16 @@ TEST_P(IndexValidityExpressionTest,
         for (int64_t row = 0; row < rows; ++row) {
             values[row] = row;
             data->mutable_scalars()->mutable_long_data()->set_data(row, row);
-            if (nullable) {
-                const bool valid = row % 5 != 0;
-                row_validity->Set(row, valid);
-                if (!valid) {
-                    validity[row >> 3] &= ~(1 << (row & 7));
-                }
+            const bool valid = !has_nulls || row % 5 != 0;
+            row_validity->Set(row, valid);
+            if (!valid) {
+                validity[row >> 3] &= ~(1 << (row & 7));
             }
         }
         auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
         auto field_data =
-            storage::CreateFieldData(DataType::INT64, DataType::NONE, nullable);
-        if (nullable) {
-            field_data->FillFieldData(values.data(), validity.data(), rows, 0);
-        } else {
-            field_data->FillFieldData(values.data(), rows);
-        }
+            storage::CreateFieldData(DataType::INT64, DataType::NONE, true);
+        field_data->FillFieldData(values.data(), validity.data(), rows, 0);
         auto opened = expr_index::BuildIndex(
             field, DataType::INT64, index::INVERTED_INDEX_TYPE, {field_data});
         auto calls = std::make_shared<ValidityCalls>();
@@ -332,8 +328,7 @@ TEST_P(IndexValidityExpressionTest,
         lower.set_int64_val(3);
         upper.set_int64_val(20);
         auto range = std::make_shared<expr::BinaryRangeFilterExpr>(
-            expr::ColumnInfo(
-                field, DataType::INT64, DataType::NONE, {}, nullable),
+            expr::ColumnInfo(field, DataType::INT64, DataType::NONE, {}, true),
             lower,
             upper,
             true,
@@ -357,7 +352,7 @@ TEST_P(IndexValidityExpressionTest,
             TargetBitmapView valid(column->GetValidRawData(), offsets.size());
             for (size_t i = 0; i < offsets.size(); ++i) {
                 const auto row = offsets[i];
-                const bool expected_valid = !nullable || row % 5 != 0;
+                const bool expected_valid = !has_nulls || row % 5 != 0;
                 EXPECT_EQ(valid[i], expected_valid) << "row=" << row;
                 if (expected_valid) {
                     EXPECT_EQ(actual[i], row >= 3 && row <= 20)
@@ -369,7 +364,7 @@ TEST_P(IndexValidityExpressionTest,
             valid.flip();
             ASSERT_EQ(calls->owners.size(), 1);
             EXPECT_EQ(calls->owned, 0);
-            EXPECT_EQ(calls->owners.front() == nullptr, !nullable);
+            EXPECT_EQ(calls->owners.front() == nullptr, !has_nulls);
         }
         context.set_offset_input(nullptr);
     }
