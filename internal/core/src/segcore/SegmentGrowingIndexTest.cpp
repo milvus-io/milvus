@@ -60,10 +60,12 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/segcore_init_c.h"
 #include "storage/FileManager.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
