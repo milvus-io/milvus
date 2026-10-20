@@ -443,8 +443,15 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
             auto* index_ptr = const_cast<Index*>(scalar_index);
             cached_result_ = std::make_shared<TargetBitmap>(
                 execute_sub_batch(index_ptr, val1, val2));
-            cached_valid_result_ = std::make_shared<TargetBitmap>(
-                GetCachedIndexValidBitmap(index_ptr).clone());
+            const auto& validity = GetCachedIndexValidBitmap(index_ptr);
+            cached_valid_result_ = std::make_shared<TargetBitmap>();
+            // This offset cache retains writable storage. An all-valid view
+            // has size zero, so materialize its separately cached row count.
+            AppendValidityView(*cached_valid_result_,
+                               validity,
+                               cached_index_valid_count_,
+                               0,
+                               cached_index_valid_count_);
             AssertInfo(
                 cached_result_->size() == static_cast<size_t>(active_count_),
                 "index range result size {} does not match row count {}",

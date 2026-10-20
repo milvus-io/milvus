@@ -828,6 +828,84 @@ TEST_P(SharedArrayValidityTest, BatchOffsetAndWholeRange) {
     }
 }
 
+TEST_P(SharedArrayValidityTest, ScalarRangeOffsetsUseLogicalValidityCount) {
+    constexpr int64_t rows = 33;
+    for (bool nullable_rows : {false, true}) {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        auto field = schema->AddDebugField("value", DataType::INT64, true);
+        schema->set_primary_field_id(pk);
+        auto raw = DataGen(schema, rows, 42);
+        std::vector<int64_t> values(rows);
+        std::vector<size_t> nulls;
+        for (int64_t row = 0; row < rows; ++row) {
+            values[row] = row;
+            if (nullable_rows && row % 5 == 0) {
+                nulls.push_back(row);
+            }
+        }
+        for (auto& data : *raw.raw_->mutable_fields_data()) {
+            if (data.field_id() != field.get()) {
+                continue;
+            }
+            for (int64_t row = 0; row < rows; ++row) {
+                data.mutable_scalars()->mutable_long_data()->set_data(row, row);
+                data.mutable_valid_data()->Set(row,
+                                               !nullable_rows || row % 5 != 0);
+            }
+        }
+        auto segment = CreateSealedWithFieldDataLoaded(schema, raw);
+        auto counters = std::make_shared<ValidityCloneCounters>();
+        auto idx = std::make_unique<TrackedArrayValidityIndex>(counters);
+        idx->SetNullOffsets(nulls);
+        idx->BuildWithRawDataForUT(rows, values.data(), Config::object());
+        LoadIndexInfo info{};
+        info.field_id = field.get();
+        info.field_type = DataType::INT64;
+        info.index_params = GenIndexParams(idx.get());
+        info.cache_index =
+            CreateTestCacheIndex("range_validity_view", std::move(idx));
+        segment->LoadIndex(info);
+
+        proto::plan::GenericValue lower, upper;
+        lower.set_int64_val(7);
+        upper.set_int64_val(20);
+        auto range = std::make_shared<expr::BinaryRangeFilterExpr>(
+            expr::ColumnInfo(field, DataType::INT64, DataType::NONE, {}, true),
+            lower,
+            upper,
+            true,
+            true);
+        auto query = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, segment.get(), rows, MAX_TIMESTAMP);
+        exec::ExecContext execution(query.get());
+        auto compiled =
+            exec::CompileExpressions({range}, &execution, {}, false);
+        exec::OffsetVector offsets = {20, 0, 5, 7, 7, 32};
+        exec::EvalCtx context(&execution, &offsets);
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            VectorPtr output;
+            compiled[0]->Eval(context, output);
+            auto column = std::dynamic_pointer_cast<ColumnVector>(output);
+            ASSERT_NE(column, nullptr);
+            ASSERT_EQ(column->size(), offsets.size());
+            TargetBitmapView hits(column->GetRawData(), offsets.size());
+            TargetBitmapView valid(column->GetValidRawData(), offsets.size());
+            for (size_t i = 0; i < offsets.size(); ++i) {
+                const auto row = offsets[i];
+                const bool expected_valid = !nullable_rows || row % 5 != 0;
+                EXPECT_EQ(valid[i], expected_valid) << row;
+                if (expected_valid) {
+                    EXPECT_EQ(hits[i], row >= 7 && row <= 20) << row;
+                }
+            }
+            valid.flip();
+        }
+        EXPECT_EQ(counters->owned, 0);
+        ASSERT_EQ(counters->shared_buffers.size(), 1);
+    }
+}
+
 INSTANTIATE_TEST_SUITE_P(CacheModes,
                          SharedArrayValidityTest,
                          testing::Values(false, true));
