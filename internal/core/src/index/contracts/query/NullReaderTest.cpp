@@ -38,6 +38,15 @@ ExpectNullMasks(const ScalarTestData<T>& data, const INullReader& reader) {
     ASSERT_EQ(not_nulls.size(), data.values.size());
 
     const auto expected_nulls = ExpectedNulls(data);
+    if (auto snapshot = reader.GetImmutableValidity()) {
+        ASSERT_EQ(snapshot->size(), data.values.size());
+        TargetBitmap materialized;
+        snapshot->AppendTo(materialized, 0, snapshot->size());
+        ASSERT_EQ(materialized.size(), not_nulls.size());
+        for (size_t i = 0; i < data.values.size(); ++i) {
+            EXPECT_EQ(materialized[i], not_nulls[i]) << "offset=" << i;
+        }
+    }
     for (size_t i = 0; i < data.values.size(); ++i) {
         EXPECT_EQ(nulls[i], !data.validity[i]) << "offset=" << i;
         EXPECT_EQ(not_nulls[i], data.validity[i]) << "offset=" << i;

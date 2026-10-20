@@ -103,6 +103,9 @@ class InvertedIndexReader final
     TargetBitmap
     IsNotNull() const override;
 
+    std::optional<ScalarIndexValidity>
+    GetImmutableValidity() const override;
+
  private:
     template <typename Derived, typename U, bool DelegateShouldUseForOp>
     friend class PatternMatchReaderAdapter;
@@ -136,7 +139,7 @@ class InvertedIndexReader final
     // emits no element, so every indexed element is valid, and the persisted
     // offsets are row offsets that only segment-level validity can apply.
     bool all_valid_{false};
-    TargetBitmap valid_bitmap_;
+    std::shared_ptr<const TargetBitmap> valid_bitmap_;
     DataType value_type_{DataType::NONE};
     bool nested_{false};
     bool mmap_{false};

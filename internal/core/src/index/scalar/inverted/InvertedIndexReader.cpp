@@ -129,10 +129,11 @@ InvertedIndexReader<T>::InvertedIndexReader(
     if (nested_ || null_offsets->empty()) {
         all_valid_ = true;
     } else {
-        valid_bitmap_ = TargetBitmap(count_, true);
+        auto bitmap = std::make_shared<TargetBitmap>(count_, true);
         for (const auto offset : *null_offsets) {
-            valid_bitmap_.reset(offset);
+            bitmap->reset(offset);
         }
+        valid_bitmap_ = std::move(bitmap);
     }
 }
 
@@ -174,7 +175,10 @@ InvertedIndexReader<T>::MemoryUsage() const {
     size_t total = sizeof(InvertedIndexReader<T>);
     AddUsageBytes(total, sizeof(milvus::tantivy::TantivyIndexWrapper));
     AddUsageBytes(total, engine_path_bytes_);
-    AddUsageBytes(total, valid_bitmap_.size_in_bytes());
+    if (valid_bitmap_) {
+        AddUsageBytes(total, sizeof(TargetBitmap));
+        AddUsageBytes(total, valid_bitmap_->size_in_bytes());
+    }
     if (directory_ != nullptr) {
         AddUsageBytes(total, directory_->HeapBytes());
     }
@@ -218,12 +222,12 @@ InvertedIndexReader<T>::ApplyValidityMask(TargetBitmap& bitset) const {
     if (all_valid_) {
         return;
     }
-    AssertInfo(valid_bitmap_.size() == bitset.size(),
+    AssertInfo(valid_bitmap_->size() == bitset.size(),
                "inverted validity bitmap size {} does not match result size "
                "{}",
-               valid_bitmap_.size(),
+               valid_bitmap_->size(),
                bitset.size());
-    bitset &= valid_bitmap_;
+    bitset &= *valid_bitmap_;
 }
 
 template <typename T>
@@ -367,7 +371,7 @@ InvertedIndexReader<T>::IsNull() const {
     if (all_valid_) {
         return TargetBitmap(count_);
     }
-    auto result = valid_bitmap_.clone();
+    auto result = valid_bitmap_->clone();
     result.flip();
     return result;
 }
@@ -378,7 +382,13 @@ InvertedIndexReader<T>::IsNotNull() const {
     if (all_valid_) {
         return TargetBitmap(count_, true);
     }
-    return valid_bitmap_.clone();
+    return valid_bitmap_->clone();
+}
+
+template <typename T>
+std::optional<ScalarIndexValidity>
+InvertedIndexReader<T>::GetImmutableValidity() const {
+    return ScalarIndexValidity(count_, valid_bitmap_);
 }
 
 #define INSTANTIATE_INVERTED_READER(T) template class InvertedIndexReader<T>;

@@ -417,6 +417,14 @@ AddResolvedNullCase(IndexTestCases& cases,
             EXPECT_TRUE(resolved->Caps().exact);
             auto not_null = nulls->IsNotNull();
             ExpectHits(not_null, data.values.size(), expected_not_null);
+            if (auto snapshot = nulls->GetImmutableValidity()) {
+                TargetBitmap materialized;
+                snapshot->AppendTo(materialized, 0, snapshot->size());
+                ExpectHits(materialized, data.values.size(), expected_not_null);
+                auto repeated = nulls->GetImmutableValidity();
+                ASSERT_TRUE(repeated.has_value());
+                EXPECT_EQ(snapshot->bitmap().get(), repeated->bitmap().get());
+            }
             ASSERT_EQ(not_null.size(), data.values.size());
             TargetBitmap expected_null(data.values.size(), false);
             for (size_t i = 0; i < not_null.size(); ++i) {

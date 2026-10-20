@@ -16,7 +16,10 @@
 
 #pragma once
 
+#include <optional>
+
 #include "common/Types.h"
+#include "index/contracts/query/ScalarIndexValidity.h"
 
 // Null predicates, independent of point/range support. Scalar predicate and
 // candidate families provide this mixin even when they do not implement
@@ -35,6 +38,13 @@ class INullReader {
 
     virtual TargetBitmap
     IsNotNull() const = 0;
+
+    // Optional immutable equivalent of IsNotNull(). Unsupported, mutable, or
+    // path-specific readers retain their existing owned-bitmap semantics.
+    virtual std::optional<ScalarIndexValidity>
+    GetImmutableValidity() const {
+        return std::nullopt;
+    }
 };
 
 }  // namespace milvus::index

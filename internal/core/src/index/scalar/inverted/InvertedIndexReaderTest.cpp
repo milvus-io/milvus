@@ -21,6 +21,7 @@
 #include <string_view>
 
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/contracts/query/INullReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
 
 namespace milvus::index::test {
@@ -70,6 +71,64 @@ TEST(InvertedIndexReaderTest, AdvertisesVarcharPatternPolicy) {
         EXPECT_EQ(backend.PatternPolicy(PatternOp::RegexMatch),
                   PatternQueryPolicy::DeclineButRun);
     }
+}
+
+TEST(InvertedIndexReaderTest, SharedValiditySurvivesReaderAndBatchMutation) {
+    ScalarTestData<int64_t> data(std::vector<int64_t>(130, 7));
+    data.validity.reset(1);
+    data.validity.reset(65);
+    data.validity.reset(129);
+    ScalarTestInput<int64_t> input(data);
+    const auto& backend = ScalarReaderBackends().Get<int64_t>("InvertedInt64");
+    auto reader = backend.Create(input.View());
+    const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+    ASSERT_NE(nulls, nullptr);
+    std::vector<ScalarIndexValidity> leaves;
+    for (int i = 0; i < 32; ++i) {
+        auto validity = nulls->GetImmutableValidity();
+        ASSERT_TRUE(validity.has_value());
+        leaves.emplace_back(std::move(*validity));
+        EXPECT_EQ(leaves.front().bitmap().get(), leaves.back().bitmap().get());
+    }
+    auto mutable_full = nulls->IsNotNull();
+    mutable_full.flip();
+    reader.reset();
+    TargetBitmap batch;
+    leaves[0].AppendTo(batch, 63, 7);
+    ASSERT_EQ(batch.size(), 7);
+    EXPECT_FALSE(batch[2]);
+    batch.flip();
+    TargetBitmap independent;
+    leaves[1].AppendTo(independent, 63, 7);
+    EXPECT_FALSE(independent[2]);
+    EXPECT_TRUE(independent[0]);
+    EXPECT_FALSE(leaves[2][129]);
+    EXPECT_ANY_THROW(leaves[0].AppendTo(independent, 129, 2));
+    EXPECT_ANY_THROW(leaves[0][-1]);
+}
+
+TEST(InvertedIndexReaderTest, AllValidSnapshotHasNoFullBitmap) {
+    ScalarTestData<int64_t> data(std::vector<int64_t>(130, 7));
+    data.validity_present = false;
+    ScalarTestInput<int64_t> input(data);
+    const auto& backend =
+        ScalarReaderBackends().Get<int64_t>("InvertedInt64NonNull");
+    auto reader = backend.Create(input.View());
+    auto snapshot =
+        dynamic_cast<const INullReader&>(*reader).GetImmutableValidity();
+    ASSERT_TRUE(snapshot.has_value());
+    EXPECT_EQ(snapshot->bitmap(), nullptr);
+    EXPECT_EQ(snapshot->size(), 130);
+    reader.reset();
+    TargetBitmap prefixed(5, false);
+    prefixed.set(2);
+    snapshot->AppendTo(prefixed, 123, 7);
+    ASSERT_EQ(prefixed.size(), 12);
+    for (size_t i = 0; i < prefixed.size(); ++i) {
+        EXPECT_EQ(prefixed[i], i == 2 || i >= 5) << i;
+    }
+    snapshot->AppendTo(prefixed, 130, 0);
+    EXPECT_EQ(prefixed.size(), 12);
 }
 
 }  // namespace
