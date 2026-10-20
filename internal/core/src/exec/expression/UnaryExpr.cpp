@@ -1729,14 +1729,9 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(int64_t batch_size,
                 [this, input, batch_size](bool match_value) -> ColumnVectorPtr {
                 TargetBitmap valid;
                 if (expr_->column_.element_level_) {
-                    // Element batches are derived from the row cursor so
-                    // MoveCursor()-based short-circuiting stays aligned.
-                    // Individual elements cannot be null; their containing
-                    // row's validity is applied by the element consumer.
-                    valid = TargetBitmap(batch_size, true);
-                    if (input == nullptr) {
-                        MoveCursor();
-                    }
+                    // A null row has no elements; a null element stays
+                    // UNKNOWN. Without input this consumes the batch.
+                    valid = ProcessElementValidity(input, batch_size);
                 } else if (input != nullptr) {
                     valid = ProcessChunksForValidByOffsets<T>(UseIndexCursor(),
                                                               *input);

@@ -1453,7 +1453,7 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 
 	// Check if we're inside an ElementFilter context
 	if v.currentStructArrayField == "" {
-		return nil, merr.WrapErrParameterInvalidMsg("$[%s] syntax can only be used inside ElementFilter", fieldName)
+		return nil, merr.WrapErrParameterInvalidMsg("$[%s] syntax can only be used inside ElementFilter or MATCH_*", fieldName)
 	}
 
 	// Construct full field name for struct array field
@@ -1467,11 +1467,6 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 	// In element-level context, data_type should be the element type
 	elementType := field.GetElementType()
 
-	nullable := field.GetNullable()
-	if structField := v.schema.GetStructArrayFieldFromName(v.currentStructArrayField); structField != nil {
-		nullable = nullable || structField.GetNullable()
-	}
-
 	return &planpb.ColumnInfo{
 		FieldId:         field.FieldID,
 		DataType:        elementType, // Use element type, not storage type
@@ -1480,9 +1475,23 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 		IsPartitionKey:  field.IsPartitionKey,
 		IsClusteringKey: field.IsClusteringKey,
 		ElementType:     elementType,
-		Nullable:        nullable,
+		Nullable:        v.structSubFieldElementNullable(field),
 		IsElementLevel:  true, // Mark as element-level access
 	}, nil
+}
+
+// structSubFieldElementNullable reports whether an element-level ColumnInfo on
+// the struct sub-field field must keep null semantics: one element of an
+// element_nullable sub-field can be null, and a nullable struct marks its
+// sub-fields nullable. The rewriter folds predicates to constants only on
+// non-nullable columns, and segcore skips the validity data of a non-nullable
+// column in IS NULL.
+func (v *ParserVisitor) structSubFieldElementNullable(field *schemapb.FieldSchema) bool {
+	nullable := field.GetNullable() || field.GetElementNullable()
+	if structField := v.schema.GetStructArrayFieldFromName(v.currentStructArrayField); structField != nil {
+		nullable = nullable || structField.GetNullable()
+	}
+	return nullable
 }
 
 func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*planpb.ColumnInfo, error) {
@@ -2770,9 +2779,33 @@ func checkStructSubFieldNullExpr(structField, structIndexField antlr.TerminalNod
 		identifier, structName)
 }
 
+// visitElementNullExpr builds the element-level NullExpr for $[sub] IS NULL /
+// IS NOT NULL inside MATCH_* or element_filter. It accepts scalar, vector and
+// Array<T> sub-fields; outside an element context $[sub] is rejected.
+func (v *ParserVisitor) visitElementNullExpr(structSubField antlr.TerminalNode, op planpb.NullExpr_NullOp) interface{} {
+	column, err := v.getColumnInfoFromStructSubField(structSubField.GetText())
+	if err != nil {
+		return err
+	}
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_NullExpr{
+				NullExpr: &planpb.NullExpr{
+					ColumnInfo: column,
+					Op:         op,
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
 	if err := checkStructSubFieldNullExpr(ctx.StructFieldIdentifier(), ctx.StructIndexFieldIdentifier()); err != nil {
 		return err
+	}
+	if structSubField := ctx.StructSubFieldIdentifier(); structSubField != nil {
+		return v.visitElementNullExpr(structSubField, planpb.NullExpr_IsNotNull)
 	}
 	column, err := v.getNullExprColumnInfo(ctx.FieldName(), ctx.JSONIdentifier())
 	if err != nil {
@@ -2819,6 +2852,9 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 	if err := checkStructSubFieldNullExpr(ctx.StructFieldIdentifier(), ctx.StructIndexFieldIdentifier()); err != nil {
 		return err
+	}
+	if structSubField := ctx.StructSubFieldIdentifier(); structSubField != nil {
+		return v.visitElementNullExpr(structSubField, planpb.NullExpr_IsNull)
 	}
 	column, err := v.getNullExprColumnInfo(ctx.FieldName(), ctx.JSONIdentifier())
 	if err != nil {
@@ -3644,10 +3680,6 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 
 	// In element-level context, use Array as storage type, element type for operations
 	elementType := field.GetElementType()
-	nullable := field.GetNullable()
-	if structField := v.schema.GetStructArrayFieldFromName(v.currentStructArrayField); structField != nil {
-		nullable = nullable || structField.GetNullable()
-	}
 
 	return &ExprWithType{
 		expr: &planpb.Expr{
@@ -3661,7 +3693,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 						IsPartitionKey:  field.IsPartitionKey,
 						IsClusteringKey: field.IsClusteringKey,
 						ElementType:     elementType, // Element type for operations
-						Nullable:        nullable,
+						Nullable:        v.structSubFieldElementNullable(field),
 						IsElementLevel:  true, // Mark as element-level access
 					},
 				},

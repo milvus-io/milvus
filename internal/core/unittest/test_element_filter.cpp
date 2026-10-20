@@ -11,6 +11,7 @@
 
 #include <arrow/api.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <stddef.h>
@@ -59,6 +60,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/arrow_field_utils.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/FileManager.h"
 #include "test_utils/DataGen.h"
@@ -5870,4 +5872,348 @@ TEST(ElementNullableVectorSearch, GrowingBruteForceUsesLogicalElementIds) {
                                  reference_schema,
                                  layout,
                                  "growing");
+}
+
+// Element-level ANN on an element-nullable vector sub-field whose
+// element_filter references element-nullable sub-fields: a scalar compare,
+// `$[tag] IS NULL`, and `$[vec] IS NULL`. A null `tag` makes a compare
+// UNKNOWN, so the element is not selected; a null vector is never a hit.
+namespace {
+
+// tag of element (r, j): null when (r + 2j) % 4 == 0, else (10r + j) % 7.
+inline std::optional<int64_t>
+EnTag(int64_t row, int64_t elem) {
+    if ((row + 2 * elem) % 4 == 0) {
+        return std::nullopt;
+    }
+    return (row * 10 + elem) % 7;
+}
+
+struct ElementNullableFilterSchema {
+    SchemaPtr schema;
+    FieldId vec;
+    FieldId price;
+    FieldId tag;
+    FieldId pk;
+};
+
+inline ElementNullableFilterSchema
+MakeElementNullableFilterSchema(bool row_nullable) {
+    ElementNullableFilterSchema s;
+    s.schema = std::make_shared<Schema>();
+    s.vec = s.schema->AddDebugVectorArrayField("structA[vec]",
+                                               DataType::VECTOR_FLOAT,
+                                               kEnDim,
+                                               knowhere::metric::L2,
+                                               row_nullable,
+                                               true);
+    s.price = s.schema->AddDebugArrayField(
+        "structA[price]", DataType::INT32, row_nullable);
+    s.tag = s.schema->AddDebugArrayField(
+        "structA[tag]", DataType::INT64, row_nullable, true);
+    s.pk = s.schema->AddDebugField("id", DataType::INT64);
+    s.schema->set_primary_field_id(s.pk);
+    return s;
+}
+
+inline std::unique_ptr<InsertRecordProto>
+BuildElementNullableFilterData(const ElementNullableFilterSchema& s,
+                               const ElementNullableLayout& layout,
+                               int64_t row_begin,
+                               int64_t row_end,
+                               bool row_nullable) {
+    auto insert = std::make_unique<InsertRecordProto>();
+    insert->set_num_rows(row_end - row_begin);
+    auto* pk_data = insert->add_fields_data();
+    pk_data->set_field_id(s.pk.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+
+    auto add_array_field = [&](FieldId id, proto::schema::DataType element) {
+        auto* field = insert->add_fields_data();
+        field->set_field_id(id.get());
+        field->set_type(proto::schema::DataType::Array);
+        if (row_nullable) {
+            for (int64_t r = row_begin; r < row_end; ++r) {
+                field->mutable_scalars()->add_valid_data(layout.row_valid[r]);
+            }
+        }
+        auto* rows = field->mutable_scalars()->mutable_array_data();
+        rows->set_element_type(element);
+        return rows;
+    };
+    auto* price_rows = add_array_field(s.price, proto::schema::DataType::Int32);
+    auto* tag_rows = add_array_field(s.tag, proto::schema::DataType::Int64);
+
+    auto* vec_data = insert->add_fields_data();
+    vec_data->set_field_id(s.vec.get());
+    vec_data->set_type(proto::schema::DataType::ArrayOfVector);
+    vec_data->mutable_vectors()->set_dim(kEnDim);
+    auto* vec_rows = vec_data->mutable_vectors()->mutable_vector_array();
+    vec_rows->set_dim(kEnDim);
+    vec_rows->set_element_type(proto::schema::DataType::FloatVector);
+
+    for (int64_t r = row_begin; r < row_end; ++r) {
+        pk_data->mutable_scalars()->mutable_long_data()->add_data(r);
+        auto* price_row = price_rows->add_data();
+        price_row->mutable_int_data();
+        auto* tag_row = tag_rows->add_data();
+        tag_row->mutable_long_data();
+        auto* vec_row = vec_rows->add_data();
+        vec_row->set_dim(kEnDim);
+        vec_row->mutable_float_vector();
+        if (row_nullable) {
+            vec_data->mutable_vectors()->add_valid_data(layout.row_valid[r]);
+        }
+        for (size_t j = 0; j < layout.vectors[r].size(); ++j) {
+            price_row->mutable_int_data()->add_data(EnPrice(r, j));
+            const auto tag = EnTag(r, j);
+            tag_row->mutable_long_data()->add_data(tag.value_or(0));
+            tag_row->add_valid_data(tag.has_value());
+            const bool valid = layout.element_valid[r][j];
+            vec_row->add_valid_data(valid);
+            if (valid) {
+                vec_row->mutable_float_vector()->mutable_data()->Add(
+                    layout.vectors[r][j].begin(), layout.vectors[r][j].end());
+            }
+        }
+    }
+    return insert;
+}
+
+// Storage V3, two batches committed separately so the segment has two
+// chunks.
+inline std::unique_ptr<SegmentSealed>
+CreateElementNullableFilterSealed(const ElementNullableFilterSchema& s,
+                                  const ElementNullableLayout& layout,
+                                  const std::string& segment_path) {
+    s.schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    s.schema->AddField(FieldName("Timestamp"),
+                       TimestampFieldID,
+                       DataType::INT64,
+                       false,
+                       std::nullopt);
+    auto loon_schema = s.schema->ConvertToLoonArrowSchema();
+    auto build_batch = [&](int64_t row_begin, int64_t row_end) {
+        auto insert = BuildElementNullableFilterData(
+            s, layout, row_begin, row_end, false);
+        const auto n = row_end - row_begin;
+        std::unordered_map<FieldId, std::shared_ptr<arrow::Array>> columns;
+        for (auto id : {RowFieldID, TimestampFieldID}) {
+            arrow::Int64Builder builder;
+            for (int64_t r = row_begin; r < row_end; ++r) {
+                AssertInfo(
+                    builder.Append(id == TimestampFieldID ? r + 1 : r).ok(),
+                    "append failed");
+            }
+            std::shared_ptr<arrow::Array> array;
+            AssertInfo(builder.Finish(&array).ok(), "finish failed");
+            columns[id] = array;
+        }
+        for (const auto& field_data : insert->fields_data()) {
+            const FieldId id(field_data.field_id());
+            auto converted = FieldDataToArrow(std::to_string(id.get()),
+                                              field_data,
+                                              n,
+                                              false,
+                                              nullptr,
+                                              &(*s.schema)[id]);
+            AssertInfo(converted.ok(),
+                       "convert field {}: {}",
+                       id.get(),
+                       converted.status().ToString());
+            columns[id] = converted->second;
+        }
+        arrow::ArrayVector ordered;
+        for (const auto& id : s.schema->get_field_ids()) {
+            ordered.push_back(columns.at(id));
+        }
+        return arrow::RecordBatch::Make(loon_schema, n, ordered);
+    };
+
+    const int64_t split = kEnRows / 2 + 1;
+    int64_t version = 0;
+    for (auto [begin, end] : {std::pair<int64_t, int64_t>{0, split},
+                              std::pair<int64_t, int64_t>{split, kEnRows}}) {
+        version = test::WriteRecordBatchesToV3(
+            s.schema,
+            segment_path,
+            {build_batch(begin, end)},
+            test::GenerateColumnGroupPattern(s.schema));
+    }
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(kCollectionID);
+    load_info.set_partitionid(kPartitionID);
+    load_info.set_segmentid(kSegmentID);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(kEnRows);
+    load_info.set_manifest_path("{\"base_path\":\"" + segment_path +
+                                "\",\"ver\":" + std::to_string(version) + "}");
+    load_info.set_insert_channel("element-nullable-filter-test");
+    auto segment = CreateSealedSegment(s.schema, empty_index_meta, kSegmentID);
+    segment->SetLoadInfo(load_info);
+    const auto cell_target =
+        segcore::storagev2translator::GetCellTargetSizeBytes();
+    segcore::storagev2translator::SetCellTargetSizeBytes(1);
+    milvus::tracer::TraceContext trace_ctx;
+    segment->Load(trace_ctx, nullptr);
+    segcore::storagev2translator::SetCellTargetSizeBytes(cell_target);
+    return segment;
+}
+
+inline SegmentGrowingPtr
+CreateElementNullableFilterGrowing(const ElementNullableFilterSchema& s,
+                                   const ElementNullableLayout& layout) {
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(5);
+    config.set_enable_interim_segment_index(false);
+    auto segment = CreateGrowingSegment(s.schema, empty_index_meta, 1, config);
+    std::vector<int64_t> row_ids(kEnRows);
+    std::vector<Timestamp> timestamps(kEnRows);
+    for (int64_t r = 0; r < kEnRows; ++r) {
+        row_ids[r] = r;
+        timestamps[r] = static_cast<Timestamp>(r + 1);
+    }
+    segment->PreInsert(kEnRows);
+    segment->Insert(
+        0,
+        kEnRows,
+        row_ids.data(),
+        timestamps.data(),
+        std::shared_ptr<InsertRecordProto>(
+            BuildElementNullableFilterData(s, layout, 0, kEnRows, true)));
+    return segment;
+}
+
+inline std::unique_ptr<SearchResult>
+EnFilterSearch(SegmentInterface* segment,
+               const ElementNullableFilterSchema& s,
+               const std::string& expr,
+               const std::string& hints = "") {
+    ScopedSchemaHandle handle(*s.schema);
+    auto plan_bytes = handle.ParseSearch(
+        expr, "structA[vec]", kEnTopK, knowhere::metric::L2, "{}", -1, hints);
+    auto plan =
+        CreateSearchPlanByExpr(s.schema, plan_bytes.data(), plan_bytes.size());
+    auto ph_group_raw = MakeElementLevelPlaceholder(EnQuery());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    return segment->Search(plan.get(), ph_group.get(), 1L << 63);
+}
+
+// Three-valued element predicates over the layout: 1 TRUE, 0 FALSE,
+// -1 UNKNOWN. Only TRUE elements are selected.
+inline int
+EnTagTv(int64_t row, int64_t elem, const std::function<bool(int64_t)>& pred) {
+    const auto tag = EnTag(row, elem);
+    return tag.has_value() ? int(pred(*tag)) : -1;
+}
+
+inline void
+CheckElementNullableFilteredSearches(SegmentInterface* segment,
+                                     const ElementNullableFilterSchema& s,
+                                     const ElementNullableLayout& layout,
+                                     const std::string& tag) {
+    struct Case {
+        std::string expr;
+        // Whether element (r, j) is selected by the filter.
+        std::function<bool(int64_t, int64_t)> accept;
+    };
+    auto tv_or = [](int x, int y) {
+        if (x == 1 || y == 1) {
+            return 1;
+        }
+        return x == -1 || y == -1 ? -1 : 0;
+    };
+    const std::vector<Case> cases = {
+        {"element_filter(structA, $[tag] > 3)",
+         [](int64_t r, int64_t j) {
+             return EnTagTv(r, j, [](int64_t t) { return t > 3; }) == 1;
+         }},
+        // NOT keeps UNKNOWN: a null tag is selected by neither.
+        {"element_filter(structA, !($[tag] > 3))",
+         [](int64_t r, int64_t j) {
+             return EnTagTv(r, j, [](int64_t t) { return t > 3; }) == 0;
+         }},
+        {"element_filter(structA, $[tag] in [1, 2])",
+         [](int64_t r, int64_t j) {
+             return EnTagTv(r, j, [](int64_t t) { return t == 1 || t == 2; }) ==
+                    1;
+         }},
+        {"element_filter(structA, $[tag] IS NULL)",
+         [](int64_t r, int64_t j) { return !EnTag(r, j).has_value(); }},
+        {"element_filter(structA, $[tag] IS NOT NULL && $[price] > 50)",
+         [](int64_t r, int64_t j) {
+             return EnTag(r, j).has_value() && EnPrice(r, j) > kEnPriceFloor;
+         }},
+        {"element_filter(structA, $[tag] != 1 || $[tag] IS NULL)",
+         [tv_or](int64_t r, int64_t j) {
+             return tv_or(EnTagTv(r, j, [](int64_t t) { return t != 1; }),
+                          EnTag(r, j).has_value() ? 0 : 1) == 1;
+         }},
+        {"id % 2 == 0 && element_filter(structA, $[tag] == 0 || $[price] < 30)",
+         [tv_or](int64_t r, int64_t j) {
+             return r % 2 == 0 &&
+                    tv_or(EnTagTv(r, j, [](int64_t t) { return t == 0; }),
+                          EnPrice(r, j) < 30 ? 1 : 0) == 1;
+         }},
+        // A null vector is never a hit, whatever the filter says.
+        {"element_filter(structA, $[vec] IS NULL)",
+         [](int64_t, int64_t) { return true; }},
+        {"element_filter(structA, $[vec] IS NOT NULL)",
+         [](int64_t, int64_t) { return true; }},
+        {"element_filter(structA, $[vec] IS NOT NULL && $[tag] IS NULL)",
+         [](int64_t r, int64_t j) { return !EnTag(r, j).has_value(); }},
+        // MATCH_ANY selects whole rows: every valid element of a row with a
+        // null tag.
+        {"match_any(structA, $[tag] IS NULL)",
+         [&layout](int64_t r, int64_t) {
+             for (size_t j = 0; j < layout.vectors[r].size(); ++j) {
+                 if (!EnTag(r, j).has_value()) {
+                     return true;
+                 }
+             }
+             return false;
+         }},
+    };
+    for (const auto& c : cases) {
+        for (const auto& hints :
+             {std::string{}, std::string{ITERATIVE_FILTER}}) {
+            const auto label = tag + " " + c.expr +
+                               (hints.empty() ? "" : " [iterative filter]");
+            std::vector<EnHit> expected;
+            if (c.expr.find("$[vec] IS NULL") == std::string::npos) {
+                expected = EnTop(EnOracle(layout, c.accept), kEnTopK);
+            }
+            auto sr = EnFilterSearch(segment, s, c.expr, hints);
+            ASSERT_NE(sr, nullptr) << label;
+            ExpectEnHits(EnCollect(*sr), expected, layout, label);
+        }
+    }
+}
+
+}  // namespace
+
+TEST(ElementNullableVectorSearch, SealedElementFilterOnElementNullableFields) {
+    auto layout = MakeElementNullableLayout(/*with_null_rows=*/false);
+    auto s = MakeElementNullableFilterSchema(false);
+    const auto segment_path =
+        (std::filesystem::temp_directory_path() /
+         ("milvus_element_nullable_filter_v3_" +
+          std::to_string(
+              std::chrono::steady_clock::now().time_since_epoch().count())))
+            .string();
+    auto directory_guard = folly::makeGuard(
+        [&segment_path] { std::filesystem::remove_all(segment_path); });
+    auto segment = CreateElementNullableFilterSealed(s, layout, segment_path);
+    ASSERT_GT(segment->num_chunk(s.vec), 1);
+    CheckElementNullableFilteredSearches(segment.get(), s, layout, "sealed");
+}
+
+TEST(ElementNullableVectorSearch, GrowingElementFilterOnElementNullableFields) {
+    auto layout = MakeElementNullableLayout(/*with_null_rows=*/true);
+    auto s = MakeElementNullableFilterSchema(true);
+    auto segment = CreateElementNullableFilterGrowing(s, layout);
+    CheckElementNullableFilteredSearches(segment.get(), s, layout, "growing");
 }
