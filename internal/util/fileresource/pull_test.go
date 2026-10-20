@@ -47,7 +47,7 @@ func receiveFlightResult[T any](t *testing.T, ch <-chan T) T {
 func setupResourceLoader(t *testing.T,
 	fetch func(context.Context, int64) (*internalpb.FileResourceInfo, error),
 	lookup func(context.Context, string) (*internalpb.FileResourceInfo, error),
-) *resourceLoader {
+) *AnalyzerResourceManager {
 	t.Helper()
 	return setupBatchResourceLoader(t, func(ctx context.Context, ids []int64, names []string) ([]*internalpb.FileResourceInfo, error) {
 		infos := make([]*internalpb.FileResourceInfo, 0, len(ids)+len(names))
@@ -69,12 +69,14 @@ func setupResourceLoader(t *testing.T,
 	})
 }
 
-func setupBatchResourceLoader(t *testing.T, fetch ResourceFetcher) *resourceLoader {
+func setupBatchResourceLoader(t *testing.T, fetch ResourceFetcher) *AnalyzerResourceManager {
 	t.Helper()
 	SetResourceFetcher(nil, fetch)
-	t.Cleanup(func() { SetResourceFetcher(nil, nil) })
-	loader := resourceFetcher.loader
+	loader := analyzerResources.manager
 	loader.localPath = t.TempDir()
+	// Existing lifetime tests exercise the configurable immediate-eviction mode.
+	loader.lease = 0
+	t.Cleanup(func() { SetResourceFetcher(nil, nil) })
 	return loader
 }
 
@@ -82,8 +84,8 @@ func setupBatchResourceLoader(t *testing.T, fetch ResourceFetcher) *resourceLoad
 // The second call's Done is evaluated only after its flight wait is registered.
 func signalSecondAcquire(joined chan struct{}) {
 	var calls atomic.Int32
-	var original func(*resourceLoader, context.Context, int64, *internalpb.FileResourceInfo) (*resourceEntry, error)
-	mockey.Mock((*resourceLoader).acquire).Origin(&original).To(func(l *resourceLoader, ctx context.Context, id int64, info *internalpb.FileResourceInfo) (*resourceEntry, error) {
+	var original func(*AnalyzerResourceManager, context.Context, int64, *internalpb.FileResourceInfo) (*resourceEntry, error)
+	mockey.Mock((*AnalyzerResourceManager).acquire).Origin(&original).To(func(l *AnalyzerResourceManager, ctx context.Context, id int64, info *internalpb.FileResourceInfo) (*resourceEntry, error) {
 		if calls.Add(1) == 2 {
 			ctx = &flightWaitContext{Context: ctx, waiting: joined}
 		}
@@ -486,8 +488,8 @@ func TestOverlappingResourceBatchesCancelIndependently(t *testing.T) {
 		}).Build()
 		joinedB := make(chan struct{})
 		var bWaiters atomic.Int32
-		var original func(*resourceLoader, context.Context, int64, *internalpb.FileResourceInfo) (*resourceEntry, error)
-		mockey.Mock((*resourceLoader).acquire).Origin(&original).To(func(l *resourceLoader, ctx context.Context, id int64, info *internalpb.FileResourceInfo) (*resourceEntry, error) {
+		var original func(*AnalyzerResourceManager, context.Context, int64, *internalpb.FileResourceInfo) (*resourceEntry, error)
+		mockey.Mock((*AnalyzerResourceManager).acquire).Origin(&original).To(func(l *AnalyzerResourceManager, ctx context.Context, id int64, info *internalpb.FileResourceInfo) (*resourceEntry, error) {
 			if id == 8 && bWaiters.Add(1) == 2 {
 				ctx = &flightWaitContext{Context: ctx, waiting: joinedB}
 			}

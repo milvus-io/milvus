@@ -500,6 +500,7 @@ type commonConfig struct {
 	ProxyFileResourceMode       ParamItem `refreshable:"false"`
 	FileResourceMaxFileSize     ParamItem `refreshable:"true"`
 	FileResourceDownloadTimeout ParamItem `refreshable:"true"`
+	FileResourceCacheTTL        ParamItem `refreshable:"false"`
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
@@ -2071,6 +2072,22 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		},
 	}
 	p.FileResourceDownloadTimeout.Init(base.mgr)
+
+	p.FileResourceCacheTTL = ParamItem{
+		Key:          "common.fileResource.cacheTtl",
+		Version:      "3.0",
+		DefaultValue: "15m",
+		Doc:          "Idle lease for on-demand analyzer resource files after their last consumer releases them. Accepts duration strings such as 30s or 15m; 0s disables retention. Takes effect on restart.",
+		Export:       true,
+		Formatter: func(v string) string {
+			duration, err := time.ParseDuration(v)
+			if err != nil || duration < 0 {
+				return "15m"
+			}
+			return v
+		},
+	}
+	p.FileResourceCacheTTL.Init(base.mgr)
 
 	p.GroupByMaxGroups = ParamItem{
 		Key:          "common.groupBy.maxGroups",

@@ -69,6 +69,7 @@ func (s *Server) Stop() {
 	mlog.Info(context.TODO(), "stopping streamingnode server...")
 	mlog.Info(context.TODO(), "close wal manager...")
 	s.walManager.Close()
+	fileresource.CloseAnalyzerResourceManager()
 	mlog.Info(context.TODO(), "release streamingnode resources...")
 	resource.Release()
 	mlog.Info(context.TODO(), "streamingnode server stopped")

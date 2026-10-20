@@ -29,7 +29,7 @@ cancellation or deadline: cancelling one wait does not fail other waiters.
 The last departing waiter cancels the shared task and its local retries. The
 existing per-file download limit remains; Fetch adds no separate timeout.
 Runtime consumers use the IDs already bound in their collection schema. Ready
-ID entries are reused while referenced; default and local-file analyzers skip
+ID entries are reused while referenced or within their idle lease; default and local-file analyzers skip
 remote I/O. Unbound inline inputs fetch their referenced names in a batch,
 then share loading under the returned IDs. Failed downloads never publish a
 ready entry. Native code retains parameter and filename validation.
@@ -120,7 +120,9 @@ Coord reads the requested batch under one metadata lock and clones the results
 in request order. A failed batch has a business Status and no partial list.
 This is a selected-resource query, not an inventory snapshot.
 
-`fileresource.Acquire` pins ready ID entries and batches only the remaining ID
+`fileresource.Acquire` delegates to the process-wide `AnalyzerResourceManager`,
+which owns metadata access, per-ID download flights, resource references and idle
+eviction. It pins ready ID entries and batches only the remaining ID
 misses. Unbound name requests always fetch their current bindings. Metadata RPCs
 and their retry loops belong to each requesting caller; they are not shared.
 Thus overlapping requests [A,B] and [B,C] may query B metadata twice, but a
@@ -148,8 +150,24 @@ construction and execution are not retried by this loading loop.
 mapping is passed as native extra info together with that namespace. The native
 global resource table is not changed. A runner owns its references until it is
 destroyed; temporary analyzers and validation release theirs after native work.
-Files and metadata are removed after the last reference and worker leave. Failed
-construction releases its references as well. Legacy SyncMode/RefMode/CloseMode,
+When the final consumer releases its reference, the manager records `lastActive`.
+Successfully loaded files and metadata remain cached for
+`common.fileResource.cacheTtl` (default `15m`, duration string,
+configured at startup; `0s` disables idle retention). The manager schedules
+eviction even if no further requests arrive. A worker still using the directory
+delays removal, but does not restart the idle lease. Acquiring a cached resource
+cancels its expiration; the next final release starts a new lease. Acquisitions
+also check expiry, and stale timer callbacks cannot delete a new lease or entry.
+This is an idle duration, not a periodic 15-minute scan.
+
+Inline execution and validation can therefore reuse files across sequential
+calls without retaining their temporary native analyzers. Name queries still
+fetch current bindings from Coord: cached IDs do not hide name removal or
+same-name recreation. Failed/incomplete downloads are removed immediately after
+all references and workers leave. Failed native construction releases its
+references but may leave a successfully downloaded file cached for the lease.
+Server shutdown closes the manager, evicting idle resources and cleaning up
+active resources on their final release. Legacy SyncMode/RefMode/CloseMode,
 public List behavior and old push distribution are unchanged.
 
 Validation passes the acquired name-to-ID map and registered filename basenames
@@ -205,5 +223,6 @@ an unsupported new RPC surfaces as Unimplemented.
 - `internal/util/function/manager.go` — schema selection and runner lifetime.
 - `internal/proxy/impl.go` — SDK adaptation and collection identity.
 - `pkg/proto/streaming.proto` — additive request/response and service method.
-- `internal/util/fileresource/pull.go` — ID-keyed loading and resource ownership.
+- `internal/util/fileresource/pull.go` — process-wide analyzer resource manager access.
+- `internal/util/fileresource/analyzer_resource_manager.go` — ID-keyed loading, download flights, resource ownership and idle leases.
 - `internal/rootcoord/file_resource_fetch.go` — Fetch and name resolution.
