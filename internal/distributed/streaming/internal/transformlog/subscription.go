@@ -3,6 +3,7 @@ package transformlog
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 
@@ -170,11 +171,12 @@ func (h *checkpointEventHandler) Close() {
 
 type resumableEventHandler struct {
 	wal.TransformLogEventHandler
-	sub    *resumableSubscription
-	cancel context.CancelFunc
+	sub           *resumableSubscription
+	cancel        context.CancelFunc
+	errorReported atomic.Bool
 }
 
-func (h resumableEventHandler) Handle(event wal.TransformLogStreamEvent) error {
+func (h *resumableEventHandler) Handle(event wal.TransformLogStreamEvent) error {
 	h.sub.stream.mu.Lock()
 	active := h.sub.stream.subscriptions[h.sub.id] == h.sub
 	h.sub.stream.mu.Unlock()
@@ -190,10 +192,13 @@ func (h resumableEventHandler) Handle(event wal.TransformLogStreamEvent) error {
 		h.cancel()
 		return nil
 	}
+	if event.Err != nil {
+		h.errorReported.Store(true)
+	}
 	return h.TransformLogEventHandler.Handle(event)
 }
 
-func (h resumableEventHandler) Close() {}
+func (h *resumableEventHandler) Close() {}
 
 func isRetryableSubscriptionError(err error) bool {
 	if status.IsCanceled(err) {

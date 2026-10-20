@@ -219,15 +219,21 @@ func (s *resumableStream) subscribePending(ctx context.Context, cancel context.C
 		if sub.hasRemote() {
 			continue
 		}
-		if err := s.subscribeRemote(ctx, cancel, underlying, sub); err != nil {
+		handler := &resumableEventHandler{TransformLogEventHandler: sub.handler, sub: sub, cancel: cancel}
+		if err := s.subscribeRemote(ctx, underlying, sub, handler); err != nil {
 			if ctx.Err() != nil || underlying.Error() != nil || isRetryableSubscriptionError(err) {
 				return err
 			}
-			_ = sub.handle(wal.TransformLogStreamEvent{
-				SubscriptionID: sub.ID(),
-				VChannel:       sub.VChannel(),
-				Err:            err,
-			})
+			// The remote client reports subscription errors to the handler before
+			// returning them from Subscribe. Pure synchronous failures still need
+			// a notification here. This state belongs only to this create attempt.
+			if !handler.errorReported.Load() {
+				_ = sub.handle(wal.TransformLogStreamEvent{
+					SubscriptionID: sub.ID(),
+					VChannel:       sub.VChannel(),
+					Err:            err,
+				})
+			}
 			sub.markReady(nil)
 		}
 	}
@@ -244,9 +250,9 @@ func (s *resumableStream) subscriptionSnapshot() []*resumableSubscription {
 	return subs
 }
 
-func (s *resumableStream) subscribeRemote(ctx context.Context, cancel context.CancelFunc, underlying wal.TransformLogStream, sub *resumableSubscription) error {
+func (s *resumableStream) subscribeRemote(ctx context.Context, underlying wal.TransformLogStream, sub *resumableSubscription, handler *resumableEventHandler) error {
 	opt := sub.option()
-	opt.Handler = resumableEventHandler{TransformLogEventHandler: sub.handler, sub: sub, cancel: cancel}
+	opt.Handler = handler
 	mlog.Debug(s.ctx, "resumable transform log stream subscribing vchannel",
 		mlog.FieldPChannel(s.pchannel),
 		mlog.FieldVChannel(opt.VChannel),
