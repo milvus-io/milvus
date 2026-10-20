@@ -7830,7 +7830,7 @@ neither Completed nor Failed -- so this value alone decides how many finished
 importJob entries stay in etcd, each carrying its schema, file list and options
 plus every preimport and import task under it.
 The 48h default exists for BulkImport idempotency and only for it: the idempotency
-window lasts at least streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+window can extend beyond streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
 earlier than its tombstone lets an in-window retry resolve to a jobID that
 GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
 as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
@@ -9642,8 +9642,10 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALBroadcasterTombstoneMaxCount = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxCount",
 		Version: "2.6.0",
-		Doc: `The soft tombstone count threshold for GC pressure warnings, 8192 by default.
-Exceeding it never bypasses the retention TTL or persisted WAL checkpoint checks.`,
+		Doc: `The maximum number of tombstones satisfying the persisted WAL checkpoint checks, 8192 by default.
+After collecting expired eligible tombstones, evict the smallest BroadcastIDs until the
+remaining eligible count is at most maxCount, even before their TTL expires.
+Tombstones blocked by WAL checkpoints do not count toward this limit and cannot be evicted.`,
 		DefaultValue: "8192",
 		Export:       false,
 	}
@@ -9652,8 +9654,9 @@ Exceeding it never bypasses the retention TTL or persisted WAL checkpoint checks
 	p.WALBroadcasterTombstoneMaxLifetime = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxLifetime",
 		Version: "2.6.0",
-		Doc: `The minimum tombstone retention before GC, 24h by default (legacy key name).
-GC also requires every participating persisted WAL checkpoint to pass the broadcast.
+		Doc: `The tombstone age threshold for GC, 24h by default.
+GC always requires every participating persisted WAL checkpoint to pass the broadcast.
+Eligible tombstones may be evicted earlier to satisfy maxCount.
 Coordinator recovery restarts the retention clock; checkpoint lag can extend it further.`,
 		DefaultValue: "24h",
 		Export:       false,

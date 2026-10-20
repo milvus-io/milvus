@@ -120,7 +120,7 @@ func TestTombstoneGCTTLAndCheckpoint(t *testing.T) {
 			saveGCCheckpoint(t, node, "p0", 1000, 1)
 			saveGCCheckpoint(t, node, "p2", 1000, 1)
 			s.triggerGCTombstone()
-			require.Len(t, s.tombstones, 2, "missing checkpoint and unexpired TTL survive count pressure")
+			require.Len(t, s.tombstones, 2, "blocked tombstones must not count toward the eligible quota")
 			s.tombstones[1].createTime = time.Now().Add(-2 * time.Hour)
 			s.triggerGCTombstone()
 			require.Len(t, s.tombstones, 1, "blocked oldest entry must not prevent unrelated GC")
@@ -143,6 +143,122 @@ func TestTombstoneGCTTLAndCheckpoint(t *testing.T) {
 			tasks, err := coord.ListBroadcastTask(t.Context())
 			require.NoError(t, err)
 			require.Empty(t, tasks)
+		})
+	}
+}
+
+func TestTombstoneGCEligibleMaxCount(t *testing.T) {
+	for _, replicated := range []bool{false, true} {
+		name := "primary"
+		if replicated {
+			name = "secondary"
+		}
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name     string
+				maxCount string
+				expired  []uint64
+				retained []uint64
+			}{
+				{name: "evict_smallest_ids", maxCount: "1", retained: []uint64{30}},
+				{name: "exact_limit", maxCount: "3", retained: []uint64{30, 10, 20}},
+				{name: "below_limit", maxCount: "4", retained: []uint64{30, 10, 20}},
+				{name: "ttl_before_count", maxCount: "2", expired: []uint64{30}, retained: []uint64{10, 20}},
+				{name: "ttl_and_count", maxCount: "1", expired: []uint64{30}, retained: []uint64{20}},
+				{name: "zero_limit", maxCount: "0"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					coord, node := setupTombstoneGC(t)
+					paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue(tc.maxCount)
+					// Callback completion/enqueue order need not follow BroadcastID.
+					ids := []uint64{30, 10, 20, 1, 2, 3}
+					for _, id := range ids {
+						channel := "p0_vcchan"
+						switch id {
+						case 1:
+							channel = "p1_vcchan" // Missing checkpoint.
+						case 2:
+							channel = "p2_vcchan" // Equal checkpoint.
+						}
+						task := gcTestTombstone(id, []string{channel}, replicated)
+						if id == 3 {
+							task.AckedCheckpoints = nil // Legacy positions.
+						}
+						require.NoError(t, coord.SaveBroadcastTask(t.Context(), id, task))
+					}
+					saveGCCheckpoint(t, node, "p0", 101, 2)
+					saveGCCheckpoint(t, node, "p2", 100, 2)
+					bc, err := RecoverBroadcaster(t.Context())
+					require.NoError(t, err)
+					defer bc.Close()
+					bm := bc.(*broadcastTaskManager)
+					s := gcTestScheduler(bm, ids...)
+					for i := range s.tombstones {
+						if !slices.Contains(tc.expired, s.tombstones[i].broadcastID) {
+							s.tombstones[i].createTime = time.Now()
+						}
+					}
+					s.triggerGCTombstone()
+					expected := append(slices.Clone(tc.retained), 1, 2, 3)
+					var retained []uint64
+					for _, item := range s.tombstones {
+						retained = append(retained, item.broadcastID)
+					}
+					require.Equal(t, expected, retained, "retain enqueue order for the TTL shortcut")
+					persisted, err := coord.ListBroadcastTask(t.Context())
+					require.NoError(t, err)
+					require.Len(t, persisted, len(expected))
+					for _, id := range ids {
+						_, exists := bm.getBroadcastTaskByID(id)
+						require.Equal(t, slices.Contains(expected, id), exists)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTombstoneGCSkipsCatalogWithoutAgeOrCountPressure(t *testing.T) {
+	coord, node := setupTombstoneGC(t)
+	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
+	listReads, checkpointReads := 0, 0
+	listPatch := mockey.Mock(mockey.GetMethod(coord, "ListPChannel")).To(func(context.Context) ([]*streamingpb.PChannelMeta, error) {
+		listReads++
+		return []*streamingpb.PChannelMeta{{Channel: &streamingpb.PChannelInfo{Name: "p0"}}}, nil
+	}).Build()
+	defer listPatch.UnPatch()
+	checkpointPatch := mockey.Mock(mockey.GetMethod(node, "GetConsumeCheckpoint")).To(func(context.Context, string) (*streamingpb.WALCheckpoint, error) {
+		checkpointReads++
+		return nil, context.Canceled // Stop before accessing the task manager.
+	}).Build()
+	defer checkpointPatch.UnPatch()
+	for _, tc := range []struct {
+		name    string
+		count   int
+		expired bool
+		reads   int
+	}{
+		{name: "empty"},
+		{name: "below_limit", count: 1},
+		{name: "at_limit", count: 2},
+		{name: "count_only", count: 3, reads: 1},
+		{name: "ttl_only", count: 1, expired: true, reads: 1},
+		{name: "ttl_and_count", count: 3, expired: true, reads: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			listReads, checkpointReads = 0, 0
+			s := newTombstoneScheduler(mlog.With())
+			for i := 0; i < tc.count; i++ {
+				created := time.Now()
+				if tc.expired && i == 0 {
+					created = created.Add(-2 * time.Hour)
+				}
+				s.tombstones = append(s.tombstones, tombstoneItem{broadcastID: uint64(i + 1), createTime: created})
+			}
+			s.triggerGCTombstone()
+			require.Equal(t, tc.reads, listReads)
+			require.Equal(t, tc.reads, checkpointReads)
+			require.Len(t, s.tombstones, tc.count)
 		})
 	}
 }
@@ -255,7 +371,7 @@ func TestTombstoneGCReplayAndRecovery(t *testing.T) {
 	for _, channel := range []string{"p0", "p1"} {
 		saveGCCheckpoint(t, node, channel, 1000, 2)
 	}
-	s.tombstones[0].createTime = time.Now() // Recovery restarts the minimum TTL.
+	s.tombstones[0].createTime = time.Now() // Recovery restarts the TTL clock.
 	s.triggerGCTombstone()
 	require.Len(t, s.tombstones, 1)
 	s.tombstones[0].createTime = time.Now().Add(-2 * time.Hour)
