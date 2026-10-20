@@ -3,6 +3,7 @@ package replicate
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	wallock "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
@@ -23,6 +25,102 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
+
+func TestLocalFlushDoesNotBlockOtherVChannels(t *testing.T) {
+	resource.InitForTest(t)
+	for _, secondary := range []bool{false, true} {
+		name := "primary"
+		if secondary {
+			name = "secondary"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			id := walimplstest.NewTestMessageID(1)
+			channel := types.PChannelInfo{Name: "target"}
+			control := &streamingpb.PChannelRecoveryControlMeta{}
+			if secondary {
+				control.ReplicateConfig = &commonpb.ReplicateConfiguration{
+					Clusters:             []*commonpb.MilvusCluster{{ClusterId: "source", Pchannels: []string{"source"}}, {ClusterId: "target", Pchannels: []string{"target"}}},
+					CrossClusterTopology: []*commonpb.CrossClusterTopology{{SourceClusterId: "source", TargetClusterId: "target"}},
+				}
+				control.ReplicateCheckpoint = (&utility.ReplicateCheckpoint{
+					ClusterID: "source", PChannel: "source", MessageID: id, TimeTick: 1,
+				}).IntoProto()
+			}
+			rm, err := replicates.RecoverReplicateManager(&replicates.ReplicateManagerRecoverParam{
+				CurrentClusterID: "target", ChannelInfo: channel,
+				InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+					Checkpoint:      &utility.WALCheckpoint{MessageID: id, TimeTick: 1},
+					PChannelControl: control,
+					TxnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(channel).NewScannerMetrics()),
+				},
+			})
+			require.NoError(t, err)
+			param := &interceptors.InterceptorBuildParam{
+				ChannelInfo: channel, TxnManager: txn.NewTxnManager(channel, nil), ReplicateManager: rm,
+			}
+			idempotent := idempotency.NewInterceptorBuilder().Build(param)
+			locker := wallock.NewInterceptorBuilder().Build(param)
+			replicator := &replicateInterceptor{replicateManager: rm}
+			appendMessage := func(msg message.MutableMessage, backend interceptors.Append) error {
+				_, err := idempotent.DoAppend(ctx, msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+					return locker.DoAppend(ctx, msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+						return replicator.DoAppend(ctx, msg, backend)
+					})
+				})
+				return err
+			}
+			flush := message.NewManualFlushMessageBuilderV2().WithVChannel("target_v1").WithUnreplicable().
+				WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable()
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			flushDone := make(chan error, 1)
+			go func() {
+				flushDone <- appendMessage(flush, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+					close(entered)
+					<-release
+					return id, nil
+				})
+			}()
+			defer func() {
+				close(release)
+				require.NoError(t, <-flushDone)
+			}()
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Flush did not reach WAL append")
+			}
+
+			// Local TimeTick checks Role() before the WAL lock; replicated DML
+			// bypasses that check but still enters the same ReplicatesManager.
+			insert := message.NewInsertMessageBuilderV1().WithVChannel("target_v2").
+				WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable()
+			if secondary {
+				insert.WithReplicateHeader(&message.ReplicateHeader{
+					ClusterID: "source", VChannel: "source_v2", TimeTick: 100,
+					MessageID: id, LastConfirmedMessageID: id,
+				})
+			}
+			tick := message.NewTimeTickMessageBuilderV1().WithAllVChannel().
+				WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{}).MustBuildMutable()
+			for _, msg := range []message.MutableMessage{insert, tick} {
+				done := make(chan error, 1)
+				go func() {
+					done <- appendMessage(msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+						return id, nil
+					})
+				}()
+				select {
+				case err := <-done:
+					require.NoError(t, err)
+				case <-time.After(5 * time.Second):
+					t.Fatalf("%s blocked behind Flush on another VChannel", msg.MessageType())
+				}
+			}
+		})
+	}
+}
 
 func TestLocalFlushReleasesRecoveredSessionBeforeReplay(t *testing.T) {
 	resource.InitForTest(t)

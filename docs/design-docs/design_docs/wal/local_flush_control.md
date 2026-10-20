@@ -51,8 +51,11 @@ lock guard only unlocks. A failed append does not discard a session. An AlterRep
 effect. Ordinary WAL-generated TimeTick/CreateSegment/Flush do not require an
 exclusive lock and therefore do not abort transactions.
 
-Unreplicable exclusive operations use the existing ReplicatesManager mutex and
-acker to clear the scoped receiving prefix after successful append. This covers
+Unreplicable exclusive operations acquire the existing ReplicatesManager mutex
+only in the successful append's acker to clear the scoped receiving prefix. They
+do not hold that mutex across WAL append or its retries: the outer WAL lock
+already excludes appends in the affected scope. A VChannel-scoped ManualFlush
+must not additionally block other VChannels or local TimeTick messages. This covers
 local Flush and other local exclusive controls uniformly. The outer WAL lock is
 still held until session cleanup finishes, so the affected VChannel cannot start
 replay between the two cleanups. Normal replicated DDL cannot enter while a

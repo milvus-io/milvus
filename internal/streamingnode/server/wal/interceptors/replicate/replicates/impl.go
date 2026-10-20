@@ -122,17 +122,21 @@ func (impl *replicatesManagerImpl) BeginReplicateMessage(ctx context.Context, ms
 			return nil, status.NewIgnoreOperation("wal unreplicable message cannot be replicated")
 		}
 		if msg.MessageType().IsExclusiveRequired() {
-			// Share the exclusive WAL boundary with session cleanup in the lock
-			// interceptor; failed appends retain both parts of the receiving txn.
-			impl.mu.Lock()
+			// The outer WAL lock excludes appends in the affected scope until
+			// both the prefix and sessions are cleared. Only lock shared replication
+			// state during cleanup, so other VChannels can append concurrently.
 			return replicateAckerImpl(func(err error) {
-				if err == nil && impl.secondaryState != nil {
+				if err != nil {
+					return
+				}
+				impl.mu.Lock()
+				defer impl.mu.Unlock()
+				if impl.secondaryState != nil {
 					helper := impl.secondaryState.replicateTxnHelper
 					if msg.IsPChannelLevel() || msg.VChannel() == "" || msg.VChannel() == impl.pchannel.Name || msg.VChannel() == helper.vchannel {
 						helper.clear()
 					}
 				}
-				impl.mu.Unlock()
 			}), nil
 		}
 		return nil, ErrNotHandledByReplicateManager
