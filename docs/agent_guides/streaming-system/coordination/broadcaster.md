@@ -71,6 +71,9 @@ MessageID ordering participates in this comparison. When several VChannels
 share a PChannel, its checkpoint must pass every corresponding broadcast copy.
 Equality is insufficient. Missing checkpoints and missing/zero legacy ACK
 positions retain the tombstone because they cannot prove eligibility.
+Legacy tombstones without ACK positions remain permanently retained; advancing
+WAL checkpoints cannot make their missing positions known. They continue to
+participate in periodic GC checks, with the associated catalog-read cost.
 
 GC runs on `checkInternal` ticks, rather than on each newly enqueued tombstone.
 Each GC pass that has expired tombstones first lists all PChannels from the
@@ -96,14 +99,23 @@ TOMBSTONE. It is not stored in the task proto: coordinator recovery starts a new
 full TTL. This conservatively extends retention and avoids a format change.
 StreamingNode restart/handoff before checkpoint advancement therefore still sees
 the retained tombstone when it replays partial or complete sets of ACKs. Existing
-ACK lookup suppresses those messages; no global TimeTick filter is added.
+ACK lookup suppresses those messages.
+
+The physical LastConfirmedMessageID in a WAL checkpoint can precede broadcasts
+already covered by its TimeTick. During startup, `runBoundedRecovery` therefore
+observes only scanner output whose local TimeTick is strictly greater than the
+recovered checkpoint's TimeTick. The filter runs after ordering and transaction
+assembly, preserving old transaction fragments needed by later commits. This
+prevents the overlapping completed prefix from generating new broadcast ACKs
+after tombstone GC. RecoveryBarrier recognition and the retained live scanner
+remain unchanged; ordinary readers are unaffected.
 
 The checkpoint proves completion of the consuming ACK needed to advance that
 prefix. It does not drain all historical RPC attempts. The TTL additionally
 protects against delayed duplicate requests, including server-side ACK handlers
 that survive client cancellation. This is a bounded operational protection,
 not an exactly-once guarantee against arbitrarily delayed requests. Epoch fencing,
-WAL replay filtering, append deduplication, and changes to checkpoint ownership
+append deduplication, and changes to checkpoint ownership
 publication are outside this fix. The rule assumes recovery uses the published
 checkpoint and that its logical position does not regress across ownership changes.
 
@@ -111,7 +123,9 @@ Regression coverage must check TTL expiry and count pressure independently,
 checkpoint behind/equal/ahead, per-channel local timestamps, missing/legacy
 positions, catalog read/delete failures, partial/all-channel ACK replay,
 coordinator recovery and checkpoint term changes during handoff. New replicated
-broadcasts must still be recoverable through the existing ACK path.
+broadcasts must still be recoverable through the existing ACK path. Startup
+replay must suppress ACKs at or before the recovered checkpoint while preserving
+broadcasts and committed transactions beyond it and the transition to live replay.
 
 ## Import Completion
 

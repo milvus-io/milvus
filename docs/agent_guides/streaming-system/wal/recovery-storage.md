@@ -19,6 +19,13 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 
 Control may persist its latest state ahead of the global checkpoint, like a Segment snapshot. Its `control_checkpoint_time_tick` suppresses already covered control effects without skipping data replay. External effects still require idempotent retries when a crash precedes metadata publication. Startup failure and normal shutdown close the retained stream, including when it is paused at the barrier.
 
+The physical LastConfirmedMessageID may overlap the completed prefix. Startup
+observation skips scanner output at or before the recovered checkpoint's
+TimeTick, including broadcasts whose consuming ACK has already completed. This
+filter runs after ordering and transaction assembly; raw transaction fragments
+before the checkpoint remain available to assemble commits beyond it. The exact
+RecoveryBarrier is still recognized independently of this observation filter.
+
 The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
 Size, buffer age, explicit Flush and recovery-tail requests trigger output.
 Earlier L1 segments must be registered in DataCoord, but need not be flushed.

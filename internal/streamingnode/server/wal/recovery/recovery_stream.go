@@ -33,6 +33,7 @@ func (r *recoveryStorageImpl) runBoundedRecovery(
 	))
 
 	r.Logger().Info(context.TODO(), "recover from wal stream...")
+	recoveryTimeTick := r.checkpoint.TimeTick
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.MessageID,
 		RecoveryBarrier: lastTimeTickMessage,
@@ -55,7 +56,12 @@ L:
 				}
 				return nil, merr.WrapErrServiceUnavailableMsg("recovery stream ended before the startup barrier")
 			}
-			r.observeMessage(ctx, msg)
+			// LastConfirmedMessageID can replay an already completed prefix.
+			// Filter after scanner ordering and transaction assembly so older txn
+			// fragments can still contribute to a commit beyond the checkpoint.
+			if msg.TimeTick() > recoveryTimeTick {
+				r.observeMessage(ctx, msg)
+			}
 			if msg.MessageType() == message.MessageTypeRecoveryBarrier &&
 				msg.TimeTick() == lastTimeTickMessage.TimeTick() && msg.MessageID().EQ(lastTimeTickMessage.MessageID()) {
 				break L
