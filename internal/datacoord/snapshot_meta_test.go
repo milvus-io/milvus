@@ -168,34 +168,6 @@ func createTestSnapshotDataForMeta() *snapshotstorage.SnapshotData {
 	}
 }
 
-func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
-	// Create empty Catalog for mockey to mock
-	catalog := &kv_datacoord.Catalog{}
-
-	// Use temporary directory to avoid polluting project directory
-	tempDir := t.TempDir()
-	tempChunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-
-	loaderCtx, loaderCancel := context.WithCancel(context.Background())
-	return &snapshotMeta{
-		catalog:                      catalog,
-		snapshotID2Info:              typeutil.NewConcurrentMap[typeutil.UniqueID, *datapb.SnapshotInfo](),
-		snapshotID2RefIndex:          typeutil.NewConcurrentMap[typeutil.UniqueID, *SnapshotRefIndex](),
-		snapshotName2ID:              typeutil.NewConcurrentMap[typeutil.UniqueID, *typeutil.ConcurrentMap[string, typeutil.UniqueID]](),
-		collectionID2Snapshots:       typeutil.NewConcurrentMap[typeutil.UniqueID, typeutil.UniqueSet](),
-		segmentProtectionUntil:       make(map[int64]uint64),
-		compactionBlockedCollections: typeutil.NewUniqueSet(),
-		gcBlockedCollections:         typeutil.NewUniqueSet(),
-		segmentReferencedByGC:        typeutil.NewUniqueSet(),
-		buildIDReferencedByGC:        typeutil.NewUniqueSet(),
-		snapshotPendingCollections:   typeutil.NewUniqueSet(),
-		loaderCtx:                    loaderCtx,
-		loaderCancel:                 loaderCancel,
-		reader:                       snapshotstorage.NewSnapshotReader(tempChunkManager),
-		writer:                       snapshotstorage.NewSnapshotWriter(tempChunkManager),
-	}
-}
-
 func TestDeriveSnapshotRootPath(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -242,12 +214,6 @@ func TestDeriveSnapshotRootPath(t *testing.T) {
 			assert.Equal(t, tt.wantFound, found)
 		})
 	}
-}
-
-// createTestSnapshotMetaLoaded creates a snapshotMeta for tests that don't call reload().
-// Same as createTestSnapshotMeta since RefIndex state is now per-snapshot.
-func createTestSnapshotMetaLoaded(t *testing.T) *snapshotMeta {
-	return createTestSnapshotMeta(t)
 }
 
 func TestSnapshotExportMeta_DurableUpdatesAndDefensiveCopies(t *testing.T) {
@@ -396,31 +362,6 @@ func TestSnapshotExportMeta_ErrorAndEdgePaths(t *testing.T) {
 		_, ok := meta.GetJob(job.GetJobId())
 		assert.True(t, ok)
 	})
-}
-
-// insertTestSnapshot is a LIGHTWEIGHT helper that only primes the three lookup maps
-// (snapshotID2Info / snapshotID2RefIndex / secondary indexes). It is meant for tests
-// that exercise pure lookup paths (ListSnapshots, name→ID resolution, etc.) where the
-// snapshot protection state is irrelevant.
-//
-// It does NOT maintain any of the protection sets — segmentProtectionUntil,
-// segmentReferencedByGC, buildIDReferencedByGC, compactionBlockedCollections, or
-// gcBlockedCollections are left untouched. If your test needs protection state to
-// reflect the inserted snapshot, one of the following is required:
-//   - call sm.rebuildAllSegmentProtection() after insertion to derive all 5 sets, OR
-//   - call sm.registerSnapshotProtection(info, segmentIDs, buildIDs) for an incremental
-//     update, OR
-//   - use saveTestSnapshots() which goes through the real SaveSnapshot code path.
-//
-// Parameters:
-//   - sm: the snapshotMeta to populate
-//   - info: the snapshot metadata (with Id, Name, CollectionId, etc.)
-//   - segmentIDs: segment IDs the snapshot references (passed to RefIndex)
-//   - buildIDs: index build IDs the snapshot references (passed to RefIndex)
-func insertTestSnapshot(sm *snapshotMeta, info *datapb.SnapshotInfo, segmentIDs, buildIDs []int64) {
-	sm.snapshotID2Info.Insert(info.GetId(), info)
-	sm.snapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(segmentIDs, buildIDs))
-	sm.addToSecondaryIndexes(info)
 }
 
 // saveTestSnapshots saves multiple snapshots to snapshotMeta using mocked catalog and writer.

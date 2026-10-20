@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -105,18 +104,6 @@ type Manager interface {
 	CleanZeroSealedSegmentsOfChannel(ctx context.Context, channel string, cpTs Timestamp)
 	// DropSegmentsOfPartition drops all segments in a partition
 	DropSegmentsOfPartition(ctx context.Context, channel string, partitionID []int64)
-}
-
-// Allocation records the allocation info
-type Allocation struct {
-	SegmentID  UniqueID
-	NumOfRows  int64
-	ExpireTime Timestamp
-}
-
-func (alloc *Allocation) String() string {
-	t, _ := tsoutil.ParseTS(alloc.ExpireTime)
-	return fmt.Sprintf("SegmentID: %d, NumOfRows: %d, ExpireTime: %v", alloc.SegmentID, alloc.NumOfRows, t)
 }
 
 // make sure SegmentManager implements Manager

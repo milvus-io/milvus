@@ -131,6 +131,33 @@ type SegmentIndexMutation struct {
 	FinishedTask *workerpb.IndexTaskInfo
 }
 
+// stagedSegmentIndexMutation carries a SegmentIndex change from its projection
+// under keyLock to the in-memory install that follows a successful catalog
+// write. action is nil when the mutation resolves to no catalog write at all;
+// record is the locked task projection used to validate manifest contents.
+//
+// install performs in-memory changes only — it never acquires fieldIndexLock, so
+// the manifest commit may run it inside its segMu critical section. It returns
+// the observability update it deferred (never nil): the stored-index-size gauge
+// must serialize against MarkIndexAsDeleted via fieldIndexLock, whose write
+// side every index DDL (CreateIndex, AlterIndex, MarkIndexAsDeleted,
+// RemoveIndex) holds across an etcd round trip. The caller MUST run the
+// returned closure only after releasing segMu — acquiring fieldIndexLock inside
+// segMu would let one slow DDL stall every segment reader — and before
+// releasing keyLock(BuildID), so the install-then-metric sequence stays ordered
+// against the next writer of the same build.
+type stagedSegmentIndexMutation struct {
+	action  *metastore.UpdateAction
+	record  *model.SegmentIndex
+	install func() (deferredMetric func())
+}
+
+// errSegmentIndexRecordGone reports that the SegmentIndex record a staged
+// upsert must be projected from no longer exists. The commit that staged the
+// mutation is abandoned before creating a manifest revision; publishing would
+// strand an index entry that no SegmentIndex record can ever drive GC for.
+var errSegmentIndexRecordGone = errors.New("segment index record no longer exists")
+
 // SegmentManifestCommit describes one segment-scoped StorageV3 commit.
 // ExpectedManifest is an optional optimistic CAS condition for Noop mutations,
 // whose revision was prepared outside this framework against a base the caller
@@ -148,7 +175,7 @@ type SegmentManifestCommit struct {
 
 // CommitSegmentManifest is the only DataCoord primitive that both creates a
 // StorageV3 manifest revision and advances SegmentInfo.manifest_path. Lock
-// order is segmentManifestLocks[segmentID] -> indexMeta.keyLock -> segMu. No
+// order is segmentManifestLocks[segmentID] -> the SegmentIndexCatalog build-ID lock -> segMu. No
 // caller may enter this protocol while holding segMu. Manifest I/O runs outside
 // segMu; the final catalog mutation is rebased onto the latest SegmentInfo and
 // catalog + memory publication stays in one segMu critical section. No lock is
@@ -190,8 +217,8 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// update cannot make the manifest entry disagree with the in-memory record.
 	var stagedIndexes []*stagedSegmentIndexMutation
 	if len(indexBuildIDs) > 0 {
-		lock.LockManyOrdered(m.indexMeta.keyLock, indexBuildIDs)
-		defer m.indexMeta.keyLock.UnlockMany(indexBuildIDs)
+		m.indexCatalog.LockBuildIDs(indexBuildIDs)
+		defer m.indexCatalog.UnlockBuildIDs(indexBuildIDs)
 	}
 
 	// Snapshot the manifest input, then release segMu before object-storage I/O.
@@ -238,7 +265,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 
 	for i := range commit.CatalogMutation.SegmentIndexes {
 		indexMutation := &commit.CatalogMutation.SegmentIndexes[i]
-		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation)
+		staged, err := m.indexCatalog.StageSegmentIndexMutation(*indexMutation)
 		if err != nil {
 			if errors.Is(err, errSegmentIndexRecordGone) {
 				mlog.Warn(ctx, "index task no longer exists, discarding manifest commit",
@@ -773,7 +800,7 @@ var segmentManifestLockEscalationThreshold = 30 * time.Second
 //     m.UpdateSegmentsInfo call: a single segMu critical section, one catalog write.
 //
 // Lock order is segmentManifestLocks -> segMu (the manifest locks are all held
-// before UpdateSegmentsInfo takes segMu). indexMeta.keyLock never enters this path
+// before UpdateSegmentsInfo takes segMu). the SegmentIndexCatalog build-ID lock never enters this path
 // at all, because SegmentIndex mutations are rejected below; the single-segment
 // commit, which does take it, orders it BEFORE segMu. No caller may hold segMu.
 //

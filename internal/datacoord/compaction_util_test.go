@@ -91,11 +91,12 @@ func TestCompactionCandidateAndSelectability(t *testing.T) {
 		{
 			name: "snapshot protection is a shared selectability blocker",
 			mutate: func(meta *meta, segment *SegmentInfo) {
-				meta.snapshotMeta = &snapshotMeta{
+				snapMeta := &snapshotMeta{
 					segmentProtectionUntil: map[int64]uint64{
 						segment.GetID(): uint64(time.Now().Add(time.Hour).Unix()),
 					},
 				}
+				meta.compactionProtection = snapMeta
 			},
 			wantMix: true,
 		},

@@ -67,8 +67,8 @@ func buildManifestIndexInfo(m *meta, segment *SegmentInfo, segIdx *model.Segment
 		return packed.ManifestIndexInfo{}, err
 	}
 
-	indexParams := m.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-	properties := common.KeyValuePairs(m.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)).ToMap()
+	indexParams := m.indexCatalog.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
+	properties := common.KeyValuePairs(m.indexCatalog.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)).ToMap()
 	for key, value := range common.KeyValuePairs(indexParams).ToMap() {
 		properties[key] = value
 	}
@@ -80,10 +80,10 @@ func buildManifestIndexInfo(m *meta, segment *SegmentInfo, segIdx *model.Segment
 	}
 	properties[common.IndexTypeKey] = indexType
 
-	fieldID := m.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
+	fieldID := m.indexCatalog.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 	return packed.ManifestIndexInfo{
 		ColumnName:                collectionFieldName(m, segIdx.CollectionID, fieldID),
-		IndexName:                 m.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
+		IndexName:                 m.indexCatalog.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
 		IndexType:                 indexType,
 		Path:                      relativePath,
 		FieldID:                   fieldID,
@@ -318,11 +318,11 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 			}
 		}
 		for _, segIdx := range indexes {
-			if _, ok := m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID); ok {
+			if m.indexCatalog.HasBuildInfo(segIdx.BuildID) {
 				continue
 			}
-			m.indexMeta.updateSegmentIndex(segIdx)
-			m.indexMeta.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID, float64(segIdx.IndexSerializedSize))
+			m.indexCatalog.UpdateSegmentIndex(segIdx)
+			m.indexCatalog.AddStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID, float64(segIdx.IndexSerializedSize))
 			installed++
 		}
 	}

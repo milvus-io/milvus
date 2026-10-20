@@ -68,6 +68,11 @@ type GcOption struct {
 	// wired by the server from ImportMeta so the orphan scan never deletes an
 	// active job's import_v3/{job_id}/ prefix. nil disables the import_v3 scan.
 	importJobAlive func(ctx context.Context, jobID int64) bool
+
+	// indexMeta, analyzeMeta and snapshotMeta are the domain metas the collector reads.
+	indexMeta    *indexMeta
+	analyzeMeta  *analyzeMeta
+	snapshotMeta *snapshotMeta
 }
 
 type DataViewGarbageCollector interface {
@@ -827,7 +832,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 	// point query on the pre-computed segmentReferencedByGC set). The per-call caching
 	// that used to be needed here is no longer necessary because the lookups are now
 	// direct set/map reads.
-	snapshotMeta := gc.meta.GetSnapshotMeta()
+	snapshotMeta := gc.option.snapshotMeta
 	isSnapshotProtected := func(segmentID, collectionID int64) bool {
 		if snapshotMeta == nil {
 			return false
@@ -1050,7 +1055,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			droppedCompactTo[to.GetID()] = to
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, true, lo.Values(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.option.indexMeta, true, lo.Values(droppedCompactTo)...)
 	if ctx.Err() != nil {
 		return
 	}
@@ -1102,7 +1107,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		// Skip segments protected by snapshot references. IsSegmentGCBlocked is O(1)
 		// and embeds the "RefIndex not loaded → fail-closed" check, so we don't need
 		// a separate loaded-state probe.
-		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
+		if snapshotMeta := gc.option.snapshotMeta; snapshotMeta != nil {
 			if snapshotMeta.IsSegmentGCBlocked(segment.GetCollectionID(), segmentID) {
 				log.Info(ctx, "skip GC segment since it is protected by snapshot",
 					mlog.Int64("collectionID", segment.GetCollectionID()),
@@ -1213,7 +1218,7 @@ const (
 
 func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, gcBlockReason) {
 	segIndexes := gc.getAllSegmentIndexesForDroppedSegment(segmentID)
-	if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
+	if snapshotMeta := gc.option.snapshotMeta; snapshotMeta != nil {
 		for _, segIdx := range segIndexes {
 			if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
 				return segIndexes, nil, gcBlockedBySnapshot
@@ -1312,7 +1317,7 @@ func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, io *packe
 	}
 	files := make(map[string]struct{})
 	for _, manifestIndex := range manifestIndexes {
-		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil &&
+		if snapshotMeta := gc.option.snapshotMeta; snapshotMeta != nil &&
 			snapshotMeta.IsBuildIDGCBlocked(segment.GetCollectionID(), manifestIndex.BuildID) {
 			return nil, true, nil
 		}
@@ -1336,7 +1341,7 @@ func (gc *garbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIn
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := gc.meta.indexMeta.DeleteTask(segIdx.BuildID); err != nil {
+		if err := gc.option.indexMeta.DeleteTask(segIdx.BuildID); err != nil {
 			mlog.Warn(ctx, "failed to mark segment index task deleted before GC",
 				mlog.FieldSegmentID(segIdx.SegmentID), mlog.FieldBuildID(segIdx.BuildID), mlog.Err(err))
 			return err
@@ -1346,15 +1351,15 @@ func (gc *garbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIn
 }
 
 // getAllSegmentIndexesForDroppedSegment wraps indexMeta.GetAllSegmentIndexes
-// with a defensive nil guard. Production newMeta always wires indexMeta, but
+// with a defensive nil guard. Production initGarbageCollection always wires indexMeta, but
 // the guard is cheap and turns any unexpected nil into "no index records"
 // instead of a panic during a GC sweep — keeping a single misbuilt gc
 // instance from taking the whole datacoord down.
 func (gc *garbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int64) []*model.SegmentIndex {
-	if gc.meta == nil || gc.meta.indexMeta == nil {
+	if gc.option.indexMeta == nil {
 		return nil
 	}
-	return gc.meta.indexMeta.GetAllSegmentIndexes(segmentID)
+	return gc.option.indexMeta.GetAllSegmentIndexes(segmentID)
 }
 
 // v3SegmentGCPrefix accepts canonical and legacy namespaces beneath the root,
@@ -1469,7 +1474,7 @@ func (gc *garbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, s
 		return nil
 	}
 	for _, segIdx := range segIndexes {
-		if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
+		if err := gc.option.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
 			return err
 		}
 	}
@@ -1706,7 +1711,7 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-c
 		log.Info(ctx, "recycleUnusedIndexes done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
-	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexes()
+	deletedIndexes := gc.option.indexMeta.GetDeletedIndexes()
 	for _, index := range deletedIndexes {
 		if ctx.Err() != nil {
 			// process canceled.
@@ -1718,7 +1723,7 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-c
 		gc.ackSignal(signal)
 
 		log := mlog.With(mlog.Int64("collectionID", index.CollectionID), mlog.Int64("fieldID", index.FieldID), mlog.Int64("indexID", index.IndexID))
-		if err := gc.meta.indexMeta.RemoveIndex(ctx, index.CollectionID, index.IndexID); err != nil {
+		if err := gc.option.indexMeta.RemoveIndex(ctx, index.CollectionID, index.IndexID); err != nil {
 			log.Warn(ctx, "remove index on collection fail", mlog.Err(err))
 			continue
 		}
@@ -1752,7 +1757,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 	defer io.Close()
 	groups := make(map[int64][]*model.SegmentIndex)
 	segmentOrder := make([]int64, 0)
-	for _, candidate := range gc.meta.indexMeta.GetAllSegIndexes() {
+	for _, candidate := range gc.option.indexMeta.GetAllSegIndexes() {
 		if candidate == nil {
 			continue
 		}
@@ -1792,7 +1797,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 
 		// 1. segment belongs to is deleted.
 		// 2. index is deleted.
-		if segment != nil && gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+		if segment != nil && gc.option.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			continue
 		}
 		// Non-terminal tasks may still be writing index files or updating meta.
@@ -1809,7 +1814,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 				mlog.String("state", segIdx.IndexState.String()))
 			continue
 		}
-		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil &&
+		if snapshotMeta := gc.option.snapshotMeta; snapshotMeta != nil &&
 			snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
 			mlog.Info(ctx, "skip GC segment index since buildID is protected by snapshot",
 				mlog.Int64("collectionID", segIdx.CollectionID),
@@ -1884,7 +1889,7 @@ func (gc *garbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, i
 		log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
 		return
 	}
-	if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+	if err := gc.option.indexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
 		log.Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
 		return
 	}
@@ -1937,7 +1942,7 @@ func (gc *garbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 		// further manifest revision; remove any surviving records via the legacy
 		// idempotent path so they do not strand the already-deleted files.
 		for _, item := range ready {
-			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+			if err := gc.option.indexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
 				segmentIndexGCLog(item).Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
 			}
 		}
@@ -2007,10 +2012,10 @@ func (gc *garbageCollector) getLatestSegmentIndexForGC(candidate *model.SegmentI
 	if candidate == nil {
 		return nil, false
 	}
-	if gc.meta == nil || gc.meta.indexMeta == nil || gc.meta.indexMeta.segmentBuildInfo == nil {
+	if gc.option.indexMeta == nil || gc.option.indexMeta.segmentBuildInfo == nil {
 		return candidate, true
 	}
-	return gc.meta.indexMeta.GetIndexJob(candidate.BuildID)
+	return gc.option.indexMeta.GetIndexJob(candidate.BuildID)
 }
 
 // recycleUnusedIndexFilesV0 deletes orphan files under the legacy v0 index_files prefix.
@@ -2025,7 +2030,7 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 
 	// Resolve snapshotMeta once. Both IsBuildIDGCBlocked paths below are O(1) so
 	// no caching of intermediate state is needed.
-	snapshotMeta := gc.meta.GetSnapshotMeta()
+	snapshotMeta := gc.option.snapshotMeta
 
 	// list dir first
 	keyCount := 0
@@ -2043,7 +2048,7 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 		}
 		logger = logger.With(mlog.Int64("buildID", buildID))
 		logger.Info(ctx, "garbageCollector will recycle index files")
-		canRecycle, segIdx := gc.meta.indexMeta.CheckCleanSegmentIndex(buildID)
+		canRecycle, segIdx := gc.option.indexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
 			// Even if the index is marked as deleted, the index file will not be recycled, wait for the next gc,
 			// and delete all index files about the buildID at one time.
@@ -2176,7 +2181,7 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 
 	rootPath := gc.option.cli.RootPath()
 	prefix := path.Join(rootPath, common.SegmentIndexV1Path) + "/"
-	snapshotMeta := gc.meta.GetSnapshotMeta()
+	snapshotMeta := gc.option.snapshotMeta
 
 	// The decision for the build currently being walked is cached: a build's
 	// keys share its prefix and are listed together, so one entry avoids
@@ -2200,7 +2205,7 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
 			// Keep everything; nil decision fields mean "reclaim nothing".
 			return d
 		}
-		canRecycle, segIdx := gc.meta.indexMeta.CheckCleanSegmentIndex(buildID)
+		canRecycle, segIdx := gc.option.indexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
 			return d
 		}
@@ -2327,7 +2332,7 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signa
 			continue
 		}
 		mlog.Info(ctx, "garbageCollector will recycle analyze stats files", mlog.Int64("taskID", taskID))
-		canRecycle, task := gc.meta.analyzeMeta.CheckCleanAnalyzeTask(taskID)
+		canRecycle, task := gc.option.analyzeMeta.CheckCleanAnalyzeTask(taskID)
 		if !canRecycle {
 			// Even if the analysis task is marked as deleted, the analysis stats file will not be recycled, wait for the next gc,
 			// and delete all index files about the taskID at one time.
@@ -2385,7 +2390,7 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 	fileNum := 0
 	deletedFilesNum := atomic.NewInt32(0)
 
-	snapshotMeta := gc.meta.GetSnapshotMeta()
+	snapshotMeta := gc.option.snapshotMeta
 
 	for _, seg := range hasTextIndexSegments {
 		if ctx.Err() != nil {
@@ -2471,7 +2476,7 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 	deletedFilesNum := atomic.NewInt32(0)
 	maxJSONStatsDataFormat := int64(1)
 
-	snapshotMeta := gc.meta.GetSnapshotMeta()
+	snapshotMeta := gc.option.snapshotMeta
 
 	for _, seg := range hasJSONStatsSegments {
 		if ctx.Err() != nil {
@@ -2610,7 +2615,7 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 		}
 
 		// Skip segments whose files are still referenced by snapshots.
-		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
+		if snapshotMeta := gc.option.snapshotMeta; snapshotMeta != nil {
 			if snapshotMeta.IsSegmentGCBlocked(seg.GetCollectionID(), seg.GetID()) {
 				log.Info(ctx, "skip GC JSON index files since segment is protected by snapshot",
 					mlog.Int64("segmentID", seg.GetID()),
@@ -2692,7 +2697,7 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 		log.Info(ctx, "recycleSnapshots done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
-	snapshotMeta := gc.meta.GetSnapshotMeta()
+	snapshotMeta := gc.option.snapshotMeta
 	if snapshotMeta == nil {
 		log.Warn(ctx, "snapshotMeta is nil, skip recycleSnapshots")
 		return

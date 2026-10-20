@@ -55,11 +55,16 @@ type clusteringCompactionTask struct {
 	plan      *datapb.CompactionPlan
 	result    *datapb.CompactionPlanResult
 
-	allocator        allocator.Allocator
-	meta             CompactionMeta
-	handler          Handler
-	analyzeScheduler globalTask.GlobalScheduler
-	ievm             IndexEngineVersionManager
+	allocator             allocator.Allocator
+	meta                  CompactionMeta
+	compactionTaskMeta    *compactionTaskMeta
+	indexMeta             *indexMeta
+	analyzeMeta           *analyzeMeta
+	partitionStatsMeta    *partitionStatsMeta
+	partitionStatsCleaner PartitionStatsCleaner
+	handler               Handler
+	analyzeScheduler      globalTask.GlobalScheduler
+	ievm                  IndexEngineVersionManager
 
 	maxRetryTimes int32
 
@@ -287,15 +292,20 @@ func (t *clusteringCompactionTask) GetTaskProto() *datapb.CompactionTask {
 	return task.(*datapb.CompactionTask)
 }
 
-func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, handler Handler, analyzeScheduler globalTask.GlobalScheduler, ievm IndexEngineVersionManager) *clusteringCompactionTask {
+func newClusteringCompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, compactionTaskMeta *compactionTaskMeta, indexMeta *indexMeta, analyzeMeta *analyzeMeta, partitionStatsMeta *partitionStatsMeta, partitionStatsCleaner PartitionStatsCleaner, handler Handler, analyzeScheduler globalTask.GlobalScheduler, ievm IndexEngineVersionManager) *clusteringCompactionTask {
 	task := &clusteringCompactionTask{
-		allocator:        allocator,
-		meta:             meta,
-		handler:          handler,
-		analyzeScheduler: analyzeScheduler,
-		ievm:             ievm,
-		maxRetryTimes:    3,
-		times:            taskcommon.NewTimes(),
+		allocator:             allocator,
+		meta:                  meta,
+		compactionTaskMeta:    compactionTaskMeta,
+		indexMeta:             indexMeta,
+		analyzeMeta:           analyzeMeta,
+		partitionStatsMeta:    partitionStatsMeta,
+		partitionStatsCleaner: partitionStatsCleaner,
+		handler:               handler,
+		analyzeScheduler:      analyzeScheduler,
+		ievm:                  ievm,
+		maxRetryTimes:         3,
+		times:                 taskcommon.NewTimes(),
 	}
 	task.taskProto.Store(t)
 	return task
@@ -562,7 +572,7 @@ func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments 
 
 func (t *clusteringCompactionTask) processIndexing() error {
 	// wait for segment indexed
-	collectionIndexes := t.meta.GetIndexMeta().GetIndexesForCollection(t.GetTaskProto().GetCollectionID(), "")
+	collectionIndexes := t.indexMeta.GetIndexesForCollection(t.GetTaskProto().GetCollectionID(), "")
 	if len(collectionIndexes) == 0 {
 		mlog.Debug(context.TODO(), "the collection has no index, no need to do indexing")
 		return t.completeTask()
@@ -570,7 +580,7 @@ func (t *clusteringCompactionTask) processIndexing() error {
 	indexed := func() bool {
 		for _, collectionIndex := range collectionIndexes {
 			for _, segmentID := range t.GetTaskProto().GetResultSegments() {
-				segmentIndexState := t.meta.GetIndexMeta().GetSegmentIndexState(t.GetTaskProto().GetCollectionID(), segmentID, collectionIndex.IndexID)
+				segmentIndexState := t.indexMeta.GetSegmentIndexState(t.GetTaskProto().GetCollectionID(), segmentID, collectionIndex.IndexID)
 				mlog.Debug(context.TODO(), "segment index state", mlog.String("segment", segmentIndexState.String()))
 				if segmentIndexState.GetState() != commonpb.IndexState_Finished {
 					return false
@@ -631,7 +641,7 @@ func (t *clusteringCompactionTask) completeTask() error {
 	// composite catalog write (info first, version pointer last as the commit
 	// marker), so a crash cannot leave the current version pointing at a stats
 	// set that was never persisted.
-	if err = t.meta.GetPartitionStatsMeta().SavePartitionStatsAndVersion(&datapb.PartitionStatsInfo{
+	if err = t.partitionStatsMeta.SavePartitionStatsAndVersion(&datapb.PartitionStatsInfo{
 		CollectionID: t.GetTaskProto().GetCollectionID(),
 		PartitionID:  t.GetTaskProto().GetPartitionID(),
 		VChannel:     t.GetTaskProto().GetChannel(),
@@ -663,7 +673,7 @@ func (t *clusteringCompactionTask) completeTask() error {
 }
 
 func (t *clusteringCompactionTask) processAnalyzing() error {
-	analyzeTask := t.meta.GetAnalyzeMeta().GetTask(t.GetTaskProto().GetAnalyzeTaskID())
+	analyzeTask := t.analyzeMeta.GetTask(t.GetTaskProto().GetAnalyzeTaskID())
 	if analyzeTask == nil {
 		mlog.Warn(context.TODO(), "analyzeTask not found", mlog.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()))
 		return merr.WrapErrAnalyzeTaskNotFound(t.GetTaskProto().GetAnalyzeTaskID()) // retryable
@@ -771,7 +781,7 @@ func (t *clusteringCompactionTask) doClean() error {
 			Version:      t.GetTaskProto().GetPlanID(),
 			SegmentIDs:   t.GetTaskProto().GetResultSegments(),
 		}
-		err := t.meta.CleanPartitionStatsInfo(context.TODO(), partitionStatsInfo)
+		err := t.partitionStatsCleaner.CleanPartitionStatsInfo(context.TODO(), partitionStatsInfo)
 		if err != nil {
 			mlog.Warn(context.TODO(), "gcPartitionStatsInfo fail", mlog.Err(err))
 			return merr.WrapErrCleanPartitionStatsFail(fmt.Sprintf("%d-%d-%s-%d", t.GetTaskProto().GetCollectionID(), t.GetTaskProto().GetPartitionID(), t.GetTaskProto().GetChannel(), t.GetTaskProto().GetPlanID()))
@@ -802,13 +812,13 @@ func (t *clusteringCompactionTask) doAnalyze() error {
 		TaskID:       t.GetTaskProto().GetAnalyzeTaskID(),
 		State:        indexpb.JobState_JobStateInit,
 	}
-	err := t.meta.GetAnalyzeMeta().AddAnalyzeTask(analyzeTask)
+	err := t.analyzeMeta.AddAnalyzeTask(analyzeTask)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to create analyze task", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
 		return err
 	}
 
-	t.analyzeScheduler.Enqueue(newAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta.(*meta)))
+	t.analyzeScheduler.Enqueue(newAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta.(*meta), t.analyzeMeta))
 
 	mlog.Info(context.TODO(), "submit analyze task", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.Int64("collectionID", t.GetTaskProto().GetCollectionID()), mlog.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()))
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_analyzing))
@@ -911,7 +921,7 @@ func (t *clusteringCompactionTask) updateAndSaveTaskMeta(opts ...compactionTaskO
 }
 
 func (t *clusteringCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(context.TODO(), task)
+	return t.compactionTaskMeta.SaveCompactionTask(context.TODO(), task)
 }
 
 func (t *clusteringCompactionTask) SaveTaskMeta() error {

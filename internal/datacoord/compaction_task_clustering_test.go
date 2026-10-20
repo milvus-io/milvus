@@ -61,6 +61,7 @@ type ClusteringCompactionTaskSuite struct {
 	mockID    atomic.Int64
 	mockAlloc *allocator.MockAllocator
 	meta      *meta
+	dm        *compactionTaskTestMetas
 	handler   *NMockHandler
 
 	analyzeScheduler task.GlobalScheduler
@@ -72,9 +73,11 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(ctx, catalog, cm, metacache.NewMetaStore(catalog), broker)
+	dm := &compactionTaskTestMetas{}
+	meta, err := newMeta(ctx, catalog, cm, metacache.NewMetaStore(catalog), broker, loadCompactionTaskTestMetas(catalog, cm, dm))
 	s.NoError(err)
 	s.meta = meta
+	s.dm = dm
 
 	s.mockID.Store(time.Now().UnixMilli())
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
@@ -354,7 +357,7 @@ func (s *ClusteringCompactionTaskSuite) generateBasicTask(vectorClusteringKey bo
 		ResultSegments:     []int64{1000, 1100},
 	}
 
-	task := newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.handler, s.analyzeScheduler, newMockVersionManager())
+	task := newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.dm.compactionTaskMeta, s.dm.indexMeta, s.dm.analyzeMeta, s.dm.partitionStatsMeta, newPartitionStatsCleaner(s.meta.chunkManager, s.meta.catalog, s.dm.analyzeMeta, s.dm.partitionStatsMeta), s.handler, s.analyzeScheduler, newMockVersionManager())
 	task.maxRetryTimes = 0
 	return task
 }
@@ -396,7 +399,7 @@ func (s *ClusteringCompactionTaskSuite) newNamespaceClusteringTask(enableNamespa
 		},
 		PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 1, End: 100},
 	}
-	return newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.handler, s.analyzeScheduler, newMockVersionManager())
+	return newClusteringCompactionTask(compactionTask, s.mockAlloc, s.meta, s.dm.compactionTaskMeta, s.dm.indexMeta, s.dm.analyzeMeta, s.dm.partitionStatsMeta, newPartitionStatsCleaner(s.meta.chunkManager, s.meta.catalog, s.dm.analyzeMeta, s.dm.partitionStatsMeta), s.handler, s.analyzeScheduler, newMockVersionManager())
 }
 
 func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFileResources() {
@@ -740,7 +743,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing))
 
 		task.updateAndSaveTaskMeta(setResultSegments([]int64{10, 11}))
-		err := s.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err := s.dm.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 1,
 			FieldID:      3,
 			IndexID:      3,
@@ -754,20 +757,20 @@ func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
 	s.Run("collection has index, segment indexed", func() {
 		task := s.generateBasicTask(false)
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing))
-		err := s.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err := s.dm.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 1,
 			FieldID:      3,
 			IndexID:      3,
 		})
 		s.NoError(err)
 
-		s.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		s.dm.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			IndexID:      3,
 			SegmentID:    1000,
 			CollectionID: 1,
 			IndexState:   commonpb.IndexState_Finished,
 		})
-		s.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		s.dm.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			IndexID:      3,
 			SegmentID:    1100,
 			CollectionID: 1,
@@ -798,7 +801,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 			TaskID:       7,
 			State:        indexpb.JobState_JobStateFailed,
 		}
-		s.meta.analyzeMeta.AddAnalyzeTask(t)
+		s.dm.analyzeMeta.AddAnalyzeTask(t)
 		s.True(task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 	})
@@ -815,7 +818,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 			State:         indexpb.JobState_JobStateFinished,
 			CentroidsFile: "",
 		}
-		s.meta.analyzeMeta.AddAnalyzeTask(t)
+		s.dm.analyzeMeta.AddAnalyzeTask(t)
 		s.True(task.Process())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 	})
@@ -832,7 +835,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 			State:         indexpb.JobState_JobStateFinished,
 			CentroidsFile: "somewhere",
 		}
-		s.meta.analyzeMeta.AddAnalyzeTask(t)
+		s.dm.analyzeMeta.AddAnalyzeTask(t)
 		s.meta.AddSegment(context.TODO(), &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:    101,
@@ -858,12 +861,11 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 func (s *ClusteringCompactionTaskSuite) TestCompleteTask() {
 	task := s.generateBasicTask(false)
 	task.completeTask()
-	partitionStats := s.meta.GetPartitionStatsMeta().GetPartitionStats(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID(), task.GetTaskProto().GetChannel(), task.GetTaskProto().GetPlanID())
+	partitionStats := s.dm.partitionStatsMeta.GetPartitionStats(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID(), task.GetTaskProto().GetChannel(), task.GetTaskProto().GetPlanID())
 	s.True(partitionStats.GetCommitTime() > time.Now().Add(-2*time.Second).Unix())
 }
 
 const (
-	Int64Field    = "int64Field"
 	FloatVecField = "floatVecField"
 )
 
@@ -1109,7 +1111,7 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 		// Fault-inject: the FIRST persistence attempt fails (transient etcd),
 		// the second succeeds. No DropCompaction may be issued in this branch --
 		// the worker keeps the failed entry until doCompact drops it.
-		realCatalog := s.meta.compactionTaskMeta.catalog
+		realCatalog := s.dm.compactionTaskMeta.catalog
 		failing := catalogmocks.NewDataCoordCatalog(s.T())
 		calls := 0
 		failing.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(
@@ -1120,8 +1122,8 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 				}
 				return realCatalog.SaveCompactionTask(ctx, t)
 			})
-		s.meta.compactionTaskMeta.catalog = failing
-		defer func() { s.meta.compactionTaskMeta.catalog = realCatalog }()
+		s.dm.compactionTaskMeta.catalog = failing
+		defer func() { s.dm.compactionTaskMeta.catalog = realCatalog }()
 
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(retryableResult(), nil).Times(2)

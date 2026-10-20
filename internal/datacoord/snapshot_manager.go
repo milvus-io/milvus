@@ -1463,12 +1463,6 @@ func (sm *snapshotManager) handleExternalRestoreSourceError(
 	return jobID, nil
 }
 
-func isPermanentSnapshotError(err error) bool {
-	return errors.Is(err, merr.ErrDataIntegrity) ||
-		merr.GetErrorType(err) == merr.InputError ||
-		merr.IsNonRetryableErr(err)
-}
-
 // ============================================================================
 // Restore Helper Functions (private)
 // ============================================================================
@@ -1865,19 +1859,6 @@ func (sm *snapshotManager) UnpinSnapshotData(ctx context.Context, pinID int64) e
 		setSnapshotActivePinsGauge(collID, name, active)
 	}
 	return nil
-}
-
-// setSnapshotActivePinsGauge publishes the active-pins gauge for a snapshot.
-// When active falls to zero we drop the label series to keep Prometheus
-// cardinality bounded — otherwise every dropped snapshot leaves behind a
-// stale series until process restart.
-func setSnapshotActivePinsGauge(collectionID int64, name string, active int) {
-	label := []string{strconv.FormatInt(collectionID, 10), name}
-	if active == 0 {
-		metrics.DataCoordSnapshotActivePins.DeleteLabelValues(label...)
-		return
-	}
-	metrics.DataCoordSnapshotActivePins.WithLabelValues(label...).Set(float64(active))
 }
 
 // deleteSnapshotActivePinsGauge drops the active-pins gauge series for a

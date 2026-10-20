@@ -47,7 +47,7 @@ import (
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	// Call createImportJobFromAck directly instead of ImportV2
 	// ImportV2 is only for proxy broadcast, not for ack callback
-	importResp, err := c.createImportJobFromAck(ctx, result)
+	importResp, err := c.CreateImportJobFromAck(ctx, result)
 
 	err = merr.CheckRPCCall(importResp, err)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
@@ -74,7 +74,7 @@ func importFilesFromMessage(msgFiles []*msgpb.ImportFile, options importutilv2.O
 	return files
 }
 
-// validateImportRequest validates the import request before broadcasting.
+// ValidateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
 //
 // All of this runs before the broadcaster's idempotency lookup, which cannot happen
@@ -82,12 +82,12 @@ func importFilesFromMessage(msgFiles []*msgpb.ImportFile, options importutilv2.O
 // these checks again before it can resolve to its original jobID, and not all of them
 // are a pure function of the request: ValidateMaxImportJobExceed counts in-flight jobs,
 // ValidateBinlogImportRequest lists the backup files in object storage, and
-// validateImportReplication reads the replication topology. A retry sent while the job
+// ValidateImportReplication reads the replication topology. A retry sent while the job
 // limit is saturated -- by the original request among others -- or after the backup
 // files or the replication topology changed is rejected here rather than returning the
 // original jobID. Retrying the same key once the limit frees up resolves normally;
 // minting a fresh key instead is what would import the data twice.
-func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+func (c *DDLCallbacks) ValidateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
 	// Must run before any option is read: checks read options as a repeated KV
 	// (first match wins) while the broadcast body folds them into a map (last
 	// value wins), so a duplicate key would validate under one value and
@@ -117,32 +117,32 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 	// each side. Recorded in the PR's Known limitations rather than guarded
 	// here, since reaching it also requires enableInReplicatingCluster=true,
 	// which defaults to false and refuses every import on a replicating cluster.
-	if err := ValidateImportFilePaths(s.meta.chunkManager, files, options); err != nil {
+	if err := ValidateImportFilePaths(c.Meta.chunkManager, files, options); err != nil {
 		return err
 	}
 
 	// Validate binlog import files if it's a backup
 	if importutilv2.IsBackup(options) && !importutilv2.IsSnapshotSource(options) {
-		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, files, options)
+		err = ValidateBinlogImportRequest(ctx, c.Meta.chunkManager, files, options)
 		if err != nil {
 			return err
 		}
 	}
 
 	// Validate max import job count
-	err = ValidateMaxImportJobExceed(ctx, s.importMeta)
+	err = ValidateMaxImportJobExceed(ctx, c.ImportMeta)
 	if err != nil {
 		return err
 	}
 
-	if err := s.validateImportReplication(ctx, options); err != nil {
+	if err := c.ValidateImportReplication(ctx, options); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (s *Server) validateImportReplication(ctx context.Context, options []*commonpb.KeyValuePair) error {
+func (c *DDLCallbacks) ValidateImportReplication(ctx context.Context, options []*commonpb.KeyValuePair) error {
 	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return err
@@ -167,42 +167,6 @@ func (s *Server) validateImportReplication(ctx context.Context, options []*commo
 	return nil
 }
 
-func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {
-	return cfg != nil && (len(cfg.GetCrossClusterTopology()) > 0 || len(cfg.GetClusters()) > 1)
-}
-
-// getReplicationRole reports this cluster's live replication role (primary/secondary) and
-// whether it is part of a CDC replication topology at all. It is modeled on
-// isReplicatingClusterNow and reads the same balancer channel assignment. A non-nil
-// error means the role could not be determined (a transient balancer error, or
-// OnShutdownError while streamingcoord stops before datacoord); the caller must treat
-// that as indeterminate and NOT allocate, because a secondary that allocated its own
-// range would diverge from the primary's authoritative range. A nil assignment or a
-// non-replicating configuration is an unambiguous "not replicating" → (RolePrimary,
-// false, nil), so a standalone cluster proceeds to allocate and broadcast.
-func (s *Server) getReplicationRole(ctx context.Context) (replicateutil.Role, bool, error) {
-	balancer, err := balance.GetWithContext(ctx)
-	if err != nil {
-		return replicateutil.RolePrimary, false, err
-	}
-	assignment, err := balancer.GetLatestChannelAssignment()
-	if err != nil {
-		return replicateutil.RolePrimary, false, err
-	}
-	if assignment == nil {
-		return replicateutil.RolePrimary, false, nil
-	}
-	cfg := assignment.ReplicateConfiguration
-	if !isReplicatingCluster(cfg) {
-		return replicateutil.RolePrimary, false, nil
-	}
-	helper, err := replicateutil.NewConfigHelper(Params.CommonCfg.ClusterPrefix.GetValue(), cfg)
-	if err != nil {
-		return replicateutil.RolePrimary, true, err
-	}
-	return helper.GetCurrentCluster().Role(), true, nil
-}
-
 // importJobForgotten reports whether a CommitImport for a job that importMeta
 // does not hold can be acknowledged as already applied.
 //
@@ -218,8 +182,8 @@ func (s *Server) getReplicationRole(ctx context.Context) (replicateutil.Role, bo
 // ack callback creates the job, so there the caller must keep waiting. An
 // unknown role (balancer not ready) is reported as an error, so the caller
 // retries instead of guessing.
-func (s *Server) importJobForgotten(ctx context.Context, jobID int64) (bool, error) {
-	role, _, err := s.getReplicationRole(ctx)
+func importJobForgotten(ctx context.Context, jobID int64) (bool, error) {
+	role, _, err := GetReplicationRole(ctx)
 	if err != nil {
 		return false, merr.Wrap(err, "cannot tell whether the import job can still be created")
 	}
@@ -262,9 +226,9 @@ func jobIDFromDuplicatedBroadcast(ctx context.Context, msg message.BroadcastMuta
 	return body.GetJobID(), nil
 }
 
-// broadcastImport broadcasts the import message to all vchannels.
+// BroadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
-func (s *Server) broadcastImport(ctx context.Context,
+func (c *DDLCallbacks) BroadcastImport(ctx context.Context,
 	collectionID int64,
 	partitionIDs []int64,
 	files []*internalpb.ImportFile,
@@ -286,7 +250,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	})
 
 	// Validate the request before broadcasting
-	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
+	if err := c.ValidateImportRequest(ctx, msgFiles, options); err != nil {
 		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
@@ -295,7 +259,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// ships them in the UpdateImport WAL message.
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
+	broadcaster, err := c.StartBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -304,17 +268,17 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// Re-check the replication state now that the broadcast holds the shared-cluster
 	// resource key. AlterReplicateConfig takes the exclusive-cluster key, so it cannot
 	// change the replication topology while this lock is held. The pre-lock check in
-	// validateImportRequest can go stale before the lock is acquired: if CDC was
+	// ValidateImportRequest can go stale before the lock is acquired: if CDC was
 	// enabled in that window, an auto_commit / non-enableInReplicatingCluster import
 	// would otherwise be broadcast into a replicating topology and diverge.
-	if err := s.validateImportReplication(ctx, options); err != nil {
+	if err := c.ValidateImportReplication(ctx, options); err != nil {
 		return 0, false, merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
 	}
-	if err := s.validateSnapshotPartitionTargets(ctx, collectionID, partitionIDs, options); err != nil {
+	if err := c.ValidateSnapshotPartitionTargets(ctx, collectionID, partitionIDs, options); err != nil {
 		return 0, false, err
 	}
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := c.Broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return 0, false, err
 	}
@@ -326,8 +290,8 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return !common.IsSystemField(field.GetFieldID())
 	})
 	var chunkManager storage.ChunkManager
-	if s.meta != nil {
-		chunkManager = s.meta.chunkManager
+	if c.Meta != nil {
+		chunkManager = c.Meta.chunkManager
 	}
 	files, options, err = prepareSnapshotImportFiles(ctx, partitionIDs, chunkManager, schema, files, options)
 	if err != nil {
@@ -403,6 +367,39 @@ func (s *Server) broadcastImport(ctx context.Context,
 	return originalJobID, true, nil
 }
 
+// ValidateSnapshotPartitionTargets rechecks Proxy's name-to-ID resolution while holding the collection broadcast
+// lock. A drop/recreate during snapshot I/O must not redirect already-bound
+// files to another partition with the same name.
+func (c *DDLCallbacks) ValidateSnapshotPartitionTargets(ctx context.Context, collectionID int64,
+	partitionIDs []int64, options importutilv2.Options,
+) error {
+	mapping, err := importutilv2.GetPartitionMapping(options)
+	if err != nil || mapping == nil {
+		return err
+	}
+	partitions, err := c.Broker.ShowPartitions(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	if len(partitions.GetPartitionNames()) != len(partitions.GetPartitionIDs()) {
+		return merr.WrapErrServiceInternalMsg("partition metadata has mismatched names and IDs")
+	}
+	current := make(map[string]int64)
+	for i, name := range partitions.GetPartitionNames() {
+		current[name] = partitions.GetPartitionIDs()[i]
+	}
+	names := importutilv2.PartitionMappingTargets(mapping)
+	if len(names) != len(partitionIDs) {
+		return merr.WrapErrServiceInternalMsg("partition_mapping destination count changed")
+	}
+	for i, name := range names {
+		if current[name] != partitionIDs[i] {
+			return merr.WrapErrServiceUnavailableMsg("target partition %s changed while preparing snapshot import; retry the request", name)
+		}
+	}
+	return nil
+}
+
 func validateSnapshotImportMessageSize(msg message.BroadcastMutableMessage) error {
 	// Count the complete encoded reference message, including schema/options
 	// and header properties. The portable ceiling leaves headroom in the default
@@ -439,9 +436,9 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	jobID := header.GetJobId()
 	mlog.Info(ctx, "CommitImport broadcast ack received", mlog.FieldJobID(jobID))
 
-	job := c.importMeta.GetJob(ctx, jobID)
+	job := c.ImportMeta.GetJob(ctx, jobID)
 	if job == nil {
-		forgotten, err := c.importJobForgotten(ctx, jobID)
+		forgotten, err := importJobForgotten(ctx, jobID)
 		if err != nil {
 			return err
 		}
@@ -455,18 +452,18 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	case internalpb.ImportJobState_Uncommitted:
 		// Protect visibility updates from timeout/cleanup, including a crash
 		// after segment persistence but before the final Completed write.
-		if err := c.importMeta.UpdateJob(ctx, jobID, UpdateJobState(internalpb.ImportJobState_Committing)); err != nil {
+		if err := c.ImportMeta.UpdateJob(ctx, jobID, UpdateJobState(internalpb.ImportJobState_Committing)); err != nil {
 			return err
 		}
-		if c.importMeta.GetJob(ctx, jobID).GetState() == internalpb.ImportJobState_Failed {
+		if c.ImportMeta.GetJob(ctx, jobID).GetState() == internalpb.ImportJobState_Failed {
 			// A concurrent timeout won before the commit phase was persisted.
 			return nil
 		}
 	case internalpb.ImportJobState_Committing:
 		// Retry the same callback after an interrupted commit.
 	case internalpb.ImportJobState_Completed:
-		if c.meta != nil {
-			c.meta.recomputeDataView(ctx, job.GetCollectionID())
+		if c.Meta != nil {
+			c.Meta.recomputeDataView(ctx, job.GetCollectionID())
 		}
 		mlog.Info(ctx, "CommitImport: job already completed, no-op",
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
@@ -502,7 +499,7 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 			// not be used as a segment commit timestamp.
 			continue
 		}
-		segIDs := c.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+		segIDs := getImportSegmentIDsByVchannel(ctx, c.ImportMeta, c.Meta, jobID, vchannel)
 		if len(segIDs) == 0 {
 			continue
 		}
@@ -515,19 +512,19 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		}
 	}
 	if len(ops) > 0 {
-		if err := c.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
+		if err := c.Meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
 			return err
 		}
 	}
 
 	// Import visibility now commits in this callback rather than the legacy
 	// per-channel RPC. Preserve DataView reconciliation after SegmentMeta.
-	if c.meta != nil {
-		c.meta.recomputeDataView(ctx, job.GetCollectionID())
+	if c.Meta != nil {
+		c.Meta.recomputeDataView(ctx, job.GetCollectionID())
 	}
 
 	completeTime := time.Now().Format(time.RFC3339)
-	if err := c.importMeta.UpdateJob(ctx, jobID,
+	if err := c.ImportMeta.UpdateJob(ctx, jobID,
 		UpdateJobState(internalpb.ImportJobState_Completed),
 		UpdateJobCompleteTime(completeTime),
 	); err != nil {
@@ -552,7 +549,7 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 	jobID := header.GetJobId()
 	mlog.Info(ctx, "RollbackImport broadcast ack received", mlog.FieldJobID(jobID))
 
-	job := c.importMeta.GetJob(ctx, jobID)
+	job := c.ImportMeta.GetJob(ctx, jobID)
 	if job == nil {
 		mlog.Warn(ctx, "RollbackImport: job not found, skipping", mlog.FieldJobID(jobID))
 		return nil
@@ -566,7 +563,7 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		return nil
 	}
 
-	return c.importMeta.UpdateJob(ctx, jobID,
+	return c.ImportMeta.UpdateJob(ctx, jobID,
 		UpdateJobState(internalpb.ImportJobState_Failed),
 		UpdateJobReason(importJobReasonAbortedByUser),
 	)
@@ -584,7 +581,7 @@ func (c *DDLCallbacks) updateImportAckCallback(ctx context.Context, result messa
 	jobID := header.GetJobId()
 	body := result.Message.MustBody()
 
-	job := c.importMeta.GetJob(ctx, jobID)
+	job := c.ImportMeta.GetJob(ctx, jobID)
 	if job == nil {
 		// No local job, and none will appear: the ImportMsg broadcast precedes UpdateImport
 		// on every channel (on the primary ImportV2 does not even return until the
@@ -626,7 +623,7 @@ func (c *DDLCallbacks) updateImportAckCallback(ctx context.Context, result messa
 			reason := fmt.Sprintf("UpdateImport carries %d rows but no ID range was assigned locally (cross-cluster file divergence)", peerRows)
 			mlog.Warn(ctx, "UpdateImport arrived for a job without ID ranges; failing import",
 				mlog.FieldJobID(jobID), mlog.Int64("peerRows", peerRows))
-			return c.importMeta.UpdateJob(ctx, jobID,
+			return c.ImportMeta.UpdateJob(ctx, jobID,
 				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
 		}
 		mlog.Info(ctx, "UpdateImport: job already past the range gate, no-op",
@@ -650,7 +647,7 @@ func (c *DDLCallbacks) updateImportAckCallback(ctx context.Context, result messa
 		reason := fmt.Sprintf("UpdateImport carries %d file ranges but the job has %d files", len(idRanges), len(files))
 		mlog.Warn(ctx, "UpdateImport file count does not match the job; failing import",
 			mlog.FieldJobID(jobID), mlog.Int("fileRanges", len(idRanges)), mlog.Int("jobFiles", len(files)))
-		return c.importMeta.UpdateJob(ctx, jobID,
+		return c.ImportMeta.UpdateJob(ctx, jobID,
 			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
 	}
 	for idx := range idRanges {
@@ -658,7 +655,7 @@ func (c *DDLCallbacks) updateImportAckCallback(ctx context.Context, result messa
 			reason := fmt.Sprintf("UpdateImport file index %d out of range [0,%d)", idx, len(files))
 			mlog.Warn(ctx, "UpdateImport file index out of range; failing import",
 				mlog.FieldJobID(jobID), mlog.Int64("index", idx), mlog.Int("jobFiles", len(files)))
-			return c.importMeta.UpdateJob(ctx, jobID,
+			return c.ImportMeta.UpdateJob(ctx, jobID,
 				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
 		}
 	}
@@ -693,7 +690,7 @@ func (c *DDLCallbacks) updateImportAckCallback(ctx context.Context, result messa
 		ranges[idx] = r
 		totalReserved += r.GetEnd() - r.GetBegin()
 	}
-	if err := c.importMeta.UpdateJob(ctx, jobID, UpdateJobIDRanges(ranges)); err != nil {
+	if err := c.ImportMeta.UpdateJob(ctx, jobID, UpdateJobIDRanges(ranges)); err != nil {
 		// Transient persistence failure → return the error so the scheduler retries.
 		return err
 	}

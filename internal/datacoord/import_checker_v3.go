@@ -52,6 +52,7 @@ import (
 type importCheckerV3 struct {
 	ctx        context.Context
 	meta       *meta
+	indexMeta  *indexMeta
 	broker     broker.Broker
 	alloc      allocator.Allocator
 	importMeta ImportMeta
@@ -65,6 +66,7 @@ type importCheckerV3 struct {
 
 func NewImportCheckerV3(ctx context.Context,
 	meta *meta,
+	indexMeta *indexMeta,
 	broker broker.Broker,
 	alloc allocator.Allocator,
 	importMeta ImportMeta,
@@ -74,6 +76,7 @@ func NewImportCheckerV3(ctx context.Context,
 	return &importCheckerV3{
 		ctx:        ctx,
 		meta:       meta,
+		indexMeta:  indexMeta,
 		broker:     broker,
 		alloc:      alloc,
 		importMeta: importMeta,

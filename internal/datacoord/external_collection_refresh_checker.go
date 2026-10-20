@@ -52,10 +52,11 @@ import (
 // 4. Finished/Failed → GC: Remove job and tasks after retention period
 type externalCollectionRefreshChecker struct {
 	ctx context.Context
-	// mt is datacoord's segment/index meta, read directly for the index wait -
-	// the same way importChecker reads it. Nil in tests that do not exercise
-	// the wait.
+	// mt is datacoord's segment meta and indexMeta its index meta, read
+	// directly for the index wait - the same way importChecker reads them.
+	// Nil in tests that do not exercise the wait.
 	mt          *meta
+	indexMeta   *indexMeta
 	refreshMeta *externalCollectionRefreshMeta
 	closeChan   chan struct{}
 	// onJobFinished is the manager-side callback that pushes the refreshed
@@ -95,6 +96,7 @@ type externalCollectionRefreshChecker struct {
 func newRefreshChecker(
 	ctx context.Context,
 	mt *meta,
+	indexMeta *indexMeta,
 	refreshMeta *externalCollectionRefreshMeta,
 	closeChan chan struct{},
 	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob),
@@ -106,6 +108,7 @@ func newRefreshChecker(
 	return &externalCollectionRefreshChecker{
 		ctx:              ctx,
 		mt:               mt,
+		indexMeta:        indexMeta,
 		refreshMeta:      refreshMeta,
 		closeChan:        closeChan,
 		onJobFinished:    onJobFinished,
@@ -223,7 +226,7 @@ const indexWaitProgressFloor = int64(90)
 
 func (c *externalCollectionRefreshChecker) indexWaitEnabled() bool {
 	return c.mt != nil &&
-		c.mt.indexMeta != nil &&
+		c.indexMeta != nil &&
 		c.applyJobInfo != nil &&
 		Params.DataCoordCfg.RefreshWaitForIndex.GetAsBool()
 }
@@ -307,7 +310,7 @@ func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCol
 		return true
 	}
 
-	unindexed := c.mt.indexMeta.GetUnindexedSegments(job.GetCollectionId(), segmentIDs)
+	unindexed := c.indexMeta.GetUnindexedSegments(job.GetCollectionId(), segmentIDs)
 	if len(unindexed) == 0 {
 		return true
 	}

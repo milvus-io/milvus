@@ -207,7 +207,7 @@ func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.S
 	// Use the same IsSegmentGCBlocked check as the standard segment GC to stay
 	// consistent: if a dropped segment is protected by a snapshot, its LOB files
 	// must also be kept alive.
-	snapshotMeta := lobCtx.gc.meta.GetSnapshotMeta()
+	snapshotMeta := lobCtx.gc.option.snapshotMeta
 	if snapshotMeta != nil {
 		droppedSegments := lobCtx.gc.meta.SelectSegments(ctx, SegmentFilterFunc(func(si *SegmentInfo) bool {
 			return si.GetState() == commonpb.SegmentState_Dropped

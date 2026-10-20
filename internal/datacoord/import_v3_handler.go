@@ -188,7 +188,7 @@ func (h indexBuildingHandler) Handle(jc *importV3JobContext) error {
 		}
 	}
 	healthySegments := jc.meta.GetSegments(segmentIDs, isSegmentHealthy)
-	unindexed := jc.meta.indexMeta.GetUnindexedSegments(jc.job.GetCollectionID(), healthySegments)
+	unindexed := jc.indexMeta.GetUnindexedSegments(jc.job.GetCollectionID(), healthySegments)
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 {
 		for _, segmentID := range unindexed {
 			select {

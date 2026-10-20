@@ -106,12 +106,12 @@ func TestEffectiveImportV3FanIn(t *testing.T) {
 // at dispatch, so a task never owns a segment it does not use.
 func TestCreateImportV3TaskWritesPendingWithoutSegment(t *testing.T) {
 	ctx := context.Background()
-	meta, err := newMemoryMeta(t)
+	meta, metaDomains, err := newMemoryMetaWithIndex(t)
 	require.NoError(t, err)
 	importMeta := NewMockImportMeta(t)
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocN(int64(1)).Return(int64(200), int64(201), nil).Once()
-	checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta, alloc: alloc}
+	checker := &importCheckerV3{ctx: ctx, meta: meta, indexMeta: metaDomains.indexMeta, importMeta: importMeta, alloc: alloc}
 	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 2, DataTs: 1, Schema: &schemapb.CollectionSchema{Version: 3}}}
 
 	var task *importTaskV3
@@ -145,13 +145,13 @@ func TestCreateReshardTasksKeepsExistingAndAddsMissingSources(t *testing.T) {
 	importMeta := NewMockImportMeta(t)
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocN(int64(1)).Return(int64(20), int64(21), nil).Once()
-	meta, err := newMemoryMeta(t)
+	meta, metaDomains, err := newMemoryMetaWithIndex(t)
 	require.NoError(t, err)
 	// Sizing must come from the PreImportV3 stats, not the object store: the
 	// chunk manager is a strict mock with no expectations, so any Size or
 	// WalkWithPrefix call would fail the test.
 	meta.chunkManager = mocks2.NewChunkManager(t)
-	checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta, alloc: alloc}
+	checker := &importCheckerV3{ctx: ctx, meta: meta, indexMeta: metaDomains.indexMeta, importMeta: importMeta, alloc: alloc}
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
 	job := &importJob{ImportJob: &datapb.ImportJob{
 		JobID: 1, CollectionID: 2, Schema: schema, Vchannels: []string{"v0"}, PartitionIDs: []int64{3},
@@ -552,7 +552,7 @@ func TestBuildImportV3TaskPlanDerivesExecutionInput(t *testing.T) {
 // instead leave the job in Planning for the next tick.
 func TestImportCheckerV3PlanningQuotaFailsJob(t *testing.T) {
 	ctx := context.Background()
-	meta, err := newMemoryMeta(t)
+	meta, metaDomains, err := newMemoryMetaWithIndex(t)
 	require.NoError(t, err)
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
 	meta.AddCollection(&collectionInfo{ID: 2, Schema: schema})
@@ -571,7 +571,7 @@ func TestImportCheckerV3PlanningQuotaFailsJob(t *testing.T) {
 	require.NoError(t, cm.Write(ctx, manifestPath, payload))
 
 	importMeta := NewMockImportMeta(t)
-	checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta}
+	checker := &importCheckerV3{ctx: ctx, meta: meta, indexMeta: metaDomains.indexMeta, importMeta: importMeta}
 	job := &importJob{ImportJob: &datapb.ImportJob{
 		JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Planning,
 		Schema: schema, Vchannels: []string{"v0"}, PartitionIDs: []int64{3},
@@ -616,20 +616,20 @@ func TestImportCheckerV3PlanningQuotaFailsJob(t *testing.T) {
 	// Planning for the next tick. (A missing manifest object is deliberately
 	// NOT used here: it surfaces key-not-found, a permanent error the shared
 	// denylist fails fast on.)
-	freshMeta, err := newMemoryMeta(t)
+	freshMeta, freshMetaDomains, err := newMemoryMetaWithIndex(t)
 	require.NoError(t, err)
 	freshMeta.chunkManager = cm
 	transientMeta := NewMockImportMeta(t)
-	transientChecker := &importCheckerV3{ctx: ctx, meta: freshMeta, importMeta: transientMeta}
+	transientChecker := &importCheckerV3{ctx: ctx, meta: freshMeta, indexMeta: freshMetaDomains.indexMeta, importMeta: transientMeta}
 	transientChecker.checkJob(job)
 	require.Equal(t, internalpb.ImportJobState_Planning, job.GetState())
 }
 
 // newImportV3PlanningTestMeta builds a memory meta with a PK-only collection and
 // a local chunk manager, the minimum planImportV3 needs.
-func newImportV3PlanningTestMeta(t *testing.T) (*meta, storage.ChunkManager, *schemapb.CollectionSchema) {
+func newImportV3PlanningTestMeta(t *testing.T) (*meta, *indexMeta, storage.ChunkManager, *schemapb.CollectionSchema) {
 	t.Helper()
-	m, err := newMemoryMeta(t)
+	m, dm, err := newMemoryMetaWithIndex(t)
 	require.NoError(t, err)
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -637,7 +637,7 @@ func newImportV3PlanningTestMeta(t *testing.T) (*meta, storage.ChunkManager, *sc
 	m.AddCollection(&collectionInfo{ID: 2, Schema: schema})
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	m.chunkManager = cm
-	return m, cm, schema
+	return m, dm.indexMeta, cm, schema
 }
 
 // newPlanImportV3ProbeImportMeta registers the two task-set probes planImportV3
@@ -662,7 +662,7 @@ func TestPlanImportV3CanonicalFragmentOrder(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.DiskProtectionEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.DiskProtectionEnabled.Key)
 
-	meta, cm, schema := newImportV3PlanningTestMeta(t)
+	meta, im, cm, schema := newImportV3PlanningTestMeta(t)
 	// Each manifest lists its fragments out of canonical order.
 	writeReshardManifest(t, cm, 1, 20, 1, &importv3pb.ReshardManifest{Fragments: []*importv3pb.FragmentDescriptor{
 		{Path: "a2", Rows: 1, LogicalBytes: 10, VchannelIndex: 0, PartitionId: 3, Seq: 2},
@@ -674,7 +674,7 @@ func TestPlanImportV3CanonicalFragmentOrder(t *testing.T) {
 	}})
 
 	importMeta := NewMockImportMeta(t)
-	checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta, alloc: newMockAllocator(t)}
+	checker := &importCheckerV3{ctx: ctx, meta: meta, indexMeta: im, importMeta: importMeta, alloc: newMockAllocator(t)}
 	job := &importJob{ImportJob: &datapb.ImportJob{
 		JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Planning, DataTs: 1,
 		Schema: schema, Vchannels: []string{"v0", "v1"}, PartitionIDs: []int64{3},
@@ -723,10 +723,10 @@ func TestPlanImportV3RejectsInvalidFragment(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			meta, cm, schema := newImportV3PlanningTestMeta(t)
+			meta, im, cm, schema := newImportV3PlanningTestMeta(t)
 			writeReshardManifest(t, cm, 1, 20, 1, &importv3pb.ReshardManifest{Fragments: []*importv3pb.FragmentDescriptor{tc.frag}})
 			importMeta := NewMockImportMeta(t)
-			checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta, alloc: newMockAllocator(t)}
+			checker := &importCheckerV3{ctx: ctx, meta: meta, indexMeta: im, importMeta: importMeta, alloc: newMockAllocator(t)}
 			job := &importJob{ImportJob: &datapb.ImportJob{
 				JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Planning, DataTs: 1,
 				Schema: schema, Vchannels: []string{"v0"}, PartitionIDs: []int64{3},
@@ -826,7 +826,7 @@ func TestImportCheckerV3CheckJobNonPlanningDispatch(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("terminal handler error fails the job", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
+		meta, metaDomains, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		// The cached collection schema disagrees with the frozen job schema, so
 		// importingHandler's validateImportV3Schema returns a terminal error.
@@ -834,7 +834,7 @@ func TestImportCheckerV3CheckJobNonPlanningDispatch(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{{FieldID: 1, DataType: schemapb.DataType_Int64}},
 		}})
 		importMeta := NewMockImportMeta(t)
-		checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta}
+		checker := &importCheckerV3{ctx: ctx, meta: meta, indexMeta: metaDomains.indexMeta, importMeta: importMeta}
 		job := &importJob{ImportJob: &datapb.ImportJob{
 			JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Importing,
 			Schema: newPreimportV3TestSchema(),
@@ -850,10 +850,10 @@ func TestImportCheckerV3CheckJobNonPlanningDispatch(t *testing.T) {
 	})
 
 	t.Run("transient handler error keeps the job retriable", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
+		meta, metaDomains, err := newMemoryMetaWithIndex(t)
 		require.NoError(t, err) // no collection cached yet
 		importMeta := NewMockImportMeta(t)
-		checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta}
+		checker := &importCheckerV3{ctx: ctx, meta: meta, indexMeta: metaDomains.indexMeta, importMeta: importMeta}
 		job := &importJob{ImportJob: &datapb.ImportJob{
 			JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Importing,
 			Schema: newPreimportV3TestSchema(),

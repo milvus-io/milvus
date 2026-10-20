@@ -27,22 +27,24 @@ import (
 )
 
 func TestIndexGCManifestReadinessDeletedRecordWinsOnReload(t *testing.T) {
-	m := setupManifestReloadMeta(t)
+	m, mDomains := setupManifestReloadMeta(t)
+	im := mDomains.indexMeta
 	mockReloadManifestEntry(t, 5100)
-	require.NoError(t, m.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
+	require.NoError(t, im.AddSegmentIndex(context.Background(), &model.SegmentIndex{
 		CollectionID: 100, PartitionID: 10, SegmentID: 5001, IndexID: 500,
 		BuildID: 5100, IndexState: commonpb.IndexState_Finished,
 		IndexFileKeys: []string{"from-etcd"},
 	}))
-	require.NoError(t, m.indexMeta.DeleteTask(5100))
+	require.NoError(t, im.DeleteTask(5100))
 	var err error
-	m.indexMeta, err = newIndexMeta(context.Background(), m.catalog, []int64{100})
+	im, err = newIndexMeta(context.Background(), m.catalog, []int64{100})
 	require.NoError(t, err)
+	m.indexCatalog = im
 	require.NoError(t, m.reloadSegmentIndexesFromManifests(context.Background()))
-	records := m.indexMeta.GetAllSegmentIndexes(5001)
+	records := im.GetAllSegmentIndexes(5001)
 	require.Len(t, records, 1)
 	require.True(t, records[0].IsDeleted, "persisted GC tombstone wins over the stale Finished manifest entry")
 	require.Equal(t, []string{"from-etcd"}, records[0].IndexFileKeys)
-	require.Empty(t, m.indexMeta.GetSegmentIndexes(100, 5001))
-	require.Nil(t, m.indexMeta.getSegmentsIndexStates(100, []int64{5001})[5001][500])
+	require.Empty(t, im.GetSegmentIndexes(100, 5001))
+	require.Nil(t, im.getSegmentsIndexStates(100, []int64{5001})[5001][500])
 }

@@ -77,21 +77,22 @@ func TestGarbageCollectorBM25OrphanFiles(t *testing.T) {
 					{LogID: 1000}, {LogID: 1}, {LogID: 1002, LogPath: key("100/10/200/101/777")},
 				}}},
 			}}
+			sm := &snapshotMeta{}
 			mt := &meta{
 				metaStore: metacache.NewMetaStore(nil),
 				segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
 					200: segment,
 					300: {SegmentInfo: &datapb.SegmentInfo{ID: 300, CollectionID: 100, PartitionID: 10, StorageVersion: storage.StorageV3}},
 				}),
-				snapshotMeta: &snapshotMeta{},
 			}
+			mt.compactionProtection = sm
 			blocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).To(
 				func(_ *snapshotMeta, _ int64, segmentID int64) bool { return segmentID == 205 },
 			).Build()
 			defer blocked.UnPatch()
 			pool := conc.NewPool[struct{}](1)
 			t.Cleanup(pool.Release)
-			gc := &garbageCollector{meta: mt, option: GcOption{missingTolerance: time.Hour, removeObjectPool: pool}}
+			gc := &garbageCollector{meta: mt, option: GcOption{missingTolerance: time.Hour, removeObjectPool: pool, snapshotMeta: sm}}
 			old := time.Now().Add(-2 * time.Hour)
 			if local {
 				cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))

@@ -123,7 +123,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
 		segments := s.meta.getSegmentsMetrics(collectionID)
 		for _, seg := range segments {
-			isIndexed, indexedFields := s.meta.indexMeta.GetSegmentIndexedFields(seg.CollectionID, seg.SegmentID)
+			isIndexed, indexedFields := s.indexMeta.GetSegmentIndexedFields(seg.CollectionID, seg.SegmentID)
 			seg.IndexedFields = indexedFields
 			seg.IsIndexed = isIndexed
 		}

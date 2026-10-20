@@ -41,17 +41,19 @@ type analyzeTask struct {
 
 	times *taskcommon.Times
 
-	schema *schemapb.CollectionSchema
-	meta   *meta
+	schema      *schemapb.CollectionSchema
+	meta        *meta
+	analyzeMeta *analyzeMeta
 }
 
 var _ globalTask.Task = (*analyzeTask)(nil)
 
-func newAnalyzeTask(t *indexpb.AnalyzeTask, meta *meta) *analyzeTask {
+func newAnalyzeTask(t *indexpb.AnalyzeTask, meta *meta, analyzeMeta *analyzeMeta) *analyzeTask {
 	task := &analyzeTask{
 		AnalyzeTask: t,
 		times:       taskcommon.NewTimes(),
 		meta:        meta,
+		analyzeMeta: analyzeMeta,
 	}
 	coll := meta.GetCollection(t.CollectionID)
 	if coll != nil {
@@ -91,7 +93,7 @@ func (at *analyzeTask) SetState(state indexpb.JobState, failReason string) {
 }
 
 func (at *analyzeTask) UpdateStateWithMeta(state indexpb.JobState, failReason string) error {
-	if err := at.meta.analyzeMeta.UpdateState(at.GetTaskID(), state, failReason); err != nil {
+	if err := at.analyzeMeta.UpdateState(at.GetTaskID(), state, failReason); err != nil {
 		return err
 	}
 	at.SetState(state, failReason)
@@ -99,7 +101,7 @@ func (at *analyzeTask) UpdateStateWithMeta(state indexpb.JobState, failReason st
 }
 
 func (at *analyzeTask) UpdateVersion(nodeID int64) error {
-	if err := at.meta.analyzeMeta.UpdateVersion(at.GetTaskID(), nodeID); err != nil {
+	if err := at.analyzeMeta.UpdateVersion(at.GetTaskID(), nodeID); err != nil {
 		return err
 	}
 	at.Version++
@@ -108,7 +110,7 @@ func (at *analyzeTask) UpdateVersion(nodeID int64) error {
 }
 
 func (at *analyzeTask) setJobInfo(result *workerpb.AnalyzeResult) error {
-	if err := at.meta.analyzeMeta.FinishTask(at.GetTaskID(), result); err != nil {
+	if err := at.analyzeMeta.FinishTask(at.GetTaskID(), result); err != nil {
 		return err
 	}
 	at.SetState(result.GetState(), result.GetFailReason())
@@ -131,7 +133,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	log := mlog.With(mlog.FieldTaskID(at.GetTaskID()))
 
 	// Check if task still exists in meta
-	task := at.meta.analyzeMeta.GetTask(at.GetTaskID())
+	task := at.analyzeMeta.GetTask(at.GetTaskID())
 	if task == nil {
 		log.Info(context.TODO(), "analyze task has not exist in meta table, remove task")
 		at.SetState(indexpb.JobState_JobStateNone, "analyze task has not exist in meta table")

@@ -138,3 +138,29 @@ func setAnalyzeTaskID(id int64) compactionTaskOpt {
 		task.AnalyzeTaskID = id
 	}
 }
+
+// isCompactionTaskFinished returns true if the task has reached a terminal state
+// (timeout, completed, cleaned, or unknown) and requires no further processing.
+func isCompactionTaskFinished(t *datapb.CompactionTask) bool {
+	switch t.GetState() {
+	case datapb.CompactionTaskState_timeout,
+		datapb.CompactionTaskState_completed,
+		datapb.CompactionTaskState_cleaned,
+		datapb.CompactionTaskState_unknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// isCompactionTaskCleaned returns true if the task has been cleaned
+// (cleaned, or unknown) and requires no further processing.
+func isCompactionTaskCleaned(t *datapb.CompactionTask) bool {
+	switch t.GetState() {
+	case datapb.CompactionTaskState_cleaned,
+		datapb.CompactionTaskState_unknown:
+		return true
+	default:
+		return false
+	}
+}

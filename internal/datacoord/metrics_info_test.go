@@ -650,6 +650,8 @@ func TestServer_getSegmentsJSON(t *testing.T) {
 					},
 				},
 			}),
+		},
+		domainMetas: domainMetas{
 			indexMeta: &indexMeta{
 				segmentIndexes: segIndexes,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{

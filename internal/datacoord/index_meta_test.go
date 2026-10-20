@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
-	"github.com/milvus-io/milvus/internal/metastore"
+
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -581,17 +581,6 @@ func TestMeta_HasSameReq(t *testing.T) {
 	})
 }
 
-func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
-	return &indexMeta{
-		keyLock:          lock.NewKeyLock[UniqueID](),
-		ctx:              context.Background(),
-		catalog:          catalog,
-		indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-	}
-}
-
 func TestMeta_CreateIndex(t *testing.T) {
 	indexName := "default_idx"
 	indexParams := []*commonpb.KeyValuePair{
@@ -1097,15 +1086,15 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
+	im := createIndexMeta(catalog)
 
 	t.Run("success", func(t *testing.T) {
-		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segID)
+		segIndexes := im.GetSegmentIndexes(collID, segID)
 		assert.Equal(t, 1, len(segIndexes))
 	})
 
 	t.Run("segment not exist", func(t *testing.T) {
-		segIndexes := m.indexMeta.GetSegmentIndexes(collID, segID+100)
+		segIndexes := im.GetSegmentIndexes(collID, segID+100)
 		assert.Equal(t, 0, len(segIndexes))
 	})
 
@@ -1868,18 +1857,18 @@ func TestRemoveSegmentIndex(t *testing.T) {
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
-	m := createMeta(catalog, withIndexMeta(createIndexMeta(catalog)))
+	im := createIndexMeta(catalog)
 
 	// normal case
 	segmentIDs := make([]int64, 0, 11)
 	for i := 0; i <= 10; i++ {
 		segmentIDs = append(segmentIDs, segID+int64(i))
 	}
-	unindexed := m.indexMeta.GetUnindexedSegments(collID, segmentIDs)
+	unindexed := im.GetUnindexedSegments(collID, segmentIDs)
 	assert.Equal(t, 8, len(unindexed))
 
 	// no index
-	unindexed = m.indexMeta.GetUnindexedSegments(collID+1, segmentIDs)
+	unindexed = im.GetUnindexedSegments(collID+1, segmentIDs)
 	assert.Equal(t, 0, len(unindexed))
 }
 

@@ -72,7 +72,7 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 		}
 	}
 	if len(operators) > 0 {
-		if err := c.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		if err := c.Meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 			mlog.Warn(ctx, "batch update manifest failed", mlog.Err(err))
 			return err
 		}
@@ -81,7 +81,7 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 		// consumers observe the new manifest versions. V2 column-group
 		// updates do not touch the manifest, so only V3 items trigger.
 		if v3Count > 0 {
-			c.meta.recomputeDataView(ctx, result.Message.Header().GetCollectionId())
+			c.Meta.recomputeDataView(ctx, result.Message.Header().GetCollectionId())
 		}
 	}
 	mlog.Info(ctx, "batch update manifest handled",

@@ -216,6 +216,7 @@ type externalCollectionRefreshManager struct {
 func NewExternalCollectionRefreshManager(
 	ctx context.Context,
 	mt *meta,
+	indexMeta *indexMeta,
 	scheduler task.GlobalScheduler,
 	allocator allocator.Allocator,
 	refreshMeta *externalCollectionRefreshMeta,
@@ -252,7 +253,7 @@ func NewExternalCollectionRefreshManager(
 	// forgetJob releases the per-job dedup entries when the checker GC's
 	// a job, preventing unbounded growth.
 	m.inspector = newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
-	m.checker = newRefreshChecker(ctx, mt, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
+	m.checker = newRefreshChecker(ctx, mt, indexMeta, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
 	m.inspector.wrapTask = m.wrapTask
 
 	return m

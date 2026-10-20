@@ -139,7 +139,7 @@ func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, 
 	for _, segView := range levelZeroSegments {
 		key := segView.label.Key()
 		if _, ok := partChanView[key]; !ok {
-			earliestGrowingStartPos := policy.meta.GetEarliestStartPositionOfGrowingSegments(segView.label)
+			earliestGrowingStartPos := policy.meta.GetEarliestStartPositionOfGrowingSegments(segView.label.CollectionID, segView.label.PartitionID, segView.label.Channel)
 			partChanView[key] = &LevelZeroCompactionView{
 				label:           segView.label,
 				l0Segments:      []*SegmentView{},

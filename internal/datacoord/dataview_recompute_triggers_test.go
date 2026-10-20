@@ -44,7 +44,7 @@ func TestMixCompactionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 			return []*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{ID: 100}}}, nil
 		}).Build()
 	defer mockComplete.UnPatch()
-	mockSave := mockey.Mock((*meta).SaveCompactionTask).Return(nil).Build()
+	mockSave := mockey.Mock((*compactionTaskMeta).SaveCompactionTask).Return(nil).Build()
 	defer mockSave.UnPatch()
 
 	task := newMixCompactionTask(&datapb.CompactionTask{
@@ -56,7 +56,7 @@ func TestMixCompactionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 		State:         datapb.CompactionTaskState_executing,
 		InputSegments: []int64{1},
 		Schema:        &schemapb.CollectionSchema{Version: 1},
-	}, nil, m, newMockVersionManager())
+	}, nil, m, newCompactionTaskMetaOverCatalog(nil), newMockVersionManager())
 
 	require.NoError(t, task.saveSegmentMeta(&datapb.CompactionPlanResult{}))
 
@@ -77,7 +77,7 @@ func TestBumpSchemaVersionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 			return []*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{ID: 100}}}, nil
 		}).Build()
 	defer mockComplete.UnPatch()
-	mockSave := mockey.Mock((*meta).SaveCompactionTask).Return(nil).Build()
+	mockSave := mockey.Mock((*compactionTaskMeta).SaveCompactionTask).Return(nil).Build()
 	defer mockSave.UnPatch()
 
 	task := newBumpSchemaVersionTask(&datapb.CompactionTask{
@@ -89,7 +89,7 @@ func TestBumpSchemaVersionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 		State:         datapb.CompactionTaskState_executing,
 		InputSegments: []int64{1},
 		Schema:        &schemapb.CollectionSchema{Version: 2},
-	}, nil, m, newMockVersionManager())
+	}, nil, m, newCompactionTaskMetaOverCatalog(nil), newMockVersionManager())
 
 	require.NoError(t, task.saveSegmentMeta(&datapb.CompactionPlanResult{}))
 

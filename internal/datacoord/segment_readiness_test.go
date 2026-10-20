@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -81,13 +80,8 @@ func readinessExternalSchema() *schemapb.CollectionSchema {
 // per-segment index states. Field indexes carry the given fieldID keyed by
 // IndexID; segment indexes are keyed by SegmentID.
 func newReadinessIndexMeta(collectionID int64, fieldIndexes map[int64]*model.Index, segIndexes map[int64][]*model.SegmentIndex) *indexMeta {
-	im := &indexMeta{
-		catalog:          datacoord.NewCatalog(NewMetaMemoryKV(), "", ""),
-		keyLock:          lock.NewKeyLock[UniqueID](),
-		indexes:          map[UniqueID]map[UniqueID]*model.Index{collectionID: fieldIndexes},
-		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-	}
+	im := newSegmentIndexMeta(datacoord.NewCatalog(NewMetaMemoryKV(), "", ""))
+	im.indexes[collectionID] = fieldIndexes
 	for segID, segs := range segIndexes {
 		mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		for _, s := range segs {
@@ -99,9 +93,10 @@ func newReadinessIndexMeta(collectionID int64, fieldIndexes map[int64]*model.Ind
 }
 
 // readinessMeta builds a meta whose collection cache holds the given collection
-// and whose indexMeta is the given one.
+// and whose index catalog is the given index meta.
 func readinessMeta(coll *collectionInfo, im *indexMeta) *meta {
-	mt := createMeta(datacoord.NewCatalog(NewMetaMemoryKV(), "", ""), withIndexMeta(im))
+	mt := newEmptyTestMeta()
+	mt.indexCatalog = im
 	mt.AddCollection(coll)
 	return mt
 }
@@ -509,7 +504,7 @@ func TestSegmentReadiness_Ready(t *testing.T) {
 }
 
 func TestPrepareReadiness_NilCollection(t *testing.T) {
-	mt := createMeta(datacoord.NewCatalog(NewMetaMemoryKV(), "", ""))
+	mt := newEmptyTestMeta()
 	require.Nil(t, mt.prepareReadiness(nil))
 	require.Nil(t, mt.prepareReadiness(&collectionInfo{ID: 1}))
 }

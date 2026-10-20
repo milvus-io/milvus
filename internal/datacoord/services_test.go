@@ -1504,7 +1504,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
@@ -1551,22 +1551,22 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg1.ID,
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg2.ID,
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1716,18 +1716,18 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1783,18 +1783,18 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1978,14 +1978,14 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 			IndexName:    "_default_idx_2",
 		})
 		assert.NoError(t, err)
-		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		svr.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,
 			CollectionID:        0,
 			PartitionID:         0,
@@ -2122,11 +2122,11 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 			svr := &Server{
 				ctx: ctx,
 				meta: &meta{
-					segments:           NewSegmentsInfo(store),
-					partitionStatsMeta: &partitionStatsMeta{},
-					metaStore:          store,
-					channelSync:        newChannelSync(),
+					segments:    NewSegmentsInfo(store),
+					metaStore:   store,
+					channelSync: newChannelSync(),
 				},
+				domainMetas: domainMetas{partitionStatsMeta: &partitionStatsMeta{}},
 			}
 			store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{channelName: checkpoint})
 			svr.stateCode.Store(commonpb.StateCode_Healthy)
@@ -3772,6 +3772,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, newRestoreAbsentTargetBroker(t), nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
 		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
 			Name:                 "non_existent_snapshot",
@@ -5709,6 +5710,7 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 			externalCollectionRefreshManager: nil, // Not initialized
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
 		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
 			CollectionId:   100,
@@ -5734,10 +5736,11 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
 		// Bypass startBroadcast (broker not wired in test) and the new
 		// duplicate-active-job pre-check (refreshMeta is nil here).
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*DDLCallbacks).StartBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
 		defer mockStartBroadcast.UnPatch()
 		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
@@ -5761,8 +5764,9 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*DDLCallbacks).StartBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
 		defer mockStartBroadcast.UnPatch()
 		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
@@ -5796,9 +5800,10 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
-		// Mock startBroadcastWithCollectionID to return error
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(nil, errors.New("broadcaster failed")).Build()
+		// Mock StartBroadcastWithCollectionID to return error
+		mockStartBroadcast := mockey.Mock((*DDLCallbacks).StartBroadcastWithCollectionID).Return(nil, errors.New("broadcaster failed")).Build()
 		defer mockStartBroadcast.UnPatch()
 
 		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
@@ -6584,8 +6589,7 @@ func TestAbortImport_UserAbortedJobIsIdempotent(t *testing.T) {
 }
 
 func TestHandleCommitVchannelRPCIsNoOpForCoordinatorOwnedJob(t *testing.T) {
-	callbacks, _, _ := newImportCommitCallbackTest(t)
-	server := callbacks.Server
+	server, _, _ := newImportCommitCallbackTest(t)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	for _, ts := range []uint64{0, 300, 500} {
 		resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
@@ -6680,7 +6684,6 @@ func (r *recordingDataViewManager) Recompute(_ context.Context, collectionID int
 type (
 	embeddedHandler      struct{ Handler }
 	embeddedBroadcastAPI struct{ broadcaster.BroadcastAPI }
-	embeddedBroker       struct{ broker.Broker }
 )
 
 func TestAbortImport_FailedSourceBroadcastsRollback(t *testing.T) {
@@ -6778,6 +6781,6 @@ func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing
 	}
 
 	server := &Server{importMeta: importMetaMock, meta: &meta{segments: segments, metaStore: store}}
-	segIDs := server.getImportSegmentIDsByVchannel(ctx, jobID, "vchan-0")
+	segIDs := getImportSegmentIDsByVchannel(ctx, server.importMeta, server.meta, jobID, "vchan-0")
 	assert.Equal(t, []int64{101}, segIDs)
 }

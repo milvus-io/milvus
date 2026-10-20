@@ -284,7 +284,7 @@ func TestCompactionTargetReconcilerOutsideManualMatchDomainDoesNotHoldTargetActi
 			targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
 			segment := sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false)
 			meta := newCompactionTargetReconcilerTestMeta(targetMeta, segment)
-			test.mutate(meta, segment)
+			test.mutate(meta.meta, segment)
 
 			events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
@@ -309,11 +309,12 @@ func TestCompactionTargetReconcilerWaitsForSnapshotCreatedAfterTarget(t *testing
 	targetMeta := newLoadedCompactionTargetMeta(t, ctx, record)
 	segment := sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false)
 	meta := newCompactionTargetReconcilerTestMeta(targetMeta, segment)
-	meta.snapshotMeta = &snapshotMeta{
+	snapMeta := &snapshotMeta{
 		segmentProtectionUntil: map[int64]uint64{
 			segment.GetID(): uint64(time.Now().Add(time.Hour).Unix()),
 		},
 	}
+	meta.compactionProtection = snapMeta
 
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
@@ -321,7 +322,7 @@ func TestCompactionTargetReconcilerWaitsForSnapshotCreatedAfterTarget(t *testing
 	require.Empty(t, events[TriggerTypeSingle])
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 
-	delete(meta.snapshotMeta.segmentProtectionUntil, segment.GetID())
+	delete(snapMeta.segmentProtectionUntil, segment.GetID())
 	events, err = newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
@@ -403,8 +404,9 @@ func TestCompactionTargetReconcilerPausesAndResumesSnapshotBlockedCollection(t *
 	meta := newCompactionTargetReconcilerTestMeta(targetMeta,
 		sortedTargetSegment(1, 1, 10, "ch-1", 0, 199, false),
 	)
-	meta.snapshotMeta = createTestSnapshotMetaLoaded(t)
-	meta.snapshotMeta.SetSnapshotPending(1)
+	snapMeta := createTestSnapshotMetaLoaded(t)
+	meta.compactionProtection = snapMeta
+	snapMeta.SetSnapshotPending(1)
 
 	events, err := newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
@@ -412,7 +414,7 @@ func TestCompactionTargetReconcilerPausesAndResumesSnapshotBlockedCollection(t *
 	require.Empty(t, events[TriggerTypeSingle])
 	require.Equal(t, datapb.TargetState_TARGET_STATE_ACTIVE, targetMeta.GetCompactionTarget(100).GetState())
 
-	meta.snapshotMeta.ClearSnapshotPending(1)
+	snapMeta.ClearSnapshotPending(1)
 	events, err = newCompactionTargetReconcilerForTest(meta).Trigger(ctx)
 
 	require.NoError(t, err)
@@ -573,8 +575,8 @@ func newLoadedCompactionTargetMeta(t *testing.T, ctx context.Context, records ..
 	return targetMeta
 }
 
-func newCompactionTargetReconcilerForTest(meta *meta) *compactionTargetReconciler {
-	return newCompactionTargetReconciler(meta, newMockHandlerWithMeta(meta))
+func newCompactionTargetReconcilerForTest(fixture *compactionTargetReconcilerFixture) *compactionTargetReconciler {
+	return newCompactionTargetReconciler(fixture.meta, fixture.indexMeta, fixture.targetMeta, newMockHandlerWithMeta(fixture.meta))
 }
 
 func enableCompactionTargetReconciler(t *testing.T) {
@@ -585,20 +587,29 @@ func enableCompactionTargetReconciler(t *testing.T) {
 	})
 }
 
-func newCompactionTargetReconcilerTestMeta(targetMeta *compactionTargetMeta, segments ...*SegmentInfo) *meta {
+// compactionTargetReconcilerFixture bundles the meta and the domain metas that a reconciler under test reads.
+type compactionTargetReconcilerFixture struct {
+	*meta
+	targetMeta *compactionTargetMeta
+	indexMeta  *indexMeta
+}
+
+func newCompactionTargetReconcilerTestMeta(targetMeta *compactionTargetMeta, segments ...*SegmentInfo) *compactionTargetReconcilerFixture {
 	store := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments:             NewSegmentsInfo(store),
-		metaStore:            store,
-		compactionTargetMeta: targetMeta,
-		indexMeta: &indexMeta{
-			indexes: make(map[UniqueID]map[UniqueID]*model.Index),
-		},
+		segments:  NewSegmentsInfo(store),
+		metaStore: store,
 	}
 	for _, segment := range segments {
 		meta.segments.SetSegment(segment.GetID(), segment)
 	}
-	return meta
+	return &compactionTargetReconcilerFixture{
+		meta:       meta,
+		targetMeta: targetMeta,
+		indexMeta: &indexMeta{
+			indexes: make(map[UniqueID]map[UniqueID]*model.Index),
+		},
+	}
 }
 
 func sortedTargetSegment(id, collectionID, partitionID int64, channel string, createTS uint64, dataTS uint64, compacting bool, compactionFrom ...int64) *SegmentInfo {

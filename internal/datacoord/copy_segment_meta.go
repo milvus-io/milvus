@@ -245,7 +245,8 @@ type copySegmentMeta struct {
 	tasks        *copySegmentTasks          // Task collection (in-memory cache)
 	catalog      metastore.DataCoordCatalog // Persistent storage backend (etcd)
 	meta         *meta                      // Segment metadata for task execution
-	snapshotMeta *snapshotMeta              // Snapshot metadata for reading source data
+	indexMeta    *indexMeta                 // Index metadata for task execution
+	snapshotMeta SnapshotSource             // Snapshot metadata for reading source data
 	alloc        allocator.Allocator        // For allocating new build IDs in copy segment tasks
 }
 
@@ -266,6 +267,7 @@ type copySegmentMeta struct {
 //   - ctx: Context for cancellation and timeout
 //   - catalog: Persistent storage backend (etcd)
 //   - meta: Segment metadata for task execution
+//   - indexMeta: Index metadata for task execution
 //   - snapshotMeta: Snapshot metadata for reading source data
 //
 // Returns:
@@ -276,7 +278,7 @@ type copySegmentMeta struct {
 // - Restoring state on startup enables crash recovery
 // - In-memory cache provides fast lookups without etcd round trips
 // - Metadata references enable tasks to access segment/snapshot data
-func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog, meta *meta, snapshotMeta *snapshotMeta, alloc allocator.Allocator) (CopySegmentMeta, error) {
+func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog, meta *meta, indexMeta *indexMeta, snapshotMeta SnapshotSource, alloc allocator.Allocator) (CopySegmentMeta, error) {
 	// Load jobs and tasks from persistent storage
 	restoredJobs, err := catalog.ListCopySegmentJobs(ctx)
 	if err != nil {
@@ -292,6 +294,7 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 		ctx:          ctx,
 		catalog:      catalog,
 		meta:         meta,
+		indexMeta:    indexMeta,
 		snapshotMeta: snapshotMeta,
 		alloc:        alloc,
 	}
@@ -302,6 +305,7 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 			ctx:          ctx,
 			copyMeta:     copySegmentMeta,
 			meta:         meta,
+			indexMeta:    indexMeta,
 			snapshotMeta: snapshotMeta,
 			alloc:        alloc,
 			tr:           timerecord.NewTimeRecorder("copy segment task"),
@@ -622,6 +626,7 @@ func (m *copySegmentMeta) AddTask(ctx context.Context, task CopySegmentTask) err
 	t.ctx = m.ctx
 	t.copyMeta = m
 	t.meta = m.meta
+	t.indexMeta = m.indexMeta
 	t.snapshotMeta = m.snapshotMeta
 	t.alloc = m.alloc
 

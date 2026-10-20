@@ -275,7 +275,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 			},
 		},
 	})
-	err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+	err := svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 		CollectionID: 1,
 		FieldID:      2,
 		IndexID:      1,
@@ -327,13 +327,13 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 		require.NoError(t, err)
 
 		if arg.indexed {
-			err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 				SegmentID: arg.segID,
 				BuildID:   arg.segID,
 				IndexID:   1,
 			})
 			assert.NoError(t, err)
-			err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+			err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 				BuildID: arg.segID,
 				State:   commonpb.IndexState_Finished,
 			})
@@ -387,7 +387,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		},
 	})
 
-	err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+	err := svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 		CollectionID: 0,
 		FieldID:      2,
 		IndexID:      1,
@@ -410,13 +410,13 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	}
 	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s1))
 	assert.NoError(t, err)
-	err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+	err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 		SegmentID: 1,
 		BuildID:   1,
 		IndexID:   1,
 	})
 	assert.NoError(t, err)
-	err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+	err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 		BuildID: 1,
 		State:   commonpb.IndexState_Finished,
 	})
@@ -535,7 +535,7 @@ func TestGetQueryVChanPositions_PartitionStats(t *testing.T) {
 		ID:     collectionID,
 		Schema: schema,
 	})
-	svr.meta.partitionStatsMeta.partitionStatsInfos = map[string]map[int64]*partitionStatsInfo{
+	svr.partitionStatsMeta.partitionStatsInfos = map[string]map[int64]*partitionStatsInfo{
 		vchannel: {
 			partitionID: {
 				currentVersion: version,
@@ -570,7 +570,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err := svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      1,
@@ -639,7 +639,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err := svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      1,
@@ -724,7 +724,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			ID:     0,
 			Schema: schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err := svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      1,
@@ -761,13 +761,13 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(d))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: 2,
 			BuildID:   1,
 			IndexID:   1,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: 1,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -789,13 +789,13 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		}
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(e))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: 3,
 			BuildID:   2,
 			IndexID:   1,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: 2,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -834,7 +834,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			Partitions: []int64{0},
 			Schema:     schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err := svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      1,
@@ -1214,7 +1214,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			Partitions: []int64{0},
 			Schema:     schema,
 		})
-		err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err := svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      1,
@@ -1418,7 +1418,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		Schema:     schema,
 	})
 
-	err := svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+	err := svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 		CollectionID: 0,
 		FieldID:      2,
 		IndexID:      1,
@@ -1962,7 +1962,7 @@ func TestGenSnapshot(t *testing.T) {
 	// Create minimal components for testing
 	mockIndexMeta := &indexMeta{}
 	mockMeta := &meta{
-		indexMeta: mockIndexMeta,
+		indexCatalog: mockIndexMeta,
 	}
 
 	// Create mock mixCoord
@@ -1988,8 +1988,9 @@ func TestGenSnapshot(t *testing.T) {
 	mockBroker := broker.NewCoordinatorBroker(mockMixCoord)
 	handler := &ServerHandler{
 		s: &Server{
-			broker: mockBroker,
-			meta:   mockMeta,
+			broker:      mockBroker,
+			meta:        mockMeta,
+			domainMetas: domainMetas{indexMeta: mockIndexMeta},
 		},
 	}
 
@@ -2093,11 +2094,12 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 	schema.Properties = common.CloneKeyValuePairs(properties)
 
 	mixCoord := newMockMixCoord()
-	mockMeta := &meta{indexMeta: &indexMeta{}}
+	mockMeta := &meta{}
 	handler := &ServerHandler{
 		s: &Server{
-			broker: broker.NewCoordinatorBroker(mixCoord),
-			meta:   mockMeta,
+			broker:      broker.NewCoordinatorBroker(mixCoord),
+			meta:        mockMeta,
+			domainMetas: domainMetas{indexMeta: &indexMeta{}},
 		},
 	}
 
@@ -2176,11 +2178,12 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		},
 	})
 
-	mockMeta := &meta{indexMeta: &indexMeta{}}
+	mockMeta := &meta{}
 	handler := &ServerHandler{
 		s: &Server{
-			broker: broker.NewCoordinatorBroker(newMockMixCoord()),
-			meta:   mockMeta,
+			broker:      broker.NewCoordinatorBroker(newMockMixCoord()),
+			meta:        mockMeta,
+			domainMetas: domainMetas{indexMeta: &indexMeta{}},
 		},
 	}
 
@@ -2375,11 +2378,12 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	})
 	candidates := []*SegmentInfo{manifestSeg, growingSeg, emptySeg}
 
-	mockMeta := &meta{indexMeta: &indexMeta{}}
+	mockMeta := &meta{}
 	handler := &ServerHandler{
 		s: &Server{
-			broker: broker.NewCoordinatorBroker(newMockMixCoord()),
-			meta:   mockMeta,
+			broker:      broker.NewCoordinatorBroker(newMockMixCoord()),
+			meta:        mockMeta,
+			domainMetas: domainMetas{indexMeta: &indexMeta{}},
 		},
 	}
 
@@ -2484,8 +2488,8 @@ func TestGenSnapshotDependencyErrors(t *testing.T) {
 				return nil
 			}
 			handler := &ServerHandler{s: &Server{broker: &snapshotBroker{}, meta: &meta{
-				indexMeta: &indexMeta{}, chunkManager: storage.NewLocalChunkManager(),
-			}}}
+				chunkManager: storage.NewLocalChunkManager(),
+			}, domainMetas: domainMetas{indexMeta: &indexMeta{}}}}
 			describe := mockey.Mock((*snapshotBroker).DescribeCollectionInternal).Return(
 				&milvuspb.DescribeCollectionResponse{Schema: newTestSchema()}, errFor("describe")).Build()
 			defer describe.UnPatch()
@@ -2538,11 +2542,12 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 	schema := newTestSchema()
 	var seg *SegmentInfo
 
-	mockMeta := &meta{indexMeta: &indexMeta{}}
+	mockMeta := &meta{}
 	handler := &ServerHandler{
 		s: &Server{
-			broker: broker.NewCoordinatorBroker(newMockMixCoord()),
-			meta:   mockMeta,
+			broker:      broker.NewCoordinatorBroker(newMockMixCoord()),
+			meta:        mockMeta,
+			domainMetas: domainMetas{indexMeta: &indexMeta{}},
 		},
 	}
 
@@ -2625,8 +2630,8 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 		s: &Server{
 			meta: &meta{
 				chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
-				indexMeta:    &indexMeta{},
 			},
+			domainMetas: domainMetas{indexMeta: &indexMeta{}},
 		},
 	}
 
@@ -2742,7 +2747,7 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 
 	setupHandlerMocks := func(t *testing.T) (*ServerHandler, []*mockey.Mocker) {
 		mockIndexMeta := &indexMeta{}
-		mockMeta := &meta{indexMeta: mockIndexMeta}
+		mockMeta := &meta{indexCatalog: mockIndexMeta}
 
 		mockMixCoord := mocks2.NewMixCoord(t)
 		mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -2763,7 +2768,7 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 
 		mockBroker := broker.NewCoordinatorBroker(mockMixCoord)
 		handler := &ServerHandler{
-			s: &Server{broker: mockBroker, meta: mockMeta},
+			s: &Server{broker: mockBroker, meta: mockMeta, domainMetas: domainMetas{indexMeta: mockIndexMeta}},
 		}
 
 		var mockers []*mockey.Mocker

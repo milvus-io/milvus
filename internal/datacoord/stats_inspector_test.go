@@ -53,6 +53,7 @@ type statsInspectorSuite struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	mt        *meta
+	stm       *statsTaskMeta
 	alloc     *allocator.MockAllocator
 	catalog   *mocks.DataCoordCatalog
 	cluster   session.Cluster
@@ -186,13 +187,13 @@ func (s *statsInspectorSuite) SetupTest() {
 				},
 			},
 		}),
-		statsTaskMeta: &statsTaskMeta{
-			ctx:             s.ctx,
-			catalog:         s.catalog,
-			keyLock:         lock.NewKeyLock[UniqueID](),
-			tasks:           typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
-			segmentID2Tasks: typeutil.NewConcurrentMap[string, *indexpb.StatsTask](),
-		},
+	}
+	s.stm = &statsTaskMeta{
+		ctx:             s.ctx,
+		catalog:         s.catalog,
+		keyLock:         lock.NewKeyLock[UniqueID](),
+		tasks:           typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask](),
+		segmentID2Tasks: typeutil.NewConcurrentMap[string, *indexpb.StatsTask](),
 	}
 	s.cluster = session.NewMockCluster(s.T())
 
@@ -205,6 +206,7 @@ func (s *statsInspectorSuite) SetupTest() {
 	s.inspector = newStatsInspector(
 		s.ctx,
 		s.mt,
+		s.stm,
 		s.scheduler,
 		s.alloc,
 		nil,
@@ -236,7 +238,7 @@ func (s *statsInspectorSuite) putExternalSegment(segmentID UniqueID, sorted bool
 }
 
 func (s *statsInspectorSuite) putExternalStatsTask(taskID, segmentID UniqueID, subJobType indexpb.StatsSubJob) {
-	s.mt.statsTaskMeta.tasks.Insert(taskID, &indexpb.StatsTask{
+	s.stm.tasks.Insert(taskID, &indexpb.StatsTask{
 		CollectionID: 2,
 		TaskID:       taskID,
 		SegmentID:    segmentID,
@@ -276,12 +278,12 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskFileResourcesByMode() {
 			s.T().Cleanup(func() {
 				paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
 			})
-			s.mt.statsTaskMeta.tasks = typeutil.NewConcurrentMap[int64, *indexpb.StatsTask]()
-			s.mt.statsTaskMeta.segmentID2Tasks = typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
+			s.stm.tasks = typeutil.NewConcurrentMap[int64, *indexpb.StatsTask]()
+			s.stm.segmentID2Tasks = typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
 
 			s.inspector.triggerTextStatsTask()
 
-			task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob)
+			task := s.stm.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob)
 			s.Require().NotNil(task)
 			if testCase.expectResources {
 				s.Equal(resources, task.GetFileResources())
@@ -320,7 +322,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 
 		err := s.inspector.SubmitStatsTask(20, 20, indexpb.StatsSubJob_TextIndexJob, true, nil)
 		s.NoError(err)
-		s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+		s.NotNil(s.stm.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
 	})
 
 	s.Run("skip over limit", func() {
@@ -332,7 +334,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 
 		err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_TextIndexJob, true, nil)
 		s.NoError(err)
-		s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_TextIndexJob))
+		s.Nil(s.stm.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_TextIndexJob))
 	})
 }
 
@@ -355,7 +357,7 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskSkipsSubmittedSegments() {
 	s.Equal([]UniqueID{20}, submitted)
 
 	// Once the task is recorded the selector must drop the segment.
-	s.NoError(s.mt.statsTaskMeta.AddStatsTask(&indexpb.StatsTask{
+	s.NoError(s.stm.AddStatsTask(&indexpb.StatsTask{
 		CollectionID: 1,
 		TaskID:       1001,
 		SegmentID:    20,
@@ -402,16 +404,16 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZe
 
 	// Sanity check: the segment is a candidate while the deprecated key is unset.
 	s.inspector.triggerJSONKeyIndexStatsTask()
-	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
-	s.NoError(s.mt.statsTaskMeta.DropStatsTask(s.ctx,
-		s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob).GetTaskID()))
+	s.NotNil(s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.NoError(s.stm.DropStatsTask(s.ctx,
+		s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob).GetTaskID()))
 
 	Params.Save(Params.DataCoordCfg.JSONStatsTriggerCount.Key, "0")
 	defer Params.Reset(Params.DataCoordCfg.JSONStatsTriggerCount.Key)
 	s.inspector.allocator = allocator.NewMockAllocator(s.T())
 
 	s.inspector.triggerJSONKeyIndexStatsTask()
-	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.Nil(s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
 }
 
 // Every trigger loop must give up as soon as the scheduler is backlogged instead
@@ -432,8 +434,8 @@ func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged()
 	s.inspector.triggerJSONKeyIndexStatsTask()
 	s.inspector.triggerBM25StatsTask()
 
-	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
-	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(210, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.Nil(s.stm.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+	s.Nil(s.stm.GetStatsTaskBySegmentID(210, indexpb.StatsSubJob_JsonKeyIndexJob))
 }
 
 // The loop keeps submitting while the pending count is at the limit and stops on
@@ -459,7 +461,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimi
 	// pending 0 -> allowed, 1 -> allowed (== limit), 2 -> skipped (> limit).
 	submitted := 0
 	for _, segmentID := range segmentIDs {
-		if s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob) != nil {
+		if s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob) != nil {
 			submitted++
 		}
 	}
@@ -473,17 +475,17 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
 
 	err := s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_Sort, true, nil)
 	s.NoError(err)
-	sortTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_Sort)
+	sortTask := s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_Sort)
 	s.Nil(sortTask)
 
 	err = s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_TextIndexJob, true, nil)
 	s.NoError(err)
-	textTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
+	textTask := s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
 	s.NotNil(textTask)
 
 	err = s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
 	s.NoError(err)
-	jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
+	jsonTask := s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 	s.NotNil(jsonTask)
 }
 
@@ -493,7 +495,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalJSONWithoutV3Manife
 
 	err := s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
 	s.NoError(err)
-	jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
+	jsonTask := s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 	s.Nil(jsonTask)
 }
 
@@ -503,7 +505,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollection
 
 	s.inspector.triggerJSONKeyIndexStatsTask()
 
-	jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
+	jsonTask := s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 	s.NotNil(jsonTask)
 }
 
@@ -534,7 +536,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollection
 
 			s.inspector.triggerJSONKeyIndexStatsTask()
 
-			jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(testCase.segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
+			jsonTask := s.stm.GetStatsTaskBySegmentID(testCase.segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 			s.Nil(jsonTask)
 		})
 	}
@@ -542,13 +544,13 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollection
 
 func (s *statsInspectorSuite) TestGetStatsTask() {
 	// Set up mock task
-	s.mt.statsTaskMeta.tasks.Insert(1002, &indexpb.StatsTask{
+	s.stm.tasks.Insert(1002, &indexpb.StatsTask{
 		TaskID:     1002,
 		SegmentID:  10,
 		SubJobType: indexpb.StatsSubJob_Sort,
 		State:      indexpb.JobState_JobStateInProgress,
 	})
-	s.mt.statsTaskMeta.segmentID2Tasks.Insert("10-Sort", &indexpb.StatsTask{
+	s.stm.segmentID2Tasks.Insert("10-Sort", &indexpb.StatsTask{
 		TaskID:     1002,
 		SegmentID:  10,
 		SubJobType: indexpb.StatsSubJob_Sort,
@@ -564,12 +566,12 @@ func (s *statsInspectorSuite) TestGetStatsTask() {
 
 func (s *statsInspectorSuite) TestDropStatsTask() {
 	// Set up mock task
-	s.mt.statsTaskMeta.tasks.Insert(1003, &indexpb.StatsTask{
+	s.stm.tasks.Insert(1003, &indexpb.StatsTask{
 		TaskID:     1003,
 		SegmentID:  10,
 		SubJobType: indexpb.StatsSubJob_Sort,
 	})
-	s.mt.statsTaskMeta.segmentID2Tasks.Insert("10-Sort", &indexpb.StatsTask{
+	s.stm.segmentID2Tasks.Insert("10-Sort", &indexpb.StatsTask{
 		TaskID:     1003,
 		SegmentID:  10,
 		SubJobType: indexpb.StatsSubJob_Sort,
@@ -616,7 +618,7 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskExternalCollection() {
 
 	s.inspector.triggerTextStatsTask()
 
-	task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
+	task := s.stm.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
 	s.NotNil(task)
 }
 
@@ -671,7 +673,7 @@ func (s *statsInspectorSuite) TestReloadFromMeta() {
 	s.inspector.scheduler = scheduler
 
 	// Set up some existing tasks
-	s.mt.statsTaskMeta.tasks.Insert(1005, &indexpb.StatsTask{
+	s.stm.tasks.Insert(1005, &indexpb.StatsTask{
 		CollectionID: 1,
 		TaskID:       1005,
 		SegmentID:    10,
@@ -748,14 +750,14 @@ func (s *statsInspectorSuite) TestReloadFromMetaExternalStatsTask() {
 				}).Build()
 			defer mockEnqueue.UnPatch()
 			s.inspector.scheduler = scheduler
-			s.mt.statsTaskMeta.tasks = typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
-			s.mt.statsTaskMeta.segmentID2Tasks = typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
+			s.stm.tasks = typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
+			s.stm.segmentID2Tasks = typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
 			s.putExternalSegment(testCase.segmentID, false, testCase.storageVersion, testCase.manifestPath)
 			s.putExternalStatsTask(testCase.taskID, testCase.segmentID, testCase.subJobType)
 
 			s.inspector.reloadFromMeta()
 
-			statsTask, ok := s.mt.statsTaskMeta.tasks.Get(testCase.taskID)
+			statsTask, ok := s.stm.tasks.Get(testCase.taskID)
 			s.True(ok)
 			s.False(statsTask.GetCanRecycle())
 			if testCase.expectEnqueue {

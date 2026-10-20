@@ -78,7 +78,7 @@ func TestServer_FeatureUsageEntries(t *testing.T) {
 	m.indexes[2] = map[UniqueID]*model.Index{
 		2: {CollectionID: 2, IndexID: 2, IsAutoIndex: true, IndexParams: []*commonpb.KeyValuePair{kvPair(common.IndexTypeKey, "HNSW"), kvPair(common.MetricTypeKey, "COSINE")}},
 	}
-	s := &Server{meta: &meta{indexMeta: m}}
+	s := &Server{meta: &meta{}, domainMetas: domainMetas{indexMeta: m}}
 	entries := s.FeatureUsageEntries(featureusage.CollectionContext{})
 
 	find := func(group, name string) *internalpb.FeatureEntry {
@@ -116,7 +116,7 @@ func TestServer_FeatureUsageEntries_Segments(t *testing.T) {
 	assert.EqualValues(t, 1, find(featureusage.SegmentIsSorted).Value)
 }
 
-func TestRecordImportFileTypesAndCompactionType(t *testing.T) {
+func TestRecordImportFileTypes(t *testing.T) {
 	featureusage.SetEnabled(true)
 	snap := func() map[string]int64 {
 		out := map[string]int64{}
@@ -134,18 +134,12 @@ func TestRecordImportFileTypesAndCompactionType(t *testing.T) {
 		{Paths: []string{"a/b/rows.csv"}},
 		{Paths: []string{"a/b/rows.unknown"}}, // not counted
 	}, nil)
-	recordCompactionType(datapb.CompactionType_ClusteringCompaction)
-	recordCompactionType(datapb.CompactionType_MixCompaction)
-	recordCompactionType(datapb.CompactionType_UndefinedCompaction)
 	after := snap()
 	assert.EqualValues(t, 1, after["import_file_type=Parquet"]-before["import_file_type=Parquet"])
 	assert.EqualValues(t, 1, after["import_file_type=JSON"]-before["import_file_type=JSON"])
 	assert.EqualValues(t, 1, after["import_file_type=JSONLine"]-before["import_file_type=JSONLine"])
 	assert.EqualValues(t, 1, after["import_file_type=NumPy"]-before["import_file_type=NumPy"])
 	assert.EqualValues(t, 1, after["import_file_type=CSV"]-before["import_file_type=CSV"])
-	assert.EqualValues(t, 1, after["compaction=clustering"]-before["compaction=clustering"])
-	assert.EqualValues(t, 1, after["compaction=mix"]-before["compaction=mix"])
-	assert.EqualValues(t, 1, after["compaction=_other"]-before["compaction=_other"])
 	for name := range after {
 		assert.Regexp(t, `^(import_file_type|compaction)=`, name, "MixCoord role holds only the DataCoord-side counters")
 	}

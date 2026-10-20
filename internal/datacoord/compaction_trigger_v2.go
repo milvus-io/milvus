@@ -27,7 +27,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/types"
@@ -40,21 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-type CompactionTriggerType int8
-
-const (
-	TriggerTypeLevelZeroViewChange CompactionTriggerType = iota + 1
-	TriggerTypeLevelZeroViewIDLE
-	TriggerTypeLevelZeroViewManual
-	TriggerTypeSegmentSizeViewChange
-	TriggerTypeClustering
-	TriggerTypeSingle
-	TriggerTypeSort
-	TriggerTypeForceMerge
-	TriggerTypeStorageVersionUpgrade
-	TriggerTypeBumpSchemaVersion
-)
-
 type TickerType int8
 
 const (
@@ -65,63 +49,6 @@ const (
 	StorageVersionTicker
 	TargetTicker
 )
-
-func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
-	switch t {
-	case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE, TriggerTypeLevelZeroViewManual:
-		return datapb.CompactionType_Level0DeleteCompaction
-	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge:
-		return datapb.CompactionType_MixCompaction
-	case TriggerTypeClustering:
-		return datapb.CompactionType_ClusteringCompaction
-	case TriggerTypeSort:
-		return datapb.CompactionType_SortCompaction
-	case TriggerTypeStorageVersionUpgrade:
-		return datapb.CompactionType_MixCompaction
-	case TriggerTypeBumpSchemaVersion:
-		return datapb.CompactionType_BumpSchemaVersionCompaction
-	default:
-		return datapb.CompactionType_MixCompaction
-	}
-}
-
-func (t CompactionTriggerType) String() string {
-	switch t {
-	case TriggerTypeLevelZeroViewChange:
-		return "LevelZeroViewChange"
-	case TriggerTypeLevelZeroViewIDLE:
-		return "LevelZeroViewIDLE"
-	case TriggerTypeLevelZeroViewManual:
-		return "LevelZeroViewManual"
-	case TriggerTypeSegmentSizeViewChange:
-		return "SegmentSizeViewChange"
-	case TriggerTypeClustering:
-		return "Clustering"
-	case TriggerTypeSingle:
-		return "Single"
-	case TriggerTypeSort:
-		return "Sort"
-	case TriggerTypeForceMerge:
-		return "ForceMerge"
-	case TriggerTypeStorageVersionUpgrade:
-		return "StorageVersionUpgrade"
-	case TriggerTypeBumpSchemaVersion:
-		return "BumpSchemaVersion"
-	default:
-		return ""
-	}
-}
-
-// CompactionPolicy defines the interface for different compaction policies
-type CompactionPolicy interface {
-	// Enable returns whether this compaction policy is enabled
-	Enable() bool
-	// Trigger returns views that require inspector slots (actual compaction tasks).
-	// Only called when the inspector is not full.
-	Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error)
-	// Name returns the name of this compaction policy
-	Name() string
-}
 
 type TriggerManager interface {
 	Start()
@@ -141,8 +68,10 @@ type CompactionTriggerManager struct {
 	handler   Handler
 	allocator allocator.Allocator
 
-	meta     *meta
-	policies map[TickerType]CompactionPolicy
+	meta                 *meta
+	indexMeta            *indexMeta
+	compactionTargetMeta *compactionTargetMeta
+	policies             map[TickerType]CompactionPolicy
 
 	l0Policy                    *l0CompactionPolicy
 	clusteringPolicy            *clusteringCompactionPolicy
@@ -157,26 +86,29 @@ type CompactionTriggerManager struct {
 }
 
 func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, inspector CompactionInspector, meta *meta,
+	indexMeta *indexMeta, compactionTaskMeta *compactionTaskMeta, partitionStatsMeta *partitionStatsMeta, compactionTargetMeta *compactionTargetMeta,
 	versionManager IndexEngineVersionManager,
 ) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
-		allocator: alloc,
-		handler:   handler,
-		inspector: inspector,
-		meta:      meta,
-		policies:  make(map[TickerType]CompactionPolicy),
+		allocator:            alloc,
+		handler:              handler,
+		inspector:            inspector,
+		meta:                 meta,
+		indexMeta:            indexMeta,
+		compactionTargetMeta: compactionTargetMeta,
+		policies:             make(map[TickerType]CompactionPolicy),
 	}
 	// Initialize policies and keep separate pointers for frequently accessed ones
 
 	m.l0Policy = newL0CompactionPolicy(meta, alloc)
-	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
-	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
+	m.clusteringPolicy = newClusteringCompactionPolicy(meta, compactionTaskMeta, partitionStatsMeta, m.allocator, m.handler)
+	m.singlePolicy = newSingleCompactionPolicy(meta, indexMeta, m.allocator, m.handler)
 
-	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
+	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, indexMeta, m.allocator, m.handler)
 	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler, versionManager)
 	m.bumpSchemaVersionPolicy = newBumpSchemaVersionPolicy(meta, m.allocator, m.handler)
 	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
-		m.targetReconciler = newCompactionTargetReconciler(meta, handler)
+		m.targetReconciler = newCompactionTargetReconciler(meta, indexMeta, compactionTargetMeta, handler)
 	}
 
 	// Initialize policies map for ticker handling
@@ -380,7 +312,7 @@ func (m *CompactionTriggerManager) saveManualRewriteCompactionTarget(ctx context
 			"collection %d has pending snapshot or unloaded snapshot RefIndex",
 			req.GetCollectionID()))
 	}
-	targetMeta := m.meta.GetCompactionTargetMeta()
+	targetMeta := m.compactionTargetMeta
 	if targetMeta == nil {
 		return 0, merr.WrapErrServiceInternal("compaction target meta is not initialized")
 	}
@@ -519,7 +451,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 
-	expectedSegmentSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
+	expectedSegmentSize := getExpectedSegmentSize(m.indexMeta, collection.ID, collection.Schema)
 	totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view, expectedSegmentSize)
 	if err != nil {
 		log.Warn(ctx, "Failed to calculate cluster compaction config fail", mlog.Err(err))
@@ -588,7 +520,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		return
 	}
 
-	expectedSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
+	expectedSize := getExpectedSegmentSize(m.indexMeta, collection.ID, collection.Schema)
 	totalSize := view.GetTotalSize()
 	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, float64(expectedSize))
 	if err != nil {
@@ -828,7 +760,7 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 	for _, s := range view.GetSegmentsView() {
 		totalRows += s.NumOfRows
 	}
-	expectedSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
+	expectedSize := getExpectedSegmentSize(m.indexMeta, collection.ID, collection.Schema)
 	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, view.GetTotalSize(), float64(expectedSize))
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because allocate id fail", mlog.Err(err))
@@ -867,22 +799,4 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 		mlog.Int64("planID", task.GetPlanID()),
 		mlog.String("type", task.GetType().String()),
 	)
-}
-
-func getExpectedSegmentSize(meta *meta, collectionID int64, schema *schemapb.CollectionSchema) int64 {
-	allDiskIndex := meta.indexMeta.AllDenseWithDiskIndex(collectionID, schema)
-	if allDiskIndex {
-		// Only if all dense vector fields index type are DiskANN, recalc segment max size here.
-		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
-	}
-	// If some dense vector fields index type are not DiskANN, recalc segment max size using default policy.
-	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-}
-
-// chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName
-type chanPartSegments struct {
-	collectionID UniqueID
-	partitionID  UniqueID
-	channelName  string
-	segments     []*SegmentInfo
 }

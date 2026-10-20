@@ -22,7 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func (s *DDLCallbacks) dropIndexV2Callback(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
+func (c *DDLCallbacks) dropIndexV2Callback(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
 	header := result.Message.Header()
-	return s.meta.indexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds())
+	return c.IndexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds())
 }

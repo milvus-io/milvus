@@ -31,7 +31,7 @@ import (
 
 // createSnapshotV2AckCallback handles the callback for CreateSnapshot DDL message.
 // ID allocation happens inside SnapshotManager.CreateSnapshot.
-func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultCreateSnapshotMessageV2) error {
+func (c *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultCreateSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
 		mlog.FieldCollectionID(header.CollectionId),
@@ -53,7 +53,7 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 		})
 	}
 	sort.Slice(positions, func(i, j int) bool { return positions[i].GetChannelName() < positions[j].GetChannelName() })
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, positions)
+	snapshotID, err := c.SnapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, positions)
 	if err != nil {
 		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err
@@ -71,7 +71,7 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 // pins while this callback runs. Therefore snapshotManager.DropSnapshot is guaranteed
 // never to return ErrSnapshotPinned on this path — the only remaining failure modes are
 // transient (etcd/network), which are correctly retried by the ack scheduler loop.
-func (s *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultDropSnapshotMessageV2) error {
+func (c *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultDropSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
 		mlog.String("snapshotName", header.Name),
@@ -80,7 +80,7 @@ func (s *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result mes
 	log.Info(ctx, "dropSnapshotV2AckCallback received")
 
 	// Delete snapshot using SnapshotManager interface (idempotent)
-	if err := s.snapshotManager.DropSnapshot(ctx, header.CollectionId, header.Name); err != nil {
+	if err := c.SnapshotManager.DropSnapshot(ctx, header.CollectionId, header.Name); err != nil {
 		log.Error(ctx, "failed to drop snapshot via DDL callback", mlog.Err(err))
 		return err
 	}
@@ -91,14 +91,14 @@ func (s *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result mes
 
 // dropSnapshotsByCollectionV2AckCallback handles the callback for DropSnapshotsByCollection DDL message.
 // Called during drop collection cascade to clean up all snapshots of the collection.
-func (s *DDLCallbacks) dropSnapshotsByCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultDropSnapshotsByCollectionMessageV2) error {
+func (c *DDLCallbacks) dropSnapshotsByCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultDropSnapshotsByCollectionMessageV2) error {
 	msg := result.Message
 	collectionID := msg.Header().GetCollectionId()
 
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	log.Info(ctx, "dropSnapshotsByCollectionV2AckCallback received")
 
-	if err := s.snapshotManager.DropSnapshotsByCollection(ctx, collectionID); err != nil {
+	if err := c.SnapshotManager.DropSnapshotsByCollection(ctx, collectionID); err != nil {
 		log.Error(ctx, "failed to drop snapshots by collection in callback", mlog.Err(err))
 		return err
 	}
@@ -111,7 +111,7 @@ func (s *DDLCallbacks) dropSnapshotsByCollectionV2AckCallback(ctx context.Contex
 // It creates copy segment jobs for data restoration.
 // NOTE: RestoreIndexes is now called synchronously in services.go before broadcast.
 // NOTE: jobID is pre-allocated in RestoreSnapshot and passed via WAL message for idempotency.
-func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
+func (c *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
 		mlog.String("snapshotName", header.SnapshotName),
@@ -133,7 +133,7 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 		// External restores do not have a local snapshot catalog entry or pin.
 		// The WAL header carries the metadata URI and external_spec needed to
 		// recreate the source storage in the async copy job.
-		jobID, err = s.snapshotManager.RestoreExternalData(
+		jobID, err = c.SnapshotManager.RestoreExternalData(
 			ctx,
 			header.SourceCollectionId,
 			header.SnapshotName,
@@ -144,7 +144,7 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 			header.GetSnapshotFingerprint(),
 		)
 	} else {
-		jobID, err = s.snapshotManager.RestoreData(
+		jobID, err = c.SnapshotManager.RestoreData(
 			ctx,
 			header.SourceCollectionId,
 			header.SnapshotName,

@@ -41,6 +41,7 @@ type indexInspector struct {
 	notifyIndexChan chan int64
 
 	meta                      *meta
+	indexMeta                 *indexMeta
 	scheduler                 task.GlobalScheduler
 	allocator                 allocator.Allocator
 	handler                   Handler
@@ -52,6 +53,7 @@ func newIndexInspector(
 	ctx context.Context,
 	notifyIndexChan chan int64,
 	meta *meta,
+	indexMeta *indexMeta,
 	scheduler task.GlobalScheduler,
 	allocator allocator.Allocator,
 	handler Handler,
@@ -63,6 +65,7 @@ func newIndexInspector(
 		ctx:                       ctx,
 		cancel:                    cancel,
 		meta:                      meta,
+		indexMeta:                 indexMeta,
 		notifyIndexChan:           notifyIndexChan,
 		scheduler:                 scheduler,
 		allocator:                 allocator,
@@ -135,7 +138,7 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 
 	unindexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range flushedSegments {
-		if i.meta.indexMeta.IsUnIndexedSegment(segment.CollectionID, segment.GetID()) {
+		if i.indexMeta.IsUnIndexedSegment(segment.CollectionID, segment.GetID()) {
 			unindexedSegments = append(unindexedSegments, segment)
 		}
 	}
@@ -152,8 +155,8 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 		return nil
 	}
 
-	indexes := i.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
-	indexIDToSegIndexes := i.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+	indexes := i.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
+	indexIDToSegIndexes := i.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 
 	for _, index := range indexes {
 		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
@@ -207,10 +210,10 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		return err
 	}
 
-	indexParams := i.meta.indexMeta.GetIndexParams(segment.CollectionID, indexID)
+	indexParams := i.indexMeta.GetIndexParams(segment.CollectionID, indexID)
 	indexType := GetIndexType(indexParams)
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
-	fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
+	fieldID := i.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
 	fieldSize := segment.getFieldBinlogSize(fieldID)
 	taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
@@ -240,12 +243,13 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		IndexType:             indexType,
 		IndexStorePathVersion: i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion(),
 	}
-	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
+	if err = i.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err
 	}
 	i.scheduler.Enqueue(newIndexBuildTask(model.CloneSegmentIndex(segIndex),
 		taskSlot,
 		i.meta,
+		i.indexMeta,
 		i.handler,
 		i.storageCli,
 		i.indexEngineVersionManager))
@@ -267,15 +271,15 @@ func (i *indexInspector) isExternalCollection(collectionID int64) bool {
 func (i *indexInspector) reloadFromMeta() {
 	segments := i.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
-		for _, segIndex := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
+		for _, segIndex := range i.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
 			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
 				segIndex.IndexState != commonpb.IndexState_Retry &&
 				segIndex.IndexState != commonpb.IndexState_InProgress) {
 				continue
 			}
 
-			indexParams := i.meta.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
-			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
+			indexParams := i.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
+			fieldID := i.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
 			fieldSize := segment.getFieldBinlogSize(fieldID)
 			taskSlot := calculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
@@ -283,6 +287,7 @@ func (i *indexInspector) reloadFromMeta() {
 				model.CloneSegmentIndex(segIndex),
 				taskSlot,
 				i.meta,
+				i.indexMeta,
 				i.handler,
 				i.storageCli,
 				i.indexEngineVersionManager,

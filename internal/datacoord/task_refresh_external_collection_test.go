@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metacache"
-	"github.com/milvus-io/milvus/internal/metastore"
+
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -43,52 +43,6 @@ import (
 )
 
 // ==================== Stub Implementations ====================
-
-// stubCatalog is a simple stub implementation of DataCoordCatalog for testing
-type stubCatalog struct {
-	metastore.DataCoordCatalog
-	jobs            []*datapb.ExternalCollectionRefreshJob
-	tasks           []*datapb.ExternalCollectionRefreshTask
-	alterSegmentErr error
-	alteredSegments []*datapb.SegmentInfo
-
-	updateErr     error
-	updateActions [][]metastore.UpdateAction
-}
-
-// Update records the actions passed to it (so tests can assert on the
-// composite write a caller issued) and returns updateErr.
-func (s *stubCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
-	s.updateActions = append(s.updateActions, actions)
-	return s.updateErr
-}
-
-func (s *stubCatalog) ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error) {
-	return s.jobs, nil
-}
-
-func (s *stubCatalog) ListExternalCollectionRefreshTasks(ctx context.Context) ([]*datapb.ExternalCollectionRefreshTask, error) {
-	return s.tasks, nil
-}
-
-func (s *stubCatalog) SaveExternalCollectionRefreshJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
-	// Append gives the body enough instructions for mockey to patch (a bare
-	// `return nil` compiles to a single ret and cannot be patched).
-	s.jobs = append(s.jobs, job)
-	return nil
-}
-
-func (s *stubCatalog) SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error {
-	// Append gives the body enough instructions for mockey to patch (a bare
-	// `return nil` compiles to a single ret and cannot be patched).
-	s.tasks = append(s.tasks, task)
-	return nil
-}
-
-func (s *stubCatalog) AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...metastore.BinlogsIncrement) error {
-	s.alteredSegments = append([]*datapb.SegmentInfo(nil), newSegments...)
-	return s.alterSegmentErr
-}
 
 // stubAllocator is a simple stub implementation of Allocator for testing
 type stubAllocator struct {
@@ -959,7 +913,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		alloc := &stubAllocator{nextID: 99999}
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc)
 		var failedJobs []int64
-		checker := newRefreshChecker(t.Context(), nil, refreshMeta, make(chan struct{}), nil, nil,
+		checker := newRefreshChecker(t.Context(), nil, nil, refreshMeta, make(chan struct{}), nil, nil,
 			func(jobID int64) { failedJobs = append(failedJobs, jobID) }, nil, nil)
 		task.processFinishedJob = checker.processJobByID
 

@@ -36,8 +36,8 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 			withSegmentIndexManifestWrites(t, true)
 			store := newFakeManifestStore(t)
 			catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-			m := bootMetaForRestart(t, catalog, restartCollID)
-			seedRestartTask(t, m)
+			m, mDomains := bootMetaForRestartWithSnapshot(t, catalog, restartCollID)
+			seedRestartTask(t, m, mDomains.indexMeta)
 			if previouslyMarked {
 				// The old marked revision contains another index, but not this build.
 				pointer := m.GetSegment(ctx, restartSegID).GetManifestPath()
@@ -49,7 +49,8 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 				}}
 				require.NoError(t, m.UpdateSegmentsInfo(ctx, UpdateManifestHasIndex(restartSegID)))
 			}
-			gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: m.chunkManager})
+			im := mDomains.indexMeta
+			gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: m.chunkManager, indexMeta: im, snapshotMeta: mDomains.snapshotMeta})
 			defer gc.option.removeObjectPool.Release()
 			var original func(*indexMeta, int64) (*model.SegmentIndex, bool)
 			injected := false
@@ -58,14 +59,14 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 				if !injected {
 					injected = true
 					// GC captured placement before this task completion and index drop.
-					publishRestartTask(t, m)
+					publishRestartTask(t, m, mDomains.indexMeta)
 					job, ok := original(im, id)
 					require.True(t, ok)
 					files = gc.getAllIndexFilesOfIndex(job)
 					for file := range files {
 						require.NoError(t, m.chunkManager.Write(ctx, file, []byte("index")))
 					}
-					require.NoError(t, m.indexMeta.RemoveIndex(ctx, restartCollID, restartIndexID))
+					require.NoError(t, im.RemoveIndex(ctx, restartCollID, restartIndexID))
 				}
 				return original(im, id)
 			}).Build()
@@ -74,7 +75,7 @@ func TestGarbageCollector_RefreshManifestAfterTaskCompletion(t *testing.T) {
 			hook.UnPatch()
 			require.True(t, injected)
 			pointer := m.GetSegment(ctx, restartSegID).GetManifestPath()
-			_, recordExists := m.indexMeta.GetIndexJob(restartBuildID)
+			_, recordExists := im.GetIndexJob(restartBuildID)
 			require.False(t, recordExists, "GC removed its only driving record")
 			entries := store.revisions[pointer]
 			expectedEntries := 0

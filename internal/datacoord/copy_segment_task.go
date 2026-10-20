@@ -197,7 +197,8 @@ type copySegmentTask struct {
 	ctx          context.Context
 	copyMeta     CopySegmentMeta          // For accessing job metadata and updating task state
 	meta         *meta                    // For accessing segment metadata and collection schema
-	snapshotMeta *snapshotMeta            // For accessing snapshot data (source binlogs)
+	indexMeta    *indexMeta               // For accessing index definitions and segment indexes
+	snapshotMeta SnapshotSource           // For accessing snapshot data (source binlogs)
 	alloc        allocator.Allocator      // For allocating new build IDs to avoid buildID reuse
 	tr           *timerecord.TimeRecorder // For measuring task duration (pending, executing, total)
 	times        *taskcommon.Times        // For tracking task lifecycle timestamps
@@ -311,6 +312,7 @@ func (t *copySegmentTask) Clone() CopySegmentTask {
 		ctx:          t.ctx,
 		copyMeta:     t.copyMeta,
 		meta:         t.meta,
+		indexMeta:    t.indexMeta,
 		snapshotMeta: t.snapshotMeta,
 		alloc:        t.alloc,
 		tr:           t.tr,
@@ -602,7 +604,7 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 
 	// Sync task state and binlog info
 	t.cleanupAdmissionPending.Store(true)
-	err = SyncCopySegmentTask(t, resp, t.copyMeta, t.meta)
+	err = SyncCopySegmentTask(t, resp, t.copyMeta, t.meta, t.indexMeta)
 	if err != nil {
 		if !t.GetCleanupRequired() {
 			// Admission failed before cleanup intent was durable. Retry the
@@ -899,7 +901,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	isExternalCollection := typeutil.IsExternalCollection(sourceSchema)
 
 	writeIndexesToManifest, _ := taskIndexWriteToManifest(task)
-	targetIndexes := buildCopySegmentTargetIndexes(t.meta, job.GetCollectionId(), writeIndexesToManifest)
+	targetIndexes := buildCopySegmentTargetIndexes(t.meta, t.indexMeta, job.GetCollectionId(), writeIndexesToManifest)
 
 	// Resolve the immutable source descriptions first, then prefetch only the
 	// manifest index sections the snapshot cannot answer on its own. The FFI
@@ -1143,7 +1145,7 @@ func deriveSnapshotSourceRootURI(snapshotS3Location string, layout datapb.Snapsh
 // - Any error during sync marks both task and job as failed
 // - Ensures data integrity (no partial restore)
 // - Provides clear error messages for troubleshooting
-func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResponse, copyMeta CopySegmentMeta, meta *meta) error {
+func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResponse, copyMeta CopySegmentMeta, meta *meta, indexMeta *indexMeta) error {
 	ctx := context.TODO()
 
 	// Update task state based on response
@@ -1170,7 +1172,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 		verified := make([]map[int64]int64, len(results))
 		io := packed.NewManifestIOContext(min(max(1, len(results)), segmentIndexManifestReadConcurrency()))
 		err := runManifestBatch(ctx, len(results), func(ctx context.Context, i int, complete func(error)) error {
-			return submitCopiedManifestIndexOwnership(ctx, io, results[i], task, meta, func(builds map[int64]int64, err error) {
+			return submitCopiedManifestIndexOwnership(ctx, io, results[i], task, meta, indexMeta, func(builds map[int64]int64, err error) {
 				verified[i] = builds
 				complete(err)
 			})
@@ -1180,7 +1182,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			return failCopySegmentSync(ctx, task, copyMeta, err)
 		}
 		for i, result := range results {
-			if err := validateCopiedManifestIndexPlacement(result, task, meta, verified[i]); err != nil {
+			if err := validateCopiedManifestIndexPlacement(result, task, meta, indexMeta, verified[i]); err != nil {
 				return failCopySegmentSync(ctx, task, copyMeta, err)
 			}
 		}
@@ -1214,7 +1216,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 					operators = append(operators, UpdateManifestHasIndex(result.GetSegmentId()))
 				}
 			}
-			err := validateCopiedManifestIndexPlacement(result, task, meta, publishedBuilds)
+			err := validateCopiedManifestIndexPlacement(result, task, meta, indexMeta, publishedBuilds)
 			if err == nil {
 				err = meta.UpdateSegmentsInfo(ctx, operators...)
 			}
@@ -1223,7 +1225,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			}
 
 			// Sync vector/scalar indexes
-			if err = syncVectorScalarIndexes(ctx, result, task, meta, copyMeta, publishedBuilds); err != nil {
+			if err = syncVectorScalarIndexes(ctx, result, task, meta, indexMeta, copyMeta, publishedBuilds); err != nil {
 				return err
 			}
 
@@ -1304,7 +1306,7 @@ func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta Cop
 // copy. Read non-empty manifests back, including current-worker results, and
 // compare their identities and paths before the segment becomes visible.
 func submitCopiedManifestIndexOwnership(ctx context.Context, io *packed.ManifestIOContext, result *datapb.CopySegmentResult,
-	task CopySegmentTask, meta *meta, complete func(map[int64]int64, error),
+	task CopySegmentTask, meta *meta, indexMeta *indexMeta, complete func(map[int64]int64, error),
 ) error {
 	manifestPath := result.GetManifestPath()
 	if manifestPath == "" || meta == nil {
@@ -1333,21 +1335,21 @@ func submitCopiedManifestIndexOwnership(ctx context.Context, io *packed.Manifest
 			complete(nil, merr.Wrapf(err, "failed to read back copied manifest indexes for segment %d", result.GetSegmentId()))
 			return
 		}
-		builds, err := verifyCopiedManifestIndexOwnership(result, task, meta, segment, storageConfig.GetRootPath(), entries)
+		builds, err := verifyCopiedManifestIndexOwnership(result, task, meta, indexMeta, segment, storageConfig.GetRootPath(), entries)
 		complete(builds, err)
 	})
 }
 
 // Verify the loaded entries without further I/O before publishing any segment.
-func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task CopySegmentTask, meta *meta,
+func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task CopySegmentTask, meta *meta, indexMeta *indexMeta,
 	segment *SegmentInfo, rootPath string, entries []packed.ManifestIndexInfo,
 ) (map[int64]int64, error) {
 	if meta.chunkManager != nil {
 		rootPath = meta.chunkManager.RootPath()
 	}
 	definitions := make(map[int64]*model.Index)
-	if meta.indexMeta != nil {
-		for _, index := range meta.indexMeta.GetIndexesForCollection(task.GetCollectionId(), "") {
+	if indexMeta != nil {
+		for _, index := range indexMeta.GetIndexesForCollection(task.GetCollectionId(), "") {
 			definitions[index.IndexID] = index
 		}
 	}
@@ -1407,7 +1409,7 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 // made Flushed, so a mismatched or old worker cannot publish a visible segment
 // and only then fail index synchronization.
 func validateCopiedManifestIndexPlacement(result *datapb.CopySegmentResult,
-	task CopySegmentTask, meta *meta, publishedBuilds map[int64]int64,
+	task CopySegmentTask, meta *meta, indexMeta *indexMeta, publishedBuilds map[int64]int64,
 ) error {
 	writeToManifest, known := task.GetIndexWriteToManifest()
 	if !known {
@@ -1420,7 +1422,7 @@ func validateCopiedManifestIndexPlacement(result *datapb.CopySegmentResult,
 			"copied manifest of segment %d contains index entries while manifest publication was disabled at dispatch",
 			result.GetSegmentId())
 	}
-	if !writeToManifest || meta == nil || meta.indexMeta == nil {
+	if !writeToManifest || meta == nil || indexMeta == nil {
 		return nil
 	}
 	// Placement is recorded per task, which can also contain legacy segments.
@@ -1430,7 +1432,7 @@ func validateCopiedManifestIndexPlacement(result *datapb.CopySegmentResult,
 		return nil
 	}
 	targetIndexNames := make(map[string]struct{})
-	for _, index := range meta.indexMeta.GetIndexesForCollection(task.GetCollectionId(), "") {
+	for _, index := range indexMeta.GetIndexesForCollection(task.GetCollectionId(), "") {
 		if index != nil && !index.IsDeleted {
 			targetIndexNames[index.IndexName] = struct{}{}
 		}
@@ -1461,7 +1463,7 @@ func validateCopiedManifestIndexPlacement(result *datapb.CopySegmentResult,
 // can carry several indexes on different paths, so fieldID cannot be used). The
 // worker knows the name it copied and nothing else about the target, so the
 // mapping is resolved here and shipped with the request.
-func buildCopySegmentTargetIndexes(m *meta, collectionID int64, writeToManifest bool) []*datapb.CopySegmentTargetIndex {
+func buildCopySegmentTargetIndexes(m *meta, indexMeta *indexMeta, collectionID int64, writeToManifest bool) []*datapb.CopySegmentTargetIndex {
 	// Strict exclusivity with the etcd record: with manifest publication off,
 	// the copied segment's index records go to etcd (syncVectorScalarIndexes)
 	// and its manifest must gain no index entry. An empty map makes the worker
@@ -1470,10 +1472,10 @@ func buildCopySegmentTargetIndexes(m *meta, collectionID int64, writeToManifest 
 	if !writeToManifest {
 		return nil
 	}
-	if m == nil || m.indexMeta == nil {
+	if m == nil || indexMeta == nil {
 		return nil
 	}
-	indexes := m.indexMeta.GetIndexesForCollection(collectionID, "")
+	indexes := indexMeta.GetIndexesForCollection(collectionID, "")
 	if len(indexes) == 0 {
 		return nil
 	}
@@ -1482,8 +1484,8 @@ func buildCopySegmentTargetIndexes(m *meta, collectionID int64, writeToManifest 
 		if index == nil || index.IsDeleted {
 			continue
 		}
-		indexParams := m.indexMeta.GetIndexParams(collectionID, index.IndexID)
-		properties := common.KeyValuePairs(m.indexMeta.GetTypeParams(collectionID, index.IndexID)).ToMap()
+		indexParams := indexMeta.GetIndexParams(collectionID, index.IndexID)
+		properties := common.KeyValuePairs(indexMeta.GetTypeParams(collectionID, index.IndexID)).ToMap()
 		for key, value := range common.KeyValuePairs(indexParams).ToMap() {
 			properties[key] = value
 		}
@@ -1549,7 +1551,7 @@ func cloneOptionalBool(value *bool) *bool {
 // - Index metadata stored in separate indexMeta structure
 // - Enables independent index management and rebuilding
 func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResult,
-	task CopySegmentTask, meta *meta, copyMeta CopySegmentMeta, publishedBuilds map[int64]int64,
+	task CopySegmentTask, meta *meta, indexMeta *indexMeta, copyMeta CopySegmentMeta, publishedBuilds map[int64]int64,
 ) error {
 	if len(result.GetIndexInfos()) == 0 {
 		return nil
@@ -1561,7 +1563,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 	// so that segmentIndexes entries match the index definitions in indexes map.
 	// Using indexName (instead of fieldID) as key because a single JSON field can have
 	// multiple indexes on different paths, and indexName is preserved during RestoreIndexes.
-	targetIndexes := meta.indexMeta.GetIndexesForCollection(task.GetCollectionId(), "")
+	targetIndexes := indexMeta.GetIndexesForCollection(task.GetCollectionId(), "")
 	indexNameToTargetID := make(map[string]int64, len(targetIndexes))
 	for _, index := range targetIndexes {
 		indexNameToTargetID[index.IndexName] = index.IndexID
@@ -1637,9 +1639,9 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 
 		var err error
 		if manifestResident {
-			err = meta.indexMeta.AddSegmentIndexFromManifest(ctx, segIndex)
+			err = indexMeta.AddSegmentIndexFromManifest(ctx, segIndex)
 		} else {
-			err = meta.indexMeta.AddSegmentIndex(ctx, segIndex)
+			err = indexMeta.AddSegmentIndex(ctx, segIndex)
 		}
 		if err != nil {
 			mlog.Warn(ctx, "failed to add segment index",

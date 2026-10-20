@@ -31,18 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// Existing operator tests supply a blocking fake. Only this test adapter uses
-// a goroutine to model native callback delivery; production submits directly.
-func mockL0ManifestSubmissions(commit func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig, []packed.DeltaLogEntry) (string, error)) *mockey.Mocker {
-	return mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, base string, version int64, cfg *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
-		go func() {
-			manifest, err := commit(ctx, io, packed.MarshalManifestPath(base, version), cfg, updates.DeltaLogs)
-			complete(packed.ManifestUpdateResult{ManifestPath: manifest}, err)
-		}()
-		return nil
-	}).Build()
-}
-
 func TestL0ManifestBatchSingleWorker(t *testing.T) {
 	executor := newManifestCommitExecutor(1)
 	defer executor.close()

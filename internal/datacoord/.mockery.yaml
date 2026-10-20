@@ -34,6 +34,7 @@ packages:
       StatsJobManager:
       ImportMeta:
       CollectionTopologyQuerier:
+      PartitionStatsCleaner:
   github.com/milvus-io/milvus/internal/datacoord/allocator:
     interfaces:
       Allocator:

@@ -237,7 +237,7 @@ func TestPublishGroup_IndexRegressionRejected(t *testing.T) {
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	ctx := context.Background()
-	m.indexMeta = newReadinessIndexMeta(10, map[int64]*model.Index{10: vectorIndex(2, 10)}, nil)
+	m.indexCatalog = newReadinessIndexMeta(10, map[int64]*model.Index{10: vectorIndex(2, 10)}, nil)
 
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	err = m.publishGroup(ctx, ready, newMockAllocator(t))

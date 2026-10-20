@@ -69,18 +69,6 @@ func bumpVersionMock() *mockey.Mocker {
 	).Build()
 }
 
-func commitUpdates(segmentID int64, basePath string, operators ...UpdateOperator) SegmentManifestCommit {
-	return SegmentManifestCommit{
-		SegmentID:     segmentID,
-		StorageConfig: &indexpb.StorageConfig{},
-		Mutation: ManifestMutation{
-			Type:    ManifestMutationCommitUpdates,
-			Updates: &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: basePath + "/_delta/1", NumEntries: 1}}},
-		},
-		CatalogMutation: SegmentCatalogMutation{Operators: operators},
-	}
-}
-
 // TestCommitSegmentManifestsBatchesInSingleCatalogWrite is the core guarantee: N
 // segments' manifest pointers advance, but the catalog sees exactly one AlterSegments
 // transaction for the whole batch.

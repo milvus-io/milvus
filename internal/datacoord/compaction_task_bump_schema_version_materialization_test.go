@@ -39,7 +39,7 @@ const (
 	materializationPlanID    = int64(7001)
 )
 
-func newMaterializationTask(meta *meta, schemaVersion int32) *bumpSchemaVersionTask {
+func newMaterializationTask(meta *meta, compactionTaskMeta *compactionTaskMeta, schemaVersion int32) *bumpSchemaVersionTask {
 	return newBumpSchemaVersionTask(&datapb.CompactionTask{
 		PlanID:        materializationPlanID,
 		CollectionID:  1,
@@ -47,7 +47,7 @@ func newMaterializationTask(meta *meta, schemaVersion int32) *bumpSchemaVersionT
 		Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
 		Schema:        &schemapb.CollectionSchema{Version: schemaVersion},
 		InputSegments: []int64{materializationSegmentID},
-	}, nil, meta, nil)
+	}, nil, meta, compactionTaskMeta, nil)
 }
 
 func addMaterializationSegment(t *testing.T, meta *meta, manifestPath string, schemaVersion int32, opts ...func(*datapb.SegmentInfo)) {
@@ -111,7 +111,7 @@ func TestCommitBumpV3MaterializationHappyPath(t *testing.T) {
 	currentManifest := packed.MarshalManifestPath(basePath, 5)
 	newManifest := packed.MarshalManifestPath(basePath, 6)
 
-	meta, err := newMemoryMeta(t)
+	meta, dm, err := newMemoryMetaWithCompactionTask(t)
 	require.NoError(t, err)
 	addMaterializationSegment(t, meta, currentManifest, 3)
 
@@ -131,7 +131,7 @@ func TestCommitBumpV3MaterializationHappyPath(t *testing.T) {
 	).Build()
 	defer commit.UnPatch()
 
-	task := newMaterializationTask(meta, 7)
+	task := newMaterializationTask(meta, dm.compactionTaskMeta, 7)
 	ids, err := task.commitBumpV3Materialization(context.Background(), materializationResult(&datapb.Statistics{
 		InsertBinlogSize:  256,
 		InsertBinlogCount: 1,
@@ -164,7 +164,7 @@ func TestCommitBumpV3MaterializationReplayShortCircuits(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/500"
 	currentManifest := packed.MarshalManifestPath(basePath, 5)
 
-	meta, err := newMemoryMeta(t)
+	meta, dm, err := newMemoryMetaWithCompactionTask(t)
 	require.NoError(t, err)
 	// Segment already carries the target schema version: a prior attempt
 	// committed and persisted. This is the restart-safe replay guard — it must
@@ -180,7 +180,7 @@ func TestCommitBumpV3MaterializationReplayShortCircuits(t *testing.T) {
 	).Build()
 	defer commit.UnPatch()
 
-	task := newMaterializationTask(meta, 7)
+	task := newMaterializationTask(meta, dm.compactionTaskMeta, 7)
 	ids, err := task.commitBumpV3Materialization(context.Background(), materializationResult(nil))
 	require.NoError(t, err)
 	require.Equal(t, []UniqueID{materializationSegmentID}, ids)
@@ -190,33 +190,33 @@ func TestCommitBumpV3MaterializationReplayShortCircuits(t *testing.T) {
 
 func TestCommitBumpV3MaterializationRejectsStaleSchemaVersion(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/500"
-	meta, err := newMemoryMeta(t)
+	meta, dm, err := newMemoryMetaWithCompactionTask(t)
 	require.NoError(t, err)
 	// Segment schema version is newer than this task's target: a newer bump
 	// already superseded it.
 	addMaterializationSegment(t, meta, packed.MarshalManifestPath(basePath, 5), 9)
 
-	task := newMaterializationTask(meta, 7)
+	task := newMaterializationTask(meta, dm.compactionTaskMeta, 7)
 	_, err = task.commitBumpV3Materialization(context.Background(), materializationResult(nil))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrIllegalCompactionPlan)
 }
 
 func TestCommitBumpV3MaterializationSegmentNotFound(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	meta, dm, err := newMemoryMetaWithCompactionTask(t)
 	require.NoError(t, err)
-	task := newMaterializationTask(meta, 7)
+	task := newMaterializationTask(meta, dm.compactionTaskMeta, 7)
 	_, err = task.commitBumpV3Materialization(context.Background(), materializationResult(nil))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
 }
 
 func TestCommitBumpV3MaterializationRequiresPublishedV3Manifest(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	meta, dm, err := newMemoryMetaWithCompactionTask(t)
 	require.NoError(t, err)
 	// StorageV3 but no manifest path published yet.
 	addMaterializationSegment(t, meta, "", 3)
-	task := newMaterializationTask(meta, 7)
+	task := newMaterializationTask(meta, dm.compactionTaskMeta, 7)
 	_, err = task.commitBumpV3Materialization(context.Background(), materializationResult(nil))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
@@ -224,12 +224,12 @@ func TestCommitBumpV3MaterializationRequiresPublishedV3Manifest(t *testing.T) {
 
 func TestCommitBumpV3MaterializationRejectsInvisibleSegment(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/500"
-	meta, err := newMemoryMeta(t)
+	meta, dm, err := newMemoryMetaWithCompactionTask(t)
 	require.NoError(t, err)
 	addMaterializationSegment(t, meta, packed.MarshalManifestPath(basePath, 5), 3, func(info *datapb.SegmentInfo) {
 		info.IsInvisible = true
 	})
-	task := newMaterializationTask(meta, 7)
+	task := newMaterializationTask(meta, dm.compactionTaskMeta, 7)
 	_, err = task.commitBumpV3Materialization(context.Background(), materializationResult(nil))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrIllegalCompactionPlan)
@@ -237,10 +237,10 @@ func TestCommitBumpV3MaterializationRejectsInvisibleSegment(t *testing.T) {
 
 func TestCommitBumpV3MaterializationRequiresManifestDelta(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/500"
-	meta, err := newMemoryMeta(t)
+	meta, dm, err := newMemoryMetaWithCompactionTask(t)
 	require.NoError(t, err)
 	addMaterializationSegment(t, meta, packed.MarshalManifestPath(basePath, 5), 3)
-	task := newMaterializationTask(meta, 7)
+	task := newMaterializationTask(meta, dm.compactionTaskMeta, 7)
 
 	result := materializationResult(nil)
 	result.Segments[0].ManifestDelta = &datapb.SegmentManifestDelta{} // empty column groups

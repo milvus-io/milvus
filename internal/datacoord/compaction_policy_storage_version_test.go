@@ -488,11 +488,12 @@ func (s *StorageVersionUpgradePolicySuite) TestFormatRefreshRespectsSegmentFilte
 	segments[104].State = commonpb.SegmentState_Dropped
 
 	s.setPolicyMeta(collID, coll, segments)
-	s.policy.meta.snapshotMeta = &snapshotMeta{
+	snapMeta := &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
 		snapshotPendingCollections:   typeutil.NewUniqueSet(),
 		segmentProtectionUntil:       map[int64]uint64{105: uint64(time.Now().Add(time.Hour).Unix())},
 	}
+	s.policy.meta.compactionProtection = snapMeta
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
 	s.NoError(err)

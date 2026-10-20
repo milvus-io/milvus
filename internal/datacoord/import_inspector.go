@@ -29,10 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
-const (
-	NullNodeID = -1
-)
-
 type ImportInspector interface {
 	Reload()
 	Start()

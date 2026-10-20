@@ -1844,3 +1844,7 @@ func (sm *snapshotMeta) generatePinID(snapshot *datapb.SnapshotInfo) (int64, err
 	}
 	return 0, merr.WrapErrServiceInternalMsg("failed to generate unique pin ID after 3 attempts")
 }
+
+var _ CompactionProtection = (*snapshotMeta)(nil)
+
+var _ SnapshotSource = (*snapshotMeta)(nil)

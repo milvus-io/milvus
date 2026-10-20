@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"path"
 	"sort"
 	"strconv"
 	"sync"
@@ -56,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -74,17 +72,7 @@ type CompactionMeta interface {
 	CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []int64) (bool, bool)
 	CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, error)
 	ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error
-	CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
 
-	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
-	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
-	GetCompactionTasks(ctx context.Context) map[int64][]*datapb.CompactionTask
-	GetCompactionTasksByTriggerID(ctx context.Context, triggerID int64) []*datapb.CompactionTask
-
-	GetIndexMeta() *indexMeta
-	GetAnalyzeMeta() *analyzeMeta
-	GetPartitionStatsMeta() *partitionStatsMeta
-	GetCompactionTaskMeta() *compactionTaskMeta
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 }
 
@@ -114,16 +102,9 @@ type meta struct {
 	channelSync  *channelSync
 	chunkManager storage.ChunkManager
 
-	indexMeta                     *indexMeta
-	analyzeMeta                   *analyzeMeta
-	partitionStatsMeta            *partitionStatsMeta
-	compactionTaskMeta            *compactionTaskMeta
-	compactionTargetMeta          *compactionTargetMeta
-	statsTaskMeta                 *statsTaskMeta
-	externalCollectionRefreshMeta *externalCollectionRefreshMeta
-	broker                        broker.Broker
-	// Snapshot Meta
-	snapshotMeta *snapshotMeta
+	indexCatalog         SegmentIndexCatalog
+	broker               broker.Broker
+	compactionProtection CompactionProtection
 
 	// segmentChangeGroups is the in-memory table of SegmentChangeGroup, keyed by
 	// groupID and guarded by segMu (the group record composes into the same
@@ -137,30 +118,6 @@ type meta struct {
 	segmentChangeGroups      map[int64]*model.SegmentChangeGroup
 	stagedSegmentToGroup     map[int64]int64
 	supersededSegmentToGroup map[int64]int64
-}
-
-func (m *meta) GetIndexMeta() *indexMeta {
-	return m.indexMeta
-}
-
-func (m *meta) GetAnalyzeMeta() *analyzeMeta {
-	return m.analyzeMeta
-}
-
-func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
-	return m.partitionStatsMeta
-}
-
-func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
-	return m.compactionTaskMeta
-}
-
-func (m *meta) GetCompactionTargetMeta() *compactionTargetMeta {
-	return m.compactionTargetMeta
-}
-
-func (m *meta) GetSnapshotMeta() *snapshotMeta {
-	return m.snapshotMeta
 }
 
 // collectionInfo is DataCoord's name for the collection metadata held in the
@@ -215,7 +172,7 @@ func (m *meta) closeManifestCommitExecutor() {
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, metaStore metacache.MetaStore, broker broker.Broker) (*meta, error) {
+func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, metaStore metacache.MetaStore, broker broker.Broker, loadDomainMetas DomainMetaLoader) (*meta, error) {
 	// Fetch collection IDs first so both MetaStore.LoadFromCatalog and indexMeta can use them for per-collection loading.
 	collectionIDs, err := showCollectionIDs(ctx, broker)
 	if err != nil {
@@ -223,17 +180,11 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	}
 
 	var (
-		im   *indexMeta
-		am   *analyzeMeta
-		psm  *partitionStatsMeta
-		ctm  *compactionTaskMeta
-		crm  *compactionTargetMeta
-		stm  *statsTaskMeta
-		ecrm *externalCollectionRefreshMeta
-		spm  *snapshotMeta
+		indexCatalog SegmentIndexCatalog
+		protection   CompactionProtection
 	)
 
-	// Construct meta struct first. MetaStore.LoadFromCatalog runs in parallel with sub-meta loading.
+	// Construct meta struct first. MetaStore.LoadFromCatalog runs in parallel with domain meta loading.
 	commitConcurrency := paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.GetAsInt()
 	mt := &meta{
 		manifestCommitExecutor:   newManifestCommitExecutor(commitConcurrency),
@@ -261,57 +212,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	g.Go(func() error {
 		var err error
-		im, err = newIndexMeta(ctx, catalog, collectionIDs)
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		am, err = newAnalyzeMeta(ctx, catalog)
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		psm, err = newPartitionStatsMeta(ctx, catalog)
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		ctm, err = newCompactionTaskMeta(ctx, catalog)
-		return err
-	})
-
-	if Params.DataCoordCfg.EnableTargetBasedCompaction.GetAsBool() {
-		g.Go(func() error {
-			var err error
-			crm, err = newCompactionTargetMeta(ctx, catalog)
-			return err
-		})
-	}
-
-	g.Go(func() error {
-		var err error
-		stm, err = newStatsTaskMeta(ctx, catalog)
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		ecrm, err = newExternalCollectionRefreshMeta(
-			ctx,
-			catalog,
-			withExternalCollectionRefreshResultStore(
-				newExternalCollectionRefreshResultStore(chunkManager),
-			),
-		)
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		spm, err = newSnapshotMeta(ctx, catalog, chunkManager)
+		indexCatalog, protection, err = loadDomainMetas(ctx, collectionIDs)
 		return err
 	})
 
@@ -321,7 +222,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		sup  map[int64]int64
 	)
 
-	// MetaStore.LoadFromCatalog loads segments + channel checkpoints in parallel with sub-meta loading.
+	// MetaStore.LoadFromCatalog loads segments + channel checkpoints in parallel with domain meta loading.
 	g.Go(func() error {
 		return metaStore.LoadFromCatalog(ctx, collectionIDs, mt.segmentLoadNormalizer())
 	})
@@ -334,15 +235,11 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// (compaction relations, per-segment transient state) they skipped.
 	mt.segments.RebuildFromStore()
 
-	// Assign sub-metas after all goroutines complete
-	mt.indexMeta = im
-	mt.analyzeMeta = am
-	mt.partitionStatsMeta = psm
-	mt.compactionTaskMeta = ctm
-	mt.compactionTargetMeta = crm
-	mt.statsTaskMeta = stm
-	mt.externalCollectionRefreshMeta = ecrm
-	mt.snapshotMeta = spm
+	// Install the index catalog and compaction protection after all goroutines complete
+	mt.indexCatalog = indexCatalog
+	if protection != nil {
+		mt.compactionProtection = protection
+	}
 
 	// Recovery follows the durable storage location, not the current write
 	// mode. A segment marked manifest_has_index may contain records published
@@ -3190,19 +3087,19 @@ func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID
 
 // isSegmentCompactionProtected checks if a segment is protected from compaction by a snapshot.
 func (m *meta) isSegmentCompactionProtected(segmentID int64) bool {
-	if m.snapshotMeta == nil {
+	if m.compactionProtection == nil {
 		return false
 	}
-	return m.snapshotMeta.IsSegmentCompactionProtected(segmentID)
+	return m.compactionProtection.IsSegmentCompactionProtected(segmentID)
 }
 
 // isCollectionCompactionBlocked checks if compaction is blocked for a collection
 // because a protected snapshot's RefIndex hasn't been loaded yet (fail-closed).
 func (m *meta) isCollectionCompactionBlocked(collectionID int64) bool {
-	if m.snapshotMeta == nil {
+	if m.compactionProtection == nil {
 		return false
 	}
-	return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
+	return m.compactionProtection.IsCollectionCompactionBlocked(collectionID)
 }
 
 // GetCompactableSegmentGroupByCollection returns sealed segments grouped by collection.
@@ -3227,11 +3124,11 @@ func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo
 	return ret
 }
 
-func (m *meta) GetEarliestStartPositionOfGrowingSegments(label *CompactionGroupLabel) *msgpb.MsgPosition {
-	segments := m.SelectSegments(m.ctx, WithCollection(label.CollectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+func (m *meta) GetEarliestStartPositionOfGrowingSegments(collectionID, partitionID int64, channel string) *msgpb.MsgPosition {
+	segments := m.SelectSegments(m.ctx, WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Growing &&
-			(label.PartitionID == common.AllPartitionsID || segment.GetPartitionID() == label.PartitionID) &&
-			segment.GetInsertChannel() == label.Channel
+			(partitionID == common.AllPartitionsID || segment.GetPartitionID() == partitionID) &&
+			segment.GetInsertChannel() == channel
 	}))
 
 	earliest := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
@@ -3252,109 +3149,6 @@ func updateSegState(segToUpdate *SegmentInfo, targetState commonpb.SegmentState)
 
 func (m *meta) ListCollections() []int64 {
 	return m.metaStore.GetCollectionIDs()
-}
-
-func (m *meta) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
-	return m.compactionTaskMeta.DropCompactionTask(ctx, task)
-}
-
-func (m *meta) SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
-	return m.compactionTaskMeta.SaveCompactionTask(ctx, task)
-}
-
-func (m *meta) GetCompactionTasks(ctx context.Context) map[int64][]*datapb.CompactionTask {
-	return m.compactionTaskMeta.GetCompactionTasks()
-}
-
-func (m *meta) GetCompactionTasksByTriggerID(ctx context.Context, triggerID int64) []*datapb.CompactionTask {
-	return m.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID)
-}
-
-func (m *meta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
-	removePaths := make([]string, 0)
-	partitionStatsPath := path.Join(m.chunkManager.RootPath(), common.PartitionStatsPath,
-		metautil.JoinIDPath(info.CollectionID, info.PartitionID),
-		info.GetVChannel(), strconv.FormatInt(info.GetVersion(), 10))
-	removePaths = append(removePaths, partitionStatsPath)
-	analyzeT := m.analyzeMeta.GetTask(info.GetAnalyzeTaskID())
-	if analyzeT != nil {
-		centroidsFilePath := path.Join(m.chunkManager.RootPath(), common.AnalyzeStatsPath,
-			metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(),
-				analyzeT.GetPartitionID(), analyzeT.GetFieldID()),
-			"centroids",
-		)
-		removePaths = append(removePaths, centroidsFilePath)
-		for _, segID := range info.GetSegmentIDs() {
-			segmentOffsetMappingFilePath := path.Join(m.chunkManager.RootPath(), common.AnalyzeStatsPath,
-				metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(),
-					analyzeT.GetPartitionID(), analyzeT.GetFieldID(), segID),
-				"offset_mapping",
-			)
-			removePaths = append(removePaths, segmentOffsetMappingFilePath)
-		}
-	}
-
-	mlog.Debug(ctx, "remove clustering compaction stats files",
-		mlog.Int64("collectionID", info.GetCollectionID()),
-		mlog.Int64("partitionID", info.GetPartitionID()),
-		mlog.String("vChannel", info.GetVChannel()),
-		mlog.Int64("planID", info.GetVersion()),
-		mlog.Strings("removePaths", removePaths))
-	err := m.chunkManager.MultiRemove(context.Background(), removePaths)
-	if err != nil {
-		mlog.Warn(ctx, "remove clustering compaction stats files failed", mlog.Err(err))
-		return err
-	}
-
-	// Persist the analyze task removal, the current-partition-stats-version
-	// rollback (if the dropped version is the current one), and the
-	// partition-stats info removal as a single composite catalog write, with
-	// the partition-stats info removal landing last as the commit marker.
-	//
-	// Both meta locks are held across the WHOLE compute -> catalog.Update ->
-	// in-memory apply sequence, mirroring the single critical section the
-	// legacy partitionStatsMeta.DropPartitionStatsInfo held around its own
-	// catalog write. This is what keeps the rollback correct: without it, a
-	// concurrent clustering-compaction completion (SaveCurrentPartitionStats
-	// Version for the same coll/part/vchannel) could bump the current version
-	// between the rollback compute and its application, and the apply would
-	// clobber that newer version back to the stale rollback target. In-memory
-	// bookkeeping is only applied after the write succeeds, so a failed write
-	// never desyncs memory from disk.
-	m.analyzeMeta.Lock()
-	defer m.analyzeMeta.Unlock()
-	m.partitionStatsMeta.Lock()
-	defer m.partitionStatsMeta.Unlock()
-
-	rollbackVersion := m.partitionStatsMeta.getRollbackVersionLocked(info)
-
-	actions := []metastore.UpdateAction{metastore.DropAnalyzeTask(info.GetAnalyzeTaskID())}
-	if rollbackVersion != nil {
-		actions = append(actions, metastore.SavePartitionStatsVersion(
-			info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), *rollbackVersion))
-	}
-	actions = append(actions, metastore.DropPartitionStats(info))
-
-	if err := m.catalog.Update(ctx, actions...); err != nil {
-		mlog.Warn(ctx, "clean partition stats info failed",
-			mlog.Int64("collectionID", info.GetCollectionID()),
-			mlog.Int64("partitionID", info.GetPartitionID()),
-			mlog.String("vChannel", info.GetVChannel()),
-			mlog.Int64("planID", info.GetVersion()),
-			mlog.Int64("analyzeTaskID", info.GetAnalyzeTaskID()),
-			mlog.Err(err))
-		return err
-	}
-
-	m.analyzeMeta.dropTaskFromMemoryLocked(info.GetAnalyzeTaskID())
-	m.partitionStatsMeta.applyDropLocked(info, rollbackVersion)
-
-	mlog.Debug(ctx, "drop partition stats meta",
-		mlog.Int64("collectionID", info.GetCollectionID()),
-		mlog.Int64("partitionID", info.GetPartitionID()),
-		mlog.String("vChannel", info.GetVChannel()),
-		mlog.Int64("planID", info.GetVersion()))
-	return nil
 }
 
 func (m *meta) completeSortCompactionMutation(

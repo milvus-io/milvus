@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -40,12 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-type compactTime struct {
-	startTime     Timestamp
-	expireTime    Timestamp
-	collectionTTL time.Duration
-}
 
 // todo: migrate to compaction_trigger_v2
 type trigger interface {
@@ -120,6 +113,7 @@ var _ trigger = (*compactionTrigger)(nil)
 type compactionTrigger struct {
 	handler       Handler
 	meta          *meta
+	indexMeta     *indexMeta
 	allocator     allocator.Allocator
 	signals       chan *compactionSignal
 	manualSignals chan *compactionSignal
@@ -137,6 +131,7 @@ type compactionTrigger struct {
 
 func newCompactionTrigger(
 	meta *meta,
+	indexMeta *indexMeta,
 	inspector CompactionInspector,
 	allocator allocator.Allocator,
 	handler Handler,
@@ -144,6 +139,7 @@ func newCompactionTrigger(
 ) *compactionTrigger {
 	return &compactionTrigger{
 		meta:                      meta,
+		indexMeta:                 indexMeta,
 		allocator:                 allocator,
 		signals:                   make(chan *compactionSignal, 100),
 		manualSignals:             make(chan *compactionSignal, 100),
@@ -228,22 +224,6 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 		return nil, merr.Wrapf(err, "collection ID %d not found", collectionID)
 	}
 	return coll, nil
-}
-
-func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
-	if coll == nil {
-		return false
-	}
-	if coll.IsExternal() {
-		mlog.Debug(context.TODO(), "collection auto compaction disabled for external collection", mlog.FieldCollectionID(coll.ID))
-		return false
-	}
-	enabled, err := getCollectionAutoCompactionEnabled(coll.Properties)
-	if err != nil {
-		mlog.Warn(context.TODO(), "collection properties auto compaction not valid, returning false", mlog.Err(err))
-		return false
-	}
-	return enabled
 }
 
 func getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
@@ -362,7 +342,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(context.Background(), t.handler, t.meta, signal.isForce, group.segments...)
+			group.segments = FilterInIndexedSegments(context.Background(), t.handler, t.indexMeta, signal.isForce, group.segments...)
 		}
 
 		coll, err := t.getCollection(group.collectionID)
@@ -393,7 +373,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			continue
 		}
 
-		expectedSize := getExpectedSegmentSize(t.meta, coll.ID, coll.Schema)
+		expectedSize := getExpectedSegmentSize(t.indexMeta, coll.ID, coll.Schema)
 		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
 		for _, bucket := range plans {
 			if !signal.isForce && t.inspector.isFull() {
@@ -785,47 +765,6 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	}), nil
 }
 
-func hasTooManyDeletions(segment *SegmentInfo) bool {
-	stats := segment.EnsureStats()
-	deltaLogCount := int(stats.GetDeltaBinlogCount())
-	totalDeletedRows := int(stats.GetDeleteNumRows())
-	totalDeleteLogSize := stats.GetDeltaBinlogSize()
-
-	// Too many deltalog files, accumulates IO count.
-	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
-		mlog.Info(context.TODO(), "delta logs file count exceeds threshold",
-			mlog.FieldSegmentID(segment.ID),
-			mlog.Int("delta log count", deltaLogCount),
-			mlog.Int("file number threshold", Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()),
-		)
-		return true
-	}
-
-	// The proportion of deleted rows is too large, int64 PK tends to accumulates deleted row counts.
-	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() {
-		mlog.Info(context.TODO(), "deleted entities rows proportion exceeds threshold",
-			mlog.FieldSegmentID(segment.ID),
-			mlog.Int64("number of rows", segment.GetNumOfRows()),
-			mlog.Int("deleted rows", totalDeletedRows),
-			mlog.Float64("proportion threshold", Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()),
-		)
-		return true
-	}
-
-	// Delete size is too large, varchar PK tends to accumulates deltalog size.
-	if totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
-		mlog.Info(context.TODO(), "total delete entries size exceeds threshold",
-			mlog.FieldSegmentID(segment.ID),
-			mlog.Int64("numRows", segment.GetNumOfRows()),
-			mlog.Int64("delete entries size", totalDeleteLogSize),
-			mlog.Int64("size threshold", Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()),
-		)
-		return true
-	}
-
-	return false
-}
-
 func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *compactTime, segment *SegmentInfo) bool {
 	if Params.DataCoordCfg.CompactionExpiryTolerance.GetAsInt() >= 0 {
 		tolerantDuration := Params.DataCoordCfg.CompactionExpiryTolerance.GetAsDuration(time.Hour)
@@ -962,13 +901,13 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool {
 	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
 		// index version of segment lower than resolved version and IndexFileKeys should have value, trigger compaction
-		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, index := range indexIDToSegIdxes {
 			if len(index.IndexFileKeys) == 0 {
 				continue
 			}
 
-			indexParams := t.meta.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
+			indexParams := t.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
 			indexType := GetIndexType(indexParams)
 			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 
@@ -999,13 +938,13 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 	// enable force rebuild index with target index version (only for vector index)
 	if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() && Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
 		resolvedVecTarget := t.indexEngineVersionManager.ResolveVecIndexVersion()
-		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, index := range indexIDToSegIdxes {
 			if len(index.IndexFileKeys) == 0 {
 				continue
 			}
 
-			indexParams := t.meta.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
+			indexParams := t.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
 			indexType := GetIndexType(indexParams)
 			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 
@@ -1030,13 +969,13 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 	// enable force rebuild scalar index with target scalar index version
 	if Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetAsBool() && Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt64() != -1 {
 		resolvedScalarTarget := t.indexEngineVersionManager.ResolveScalarIndexVersion()
-		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, index := range indexIDToSegIdxes {
 			if len(index.IndexFileKeys) == 0 {
 				continue
 			}
 
-			indexParams := t.meta.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
+			indexParams := t.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
 			indexType := GetIndexType(indexParams)
 			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 
@@ -1057,20 +996,4 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 	}
 
 	return false
-}
-
-func isFlushed(segment *SegmentInfo) bool {
-	return segment.GetState() == commonpb.SegmentState_Flushed
-}
-
-func isFlush(segment *SegmentInfo) bool {
-	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing
-}
-
-func canTriggerSortCompaction(segment *SegmentInfo) bool {
-	return segment.GetState() == commonpb.SegmentState_Flushed &&
-		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) &&
-		!segment.GetIsImporting() &&
-		!segment.isCompacting
 }

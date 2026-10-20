@@ -96,7 +96,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	var bc broadcaster.BroadcastAPI
 	if streamingutil.IsStreamingServiceEnabled() {
 		var err error
-		bc, err = s.startLocalFlushBroadcast(ctx, req.GetCollectionID())
+		bc, err = s.ddl.StartLocalFlushBroadcast(ctx, req.GetCollectionID())
 		if err != nil {
 			return &datapb.FlushResponse{
 				Status: merr.Status(err),
@@ -1647,7 +1647,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 
 	var info *compactionInfo
 	if req.GetCollectionId() != 0 {
-		tasksByTrigger := s.meta.GetCompactionTaskMeta().GetCompactionTasksByCollection(req.GetCollectionId())
+		tasksByTrigger := s.compactionTaskMeta.GetCompactionTasksByCollection(req.GetCollectionId())
 		tasks := lo.Flatten(lo.Values(tasksByTrigger))
 		info = summaryCompactionState(0, tasks)
 	} else {
@@ -2094,8 +2094,8 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	}
 
 	// Broadcast the import message
-	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
-	duplicatedJobID, duplicated, err := s.broadcastImport(
+	// dbName is retrieved inside BroadcastImport via broker.DescribeCollectionInternal
+	duplicatedJobID, duplicated, err := s.ddl.BroadcastImport(
 		ctx,
 		in.GetCollectionID(),
 		in.GetPartitionIDs(),
@@ -2390,7 +2390,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportSysFailedMsg("import job does not exist, jobID=%d", jobID))
 		return resp, nil
 	}
-	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta)
+	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta, s.indexMeta)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
@@ -2428,7 +2428,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	for _, job := range jobs {
-		progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), s.importMeta, s.meta)
+		progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), s.importMeta, s.meta, s.indexMeta)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)
@@ -2834,10 +2834,10 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 			req.GetTargetCollectionName(),
 			req.GetTargetDbName(),
 			req.GetExternalSpec(),
-			s.startExternalRestoreSnapshotLock,
-			s.startBroadcastForRestoreSnapshot,
+			s.ddl.StartExternalRestoreSnapshotLock,
+			s.ddl.StartBroadcastForRestoreSnapshot,
 			s.rollbackRestoreSnapshot,
-			s.validateRestoredCollectionResources,
+			s.ddl.ValidateRestoredCollectionResources,
 		)
 		if err != nil {
 			mlog.Error(ctx, "restore external snapshot failed", mlog.Err(err))
@@ -2860,10 +2860,10 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 		req.GetName(),
 		req.GetTargetCollectionName(),
 		req.GetTargetDbName(),
-		s.startRestoreSnapshotLock,
-		s.startBroadcastForRestoreSnapshot,
+		s.ddl.StartRestoreSnapshotLock,
+		s.ddl.StartBroadcastForRestoreSnapshot,
 		s.rollbackRestoreSnapshot,
-		s.validateRestoreSnapshotResources,
+		s.ddl.ValidateRestoreSnapshotResources,
 	)
 	if err != nil {
 		mlog.Error(context.TODO(), "restore snapshot failed", mlog.Err(err))
@@ -3169,7 +3169,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 	}
 
 	// Start broadcaster with resource lock (shared DB + exclusive collection)
-	b, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
+	b, err := s.ddl.StartBroadcastWithCollectionID(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to start broadcaster", mlog.Err(err))
 		return &datapb.RefreshExternalCollectionResponse{
@@ -3316,7 +3316,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
 	}
@@ -3336,14 +3336,6 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	return err
 }
 
-// errRollbackImportNoVchannels marks a rollback that can never be delivered: the job
-// carries no vchannels, so there is no peer to address. A job's Vchannels are fixed at
-// creation, so retrying can never succeed — isPermanentRollbackErr classifies this as
-// permanent so GC proceeds instead of retaining the job forever. A plain sentinel
-// attached via errors.Mark, NOT a merr error: merr's errors.Is matches by error code,
-// which would make every ImportSysFailed error (mostly transient) match it.
-var errRollbackImportNoVchannels = errors.New("import job has no vchannels")
-
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
 // Targets the job's data vchannels and CChannel, matching CommitImport routing.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
@@ -3351,7 +3343,7 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 	if len(vchannels) == 0 {
 		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
 	}
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
 	}
@@ -3393,7 +3385,7 @@ func (s *Server) broadcastUpdateImportMessage(ctx context.Context, job ImportJob
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
 	}
@@ -3533,7 +3525,7 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	}
 	job := s.importMeta.GetJob(ctx, req.GetJobId())
 	if job == nil {
-		forgotten, err := s.importJobForgotten(ctx, req.GetJobId())
+		forgotten, err := importJobForgotten(ctx, req.GetJobId())
 		if err != nil {
 			return merr.Status(err), nil
 		}
@@ -3546,7 +3538,7 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	}
 	// Fetch IDs before importMeta takes its write lock. The callback must not
 	// reenter importMeta while updating segment visibility.
-	ids := s.getImportSegmentIDsByVchannel(ctx, req.GetJobId(), req.GetVchannel())
+	ids := getImportSegmentIDsByVchannel(ctx, s.importMeta, s.meta, req.GetJobId(), req.GetVchannel())
 	err := s.importMeta.HandleCommitVchannel(ctx, req.GetJobId(), req.GetVchannel(), func() error {
 		ops := make([]UpdateOperator, 0, len(ids)*2)
 		for _, id := range ids {
@@ -3564,65 +3556,4 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		s.meta.recomputeDataView(ctx, job.GetCollectionID())
 	}
 	return merr.Success(), nil
-}
-
-// getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
-// the given import job that are assigned to the given vchannel.
-// Called by the broadcast callback without holding importMeta's mutex.
-//
-// V2 preserves its legacy original/sorted candidate set. V3 only admits the
-// current Completed task outputs that have been materialized as non-empty
-// Flushed segments; zero-row or unaccepted segments never cross the
-// CommitImport fence.
-func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
-	tasks := s.importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
-	var segIDs []int64
-	for _, task := range tasks {
-		it, ok := task.(*importTask)
-		if !ok {
-			continue
-		}
-		// Collect all candidate segment IDs from this task (safe copies).
-		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
-		candidates = append(candidates, it.GetSegmentIDs()...)
-		candidates = append(candidates, it.GetSortedSegmentIDs()...)
-		for _, segID := range candidates {
-			seg := s.meta.GetSegment(ctx, segID)
-			if seg == nil {
-				continue
-			}
-			if seg.GetInsertChannel() != vchannel {
-				continue
-			}
-			segIDs = append(segIDs, segID)
-		}
-	}
-	tasks = s.importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskV3Type))
-	for _, task := range tasks {
-		it, ok := task.(*importTaskV3)
-		if !ok {
-			continue
-		}
-		if it.GetState() != datapb.ImportTaskStateV2_Completed {
-			continue
-		}
-		var candidates []int64
-		if segmentID := it.task.Load().GetSegmentId(); segmentID != 0 {
-			candidates = append(candidates, segmentID)
-		}
-		for _, segID := range candidates {
-			seg := s.meta.GetSegment(ctx, segID)
-			if seg == nil {
-				continue
-			}
-			if seg.GetInsertChannel() != vchannel {
-				continue
-			}
-			if seg.GetState() != commonpb.SegmentState_Flushed || seg.GetNumOfRows() == 0 || !seg.GetIsImporting() {
-				continue
-			}
-			segIDs = append(segIDs, segID)
-		}
-	}
-	return segIDs
 }

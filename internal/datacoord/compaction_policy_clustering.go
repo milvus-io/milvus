@@ -35,16 +35,18 @@ import (
 )
 
 type clusteringCompactionPolicy struct {
-	meta      *meta
-	allocator allocator.Allocator
-	handler   Handler
+	meta               *meta
+	compactionTaskMeta *compactionTaskMeta
+	partitionStatsMeta *partitionStatsMeta
+	allocator          allocator.Allocator
+	handler            Handler
 }
 
 // Ensure clusteringCompactionPolicy implements CompactionPolicy interface
 var _ CompactionPolicy = (*clusteringCompactionPolicy)(nil)
 
-func newClusteringCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *clusteringCompactionPolicy {
-	return &clusteringCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
+func newClusteringCompactionPolicy(meta *meta, compactionTaskMeta *compactionTaskMeta, partitionStatsMeta *partitionStatsMeta, allocator allocator.Allocator, handler Handler) *clusteringCompactionPolicy {
+	return &clusteringCompactionPolicy{meta: meta, compactionTaskMeta: compactionTaskMeta, partitionStatsMeta: partitionStatsMeta, allocator: allocator, handler: handler}
 }
 
 func (policy *clusteringCompactionPolicy) Enable() bool {
@@ -177,7 +179,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 		}
 
 		if !manual {
-			execute, err := triggerClusteringCompactionPolicy(ctx, policy.meta, group.collectionID, group.partitionID, group.channelName, group.segments)
+			execute, err := triggerClusteringCompactionPolicy(ctx, policy.partitionStatsMeta, group.collectionID, group.partitionID, group.channelName, group.segments)
 			if err != nil {
 				log.Warn(ctx, "failed to trigger clustering compaction", mlog.Err(err))
 				continue
@@ -203,7 +205,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 }
 
 func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(collectionID UniqueID) (bool, int64) {
-	triggers := policy.meta.compactionTaskMeta.GetCompactionTasksByCollection(collectionID)
+	triggers := policy.compactionTaskMeta.GetCompactionTasksByCollection(collectionID)
 	if len(triggers) == 0 {
 		return false, 0
 	}
@@ -274,9 +276,9 @@ func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int6
 	return int64(rows), nil
 }
 
-func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collectionID int64, partitionID int64, channel string, segments []*SegmentInfo) (bool, error) {
+func triggerClusteringCompactionPolicy(ctx context.Context, partitionStatsMeta *partitionStatsMeta, collectionID int64, partitionID int64, channel string, segments []*SegmentInfo) (bool, error) {
 	log := mlog.With(mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(partitionID))
-	currentVersion := meta.partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
+	currentVersion := partitionStatsMeta.GetCurrentPartitionStatsVersion(collectionID, partitionID, channel)
 	if currentVersion == 0 {
 		var newDataSize int64 = 0
 		for _, seg := range segments {
@@ -290,7 +292,7 @@ func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collecti
 		return false, nil
 	}
 
-	partitionStats := meta.GetPartitionStatsMeta().GetPartitionStats(collectionID, partitionID, channel, currentVersion)
+	partitionStats := partitionStatsMeta.GetPartitionStats(collectionID, partitionID, channel, currentVersion)
 	if partitionStats == nil {
 		log.Info(ctx, "partition stats not found")
 		return false, nil

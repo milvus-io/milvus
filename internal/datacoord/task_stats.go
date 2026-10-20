@@ -49,10 +49,11 @@ type statsTask struct {
 
 	times *taskcommon.Times
 
-	meta      *meta
-	handler   Handler
-	allocator allocator.Allocator
-	ievm      IndexEngineVersionManager
+	meta          *meta
+	statsTaskMeta *statsTaskMeta
+	handler       Handler
+	allocator     allocator.Allocator
+	ievm          IndexEngineVersionManager
 }
 
 var _ globalTask.Task = (*statsTask)(nil)
@@ -65,18 +66,20 @@ var (
 func newStatsTask(t *indexpb.StatsTask,
 	taskSlot int64,
 	mt *meta,
+	statsTaskMeta *statsTaskMeta,
 	handler Handler,
 	allocator allocator.Allocator,
 	ievm IndexEngineVersionManager,
 ) *statsTask {
 	return &statsTask{
-		StatsTask: t,
-		taskSlot:  taskSlot,
-		times:     taskcommon.NewTimes(),
-		meta:      mt,
-		handler:   handler,
-		allocator: allocator,
-		ievm:      ievm,
+		StatsTask:     t,
+		taskSlot:      taskSlot,
+		times:         taskcommon.NewTimes(),
+		meta:          mt,
+		statsTaskMeta: statsTaskMeta,
+		handler:       handler,
+		allocator:     allocator,
+		ievm:          ievm,
 	}
 }
 
@@ -114,7 +117,7 @@ func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
 }
 
 func (st *statsTask) UpdateStateWithMeta(state indexpb.JobState, failReason string) error {
-	if err := st.meta.statsTaskMeta.UpdateTaskState(st.GetTaskID(), state, failReason); err != nil {
+	if err := st.statsTaskMeta.UpdateTaskState(st.GetTaskID(), state, failReason); err != nil {
 		mlog.Warn(context.TODO(), "update stats task state failed", mlog.FieldTaskID(st.GetTaskID()),
 			mlog.String("state", state.String()), mlog.String("failReason", failReason),
 			mlog.Err(err))
@@ -125,7 +128,7 @@ func (st *statsTask) UpdateStateWithMeta(state indexpb.JobState, failReason stri
 }
 
 func (st *statsTask) UpdateTaskVersion(nodeID int64) error {
-	if err := st.meta.statsTaskMeta.UpdateVersion(st.GetTaskID(), nodeID); err != nil {
+	if err := st.statsTaskMeta.UpdateVersion(st.GetTaskID(), nodeID); err != nil {
 		return err
 	}
 	st.Version++
@@ -167,7 +170,7 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	segment := st.meta.GetHealthySegment(ctx, st.GetSegmentID())
 	if segment == nil {
 		log.Warn(context.TODO(), "segment is not healthy, skipping stats task")
-		if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+		if err := st.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
 			log.Warn(context.TODO(), "remove stats task failed, will retry later", mlog.Err(err))
 			return
 		}
@@ -177,7 +180,7 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 
 	if st.shouldDropExternalJSONStatsTask(segment) {
 		log.Warn(ctx, "external json stats task is no longer buildable, dropping stats task")
-		if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+		if err := st.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
 			log.Warn(ctx, "remove stats task failed, will retry later", mlog.Err(err))
 			return
 		}
@@ -312,7 +315,7 @@ func (st *statsTask) abortForDroppedSegment(ctx context.Context, cluster session
 	if err := st.tryDropTaskOnWorker(cluster); err != nil {
 		return
 	}
-	if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+	if err := st.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
 		mlog.Warn(ctx, "remove stats task of dropped segment failed, will retry later",
 			mlog.FieldTaskID(st.GetTaskID()), mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
 		return
@@ -356,7 +359,7 @@ func (st *statsTask) discardRejectedStatsResult(ctx context.Context, cluster ses
 	if err := st.tryDropTaskOnWorker(cluster); err != nil {
 		log.Warn(ctx, "failed to drop rejected stats task on worker", mlog.Err(err))
 	}
-	if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+	if err := st.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
 		log.Warn(ctx, "failed to drop rejected stats task meta", mlog.Err(err))
 		return
 	}

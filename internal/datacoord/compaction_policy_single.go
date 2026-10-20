@@ -36,6 +36,7 @@ import (
 // todo: move l1 single compaction here
 type singleCompactionPolicy struct {
 	meta      *meta
+	indexMeta *indexMeta
 	allocator allocator.Allocator
 	handler   Handler
 }
@@ -43,8 +44,8 @@ type singleCompactionPolicy struct {
 // Ensure singleCompactionPolicy implements CompactionPolicy interface
 var _ CompactionPolicy = (*singleCompactionPolicy)(nil)
 
-func newSingleCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *singleCompactionPolicy {
-	return &singleCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
+func newSingleCompactionPolicy(meta *meta, indexMeta *indexMeta, allocator allocator.Allocator, handler Handler) *singleCompactionPolicy {
+	return &singleCompactionPolicy{meta: meta, indexMeta: indexMeta, allocator: allocator, handler: handler}
 }
 
 func (policy *singleCompactionPolicy) Enable() bool {
@@ -287,7 +288,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 
 	for _, group := range partSegments {
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(ctx, policy.handler, policy.meta, false, group.segments...)
+			group.segments = FilterInIndexedSegments(ctx, policy.handler, policy.indexMeta, false, group.segments...)
 		}
 
 		for _, segment := range group.segments {

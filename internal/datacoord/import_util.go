@@ -195,12 +195,12 @@ func importTaskPartitionIDs(task ImportTask, job ImportJob) []int64 {
 	return job.GetPartitionIDs()
 }
 
-func GetSegmentMaxSize(job ImportJob, meta *meta) int {
+func GetSegmentMaxSize(job ImportJob, indexMeta *indexMeta) int {
 	if importutilv2.IsL0Import(job.GetOptions()) {
 		return paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
 	}
 
-	return int(getExpectedSegmentSize(meta, job.GetCollectionID(), job.GetSchema()))
+	return int(getExpectedSegmentSize(indexMeta, job.GetCollectionID(), job.GetSchema()))
 }
 
 func importStorageVersion(isL0Import bool) int64 {
@@ -781,7 +781,7 @@ func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, m
 	return float32(doneCnt) / float32(len(targetSegmentIDs))
 }
 
-func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
+func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta, indexMeta *indexMeta) float32 {
 	job := importMeta.GetJob(ctx, jobID)
 	if !Params.DataCoordCfg.WaitForIndex.GetAsBool() {
 		return 1
@@ -800,7 +800,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 		if len(targetSegmentIDs) == 0 {
 			return 1
 		}
-		unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
+		unindexed := indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
 		return float32(len(targetSegmentIDs)-len(unindexed)) / float32(len(targetSegmentIDs))
 	}
 	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
@@ -816,7 +816,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 	if !enableSortCompaction() {
 		targetSegmentIDs = originSegmentIDs
 	}
-	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
+	unindexed := indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
 	return float32(len(targetSegmentIDs)-len(unindexed)) / float32(len(targetSegmentIDs))
 }
 
@@ -840,20 +840,20 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 // TODO: Wrap a function to map status to user status.
 // TODO: Save these progress to job instead of recalculating.
 func GetJobProgress(ctx context.Context, jobID int64,
-	importMeta ImportMeta, meta *meta,
+	importMeta ImportMeta, meta *meta, indexMeta *indexMeta,
 ) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := importMeta.GetJob(ctx, jobID)
 	if job == nil {
 		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
 	}
 	if isV3Job(job) {
-		return getV3JobProgress(ctx, job, importMeta, meta)
+		return getV3JobProgress(ctx, job, importMeta, meta, indexMeta)
 	}
-	return getV2JobProgress(ctx, job, importMeta, meta)
+	return getV2JobProgress(ctx, job, importMeta, meta, indexMeta)
 }
 
 // getV2JobProgress maps the legacy import job states to progress.
-func getV2JobProgress(ctx context.Context, job ImportJob, importMeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
+func getV2JobProgress(ctx context.Context, job ImportJob, importMeta ImportMeta, meta *meta, indexMeta *indexMeta) (int64, internalpb.ImportJobState, int64, int64, string) {
 	jobID := job.GetJobID()
 	switch job.GetState() {
 	case internalpb.ImportJobState_Pending:
@@ -874,7 +874,7 @@ func getV2JobProgress(ctx context.Context, job ImportJob, importMeta ImportMeta,
 		return 10 + 30 + 30 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
 	case internalpb.ImportJobState_IndexBuilding:
-		progress := getIndexBuildingProgress(ctx, jobID, importMeta, meta)
+		progress := getIndexBuildingProgress(ctx, jobID, importMeta, meta, indexMeta)
 		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
 		return 10 + 30 + 30 + 10 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
@@ -903,7 +903,7 @@ func getV2JobProgress(ctx context.Context, job ImportJob, importMeta ImportMeta,
 }
 
 // getV3JobProgress maps the Import V3 job states to progress.
-func getV3JobProgress(ctx context.Context, job ImportJob, importMeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
+func getV3JobProgress(ctx context.Context, job ImportJob, importMeta ImportMeta, meta *meta, indexMeta *indexMeta) (int64, internalpb.ImportJobState, int64, int64, string) {
 	jobID := job.GetJobID()
 	switch job.GetState() {
 	case internalpb.ImportJobState_Pending:
@@ -926,7 +926,7 @@ func getV3JobProgress(ctx context.Context, job ImportJob, importMeta ImportMeta,
 		return 10 + 5 + 30 + 5 + int64(progress*10), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
 
 	case internalpb.ImportJobState_IndexBuilding:
-		progress := getIndexBuildingProgress(ctx, jobID, importMeta, meta)
+		progress := getIndexBuildingProgress(ctx, jobID, importMeta, meta, indexMeta)
 		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
 		return 10 + 5 + 30 + 5 + 10 + int64(progress*30), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
@@ -1483,6 +1483,7 @@ func createSortCompactionTask(ctx context.Context,
 	originSegment *SegmentInfo,
 	targetSegmentID int64,
 	meta *meta,
+	indexMeta *indexMeta,
 	handler Handler,
 	alloc allocator.Allocator,
 ) (*datapb.CompactionTask, error) {
@@ -1514,7 +1515,7 @@ func createSortCompactionTask(ctx context.Context,
 		return nil, err
 	}
 
-	expectedSize := getExpectedSegmentSize(meta, collection.ID, collection.Schema)
+	expectedSize := getExpectedSegmentSize(indexMeta, collection.ID, collection.Schema)
 	task := &datapb.CompactionTask{
 		PlanID:             startID + 1,
 		TriggerID:          startID,
@@ -1541,3 +1542,72 @@ func createSortCompactionTask(ctx context.Context,
 		mlog.Int64("targetSegmentID", targetSegmentID), mlog.Int64("num rows", originSegment.GetNumOfRows()))
 	return task, nil
 }
+
+// getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
+// the given import job that are assigned to the given vchannel.
+// Called by the broadcast callback without holding importMeta's mutex.
+//
+// V2 preserves its legacy original/sorted candidate set. V3 only admits the
+// current Completed task outputs that have been materialized as non-empty
+// Flushed segments; zero-row or unaccepted segments never cross the
+// CommitImport fence.
+func getImportSegmentIDsByVchannel(ctx context.Context, importMeta ImportMeta, mt *meta, jobID int64, vchannel string) []int64 {
+	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
+	var segIDs []int64
+	for _, task := range tasks {
+		it, ok := task.(*importTask)
+		if !ok {
+			continue
+		}
+		// Collect all candidate segment IDs from this task (safe copies).
+		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
+		candidates = append(candidates, it.GetSegmentIDs()...)
+		candidates = append(candidates, it.GetSortedSegmentIDs()...)
+		for _, segID := range candidates {
+			seg := mt.GetSegment(ctx, segID)
+			if seg == nil {
+				continue
+			}
+			if seg.GetInsertChannel() != vchannel {
+				continue
+			}
+			segIDs = append(segIDs, segID)
+		}
+	}
+	tasks = importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskV3Type))
+	for _, task := range tasks {
+		it, ok := task.(*importTaskV3)
+		if !ok {
+			continue
+		}
+		if it.GetState() != datapb.ImportTaskStateV2_Completed {
+			continue
+		}
+		var candidates []int64
+		if segmentID := it.task.Load().GetSegmentId(); segmentID != 0 {
+			candidates = append(candidates, segmentID)
+		}
+		for _, segID := range candidates {
+			seg := mt.GetSegment(ctx, segID)
+			if seg == nil {
+				continue
+			}
+			if seg.GetInsertChannel() != vchannel {
+				continue
+			}
+			if seg.GetState() != commonpb.SegmentState_Flushed || seg.GetNumOfRows() == 0 || !seg.GetIsImporting() {
+				continue
+			}
+			segIDs = append(segIDs, segID)
+		}
+	}
+	return segIDs
+}
+
+// errRollbackImportNoVchannels marks a rollback that can never be delivered: the job
+// carries no vchannels, so there is no peer to address. A job's Vchannels are fixed at
+// creation, so retrying can never succeed — isPermanentRollbackErr classifies this as
+// permanent so GC proceeds instead of retaining the job forever. A plain sentinel
+// attached via errors.Mark, NOT a merr error: merr's errors.Is matches by error code,
+// which would make every ImportSysFailed error (mostly transient) match it.
+var errRollbackImportNoVchannels = errors.New("import job has no vchannels")

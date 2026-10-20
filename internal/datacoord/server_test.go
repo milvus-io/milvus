@@ -1410,7 +1410,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
@@ -1457,22 +1457,22 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg1.ID,
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg2.ID,
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1630,18 +1630,18 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
 			BuildID:   segment.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: segment.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1791,14 +1791,14 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 			IndexName:    "_default_idx_2",
 		})
 		assert.NoError(t, err)
-		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		svr.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,
 			CollectionID:        0,
 			PartitionID:         0,
@@ -1859,20 +1859,25 @@ func TestGetCompactionState(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		mockMeta := NewMockCompactionMeta(t)
-		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, mock.Anything).Return(
-			[]*datapb.CompactionTask{
-				{State: datapb.CompactionTaskState_executing},
-				{State: datapb.CompactionTaskState_executing},
-				{State: datapb.CompactionTaskState_executing},
-				{State: datapb.CompactionTaskState_completed},
-				{State: datapb.CompactionTaskState_completed},
-				{State: datapb.CompactionTaskState_failed, PlanID: 1},
-				{State: datapb.CompactionTaskState_timeout, PlanID: 2},
-				{State: datapb.CompactionTaskState_timeout},
-				{State: datapb.CompactionTaskState_timeout},
-				{State: datapb.CompactionTaskState_timeout},
-			})
-		mockHandler := newCompactionInspector(mockMeta, nil, nil, nil, nil, newMockVersionManager())
+		compactionTaskMeta := newCompactionTaskMetaOverCatalog(nil)
+		tasks := []*datapb.CompactionTask{
+			{State: datapb.CompactionTaskState_executing},
+			{State: datapb.CompactionTaskState_executing},
+			{State: datapb.CompactionTaskState_executing},
+			{State: datapb.CompactionTaskState_completed},
+			{State: datapb.CompactionTaskState_completed},
+			{State: datapb.CompactionTaskState_failed, PlanID: 1},
+			{State: datapb.CompactionTaskState_timeout, PlanID: 2},
+			{State: datapb.CompactionTaskState_timeout},
+			{State: datapb.CompactionTaskState_timeout},
+			{State: datapb.CompactionTaskState_timeout},
+		}
+		// Tasks are keyed by slice index: several of them share PlanID 0.
+		compactionTaskMeta.compactionTasks[1] = make(map[int64]*datapb.CompactionTask)
+		for i, task := range tasks {
+			compactionTaskMeta.compactionTasks[1][int64(i)] = task
+		}
+		mockHandler := newCompactionInspector(mockMeta, compactionTaskMeta, nil, nil, nil, nil, nil, nil, nil, nil, newMockVersionManager())
 		svr.compactionInspector = mockHandler
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
@@ -1975,8 +1980,9 @@ func TestManualCompaction(t *testing.T) {
 
 		svr := &Server{allocator: alloc}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{compactionTargetMeta: targetMeta}
-		svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
+		svr.meta = &meta{}
+		svr.compactionTargetMeta = targetMeta
+		svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, nil, nil, nil, svr.compactionTargetMeta, versionManager)
 
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -2039,8 +2045,9 @@ func TestManualCompaction(t *testing.T) {
 
 				svr := &Server{allocator: alloc}
 				svr.stateCode.Store(commonpb.StateCode_Healthy)
-				svr.meta = &meta{compactionTargetMeta: targetMeta}
-				svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
+				svr.meta = &meta{}
+				svr.compactionTargetMeta = targetMeta
+				svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, nil, nil, nil, svr.compactionTargetMeta, versionManager)
 
 				resp, err := svr.ManualCompaction(context.Background(), test.request)
 
@@ -2091,10 +2098,10 @@ func TestManualCompaction(t *testing.T) {
 
 func TestGetCompactionStateWithPlans(t *testing.T) {
 	t.Run("shared trigger retains running tasks and sorts plans", func(t *testing.T) {
-		svr := &Server{meta: &meta{compactionTaskMeta: newTestCompactionTaskMeta(t)}}
+		svr := &Server{meta: &meta{}, domainMetas: domainMetas{compactionTaskMeta: newTestCompactionTaskMeta(t)}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		for _, id := range []int64{8, 3, 6, 1, 4, 7, 2, 5} {
-			svr.meta.GetCompactionTaskMeta().saveCompactionTaskMemory(&datapb.CompactionTask{
+			svr.compactionTaskMeta.saveCompactionTaskMemory(&datapb.CompactionTask{
 				PlanID: id, TriggerID: 100, CollectionID: id%2 + 1,
 				Type:  datapb.CompactionType_Level0DeleteCompaction,
 				State: datapb.CompactionTaskState_executing,
@@ -2134,7 +2141,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 	t.Run("test get all retained tasks by collection", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		taskMeta := svr.meta.GetCompactionTaskMeta()
+		taskMeta := svr.compactionTaskMeta
 		taskMeta.saveCompactionTaskMemory(&datapb.CompactionTask{
 			PlanID:         10,
 			TriggerID:      100,
@@ -2423,9 +2430,9 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 
 	t.Run("dataCoord meta set state not exists", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
+		meta, dm, err := newMemoryMetaWithDomainMetas(t)
 		assert.NoError(t, err)
-		svr := newTestServer(t, WithMeta(meta))
+		svr := newTestServer(t, WithMeta(meta, dm))
 		defer closeTestServer(t, svr)
 		// Set segment state.
 		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
@@ -2558,9 +2565,10 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 
 var globalTestTikv = tikv.SetupLocalTxn()
 
-func WithMeta(meta *meta) Option {
+func WithMeta(meta *meta, dm *domainMetas) Option {
 	return func(svr *Server) {
 		svr.meta = meta
+		svr.domainMetas = *dm
 
 		svr.watchClient = etcdkv.NewEtcdKV(svr.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
 			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))

@@ -26,8 +26,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/time/rate"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -65,15 +63,6 @@ type CompactionInspector interface {
 
 var _ CompactionInspector = (*compactionInspector)(nil)
 
-type compactionInfo struct {
-	state        commonpb.CompactionState
-	executingCnt int
-	completedCnt int
-	failedCnt    int
-	timeoutCnt   int
-	mergeInfos   map[int64]*milvuspb.CompactionMergeInfo
-}
-
 type compactionInspector struct {
 	queueTasks *CompactionQueue
 
@@ -83,12 +72,18 @@ type compactionInspector struct {
 	cleaningGuard lock.RWMutex
 	cleaningTasks map[int64]CompactionTask // planID -> task
 
-	meta             CompactionMeta
-	allocator        allocator.Allocator
-	analyzeScheduler task.GlobalScheduler
-	handler          Handler
-	scheduler        task.GlobalScheduler
-	ievm             IndexEngineVersionManager
+	meta               CompactionMeta
+	compactionTaskMeta *compactionTaskMeta
+	indexMeta          *indexMeta
+	analyzeMeta        *analyzeMeta
+	partitionStatsMeta *partitionStatsMeta
+	// partitionStatsCleaner removes stale partition stats versions; clustering tasks share it.
+	partitionStatsCleaner PartitionStatsCleaner
+	allocator             allocator.Allocator
+	analyzeScheduler      task.GlobalScheduler
+	handler               Handler
+	scheduler             task.GlobalScheduler
+	ievm                  IndexEngineVersionManager
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -96,70 +91,8 @@ type compactionInspector struct {
 }
 
 func (c *compactionInspector) getCompactionInfo(ctx context.Context, triggerID int64) *compactionInfo {
-	tasks := c.meta.GetCompactionTasksByTriggerID(ctx, triggerID)
+	tasks := c.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID)
 	return summaryCompactionState(triggerID, tasks)
-}
-
-func summaryCompactionState(triggerID int64, tasks []*datapb.CompactionTask) *compactionInfo {
-	ret := &compactionInfo{}
-	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, analyzingCnt, indexingCnt, cleanedCnt, metaSavedCnt, stats int
-	mergeInfos := make(map[int64]*milvuspb.CompactionMergeInfo)
-
-	for _, task := range tasks {
-		if task == nil {
-			continue
-		}
-		switch task.GetState() {
-		case datapb.CompactionTaskState_executing:
-			executingCnt++
-		case datapb.CompactionTaskState_pipelining:
-			pipeliningCnt++
-		case datapb.CompactionTaskState_completed:
-			completedCnt++
-		case datapb.CompactionTaskState_failed:
-			failedCnt++
-		case datapb.CompactionTaskState_timeout:
-			timeoutCnt++
-		case datapb.CompactionTaskState_analyzing:
-			analyzingCnt++
-		case datapb.CompactionTaskState_indexing:
-			indexingCnt++
-		case datapb.CompactionTaskState_cleaned:
-			cleanedCnt++
-		case datapb.CompactionTaskState_meta_saved:
-			metaSavedCnt++
-		case datapb.CompactionTaskState_statistic:
-			stats++
-		default:
-		}
-		mergeInfos[task.GetPlanID()] = getCompactionMergeInfo(task)
-	}
-
-	ret.executingCnt = executingCnt + pipeliningCnt + analyzingCnt + indexingCnt + metaSavedCnt + stats
-	ret.completedCnt = completedCnt
-	ret.timeoutCnt = timeoutCnt
-	ret.failedCnt = failedCnt
-	ret.mergeInfos = mergeInfos
-
-	if ret.executingCnt != 0 {
-		ret.state = commonpb.CompactionState_Executing
-	} else {
-		ret.state = commonpb.CompactionState_Completed
-	}
-
-	mlog.Info(context.TODO(), "compaction states",
-		mlog.Int64("triggerID", triggerID),
-		mlog.String("state", ret.state.String()),
-		mlog.Int("executingCnt", executingCnt),
-		mlog.Int("pipeliningCnt", pipeliningCnt),
-		mlog.Int("completedCnt", completedCnt),
-		mlog.Int("failedCnt", failedCnt),
-		mlog.Int("timeoutCnt", timeoutCnt),
-		mlog.Int("analyzingCnt", analyzingCnt),
-		mlog.Int("indexingCnt", indexingCnt),
-		mlog.Int("cleanedCnt", cleanedCnt),
-		mlog.Int("metaSavedCnt", metaSavedCnt))
-	return ret
 }
 
 func (c *compactionInspector) getCompactionTasksNumBySignalID(triggerID int64) int {
@@ -180,20 +113,26 @@ func (c *compactionInspector) getCompactionTasksNumBySignalID(triggerID int64) i
 }
 
 func newCompactionInspector(meta CompactionMeta,
+	compactionTaskMeta *compactionTaskMeta, indexMeta *indexMeta, analyzeMeta *analyzeMeta, partitionStatsMeta *partitionStatsMeta, partitionStatsCleaner PartitionStatsCleaner,
 	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, analyzeScheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
 ) *compactionInspector {
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionInspector{
-		queueTasks:       NewCompactionQueue(capacity, getPrioritizer()),
-		meta:             meta,
-		allocator:        allocator,
-		stopCh:           make(chan struct{}),
-		executingTasks:   make(map[int64]CompactionTask),
-		cleaningTasks:    make(map[int64]CompactionTask),
-		handler:          handler,
-		scheduler:        scheduler,
-		analyzeScheduler: analyzeScheduler,
-		ievm:             ievm,
+		queueTasks:            NewCompactionQueue(capacity, getPrioritizer()),
+		meta:                  meta,
+		compactionTaskMeta:    compactionTaskMeta,
+		indexMeta:             indexMeta,
+		analyzeMeta:           analyzeMeta,
+		partitionStatsMeta:    partitionStatsMeta,
+		partitionStatsCleaner: partitionStatsCleaner,
+		allocator:             allocator,
+		stopCh:                make(chan struct{}),
+		executingTasks:        make(map[int64]CompactionTask),
+		cleaningTasks:         make(map[int64]CompactionTask),
+		handler:               handler,
+		scheduler:             scheduler,
+		analyzeScheduler:      analyzeScheduler,
+		ievm:                  ievm,
 	}
 }
 
@@ -313,7 +252,7 @@ func (c *compactionInspector) start() {
 }
 
 func (c *compactionInspector) loadMeta() {
-	triggers := c.meta.GetCompactionTasks(context.TODO())
+	triggers := c.compactionTaskMeta.GetCompactionTasks()
 	var failedTasks []*datapb.CompactionTask
 	for _, tasks := range triggers {
 		for _, task := range tasks {
@@ -396,7 +335,7 @@ func (c *compactionInspector) cleanupFailedCompactionTasks(tasks []*datapb.Compa
 			return
 		default:
 		}
-		if err := c.meta.DropCompactionTask(ctx, task); err != nil {
+		if err := c.compactionTaskMeta.DropCompactionTask(ctx, task); err != nil {
 			mlog.Warn(ctx, "drop failed compaction task failed",
 				mlog.Int64("planID", task.GetPlanID()), mlog.Err(err))
 			continue
@@ -451,14 +390,14 @@ func (c *compactionInspector) Clean() {
 
 func (c *compactionInspector) cleanCompactionTaskMeta() {
 	// gc clustering compaction tasks
-	triggers := c.meta.GetCompactionTasks(context.TODO())
+	triggers := c.compactionTaskMeta.GetCompactionTasks()
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_cleaned {
 				duration := time.Since(time.Unix(task.StartTime, 0)).Seconds()
 				if duration > Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds() {
 					// try best to delete meta
-					err := c.meta.DropCompactionTask(context.TODO(), task)
+					err := c.compactionTaskMeta.DropCompactionTask(context.TODO(), task)
 					mlog.Debug(context.TODO(), "drop compaction task meta", mlog.Int64("planID", task.PlanID))
 					if err != nil {
 						mlog.Warn(context.TODO(), "fail to drop task", mlog.Int64("planID", task.PlanID), mlog.Err(err))
@@ -474,10 +413,10 @@ func (c *compactionInspector) cleanPartitionStats() error {
 	// gc partition stats
 	channelPartitionStatsInfos := make(map[string][]*datapb.PartitionStatsInfo)
 	unusedPartStats := make([]*datapb.PartitionStatsInfo, 0)
-	if c.meta.GetPartitionStatsMeta() == nil {
+	if c.partitionStatsMeta == nil {
 		return nil
 	}
-	infos := c.meta.GetPartitionStatsMeta().ListAllPartitionStatsInfos()
+	infos := c.partitionStatsMeta.ListAllPartitionStatsInfos()
 	for _, info := range infos {
 		collInfo := c.meta.(*meta).GetCollection(info.GetCollectionID())
 		if collInfo == nil {
@@ -495,7 +434,7 @@ func (c *compactionInspector) cleanPartitionStats() error {
 	for _, info := range unusedPartStats {
 		mlog.Debug(context.TODO(), "collection has been dropped, remove partition stats",
 			mlog.Int64("collID", info.GetCollectionID()))
-		if err := c.meta.CleanPartitionStatsInfo(context.TODO(), info); err != nil {
+		if err := c.partitionStatsCleaner.CleanPartitionStatsInfo(context.TODO(), info); err != nil {
 			mlog.Warn(context.TODO(), "gcPartitionStatsInfo fail", mlog.Err(err))
 			return err
 		}
@@ -509,7 +448,7 @@ func (c *compactionInspector) cleanPartitionStats() error {
 		if len(infos) > 2 {
 			for i := 2; i < len(infos); i++ {
 				info := infos[i]
-				if err := c.meta.CleanPartitionStatsInfo(context.TODO(), info); err != nil {
+				if err := c.partitionStatsCleaner.CleanPartitionStatsInfo(context.TODO(), info); err != nil {
 					mlog.Warn(context.TODO(), "gcPartitionStatsInfo fail", mlog.Err(err))
 					return err
 				}
@@ -637,13 +576,13 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 	var task CompactionTask
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
-		task = newMixCompactionTask(t, c.allocator, c.meta, c.ievm)
+		task = newMixCompactionTask(t, c.allocator, c.meta, c.compactionTaskMeta, c.ievm)
 	case datapb.CompactionType_Level0DeleteCompaction:
-		task = newL0CompactionTask(t, c.allocator, c.meta)
+		task = newL0CompactionTask(t, c.allocator, c.meta, c.compactionTaskMeta)
 	case datapb.CompactionType_ClusteringCompaction:
-		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.handler, c.analyzeScheduler, c.ievm)
+		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.compactionTaskMeta, c.indexMeta, c.analyzeMeta, c.partitionStatsMeta, c.partitionStatsCleaner, c.handler, c.analyzeScheduler, c.ievm)
 	case datapb.CompactionType_BumpSchemaVersionCompaction:
-		task = newBumpSchemaVersionTask(t, c.allocator, c.meta, c.ievm)
+		task = newBumpSchemaVersionTask(t, c.allocator, c.meta, c.compactionTaskMeta, c.ievm)
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}

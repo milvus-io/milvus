@@ -63,7 +63,7 @@ type segmentReadiness struct {
 	schemaVersion int32
 
 	// Shared source of truth for the index term.
-	indexMeta            *indexMeta
+	indexMeta            SegmentIndexCatalog
 	minRowsToEnableIndex int64
 }
 
@@ -79,7 +79,7 @@ func (m *meta) prepareReadiness(collection *collectionInfo) *segmentReadiness {
 	r := &segmentReadiness{
 		collectionID:         collection.ID,
 		collection:           collection,
-		indexMeta:            m.indexMeta,
+		indexMeta:            m.indexCatalog,
 		schemaVersion:        collection.Schema.GetVersion(),
 		requireSorted:        enableSortCompaction() && !collection.IsExternal(),
 		minRowsToEnableIndex: Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64(),
@@ -106,11 +106,11 @@ func (m *meta) prepareReadiness(collection *collectionInfo) *segmentReadiness {
 	// FilterInIndexedSegments). A pure-scalar collection leaves the vector set
 	// empty: the term would otherwise be vacuously satisfied, so degrade to
 	// "every scalar index on the collection is Finished" (design §5.3, O3).
-	if m.indexMeta != nil && m.indexMeta.HasIndex(collection.ID) {
+	if m.indexCatalog != nil && m.indexCatalog.HasIndex(collection.ID) {
 		r.hasIndex = true
 		r.targetFieldIDs = append(r.targetFieldIDs, vectorFieldIDs...)
 		if len(vectorFieldIDs) == 0 || Params.DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
-			for _, index := range m.indexMeta.GetIndexesForCollection(collection.ID, "") {
+			for _, index := range m.indexCatalog.GetIndexesForCollection(collection.ID, "") {
 				r.targetFieldIDs = append(r.targetFieldIDs, index.FieldID)
 			}
 		}

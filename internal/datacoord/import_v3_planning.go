@@ -101,7 +101,7 @@ func planImportV3(jc *importV3JobContext) error {
 	// The segment target and the fragment bytes below must stay in the same
 	// normalized decoded-bytes metric: changing one side's metric without the
 	// other reopens a fragment/segment size mismatch.
-	target := getExpectedSegmentSize(jc.meta, job.GetCollectionID(), job.GetSchema())
+	target := getExpectedSegmentSize(jc.indexMeta, job.GetCollectionID(), job.GetSchema())
 	jobPartitions := make(map[int64]struct{}, len(job.GetPartitionIDs()))
 	for _, partitionID := range job.GetPartitionIDs() {
 		jobPartitions[partitionID] = struct{}{}
