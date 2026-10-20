@@ -2,52 +2,60 @@ package fileresource
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path"
+	"sort"
 	"sync"
 
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
-// SnapshotFetcher returns the current inventory version and, only when it
-// differs from knownVersion, the full inventory. knownVersion must be the last
-// successfully applied version. An unchanged response omits the inventory;
-// a newer response with an empty inventory means all resources were removed.
-type SnapshotFetcher func(ctx context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64, error)
+// ResourceFetcher fetches a requested batch by IDs or names (never both).
+// The result must contain every requested resource; errors return no partial list.
+type ResourceFetcher func(context.Context, []int64, []string) ([]*internalpb.FileResourceInfo, error)
 
-var snapshotFetcher struct {
+var resourceFetcher struct {
 	sync.RWMutex
-	preparer *resourcePreparer
+	loader *resourceLoader
 }
 
-// SetSnapshotFetcher must be called after InitManager. It enables preparation
-// by pull for workers outside QueryCoord's legacy file-resource push distribution.
-func SetSnapshotFetcher(fetch SnapshotFetcher) {
-	snapshotFetcher.Lock()
-	snapshotFetcher.preparer = nil
+// SetResourceFetcher enables ID-based loading independently of legacy Sync modes.
+func SetResourceFetcher(downloader storage.ChunkManager, fetch ResourceFetcher) {
+	resourceFetcher.Lock()
+	defer resourceFetcher.Unlock()
+	resourceFetcher.loader = nil
 	if fetch != nil {
-		snapshotFetcher.preparer = &resourcePreparer{manager: GlobalFileManager, fetch: fetch}
+		resourceFetcher.loader = &resourceLoader{
+			BaseManager: newBaseManager(),
+			downloader:  downloader,
+			fetch:       fetch,
+			entries:     make(map[int64]*resourceEntry),
+		}
 	}
-	snapshotFetcher.Unlock()
 }
 
-// IsPullEnabled identifies consumers of the new demand-driven preparation path.
-// It does not interpret or change the legacy file-resource mode configuration.
 func IsPullEnabled() bool {
-	snapshotFetcher.RLock()
-	defer snapshotFetcher.RUnlock()
-	return snapshotFetcher.preparer != nil
+	resourceFetcher.RLock()
+	defer resourceFetcher.RUnlock()
+	return resourceFetcher.loader != nil
 }
 
 // retryPreparation keeps transient preparation failures on the worker. Its
-// context belongs to the flight, so retries stop only when all waiters leave.
-// An inner RPC/download deadline can expire while this shared context is alive.
+// context belongs to the request for metadata, or the shared flight for file
+// loading. An inner timeout can retry while that owning context is alive.
 func retryPreparation(ctx context.Context, work func() error) error {
 	err := retry.Handle(ctx, func() (bool, error) {
 		if err := ctx.Err(); err != nil {
@@ -55,7 +63,7 @@ func retryPreparation(ctx context.Context, work func() error) error {
 		}
 		err := work()
 		return err != nil && ctx.Err() == nil && retry.IsRecoverable(err) && !merr.IsNonRetryableErr(err) &&
-			grpcstatus.Code(err) != codes.Unimplemented, err
+			merr.GetErrorType(err) != merr.InputError && grpcstatus.Code(err) != codes.Unimplemented, err
 	}, retry.AttemptAlways())
 	// retry.Handle can return its previous attempt's error after cancellation.
 	// The shared lifetime, rather than that stale transient cause, ended the wait.
@@ -65,119 +73,269 @@ func retryPreparation(ctx context.Context, work func() error) error {
 	return err
 }
 
-type resourceSnapshot struct {
-	resources []*internalpb.FileResourceInfo
-	version   uint64
+// Demand files live outside the directories managed by legacy full-inventory Sync.
+const demandStorageName = "analyzer-demand"
+
+type resourceEntry struct {
+	id      int64
+	refs    int
+	workers int
+	info    *internalpb.FileResourceInfo // published only after a complete download
 }
 
-// resourcePreparer keeps the two flight stages and latest target for one manager.
-// The target is metadata, not a cached Prepare result: every call still fetches.
-type resourcePreparer struct {
-	manager Manager
-	fetch   SnapshotFetcher
-
-	snapshotFlights syncutil.FlightGroup[uint64, resourceSnapshot]
-	syncFlights     syncutil.FlightGroup[struct{}, uint64]
-	mu              sync.Mutex
-	latest          resourceSnapshot
+type resourceLoader struct {
+	BaseManager
+	downloader storage.ChunkManager
+	fetch      ResourceFetcher
+	mu         sync.Mutex
+	entries    map[int64]*resourceEntry
+	flights    syncutil.FlightGroup[int64, struct{}]
 }
 
-// Prepare refreshes the atomic resource inventory before creating a consumer.
-// Fetch and application are separate flights so calls arriving during a download
-// can discover newer snapshots. Each caller checks its own required version after
-// an application completes. Only the last departing waiter cancels shared work.
-func Prepare(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
+// Resources pins the exact IDs used by a native consumer. It must be closed on
+// constructor failure, or after the analyzer/runner has been destroyed.
+type Resources struct {
+	loader          *resourceLoader
+	entries         []*resourceEntry
+	once            sync.Once
+	extra           string
+	validationExtra string
+}
+
+func (r *Resources) ExtraInfo() string { return r.extra }
+
+func (r *Resources) ValidateAnalyzer(params string) ([]int64, error) {
+	return analyzer.ValidateAnalyzer(params, r.validationExtra)
+}
+
+func (r *Resources) Close() {
+	r.once.Do(func() {
+		if r.loader == nil {
+			return
+		}
+		r.loader.mu.Lock()
+		defer r.loader.mu.Unlock()
+		for _, entry := range r.entries {
+			entry.refs--
+			r.loader.cleanupLocked(entry)
+		}
+	})
+}
+
+func (l *resourceLoader) cleanupLocked(entry *resourceEntry) {
+	if entry.refs != 0 || entry.workers != 0 {
+		return
 	}
-	snapshotFetcher.RLock()
-	preparer := snapshotFetcher.preparer
-	snapshotFetcher.RUnlock()
-	if preparer == nil {
-		return nil
+	delete(l.entries, entry.id)
+	if err := os.RemoveAll(l.resourcePath(entry.id)); err != nil {
+		mlog.Warn(context.TODO(), "remove unused analyzer resource", mlog.Int64("resourceID", entry.id), mlog.Err(err))
 	}
-	knownVersion := preparer.manager.GetVersion()
-	snapshot, err := preparer.snapshotFlights.Do(ctx, knownVersion, func(ctx context.Context) (resourceSnapshot, error) {
-		var snapshot resourceSnapshot
+}
+
+func (l *resourceLoader) resourcePath(id int64) string {
+	return path.Join(l.localPath, demandStorageName, fmt.Sprint(id))
+}
+
+func (l *resourceLoader) acquire(ctx context.Context, id int64, info *internalpb.FileResourceInfo) (*resourceEntry, error) {
+	l.mu.Lock()
+	entry := l.entries[id]
+	if entry == nil {
+		entry = &resourceEntry{id: id}
+		l.entries[id] = entry
+	}
+	entry.refs++
+	ready := entry.info != nil
+	l.mu.Unlock()
+	if ready {
+		return entry, nil
+	}
+	_, err := l.flights.Do(ctx, id, func(ctx context.Context) (struct{}, error) {
+		l.mu.Lock()
+		// A canceled caller can release its reference before this worker starts.
+		if l.entries[id] != entry {
+			l.mu.Unlock()
+			return struct{}{}, ctx.Err()
+		}
+		entry.workers++
+		ready := entry.info != nil
+		l.mu.Unlock()
+		defer func() {
+			l.mu.Lock()
+			entry.workers--
+			l.cleanupLocked(entry)
+			l.mu.Unlock()
+		}()
+		if ready {
+			return struct{}{}, nil
+		}
 		err := retryPreparation(ctx, func() error {
-			resources, version, err := preparer.fetch(ctx, knownVersion)
-			snapshot = resourceSnapshot{resources: resources, version: version}
+			timeout := paramtable.Get().CommonCfg.FileResourceDownloadTimeout.GetAsDurationByParse()
+			if err := l.downloadFile(ctx, l.downloader, info, path.Join(l.resourcePath(id), path.Base(info.GetPath())), timeout); err != nil {
+				return err
+			}
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			entry.info = proto.Clone(info).(*internalpb.FileResourceInfo)
+			return nil
+		})
+		return struct{}{}, err
+	})
+	if err != nil {
+		l.mu.Lock()
+		entry.refs--
+		l.cleanupLocked(entry)
+		l.mu.Unlock()
+		return nil, err
+	}
+	return entry, nil
+}
+
+// Acquire fetches missing metadata in one request, then loads files through
+// per-ID flights. Overlapping callers may read the same metadata, but share
+// downloads. A metadata RPC belongs only to its caller and cannot cancel others.
+func Acquire(ctx context.Context, ids []int64, params ...string) (*Resources, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	resourceFetcher.RLock()
+	loader := resourceFetcher.loader
+	resourceFetcher.RUnlock()
+	result := &Resources{loader: loader}
+	if loader == nil {
+		return result, nil
+	}
+	names := analyzerResourceNames(params)
+	if len(names) == 0 {
+		result.extra = `{ "resource_map": {} }`
+		result.validationExtra = `{ "resource_map": {}, "resource_file_names": {}, "validate_resource_names": true }`
+		return result, nil
+	}
+	var missingIDs []int64
+	var missingNames []string
+	if len(ids) == 0 {
+		// Fresh name queries cannot join a negative read that predates Add.
+		for name := range names {
+			missingNames = append(missingNames, name)
+		}
+		sort.Strings(missingNames)
+	} else {
+		// Pin ready entries before fetching the misses so a concurrent final Close
+		// cannot remove the files this consumer has already selected.
+		seen := make(map[int64]struct{})
+		loader.mu.Lock()
+		for _, id := range ids {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			if entry := loader.entries[id]; entry != nil && entry.info != nil {
+				entry.refs++
+				result.entries = append(result.entries, entry)
+			} else {
+				missingIDs = append(missingIDs, id)
+			}
+		}
+		loader.mu.Unlock()
+	}
+	if len(missingIDs) > 0 || len(missingNames) > 0 {
+		var infos []*internalpb.FileResourceInfo
+		err := retryPreparation(ctx, func() error {
+			var err error
+			infos, err = loader.fetch(ctx, missingIDs, missingNames)
 			return err
 		})
-		return snapshot, err
-	})
-	if err != nil {
-		return err
+		if err == nil {
+			err = checkFetchedResources(infos, missingIDs, missingNames)
+		}
+		if err != nil {
+			result.Close()
+			return nil, err
+		}
+		// Register all resource waits concurrently. A failed request releases all
+		// of its waits; another request's wait keeps that resource's worker alive.
+		loadCtx, cancel := context.WithCancel(ctx)
+		type loadResult struct {
+			entry *resourceEntry
+			err   error
+		}
+		loaded := make(chan loadResult, len(infos))
+		for _, info := range infos {
+			go func() {
+				entry, err := loader.acquire(loadCtx, info.GetId(), info)
+				loaded <- loadResult{entry: entry, err: err}
+			}()
+		}
+		for range infos {
+			item := <-loaded
+			if item.err != nil {
+				if err == nil {
+					err = item.err
+					cancel()
+				}
+			} else {
+				result.entries = append(result.entries, item.entry)
+			}
+		}
+		cancel()
+		if err != nil {
+			result.Close()
+			return nil, err
+		}
 	}
-	return preparer.syncSnapshot(ctx, snapshot)
-}
 
-func (p *resourcePreparer) syncSnapshot(ctx context.Context, snapshot resourceSnapshot) error {
+	resourceMap := make(map[string]int64)
+	fileNames := make(map[string]string)
+	for _, entry := range result.entries {
+		// info is immutable after publication for this ID.
+		loader.mu.Lock()
+		info := entry.info
+		loader.mu.Unlock()
+		resourceMap[info.GetName()] = info.GetId()
+		fileNames[info.GetName()] = path.Base(info.GetPath())
+	}
+	extra := map[string]any{"storage_name": demandStorageName, "resource_map": resourceMap}
+	data, err := json.Marshal(extra)
+	if err != nil {
+		result.Close()
+		return nil, merr.Wrap(err, "marshal analyzer resource bindings")
+	}
+	result.extra = string(data)
+	extra["resource_file_names"] = fileNames
+	extra["validate_resource_names"] = true
+	data, err = json.Marshal(extra)
+	if err != nil {
+		result.Close()
+		return nil, merr.Wrap(err, "marshal analyzer validation bindings")
+	}
+	result.validationExtra = string(data)
 	if err := ctx.Err(); err != nil {
-		return err
+		result.Close()
+		return nil, err
 	}
-	if snapshot.version <= p.manager.GetVersion() {
-		return nil
-	}
-	p.mu.Lock()
-	if snapshot.version > p.latest.version {
-		p.latest = snapshot
-	}
-	p.mu.Unlock()
-
-	for {
-		attempted, err := p.syncFlights.Do(ctx, struct{}{}, p.syncLatest)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		// A newer application may fail after this caller's version was installed.
-		if snapshot.version <= p.manager.GetVersion() {
-			return nil
-		}
-		if attempted >= snapshot.version {
-			return err
-		}
-		// This caller joined an older application. Its result (including a
-		// permanent error) cannot decide whether the newer target can be applied.
-	}
+	return result, nil
 }
 
-func (p *resourcePreparer) syncLatest(ctx context.Context) (uint64, error) {
-	var target resourceSnapshot
-	err := retryPreparation(ctx, func() error {
-		p.mu.Lock()
-		target = p.latest
-		p.mu.Unlock()
-		// Re-read the target on every retry: a newer snapshot can remove the
-		// resource that made the previous attempt fail. Sync publishes atomically.
-		if target.version <= p.manager.GetVersion() {
-			return nil
+// Response order is part of the batch RPC contract. Validate the full result
+// before publishing any files, including duplicate IDs returned for names.
+func checkFetchedResources(infos []*internalpb.FileResourceInfo, ids []int64, names []string) error {
+	if len(infos) != len(ids)+len(names) {
+		return merr.WrapErrServiceInternalMsg("resource fetch returned an incomplete batch")
+	}
+	seen := make(map[int64]struct{}, len(infos))
+	for i, info := range infos {
+		if info == nil {
+			return merr.WrapErrServiceInternalMsg("resource fetch returned empty metadata")
 		}
-		return p.manager.Sync(ctx, target.version, target.resources)
-	})
-	return target.version, err
-}
-
-// ValidateAnalyzer must follow a successful Prepare. A sync-mode inventory is
-// authoritative for name validation; other modes cannot blame a missing name on
-// the caller. Explicit extra info keeps all native lookups on the same snapshot.
-func ValidateAnalyzer(params string) ([]int64, error) {
-	manager, ok := GlobalFileManager.(*SyncManager)
-	if !ok {
-		return analyzer.ValidateAnalyzer(params, "")
+		if len(ids) > 0 && info.GetId() != ids[i] || len(names) > 0 && info.GetName() != names[i] {
+			return merr.WrapErrServiceInternalMsg("resource fetch returned an unexpected identity")
+		}
+		if _, ok := seen[info.GetId()]; ok {
+			return merr.WrapErrServiceInternalMsg("resource fetch returned duplicate ID %d", info.GetId())
+		}
+		seen[info.GetId()] = struct{}{}
 	}
-	manager.Lock()
-	// Marshal under the lock: Sync cannot mutate the map midway through the copy.
-	extraInfo, err := json.Marshal(map[string]any{
-		"resource_map":            manager.resourceMap,
-		"resource_file_names":     manager.resourceFileNames,
-		"validate_resource_names": true,
-	})
-	manager.Unlock()
-	if err != nil {
-		return nil, merr.Wrap(err, "marshal analyzer validation resource snapshot")
-	}
-	// Sync can remove files after the snapshot was captured. Native file I/O errors
-	// retain their system classification, and RootCoord still reserves returned IDs.
-	return analyzer.ValidateAnalyzer(params, string(extraInfo))
+	return nil
 }

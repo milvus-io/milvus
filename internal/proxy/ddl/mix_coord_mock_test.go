@@ -1960,6 +1960,6 @@ type DropCollectionFunc func(ctx context.Context, request *milvuspb.DropCollecti
 
 type GetGetCredentialFunc func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error)
 
-func (*MixCoordMock) GetFileResourceSnapshot(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest, ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error) {
-	panic("mock GetFileResourceSnapshot with mockey")
+func (*MixCoordMock) FetchFileResources(context.Context, *rootcoordpb.FetchFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
+	panic("mock FetchFileResources with mockey")
 }

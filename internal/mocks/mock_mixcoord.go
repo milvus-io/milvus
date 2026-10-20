@@ -7725,28 +7725,28 @@ func (_c *MixCoord_ListDatabases_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
-// GetFileResourceSnapshot provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) GetFileResourceSnapshot(_a0 context.Context, _a1 *rootcoordpb.GetFileResourceSnapshotRequest) (*rootcoordpb.FileResourceSnapshot, error) {
+// FetchFileResources provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) FetchFileResources(_a0 context.Context, _a1 *rootcoordpb.FetchFileResourcesRequest) (*rootcoordpb.FetchFileResourcesResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetFileResourceSnapshot")
+		panic("no return value specified for FetchFileResources")
 	}
 
-	var r0 *rootcoordpb.FileResourceSnapshot
+	var r0 *rootcoordpb.FetchFileResourcesResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest) (*rootcoordpb.FileResourceSnapshot, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.FetchFileResourcesRequest) (*rootcoordpb.FetchFileResourcesResponse, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest) *rootcoordpb.FileResourceSnapshot); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.FetchFileResourcesRequest) *rootcoordpb.FetchFileResourcesResponse); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*rootcoordpb.FileResourceSnapshot)
+			r0 = ret.Get(0).(*rootcoordpb.FetchFileResourcesResponse)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.FetchFileResourcesRequest) error); ok {
 		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -7755,31 +7755,31 @@ func (_m *MixCoord) GetFileResourceSnapshot(_a0 context.Context, _a1 *rootcoordp
 	return r0, r1
 }
 
-// MixCoord_GetFileResourceSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFileResourceSnapshot'
-type MixCoord_GetFileResourceSnapshot_Call struct {
+// MixCoord_FetchFileResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FetchFileResources'
+type MixCoord_FetchFileResources_Call struct {
 	*mock.Call
 }
 
-// GetFileResourceSnapshot is a helper method to define mock.On call
+// FetchFileResources is a helper method to define mock.On call
 //   - _a0 context.Context
-//   - _a1 *rootcoordpb.GetFileResourceSnapshotRequest
-func (_e *MixCoord_Expecter) GetFileResourceSnapshot(_a0 interface{}, _a1 interface{}) *MixCoord_GetFileResourceSnapshot_Call {
-	return &MixCoord_GetFileResourceSnapshot_Call{Call: _e.mock.On("GetFileResourceSnapshot", _a0, _a1)}
+//   - _a1 *rootcoordpb.FetchFileResourcesRequest
+func (_e *MixCoord_Expecter) FetchFileResources(_a0 interface{}, _a1 interface{}) *MixCoord_FetchFileResources_Call {
+	return &MixCoord_FetchFileResources_Call{Call: _e.mock.On("FetchFileResources", _a0, _a1)}
 }
 
-func (_c *MixCoord_GetFileResourceSnapshot_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetFileResourceSnapshotRequest)) *MixCoord_GetFileResourceSnapshot_Call {
+func (_c *MixCoord_FetchFileResources_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.FetchFileResourcesRequest)) *MixCoord_FetchFileResources_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*rootcoordpb.GetFileResourceSnapshotRequest))
+		run(args[0].(context.Context), args[1].(*rootcoordpb.FetchFileResourcesRequest))
 	})
 	return _c
 }
 
-func (_c *MixCoord_GetFileResourceSnapshot_Call) Return(_a0 *rootcoordpb.FileResourceSnapshot, _a1 error) *MixCoord_GetFileResourceSnapshot_Call {
+func (_c *MixCoord_FetchFileResources_Call) Return(_a0 *rootcoordpb.FetchFileResourcesResponse, _a1 error) *MixCoord_FetchFileResources_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MixCoord_GetFileResourceSnapshot_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest) (*rootcoordpb.FileResourceSnapshot, error)) *MixCoord_GetFileResourceSnapshot_Call {
+func (_c *MixCoord_FetchFileResources_Call) RunAndReturn(run func(context.Context, *rootcoordpb.FetchFileResourcesRequest) (*rootcoordpb.FetchFileResourcesResponse, error)) *MixCoord_FetchFileResources_Call {
 	_c.Call.Return(run)
 	return _c
 }

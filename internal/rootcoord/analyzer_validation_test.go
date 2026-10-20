@@ -55,6 +55,7 @@ func (*validationClient) ValidateAnalyzer(context.Context, *streamingpb.Streamin
 
 func TestValidateAnalyzerInfosUsesStreaming(t *testing.T) {
 	mockey.PatchConvey("validation does not require QN inventory or a collection", t, func() {
+		const params = `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"dictionary","file_name":"stop.txt"}}]}`
 		wal := mockey.Mock(streaming.WAL).Return(&validationWAL{}).Build()
 		mockey.Mock((*validationWAL).AnalyzerClient).Return(&validationClient{}).Build()
 		var validationErr error
@@ -63,18 +64,18 @@ func TestValidateAnalyzerInfosUsesStreaming(t *testing.T) {
 			info := req.AnalyzerInfos[0]
 			require.Equal(t, "body", info.Field)
 			require.Equal(t, "english", info.Name)
-			require.Equal(t, "{}", info.Params)
+			require.Equal(t, params, info.Params)
 			if validationErr != nil {
 				return nil, validationErr
 			}
 			return &streamingpb.StreamingNodeValidateAnalyzerResponse{ResourceIds: []int64{11}}, nil
 		}).Build()
-		core := &Core{} // No coordinator client or file-resource observer.
+		core := &Core{} // No metadata access: SN resolves resource_name from the forwarded params.
 		ids, err := core.validateAnalyzerInfos(context.Background(), nil)
 		require.NoError(t, err)
 		require.Empty(t, ids)
 		require.Zero(t, wal.Times())
-		infos := []*querypb.AnalyzerInfo{{Field: "body", Name: "english", Params: "{}"}}
+		infos := []*querypb.AnalyzerInfo{{Field: "body", Name: "english", Params: params}}
 		ids, err = core.validateAnalyzerInfos(context.Background(), infos)
 		require.NoError(t, err)
 		require.Equal(t, []int64{11}, ids)

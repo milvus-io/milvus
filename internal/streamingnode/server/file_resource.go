@@ -7,16 +7,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
-func fetchFileResourceSnapshot(ctx context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64, error) {
+func fetchFileResources(ctx context.Context, ids []int64, names []string) ([]*internalpb.FileResourceInfo, error) {
 	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	resp, err := coord.GetFileResourceSnapshot(ctx, &rootcoordpb.GetFileResourceSnapshotRequest{KnownVersion: knownVersion})
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, 0, err
+	resp, err := coord.FetchFileResources(ctx, &rootcoordpb.FetchFileResourcesRequest{ResourceIds: ids, ResourceNames: names})
+	if err != nil {
+		return nil, err
 	}
-	return resp.GetResources(), resp.GetVersion(), nil
+	if err := merr.CheckRPCCall(resp, nil); err != nil {
+		if !resp.GetStatus().GetRetriable() {
+			return nil, retry.Unrecoverable(err)
+		}
+		return nil, err
+	}
+	return resp.GetResources(), nil
 }

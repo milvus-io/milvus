@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -26,15 +25,12 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 	}
 	switch source := req.GetSource().(type) {
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer:
-		params := strings.TrimSpace(source.InlineAnalyzer.GetAnalyzerParams())
-		if params != "" && params != "{}" {
-			if err := fileresource.Prepare(ctx); err != nil {
-				return &streamingpb.StreamingNodeRunAnalyzerResponse{
-					Status: merr.Status(merr.Wrap(err, "prepare analyzer file resources")),
-				}, nil
-			}
+		resources, err := fileresource.Acquire(ctx, nil, source.InlineAnalyzer.GetAnalyzerParams())
+		if err != nil {
+			return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.Wrap(err, "acquire analyzer file resources"))}, nil
 		}
-		results, err := analyzer.Run(ctx, source.InlineAnalyzer.GetAnalyzerParams(), req.GetPlaceholder(), req.GetWithDetail(), req.GetWithHash())
+		defer resources.Close()
+		results, err := analyzer.Run(ctx, source.InlineAnalyzer.GetAnalyzerParams(), req.GetPlaceholder(), req.GetWithDetail(), req.GetWithHash(), resources.ExtraInfo())
 		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err), Results: results}, nil
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer:
 		field := source.FieldAnalyzer
@@ -55,21 +51,25 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 	}
 }
 
-// ValidateAnalyzer prepares the local inventory before native config validation.
+// ValidateAnalyzer fetches names from the analyzer parameters and pins their
+// IDs before native validation.
 // No collection, WAL ownership, QueryView or loaded segments are required.
 func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := fileresource.Prepare(ctx); err != nil {
-		// Known terminal storage failures are business results, preserving their
-		// code. Unclassified transport failures remain eligible for readiness retry.
-		err = merr.Wrap(err, "prepare analyzer file resources")
-		if merr.IsNonRetryableErr(err) {
-			return &streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(err)}, nil
-		}
-		return nil, err
+	params := make([]string, 0, len(req.GetAnalyzerInfos()))
+	for _, info := range req.GetAnalyzerInfos() {
+		params = append(params, info.GetParams())
 	}
+	resources, err := fileresource.Acquire(ctx, nil, params...)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return &streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(merr.Wrap(err, "acquire analyzer file resources"))}, nil
+	}
+	defer resources.Close()
 	resourceIDs := typeutil.NewSet[int64]()
 	for _, info := range req.GetAnalyzerInfos() {
 		if err := ctx.Err(); err != nil {
@@ -81,7 +81,7 @@ func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streami
 				return &streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("analyzer parameters must be a JSON object for field: %s, name: %s", info.GetField(), info.GetName()))}, nil
 			}
 		}
-		ids, err := fileresource.ValidateAnalyzer(info.GetParams())
+		ids, err := resources.ValidateAnalyzer(info.GetParams())
 		if err != nil {
 			err = merr.Wrapf(err, "validate analyzer failed for field: %s, name: %s", info.GetField(), info.GetName())
 			// Validation results must not enter the readiness retry loop. In

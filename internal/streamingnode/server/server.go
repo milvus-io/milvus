@@ -43,9 +43,9 @@ type Server struct {
 // Init initializes the streamingnode server.
 func (s *Server) init() {
 	mlog.Info(context.TODO(), "init streamingnode server...")
-	// Prepare file resources before WAL recovery can initialize function runners.
+	// Install on-demand resource loading before WAL recovery registers function runners.
 	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.GetLocalMode())
-	fileresource.SetSnapshotFetcher(fetchFileResourceSnapshot)
+	fileresource.SetResourceFetcher(resource.Resource().ChunkManager(), fetchFileResources)
 	// init all basic components.
 	s.initBasicComponent()
 

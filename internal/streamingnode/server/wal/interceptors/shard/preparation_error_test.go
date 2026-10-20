@@ -22,17 +22,14 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/function"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -47,35 +44,20 @@ func (*preparationShardManager) CheckIfCollectionSchemaVersionMatch(*message.Ins
 	panic("unpatched")
 }
 
-func TestMaterializationPreparationRetriesLocally(t *testing.T) {
+func TestMaterializationDefersPreparation(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		prepareErr error
-		fetchCalls int
 		buildCalls int
 	}{
-		{"temporary preparation", merr.ErrServiceUnavailable, 2, 1},
-		{"network preparation", grpcstatus.Error(codes.Unavailable, "disconnected"), 2, 1},
-		{"inner request timeout", context.DeadlineExceeded, 2, 1},
-		{"missing object", merr.WrapErrIoKeyNotFound("dictionary"), 1, 0},
-		{"denied access", merr.ErrIoPermissionDenied, 1, 0},
-		{"native construction", nil, 1, 1},
+		{"missing object", merr.WrapErrIoKeyNotFound("dictionary"), 0},
+		{"denied access", merr.ErrIoPermissionDenied, 0},
+		{"native construction", nil, 1},
 	} {
 		mockey.PatchConvey(tc.name, t, func() {
-			previousManager := fileresource.GlobalFileManager
-			fileresource.GlobalFileManager = &fileresource.BaseManager{}
-			defer func() {
-				fileresource.SetSnapshotFetcher(nil)
-				fileresource.GlobalFileManager = previousManager
-			}()
-			fetchCalls := 0
-			fileresource.SetSnapshotFetcher(func(context.Context, uint64) ([]*internalpb.FileResourceInfo, uint64, error) {
-				fetchCalls++
-				if fetchCalls == 1 {
-					return nil, 0, tc.prepareErr
-				}
-				return nil, 0, nil
-			})
+			acquire := mockey.Mock(fileresource.Acquire).To(func(context.Context, []int64, ...string) (*fileresource.Resources, error) {
+				return &fileresource.Resources{}, tc.prepareErr
+			}).Build()
 			manager := function.NewFunctionRunnerManager()
 			defer manager.Close()
 			mockey.Mock(function.GetManager).Return(manager).Build()
@@ -85,7 +67,9 @@ func TestMaterializationPreparationRetriesLocally(t *testing.T) {
 			schema := &schemapb.CollectionSchema{
 				Version: 1, FileResourceIds: []int64{7},
 				Fields: []*schemapb.FieldSchema{
-					{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+					{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+						{Key: "analyzer_params", Value: `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"dictionary","file_name":"stop.txt"}}]}`},
+					}},
 					{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
 				},
 				Functions: []*schemapb.FunctionSchema{{Id: 1, Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{102}}},
@@ -103,11 +87,16 @@ func TestMaterializationPreparationRetriesLocally(t *testing.T) {
 				return nil, nil
 			})
 			require.Error(t, err)
-			require.True(t, status.AsStreamingError(err).IsUnrecoverable())
-			require.Equal(t, tc.fetchCalls, fetchCalls)
+			var preparation *function.PreparationRequiredError
+			require.ErrorAs(t, err, &preparation)
+			require.Zero(t, acquire.Times(), "the interceptor must not fetch resources")
+			require.Zero(t, build.Times(), "the interceptor must not initialize runners")
+			err = preparation.Prepare(t.Context())
+			require.Error(t, err)
+			require.Equal(t, 1, acquire.Times())
 			require.Equal(t, tc.buildCalls, build.Times())
 			if tc.buildCalls > 0 {
-				require.Contains(t, err.Error(), merr.ErrServiceInternal.Error(), "the transient preparation failure must recover before native construction")
+				require.Contains(t, err.Error(), merr.ErrServiceInternal.Error(), "preparation must complete before native construction")
 			}
 			require.Empty(t, message.MustAsMutableInsertMessageV1(msg).MustBody().GetFieldsData())
 		})

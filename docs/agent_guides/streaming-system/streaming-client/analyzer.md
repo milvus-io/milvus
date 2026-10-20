@@ -27,13 +27,12 @@ ReleaseCollection releases query resources, not this WAL key.
 Resource preparation preserves tracing values without inheriting one RPC's
 cancellation or deadline: cancelling one wait does not fail other waiters.
 The last departing waiter cancels the shared task and its local retries. The
-existing per-file download limit remains; snapshot fetch adds no separate timeout.
-Default analyzers on schemas with no file-resource IDs bypass preparation, so an
-unrelated broken resource does not prevent their runner initialization. Explicit
-analyzer or multi-analyzer configuration still prepares conservatively: older
-schemas and MinHash fields without enable_analyzer may lack resource IDs.
-Resource-dependent initialization continues to require the full snapshot; a
-failed download is not silently replaced with stale inventory.
+existing per-file download limit remains; Fetch adds no separate timeout.
+Runtime consumers use the IDs already bound in their collection schema. Ready
+ID entries are reused while referenced; default and local-file analyzers skip
+remote I/O. Unbound inline inputs fetch their referenced names in a batch,
+then share loading under the returned IDs. Failed downloads never publish a
+ready entry. Native code retains parameter and filename validation.
 
 ## Execution and lifetime
 
@@ -101,110 +100,101 @@ QueryView, replica, or loaded QueryNode. The legacy Coordinator `ValidateAnalyze
 RPC remains as a forwarding entry for existing callers. There is no
 `StreamingNodeManagerService.ValidateRuntime` RPC or ManagerClient validation API.
 
-Before native validation, the selected StreamingNode calls `fileresource.Prepare`
-to pull Coordinator's current resource snapshot and synchronize its local files
-and native resource table. Legacy file-resource mode selection is unchanged;
-this PR does not adapt the old CloseMode/RefMode behavior to the new pull path.
-Preparation uses two stages backed by the same `syncutil.FlightGroup` utility.
-Overlapping snapshot fetches share one request. Snapshot applications share a
-worker for the manager, so a newer snapshot keeps an existing download alive
-when an older snapshot's caller cancels. Each caller checks its required version
-after the shared application finishes; callers that joined an older application
-enter another application round if needed. An older round's failure does not
-fail a newer target, and an already applied version satisfies its caller even
-when a newer application fails.
-Each RPC waits with its own context. Canceling
-one RPC releases only its wait, while the final departing waiter cancels the
-shared task. Completed fetches are not cached: a request arriving during a
-download can discover a newer snapshot instead of joining stale preparation.
-Legacy runner prewarming remains. Only runners requiring file resources with
-the new pull path enabled defer preparation until first use, so background
-prewarming cannot keep that shared I/O alive after every requesting RPC cancels.
-Each RPC owns a wait on a per-runner initialization flight covering both
-resource preparation and native construction. Callers arriving during native
-construction join that initialization without starting another snapshot fetch.
-The last departing caller cancels the initialization flight's preparation wait,
-which releases its ownership of the shared resource flights. Native construction
-itself has no context cancellation API: an admitted build survives cancellation,
-and subsequent callers rejoin it without preparing again. Canceled preparation
-workers check their context under the native-init publication lock before they
-can admit a build. Default inline analyzers with empty parameters or `{}` bypass
-resource preparation.
+Schema persistence binds analyzer resources through
+`CollectionSchema.file_resource_ids`. Runtime loading uses those IDs, never the
+current meaning of a resource name. The internal `FetchFileResources` RPC returns
+a batch of requested `FileResourceInfo` records by IDs or names; it replaces this PR's full-inventory snapshot RPC.
+Metadata is cloned under Coord's metadata lock. Fetching a deleted ID reports a
+system error and cannot silently select a replacement with the same name.
 
-Validation copies the applied name-to-ID map under the manager lock, together
-with the filenames derived from the registered object paths,
-and passes them as explicit native extra info. Only this validation snapshot
-classifies an unknown resource name or a mismatched remote `file_name` as bad
-input. The filename must equal the basename of the registered path; validation
-does not infer caller blame from local file existence. Runtime lookups and non-sync
-modes retain system-error semantics. A concurrent sync cannot change the names
-seen by an in-flight validation; if it removes a referenced file, native file I/O
-still reports a system error. Validation returns the deduplicated resource IDs.
-RootCoord reserves these references under its existing metadata lock before DDL
-publication; a concurrent resource removal must fail reservation rather than
-publish a schema with missing resources. RootCoord does not wait for all QNs to
-synchronize their inventories. Existing StreamingCoord assignment admission and
-legacy file-resource push distribution remain unchanged.
+Create/Alter validation forwards `AnalyzerInfo` parameters to StreamingNode;
+there is no resource-ID field in the validation request and no local name
+resolution in Coord. StreamingNode extracts and deduplicates remote names and
+fetches them in one RPC. Inline RunAnalyzer and runtime schemas without IDs use
+the same path. Responses carry complete metadata including IDs, so downloading
+requires no additional ID Fetch. Each call performs its own name query; a delayed
+negative query cannot reject a later request after Add. There is no Resolve RPC.
 
-The validation response carries a business Status and, on success, resource IDs.
-Native validation failures return in Status, preserving their error code, input
-classification and retriability. HandlerClient checks this Status after the
-readiness loop and does not retry business failures, even when Status marks an
-I/O error retriable. A mismatched remote filename returns a parameter error.
-Rust classifies a direct I/O error with `ErrorKind::NotFound` as the generic
-`IoNotFound` FFI discriminant, independently of the caller. The C++ analyzer
-validation boundary maps this to the existing `PathNotExist` code.
-This is a non-retriable system error, so a missing local path
-or a missing downloaded resource file does not trigger outer DDL retries either.
-Filesystem absence alone does not prove invalid input: concurrent resource
-removal or worker-local state can cause the same failure. The caller must
-resubmit validation after that state recovers. Permission errors and other I/O
-failures retain `FileReadFailed`; the outer Proxy-to-Coordinator client may retry
-them within its existing attempt limit and the caller context. Runtime analyzer
-creation and index operations keep mapping both `Io` and `IoNotFound` to
-`FileReadFailed`. Only analyzer validation, after resource preparation, applies
-the terminal missing-path policy.
-Deterministically invalid analyzer options remain input errors at their Rust
-origin; HandlerClient maps these to the public DDL parameter-error contract.
-Discovery and transport recovery retain the existing streaming readiness loop.
-Transient snapshot-fetch and resource-download failures instead retry inside the
-StreamingNode's shared preparation task, using the existing retry utility's
-backoff. Inner RPC or per-file timeouts can retry while another caller still
-waits; the final departing caller cancels the shared task and its retries. Retry
-attempts consider the latest known inventory, so an old snapshot cannot
-indefinitely pin a resource removed in a newer snapshot. The latest target is
-metadata owned by the preparer, not a completed fetch cache; retaining it does
-not keep a worker alive after all its callers cancel.
-Known permanent preparation failures return immediately in the response Status
-with their original system error code. An unsupported snapshot RPC also stops
-local retries. Native analyzer validation and execution are not retried by this
-preparation loop. WAL materialization no longer needs to surface transient
-preparation failures to the producer for another append attempt; cancellation is
-preserved, while permanent preparation and native construction failures retain
-the existing terminal policy. With no available StreamingNode, discovery still
-waits until a node becomes available or the caller context ends.
+`FetchFileResourcesRequest` supplies either `resource_ids` or `resource_names`.
+Coord reads the requested batch under one metadata lock and clones the results
+in request order. A failed batch has a business Status and no partial list.
+This is a selected-resource query, not an inventory snapshot.
 
-The internal Coordinator `GetFileResourceSnapshot` RPC uses a dedicated
-`GetFileResourceSnapshotRequest`. Its `known_version` is the last snapshot
-successfully applied locally, not the last version fetched. Zero denotes the
-initial empty inventory. Coordinator reads the inventory and version together
-under the metadata lock. On success:
+`fileresource.Acquire` pins ready ID entries and batches only the remaining ID
+misses. Unbound name requests always fetch their current bindings. Metadata RPCs
+and their retry loops belong to each requesting caller; they are not shared.
+Thus overlapping requests [A,B] and [B,C] may query B metadata twice, but a
+failure/cancellation of the first metadata request does not affect the second.
 
-- An equal response version means unchanged; the resource list is omitted.
-- A different version carries the complete inventory, never a delta. A newer
-  version with an empty list means all resources were removed and must be applied.
-- Older responses are ignored. `Sync` rechecks the version under its lock, so
-  concurrent pulls and legacy pushes cannot roll back a newer local inventory.
+After metadata fetch, resources load concurrently through per-ID
+`syncutil.FlightGroup` tasks. These flights share file download and readiness
+publication, not the preceding batch RPC. Each caller waits with its own context;
+only the last departing waiter cancels that ID's worker. A request that fails on
+one resource releases its other waits without canceling another consumer's
+shared download. A replacement caller can start work while an abandoned worker
+unwinds; worker references prevent premature file cleanup. Download retries reuse
+fetched metadata and stop on terminal storage errors or final-waiter cancellation.
+The RPC batch/whole ID set is never a singleflight key.
 
-Downloads and native resource-table activation must succeed before the local
-version advances. A failed preparation therefore retries with the last applied
-version. Coordinator compares versions under the metadata lock before enumerating
-resources, so unchanged responses avoid both list allocation and transfer. Pulls
-still perform an RPC; there is no TTL that can hide a newly committed version.
+There is no inventory version, generation or separate application flight.
+Default/local-file configs do not fetch metadata. Established schemas use their
+bound IDs and cannot substitute the current meaning of a same-name resource.
+Metadata retries use the existing backoff and caller context. Permanent Status,
+known terminal storage/input errors and Unimplemented end retry; native
+construction and execution are not retried by this loading loop.
 
-New StreamingNodes require a Coordinator that supports this RPC, and the new DDL
-validation path requires StreamingNodes that support `ValidateAnalyzer`. Existing RPC
-signatures remain available; missing new RPCs surface as Unimplemented.
+`Resources` holds references for the native consumer. Downloads use the isolated
+`analyzer-demand/<resource_id>/<filename>` namespace, and the exact name-to-ID
+mapping is passed as native extra info together with that namespace. The native
+global resource table is not changed. A runner owns its references until it is
+destroyed; temporary analyzers and validation release theirs after native work.
+Files and metadata are removed after the last reference and worker leave. Failed
+construction releases its references as well. Legacy SyncMode/RefMode/CloseMode,
+public List behavior and old push distribution are unchanged.
+
+Validation passes the acquired name-to-ID map and registered filename basenames
+as explicit native extra info. Only this validation binding classifies a
+mismatched remote `file_name` as bad input. Runtime native lookups retain system
+error semantics. Validation returns the deduplicated IDs actually used by the
+analyzer. RootCoord reserves those references under its existing metadata lock
+before publishing DDL; a concurrent resource removal must fail reservation
+rather than publish a schema with missing resources. No QueryNode inventory
+synchronization is needed for this validation.
+
+The validation response carries business Status and, on success, resource IDs.
+Resource acquisition and native failures preserve their codes and classification
+in Status; actual caller cancellation remains a transport cancellation.
+HandlerClient checks Status after its readiness loop. A missing local file maps
+from Rust's generic `IoNotFound` to the existing non-retriable `PathNotExist`
+code at the C++ validation boundary. Other local I/O errors retain
+`FileReadFailed`. Runtime construction and index operations keep their existing
+I/O mappings. This resource-loading refactor adds no Rust or C++ changes.
+
+Only runners needing resources with the new loader enabled defer prewarming to
+first use. Each RPC joins a per-runner initialization flight that acquires
+resources and constructs the native runner. This is runner initialization, not
+a second resource-loading phase. Native construction has no cancellation API:
+a build already admitted owns its resources until it completes, and a later
+caller rejoins that build. Failed/canceled preparation cannot admit a new build.
+Runner signatures include the schema resource IDs, so an identical analyzer
+configuration with different bindings cannot reuse the old runner.
+
+WAL materialization leases only ready runners inside the inner interceptor
+chain. A missing runner returns `PreparationRequiredError` before fields are
+changed or segments assigned. The inner chain unwinds to redo, releasing WAL
+locks and acknowledging the failed attempt's TimeTick. Redo prepares with the
+original caller context, also canceled on WAL shutdown, then retries the inner
+chain to recheck schema and transaction state. Idempotency stays outermost:
+same-key duplicates wait for the owner's result; distinct executing requests
+share initialization with independent cancellation. Segment readiness remains
+checked before every inner attempt. Actual mutation/append uses the WAL-owned
+context and still survives caller cancellation. Remote Produce uses its existing
+stream context; no per-message cancellation protocol is introduced.
+
+New StreamingNodes require a Coordinator supporting Fetch; the new DDL
+validation path requires StreamingNodes supporting ValidateAnalyzer. Milvus
+upgrades MixCoord before worker nodes. Existing published RPCs remain available;
+an unsupported new RPC surfaces as Unimplemented.
 
 ## Key Packages
 
@@ -215,3 +205,5 @@ signatures remain available; missing new RPCs surface as Unimplemented.
 - `internal/util/function/manager.go` — schema selection and runner lifetime.
 - `internal/proxy/impl.go` — SDK adaptation and collection identity.
 - `pkg/proto/streaming.proto` — additive request/response and service method.
+- `internal/util/fileresource/pull.go` — ID-keyed loading and resource ownership.
+- `internal/rootcoord/file_resource_fetch.go` — Fetch and name resolution.

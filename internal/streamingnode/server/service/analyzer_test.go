@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -131,7 +132,7 @@ func TestAnalyzerGracefulStopWaitsForInline(t *testing.T) {
 		entered, release := make(chan struct{}), make(chan struct{})
 		var once sync.Once
 		defer once.Do(func() { close(release) })
-		mockey.Mock(analyzer.Run).To(func(context.Context, string, [][]byte, bool, bool) ([]*milvuspb.AnalyzerResult, error) {
+		mockey.Mock(analyzer.Run).To(func(context.Context, string, [][]byte, bool, bool, ...string) ([]*milvuspb.AnalyzerResult, error) {
 			close(entered)
 			<-release
 			return nil, nil
@@ -177,9 +178,11 @@ func TestValidateAnalyzerPreparesResources(t *testing.T) {
 	mockey.PatchConvey("prepare before validating, deduplicate references", t, func() {
 		prepared := false
 		var prepareErr error
-		prepare := mockey.Mock(fileresource.Prepare).To(func(context.Context) error {
+		prepare := mockey.Mock(fileresource.Acquire).To(func(_ context.Context, ids []int64, params ...string) (*fileresource.Resources, error) {
+			require.Empty(t, ids, "validation fetches names from AnalyzerInfo parameters")
+			require.Equal(t, []string{"{}", "{}"}, params)
 			prepared = true
-			return prepareErr
+			return &fileresource.Resources{}, prepareErr
 		}).Build()
 		native := mockey.Mock(analyzer.ValidateAnalyzer).To(func(string, string) ([]int64, error) {
 			require.True(t, prepared)
@@ -193,8 +196,8 @@ func TestValidateAnalyzerPreparesResources(t *testing.T) {
 		require.Equal(t, 2, native.Times())
 		prepareErr = merr.ErrServiceUnavailable
 		resp, err = handler.ValidateAnalyzer(context.Background(), req)
-		require.ErrorIs(t, err, prepareErr)
-		require.Nil(t, resp)
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), prepareErr)
 		require.Equal(t, 2, native.Times())
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -206,7 +209,7 @@ func TestValidateAnalyzerPreparesResources(t *testing.T) {
 
 func TestValidateAnalyzerNativeTransport(t *testing.T) {
 	mockey.PatchConvey("native validation failures use response Status", t, func() {
-		mockey.Mock(fileresource.Prepare).Return(nil).Build()
+		mockey.Mock(fileresource.Acquire).Return(&fileresource.Resources{}, nil).Build()
 		listener := bufconn.Listen(1024 * 1024)
 		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
 		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
@@ -274,37 +277,30 @@ func TestValidateAnalyzerNativeTransport(t *testing.T) {
 
 func TestAnalyzerPreparationErrorClassification(t *testing.T) {
 	cases := []struct {
-		name     string
-		err      error
-		terminal bool
+		name string
+		err  error
 	}{
-		{"missing object", merr.WrapErrIoKeyNotFound("dictionary.txt"), true},
-		{"missing bucket", merr.Wrap(merr.ErrIoBucketNotFound, "bucket"), true},
-		{"permission denied", merr.Wrap(merr.ErrIoPermissionDenied, "dictionary.txt"), true},
-		{"not ready", merr.ErrServiceUnavailable, false},
-		{"network unavailable", grpcstatus.Error(codes.Unavailable, "connection lost"), false},
-		{"fetch timeout", context.DeadlineExceeded, false},
-		{"canceled", context.Canceled, false},
+		{"missing object", merr.WrapErrIoKeyNotFound("dictionary.txt")},
+		{"missing bucket", merr.Wrap(merr.ErrIoBucketNotFound, "bucket")},
+		{"permission denied", merr.Wrap(merr.ErrIoPermissionDenied, "dictionary.txt")},
+		{"not ready", merr.ErrServiceUnavailable},
+		{"network unavailable", grpcstatus.Error(codes.Unavailable, "connection lost")},
+		{"fetch timeout", context.DeadlineExceeded},
+		{"canceled", context.Canceled},
 	}
 	for _, tc := range cases {
 		mockey.PatchConvey(tc.name, t, func() {
-			mockey.Mock(fileresource.Prepare).Return(tc.err).Build()
+			mockey.Mock(fileresource.Acquire).Return(nil, tc.err).Build()
 			native := mockey.Mock(analyzer.ValidateAnalyzer).To(func(string, string) ([]int64, error) {
 				t.Fatal("failed preparation must not enter native validation")
 				return nil, nil
 			}).Build()
 			handler := NewHandlerService(nil)
 			resp, validateErr := handler.ValidateAnalyzer(t.Context(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
-			if tc.terminal {
-				require.NoError(t, validateErr)
-				want := merr.Status(merr.Wrap(tc.err, "prepare analyzer file resources"))
-				require.True(t, proto.Equal(want, resp.GetStatus()))
-				require.Equal(t, merr.Code(tc.err), resp.GetStatus().GetCode())
-			} else {
-				require.Nil(t, resp)
-				require.ErrorIs(t, validateErr, tc.err)
-				require.False(t, status.AsStreamingError(validateErr).IsUnrecoverable())
-			}
+			require.NoError(t, validateErr)
+			want := merr.Status(merr.Wrap(tc.err, "acquire analyzer file resources"))
+			require.True(t, proto.Equal(want, resp.GetStatus()))
+			require.Equal(t, merr.Code(tc.err), resp.GetStatus().GetCode())
 			require.Zero(t, native.Times())
 		})
 	}
@@ -327,14 +323,14 @@ func TestRunAnalyzerPreparationStatus(t *testing.T) {
 		context.DeadlineExceeded,
 	} {
 		mockey.PatchConvey(prepareErr.Error(), t, func() {
-			mockey.Mock(fileresource.Prepare).Return(prepareErr).Build()
+			mockey.Mock(fileresource.Acquire).Return(nil, prepareErr).Build()
 			native := mockey.Mock(analyzer.Run).Return(nil, nil).Build()
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			resp, err := client.RunAnalyzer(ctx, inlineAnalyzerRequest(`{"tokenizer":"standard"}`))
 			require.NoError(t, err, "preparation failures must remain business Status across streaming interceptors")
 			require.NotNil(t, resp)
-			want := merr.Status(merr.Wrap(prepareErr, "prepare analyzer file resources"))
+			want := merr.Status(merr.Wrap(prepareErr, "acquire analyzer file resources"))
 			require.True(t, proto.Equal(want, resp.GetStatus()), "want %v, got %v", want, resp.GetStatus())
 			require.Equal(t, merr.Code(prepareErr), resp.GetStatus().GetCode())
 			require.Equal(t, merr.IsRetryableErr(prepareErr), resp.GetStatus().GetRetriable())
@@ -345,11 +341,18 @@ func TestRunAnalyzerPreparationStatus(t *testing.T) {
 	}
 }
 
-func TestValidateAnalyzerMissingResourceNativeTransport(t *testing.T) {
-	mockey.PatchConvey("missing names are input only against a prepared sync inventory", t, func() {
+func TestValidateAnalyzerFetchesMissingNames(t *testing.T) {
+	mockey.PatchConvey("missing names fetched from params return parameter status", t, func() {
 		previous := fileresource.GlobalFileManager
 		defer func() { fileresource.GlobalFileManager = previous }()
-		mockey.Mock(fileresource.Prepare).Return(nil).Build()
+		lookups := 0
+		fileresource.SetResourceFetcher(nil, func(_ context.Context, ids []int64, names []string) ([]*internalpb.FileResourceInfo, error) {
+			require.Empty(t, ids)
+			require.Equal(t, []string{"missing_validation_dictionary"}, names)
+			lookups++
+			return nil, merr.WrapErrParameterInvalidMsg("file resource missing_validation_dictionary not found")
+		})
+		defer fileresource.SetResourceFetcher(nil, nil)
 		listener := bufconn.Listen(1024 * 1024)
 		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
 		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
@@ -368,14 +371,15 @@ func TestValidateAnalyzerMissingResourceNativeTransport(t *testing.T) {
 			resp, err := client.ValidateAnalyzer(ctx, req)
 			require.NoError(t, err)
 			require.Error(t, merr.Error(resp.GetStatus()))
-			require.Equal(t, mode == fileresource.SyncMode, merr.GetErrorType(merr.Error(resp.GetStatus())) == merr.InputError)
+			require.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(resp.GetStatus())))
 		}
+		require.Equal(t, 2, lookups, "each validation resolves its names freshly")
 	})
 }
 
 func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
 	mockey.PatchConvey("missing local file is a validation result, not a transport failure", t, func() {
-		mockey.Mock(fileresource.Prepare).Return(nil).Build()
+		mockey.Mock(fileresource.Acquire).Return(&fileresource.Resources{}, nil).Build()
 		previous := fileresource.GlobalFileManager
 		fileresource.GlobalFileManager = fileresource.NewManager(nil, fileresource.CloseMode)
 		defer func() { fileresource.GlobalFileManager = previous }()
@@ -404,15 +408,18 @@ func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
 }
 
 func TestRunDefaultInlineAnalyzerSkipsPreparation(t *testing.T) {
-	mockey.PatchConvey("resource-free defaults do not fetch the inventory", t, func() {
-		prepare := mockey.Mock(fileresource.Prepare).Return(merr.ErrServiceUnavailable).Build()
+	mockey.PatchConvey("resource-free defaults do not fetch resources", t, func() {
+		fileresource.SetResourceFetcher(nil, func(context.Context, []int64, []string) ([]*internalpb.FileResourceInfo, error) {
+			t.Error("resource-free analyzer fetched metadata")
+			return nil, merr.ErrServiceUnavailable
+		})
+		defer fileresource.SetResourceFetcher(nil, nil)
 		native := mockey.Mock(analyzer.Run).Return(nil, nil).Build()
 		for _, params := range []string{"", "{}", " {} "} {
 			resp, err := NewHandlerService(nil).RunAnalyzer(t.Context(), inlineAnalyzerRequest(params))
 			require.NoError(t, err)
 			require.NoError(t, merr.Error(resp.GetStatus()))
 		}
-		require.Zero(t, prepare.Times())
 		require.Equal(t, 3, native.Times())
 	})
 }
@@ -428,13 +435,13 @@ func TestValidateAnalyzerPreparationStatusTransport(t *testing.T) {
 		require.NoError(t, err)
 		defer conn.Close()
 		var failure error
-		mockey.Mock(fileresource.Prepare).To(func(context.Context) error { return failure }).Build()
+		mockey.Mock(fileresource.Acquire).To(func(context.Context, []int64, ...string) (*fileresource.Resources, error) { return nil, failure }).Build()
 		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
 		for _, cause := range []error{merr.WrapErrIoKeyNotFound("dictionary"), merr.ErrIoBucketNotFound, merr.ErrIoPermissionDenied} {
 			failure = cause
 			resp, err := client.ValidateAnalyzer(t.Context(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
 			require.NoError(t, err)
-			want := merr.Status(merr.Wrap(cause, "prepare analyzer file resources"))
+			want := merr.Status(merr.Wrap(cause, "acquire analyzer file resources"))
 			require.True(t, proto.Equal(want, resp.GetStatus()))
 		}
 	})

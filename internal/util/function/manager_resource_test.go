@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -49,11 +50,11 @@ func TestRunnerPreparationFollowsRequestCancellation(t *testing.T) {
 		defer entry.Close()
 		entered := make(chan context.Context, 1)
 		stopped := make(chan struct{})
-		prepare := mockey.Mock(fileresource.Prepare).To(func(ctx context.Context) error {
+		prepare := mockey.Mock(fileresource.Acquire).To(func(ctx context.Context, _ []int64, _ ...string) (*fileresource.Resources, error) {
 			defer close(stopped)
 			entered <- ctx
 			<-ctx.Done()
-			return ctx.Err()
+			return nil, ctx.Err()
 		}).Build()
 		build := mockey.Mock(BuildEmbeddingRunner).Return(nil, nil).Build()
 		firstCtx, firstCancel := context.WithCancel(t.Context())
@@ -87,17 +88,17 @@ func TestRunnerJoinsNativeBuildWithoutPreparingAgain(t *testing.T) {
 			entry := newFunctionRunnerEntry(schema, schema.GetFunctions()[0])
 			defer entry.Close()
 			var prepareCalls atomic.Int32
-			prepare := mockey.Mock(fileresource.Prepare).To(func(context.Context) error {
+			prepare := mockey.Mock(fileresource.Acquire).To(func(context.Context, []int64, ...string) (*fileresource.Resources, error) {
 				if prepareCalls.Add(1) > 1 {
-					return merr.ErrIoPermissionDenied // A new refresh would fail.
+					return nil, merr.ErrIoPermissionDenied // A new refresh would fail.
 				}
-				return nil
+				return &fileresource.Resources{}, nil
 			}).Build()
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			unblock := func() { once.Do(func() { close(release) }) }
 			defer unblock()
-			build := mockey.Mock(BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+			build := mockey.Mock(BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 				close(entered)
 				<-release
 				return newTestFunctionRunner(schema, fn)
@@ -157,16 +158,16 @@ func TestRunnerSharesPreparationThroughNativeTransition(t *testing.T) {
 		unblockBuild := func() { buildOnce.Do(func() { close(releaseBuild) }) }
 		defer unblockPrepare()
 		defer unblockBuild()
-		prepare := mockey.Mock(fileresource.Prepare).To(func(ctx context.Context) error {
+		prepare := mockey.Mock(fileresource.Acquire).To(func(ctx context.Context, _ []int64, _ ...string) (*fileresource.Resources, error) {
 			close(prepareEntered)
 			select {
 			case <-releasePrepare:
-				return nil
+				return &fileresource.Resources{}, nil
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			}
 		}).Build()
-		build := mockey.Mock(BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+		build := mockey.Mock(BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 			close(buildEntered)
 			<-releaseBuild
 			return newTestFunctionRunner(schema, fn)
@@ -199,9 +200,9 @@ func TestCanceledRunnerPreparationDoesNotAdmitNativeBuild(t *testing.T) {
 		defer entry.Close()
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		mockey.Mock(fileresource.Prepare).To(func(context.Context) error {
+		mockey.Mock(fileresource.Acquire).To(func(context.Context, []int64, ...string) (*fileresource.Resources, error) {
 			cancel()
-			return nil
+			return &fileresource.Resources{}, nil
 		}).Build()
 		build := mockey.Mock(BuildEmbeddingRunner).Return(nil, nil).Build()
 		require.ErrorIs(t, entry.initialize(ctx), context.Canceled)
@@ -213,7 +214,7 @@ func TestCanceledRunnerPreparationDoesNotAdmitNativeBuild(t *testing.T) {
 func TestPreparationErrorPreservesCause(t *testing.T) {
 	for _, cause := range []error{merr.ErrServiceUnavailable, context.DeadlineExceeded, merr.WrapErrIoKeyNotFound("dictionary"), merr.ErrIoPermissionDenied} {
 		mockey.PatchConvey(cause.Error(), t, func() {
-			mockey.Mock(fileresource.Prepare).Return(cause).Build()
+			mockey.Mock(fileresource.Acquire).Return(nil, cause).Build()
 			schema := newBM25SignatureTestSchema()
 			schema.FileResourceIds = []int64{7}
 			entry := newFunctionRunnerEntry(schema, schema.GetFunctions()[0])
@@ -228,7 +229,7 @@ func TestPreparationErrorPreservesCause(t *testing.T) {
 func TestPullRunnerRegistrationDoesNotPrepareResources(t *testing.T) {
 	mockey.PatchConvey("pull preparation is owned by requests rather than prewarming", t, func() {
 		mockey.Mock(fileresource.IsPullEnabled).Return(true).Build()
-		prepare := mockey.Mock(fileresource.Prepare).Return(merr.ErrServiceUnavailable).Build()
+		prepare := mockey.Mock(fileresource.Acquire).Return(nil, merr.ErrServiceUnavailable).Build()
 		build := mockey.Mock(BuildEmbeddingRunner).Return(nil, nil).Build()
 		manager := newFunctionRunnerManager()
 		defer manager.Close()
@@ -263,8 +264,8 @@ func TestRunnerPreparationIsNotRequiredForDefaultAnalyzer(t *testing.T) {
 			case "multi analyzer without IDs":
 				schema.Fields[1].TypeParams = []*commonpb.KeyValuePair{{Key: multiAnalyzerParams, Value: `{"analyzers":{}}`}}
 			}
-			prepare := mockey.Mock(fileresource.Prepare).Return(merr.ErrIoFailed).Build()
-			build := mockey.Mock(BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+			prepare := mockey.Mock(fileresource.Acquire).Return(nil, merr.ErrIoFailed).Build()
+			build := mockey.Mock(BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 				return newTestFunctionRunner(schema, fn)
 			}).Build()
 			entry := newFunctionRunnerEntry(schema, schema.Functions[0])
@@ -287,7 +288,7 @@ func TestRunnerPreparationIsNotRequiredForDefaultAnalyzer(t *testing.T) {
 
 func TestDefaultFieldAnalyzerSurvivesUnrelatedResourceFailure(t *testing.T) {
 	mockey.PatchConvey("ordinary default field needs no file inventory", t, func() {
-		prepare := mockey.Mock(fileresource.Prepare).Return(merr.ErrIoFailed).Build()
+		prepare := mockey.Mock(fileresource.Acquire).Return(nil, merr.ErrIoFailed).Build()
 		manager := newFunctionRunnerManager()
 		defer manager.Close()
 		schema := newBM25SignatureTestSchema()
@@ -304,4 +305,78 @@ func TestDefaultFieldAnalyzerSurvivesUnrelatedResourceFailure(t *testing.T) {
 		require.True(t, ok)
 		require.Zero(t, prepare.Times())
 	})
+}
+
+func TestRunnerPreparationUsesActualAnalyzerConfigs(t *testing.T) {
+	const remoteParams = `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"dictionary","file_name":"stop.txt"}}]}`
+	for _, tc := range []struct {
+		name   string
+		kind   schemapb.FunctionType
+		key    string
+		params string
+	}{
+		{"BM25", schemapb.FunctionType_BM25, analyzerParams, remoteParams},
+		{"MinHash", schemapb.FunctionType_MinHash, analyzerParams, remoteParams},
+		{"multi analyzer", schemapb.FunctionType_BM25, multiAnalyzerParams, `{"by_field":"language","analyzers":{"default":` + remoteParams + `}}`},
+	} {
+		mockey.PatchConvey(tc.name, t, func() {
+			schema := newBM25SignatureTestSchema()
+			// Older schemas and MinHash can have no FileResourceIds. The
+			// runtime must still resolve the names in the actual config.
+			schema.Functions[0].Type = tc.kind
+			schema.Fields[1].TypeParams = []*commonpb.KeyValuePair{{Key: tc.key, Value: tc.params}}
+			prepare := mockey.Mock(fileresource.Acquire).To(func(_ context.Context, _ []int64, params ...string) (*fileresource.Resources, error) {
+				require.Equal(t, []string{tc.params}, params)
+				return &fileresource.Resources{}, nil
+			}).Build()
+			mockey.Mock(BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
+				return newTestFunctionRunner(schema, fn)
+			}).Build()
+			entry := newFunctionRunnerEntry(schema, schema.Functions[0])
+			defer entry.Close()
+			require.NoError(t, entry.ensureRunner(t.Context()))
+			require.Equal(t, 1, prepare.Times())
+		})
+	}
+}
+
+func TestResourceFreeRunnerDoesNotFetchUnrelatedCollectionResources(t *testing.T) {
+	mockey.PatchConvey("collection IDs and explicit config do not force a resource fetch", t, func() {
+		previous := fileresource.GlobalFileManager
+		fileresource.GlobalFileManager = &fileresource.BaseManager{}
+		defer func() {
+			fileresource.SetResourceFetcher(nil, nil)
+			fileresource.GlobalFileManager = previous
+		}()
+		fileresource.SetResourceFetcher(nil, func(context.Context, []int64, []string) ([]*internalpb.FileResourceInfo, error) {
+			t.Error("this runner does not reference any remote resource")
+			return nil, merr.ErrIoPermissionDenied
+		})
+		mockey.Mock(BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
+			return newTestFunctionRunner(schema, fn)
+		}).Build()
+		for _, params := range []string{`{}`, `{"tokenizer":"standard"}`, `{"filter":[{"stop_words_file":{"type":"local","path":"local.txt"}}]}`} {
+			schema := newBM25SignatureTestSchema()
+			schema.FileResourceIds = []int64{7} // Used by some other field.
+			schema.Fields[1].TypeParams = []*commonpb.KeyValuePair{{Key: analyzerParams, Value: params}}
+			entry := newFunctionRunnerEntry(schema, schema.Functions[0])
+			require.NoError(t, entry.ensureRunner(t.Context()))
+			entry.Close()
+		}
+	})
+}
+
+func TestRunnerSignatureIncludesResourceBindings(t *testing.T) {
+	schema := newBM25SignatureTestSchema()
+	schema.FileResourceIds = []int64{7, 8}
+	first, _, _, err := embeddingFunctionMetadata(schema, schema.Functions[0])
+	require.NoError(t, err)
+	schema.FileResourceIds = []int64{8, 7}
+	reordered, _, _, err := embeddingFunctionMetadata(schema, schema.Functions[0])
+	require.NoError(t, err)
+	require.Equal(t, first, reordered)
+	schema.FileResourceIds = []int64{8, 9}
+	rebound, _, _, err := embeddingFunctionMetadata(schema, schema.Functions[0])
+	require.NoError(t, err)
+	require.NotEqual(t, first, rebound, "same analyzer options with different resource IDs require a new runner")
 }

@@ -7517,8 +7517,8 @@ func (x *StreamingNodeGetCollectionSchemaResponse) GetEffectiveTimeTick() uint64
 	return 0
 }
 
-// Analyzer validation is collection-independent. Failures use native streaming
-// RPC errors; successful responses identify the resources to reserve before DDL.
+// Analyzer validation is collection-independent. Business failures use Status;
+// successful responses identify the resources to reserve before DDL.
 type StreamingAnalyzerInfo struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

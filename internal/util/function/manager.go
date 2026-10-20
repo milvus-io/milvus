@@ -126,17 +126,19 @@ type functionRunnerEntry struct {
 	// Share preparation through native completion, not just the native build.
 	initialization syncutil.FlightGroup[struct{}, struct{}]
 
-	mu       sync.RWMutex
-	schema   *schemapb.CollectionSchema
-	function *schemapb.FunctionSchema
-	runner   FunctionRunner
-	init     *functionRunnerInit
-	closed   bool
+	mu        sync.RWMutex
+	schema    *schemapb.CollectionSchema
+	function  *schemapb.FunctionSchema
+	runner    FunctionRunner
+	resources *fileresource.Resources
+	init      *functionRunnerInit
+	closed    bool
 }
 
 type functionRunnerInit struct {
-	done chan struct{}
-	err  error
+	resources *fileresource.Resources
+	done      chan struct{}
+	err       error
 }
 
 func newFunctionRunnerCollectionEntry(collectionID int64) *functionRunnerCollectionEntry {
@@ -311,8 +313,16 @@ func runWithRunnerEntries(
 	// The read locks are shared, so concurrent materialization is still allowed;
 	// concrete runners protect their own mutable state.
 	runners := make([]FunctionRunner, 0, len(runnerEntries))
+	deferred, _ := ctx.Value(deferredPreparationKey{}).(bool)
 	for _, runnerEntry := range runnerEntries {
-		runner, unlock, err := runnerEntry.GetRunner(ctx)
+		var runner FunctionRunner
+		var unlock func()
+		var err error
+		if deferred {
+			runner, unlock, err = runnerEntry.getReadyRunner()
+		} else {
+			runner, unlock, err = runnerEntry.GetRunner(ctx)
+		}
 		if err != nil {
 			return err
 		}
@@ -404,23 +414,39 @@ func (e *functionRunnerEntry) initialize(ctx context.Context) error {
 		// running. Rejoin that build without repeating its successful preparation.
 		return e.waitInit(ctx, init)
 	}
+	resources := &fileresource.Resources{}
 	if e.needsFileResources() {
-		if err := fileresource.Prepare(ctx); err != nil {
-			return merr.Wrap(err, "prepare function file resources")
+		params := make([]string, 0, len(e.function.GetInputFieldIds()))
+		for _, fieldID := range e.function.GetInputFieldIds() {
+			field := typeutil.GetField(e.schema, fieldID)
+			if multiParams, ok := getMultiAnalyzerParams(field); ok && e.function.GetType() == schemapb.FunctionType_BM25 {
+				params = append(params, multiParams)
+			} else {
+				params = append(params, getAnalyzerParams(field))
+			}
+		}
+		var err error
+		resources, err = fileresource.Acquire(ctx, e.schema.GetFileResourceIds(), params...)
+		if err != nil {
+			return merr.Wrap(err, "acquire function file resources")
 		}
 	}
 
 	init, runInit, err := e.getOrCreateInit(ctx)
 	if err != nil {
+		resources.Close()
 		return err
 	}
 	if init == nil {
+		resources.Close()
 		return nil
 	}
 	if runInit {
-		// Native construction has no context API. Keep its result available even
-		// if all callers leave; the initialization flight only owns the wait.
+		// The native build owns this lease even when every RPC stops waiting.
+		init.resources = resources
 		go e.runInit(init)
+	} else {
+		resources.Close()
 	}
 	return e.waitInit(ctx, init)
 }
@@ -459,7 +485,7 @@ func (e *functionRunnerEntry) waitInit(ctx context.Context, init *functionRunner
 }
 
 func (e *functionRunnerEntry) runInit(init *functionRunnerInit) {
-	runner, err := BuildEmbeddingRunner(e.schema, e.function)
+	runner, err := BuildEmbeddingRunner(e.schema, e.function, init.resources.ExtraInfo())
 	if err == nil && runner == nil {
 		err = errors.New("function runner is nil")
 	}
@@ -473,28 +499,36 @@ func (e *functionRunnerEntry) runInit(init *functionRunnerInit) {
 		if runner != nil {
 			runner.Close()
 		}
+		init.resources.Close()
 		init.err = err
 		return
 	}
 	if e.closed {
 		init.err = errFunctionRunnerEntryRemoved
 		runner.Close()
+		init.resources.Close()
 		return
 	}
 
 	e.runner = runner
+	e.resources = init.resources
 	init.err = nil
 }
 
 func (e *functionRunnerEntry) Close() {
 	e.mu.Lock()
 	runner := e.runner
+	resources := e.resources
+	e.resources = nil
 	e.runner = nil
 	e.closed = true
 	e.mu.Unlock()
 
 	if runner != nil {
 		runner.Close()
+	}
+	if resources != nil {
+		resources.Close()
 	}
 }
 
@@ -868,7 +902,7 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 		return true, run(analyzer)
 	}
 
-	needsResources := len(versionRunners.schema.GetFileResourceIds()) > 0
+	resourceIDs := append([]int64(nil), versionRunners.schema.GetFileResourceIds()...)
 	field := typeutil.GetField(versionRunners.schema, fieldID)
 	if field != nil {
 		field = proto.Clone(field).(*schemapb.FieldSchema)
@@ -881,12 +915,16 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 		return false, nil
 	}
 
-	if needsResources || analyzerMayUseFileResources(field) {
-		if err := fileresource.Prepare(ctx); err != nil {
+	resources := &fileresource.Resources{}
+	var err error
+	if len(resourceIDs) > 0 || analyzerMayUseFileResources(field) {
+		resources, err = fileresource.Acquire(ctx, resourceIDs, getAnalyzerParams(field))
+		if err != nil {
 			return true, err
 		}
 	}
-	analyzer, err := NewAnalyzerRunner(field)
+	defer resources.Close()
+	analyzer, err := NewAnalyzerRunner(field, resources.ExtraInfo())
 	if err != nil {
 		return true, err
 	}
@@ -1037,7 +1075,7 @@ func (m *functionRunnerManager) Close() {
 	closeFunctionRunnerEntries(runnerEntries)
 }
 
-func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, extraInfo ...string) (FunctionRunner, error) {
 	if schema == nil {
 		return nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
@@ -1050,7 +1088,7 @@ func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.Functi
 
 	schema = proto.Clone(schema).(*schemapb.CollectionSchema)
 	fn = proto.Clone(fn).(*schemapb.FunctionSchema)
-	return NewFunctionRunner(schema, fn)
+	return NewFunctionRunner(schema, fn, extraInfo...)
 }
 
 func BuildEmbeddingRunners(schema *schemapb.CollectionSchema) ([]FunctionRunner, error) {
@@ -1155,6 +1193,9 @@ func embeddingFunctionMetadata(schema *schemapb.CollectionSchema, fn *schemapb.F
 	writeInt64s(hasher, "output_ids", outputIDs)
 	writeStrings(hasher, "output_names", outputNames)
 	writeKeyValuePairs(hasher, "fn_params", fn.GetParams())
+	resourceIDs := append([]int64(nil), schema.GetFileResourceIds()...)
+	sort.Slice(resourceIDs, func(i, j int) bool { return resourceIDs[i] < resourceIDs[j] })
+	writeInt64s(hasher, "resource_ids", resourceIDs)
 
 	resolvedInputIDs := append([]int64(nil), inputIDs...)
 	for _, fieldID := range inputIDs {

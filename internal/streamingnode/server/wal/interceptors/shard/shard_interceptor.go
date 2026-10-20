@@ -196,6 +196,12 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// effective value.
 	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
 		if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
+			var preparation *function.PreparationRequiredError
+			if errors.As(err, &preparation) {
+				// Unwind to redo before waiting for initialization. No
+				// fields or segment assignments have changed on this path.
+				return nil, err
+			}
 			impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
 				mlog.Int64("collectionID", header.GetCollectionId()),
 				mlog.Int32("schemaVersion", schemaVersion),

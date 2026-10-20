@@ -422,6 +422,6 @@ func (m *GrpcRootCoordClient) PushClientCommand(ctx context.Context, in *milvusp
 	return &milvuspb.PushClientCommandResponse{}, m.Err
 }
 
-func (*GrpcRootCoordClient) GetFileResourceSnapshot(context.Context, *rootcoordpb.GetFileResourceSnapshotRequest, ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error) {
-	panic("mock GetFileResourceSnapshot with mockey")
+func (*GrpcRootCoordClient) FetchFileResources(context.Context, *rootcoordpb.FetchFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
+	panic("mock FetchFileResources with mockey")
 }

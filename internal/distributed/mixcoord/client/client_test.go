@@ -50,11 +50,12 @@ func TestMain(m *testing.M) {
 }
 
 func Test_NewClient(t *testing.T) {
-	resourceSnapshot := mockey.Mock((*mock.GrpcRootCoordClient).GetFileResourceSnapshot).To(
-		func(c *mock.GrpcRootCoordClient, _ context.Context, _ *rootcoordpb.GetFileResourceSnapshotRequest, _ ...grpc.CallOption) (*rootcoordpb.FileResourceSnapshot, error) {
-			return &rootcoordpb.FileResourceSnapshot{}, c.Err
+	resourceFetch := mockey.Mock((*mock.GrpcRootCoordClient).FetchFileResources).To(
+		func(c *mock.GrpcRootCoordClient, _ context.Context, _ *rootcoordpb.FetchFileResourcesRequest, _ ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
+			return &rootcoordpb.FetchFileResourcesResponse{}, c.Err
 		}).Build()
-	defer resourceSnapshot.UnPatch()
+	defer resourceFetch.UnPatch()
+
 	ctx := context.Background()
 
 	client, err := NewClient(ctx)
@@ -398,8 +399,8 @@ func Test_NewClient(t *testing.T) {
 		r42, err := client.ValidateAnalyzer(ctx, nil)
 		retCheck(retNotNil, r42, err)
 
-		snapshot, err := client.GetFileResourceSnapshot(ctx, &rootcoordpb.GetFileResourceSnapshotRequest{})
-		retCheck(retNotNil, snapshot, err)
+		fetched, err := client.FetchFileResources(ctx, &rootcoordpb.FetchFileResourcesRequest{})
+		retCheck(retNotNil, fetched, err)
 	}
 
 	client.(*Client).grpcClient = &mock.GRPCClientBase[MixCoordClient]{

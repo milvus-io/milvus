@@ -183,7 +183,7 @@ type IMetaTable interface {
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
 	HasFileResource(ctx context.Context) bool
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
-	ListFileResourceIfChanged(ctx context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64)
+	GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error)
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 	IncFileResourceRefCnt(ids []int64) error
 	DecFileResourceRefCnt(ids []int64)
@@ -3463,17 +3463,19 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
 }
 
-// ListFileResourceIfChanged compares the version before materializing the list.
-// Comparison and snapshot capture share ddLock, so an unchanged reply cannot
-// accidentally acknowledge a version whose inventory was not returned.
-func (mt *MetaTable) ListFileResourceIfChanged(ctx context.Context, knownVersion uint64) ([]*internalpb.FileResourceInfo, uint64) {
+// GetFileResourcesByNames resolves unbound names together under the metadata lock.
+func (mt *MetaTable) GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-
-	if knownVersion == mt.fileResourceVersion {
-		return nil, mt.fileResourceVersion
+	resources := make([]*internalpb.FileResourceInfo, 0, len(names))
+	for _, name := range names {
+		resource, ok := mt.fileResourceName2Meta[name]
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("file resource %s not found", name)
+		}
+		resources = append(resources, proto.Clone(resource).(*internalpb.FileResourceInfo))
 	}
-	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+	return resources, nil
 }
 
 func (mt *MetaTable) HasFileResource(ctx context.Context) bool {

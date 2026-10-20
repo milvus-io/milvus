@@ -1053,8 +1053,8 @@ message StreamingNodeGetCollectionSchemaResponse {
     uint64 effective_time_tick = 2;
 }
 
-// Analyzer validation is collection-independent. Failures use native streaming
-// RPC errors; successful responses identify the resources to reserve before DDL.
+// Analyzer validation is collection-independent. Business failures use Status;
+// successful responses identify the resources to reserve before DDL.
 message StreamingAnalyzerInfo {
     string params = 1;
     string field = 2;

@@ -219,7 +219,7 @@ service RootCoord {
     rpc DeleteClientCommand(milvus.DeleteClientCommandRequest) returns (milvus.DeleteClientCommandResponse) {}
     rpc ListClientCommands(ListClientCommandsRequest) returns (ListClientCommandsResponse) {}
 
-    rpc GetFileResourceSnapshot(GetFileResourceSnapshotRequest) returns (FileResourceSnapshot) {}
+    rpc FetchFileResources(FetchFileResourcesRequest) returns (FetchFileResourcesResponse) {}
 }
 
 // ListClientCommandsRequest asks for the commands the coordinator is currently holding for
@@ -411,19 +411,16 @@ message GetRLSMetadataResponse {
   repeated RLSPrincipalInfo principals = 6;
 }
 
-message GetFileResourceSnapshotRequest {
-  // Last snapshot successfully applied locally, not merely fetched. Zero is
-  // the initial empty inventory version.
-  uint64 known_version = 1;
+// Fetch only the requested resources, never the full inventory.
+message FetchFileResourcesRequest {
+  // Supply IDs for bound schemas or names for unbound analyzer parameters.
+  // The two selectors must not be combined in one request.
+  repeated int64 resource_ids = 1;
+  repeated string resource_names = 2;
 }
 
-message FileResourceSnapshot {
+message FetchFileResourcesResponse {
   common.Status status = 1;
-  // Current inventory version, read atomically with resources. On success,
-  // equality with known_version means unchanged and resources is omitted.
-  uint64 version = 2;
-  // Complete inventory when version differs from known_version, never a delta.
-  // An empty inventory at a newer version removes all local resources. Clients
-  // must ignore versions older than their locally applied version.
-  repeated internal.FileResourceInfo resources = 3;
+  // Complete results in request order on success. No partial list on failure.
+  repeated internal.FileResourceInfo resources = 2;
 }
