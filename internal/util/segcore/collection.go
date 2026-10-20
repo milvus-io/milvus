@@ -11,6 +11,7 @@ import "C"
 
 import (
 	"context"
+	"sync"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -63,21 +64,32 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 			return nil, err
 		}
 	}
-	return &CCollection{
+	collection := &CCollection{
 		collectionID: req.CollectionID,
 		ptr:          ptr,
 		schema:       req.Schema,
 		indexMeta:    req.IndexMeta,
-	}, nil
+	}
+	// NewCollection parses the fields but leaves the native revision at zero.
+	// Immutable QueryView planning collections must carry their logical version
+	// so LazyCheckSchema can backfill older growing segments before reading.
+	if err := collection.UpdateSchema(req.Schema, uint64(req.Schema.GetVersion())); err != nil {
+		collection.Release()
+		return nil, err
+	}
+	return collection, nil
 }
 
 // CCollection is just a wrapper of the underlying C-structure CCollection.
 // Contains some additional immutable properties of collection.
 type CCollection struct {
-	ptr          C.CCollection
-	collectionID int64
-	schema       *schemapb.CollectionSchema
-	indexMeta    *segcorepb.CollectionIndexMeta
+	ptr           C.CCollection
+	collectionID  int64
+	schemaMu      sync.RWMutex
+	schemaVersion uint64
+	schema        *schemapb.CollectionSchema
+	indexMetaMu   sync.RWMutex
+	indexMeta     *segcorepb.CollectionIndexMeta
 }
 
 // ID returns the collection ID.
@@ -91,10 +103,14 @@ func (c *CCollection) rawPointer() C.CCollection {
 }
 
 func (c *CCollection) Schema() *schemapb.CollectionSchema {
+	c.schemaMu.RLock()
+	defer c.schemaMu.RUnlock()
 	return c.schema
 }
 
 func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
+	c.indexMetaMu.RLock()
+	defer c.indexMetaMu.RUnlock()
 	return c.indexMeta
 }
 
@@ -102,6 +118,8 @@ func (c *CCollection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error
 	if meta == nil {
 		return nil
 	}
+	c.indexMetaMu.Lock()
+	defer c.indexMetaMu.Unlock()
 
 	indexMetaBlob, err := proto.Marshal(meta)
 	if err != nil {
@@ -121,13 +139,23 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 		return merr.WrapErrServiceInternal("update collection schema with nil")
 	}
 
+	c.schemaMu.Lock()
+	defer c.schemaMu.Unlock()
+	if version <= c.schemaVersion {
+		return nil
+	}
 	schemaBlob, err := proto.Marshal(sch)
 	if err != nil {
 		return err
 	}
 
 	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), (C.uint64_t)(version))
-	return ConsumeCStatusIntoError(&status)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
+	}
+	c.schema = sch
+	c.schemaVersion = version
+	return nil
 }
 
 // Release releases the underlying collection

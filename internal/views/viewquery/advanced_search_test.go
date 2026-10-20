@@ -27,6 +27,7 @@ import (
 func TestBuildAndUpdateSubSearchRequest(t *testing.T) {
 	parent := &internalpb.SearchRequest{
 		CollectionID:            12,
+		SchemaVersion:           3,
 		OutputFieldsId:          []int64{13},
 		MvccTimestamp:           14,
 		IsAdvanced:              true,
@@ -55,6 +56,7 @@ func TestBuildAndUpdateSubSearchRequest(t *testing.T) {
 	assert.False(t, req.GetIsAdvanced())
 	assert.Nil(t, req.GetSubReqs())
 	assert.Equal(t, parent.GetCollectionID(), req.GetCollectionID())
+	assert.Equal(t, parent.GetSchemaVersion(), req.GetSchemaVersion())
 	assert.Equal(t, parent.GetOutputFieldsId(), req.GetOutputFieldsId())
 	assert.Equal(t, parent.GetMvccTimestamp(), req.GetMvccTimestamp())
 	assert.Equal(t, parent.GetCollectionTtlTimestamps(), req.GetCollectionTtlTimestamps())

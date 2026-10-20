@@ -83,6 +83,7 @@ message QueryViewMeta {
     QueryViewState state = 5;
     uint64 load_info_version = 6;
     uint64 transform_start_after_timetick = 7;
+    int32 schema_version = 8; // Exact logical schema required by this view.
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
@@ -108,6 +109,7 @@ message QueryViewOfPartition {
     int64 partition_id = 1;
     repeated int64 segment_ids = 2;
     repeated int64 ready_segment_ids = 3;
+    repeated int64 segment_manifest_versions = 5 [packed = true];
 }
 
 // SyncRequest carries an atomic state-machine input or closes the stream.
@@ -201,6 +203,14 @@ message QueryPlanMVCC {
     // Latest timetick of the transforming stream. StreamingNode and QueryNode
     // wait for transform visibility up to this timetick before execution.
     uint64 transforming_timetick = 2;
+    QuerySchemaBinding schema_binding = 3;
+}
+
+message QuerySchemaBinding {
+    int32 schema_version = 1;
+    uint64 growing_timetick = 2;
+    uint64 transforming_timetick = 3;
+    repeated int64 field_ids = 4;
 }
 
 // QueryPlanService generates shard-level query plans.

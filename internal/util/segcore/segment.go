@@ -46,11 +46,14 @@ type (
 
 // CreateCSegmentRequest is a request to create a segment.
 type CreateCSegmentRequest struct {
-	Collection  *CCollection
-	SegmentID   int64
-	SegmentType SegmentType
-	IsSorted    bool
-	LoadInfo    *querypb.SegmentLoadInfo
+	Collection        *CCollection
+	SegmentID         int64
+	SegmentType       SegmentType
+	IsSorted          bool
+	LoadInfo          *querypb.SegmentLoadInfo
+	LoadFields        []int64 // independent sealed load scope; never mutates CCollection
+	FieldHints        []int64 // preload only; empty follows the bound scope
+	ExplicitLoadScope bool    // QN scope distinguishes empty from legacy all-fields
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -75,12 +78,21 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		if err != nil {
 			return nil, merr.Wrap(err, "failed to convert segment load info")
 		}
+		segLoadInfo.FieldHints = req.FieldHints
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {
 			return nil, err
 		}
 
-		status = C.NewSegmentWithLoadInfo(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
+		var fields *C.int64_t
+		if len(req.LoadFields) > 0 {
+			fields = (*C.int64_t)(unsafe.Pointer(&req.LoadFields[0]))
+		}
+		if req.ExplicitLoadScope && req.SegmentType == SegmentTypeSealed {
+			status = C.NewSealedSegmentWithCollection(req.Collection.rawPointer(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)), fields, C.int64_t(len(req.LoadFields)))
+		} else {
+			status = C.NewSegmentWithLoadInfoAndLoadFields(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)), fields, C.int64_t(len(req.LoadFields)))
+		}
 	} else {
 		status = C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted))
 	}
@@ -103,6 +115,17 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 type cSegmentImpl struct {
 	id  int64
 	ptr C.CSegmentInterface
+}
+
+// PinSealedReadState retains the current immutable columns and indexes. The
+// caller must keep the source alive until the returned segment is released.
+func PinSealedReadState(source CSegment) (CSegment, error) {
+	var ptr C.CSegmentInterface
+	status := C.PinSealedSegmentReadState(C.CSegmentInterface(source.RawPointer()), &ptr)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
+	return &cSegmentImpl{id: source.ID(), ptr: ptr}, nil
 }
 
 // ID returns the ID of the segment.
@@ -351,8 +374,8 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if req.LoadInfo == nil {
 		return merr.WrapErrParameterInvalidMsg("reopen load info is nil")
 	}
-	if req.Schema == nil {
-		return merr.WrapErrParameterInvalidMsg("reopen schema is nil")
+	if req.Schema == nil && req.Collection == nil {
+		return merr.WrapErrServiceInternalMsg("reopen schema owner is nil")
 	}
 
 	traceCtx := ParseCTraceContext(ctx)
@@ -363,6 +386,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if err != nil {
 		return merr.Wrap(err, "failed to convert reopen load info")
 	}
+	segLoadInfo.FieldHints = req.FieldHints
 	loadInfoBlob, err := proto.Marshal(segLoadInfo)
 	if err != nil {
 		return err
@@ -371,29 +395,37 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 		return merr.WrapErrServiceInternalMsg("reopen load info blob is empty")
 	}
 
-	schemaBlob, err := proto.Marshal(req.Schema)
-	if err != nil {
-		return err
+	var loadFields *C.int64_t
+	if len(req.LoadFields) != 0 {
+		loadFields = (*C.int64_t)(unsafe.Pointer(&req.LoadFields[0]))
 	}
-	if len(schemaBlob) == 0 {
-		return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
-	}
-	defer runtime.KeepAlive(schemaBlob)
-
-	future := cgo.Async(ctx,
-		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
-				traceCtx.ctx,
-				s.ptr,
-				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
-				C.int64_t(len(loadInfoBlob)),
-				unsafe.Pointer(&schemaBlob[0]),
-				C.int64_t(len(schemaBlob)),
-				C.uint64_t(req.SchemaVersion),
+	var future cgo.Future
+	if req.Collection != nil {
+		future = cgo.Async(ctx, func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncReopenSealedSegmentWithCollection(
+				traceCtx.ctx, s.ptr, req.Collection.rawPointer(),
+				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)),
+				loadFields, C.int64_t(len(req.LoadFields)),
 			))
-		},
-		cgo.WithName("segment-reopen"),
-	)
+		}, cgo.WithName("segment-reopen"))
+	} else {
+		schemaBlob, marshalErr := proto.Marshal(req.Schema)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if len(schemaBlob) == 0 {
+			return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
+		}
+		defer runtime.KeepAlive(schemaBlob)
+		future = cgo.Async(ctx, func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncReopenSegmentWithLoadFields(
+				traceCtx.ctx, s.ptr,
+				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)),
+				unsafe.Pointer(&schemaBlob[0]), C.int64_t(len(schemaBlob)), C.uint64_t(req.SchemaVersion),
+				loadFields, C.int64_t(len(req.LoadFields)),
+			))
+		}, cgo.WithName("segment-reopen"))
+	}
 	defer future.Release()
 	_, err = future.BlockAndLeakyGet()
 	return err
@@ -680,4 +712,11 @@ func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats, basePaths map[int64
 		}
 	}
 	return result
+}
+
+// AdoptSealedReadState moves the base's resource references to a live read scope.
+// The caller verifies that read shares this base's row domain and delete record.
+func AdoptSealedReadState(base, read CSegment) error {
+	status := C.AdoptSealedSegmentReadState(C.CSegmentInterface(base.RawPointer()), C.CSegmentInterface(read.RawPointer()))
+	return ConsumeCStatusIntoError(&status)
 }

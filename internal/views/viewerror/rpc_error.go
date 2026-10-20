@@ -9,7 +9,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var viewCodeToGRPCStatus = map[viewpb.ViewCode]codes.Code{
@@ -41,11 +43,38 @@ func NewGRPCStatusFromViewError(e *ViewError) *status.Status {
 	return newST
 }
 
+// NewGRPCStatusFromError preserves business error codes as native gRPC details.
+// View lifecycle errors keep their existing retry protocol. Older clients can
+// still decode the ViewError detail and ignore the additional common.Status.
+func NewGRPCStatusFromError(err error) *status.Status {
+	st := NewGRPCStatusFromViewError(AsViewError(err))
+	var lifecycle *ViewError
+	if err == nil || errors.As(err, &lifecycle) {
+		return st
+	}
+	withCause, detailErr := st.WithDetails(merr.Status(err))
+	if detailErr != nil {
+		return st
+	}
+	return withCause
+}
+
 // ViewClientStatus is a wrapper of grpc status.
 // Should be used in client side.
 type ViewClientStatus struct {
 	*status.Status
 	method string
+}
+
+// Unwrap exposes the original Milvus code to the Proxy's public status mapping
+// without discarding the view protocol used by query retries.
+func (s *ViewClientStatus) Unwrap() error {
+	for _, detail := range s.Details() {
+		if cause, ok := detail.(*commonpb.Status); ok {
+			return merr.Error(cause)
+		}
+	}
+	return nil
 }
 
 // ConvertViewError converts error to ViewClientStatus.

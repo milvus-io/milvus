@@ -2091,8 +2091,8 @@ TEST_P(TestLazyManifest, LazyManifestSchemaOnlyDropKeepsSurvivorTask) {
     auto new_snapshot = segment_impl->TestGetPublishedStateSnapshot();
     ASSERT_NE(new_snapshot, old_snapshot);
     ASSERT_NE(new_snapshot->runtime, nullptr);
-    EXPECT_TRUE(old_snapshot->schema->has_field(dropped_field));
-    EXPECT_FALSE(new_snapshot->schema->has_field(dropped_field));
+    EXPECT_TRUE(old_snapshot->fields->has_field(dropped_field));
+    EXPECT_FALSE(new_snapshot->fields->has_field(dropped_field));
     EXPECT_EQ(new_snapshot->runtime->fields.count(dropped_field), 0);
 
     auto new_survivor = new_snapshot->runtime->fields.at(survivor_field);

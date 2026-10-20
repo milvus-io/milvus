@@ -4,38 +4,55 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/metacache"
-	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func TestQueryViewLoadInfoUsesCurrentLoadedMetadata(t *testing.T) {
+type loadInfoCatalogForTest struct{ queryview.LoadInfoCatalog }
+
+func (*loadInfoCatalogForTest) GetLoadInfo(context.Context, int64, uint64) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	panic("patch with mockey")
+}
+
+func TestQueryViewLoadInfoRequiresExactHistory(t *testing.T) {
 	ctx := context.Background()
-	manager := meta.NewCollectionManager(nil, metacache.NewMetaStore(nil))
-	s := &Server{meta: &meta.Meta{CollectionManager: manager}}
+	stored := &querypb.GetQueryViewLoadInfoResponse{CollectionID: 1, Version: 9, PartitionIDs: []int64{10}, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 42}}}
+	patch := mockey.Mock((*loadInfoCatalogForTest).GetLoadInfo).To(func(_ *loadInfoCatalogForTest, _ context.Context, collectionID int64, version uint64) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		if collectionID == 1 && version == 9 {
+			return stored, nil
+		}
+		return nil, nil
+	}).Build()
+	defer patch.UnPatch()
+	s := &Server{loadInfoCatalog: &loadInfoCatalogForTest{}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	require.NoError(t, manager.PutCollectionWithoutSave(ctx, &meta.Collection{CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 1, LoadFields: []int64{100, 102}}}))
-	require.NoError(t, manager.PutPartitionWithoutSave(ctx, &meta.Partition{PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: 1, PartitionID: 10}}))
 	resp, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9})
 	require.NoError(t, err)
-	require.NoError(t, merr.Error(resp.GetStatus()))
-	require.Equal(t, int64(1), resp.GetCollectionID())
-	require.Equal(t, []int64{10}, resp.GetPartitionIDs())
-	require.Len(t, resp.GetLoadFields(), 2)
-	require.Equal(t, int64(100), resp.LoadFields[0].FieldId)
-	require.Equal(t, int64(102), resp.LoadFields[1].FieldId)
-	require.Zero(t, resp.GetVersion(), "current metadata must not claim a historical version")
-	for _, id := range []int64{0, 2} {
-		resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: id})
+	require.NoError(t, merr.Error(resp.Status))
+	require.EqualValues(t, 9, resp.Version)
+	require.Equal(t, []int64{10}, resp.PartitionIDs)
+	require.Zero(t, resp.RequiredFields[0].IndexId)
+	require.EqualValues(t, 42, stored.RequiredFields[0].IndexId, "RPC must not mutate the retained snapshot")
+	for _, req := range []*querypb.GetQueryViewLoadInfoRequest{{CollectionID: 1, Version: 10}, {CollectionID: 2, Version: 9}} {
+		resp, err = s.GetQueryViewLoadInfo(ctx, req)
 		require.NoError(t, err)
-		require.Error(t, merr.Error(resp.GetStatus()))
+		require.ErrorIs(t, merr.Error(resp.Status), merr.ErrServiceNotReady)
 	}
-	s.UpdateStateCode(commonpb.StateCode_Abnormal)
-	resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1})
+	resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{})
 	require.NoError(t, err)
-	require.Error(t, merr.Error(resp.GetStatus()))
+	require.Error(t, merr.Error(resp.Status))
+	s.loadInfoCatalog = nil
+	resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(resp.Status), merr.ErrServiceNotReady)
+	s.UpdateStateCode(commonpb.StateCode_Abnormal)
+	resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9})
+	require.NoError(t, err)
+	require.Error(t, merr.Error(resp.Status))
 }

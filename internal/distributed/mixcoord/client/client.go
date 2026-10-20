@@ -2398,3 +2398,11 @@ func (c *Client) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 		return client.GetStreamingNodeQueryViewResources(ctx, req)
 	})
 }
+
+func (c *Client) WatchQueryViewSegmentLoadInfo(ctx context.Context, opts ...grpc.CallOption) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client MixCoordClient) (any, error) { return client.WatchQueryViewSegmentLoadInfo(ctx, opts...) })
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient), nil
+}
