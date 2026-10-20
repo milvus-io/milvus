@@ -28,7 +28,7 @@ import (
 )
 
 func TestPublishedManifestSnapshot(t *testing.T) {
-	s := &Server{meta: &meta{segments: NewSegmentsInfo()}}
+	s := &Server{meta: newEmptyTestMeta()}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	fixtures := []*datapb.SegmentInfo{
 		{ID: 1, CollectionID: 10, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, ManifestPath: "collection10/v1"},

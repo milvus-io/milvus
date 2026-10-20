@@ -138,15 +138,18 @@ func TestTalonPrewarmUsesDataCoordConfiguration(t *testing.T) {
 
 func TestTalonPrewarmDataCoordStartAfterHealthy(t *testing.T) {
 	// Keep DC's state transition and prewarm loop real; suppress unrelated
-	// schedulers/service discovery and the process-level server-info file.
+	// schedulers, import recovery, service discovery and the process-level
+	// server-info file.
 	patchScheduler := mockey.Mock((*Server).startTaskScheduler).To(func(*Server) {}).Build()
 	defer patchScheduler.UnPatch()
+	patchImportReload := mockey.Mock((*importInspector).Reload).To(func(*importInspector) {}).Build()
+	defer patchImportReload.UnPatch()
 	patchLoops := mockey.Mock((*Server).startServerLoop).To(func(*Server) {}).Build()
 	defer patchLoops.UnPatch()
 	patchInfo := mockey.Mock(sessionutil.SaveServerInfo).To(func(string, int64) {}).Build()
 	defer patchInfo.UnPatch()
 
-	s := &Server{ctx: context.Background(), meta: &meta{segments: NewSegmentsInfo()}}
+	s := &Server{ctx: context.Background(), meta: newEmptyTestMeta(), importInspector: &importInspector{}}
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	s.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 1, CollectionID: 10, State: commonpb.SegmentState_Flushed, ManifestPath: "unloaded/object",
