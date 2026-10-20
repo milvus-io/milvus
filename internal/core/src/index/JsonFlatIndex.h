@@ -105,8 +105,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         return bitset;
     }
 
-    std::optional<ScalarIndexValidity>
-    GetImmutableValidity() override {
+    std::optional<BitsetView>
+    GetValidityView() override {
         // The executor can have path/type-specific comparable-value masks.
         return std::nullopt;
     }
@@ -776,8 +776,8 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
     friend class JsonFlatIndexQueryExecutor;
 
  public:
-    std::optional<ScalarIndexValidity>
-    GetImmutableValidity() override {
+    std::optional<BitsetView>
+    GetValidityView() override {
         // Query validity belongs to a path/type-aware executor, not this index.
         return std::nullopt;
     }

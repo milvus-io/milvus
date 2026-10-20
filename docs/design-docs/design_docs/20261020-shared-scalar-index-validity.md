@@ -1,125 +1,102 @@
-# Share immutable scalar-index validity across filter expressions
+# Borrow scalar-index validity through BitsetView
 
 - Created: 2026-10-20
-- Status: Draft
 - Component: QueryNode scalar indexes and expression execution
 - Tracking: [Milvus #54434](https://github.com/milvus-io/milvus/issues/54434)
+- Master PR: [Milvus #54437](https://github.com/milvus-io/milvus/pull/54437)
+- Branch: 2.6, based on `78388056176a20cec3e00aaadb59d34516e761c6`
 
-## Problem
+## Problem and scope
 
-Indexed scalar expressions commonly cache a full-segment hit bitmap and an
-owned validity bitmap before returning batches. For `L` evaluated leaves over
-`N` rows, the validity copies alone retain approximately `L * ceil(N / 8)`
-bytes, even when every leaf reads the same sealed index. A non-nullable index
-also materializes a full all-valid bitmap for each expression.
+Batched indexed filters currently retain a full hit bitmap and an owned
+validity bitmap for each evaluated leaf. Sealed validity is identical across
+leaves using the same index. Repeated owned copies can retain approximately
+`leaves * ceil(rows / 8)` bytes even though the index already owns the mask.
+This change removes those redundant caches without changing predicate
+compilation, persisted formats, or the writable `IsNotNull()` API.
 
-The hit bitmap depends on the predicate. Sealed index validity can be shared
-because it is finalized before queries read it. This proposal removes repeated
-full-segment validity materialization without changing the owned result
-contract of `IsNotNull()`.
+## Reuse the existing view and pin
 
-ARRAY contains compilation merging is a separate optimization implemented in
-[Milvus #52138](https://github.com/milvus-io/milvus/pull/52138). It can reduce the
-number of hit bitmaps, while this change independently reduces validity copies
-for predicates that remain separate.
+The optional `GetValidityView()` capability returns the existing
+`milvus::BitsetView` from `common/BitsetView.h`. It does not introduce an index
+specific bitmap wrapper, an owning snapshot, a new shared control block, or
+copy-on-write behavior.
 
-## Optional immutable validity capability
+The representation is explicit:
 
-Expose an optional internal snapshot containing a row count and either an
-owning `shared_ptr<const TargetBitmap>` or an explicit all-valid marker. The
-snapshot owns its storage and can outlive the index reader. An unsupported
-capability is different from all-valid; it must invoke the existing virtual
-`IsNotNull()` path and retain the resulting owned snapshot.
+- `nullopt`: unsupported; use the original owned `IsNotNull()` result.
+- An engaged view with `size() == 0`: all-valid, with logical coordinate count
+  taken separately from the pinned index's stable `Count()`.
+- An engaged nonempty view: dense, unmapped validity with `size() == Count()`.
+  Its data pointer is const and its ID offset is zero.
 
-On master, `INullReader::GetImmutableValidity() const` returns an optional
-`ScalarIndexValidity`, with an implementation in the sealed inverted reader.
-The master snapshot uses a null owner as its explicit all-valid marker. On 2.6
-the capability belongs to `ScalarIndex`, with an
-implementation in sealed `InvertedIndexTantivy`. The different index interfaces
-require separate implementations rather than copying class hierarchies across
-branches.
+`empty()` is deliberately not the all-valid test: Knowhere also uses it for
+certain nonempty all-allowed filters. In particular, an all-zero dense validity
+bitmap must continue to mean all-null. The Knowhere `v2.6.22` pointer/length
+constructor only stores its fields; it does not scan or count the bitmap.
 
-Only immutable, finalized validity may be shared. Growing indexes retain
-snapshot behavior. The provider's row count and bitmap coordinate domain must
-agree. An empty bitmap used internally as an all-valid sentinel is not an empty
-row space.
+A borrowed view is valid only while the selected index remains pinned. Existing
+`SegmentExpr::pinned_index_` retains the cache accessor across evaluation
+batches. Sealed `PinIndex()` places the accessor in `PinWrapper` together with
+the index pointer. Execution-path selection completes before a view is read;
+paths that release the pin and switch to raw data never consume that index
+view. The view is not stored in expression-result caches or returned as
+writable output. It must not be used after the pin is released.
 
-## Expression consumption
+For unsupported/growing indexes, the expression retains its old owned bitmap
+and borrows a view from that owner. Its coordinate count comes from the actual
+owned bitmap size, preserving coverage checks rather than hiding an invalid
+or concurrently changing result behind `Count()`.
 
-Expressions retain the immutable handle and materialize only the requested
-batch or offset selection. Returned data and validity remain independently
-writable because logical operators and final exclusion-mask construction
-mutate their operands. A full-range evaluation may move an owned hit bitmap,
-but must materialize shared validity rather than move from its owner.
+## Independent writable output
 
-The all-valid path extends the result with true bits without allocating a
-temporary full-segment bitmap. Existing output bits must survive non-aligned
-appends. A snapshot is reused across batches, preserving the existing index
-cursor and offset-evaluation behavior.
+An expression-local helper appends only the requested interval to an owned
+output bitmap. For a nonempty source it uses the existing
+`ElementWiseBitsetPolicy<uint8_t>::op_copy` with a const source pointer and
+explicit source/destination bit offsets. All-valid appends extend the output
+with true bits. Neither path casts away constness or mutates the index bytes.
+Offset reads use the view's `test()` after selecting the proper coordinate
+space. Partial batches and non-aligned appends preserve existing output bits.
 
-Raw-data and statistics paths retain their existing mutable caches. This
-proposal does not change cache invalidation, query scheduling, early release,
-or the ownership contract of the existing `IsNotNull()` API.
+The returned batch still needs writable validity storage. A batch covering the
+whole segment therefore still materializes a full output bitmap. The saving is
+in the retained per-leaf full validity cache, not the elimination of every
+validity output allocation. Unlike this 2.6 batch path, newer branches also
+have whole-range move paths and require their own adaptation and validation.
 
-## JSON and derived-reader semantics
+## 2.6 reader boundaries
 
-Field validity, JSON path existence, and typed comparable-value masks are
-different concepts. A derived reader may expose the capability only when its
-snapshot exactly matches its own `IsNotNull()` semantics.
+2.6 uses `ScalarIndex`/`InvertedIndexTantivy`. Only finalized sealed Tantivy
+validity opts in. Its existing shared-const storage remains unchanged; callers
+borrow its bytes without retaining another bitmap owner. Growing indexes and
+unsupported backends retain the owned fallback. ARRAY-cast JSON inverted indexes
+may delegate to base field validity. Scalar JSON inverted indexes and JSON-flat
+indexes/executors explicitly decline because their path/type comparable masks
+have different semantics. TextMatch and Ngram preserve their existing base
+validity semantics. Hybrid indexes retain the default unsupported capability.
 
-For the 2.6 implementation, ARRAY-cast JSON inverted indexes may delegate to
-their sealed base validity. Scalar JSON inverted indexes, JSON-flat indexes,
-and JSON-flat query executors explicitly decline the capability. TextMatch
-and Ngram readers inherit their existing base validity semantics; unfinalized
-and growing instances continue to fall back.
+Index selection and pinning occur during expression initialization. The pin is
+kept as an expression member across every batch and offset evaluation. Mutable
+raw-data/statistics caches retain their existing owned storage. This change does
+not modify query scheduling, expression-result cache admission, or the old
+writable `IsNotNull()` contract.
 
-For master, the sealed inverted reader provides its own coordinate-domain
-validity. JSON-flat comparable/path-specific readers retain their existing
-owned results. Reader selection must preserve row-versus-element coordinates
-and must not substitute field-level validity for path/type validity.
-Typed JSON-path resolution may reuse an inverted reader whose existing
-validity already represents the resolved path/type; its coordinate and row
-count checks still apply.
-
-## Expression-result cache compatibility
-
-Master's expression-result cache currently owns a writable result/validity
-pair. The initial implementation preserves that contract: paths participating
-in that cache retain their existing owned validity materialization. Ordinary
-uncached index evaluation, validity-only evaluation, and offset reads may use
-immutable snapshots where their reader supports them.
-
-Changing the cache value representation is a separate follow-up. This proposal
-does not claim to remove validity copies from every cache-enabled execution.
-
-## Compatibility
-
-No protobuf, persisted index format, public API, or configuration migration is
-required. Unsupported readers use the existing behavior. New native binaries
-must be rebuilt together because this is an internal C++ interface change.
-
-The optimization is independent of ARRAY predicate merging. The 2.6 backport
-must also pass with the original 2.6 parser, not only with a parser that merges
-ARRAY predicates before execution.
+The 2.6 implementation consumes only `size()`, `data()`, `test()`, and the dense
+mapping contract from the view. It does not use Knowhere's optional filtered-bit
+count, or interpret its ANN exclusion-mask metadata as validity statistics.
 
 ## Validation
 
-- Audit every concrete provider and derived override of `IsNotNull()` to verify
-  that shared storage has the same semantics as the owned result.
-- Verify that many independent leaves share one owner and never call the
-  full-segment owned path when the capability is supported.
-- Release the reader while retaining a handle; verify ownership remains valid.
-- Mutate one returned batch and confirm neither the owner nor another batch
-  changes. Cover non-aligned appends, partial final batches, arbitrary/repeated
-  offsets, zero rows, nullable rows, and all-valid storage.
-- Compare indexed and raw execution across multiple batches and NULL/ARRAY
-  predicates. Exercise growing and JSON path/type fallback behavior.
-- For master, test full-range materialization and expression-cache fallback,
-  including subsequent reads that would expose moved-from shared storage.
-- Run focused native index/expression tests and record source revisions,
-  dependency configuration, and any unexecuted integration coverage.
-
-Copy counters and ownership tests establish the eliminated validity copies.
-They do not establish production peak-memory savings, latency, throughput, or
-the cause of every OOM. Those outcomes require matched workload replay with
-the same indexes, segment concurrency, and cache configuration.
+- Verify many leaves borrow the same buffer without invoking `IsNotNull()`.
+- Keep a pin alive while borrowing; release it only after reads finish. Do not
+  require a borrowed view to extend the reader's lifetime independently.
+- Mutate returned batches and whole-range output, then confirm subsequent
+  reads still see the original index validity and cached expression results.
+- Cover all-valid, all-null, zero-size, non-aligned intervals, partial batches,
+  repeated offsets, and owned growing fallback with its actual size.
+- Check JSON ARRAY validity and scalar JSON/JSON-flat comparable-mask fallback,
+  plus TextMatch and Ngram nullable-index regressions.
+- Build with the independent 2.6 dependencies and repeat focused native tests
+  with both the original parser and the independent ARRAY compilation backport.
+  Native validation results are recorded separately; historical snapshot-based
+  tests do not verify this borrowed-view revision.

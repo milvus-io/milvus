@@ -140,13 +140,13 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     TargetBitmap
     IsNotNull() override;
 
-    std::optional<ScalarIndexValidity>
-    GetImmutableValidity() override {
+    std::optional<BitsetView>
+    GetValidityView() override {
         // Scalar JSON validity is type-comparability, not just non-nullness.
         if (cast_type_.data_type() != JsonCastType::DataType::ARRAY) {
             return std::nullopt;
         }
-        return InvertedIndexTantivy<T>::GetImmutableValidity();
+        return InvertedIndexTantivy<T>::GetValidityView();
     }
 
     const TargetBitmap

@@ -180,7 +180,7 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
 
     loaded_json_index->Load(milvus::tracer::TraceContext{}, load_config);
     // Scalar JSON uses a comparable-value mask; never borrow field validity.
-    EXPECT_FALSE(loaded_json_index->GetImmutableValidity().has_value());
+    EXPECT_FALSE(loaded_json_index->GetValidityView().has_value());
     auto exists = loaded_json_index->Exists();
     auto nulls = loaded_json_index->IsNull();
     return {loaded_json_index->Count(),
@@ -301,11 +301,12 @@ TEST(JsonIndexTest, TestJsonContains) {
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
     json_index->create_reader(milvus::index::SetBitsetSealed);
-    auto immutable_valid = json_index->GetImmutableValidity();
-    ASSERT_TRUE(immutable_valid.has_value());
+    auto borrowed_valid = json_index->GetValidityView();
+    ASSERT_TRUE(borrowed_valid.has_value());
     auto valid = json_index->IsNotNull();
     for (size_t i = 0; i < valid.size(); ++i) {
-        EXPECT_EQ((*immutable_valid)[i], valid[i]);
+        EXPECT_EQ(borrowed_valid->size() == 0 || borrowed_valid->test(i),
+                  valid[i]);
     }
     ASSERT_EQ(valid.size(), json_raw_data.size());
     EXPECT_EQ(valid.count(), json_raw_data.size());

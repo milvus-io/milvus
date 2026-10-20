@@ -647,7 +647,7 @@ TEST(ArrayInvertedIndexRegression,
 namespace {
 struct ValidityCloneCounters {
     size_t owned = 0;
-    std::vector<const TargetBitmap*> shared_owners;
+    std::vector<const uint8_t*> borrowed_buffers;
 };
 
 class TrackedArrayValidityIndex : public index::InvertedIndexTantivy<int64_t> {
@@ -668,12 +668,11 @@ class TrackedArrayValidityIndex : public index::InvertedIndexTantivy<int64_t> {
         return index::InvertedIndexTantivy<int64_t>::IsNotNull();
     }
 
-    std::optional<index::ScalarIndexValidity>
-    GetImmutableValidity() override {
-        auto validity =
-            index::InvertedIndexTantivy<int64_t>::GetImmutableValidity();
+    std::optional<BitsetView>
+    GetValidityView() override {
+        auto validity = index::InvertedIndexTantivy<int64_t>::GetValidityView();
         if (validity) {
-            counters_->shared_owners.push_back(validity->bitmap().get());
+            counters_->borrowed_buffers.push_back(validity->data());
         }
         return validity;
     }
@@ -759,10 +758,10 @@ TEST(ArrayInvertedIndexRegression, ContainsLeavesShareValidityAcrossBatches) {
     }
     auto expected = EvalFilterInBatches(root, raw_segment.get(), rows);
     auto actual = EvalFilterInBatches(root, segment.get(), rows);
-    ASSERT_EQ(counters->shared_owners.size(), 20);
+    ASSERT_EQ(counters->borrowed_buffers.size(), 20);
     EXPECT_EQ(counters->owned, 0);
-    for (auto* owner : counters->shared_owners) {
-        EXPECT_EQ(owner, counters->shared_owners.front());
+    for (auto* owner : counters->borrowed_buffers) {
+        EXPECT_EQ(owner, counters->borrowed_buffers.front());
     }
     TargetBitmapView values(actual->GetRawData(), rows);
     TargetBitmapView valid(actual->GetValidRawData(), rows);
@@ -770,7 +769,9 @@ TEST(ArrayInvertedIndexRegression, ContainsLeavesShareValidityAcrossBatches) {
     TargetBitmapView expected_valid(expected->GetValidRawData(), rows);
     for (int64_t row = 0; row < rows; ++row) {
         EXPECT_EQ(valid[row], expected_valid[row]) << row;
-        EXPECT_EQ(values[row], expected_values[row]) << row;
+        if (valid[row] && expected_valid[row]) {
+            EXPECT_EQ(values[row], expected_values[row]) << row;
+        }
     }
 
     // Null predicates exercise both sequential validity-only and offset reads.

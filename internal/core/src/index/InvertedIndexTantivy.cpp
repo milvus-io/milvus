@@ -433,12 +433,15 @@ InvertedIndexTantivy<T>::ApplyValidityMask(TargetBitmap& bitset) {
 }
 
 template <typename T>
-std::optional<ScalarIndexValidity>
-InvertedIndexTantivy<T>::GetImmutableValidity() {
+std::optional<BitsetView>
+InvertedIndexTantivy<T>::GetValidityView() {
     if (is_growing_ || valid_bitmap_ == nullptr) {
         return std::nullopt;
     }
-    return ScalarIndexValidity(Count(), valid_bitmap_);
+    AssertInfo(valid_bitmap_->size() == 0 || valid_bitmap_->size() == Count(),
+               "sealed validity bitmap does not match index row count");
+    return BitsetView(reinterpret_cast<const uint8_t*>(valid_bitmap_->data()),
+                      valid_bitmap_->size());
 }
 
 template <typename T>

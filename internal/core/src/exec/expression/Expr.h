@@ -45,16 +45,39 @@ inline void
 AppendIndexValidity(TargetBitmap& result,
                     const TargetBitmap& validity,
                     int64_t offset,
-                    int64_t count) {
+                    int64_t count,
+                    int64_t /*logical_size*/) {
     result.append(validity, offset, count);
 }
 
 inline void
 AppendIndexValidity(TargetBitmap& result,
-                    const index::ScalarIndexValidity& validity,
+                    const BitsetView& validity,
                     int64_t offset,
-                    int64_t count) {
-    validity.AppendTo(result, offset, count);
+                    int64_t count,
+                    int64_t logical_size) {
+    AssertInfo(offset >= 0 && count >= 0 && offset <= logical_size &&
+                   count <= logical_size - offset,
+               "validity slice exceeds the index row space");
+    // size()==0 is the index capability's all-valid sentinel. Do not use
+    // empty(), which may also describe a dense all-zero exclusion mask.
+    if (validity.size() == 0) {
+        result.resize(result.size() + count, true);
+        return;
+    }
+    AssertInfo(!validity.has_out_ids() && validity.data() != nullptr &&
+                   validity.size() == logical_size,
+               "validity must be a dense view over the index row space");
+    const auto output_offset = result.size();
+    result.resize(output_offset + count, false);
+    if (count > 0) {
+        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+            validity.data(),
+            offset,
+            reinterpret_cast<uint8_t*>(result.data()),
+            output_offset,
+            count);
+    }
 }
 
 inline std::vector<PinWrapper<const index::IndexBase*>>
@@ -406,28 +429,43 @@ class SegmentExpr : public Expr {
         ApplyValidMask(validity, res, valid_res, size);
     }
 
+    // The caller retains the index pin, or the fallback bitmap below, for
+    // every use of the returned borrowed view. Output batches never alias it.
     template <typename Index>
-    static index::ScalarIndexValidity
-    GetIndexValiditySnapshot(Index* index_ptr) {
-        if (auto validity = index_ptr->GetImmutableValidity()) {
-            return std::move(*validity);
+    static BitsetView
+    GetIndexValidityView(Index* index_ptr,
+                         std::shared_ptr<TargetBitmap>& owned_fallback,
+                         int64_t& row_count) {
+        if (auto view = index_ptr->GetValidityView()) {
+            row_count = index_ptr->Count();
+            AssertInfo(row_count >= 0 &&
+                           (view->size() == 0 ||
+                            (view->size() == row_count &&
+                             view->data() != nullptr && !view->has_out_ids())),
+                       "borrowed validity does not cover the index row space");
+            owned_fallback.reset();
+            return *view;
         }
-        // Preserve virtual IsNotNull semantics for JSON comparable masks,
-        // growing indexes, and index implementations without immutable validity.
-        auto bitmap =
-            std::make_shared<const TargetBitmap>(index_ptr->IsNotNull());
-        const auto row_count = bitmap->size();
-        return index::ScalarIndexValidity(row_count, std::move(bitmap));
+        // JSON comparable masks and growing indexes preserve virtual semantics.
+        owned_fallback = std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
+        row_count = owned_fallback->size();
+        return BitsetView(
+            reinterpret_cast<const uint8_t*>(owned_fallback->data()),
+            row_count);
     }
 
     template <typename Index>
-    const index::ScalarIndexValidity&
+    const BitsetView&
     GetCachedIndexValidBitmap(Index* index_ptr) {
-        if (!cached_index_valid_res_) {
-            cached_index_valid_res_ = GetIndexValiditySnapshot(index_ptr);
-            cached_index_all_valid_ = cached_index_valid_res_->all();
+        if (!cached_index_valid_view_) {
+            int64_t row_count = 0;
+            cached_index_valid_view_ = GetIndexValidityView(
+                index_ptr, cached_index_valid_res_, row_count);
+            cached_index_all_valid_ =
+                cached_index_valid_view_->size() == 0 ||
+                (cached_index_valid_res_ && cached_index_valid_res_->all());
         }
-        return *cached_index_valid_res_;
+        return *cached_index_valid_view_;
     }
 
     int64_t
@@ -574,7 +612,10 @@ class SegmentExpr : public Expr {
             valid_res.set();
         } else {
             for (auto i = 0; i < input->size(); ++i) {
-                valid_res[i] = valid_result[(*input)[i]];
+                AssertInfo(
+                    (*input)[i] >= 0 && (*input)[i] < valid_result.size(),
+                    "validity offset outside the borrowed bitmap");
+                valid_res[i] = valid_result.test((*input)[i]);
             }
         }
         auto result = std::move(func.template operator()<FilterType::random>(
@@ -614,7 +655,10 @@ class SegmentExpr : public Expr {
                     continue;
                 }
                 T raw_data = raw.value();
-                bool valid_data = all_valid || valid_result[offset];
+                AssertInfo(
+                    all_valid || (offset >= 0 && offset < valid_result.size()),
+                    "validity offset outside the borrowed bitmap");
+                bool valid_data = all_valid || valid_result.test(offset);
                 func.template operator()<FilterType::random>(
                     &raw_data,
                     ValidityView::FromExpanded(&valid_data),
@@ -632,7 +676,9 @@ class SegmentExpr : public Expr {
                 auto offset = (*input)[i];
                 // materialize the bool once: chaining proxies would read
                 // back the word just stored into valid_res
-                const bool valid = valid_result[offset];
+                AssertInfo(offset >= 0 && offset < valid_result.size(),
+                           "validity offset outside the borrowed bitmap");
+                const bool valid = valid_result.test(offset);
                 valid_res[i] = valid;
                 res[i] = valid;
             }
@@ -1128,7 +1174,8 @@ class SegmentExpr : public Expr {
                          size_t chunk_id,
                          const TargetBitmap& chunk_res,
                          const Validity& chunk_valid_res,
-                         int processed_rows) {
+                         int processed_rows,
+                         int64_t validity_rows = -1) {
         auto data_pos =
             chunk_id == current_index_chunk_ ? current_index_chunk_pos_ : 0;
         // Slice by active_count_ for the same reason as
@@ -1153,10 +1200,13 @@ class SegmentExpr : public Expr {
                    chunk_res.size(),
                    data_pos,
                    data_pos + size);
+        if (validity_rows < 0) {
+            validity_rows = chunk_valid_res.size();
+        }
         AssertInfo(
-            int64_t(chunk_valid_res.size()) >= data_pos + size,
+            validity_rows >= data_pos + size,
             "index valid bitmap covers {} rows, batch needs rows [{}, {})",
-            chunk_valid_res.size(),
+            validity_rows,
             data_pos,
             data_pos + size);
 
@@ -1164,7 +1214,8 @@ class SegmentExpr : public Expr {
         //                      chunk_res.begin() + data_pos,
         //                      chunk_res.begin() + data_pos + size);
         result.append(chunk_res, data_pos, size);
-        AppendIndexValidity(valid_result, chunk_valid_res, data_pos, size);
+        AppendIndexValidity(
+            valid_result, chunk_valid_res, data_pos, size, validity_rows);
         return size;
     }
 
@@ -1232,8 +1283,10 @@ class SegmentExpr : public Expr {
 
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
                     std::move(func(index_ptr, values...)));
-                cached_index_chunk_validity_ =
-                    GetIndexValiditySnapshot(index_ptr);
+                cached_index_chunk_valid_view_ =
+                    GetIndexValidityView(index_ptr,
+                                         cached_index_chunk_valid_res_,
+                                         cached_index_chunk_valid_count_);
                 cached_index_chunk_id_ = i;
             }
 
@@ -1241,8 +1294,9 @@ class SegmentExpr : public Expr {
                                              valid_result,
                                              i,
                                              *cached_index_chunk_res_,
-                                             *cached_index_chunk_validity_,
-                                             processed_rows);
+                                             *cached_index_chunk_valid_view_,
+                                             processed_rows,
+                                             cached_index_chunk_valid_count_);
 
             if (processed_rows + size >= batch_size_) {
                 current_index_chunk_ = i;
@@ -1371,7 +1425,9 @@ class SegmentExpr : public Expr {
             const auto& res = GetCachedIndexValidBitmap(index_ptr);
             if (!cached_index_all_valid_) {
                 for (auto i = 0; i < batch_size; ++i) {
-                    valid_result[i] = res[input[i]];
+                    AssertInfo(input[i] >= 0 && input[i] < res.size(),
+                               "validity offset outside the borrowed bitmap");
+                    valid_result[i] = res.test(input[i]);
                 }
             }  // else: valid_result is already all-set
         } else {
@@ -1449,7 +1505,8 @@ class SegmentExpr : public Expr {
     ProcessIndexOneChunkForValid(TargetBitmap& valid_result,
                                  size_t chunk_id,
                                  const Validity& chunk_valid_res,
-                                 int processed_rows) {
+                                 int processed_rows,
+                                 int64_t validity_rows = -1) {
         auto data_pos =
             chunk_id == current_index_chunk_ ? current_index_chunk_pos_ : 0;
         // The cached bitmap is segment-global (a scalar index always has
@@ -1463,13 +1520,17 @@ class SegmentExpr : public Expr {
         // decides how many rows to emit. See issue #51237.
         auto size =
             std::min(active_count_ - data_pos, batch_size_ - processed_rows);
+        if (validity_rows < 0) {
+            validity_rows = chunk_valid_res.size();
+        }
         AssertInfo(
-            int64_t(chunk_valid_res.size()) >= data_pos + size,
+            validity_rows >= data_pos + size,
             "index valid bitmap covers {} rows, batch needs rows [{}, {})",
-            chunk_valid_res.size(),
+            validity_rows,
             data_pos,
             data_pos + size);
-        AppendIndexValidity(valid_result, chunk_valid_res, data_pos, size);
+        AppendIndexValidity(
+            valid_result, chunk_valid_res, data_pos, size, validity_rows);
         return size;
     }
 
@@ -1495,13 +1556,19 @@ class SegmentExpr : public Expr {
                     GetIndexPtrForChunk<IndexInnerType>(i, false);
                 Index* index_ptr = index_result.index_ptr;
 
-                cached_index_chunk_validity_ =
-                    GetIndexValiditySnapshot(index_ptr);
+                cached_index_chunk_valid_view_ =
+                    GetIndexValidityView(index_ptr,
+                                         cached_index_chunk_valid_res_,
+                                         cached_index_chunk_valid_count_);
                 cached_index_chunk_id_ = i;
             }
 
-            auto size = ProcessIndexOneChunkForValid(
-                valid_result, i, *cached_index_chunk_validity_, processed_rows);
+            auto size =
+                ProcessIndexOneChunkForValid(valid_result,
+                                             i,
+                                             *cached_index_chunk_valid_view_,
+                                             processed_rows,
+                                             cached_index_chunk_valid_count_);
 
             if (processed_rows + size >= batch_size_) {
                 current_index_chunk_ = i;
@@ -1769,14 +1836,16 @@ class SegmentExpr : public Expr {
 
     // Cached scalar-index IsNotNull() bitmap for the ByOffsets paths
     // (single-index-chunk only); see GetCachedIndexValidBitmap().
-    std::optional<index::ScalarIndexValidity> cached_index_valid_res_;
+    std::shared_ptr<TargetBitmap> cached_index_valid_res_;
+    std::optional<BitsetView> cached_index_valid_view_;
     bool cached_index_all_valid_{false};
 
     // Cache for index scan to avoid search index every batch
     int64_t cached_index_chunk_id_{-1};
     std::shared_ptr<TargetBitmap> cached_index_chunk_res_{nullptr};
-    // Immutable index validity is not used for writable raw-data/stats caches.
-    std::optional<index::ScalarIndexValidity> cached_index_chunk_validity_;
+    // Borrowed from the pinned index or cached_index_chunk_valid_res_.
+    std::optional<BitsetView> cached_index_chunk_valid_view_;
+    int64_t cached_index_chunk_valid_count_{0};
     // Cache for chunk valid res.
     std::shared_ptr<TargetBitmap> cached_index_chunk_valid_res_{nullptr};
 
