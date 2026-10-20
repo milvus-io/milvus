@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -144,6 +145,20 @@ func (t *SearchTask) PreExecute() error {
 }
 
 func (t *SearchTask) Execute() error {
+	return t.execute(nil)
+}
+
+// TODO(#40451): move selected-segment search and reduction into the shared
+// QueryView execution layer so SN no longer depends on the legacy QueryNode task.
+// Keep segment selection and handle ownership with the QueryView caller.
+func (t *SearchTask) ExecuteOnSegments(selected []segments.Segment) error {
+	if selected == nil {
+		selected = []segments.Segment{}
+	}
+	return t.execute(selected)
+}
+
+func (t *SearchTask) execute(selected []segments.Segment) error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
@@ -180,7 +195,10 @@ func (t *SearchTask) Execute() error {
 		results          []*segments.SearchResult
 		searchedSegments []segments.Segment
 	)
-	if req.GetScope() == querypb.DataScope_Historical {
+	if selected != nil {
+		searchedSegments = selected
+		results, err = segments.SearchSelectedSegments(t.ctx, searchReq, selected)
+	} else if req.GetScope() == querypb.DataScope_Historical {
 		results, searchedSegments, err = segments.SearchHistorical(
 			t.ctx,
 			t.segmentManager,
@@ -199,7 +217,9 @@ func (t *SearchTask) Execute() error {
 			req.GetSegmentIDs(),
 		)
 	}
-	defer t.segmentManager.Segment.Unpin(searchedSegments)
+	if selected == nil {
+		defer t.segmentManager.Segment.Unpin(searchedSegments)
+	}
 	defer segments.DeleteSearchResults(results)
 	if err != nil {
 		return err
@@ -437,6 +457,17 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		!funcutil.SliceSetEqual(t.req.GetReq().GetPartitionIDs(), other.req.GetReq().GetPartitionIDs()) ||
 		!funcutil.SliceSetEqual(t.req.GetSegmentIDs(), other.req.GetSegmentIDs()) ||
 		!bytes.Equal(t.req.GetReq().GetSerializedExprPlan(), other.req.GetReq().GetSerializedExprPlan()) {
+		return false
+	}
+
+	// Plans are identical, so checking one is sufficient. Keep function-chain
+	// failures scoped to the original request instead of propagating them to
+	// every request in a merged task through Done.
+	plan := &planpb.PlanNode{}
+	if err := proto.Unmarshal(t.req.GetReq().GetSerializedExprPlan(), plan); err != nil {
+		return false
+	}
+	if len(plan.GetQuerynodeFunctionChains()) > 0 {
 		return false
 	}
 

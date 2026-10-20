@@ -20,10 +20,12 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -49,6 +51,12 @@ func WithJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 			}
 		}
 		return false
+	}
+}
+
+func WithJobVersions(versions ...internalpb.ImportVersion) ImportJobFilter {
+	return func(job ImportJob) bool {
+		return lo.Contains(versions, job.GetVersion())
 	}
 }
 
@@ -90,6 +98,16 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 		}
 		job.(*importJob).State = state
 		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
+			// Credentials are needed through both phases and retries, but not
+			// after a terminal transition. This clears the retained job record;
+			// historical WAL entries remain subject to normal WAL retention.
+			options := make([]*commonpb.KeyValuePair, 0, len(job.GetOptions()))
+			for _, option := range job.GetOptions() {
+				if option.GetKey() != importutilv2.ExternalSpec && option.GetKey() != importutilv2.SnapshotSourceURI {
+					options = append(options, option)
+				}
+			}
+			job.(*importJob).Options = options
 			// releases requested disk resource
 			job.(*importJob).RequestedDiskSize = 0
 			// set cleanup ts
@@ -153,12 +171,14 @@ type ImportJob interface {
 	GetCreateTime() string
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
+	GetSnapshotL0Sources() []*internalpb.SnapshotImportL0Source
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
 	GetCommitByCoordinator() bool
 	GetRlsCheckPredicate() *planpb.Expr
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
+	GetVersion() internalpb.ImportVersion
 	Clone() ImportJob
 }
 

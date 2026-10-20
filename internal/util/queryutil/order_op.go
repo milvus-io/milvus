@@ -44,7 +44,7 @@ import (
 type OrderByLimitOperator struct {
 	orderByFields  []*orderby.OrderByField
 	fieldPositions []int // nil = default i+1; non-nil = explicit positions
-	topK           int64 // max results to keep (offset+limit); 0 = unlimited
+	topK           int64 // max results to keep (offset+limit); <= 0 = unlimited
 }
 
 // NewOrderByLimitOperator creates an operator that auto-resolves field positions

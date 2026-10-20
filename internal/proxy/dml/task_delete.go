@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"sync"
 	"time"
 
 	"go.uber.org/atomic"
@@ -16,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
@@ -51,8 +51,6 @@ type DeleteTask struct {
 	req *milvuspb.DeleteRequest
 
 	// channel
-	chMgr     channelmgr.ChannelsMgr
-	pChannels []pChan
 	vChannels []vChan
 
 	idAllocator allocator.Interface
@@ -109,29 +107,19 @@ func (dt *DeleteTask) SetTs(ts Timestamp) {
 }
 
 func (dt *DeleteTask) OnEnqueue() error {
-	if dt.req.Base == nil {
-		dt.req.Base = commonpbutil.NewMsgBase()
-	}
-	dt.req.Base.MsgType = commonpb.MsgType_Delete
-	dt.req.Base.SourceID = paramtable.GetNodeID()
+	// The runner initializes the shared request before enqueueing. IDs and
+	// timestamps belong to each task; repacking creates independent WAL bases.
 	return nil
 }
 
 func (dt *DeleteTask) SetChannels() error {
-	collID, err := dt.GetMetaCache().GetCollectionID(dt.ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
-	if err != nil {
-		return err
-	}
-	channels, err := dt.chMgr.GetChannels(collID)
-	if err != nil {
-		return err
-	}
-	dt.pChannels = channels
+	// delete task routes messages by the vchannels pinned in DeleteRunner.Init and
+	// nothing reads its pchannels, so we don't need to resolve channels here.
 	return nil
 }
 
 func (dt *DeleteTask) GetChannels() []pChan {
-	return dt.pChannels
+	return nil
 }
 
 func (dt *DeleteTask) PreExecute(ctx context.Context) error {
@@ -287,13 +275,13 @@ func repackDeleteMsgByHash(
 }
 
 type DeleteRunner struct {
-	req       *milvuspb.DeleteRequest
-	result    *milvuspb.MutationResult
-	node      taskmodel.TaskNode
-	metaCache Cache
+	initRequestOnce sync.Once
+	req             *milvuspb.DeleteRequest
+	result          *milvuspb.MutationResult
+	node            taskmodel.TaskNode
+	metaCache       Cache
 
 	// channel
-	chMgr     channelmgr.ChannelsMgr
 	vChannels []vChan
 
 	idAllocator     allocator.Interface
@@ -326,14 +314,13 @@ type DeleteRunner struct {
 // NewDeleteRunner constructs a delete runner. Its dependencies are passed in
 // explicitly because most of them (queue, limiter, allocators) are not part of
 // the taskmodel.TaskNode contract.
-func NewDeleteRunner(node taskmodel.TaskNode, request *milvuspb.DeleteRequest, metaCache Cache, idAllocator allocator.Interface, tsoAllocatorIns tsoAllocator, chMgr channelmgr.ChannelsMgr, queue *scheduler.DmTaskQueue, lb shardclient.LBPolicy, limiter types.Limiter) *DeleteRunner {
+func NewDeleteRunner(node taskmodel.TaskNode, request *milvuspb.DeleteRequest, metaCache Cache, idAllocator allocator.Interface, tsoAllocatorIns tsoAllocator, queue *scheduler.DmTaskQueue, lb shardclient.LBPolicy, limiter types.Limiter) *DeleteRunner {
 	return &DeleteRunner{
 		req:             request,
 		node:            node,
 		metaCache:       metaCache,
 		idAllocator:     idAllocator,
 		tsoAllocatorIns: tsoAllocatorIns,
-		chMgr:           chMgr,
 		queue:           queue,
 		lb:              lb,
 		limiter:         limiter,
@@ -513,12 +500,8 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 		dr.partitionIDs = []UniqueID{partID} // only one partID
 	}
 
-	// set vchannels
-	channelNames, err := dr.chMgr.GetVChannels(dr.collectionID)
-	if err != nil {
-		return ErrWithLog(log, "Failed to get vchannels from collection", err)
-	}
-	dr.vChannels = channelNames
+	// set vchannels from the collection info pinned above
+	dr.vChannels = colInfo.VChannels
 
 	dr.result = &milvuspb.MutationResult{
 		Status: merr.Success(),
@@ -550,13 +533,22 @@ func (dr *DeleteRunner) Run(ctx context.Context) error {
 }
 
 func (dr *DeleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*DeleteTask, error) {
+	// Shard callbacks can produce tasks concurrently from the same request.
+	// Preserve lazy initialization when producing the first task.
+	dr.initRequestOnce.Do(func() {
+		if dr.req.Base == nil {
+			dr.req.Base = commonpbutil.NewMsgBase()
+		}
+		dr.req.Base.MsgType = commonpb.MsgType_Delete
+		dr.req.Base.SourceID = paramtable.GetNodeID()
+	})
+
 	dt := &DeleteTask{
 		baseTask:     baseTask{MetaCache: dr.GetMetaCache()},
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
 		req:          dr.req,
 		idAllocator:  dr.idAllocator,
-		chMgr:        dr.chMgr,
 		schema:       dr.schema,
 		collectionID: dr.collectionID,
 		partitionID:  partitionID,

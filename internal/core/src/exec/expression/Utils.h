@@ -28,23 +28,23 @@
 namespace milvus {
 namespace exec {
 
-inline bool
-IsCompareOp(proto::plan::OpType op) {
-    return op == proto::plan::OpType::Equal ||
-           op == proto::plan::OpType::NotEqual ||
-           op == proto::plan::OpType::GreaterEqual ||
-           op == proto::plan::OpType::GreaterThan ||
-           op == proto::plan::OpType::LessEqual ||
-           op == proto::plan::OpType::LessThan;
-}
-
-// Ops served by the per-field text index (segment_->GetTextIndex()) instead of
-// the scalar index path; add a new text-index op here and the dispatch follows.
+// Ops served by ITextMatchReader instead of the scalar predicate path.
 inline bool
 IsTextIndexOpType(proto::plan::OpType op) {
     return op == proto::plan::OpType::TextMatch ||
            op == proto::plan::OpType::PhraseMatch ||
            op == proto::plan::OpType::TextMatchFuzzy;
+}
+
+// Ops served by IPatternMatchReader / INgramReader. Exactly the operations
+// ToIndexPatternOp() accepts, so it is also the guard before calling it.
+inline bool
+IsPatternMatchOpType(proto::plan::OpType op) {
+    return op == proto::plan::OpType::Match ||
+           op == proto::plan::OpType::PrefixMatch ||
+           op == proto::plan::OpType::PostfixMatch ||
+           op == proto::plan::OpType::InnerMatch ||
+           op == proto::plan::OpType::RegexMatch;
 }
 
 [[maybe_unused]] static ColumnVectorPtr

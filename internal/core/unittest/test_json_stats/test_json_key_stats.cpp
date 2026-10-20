@@ -13,9 +13,12 @@
 #include <fmt/core.h>
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
+#include <folly/coro/BlockingWait.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <parquet/arrow/reader.h>
+#include <parquet/arrow/writer.h>
 #include <simdjson.h>
 #include <stddef.h>
 #include <algorithm>
@@ -52,32 +55,31 @@
 #include "futures/Executor.h"
 #include "futures/future_c.h"
 #include "gtest/gtest.h"
-#include "index/IndexInfo.h"
-#include "index/IndexStats.h"
 #include "index/Meta.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/JsonStatsBuildMemoryBudget.h"
-#include "index/json_stats/bson_inverted.h"
-#include "index/json_stats/utils.h"
-#include "indexbuilder/IndexCreatorBase.h"
 #include "milvus-storage/format/parquet/file_reader.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/bson_inverted.h"
+#include "segcore/json_stats/utils.h"
+#include "segcore/json_stats/JsonStatsBuildMemoryBudget.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
+#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/PayloadReader.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/Constants.h"
 
 using namespace milvus::index;
-using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
 
@@ -148,7 +150,7 @@ class BuildKeyStatsAccessor {
         return files;
     }
 
-    static IndexStatsPtr
+    static storage::ArtifactStats
     UploadBsonIndex(JsonKeyStats& stats) {
         return stats.bson_inverted_index_->UploadIndex();
     }
@@ -447,9 +449,18 @@ BuildMaterializeSnapshot(const std::vector<JsonStatsRowRange>& row_ranges,
     auto load_disk_file_manager =
         std::make_shared<storage::DiskFileManagerImpl>(test_index.context);
     BsonInvertedIndex loaded_bson_index(load_disk_file_manager);
-    loaded_bson_index.LoadIndex(bson_stats->GetIndexFiles(),
-                                milvus::proto::common::LoadPriority::HIGH,
-                                false);
+    std::vector<std::string> bson_files;
+    for (const auto& file : bson_stats.Files()) {
+        bson_files.push_back(file.file_name);
+    }
+    storage::V1RemoteSource bson_source(
+        test_index.context,
+        bson_files,
+        {},
+        storage::ArtifactStorageNamespace::Index,
+        storage::V1SourceLayout::DiskFiles);
+    folly::coro::blockingWait(
+        loaded_bson_index.LoadIndex(bson_source, {}, false));
     for (const auto& path : shared_paths) {
         loaded_bson_index.TermQuery(
             path,
@@ -1428,14 +1439,16 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         auto build_index = std::make_shared<JsonKeyStats>(ctx, false);
         build_index->Build(config);
 
-        auto create_index_result = build_index->Upload(config);
-        auto memSize = create_index_result->GetMemSize();
-        auto serializedSize = create_index_result->GetSerializedSize();
-        ASSERT_GT(memSize, 0);
-        ASSERT_GT(serializedSize, 0);
-        index_files = create_index_result->GetIndexFiles();
+        const auto upload_stats = build_index->Upload(config);
+        ASSERT_GT(upload_stats.MemSize(), 0);
+        int64_t serialized_size = 0;
+        for (const auto& file : upload_stats.Files()) {
+            serialized_size += file.file_size;
+            index_files.push_back(file.file_name);
+        }
+        ASSERT_GT(serialized_size, 0);
+        ASSERT_FALSE(index_files.empty());
 
-        index::CreateIndexInfo index_info{};
         config["index_files"] = index_files;
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
@@ -1503,12 +1516,6 @@ INSTANTIATE_TEST_SUITE_P(JsonKeyStatsTestSuite,
 TEST_P(JsonKeyStatsTest, TestBasicOperations) {
     // Test Count
     EXPECT_EQ(index_->Count(), size_);
-
-    // Test Size
-    EXPECT_EQ(index_->Size(), size_);
-
-    // Test HasRawData
-    EXPECT_FALSE(index_->HasRawData());
 }
 
 TEST_P(JsonKeyStatsTest, TestExecuteForSharedData) {
@@ -1694,16 +1701,22 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         build_index_ = std::make_shared<JsonKeyStats>(ctx, false);
         build_index_->Build(config);
 
-        auto create_index_result = build_index_->Upload(config);
-        auto memSize = create_index_result->GetMemSize();
-        auto serializedSize = create_index_result->GetSerializedSize();
-        ASSERT_GT(memSize, 0);
-        ASSERT_GT(serializedSize, 0);
-        index_files_ = create_index_result->GetIndexFiles();
+        const auto upload_stats = build_index_->Upload(config);
+        ASSERT_GT(upload_stats.MemSize(), 0);
+        int64_t serialized_size = 0;
+        index_files_.clear();
+        for (const auto& file : upload_stats.Files()) {
+            serialized_size += file.file_size;
+            index_files_.push_back(file.file_name);
+        }
+        ASSERT_GT(serialized_size, 0);
+        ASSERT_FALSE(index_files_.empty());
     }
 
     void
-    Load(const std::string& warmup_policy = "") {
+    Load(const std::string& warmup_policy = "",
+         OpContext* op_ctx = nullptr,
+         std::optional<bool> use_async = std::nullopt) {
         storage::FileManagerContext ctx(
             field_meta_, index_meta_, chunk_manager_, fs_);
         Config config;
@@ -1723,15 +1736,15 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
                                                   partition_id_,
                                                   segment_id_,
                                                   field_id_);
+        ctx.use_async_load = use_async;
         load_index_ = std::make_shared<JsonKeyStats>(ctx, true);
-        load_index_->Load(milvus::tracer::TraceContext{}, config);
+        load_index_->Load(milvus::tracer::TraceContext{}, config, op_ctx);
     }
 
     void
     VerifyBasicOperations() {
         EXPECT_EQ(load_index_->Count(), data_.size());
-        EXPECT_EQ(load_index_->Size(), data_.size());
-        EXPECT_FALSE(load_index_->HasRawData());
+        EXPECT_EQ(load_index_->Count(), data_.size());
     }
 
     void
@@ -1778,6 +1791,501 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     std::vector<std::string> index_files_;
     milvus_storage::ArrowFileSystemPtr fs_;
 };
+
+class JsonStatsAsyncFileSystem : public arrow::fs::SubTreeFileSystem {
+ public:
+    explicit JsonStatsAsyncFileSystem(milvus_storage::ArrowFileSystemPtr fs)
+        : SubTreeFileSystem("", std::move(fs)) {
+    }
+
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFile(const std::string& path) override {
+        if (path.find(JSON_STATS_SHREDDING_DATA_PATH) != std::string::npos)
+            ++sync_footer_opens;
+        if (auto it = footer_files.find(path); it != footer_files.end())
+            return std::static_pointer_cast<arrow::io::RandomAccessFile>(
+                it->second);
+        return SubTreeFileSystem::OpenInputFile(path);
+    }
+
+    arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFileAsync(const std::string& path) override {
+        ++async_opens;
+        if (on_async_open)
+            on_async_open();
+        if (held_open.is_valid())
+            return held_open;
+        return SubTreeFileSystem::OpenInputFileAsync(path);
+    }
+
+    std::atomic<size_t> async_opens{0};
+    std::map<std::string, std::shared_ptr<test::ControlledDirectReadFile>>
+        footer_files;
+    std::atomic<size_t> sync_footer_opens{0};
+    std::function<void()> on_async_open;
+    arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>> held_open;
+};
+
+class JsonStatsPreparationTest
+    : public JsonKeyStatsUploadLoadTest,
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {};
+
+TEST_P(JsonStatsPreparationTest, PinsModeAndPreservesLegacyLayout) {
+    const auto [use_async, with_meta] = GetParam();
+    InitContext();
+    PrepareData({R"({"int": 1, "array": [1]})", R"({"int": 2, "array": [2]})"});
+    BuildAndUpload();
+    const auto prefix = storage::GenRemoteJsonStatsPathPrefix(chunk_manager_,
+                                                              index_build_id_,
+                                                              index_version_,
+                                                              collection_id_,
+                                                              partition_id_,
+                                                              segment_id_,
+                                                              field_id_);
+    size_t parquet_files = 0;
+    for (const auto& file : index_files_) {
+        if (file.find(JSON_STATS_SHREDDING_DATA_PATH) == std::string::npos)
+            continue;
+        ++parquet_files;
+        if (!with_meta) {
+            // Emulate old artifacts with layout metadata in the Parquet footer.
+            auto input = fs_->OpenInputFile(prefix + "/" + file).ValueOrDie();
+            std::unique_ptr<parquet::arrow::FileReader> reader;
+            ASSERT_TRUE(parquet::arrow::OpenFile(
+                            input, arrow::default_memory_pool(), &reader)
+                            .ok());
+            std::shared_ptr<arrow::Table> table;
+            ASSERT_TRUE(reader->ReadTable(&table).ok());
+            auto metadata = std::make_shared<arrow::KeyValueMetadata>();
+            metadata->Append(JSON_STATS_META_KEY_LAYOUT_TYPE_MAP,
+                             R"({"/int_INT64":"TYPED"})");
+            table = table->ReplaceSchemaMetadata(nullptr);
+            reader.reset();
+            ASSERT_TRUE(input->Close().ok());
+            auto output =
+                fs_->OpenOutputStream(prefix + "/" + file).ValueOrDie();
+            auto writer = parquet::arrow::FileWriter::Open(
+                              *table->schema(),
+                              arrow::default_memory_pool(),
+                              output,
+                              parquet::default_writer_properties(),
+                              parquet::ArrowWriterProperties::Builder()
+                                  .store_schema()
+                                  ->build())
+                              .ValueOrDie();
+            ASSERT_TRUE(writer->AddKeyValueMetadata(metadata).ok());
+            ASSERT_TRUE(writer->WriteTable(*table, table->num_rows()).ok());
+            ASSERT_TRUE(writer->Close().ok());
+            ASSERT_TRUE(output->Close().ok());
+        }
+    }
+    if (!with_meta) {
+        std::erase(index_files_, std::string(JSON_STATS_META_FILE_NAME));
+    }
+    auto fs = std::make_shared<JsonStatsAsyncFileSystem>(fs_);
+    for (const auto& name : index_files_) {
+        if (name.find(JSON_STATS_SHREDDING_DATA_PATH) == std::string::npos)
+            continue;
+        auto file = fs_->OpenInputFile(prefix + "/" + name).ValueOrDie();
+        auto bytes = file->ReadAt(0, file->GetSize().ValueOrDie()).ValueOrDie();
+        fs->footer_files.emplace(
+            prefix + "/" + name,
+            std::make_shared<test::ControlledDirectReadFile>(
+                std::vector<uint8_t>(bytes->data(),
+                                     bytes->data() + bytes->size())));
+    }
+    fs_ = fs;
+    const bool previous =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto restore = folly::makeGuard([&] {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(previous);
+    });
+    // Explicit context mode must survive the opposite global rollout setting.
+    segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(!use_async);
+    OpContext operation;
+    operation.runtime_load_priority = proto::common::LoadPriority::LOW;
+    Load("disable", &operation, use_async);
+    EXPECT_EQ(load_index_->Count(), data_.size());
+    EXPECT_FALSE(load_index_->GetShreddingFields("/int").empty());
+    EXPECT_EQ(fs->async_opens.load() > 0, use_async);
+    EXPECT_EQ(fs->sync_footer_opens.load(), parquet_files);
+    for (const auto& [path, file] : fs->footer_files) {
+        EXPECT_EQ(
+            !file->DirectReadCalls().empty() || file->AsyncReadCalls() > 0,
+            use_async);
+        if (use_async)
+            EXPECT_EQ(file->ReadAtCalls(), 0);
+    }
+    VerifyPathInShredding("/int");
+    VerifyPathInShared("/array");
+}
+
+TEST_P(JsonStatsPreparationTest, FailedPreparationCanBeRetried) {
+    const auto [use_async, with_meta] = GetParam();
+    InitContext();
+    PrepareData({R"({"int": 1})", R"({"int": 2})"});
+    BuildAndUpload();
+    const auto prefix = storage::GenRemoteJsonStatsPathPrefix(chunk_manager_,
+                                                              index_build_id_,
+                                                              index_version_,
+                                                              collection_id_,
+                                                              partition_id_,
+                                                              segment_id_,
+                                                              field_id_);
+    if (!with_meta)
+        std::erase(index_files_, std::string(JSON_STATS_META_FILE_NAME));
+    const auto file =
+        with_meta ? std::string(JSON_STATS_META_FILE_NAME)
+                  : *std::find_if(
+                        index_files_.begin(),
+                        index_files_.end(),
+                        [](const auto& name) {
+                            return name.find(JSON_STATS_SHREDDING_DATA_PATH) !=
+                                   std::string::npos;
+                        });
+    const auto path = prefix + "/" + file;
+    auto input = fs_->OpenInputFile(path).ValueOrDie();
+    const auto bytes =
+        input->ReadAt(0, input->GetSize().ValueOrDie()).ValueOrDie();
+    ASSERT_TRUE(input->Close().ok());
+    auto restore = folly::makeGuard([&] {
+        auto output = fs_->OpenOutputStream(path).ValueOrDie();
+        EXPECT_TRUE(output->Write(bytes).ok());
+        EXPECT_TRUE(output->Close().ok());
+    });
+    auto output = fs_->OpenOutputStream(path).ValueOrDie();
+    ASSERT_TRUE(output->Write("{", 1).ok());
+    ASSERT_TRUE(output->Close().ok());
+    EXPECT_THROW(Load("disable", nullptr, use_async), SegcoreError);
+    output = fs_->OpenOutputStream(path).ValueOrDie();
+    ASSERT_TRUE(output->Write(bytes).ok());
+    ASSERT_TRUE(output->Close().ok());
+    restore.dismiss();
+    // Direct callers may provide only a ChunkManager in FileManagerContext.
+    fs_.reset();
+    Load("disable", nullptr, use_async);
+    EXPECT_EQ(load_index_->Count(), data_.size());
+}
+
+INSTANTIATE_TEST_SUITE_P(JsonStatsPreparationModes,
+                         JsonStatsPreparationTest,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
+
+TEST_F(JsonKeyStatsUploadLoadTest,
+       MetadataWaitsForSharedSlotAndCancelsWithoutIO) {
+    InitContext();
+    PrepareData({R"({"int": 1})", R"({"int": 2})"});
+    BuildAndUpload();
+    const auto original_files = index_files_;
+    const auto original_fs = fs_;
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    const auto old_slots = admission.CapacitySlots();
+    admission.SetCapacitySlots(1);
+    auto restore =
+        folly::makeGuard([&] { admission.SetCapacitySlots(old_slots); });
+    for (const bool with_meta : {true, false}) {
+        index_files_ = original_files;
+        if (!with_meta)
+            std::erase(index_files_, std::string(JSON_STATS_META_FILE_NAME));
+        auto fs = std::make_shared<JsonStatsAsyncFileSystem>(original_fs);
+        fs_ = fs;
+        auto lease =
+            folly::coro::blockingWait(storage::AcquireMetadataLoadSlotAsync(
+                proto::common::LoadPriority::HIGH));
+        folly::CancellationSource cancel;
+        OpContext ctx(cancel.getToken());
+        auto pending = std::async(std::launch::async,
+                                  [&] { Load("disable", &ctx, true); });
+        auto cleanup = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            lease.Release();
+            if (pending.valid())
+                pending.wait();
+        });
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        EXPECT_EQ(fs->async_opens.load(), 0);
+        EXPECT_EQ(fs->sync_footer_opens.load(), 0);
+        cancel.requestCancellation();
+        try {
+            pending.get();
+            FAIL() << "expected cancelled metadata admission";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+        EXPECT_EQ(fs->async_opens.load(), 0);
+        EXPECT_EQ(fs->sync_footer_opens.load(), 0);
+        lease.Release();
+        Load("disable", nullptr, true);
+        EXPECT_EQ(load_index_->Count(), data_.size());
+    }
+}
+
+TEST_F(JsonKeyStatsUploadLoadTest, PreparationCancellationDrainsIssuedOpens) {
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    const auto old_slots = admission.CapacitySlots();
+    admission.SetCapacitySlots(1);
+    auto restore =
+        folly::makeGuard([&] { admission.SetCapacitySlots(old_slots); });
+    InitContext();
+    PrepareData({R"({"int": 1})", R"({"int": 2})"});
+    BuildAndUpload();
+    const auto original_files = index_files_;
+    const auto original_fs = fs_;
+    const auto prefix = storage::GenRemoteJsonStatsPathPrefix(chunk_manager_,
+                                                              index_build_id_,
+                                                              index_version_,
+                                                              collection_id_,
+                                                              partition_id_,
+                                                              segment_id_,
+                                                              field_id_);
+    for (const bool with_meta : {true, false}) {
+        index_files_ = original_files;
+        if (!with_meta)
+            std::erase(index_files_, std::string(JSON_STATS_META_FILE_NAME));
+        auto fs = std::make_shared<JsonStatsAsyncFileSystem>(original_fs);
+        fs_ = fs;
+        folly::CancellationSource cancel;
+        OpContext operation(cancel.getToken());
+        cancel.requestCancellation();
+        EXPECT_THROW(Load("disable", &operation, true), SegcoreError);
+        EXPECT_EQ(fs->async_opens.load(), 0);
+
+        folly::CancellationSource in_flight;
+        OpContext request(in_flight.getToken());
+        const auto file =
+            with_meta
+                ? std::string(JSON_STATS_META_FILE_NAME)
+                : *std::find_if(
+                      index_files_.begin(),
+                      index_files_.end(),
+                      [](const auto& name) {
+                          return name.find(JSON_STATS_SHREDDING_DATA_PATH) !=
+                                 std::string::npos;
+                      });
+        const auto path = prefix + "/" + file;
+        std::promise<void> opened;
+        auto ready = opened.get_future();
+        auto size_future = arrow::Future<int64_t>::Make();
+        std::shared_ptr<test::ControlledDirectReadFile> footer;
+        if (with_meta) {
+            fs->on_async_open = [&] { opened.set_value(); };
+            fs->held_open = arrow::Future<
+                std::shared_ptr<arrow::io::RandomAccessFile>>::Make();
+        } else {
+            auto input = original_fs->OpenInputFile(path).ValueOrDie();
+            auto bytes =
+                input->ReadAt(0, input->GetSize().ValueOrDie()).ValueOrDie();
+            footer = std::make_shared<test::ControlledDirectReadFile>(
+                std::vector<uint8_t>(bytes->data(),
+                                     bytes->data() + bytes->size()));
+            footer->SetSizeFuture(size_future);
+            fs->footer_files.emplace(path, footer);
+        }
+        auto pending = std::async(std::launch::async,
+                                  [&] { Load("disable", &request, true); });
+        auto drain = folly::makeGuard([&] {
+            in_flight.requestCancellation();
+            if (with_meta && !fs->held_open.is_finished())
+                fs->held_open.MarkFinished(
+                    arrow::Status::IOError("test cleanup"));
+            if (!with_meta && !size_future.is_finished())
+                size_future.MarkFinished(
+                    arrow::Status::IOError("test cleanup"));
+            if (pending.valid())
+                pending.wait();
+        });
+        if (with_meta) {
+            ASSERT_EQ(ready.wait_for(std::chrono::seconds(5)),
+                      std::future_status::ready);
+        } else {
+            ASSERT_TRUE(footer->WaitForSizeCall());
+        }
+        const bool available =
+            admission.TryAcquire({0, 1}, storage::LoadAdmissionPriority::High);
+        EXPECT_FALSE(available);
+        if (available)
+            admission.Release({0, 1});
+        in_flight.requestCancellation();
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        if (with_meta)
+            fs->held_open.MarkFinished(original_fs->OpenInputFile(path));
+        else
+            size_future.MarkFinished(footer->GetSize());
+        try {
+            pending.get();
+            FAIL() << "cancelled preparation published JSON stats";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+        drain.dismiss();
+        fs->on_async_open = {};
+        fs->held_open = {};
+        fs->footer_files.clear();
+        Load("disable", nullptr, true);
+        EXPECT_EQ(load_index_->Count(), data_.size());
+    }
+}
+
+class BsonAsyncLoadTest
+    : public JsonKeyStatsUploadLoadTest,
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {};
+
+TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
+    const auto [use_async, enable_mmap] = GetParam();
+    auto& local_pool = storage::LocalFileIOPool::GetInstance();
+    local_pool.Configure(1);
+    auto reset_pool = folly::makeGuard([&] { local_pool.Configure(0); });
+    InitContext();
+    PrepareData({R"({"a": 1})", R"({"b": 2})"});
+    BuildAndUpload();
+    // Use a real BSON artifact with deterministic postings, independent of the
+    // shredding threshold used by the complete JSON stats builder.
+    storage::FileManagerContext build_context(
+        field_meta_, index_meta_, chunk_manager_, fs_);
+    const auto path =
+        TestLocalPath + "bson_async_" + std::to_string(index_build_id_);
+    std::filesystem::create_directories(path);
+    BsonInvertedIndex built(path, field_id_, build_context, 7);
+    built.AddRecord("/a", 0, 12);
+    built.AddRecord("/a", 1, 42);
+    built.BuildIndex();
+    auto artifact = built.UploadIndex();
+    std::vector<std::string> files;
+    for (const auto& file : artifact.Files()) files.push_back(file.file_name);
+    ASSERT_FALSE(files.empty());
+    auto fs = std::make_shared<JsonStatsAsyncFileSystem>(fs_);
+    storage::FileManagerContext context(
+        field_meta_, index_meta_, chunk_manager_, fs);
+    context.use_async_load = use_async;
+    segcore::storagev1translator::BsonInvertedIndexLoadInfo info{
+        .enable_mmap = enable_mmap,
+        .segment_id = segment_id_,
+        .field_id = field_id_,
+        .index_size = static_cast<int64_t>(artifact.MemSize()),
+        .index_files = files,
+        .load_priority = proto::common::LoadPriority::LOW,
+        .warmup_policy = "disable"};
+    if (use_async) {
+        size_t cold_opens = 0;
+        size_t warm_opens = 0;
+        for (const auto* policy : {"disable", "sync"}) {
+            auto probe_info = info;
+            probe_info.warmup_policy = policy;
+            segcore::storagev1translator::BsonInvertedIndexTranslator probe(
+                probe_info, context);
+            const auto before = fs->async_opens.load();
+            auto cells = probe.get_cells(nullptr, {0});
+            const auto opened = fs->async_opens.load() - before;
+            if (probe_info.warmup_policy == "disable") {
+                cold_opens = opened;
+            } else {
+                warm_opens = opened;
+            }
+        }
+        // Cold indexes reopen metadata; warmup reuses the inspected source.
+        EXPECT_GT(cold_opens, warm_opens);
+    }
+    segcore::storagev1translator::BsonInvertedIndexTranslator translator(
+        info, context);
+    const auto before_cancel = fs->async_opens.load();
+    folly::CancellationSource cancelled;
+    cancelled.requestCancellation();
+    OpContext cancelled_ctx(cancelled.getToken());
+    EXPECT_THROW(translator.get_cells(&cancelled_ctx, {0}), SegcoreError);
+    EXPECT_EQ(fs->async_opens.load(), before_cancel);
+
+    if (use_async) {
+        folly::CancellationSource during_open;
+        OpContext open_ctx(during_open.getToken());
+        fs->on_async_open = [&] { during_open.requestCancellation(); };
+        auto clear_hook = folly::makeGuard([&] { fs->on_async_open = {}; });
+        try {
+            translator.get_cells(&open_ctx, {0});
+            FAIL() << "expected cancellation during remote open";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+    }
+
+    if (use_async) {
+        // Pause remote open to check that orchestration does not retain the
+        // local executor while waiting for storage.
+        std::promise<void> opened;
+        auto ready = opened.get_future();
+        std::promise<void> resume;
+        auto resumed = resume.get_future().share();
+        bool released = false;
+        auto release = [&] {
+            if (!std::exchange(released, true))
+                resume.set_value();
+        };
+        std::atomic<bool> first_open{true};
+        fs->on_async_open = [&] {
+            if (first_open.exchange(false))
+                opened.set_value();
+            resumed.wait();
+        };
+        auto pending = std::async(std::launch::async, [&] {
+            return translator.get_cells(nullptr, {0});
+        });
+        auto drain = folly::makeGuard([&] {
+            release();
+            if (pending.valid())
+                pending.wait();
+            fs->on_async_open = {};
+        });
+        ASSERT_EQ(ready.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        auto disable =
+            std::async(std::launch::async, [&] { local_pool.Configure(0); });
+        auto release_before_join = folly::makeGuard(release);
+        EXPECT_EQ(disable.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(0)),
+                  std::future_status::timeout);
+        release_before_join.dismiss();
+        release();
+        disable.get();
+        pending.get();
+        fs->on_async_open = {};
+        drain.dismiss();
+        local_pool.Configure(1);
+    }
+
+    auto first = translator.get_cells(nullptr, {0});
+    const auto missing = files.front() + ".unavailable";
+    std::filesystem::rename(files.front(), missing);
+    {
+        auto restore = folly::makeGuard(
+            [&] { std::filesystem::rename(missing, files.front()); });
+        EXPECT_THROW(translator.get_cells(nullptr, {0}), SegcoreError);
+    }
+    auto second = translator.get_cells(nullptr, {0});
+    first.clear();
+    std::vector<std::pair<uint32_t, uint32_t>> hits;
+    second.front().second->TermQuery(
+        "/a",
+        [&](const uint32_t* rows, const uint32_t* offsets, int64_t count) {
+            for (int64_t i = 0; i < count; ++i)
+                hits.emplace_back(rows[i], offsets[i]);
+        });
+    EXPECT_EQ(hits,
+              (std::vector<std::pair<uint32_t, uint32_t>>{{0, 12}, {1, 42}}));
+    EXPECT_EQ(fs->async_opens.load() > 0, use_async);
+    if (use_async) {
+        const auto [resident, transient] =
+            translator.estimated_byte_size_of_cell(0);
+        EXPECT_GT(transient.memory_bytes, 0);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(BsonAsyncLoadModes,
+                         BsonAsyncLoadTest,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
 
 class JsonKeyStatsAsyncLoadTest
     : public JsonKeyStatsUploadLoadTest,
@@ -2104,7 +2612,7 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestLoadWithoutMetaFile) {
 
     // Basic operations should still work
     EXPECT_EQ(load_index_->Count(), data_.size());
-    EXPECT_EQ(load_index_->Size(), data_.size());
+    EXPECT_EQ(load_index_->Count(), data_.size());
 
     // Note: GetShreddingFields may return empty because key_field_map_ is empty
     // when both meta.json and parquet metadata are missing/empty.
@@ -2305,7 +2813,7 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestSingleRow) {
     Load();
 
     EXPECT_EQ(load_index_->Count(), 1);
-    EXPECT_EQ(load_index_->Size(), 1);
+    EXPECT_EQ(load_index_->Count(), 1);
 }
 
 // Test with all null values in JSON

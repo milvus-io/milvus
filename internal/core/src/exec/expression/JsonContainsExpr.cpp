@@ -37,9 +37,8 @@
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "monitor/Monitor.h"
-#include "index/ScalarIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/utils.h"
 #include "opentelemetry/trace/span.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
@@ -186,13 +185,9 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
-                if (value_type_ == DataType::INT64 && PinnedJsonIndexIsFlat()) {
-                    result = EvalArrayContainsForIndexSegment(DataType::INT64);
-                } else {
-                    result = EvalArrayContainsForIndexSegment(
-                        value_type_ == DataType::INT64 ? DataType::DOUBLE
-                                                       : value_type_);
-                }
+                result = EvalArrayContainsForIndexSegment(
+                    value_type_ == DataType::INT64 ? DataType::DOUBLE
+                                                   : value_type_);
             } else {
                 result = EvalJsonContainsForDataSegment(context);
             }
@@ -2428,7 +2423,7 @@ PhyJsonContainsFilterExpr::EvalArrayContainsForIndexSegment(
         }
         case DataType::VARCHAR:
         case DataType::STRING: {
-            return ExecArrayContainsForIndexSegmentImpl<std::string>();
+            return ExecArrayContainsForIndexSegmentImpl<std::string_view>();
         }
         default:
             ThrowInfo(UnexpectedError,
@@ -2441,17 +2436,17 @@ PhyJsonContainsFilterExpr::EvalArrayContainsForIndexSegment(
 template <typename ExprValueType>
 VectorPtr
 PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
-    typedef std::conditional_t<std::is_same_v<ExprValueType, std::string_view>,
-                               std::string,
-                               ExprValueType>
-        GetType;
-    using Index = index::ScalarIndex<GetType>;
+    using GetType = ExprValueType;
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    // Get struct element offsets for nested index (element-to-row conversion)
+    // Project each value's element hits to rows before combining uncorrelated
+    // contains predicates. Correlated struct predicates require a different fold
+    // point, as constrained by index/contracts/README.md. Offsets come from the
+    // column via execution, not from the index. TODO: consolidate the projection
+    // helpers with UnaryExpr and Expr at plan-selected boundaries.
     auto struct_element_offsets =
         segment_->GetStructElementOffsets(expr_->column_.field_id_);
 
@@ -2460,18 +2455,19 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     // hundreds of terms the per-batch rebuild dominated the query cost. An
     // ExprResCache hit skips the conversion entirely.
     auto execute_sub_batch =
-        [this, &struct_element_offsets](Index* index_ptr) -> TargetBitmap {
+        [this, &struct_element_offsets](
+            const index::IScalarPredicateReader<GetType>* index_ptr)
+        -> TargetBitmap {
         std::unordered_set<GetType> elements;
-        for (auto const& element : expr_->vals_) {
+        for (const auto& element : expr_->vals_) {
             elements.insert(GetValueWithCastNumber<GetType>(element));
         }
         boost::container::vector<GetType> vals(elements.begin(),
                                                elements.end());
-
         // Query helper: for nested index, convert element-level to row-level
         auto query_in = [&](size_t n, const GetType* data) -> TargetBitmap {
             auto element_bitset = index_ptr->In(n, data);
-            if (!index_ptr->IsNestedIndex()) {
+            if (!selected_element_level_result_) {
                 return element_bitset;
             }
             AssertInfo(struct_element_offsets != nullptr,

@@ -296,8 +296,9 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitLocalChunkManager(suite.rootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
-	initcore.InitLocalArrowFileSystem(suite.rootPath)
-	initcore.InitRemoteArrowFileSystem(paramtable.Get())
+	// Like the query node, initialize the process-wide default filesystem once
+	// from common.storageType so it matches the remote ChunkManager.
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
@@ -513,6 +514,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -570,6 +572,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexPreferFieldDataWhenIndexHasRaw
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -635,6 +638,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexSkipsFieldDataByDefault() {
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -1678,6 +1682,53 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		err := suite.loader.waitSegmentLoadDone(ctx, SegmentTypeSealed, []int64{suite.segmentID}, 0)
 		suite.Error(err)
 		suite.True(merr.IsCanceledOrTimeout(err))
+	})
+
+	suite.Run("wait_completed_before_wait", func() {
+		suite.SetupTest()
+
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			NumOfRows:     100,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+
+		suite.loader.notifyLoadFinish(infos...)
+
+		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
+		suite.NoError(err)
+	})
+
+	suite.Run("wait_concurrent_waiters_all_woken", func() {
+		suite.SetupTest()
+
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			NumOfRows:     100,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+
+		const waiters = 16
+		results := make(chan error, waiters)
+		start := make(chan struct{})
+		for i := 0; i < waiters; i++ {
+			go func() {
+				<-start
+				results <- suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
+			}()
+		}
+		close(start)
+		time.Sleep(200 * time.Millisecond)
+
+		suite.loader.notifyLoadFinish(infos...)
+
+		for i := 0; i < waiters; i++ {
+			suite.NoError(<-results)
+		}
 	})
 }
 

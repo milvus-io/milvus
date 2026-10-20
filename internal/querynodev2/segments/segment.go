@@ -35,6 +35,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -856,6 +857,70 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan)
 	}
 	log.Debug(ctx, "retrieve segment done", mlog.Int("resultNum", len(retrieveResult.Offset)))
 	return retrieveResult, nil
+}
+
+// RetrieveArrow retrieves with the Arrow transport, returning the protobuf
+// header and the user output columns as an Arrow record. It is the counterpart
+// of retrieve: the same pin / read-gate / latency choreography, then the Arrow
+// columns.
+//
+// The caller owns the record and must Release it once MaterializeArrowSelection has read it. Returning the two separately rather than merging into
+// FieldData is the point: FieldData is built once, at response assembly,
+// instead of once per segment.
+//
+// There is deliberately NO fallback to the protobuf path: every error it can
+// return is either a bug or one the protobuf path fails on identically, so a
+// fallback would silently paper over the former and buy nothing for the latter.
+// See the design doc for the full argument.
+//
+// common.interface.zeroCopy is the rollback mechanism; bugs here should be loud.
+func (s *LocalSegment) RetrieveArrow(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, arrow.Record, error) {
+	// WithLazy, matching retrieve: this runs once per segment per query and the
+	// only consumer is a Debug line, so the fields should not be encoded at
+	// default log level.
+	log := mlog.WithLazy(
+		mlog.FieldCollectionID(s.Collection()),
+		mlog.FieldPartitionID(s.Partition()),
+		mlog.FieldSegmentID(s.ID()),
+		mlog.String("segmentType", s.segmentType.String()),
+	)
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return nil, nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	tr := timerecord.NewTimeRecorder("cgoRetrieveAsArrow")
+	arrowResult, err := retrySegmentReadGate(
+		ctx,
+		s.segmentType,
+		func() (*segcore.RetrieveArrowResult, error) {
+			return s.csegment.RetrieveAsArrow(ctx, plan)
+		},
+		waitSegmentReadGateRetry,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Releasing the CRetrieveArrowResult is safe even though the record outlives
+	// it: importing the Arrow C structs nulls their release callbacks, so this
+	// frees the protobuf header blob and the two now-inert structs, not the
+	// record's buffers.
+	defer arrowResult.Release()
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(paramtable.GetStringNodeID(),
+		contextutil.GetQueryLabel(ctx)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
+
+	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "partial-segcore-results-deserialization")
+	defer span.End()
+
+	header, record, err := arrowResult.GetResult()
+	if err != nil {
+		return nil, nil, err
+	}
+	// The record is NOT released here: ownership moves to the caller, which must
+	// keep it alive until MaterializeArrowSelection has read it. See
+	// RetrieveSegmentResult.Record.
+	log.Debug(ctx, "retrieve segment as arrow done", mlog.Int("resultNum", len(header.Offset)))
+	return header, record, nil
 }
 
 func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets, log *mlog.Logger) (*segcore.RetrieveResult, error) {

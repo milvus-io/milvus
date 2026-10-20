@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -137,14 +138,24 @@ func setLocalManifestLegacyPrefix(t *testing.T, prefix string) {
 	t.Cleanup(func() { require.NoError(t, params.Save(key, original)) })
 }
 
-func newLocalManifestTestMeta(catalog *catalogmocks.DataCoordCatalog, cm storage.ChunkManager) *meta {
+func newLocalManifestTestMeta(t *testing.T, catalog *catalogmocks.DataCoordCatalog, cm storage.ChunkManager) *meta {
+	t.Helper()
+	executor := newManifestCommitExecutor(1)
+	t.Cleanup(executor.close)
+	store := metacache.NewMetaStore(catalog)
 	return &meta{
-		ctx:          context.Background(),
-		catalog:      catalog,
-		chunkManager: cm,
-		segments:     NewSegmentsInfo(),
-		channelCPs:   newChannelCps(),
+		manifestCommitExecutor: executor,
+		ctx:                    context.Background(),
+		catalog:                catalog,
+		metaStore:              store,
+		chunkManager:           cm,
+		segments:               NewSegmentsInfo(store),
+		channelSync:            newChannelSync(),
 	}
+}
+
+func loadAndNormalize(ctx context.Context, mt *meta, collectionIDs []int64) error {
+	return mt.metaStore.LoadFromCatalog(ctx, collectionIDs, mt.segmentLoadNormalizer())
 }
 
 func assertLocalManifestCatalogReadOnly(t *testing.T, catalog *catalogmocks.DataCoordCatalog) {
@@ -183,14 +194,14 @@ func TestReloadLocalManifestPathsReadOnlyAndLazyPersistence(t *testing.T) {
 		return []*datapb.SegmentInfo{stored}, nil
 	}).Times(3)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Times(3)
-	mt := newLocalManifestTestMeta(catalog, cm)
+	mt := newLocalManifestTestMeta(t, catalog, cm)
 	expected := packed.MarshalManifestPath(filepath.ToSlash(filepath.Join(root, legacyBase)), 17)
 
 	// The same legacy catalog value is resolved on every reload without writes.
 	// Stats is deliberately nil: NewSegmentInfo fills it, so the compatibility
 	// layer must clone before constructing the in-memory segment as well.
 	for i := 0; i < 2; i++ {
-		require.NoError(t, mt.reloadFromKV(ctx, []int64{1}))
+		require.NoError(t, loadAndNormalize(ctx, mt, []int64{1}))
 		loaded := mt.segments.GetSegment(3)
 		require.NotNil(t, loaded)
 		assert.Equal(t, expected, loaded.GetManifestPath())
@@ -228,7 +239,7 @@ func TestReloadLocalManifestPathsReadOnlyAndLazyPersistence(t *testing.T) {
 	require.NoError(t, mt.UpdateSegmentsInfo(ctx, UpdateStatusOperator(3, commonpb.SegmentState_Dropped)))
 	assert.True(t, proto.Equal(original, raw))
 	assert.Equal(t, expected, stored.GetManifestPath())
-	require.NoError(t, mt.reloadFromKV(ctx, []int64{1}))
+	require.NoError(t, loadAndNormalize(ctx, mt, []int64{1}))
 	assert.Equal(t, expected, mt.segments.GetSegment(3).GetManifestPath())
 	catalog.AssertNumberOfCalls(t, "AlterSegments", 2)
 	legacyContents, err := os.ReadFile(legacyFile)
@@ -258,8 +269,8 @@ func TestReloadLocalManifestPathsRejectInvalid(t *testing.T) {
 			catalog := catalogmocks.NewDataCoordCatalog(t)
 			catalog.EXPECT().ListSegments(mock.Anything, int64(1)).Return([]*datapb.SegmentInfo{raw}, nil).Once()
 			catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Maybe()
-			mt := newLocalManifestTestMeta(catalog, storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())))
-			require.ErrorIs(t, mt.reloadFromKV(context.Background(), []int64{1}), merr.ErrDataIntegrity)
+			mt := newLocalManifestTestMeta(t, catalog, storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())))
+			require.ErrorIs(t, loadAndNormalize(context.Background(), mt, []int64{1}), merr.ErrDataIntegrity)
 			assert.Nil(t, mt.segments.GetSegment(3), "invalid metadata must never enter the segment cache")
 			assert.True(t, proto.Equal(original, raw))
 			assertLocalManifestCatalogReadOnly(t, catalog)
@@ -294,8 +305,8 @@ func TestReloadLocalManifestPathsBypass(t *testing.T) {
 			if tc.remote {
 				cm = mocks.NewChunkManager(t)
 			}
-			mt := newLocalManifestTestMeta(catalog, cm)
-			require.NoError(t, mt.reloadFromKV(context.Background(), []int64{1}))
+			mt := newLocalManifestTestMeta(t, catalog, cm)
+			require.NoError(t, loadAndNormalize(context.Background(), mt, []int64{1}))
 			loaded := mt.segments.GetSegment(3)
 			require.NotNil(t, loaded)
 			assert.Equal(t, tc.manifest, loaded.GetManifestPath())

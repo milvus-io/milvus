@@ -336,10 +336,14 @@ func getValidTargetList(groupByFields []string, _ []agg.AggregateBase) []string 
 // translateOrderByFields converts ORDER BY field specifications to planpb.OrderByField messages.
 // Delegates parsing to orderby.ParseOrderByFields to ensure consistent behavior
 // (direction validation, nullsFirst defaults) between C++ segcore and Go proxy pipeline.
-func translateOrderByFields(orderByFieldSpecs []string, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
+func translateOrderByFields(orderByFieldSpecs []string, groupByFieldIDs []int64, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
 	parsed, err := orderby.ParseOrderByFields(orderByFieldSpecs, schema)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
+	}
+	parsed, err = orderby.AppendGroupByTieBreakers(parsed, groupByFieldIDs, schema)
+	if err != nil {
+		return nil, err
 	}
 	if len(parsed) == 0 {
 		return nil, nil
@@ -676,7 +680,7 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	}
 
 	// parse order by fields
-	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, groupByFieldsIDs, t.schema.CollectionSchema)
 	if err != nil {
 		return err
 	}
@@ -1124,12 +1128,12 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
 
-	// Parse ORDER BY fields if present
+	// Use the same complete group ordering as segcore, QN, and Delegator.
 	var orderByFields []*orderby.OrderByField
-	if len(t.queryParams.orderByFields) > 0 {
-		orderByFields, err = orderby.ParseOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+	if len(t.OrderByFields) > 0 {
+		orderByFields, err = orderby.ConvertFromPlanOrderByFields(t.OrderByFields, t.schema.CollectionSchema)
 		if err != nil {
-			log.Warn(ctx, "fail to parse order by fields", mlog.Err(err))
+			log.Warn(ctx, "fail to convert order by fields", mlog.Err(err))
 			return err
 		}
 	}

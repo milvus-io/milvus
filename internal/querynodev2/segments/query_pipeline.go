@@ -19,6 +19,8 @@ package segments
 import (
 	"context"
 
+	"github.com/apache/arrow/go/v17/arrow"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
@@ -51,13 +53,18 @@ func RunQNQueryPipeline(
 	schema *schemapb.CollectionSchema,
 	plan *planpb.PlanNode,
 	segcoreResults []*segcorepb.RetrieveResults,
+	// arrowRecords is positionally aligned with segcoreResults: entry i carries
+	// the user output columns of result i, or nil. The CALLER owns them and must
+	// release them after this returns.
+	arrowRecords []arrow.Record,
 	segments []Segment,
 	manager *Manager,
 	retrievePlan *segcore.RetrievePlan,
-) (*segcorepb.RetrieveResults, error) {
+) (*segcorepb.RetrieveResults, *queryutil.ArrowSelection, error) {
 	// Early empty check before any pipeline construction
 	if allSegcoreResultsEmpty(segcoreResults) {
-		return emptySegcoreResult(req, schema)
+		res, err := emptySegcoreResult(req, schema)
+		return res, nil, err
 	}
 
 	// Build pipeline + input msg — the only branching point
@@ -65,23 +72,35 @@ func RunQNQueryPipeline(
 	var msg queryutil.OpMsg
 	var err error
 
+	// selection is filled by the plain reduce when the Arrow path ran. It is
+	// returned UNMATERIALIZED: the caller turns the chosen rows into FieldData
+	// once, at response assembly, while it still holds the records.
+	selection := &queryutil.ArrowSelection{}
+
 	if retrievePlan.IsIgnoreNonPk() {
 		pipeline, msg, err = buildIgnoreNonPkPipeline(req, schema, segcoreResults, segments, manager, retrievePlan)
 	} else {
-		pipeline, msg, err = buildStandardQNPipeline(req, schema, plan, segcoreResults)
+		pipeline, msg, err = buildStandardQNPipeline(req, schema, plan, segcoreResults, arrowRecords, selection)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Common: run pipeline
 	finalMsg, err := pipeline.Run(ctx, nil, msg)
 	if err != nil {
-		return nil, merr.Wrap(err, "QN query pipeline failed")
+		return nil, nil, merr.Wrap(err, "QN query pipeline failed")
 	}
 
 	// Common: extract output + aggregate stats + fill empty fields
-	return extractSegcoreResult(finalMsg, segcoreResults, req, schema)
+	merged, err := extractSegcoreResult(finalMsg, segcoreResults, req, schema)
+	if err != nil {
+		return nil, nil, err
+	}
+	if selection.Empty() {
+		return merged, nil, nil
+	}
+	return merged, selection, nil
 }
 
 // buildIgnoreNonPkPipeline builds the two-phase pipeline for IgnoreNonPk=true:
@@ -140,6 +159,8 @@ func buildStandardQNPipeline(
 	schema *schemapb.CollectionSchema,
 	plan *planpb.PlanNode,
 	segcoreResults []*segcorepb.RetrieveResults,
+	arrowRecords []arrow.Record,
+	arrowOut *queryutil.ArrowSelection,
 ) (*queryutil.Pipeline, queryutil.OpMsg, error) {
 	topK := req.GetReq().GetLimit()
 
@@ -153,8 +174,23 @@ func buildStandardQNPipeline(
 	// Convert segcore results to internal format.
 	// For regular queries, filter by IDs; for aggregation/count, filter by FieldsData.
 	hasAggregation := len(req.GetReq().GetGroupByFieldIds()) > 0 || len(req.GetReq().GetAggregates()) > 0
+	// filteredRecords must be built by the SAME predicate and in the same order
+	// as internalResults: the reduce addresses rows by (resultIdx, rowIdx) into
+	// this slice, so dropping a result from one list and not the other
+	// misattributes every column after it.
 	internalResults := make([]*internalpb.RetrieveResults, 0, len(segcoreResults))
-	for _, res := range segcoreResults {
+	var filteredRecords []arrow.Record
+	if len(arrowRecords) > 0 {
+		// Indexing arrowRecords[i] below is only safe because the caller builds
+		// one entry per segcoreResult, nil included.
+		if len(arrowRecords) != len(segcoreResults) {
+			return nil, nil, merr.WrapErrServiceInternalMsg(
+				"arrow records (%d) are not positionally aligned with results (%d)",
+				len(arrowRecords), len(segcoreResults))
+		}
+		filteredRecords = make([]arrow.Record, 0, len(arrowRecords))
+	}
+	for i, res := range segcoreResults {
 		if res == nil {
 			continue
 		}
@@ -166,6 +202,9 @@ func buildStandardQNPipeline(
 			if typeutil.GetSizeOfIDs(res.GetIds()) == 0 {
 				continue
 			}
+		}
+		if filteredRecords != nil {
+			filteredRecords = append(filteredRecords, arrowRecords[i])
 		}
 		internalResults = append(internalResults, &internalpb.RetrieveResults{
 			Ids:              res.GetIds(),
@@ -185,6 +224,8 @@ func buildStandardQNPipeline(
 		req.GetReq().GetGroupByFieldIds(),
 		req.GetReq().GetAggregates(),
 		maxOutputSize,
+		filteredRecords,
+		arrowOut,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -284,6 +325,9 @@ func RunDelegatorQueryPipeline(
 		req.GetReq().GetGroupByFieldIds(),
 		req.GetReq().GetAggregates(),
 		maxOutputSize,
+		// The delegator reduces FieldData; carrying Arrow across the RPC is a
+		// separate change that needs the wire format to carry it.
+		nil, nil,
 	)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to build delegator query pipeline")

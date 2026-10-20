@@ -42,6 +42,7 @@
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/FileManager.h"
+#include "storage/LegacyIndexFileIO.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -133,15 +134,24 @@ MemFileManagerImpl::LoadFile(const std::string& filename) noexcept {
 std::map<std::string, std::unique_ptr<DataCodec>>
 MemFileManagerImpl::LoadIndexToMemory(
     const std::vector<std::string>& remote_files,
-    milvus::proto::common::LoadPriority priority) {
+    milvus::proto::common::LoadPriority priority,
+    folly::CancellationToken token) {
     std::map<std::string, std::unique_ptr<DataCodec>> file_to_index_data;
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
 
     auto LoadBatchIndexFiles = [&]() {
-        auto index_datas = GetObjectData(
-            rcm_.get(), batch_files, milvus::PriorityForLoad(priority));
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
+        std::vector<std::future<std::unique_ptr<DataCodec>>> index_datas;
+        index_datas.reserve(batch_files.size());
+        for (const auto& path : batch_files) {
+            index_datas.push_back(
+                pool.Submit([manager = rcm_, path, priority, token] {
+                    return ReadLegacyIndexFile(*manager, path, priority, token);
+                }));
+        }
         size_t idx = 0;
         storage::ProcessFuturesInOrder(
             index_datas, [&](std::unique_ptr<DataCodec> codec) {
@@ -311,9 +321,6 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     }
 
     auto& remote_files = segment_insert_files.value();
-    for (auto& files : remote_files) {
-        SortByPath(files);
-    }
     auto field_datas = GetFieldDatasFromStorageV2(remote_files,
                                                   field_meta_.field_id,
                                                   data_type.value(),
@@ -455,9 +462,6 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
     AssertInfo(segment_insert_files.has_value(),
                "insert file paths for storage v2 is empty when build index");
     auto& remote_files = segment_insert_files.value();
-    for (auto& files : remote_files) {
-        SortByPath(files);
-    }
 
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
     for (auto& [field_id, tup] : fields_map) {

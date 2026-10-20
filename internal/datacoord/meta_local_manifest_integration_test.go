@@ -112,7 +112,7 @@ func newLocalPackedFixture(t *testing.T, displaced bool) *legacyLocalPackedFixtu
 			FieldID: 101, LobBasePath: filepath.Join(legacyRoot, "insert_log/1/2/lobs/101"),
 			InlineThreshold: 1, MaxLobFileBytes: 1 << 20, FlushThresholdBytes: 1 << 20,
 		}},
-	}, cfg)
+	}, cfg, nil)
 	require.NoError(t, err)
 	closed := false
 	t.Cleanup(func() {
@@ -262,7 +262,7 @@ func TestReloadLocalManifestPreservesPackedReferences(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegments(mock.Anything, int64(1)).Return([]*datapb.SegmentInfo{f.segment}, nil).Twice()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Twice()
-	mt := newLocalManifestTestMeta(catalog, f.cm)
+	mt := newLocalManifestTestMeta(t, catalog, f.cm)
 	originalSegment := proto.Clone(f.segment)
 	for i := 0; i < 2; i++ {
 		// The R/M namespace remains live compatibility data, not a rename source
@@ -270,7 +270,7 @@ func TestReloadLocalManifestPreservesPackedReferences(t *testing.T) {
 		report, err := localmigrate.Migrate(t.Context(), f.root, localmigrate.Options{LegacyPrefix: "files"})
 		require.NoError(t, err)
 		require.Zero(t, report.Renamed)
-		require.NoError(t, mt.reloadFromKV(context.Background(), []int64{1}))
+		require.NoError(t, loadAndNormalize(context.Background(), mt, []int64{1}))
 		loaded := mt.segments.GetSegment(3)
 		require.Equal(t, f.physicalManifest, loaded.GetManifestPath())
 		f.assertReadable(t, loaded.GetManifestPath(), f.legacyRoot)
@@ -311,12 +311,12 @@ func TestMigrateDoubleRootPackedReferencesAndGCRetry(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegments(mock.Anything, int64(1)).Return([]*datapb.SegmentInfo{f.segment}, nil).Twice()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Twice()
-	mt := newLocalManifestTestMeta(catalog, f.cm)
+	mt := newLocalManifestTestMeta(t, catalog, f.cm)
 	for range 2 {
 		report, err = localmigrate.Migrate(t.Context(), f.root, opts)
 		require.NoError(t, err)
 		require.Zero(t, report.Renamed)
-		require.NoError(t, mt.reloadFromKV(context.Background(), []int64{1}))
+		require.NoError(t, loadAndNormalize(context.Background(), mt, []int64{1}))
 		require.Equal(t, f.segment.GetManifestPath(), mt.segments.GetSegment(3).GetManifestPath())
 		assertLocalManifestCatalogReadOnly(t, catalog)
 		f.assertReadable(t, mt.segments.GetSegment(3).GetManifestPath(), f.root)
@@ -373,9 +373,9 @@ func TestReloadLocalManifestCommitSegmentManifestCAS(t *testing.T) {
 				return []*datapb.SegmentInfo{stored}, nil
 			}).Twice()
 			catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Twice()
-			mt := newLocalManifestTestMeta(catalog, f.cm)
+			mt := newLocalManifestTestMeta(t, catalog, f.cm)
 			ctx := context.Background()
-			require.NoError(t, mt.reloadFromKV(ctx, []int64{1}))
+			require.NoError(t, loadAndNormalize(ctx, mt, []int64{1}))
 			assertLocalManifestCatalogReadOnly(t, catalog)
 			base, version, err := packed.UnmarshalManifestPath(f.physicalManifest)
 			require.NoError(t, err)
@@ -430,7 +430,7 @@ func TestReloadLocalManifestCommitSegmentManifestCAS(t *testing.T) {
 			require.ErrorIs(t, err, errSegmentManifestStale)
 			require.Equal(t, prepared, stored.GetManifestPath())
 			catalog.AssertNumberOfCalls(t, "Update", 1)
-			require.NoError(t, mt.reloadFromKV(ctx, []int64{1}))
+			require.NoError(t, loadAndNormalize(ctx, mt, []int64{1}))
 			require.Equal(t, prepared, mt.segments.GetSegment(3).GetManifestPath())
 			f.assertNoCanonicalLayout(t)
 		})

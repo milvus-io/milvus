@@ -203,3 +203,11 @@ func (s errScanner) Error() error {
 
 func (s errScanner) Close() {
 }
+
+func (w *walAccesserImpl) AnalyzerClient() AnalyzerClient {
+	return w.handlerClient
+}
+
+func (w *walAccesserImpl) SchemaClient() SchemaClient {
+	return schemaClient{handlerClient: w.handlerClient}
+}

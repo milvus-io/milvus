@@ -54,6 +54,9 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
         token, co_await folly::coro::co_current_cancellation_token);
     ThrowIfCancelled(token, "AsyncIndexEntryReader::Open");
     AssertInfo(input != nullptr, "Packed V3 input is null");
+    auto metadata_lease =
+        co_await AcquireMetadataLoadSlotAsync(priority, token);
+    ThrowIfCancelled(token, "AsyncIndexEntryReader::Open");
     const auto file_size = input->Size();
     if (!(file_size <= std::numeric_limits<int64_t>::max() &&
           file_size >= MILVUS_V3_MAGIC_SIZE + MILVUS_V3_FOOTER_SIZE)) {
@@ -65,9 +68,8 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
         std::unique_ptr<AsyncIndexEntryReader>(new AsyncIndexEntryReader());
     reader->input_ = std::move(input);
     reader->collection_id_ = collection_id;
-    // NOTE: Magic/footer and directory reads normally stay small and bypass
-    // admission. Directory/metadata buffers and parsed JSON are allocated outside
-    // admission; large control data can therefore add unaccounted memory usage.
+    // Magic/footer and directory reads share one load slot without a byte charge.
+    // Directory/metadata buffers and parsed JSON remain outside byte accounting.
     // __meta__ reads still use ReadEntriesAsync slice admission, which does not
     // cover the destination buffer allocated below.
     uint8_t magic[MILVUS_V3_MAGIC_SIZE];
@@ -105,6 +107,8 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
         }
     }
 
+    // ReadEntriesAsync acquires its own slots; do not retain the directory slot.
+    metadata_lease.Release();
     const auto& meta = reader->directory_.At(MILVUS_V3_META_ENTRY_NAME);
     auto data = std::make_shared<std::vector<uint8_t>>(meta.plaintext_size);
     std::vector<EntryLoadPlan> entries_to_read;

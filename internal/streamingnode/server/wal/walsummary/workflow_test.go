@@ -3,7 +3,6 @@ package walsummary
 import (
 	"context"
 	"fmt"
-	"maps"
 	"math"
 	"strings"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -145,23 +145,23 @@ func TestNodeSchedulerUploadsInParallel(t *testing.T) {
 	m, store := newTestManagerWithStore(t)
 	scheduler := nodescheduler.New(3)
 	firstEntered, release := make(chan struct{}), make(chan struct{})
-	patch := mockey.Mock((*Store).WriteChunk).To(func(s *Store, ctx context.Context, gen uint64, sections map[string]*ChunkSections, coverage TimeTickRange) (*streamingpb.PChannelSummaryChunkFooter, uint64, error) {
+	patch := mockey.Mock((*Store).writeChunk).To(func(s *Store, ctx context.Context, gen uint64, sections map[string]*ChunkSections, coverage TimeTickRange) (*streamingpb.PChannelSummaryChunkFooter, []byte, error) {
 		// Consume mock arguments before blocking: runtime patching cannot tell
 		// the compiler that the original callee's stack map now escapes.
 		payload, footer, err := marshalChunk(s.PChannel(), gen, s.Term(), sections, coverage)
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, err
 		}
 		if gen == 0 {
 			close(firstEntered)
 			select {
 			case <-release:
 			case <-ctx.Done():
-				return nil, 0, ctx.Err()
+				return nil, nil, ctx.Err()
 			}
 		}
 		err = s.chunkManager.Write(ctx, s.ChunkKey(gen), payload)
-		return footer, uint64(len(payload)), err
+		return footer, payload, err
 	}).Build()
 	defer patch.UnPatch()
 	defer scheduler.Close()
@@ -266,12 +266,12 @@ func TestGCWaitsForPublicationAndReaders(t *testing.T) {
 	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
 	require.NoError(t, drainSummary(ctx, m))
 	entered, release := make(chan struct{}), make(chan struct{})
-	var original func(*Store, context.Context, uint64, int64, map[string]*streamingpb.VChannelSummaryChunkIndex) (map[string]*ChunkSections, error)
-	patch := mockey.Mock((*Store).ReadIdempotencySectionsOfChunk).Origin(&original).To(func(s *Store, ctx context.Context, gen uint64, term int64, index map[string]*streamingpb.VChannelSummaryChunkIndex) (map[string]*ChunkSections, error) {
-		copiedIndex := maps.Clone(index)
+	var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error)
+	patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(s *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+		copiedIndex := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 		close(entered)
 		<-release
-		return original(s, ctx, gen, term, copiedIndex)
+		return original(s, ctx, copiedIndex)
 	}).Build()
 	defer patch.UnPatch()
 	readDone := make(chan error, 1)

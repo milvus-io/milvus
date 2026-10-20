@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -63,15 +64,15 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 		buildID      = int64(102)
 	)
 	basePath := "files/insert_log/1/2/3"
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collectionID, &collectionInfo{
+	ms := metacache.NewMetaStore(nil)
+	ms.PutCollection(&collectionInfo{
 		ID: collectionID,
 		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 			{FieldID: fieldID, Name: "vector"},
 		}},
 	})
 	m := &meta{
-		collections:  collections,
+		metaStore:    ms,
 		chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
 		indexMeta: &indexMeta{
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -142,9 +143,9 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 // TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride covers a segment
 // whose index type was downgraded away from the collection definition.
 func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	ms := metacache.NewMetaStore(nil)
 	m := &meta{
-		collections:  collections,
+		metaStore:    ms,
 		chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
 		indexMeta: &indexMeta{
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -231,7 +232,8 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 	segmentIndexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segmentIndexes.Insert(indexID, segmentIndex)
 	segmentIndexes.Insert(indexID2, segmentIndex2)
-	segments := NewSegmentsInfo()
+	ms := metacache.NewMetaStore(nil)
+	segments := NewSegmentsInfo(ms)
 	segments.SetSegment(segmentID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -291,8 +293,8 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 	t.Run("absent segment index records yield nothing and read no manifest", func(t *testing.T) {
 		server.meta.indexMeta.segmentIndexes.Remove(segmentID)
 		manifestReadCount := 0
-		patch := mockey.Mock(packed.GetManifestIndexInfos).To(
-			func(_ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		patch := mockey.Mock(packed.GetManifestIndexInfosAsync).To(
+			func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 				manifestReadCount++
 				return []packed.ManifestIndexInfo{manifestIndex, manifestIndex2}, nil
 			}).Build()
@@ -313,8 +315,8 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 	t.Run("finished task missing index file keys reads no manifest", func(t *testing.T) {
 		server.meta.chunkManager = storage.NewLocalChunkManager()
 		manifestReadCount := 0
-		patch := mockey.Mock(packed.GetManifestIndexInfos).To(
-			func(_ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		patch := mockey.Mock(packed.GetManifestIndexInfosAsync).To(
+			func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 				manifestReadCount++
 				return []packed.ManifestIndexInfo{manifestIndex, manifestIndex2}, nil
 			}).Build()
@@ -339,8 +341,8 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 		segmentIndex2.IndexMemSize = 3000
 		server.meta.chunkManager = storage.NewLocalChunkManager()
 		manifestReadCount := 0
-		patch := mockey.Mock(packed.GetManifestIndexInfos).To(
-			func(_ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		patch := mockey.Mock(packed.GetManifestIndexInfosAsync).To(
+			func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 				manifestReadCount++
 				return nil, nil
 			}).Build()
@@ -371,6 +373,7 @@ func withSegmentIndexManifestWrites(t *testing.T, enabled bool) {
 // state a restart lands in after manifest publication retires the Finished
 // etcd row.
 func setupManifestReloadMeta(t *testing.T) *meta {
+	mockManifestIndexSubmissions(t)
 	t.Helper()
 	const (
 		collID  = UniqueID(100)
@@ -405,7 +408,7 @@ func setupManifestReloadMeta(t *testing.T) *meta {
 
 func mockReloadManifestEntry(t *testing.T, buildID int64) {
 	t.Helper()
-	infos := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{
+	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{
 		IndexID:               500,
 		BuildID:               buildID,
 		FieldID:               101,
@@ -501,7 +504,7 @@ func TestReloadSegmentIndexesFromManifests_EtcdRecordWins(t *testing.T) {
 func TestReloadSegmentIndexesFromManifests_UnreadableManifestFailsStartup(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 	m := setupManifestReloadMeta(t)
-	infos := mockey.Mock(packed.GetManifestIndexInfos).
+	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).
 		Return(nil, merr.WrapErrIoFailedReason("throttled")).Build()
 	defer infos.UnPatch()
 
@@ -528,7 +531,7 @@ func TestUnreadableManifestAbortsMetaBoot(t *testing.T) {
 		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{restartCollID}}},
 	}, nil).Maybe()
 	_, err := newMeta(context.TODO(), catalog,
-		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), b)
+		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), metacache.NewMetaStore(catalog), b)
 	require.Error(t, err, "startup must fail rather than come up with an incomplete indexMeta")
 }
 
@@ -553,12 +556,51 @@ func (s *fakeManifestStore) failReadsFrom() {
 	s.failReads = true
 }
 
+// Adapt the existing fake reader to callback delivery. Production recovery
+// submits directly to the native executor; only this test stub uses a goroutine.
+func mockManifestIndexSubmissions(t *testing.T) {
+	t.Helper()
+	mock := mockey.Mock(packed.SubmitManifestIndexInfos).To(func(ctx context.Context, io *packed.ManifestIOContext, manifest string, config *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
+		go func() {
+			entries, err := packed.GetManifestIndexInfosAsync(ctx, io, manifest, config)
+			complete(entries, err)
+		}()
+		return nil
+	}).Build()
+	t.Cleanup(func() { mock.UnPatch() })
+}
+
+func mockManifestUpdateResult(manifestPath string, updates *packed.ManifestUpdates) packed.ManifestUpdateResult {
+	result := packed.ManifestUpdateResult{ManifestPath: manifestPath}
+	if updates != nil && (len(updates.Indexes) > 0 || len(updates.DropIndexes) > 0) {
+		value := len(updates.Indexes) > 0
+		result.HasIndexes = &value
+	}
+	return result
+}
+
+// Adapt a mocked blocking commit to callback delivery. Install only alongside a
+// CommitManifestUpdatesWithResultAsync mock, since the real wrapper calls the submit API.
+func mockManifestUpdateSubmissions(t *testing.T) {
+	t.Helper()
+	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+		go func() {
+			manifestPath, err := packed.CommitManifestUpdatesWithResultAsync(ctx, io, base, version, config, updates)
+			complete(manifestPath, err)
+		}()
+		return nil
+	}).Build()
+	t.Cleanup(func() { mock.UnPatch() })
+}
+
 func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 	t.Helper()
+	mockManifestUpdateSubmissions(t)
+	mockManifestIndexSubmissions(t)
 	s := &fakeManifestStore{revisions: make(map[string][]packed.ManifestIndexInfo)}
 
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(basePath string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, basePath string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			s.commitCount++
@@ -580,12 +622,13 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 			next = append(next, updates.Indexes...)
 			published := packed.MarshalManifestPath(basePath, version+1)
 			s.revisions[published] = next
-			return published, nil
+			hasIndexes := len(next) > 0
+			return packed.ManifestUpdateResult{ManifestPath: published, HasIndexes: &hasIndexes}, nil
 		}).Build()
 	t.Cleanup(func() { commit.UnPatch() })
 
-	read := mockey.Mock(packed.GetManifestIndexInfos).To(
-		func(manifestPath string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+	read := mockey.Mock(packed.GetManifestIndexInfosAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			s.readCount++
@@ -618,8 +661,9 @@ func bootMetaForRestart(t *testing.T, catalog metastore.DataCoordCatalog, collec
 		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{collectionID}}},
 	}, nil)
 	m, err := newMeta(context.TODO(), catalog,
-		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), b)
+		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), metacache.NewMetaStore(catalog), b)
 	require.NoError(t, err)
+	t.Cleanup(m.closeManifestCommitExecutor)
 	return m
 }
 
@@ -961,7 +1005,7 @@ func TestReloadRecoversDroppedIndexEntriesSoGCCanRetract(t *testing.T) {
 func TestReloadRejectsUnusableManifestIndexEntry(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 	m := setupManifestReloadMeta(t)
-	infos := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{
+	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{
 		IndexID:               500,
 		BuildID:               5100,
 		FieldID:               101,

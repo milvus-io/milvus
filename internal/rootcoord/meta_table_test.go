@@ -58,6 +58,67 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestCollectionAvailability(t *testing.T) {
+	mt := &MetaTable{collID2Meta: map[int64]*model.Collection{
+		1: {CollectionID: 1, State: pb.CollectionState_CollectionCreated},
+		2: {CollectionID: 2, State: pb.CollectionState_CollectionCreating},
+		3: {CollectionID: 3, State: pb.CollectionState_CollectionDropping},
+		4: nil,
+	}}
+	core := &Core{ctx: context.Background(), meta: mt}
+	core.UpdateStateCode(commonpb.StateCode_Healthy)
+	require.True(t, core.IsCollectionAvailable(1))
+	for _, id := range []int64{2, 3, 4, 5} {
+		require.False(t, core.IsCollectionAvailable(id))
+	}
+	// No scheduler, catalog or schema is needed on either cache outcome.
+	core.UpdateStateCode(commonpb.StateCode_Abnormal)
+	require.False(t, core.IsCollectionAvailable(1))
+	core.UpdateStateCode(commonpb.StateCode_Healthy)
+	mt.ddLock.Lock()
+	mt.collID2Meta[1] = &model.Collection{CollectionID: 1, State: pb.CollectionState_CollectionDropping}
+	mt.ddLock.Unlock()
+	require.False(t, core.IsCollectionAvailable(1))
+	core.meta = nil
+	require.False(t, core.IsCollectionAvailable(1))
+
+	require.Zero(t, testing.AllocsPerRun(100, func() { mt.IsCollectionAvailable(1) }))
+}
+
+func BenchmarkCollectionAvailability(b *testing.B) {
+	mt := &MetaTable{collID2Meta: map[int64]*model.Collection{
+		1: {CollectionID: 1, State: pb.CollectionState_CollectionCreated},
+	}}
+	b.ReportAllocs()
+	for b.Loop() {
+		if !mt.IsCollectionAvailable(1) {
+			b.Fatal("available collection not found")
+		}
+	}
+}
+
+func TestCollectionAvailabilityConcurrent(t *testing.T) {
+	mt := &MetaTable{collID2Meta: make(map[int64]*model.Collection)}
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := 0; i < 100; i++ {
+			mt.ddLock.Lock()
+			mt.collID2Meta[1] = &model.Collection{CollectionID: 1, State: pb.CollectionState_CollectionCreated}
+			mt.ddLock.Unlock()
+			mt.ddLock.Lock()
+			delete(mt.collID2Meta, 1)
+			mt.ddLock.Unlock()
+		}
+	})
+	wg.Go(func() {
+		for i := 0; i < 100; i++ {
+			mt.IsCollectionAvailable(1)
+		}
+	})
+	wg.Wait()
+	require.False(t, mt.IsCollectionAvailable(1))
+}
+
 func TestMetaTable_DescribeAliasAllowsConcurrentReaders(t *testing.T) {
 	const (
 		collectionID   = int64(100)
@@ -3368,6 +3429,66 @@ func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
 }
 
 func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
+	t.Run("grant cleanup does not hold ddl lock", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil)
+
+		cleanupStarted := make(chan struct{})
+		cleanupRelease := make(chan struct{})
+		catalog.On("DeleteGrantByCollectionName",
+			mock.Anything, mock.Anything, "testdb", "collection",
+		).Run(func(mock.Arguments) {
+			close(cleanupStarted)
+			<-cleanupRelease
+		}).Return(nil)
+
+		meta := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "collection", DBID: 1, State: pb.CollectionState_CollectionCreated},
+			},
+			dbName2Meta: map[string]*model.Database{
+				"testdb": {ID: 1, Name: "testdb"},
+			},
+			fileResourceRefCnt: make(map[int64]int),
+		}
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
+		meta.names.insert("testdb", "collection", 100)
+
+		dropDone := make(chan error, 1)
+		go func() {
+			dropDone <- meta.DropCollection(context.Background(), 100, 9999)
+		}()
+
+		select {
+		case <-cleanupStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("grant cleanup did not start")
+		}
+
+		lockAcquired := make(chan struct{})
+		go func() {
+			meta.ddLock.Lock()
+			close(lockAcquired)
+			meta.ddLock.Unlock()
+		}()
+
+		select {
+		case <-lockAcquired:
+		case <-time.After(3 * time.Second):
+			close(cleanupRelease)
+			t.Fatal("ddl lock is held while grant cleanup is blocked")
+		}
+
+		close(cleanupRelease)
+		require.NoError(t, <-dropDone)
+	})
+
 	t.Run("grant cleanup on drop", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterCollection",
