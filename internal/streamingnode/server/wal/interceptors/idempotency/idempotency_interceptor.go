@@ -61,7 +61,7 @@ func newIdempotencyInterceptorWithParam(config WindowConfig, param *interceptors
 		// A txn whose session is no longer tracked by the txn manager has been
 		// committed, rolled back, expired or failed over. Its buffered insert
 		// results can be dropped even if no commit/rollback message reached this
-		// interceptor (e.g. RollbackAllInFlightTransactions on failover).
+		// interceptor (e.g. FailTxnAtVChannel on failover).
 		txnActive = func(txnID message.TxnID) bool {
 			_, err := txnManager.GetSessionOfTxn(txnID)
 			return err == nil

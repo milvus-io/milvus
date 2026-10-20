@@ -39,8 +39,9 @@ WAL append cancellation ends the writer lifecycle and requires this recovery flo
 before writes resume. It does not prove that the interrupted record was absent.
 A durable Commit is replayed as a completed transaction; an incomplete receiving
 prefix reconstructs both TxnManager and ReplicatesManager from the same TxnBuffer;
-a durable ManualFlush/FlushAll removes the aborted prefix in its scope, regardless
-of replication origin or the `_ur` marker. The old session is not reset
+a durable exclusive operation (including ManualFlush/FlushAll) removes the aborted
+prefix in its scope, regardless of replication origin or the `_ur` marker.
+Explicitly ignored topology records have no abort effect. The old session is not reset
 for another Commit attempt on the cancelled writer. See
 [Append retry and writer lifetime](../walbackend/walbackend.md#append-retry-and-writer-lifetime).
 

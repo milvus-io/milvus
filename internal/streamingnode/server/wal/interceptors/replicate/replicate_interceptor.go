@@ -7,17 +7,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 const interceptorName = "replicate"
 
 type replicateInterceptor struct {
 	replicateManager replicates.ReplicatesManager
-	txnManager       *txn.TxnManager
 }
 
 func (impl *replicateInterceptor) Name() string {
@@ -42,20 +39,7 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 			return nil, err
 		}
 
-		// Append the message first
-		msgID, err := appendOp(ctx, msg)
-		if err != nil {
-			return nil, err
-		}
-
-		// After successful append, check if this is a force promote - if so, rollback all in-flight transactions
-		// This ensures atomicity: transactions are only rolled back after the config change is persisted in WAL
-		if header.ForcePromote && impl.txnManager != nil {
-			impl.txnManager.RollbackAllInFlightTransactions()
-			mlog.Info(ctx, "Force promote replicate config and roll back all in-flight transactions successfully")
-		}
-
-		return msgID, nil
+		return appendOp(ctx, msg)
 	}
 
 	// Begin to replicate the message.
@@ -71,17 +55,7 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 	defer func() {
 		acker.Ack(err)
 	}()
-	msgID, err = appendOp(ctx, msg)
-	if err == nil && message.IsLocalFlush(msg) {
-		// Both the WAL lock and replicate manager guard are still held. Release
-		// segment/proof references before the acker clears the replication prefix.
-		if msg.MessageType() == message.MessageTypeFlushAll {
-			impl.txnManager.AbortTxnAtVChannel("")
-		} else if !funcutil.IsControlChannel(msg.VChannel()) {
-			impl.txnManager.AbortTxnAtVChannel(msg.VChannel())
-		}
-	}
-	return msgID, err
+	return appendOp(ctx, msg)
 }
 
 func (impl *replicateInterceptor) Close() {

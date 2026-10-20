@@ -47,10 +47,8 @@ func TestFlushAbortsRecoveredReplicaSessionsByVChannel(t *testing.T) {
 		require.NoError(t, err)
 		session.RegisterCleanup(func() { cleaned[id]++ }, 1)
 	}
-	m.FailTxnAtVChannel("")
-	require.Len(t, m.sessions, 2, "ordinary exclusives cannot discard a receiving txn")
 	first := m.sessions[1]
-	m.AbortTxnAtVChannel("v1")
+	m.FailTxnAtVChannel("v1")
 	require.Equal(t, message.TxnStateRollbacked, first.State())
 	require.True(t, first.IsExpiredOrDone(1), "LastConfirmedMessageID must be able to pass the aborted infinite-lease txn")
 	require.Equal(t, 1, cleaned[1])
@@ -70,7 +68,7 @@ func TestFlushAbortsRecoveredReplicaSessionsByVChannel(t *testing.T) {
 		defer m.mu.Unlock()
 		return m.closed != nil
 	}, time.Second, time.Millisecond)
-	m.AbortTxnAtVChannel("")
+	m.FailTxnAtVChannel("")
 	require.Equal(t, 1, cleaned[2])
 	require.Empty(t, m.sessions)
 	select {
@@ -78,7 +76,7 @@ func TestFlushAbortsRecoveredReplicaSessionsByVChannel(t *testing.T) {
 	default:
 		t.Fatal("flush must release the recovered-segment flush barrier")
 	}
-	m.AbortTxnAtVChannel("")
+	m.FailTxnAtVChannel("")
 	require.Equal(t, map[message.TxnID]int{1: 1, 2: 1}, cleaned)
 	require.NoError(t, <-closing, "flush must wake a concurrently closing manager")
 }
@@ -297,7 +295,7 @@ func TestTxnSessionRejectCommitAdmission(t *testing.T) {
 	require.Equal(t, int32(1), cleanupCalled.Load())
 }
 
-func TestRollbackAllInFlightTransactions(t *testing.T) {
+func TestFailAllTransactions(t *testing.T) {
 	resource.InitForTest(t)
 
 	t.Run("RollbackWithNoSessions", func(t *testing.T) {
@@ -305,7 +303,7 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		<-m.RecoverDone()
 
 		// Should not panic and handle empty case
-		m.RollbackAllInFlightTransactions()
+		m.FailTxnAtVChannel("")
 	})
 
 	t.Run("RollbackWithActiveSessions", func(t *testing.T) {
@@ -330,7 +328,7 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		m.mu.Unlock()
 
 		// Rollback all in-flight transactions
-		m.RollbackAllInFlightTransactions()
+		m.FailTxnAtVChannel("")
 
 		// Verify all sessions are cleaned up
 		m.mu.Lock()
@@ -376,7 +374,7 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		session3.AddNewMessageDoneAndKeepalive(0)
 
 		// Rollback all in-flight transactions
-		m.RollbackAllInFlightTransactions()
+		m.FailTxnAtVChannel("")
 
 		require.Equal(t, message.TxnStateRollbacked, session1.State())
 		require.Equal(t, message.TxnStateCommitted, session2.State())
@@ -412,7 +410,7 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		}
 
 		// Rollback all in-flight transactions
-		m.RollbackAllInFlightTransactions()
+		m.FailTxnAtVChannel("")
 
 		// Verify all sessions are cleaned up
 		m.mu.Lock()

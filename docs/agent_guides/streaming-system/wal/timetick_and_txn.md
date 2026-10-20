@@ -50,22 +50,20 @@ See [Transaction Messages](../message/message-semantic-txn.md) for message types
 3. **Commit**: Close body admission and wait for in-flight appends. Check a nonzero Commit `body_cnt` against successful appends; zero skips validation for legacy transactions. A mismatch rolls back the session and releases references, causing a whole-transaction retry. After successful Commit append, mark the transaction as committed. The transaction's messages become visible to consumers as a single atomic group at the assigned TimeTick.
 4. **Rollback**: Mark the transaction as rolled back. All messages in the transaction are discarded.
 5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
-6. **Force-fail**: The [Lock](lock.md) interceptor force-fails locally originated active transactions at a VChannel when an exclusive operation is appended.
+6. **Force-fail**: The [Lock](lock.md) interceptor aborts all active transactions in the affected scope after an exclusive operation is successfully appended. Failed, deduplicated and explicitly ignored operations do not abort.
 
-A replicated Commit interrupted by WAL cancellation/fencing stays unresolved until
+A Commit of either origin interrupted by WAL cancellation/fencing stays unresolved until
 recovery; it is neither marked committed nor reset for retry on the old writer.
 Ordinary backend errors retry below the interceptor. See
 [Append retry and writer lifetime](../walbackend/walbackend.md#append-retry-and-writer-lifetime).
 
-Force-fail, local Flush and ForcePromote use the same terminal-session cleanup:
-mark unfinished sessions rolled back, release references, remove them from active
-and recovered maps, and notify recovery/shutdown waiters. Completed sessions keep
-their committed outcome. Only the selection differs: ordinary exclusive operations
-select local sessions, local Flush also selects receiving sessions in its scope,
-and ForcePromote selects all sessions. Terminal state releases confirmation
-barriers immediately instead of relying on the local lease to expire.
-Local Flush durably aborts scoped receiving sessions, allowing CDC to replay the
-full transaction. See [Local Flush Control](local-flush.md).
+All exclusive operations, including Flush and ForcePromote, use one scope-based
+terminal-session cleanup: mark unfinished sessions rolled back, release references,
+remove them from active and recovered maps, and notify recovery/shutdown waiters.
+Committed sessions keep their outcome. There is no transaction-origin selector.
+Terminal state releases confirmation barriers without waiting for lease expiry.
+The replication helper clears the corresponding prefix under the same WAL lock;
+CDC can then replay the full source transaction. See [Local Flush Control](local-flush.md).
 
 ### Scope and duplicate handling
 
@@ -75,8 +73,9 @@ resolves the whole PChannel. Incomplete replicated transactions need not finish
 before a local Flush: its durable abort boundary allows the complete transaction
 to be replayed with new local segment assignments.
 
-At consumption, every ManualFlush/FlushAll immediately discards unfinished
+At consumption, every exclusive operation immediately discards unfinished
 transactions in the same scope, regardless of `_ur` or replication origin.
+An AlterReplicateConfig record marked Ignore does not abort.
 ManualFlush on CChannel does not abort business transactions.
 
 Distinguish three kinds of duplicate when reasoning about `body_cnt`:

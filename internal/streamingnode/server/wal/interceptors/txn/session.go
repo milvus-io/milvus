@@ -38,7 +38,6 @@ func newTxnSession(
 // TxnSession is a session for a transaction.
 type TxnSession struct {
 	mu               sync.Mutex
-	replicated       bool                         // Set from BeginTxn, immutable for this session.
 	vchannel         string                       // The vchannel of the session.
 	lastTimetick     uint64                       // session last timetick.
 	expired          bool                         // The flag indicates the transaction has trigger expired once.

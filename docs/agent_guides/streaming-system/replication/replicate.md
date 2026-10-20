@@ -51,9 +51,10 @@ body deduplication. A nonzero Commit body count equal to that set's size establi
 completeness because the accepted IDs are drawn from the same source transaction.
 No complete ID manifest, predecessor chain, per-attempt key or ReplicateTerm is needed.
 
-A duplicate Begin preserves an intact prefix. A durable local Flush clears both
-the receiving session and prefix under the WAL lock, so the next replayed Begin
-starts fresh. Repeated Commit is covered by the checkpoint once committed. CDC
+A duplicate Begin preserves an intact prefix. Successful local exclusive operations
+clear the scoped prefix through the replicate acker and abort sessions through
+the common lock guard, all before releasing the WAL lock. The next replayed Begin
+starts fresh. Failed and deduplicated operations do not discard the prefix. Repeated Commit is covered by the checkpoint once committed. CDC
 restart resumes from the existing checkpoint and immutable source WAL; there is no
 additional replication-term high-water mark to allocate or recover. Existing WAL
 assignment terms and fencing retain their separate writer-ownership role.

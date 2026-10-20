@@ -75,7 +75,7 @@ func (s *replicateTxnHelper) StartCommit(txn *message.TxnContext, bodyCnt uint64
 	return nil
 }
 
-func (s *replicateTxnHelper) CommitDone(txn *message.TxnContext) {
+func (s *replicateTxnHelper) CommitDone() {
 	s.clear()
 }
 

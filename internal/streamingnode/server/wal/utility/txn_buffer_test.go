@@ -63,7 +63,8 @@ func TestFlushAbortsScopedTransactions(t *testing.T) {
 			require.Less(t, b.Bytes(), bytesBefore)
 			require.Len(t, b.Snapshot().builders, 1, "recovery must not revive the aborted prefix")
 
-			all := message.NewFlushAllMessageBuilderV2().WithAllVChannel().
+			// Legacy FlushAll records may carry the PChannel name without a scope flag.
+			all := message.NewFlushAllMessageBuilderV2().WithVChannel("p1").
 				WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{})
 			if origin == "local" {
 				all.WithUnreplicable()
@@ -229,57 +230,6 @@ func newAlterReplicateConfigMessage(t *testing.T, forcePromote bool, ignore bool
 		IntoImmutableMessage(walimplstest.NewTestMessageID(idAllocator.Allocate()))
 }
 
-func TestRollbackAllUncommittedTxn(t *testing.T) {
-	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
-
-	baseTso := tsoutil.ComposeTSByTime(time.Now())
-
-	// Create uncommitted transactions
-	txnCtx1 := &message.TxnContext{
-		TxnID:     1,
-		Keepalive: time.Hour, // Long keepalive so it doesn't expire
-	}
-	txnCtx2 := &message.TxnContext{
-		TxnID:     2,
-		Keepalive: time.Hour,
-	}
-
-	// Start two transactions
-	msgs := b.HandleImmutableMessages([]message.ImmutableMessage{
-		newBeginMessage(t, txnCtx1, baseTso),
-		newBeginMessage(t, txnCtx2, baseTso),
-	}, tsoutil.AddPhysicalDurationOnTs(baseTso, time.Millisecond))
-	assert.Len(t, msgs, 0)
-	assert.Len(t, b.builders, 2)
-
-	// Add some body messages
-	msgs = b.HandleImmutableMessages([]message.ImmutableMessage{
-		newInsertMessage(t, txnCtx1, tsoutil.AddPhysicalDurationOnTs(baseTso, 100*time.Millisecond)),
-		newInsertMessage(t, txnCtx2, tsoutil.AddPhysicalDurationOnTs(baseTso, 100*time.Millisecond)),
-	}, tsoutil.AddPhysicalDurationOnTs(baseTso, 200*time.Millisecond))
-	assert.Len(t, msgs, 0)
-	assert.Len(t, b.builders, 2)
-
-	// Verify bytes are tracked
-	assert.Greater(t, b.Bytes(), 0)
-
-	// Rollback all uncommitted transactions
-	b.rollbackAllUncommittedTxn()
-
-	// Verify all transactions are rolled back
-	assert.Len(t, b.builders, 0)
-	assert.Equal(t, 0, b.Bytes())
-}
-
-func TestRollbackAllUncommittedTxn_Empty(t *testing.T) {
-	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
-
-	// Rollback on empty buffer should be a no-op
-	b.rollbackAllUncommittedTxn()
-	assert.Len(t, b.builders, 0)
-	assert.Equal(t, 0, b.Bytes())
-}
-
 func TestForcePromoteRollsBackUncommittedTxn(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
@@ -352,7 +302,7 @@ func TestForcePromoteIgnored_DoesNotRollback(t *testing.T) {
 	assert.Len(t, b.builders, 1)
 }
 
-func TestNonForcePromoteAlterReplicateConfig_DoesNotRollback(t *testing.T) {
+func TestNonForcePromoteAlterReplicateConfigAborts(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
 	baseTso := tsoutil.ComposeTSByTime(time.Now())
@@ -370,15 +320,15 @@ func TestNonForcePromoteAlterReplicateConfig_DoesNotRollback(t *testing.T) {
 	assert.Len(t, msgs, 0)
 	assert.Len(t, b.builders, 1)
 
-	// Send AlterReplicateConfig message WITHOUT force promote - should NOT rollback
+	// Ordinary topology changes share the exclusive transaction boundary.
 	msgs = b.HandleImmutableMessages([]message.ImmutableMessage{
 		newAlterReplicateConfigMessage(t, false, false, tsoutil.AddPhysicalDurationOnTs(baseTso, 200*time.Millisecond)),
 	}, tsoutil.AddPhysicalDurationOnTs(baseTso, 300*time.Millisecond))
 
 	// Message should be returned
 	assert.Len(t, msgs, 1)
-	// Transaction should still exist (not force promote)
-	assert.Len(t, b.builders, 1)
+	// Transaction is aborted even without ForcePromote.
+	assert.Empty(t, b.builders)
 }
 
 func TestTxnBufferSnapshotIsIndependent(t *testing.T) {

@@ -33,7 +33,7 @@ func TestReplicateTxnBodyCount(t *testing.T) {
 	require.NoError(t, helper.StartCommit(txn, 2))
 	require.Error(t, helper.StartCommit(txn, 1), "extra bodies also reject Commit")
 	require.NoError(t, helper.StartCommit(txn, 0), "legacy Commit remains unchecked")
-	helper.CommitDone(txn)
+	helper.CommitDone()
 	require.Nil(t, helper.CurrentTxn())
 }
 

@@ -37,26 +37,39 @@ locks; those locks alone cannot prevent this race. No ACK is synthesized outside
 
 ## Abort and replay against replication
 
-Transactions are VChannel-scoped. A local ManualFlush takes the existing exclusive
-VChannel WAL lock; FlushAll takes the PChannel exclusive lock. It does not wait for
-an incomplete transaction to commit. Ordinary lock cleanup continues to fail local
-sessions. Once the local flush record is durable, the Replicate interceptor aborts
-receiving sessions in that scope, releases their segment/proof references, and
-clears the replication helper's accepted prefix before releasing the WAL lock.
-Aborted sessions are marked terminal so infinite leases cannot pin
-LastConfirmedMessageID; completing the last session also wakes graceful shutdown.
-ManualFlush's CChannel copy does not abort business transactions. Other VChannels
-on the same PChannel remain unaffected. Ordinary non-flush exclusive operations
-continue to skip replicated sessions.
+Transactions are VChannel-scoped. ManualFlush takes the existing exclusive
+VChannel WAL lock; FlushAll takes the PChannel exclusive lock. Neither waits for
+an incomplete transaction to commit. All successful exclusive operations use the
+same `TxnManager.FailTxnAtVChannel` cleanup before unlocking, regardless of
+transaction origin. It marks unfinished sessions terminal, releases segment/proof
+references, and notifies recovery and shutdown waiters. There is no replicated
+session flag, includeReplicated switch or separate Flush/ForcePromote abort API.
 
-The consumer TxnBuffer treats every ManualFlush and FlushAll as a scoped abort
-boundary, including historical unmarked and replicated flushes. `_ur` controls
-replication policy, not transaction abort semantics. Cleanup is immediate rather
-than waiting for transaction expiry. Thus a WAL reopen cannot recover a pre-flush
-partial transaction. Only the replayed body's newly assigned local segments can
-appear in the committed txn.
-No rollback message is sent back to the source and no replication checkpoint is
-advanced. The local flush itself is the durable abort record.
+An operation rejected or deduplicated before append is not an abort boundary.
+The lock guard receives the append outcome; a failed append does not discard a
+session. An AlterReplicateConfig record with Ignore set likewise has no abort
+effect. Ordinary WAL-generated TimeTick/CreateSegment/Flush do not require an
+exclusive lock and therefore do not abort transactions.
+
+Unreplicable exclusive operations use the existing ReplicatesManager mutex and
+acker to clear the scoped receiving prefix after successful append. This covers
+local Flush and other local exclusive controls uniformly. The outer WAL lock is
+still held until session cleanup finishes, so the affected VChannel cannot start
+replay between the two cleanups. Normal replicated DDL cannot enter while a
+receiving txn is active; old DDL is deduplicated without aborting it. Non-ignored
+topology changes reset the prefix as part of the existing role transition.
+
+The consumer TxnBuffer applies the same exclusive-operation boundaries before
+forwarding messages, independent of `_ur` or replication origin. PChannel-level
+operations cover every txn; business-VChannel operations cover only that shard;
+collection DDL's CChannel copy has no business transaction to abort. An ignored
+topology record is a no-op. This replaces both expiry-based cleanup and the
+separate consumer ForcePromote cleanup loop.
+
+A WAL reopen therefore cannot recover a prefix that crosses a durable exclusive
+boundary. Only replayed bodies with newly assigned local segments can appear in
+the committed txn. Local Flush does not send a rollback to the source or advance
+the source replication checkpoint; its WAL record is the durable abort boundary.
 
 CDC retains each complete source transaction until Commit is acknowledged. A
 transaction-expired response terminates the stream; reconnect replays Begin, all
@@ -130,7 +143,7 @@ cancel/timeout error. Append timestamp allocation and barrier advancement likewi
 cannot leave a live writer with interceptor state that has no corresponding WAL record.
 
 There is no RetryCommit state restoration or extra failure-handler callback.
-A replicated Commit interrupted after preparation remains unresolved with its
+A Commit of either origin interrupted after preparation remains unresolved with its
 session references retained for teardown/recovery. A body-count mismatch is a
 definite rejection before backend append; on a replica it is checked before Commit
 preparation, allowing the missing source bodies to be supplied by replay.
@@ -143,8 +156,8 @@ are used for subsequent write-side Commit validation, not for rechecking a durab
 
 Flush has no wait-for-source gate, pending counter, FIFO queue or promotion lock.
 Broadcaster uses its existing resource keys and worker pool for all operations.
-ForcePromote retains ExclusiveCluster, successful-append rollback, salvage
-checkpoints and callback ordering. It needs no separate execution lane to rescue
+ForcePromote retains ExclusiveCluster, salvage checkpoints and callback ordering;
+its transaction cleanup uses the same successful-append exclusive path. It needs no separate execution lane to rescue
 Flush from a disconnected source. Coordinator resource keys serialize local APIs;
 replicated DDL still relies on WAL ordering and consuming ACKs.
 
@@ -203,7 +216,7 @@ understand the durable local-flush abort boundary.
 | --- | --- | --- |
 | Flush / FlushAll | Local WAL, either role, `_ur`, AckSyncUp | Enabled on secondary with abort and full-txn replay |
 | Resource-group create/update/drop and node transfer | Local CChannel, either role, `_ur` | Existing behavior retained |
-| ForcePromote | Secondary-only topology transition | Existing resource keys and explicit txn rollback retained |
+| ForcePromote | Secondary-only topology transition | Existing resource keys; shared exclusive-operation abort |
 | Snapshot/manifest/external-collection controls marked `_ur` | Concrete messages stay local; ordinary producers still check primary | Role admission unchanged |
 | Collection/partition DDL, DML, load configuration and TransferReplica | Existing logical replication path | Remain replicated; no message-type blacklist |
 | WAL-generated CreateSegment/Flush/TimeTick | Self-controlled local messages | Unchanged |

@@ -18,8 +18,8 @@ import (
 // Exercise the real replication admission, consumer buffer and recovery together.
 // Connections deliberately overlap; only the complete source prefix may commit.
 func TestLocalFlushReplayAndRecovery(t *testing.T) {
-	for _, flushAll := range []bool{false, true} {
-		t.Run(map[bool]string{false: "ManualFlush", true: "FlushAll"}[flushAll], func(t *testing.T) {
+	for _, operation := range []string{"ManualFlush", "FlushAll", "CreateSnapshot"} {
+		t.Run(operation, func(t *testing.T) {
 			ctx := context.Background()
 			buffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 			checkpoint := &utility.ReplicateCheckpoint{ClusterID: "test2", PChannel: "test2-rootcoord-dml_0", MessageID: walimplstest.NewTestMessageID(0), TimeTick: 1}
@@ -70,8 +70,13 @@ func TestLocalFlushReplayAndRecovery(t *testing.T) {
 				require.True(t, status.AsStreamingError(err).IsIgnoredOperation(), "%v", err)
 			}
 			flush := func(vchannel string) message.MutableMessage {
-				if flushAll {
+				if operation == "FlushAll" {
 					return message.NewFlushAllMessageBuilderV2().WithAllVChannel().WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).WithUnreplicable().MustBuildMutable()
+				}
+				if operation == "CreateSnapshot" {
+					return message.NewCreateSnapshotMessageBuilderV2().WithVChannel(vchannel).
+						WithHeader(&message.CreateSnapshotMessageHeader{}).WithBody(&message.CreateSnapshotMessageBody{}).
+						WithUnreplicable().MustBuildMutable()
 				}
 				return message.NewManualFlushMessageBuilderV2().WithVChannel(vchannel).WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).WithUnreplicable().MustBuildMutable()
 			}
@@ -83,7 +88,7 @@ func TestLocalFlushReplayAndRecovery(t *testing.T) {
 			require.NoError(t, err)
 			acker.Ack(context.Canceled)
 			ignore(makeTxn()[1])
-			if !flushAll {
+			if operation != "FlushAll" {
 				require.Len(t, appendMessage(flush("other_vchannel")), 1)
 				require.Len(t, buffer.GetUncommittedMessageBuilder(), 1)
 				ignore(makeTxn()[1])

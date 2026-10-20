@@ -79,19 +79,13 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			return nil, err
 		}
 		defer func() {
-			if err != nil && msg.ReplicateHeader() != nil {
-				// Backend errors retry below us; cancellation/fencing ends this
-				// writer's lifecycle. Keep the session unresolved for WAL recovery
-				// instead of committing it or reopening it for another attempt.
-				return
-			}
 			if txn.IsCommitAdmissionRejected(err) {
 				txnSession.RejectCommit()
-				return
+			} else if err == nil {
+				txnSession.CommitDone()
 			}
-			// Preserve the existing transaction outcome for non-admission errors.
-			// WAL append failures do not prove that CommitTxn was not persisted.
-			txnSession.CommitDone()
+			// Cancellation/fencing ends this writer. For either transaction origin,
+			// WAL recovery determines the outcome; a failed append is not a Commit.
 		}()
 	case message.MessageTypeRollbackTxn:
 		if txnSession, err = impl.handleRollback(ctx, msg); err != nil {

@@ -11,8 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -54,7 +56,7 @@ func TestAcquireLockGuard(t *testing.T) {
 
 		guard := interceptor.acquireLockGuard(context.Background(), msg)
 		assert.False(t, interceptor.glock.TryRLock(), "pchannel-level message should hold the global write lock")
-		guard()
+		guard(true)
 		assert.True(t, interceptor.glock.TryRLock())
 		interceptor.glock.RUnlock()
 	})
@@ -73,7 +75,7 @@ func TestAcquireLockGuard(t *testing.T) {
 
 		guard := interceptor.acquireLockGuard(context.Background(), msg)
 		assert.False(t, interceptor.glock.TryRLock(), "glock should be write-locked for exclusive message with pchannel name")
-		guard()
+		guard(true)
 		assert.True(t, interceptor.glock.TryRLock())
 		interceptor.glock.RUnlock()
 	})
@@ -100,7 +102,7 @@ func TestAcquireLockGuard(t *testing.T) {
 		// Other vchannels should not be blocked.
 		assert.True(t, interceptor.vchannelLocker.TryLock("other-vchannel"), "other vchannels should not be blocked")
 		interceptor.vchannelLocker.Unlock("other-vchannel")
-		guard()
+		guard(true)
 	})
 
 	t.Run("ExclusiveOnControlChannel", func(t *testing.T) {
@@ -124,7 +126,7 @@ func TestAcquireLockGuard(t *testing.T) {
 		assert.False(t, interceptor.vchannelLocker.TryLock(controlChannel), "control channel read lock should be held")
 		assert.True(t, interceptor.vchannelLocker.TryRLock(controlChannel), "another control channel read lock should succeed")
 		interceptor.vchannelLocker.RUnlock(controlChannel)
-		guard()
+		guard(true)
 	})
 
 	t.Run("PartialUpdateCASCommit", func(t *testing.T) {
@@ -153,7 +155,7 @@ func TestAcquireLockGuard(t *testing.T) {
 		interceptor.vchannelLocker.RUnlock(testVChannel)
 		assert.True(t, interceptor.vchannelLocker.TryLock("other-vchannel"))
 		interceptor.vchannelLocker.Unlock("other-vchannel")
-		guard()
+		guard(true)
 		assert.Equal(t, 0, failCalls)
 	})
 
@@ -183,7 +185,7 @@ func TestAcquireLockGuard(t *testing.T) {
 		assert.False(t, interceptor.vchannelLocker.TryLock(testVChannel), "vchannel write lock should fail when read-locked")
 		assert.True(t, interceptor.vchannelLocker.TryRLock(testVChannel), "vchannel read lock should succeed when read-locked")
 		interceptor.vchannelLocker.RUnlock(testVChannel)
-		guard()
+		guard(true)
 	})
 }
 
@@ -439,6 +441,51 @@ func TestManualFlushKeepsStructuralExclusiveLock(t *testing.T) {
 		WithBody(&message.ManualFlushMessageBody{}).
 		MustBuildMutable()
 	guard := interceptor.acquireLockGuard(context.Background(), msg)
-	defer guard()
+	defer guard(true)
 	require.False(t, interceptor.vchannelLocker.TryRLock(testVChannel))
+}
+
+func TestTopologyChangeAbortAfterAppend(t *testing.T) {
+	resource.InitForTest(t)
+	for _, tc := range []struct {
+		name          string
+		force, ignore bool
+		err           error
+		abort         bool
+	}{
+		{name: "promote", force: true, abort: true},
+		{name: "ordinary topology change", abort: true},
+		{name: "ignored promote", force: true, ignore: true},
+		{name: "deduplicated", force: true, err: status.NewIgnoreOperation("already appended")},
+		{name: "canceled writer", force: true, err: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := txn.NewTxnManager(types.PChannelInfo{Name: testPChannelName}, nil)
+			defer manager.FailTxnAtVChannel("")
+			begin := message.NewBeginTxnMessageBuilderV2().WithVChannel(testVChannel).
+				WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
+				MustBuildMutable().WithTimeTick(1).
+				WithTxnContext(message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}).
+				WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", MessageID: walimplstest.NewTestMessageID(1), LastConfirmedMessageID: walimplstest.NewTestMessageID(0)})
+			session, err := manager.BeginNewTxn(context.Background(), message.MustAsMutableBeginTxnMessageV2(begin))
+			require.NoError(t, err)
+			interceptor := newTestInterceptor()
+			interceptor.txnManager = manager
+			msg := message.NewAlterReplicateConfigMessageBuilderV2().WithAllVChannel().
+				WithHeader(&message.AlterReplicateConfigMessageHeader{ForcePromote: tc.force, Ignore: tc.ignore}).
+				WithBody(&message.AlterReplicateConfigMessageBody{}).MustBuildMutable()
+			_, err = interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				require.Equal(t, message.TxnStateInFlight, session.State(), "abort must follow durable append")
+				return walimplstest.NewTestMessageID(2), tc.err
+			})
+			require.ErrorIs(t, err, tc.err)
+			if tc.abort {
+				require.Equal(t, message.TxnStateRollbacked, session.State())
+			} else {
+				require.Equal(t, message.TxnStateInFlight, session.State())
+			}
+			require.True(t, interceptor.glock.TryLock(), "all outcomes must release the WAL lock")
+			interceptor.glock.Unlock()
+		})
+	}
 }

@@ -15,10 +15,13 @@ See [Message Semantic Docs](../message/message.md) for per-message lock requirem
 
 ## Local flush and replication
 
-Local Flush takes its existing exclusive WAL lock and aborts incomplete receiving
-transactions in that scope after successful append. It does not wait for the
-source Commit. Ordinary exclusive cleanup only fails locally originated sessions.
-ManualFlush affects one business VChannel per copy; FlushAll affects the PChannel.
+Every successfully appended exclusive operation aborts transactions in its lock
+scope, regardless of their local or replicated origin. The same guard releases
+references and then unlocks; failed or deduplicated operations do not abort.
+An ignored AlterReplicateConfig record is also a no-op. ManualFlush affects one
+business VChannel per copy; FlushAll and topology changes affect the PChannel.
+Replication prefix cleanup completes under the same outer WAL lock before replay
+can enter the affected scope. There is no separate Flush or ForcePromote cleanup API.
 See [Local Flush Control](local-flush.md).
 
 ## Key Packages

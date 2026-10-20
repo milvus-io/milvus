@@ -945,7 +945,7 @@ func TestTxnInsertResultBufferReclaimsUntrackedTxn(t *testing.T) {
 	}, 0)
 	require.NotNil(t, buffers.Build(body))
 
-	// The txn session vanished (e.g. RollbackAllInFlightTransactions on failover)
+	// The txn session vanished (e.g. FailTxnAtVChannel on failover)
 	// without a commit/rollback message reaching the interceptor.
 	active[1] = false
 	require.Nil(t, buffers.Build(body))

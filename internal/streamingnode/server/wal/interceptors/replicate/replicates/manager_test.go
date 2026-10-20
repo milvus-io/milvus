@@ -103,8 +103,8 @@ func TestReplicateManager_UnreplicableMessage(t *testing.T) {
 
 	msg := newCreateSnapshotMutableMessage()
 	g, err := rm.BeginReplicateMessage(context.Background(), msg)
-	assert.ErrorIs(t, err, ErrNotHandledByReplicateManager)
-	assert.Nil(t, g)
+	require.NoError(t, err)
+	g.Ack(nil)
 
 	msg = newCreateSnapshotMutableMessage().WithReplicateHeader(&message.ReplicateHeader{
 		ClusterID:              "test2",

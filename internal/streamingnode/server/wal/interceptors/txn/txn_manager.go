@@ -30,7 +30,6 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 			beginMessages.TimeTick(),
 			m.BeginTxn(),
 		)
-		session.replicated = beginMessages.ReplicateHeader() != nil
 		for _, msg := range body {
 			session.AddNewMessage(context.Background(), msg.TimeTick())
 			session.AddNewMessageDoneAndKeepalive(msg.TimeTick())
@@ -92,7 +91,6 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTx
 		return nil, status.NewTransactionExpired("manager closed")
 	}
 	session := newTxnSession(vchannel, *txnCtx, timetick, m.metrics.BeginTxn())
-	session.replicated = msg.ReplicateHeader() != nil
 	m.sessions[session.TxnContext().TxnID] = session
 	return session, nil
 }
@@ -126,25 +124,15 @@ func (m *TxnManager) buildTxnContext(ctx context.Context, msg message.MutableBeg
 	}, nil
 }
 
-// FailTxnAtVChannel fails locally originated transactions for ordinary exclusive
-// operations. Replicated transactions are resolved by local flush or promotion.
+// FailTxnAtVChannel aborts all transactions in the specified VChannel.
+// An empty VChannel covers the whole PChannel, regardless of transaction origin.
 func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
-	m.failTxnAtVChannel(vchannel, false)
-}
-
-// AbortTxnAtVChannel aborts both local and replicated sessions after a durable local flush.
-// An empty vchannel covers the whole PChannel.
-func (m *TxnManager) AbortTxnAtVChannel(vchannel string) {
-	m.failTxnAtVChannel(vchannel, true)
-}
-
-func (m *TxnManager) failTxnAtVChannel(vchannel string, includeReplicated bool) {
 	// avoid the txn to be committed.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ids := make([]int64, 0, len(m.sessions))
 	for id, session := range m.sessions {
-		if (includeReplicated || !session.replicated) && (vchannel == "" || session.VChannel() == vchannel) {
+		if vchannel == "" || session.VChannel() == vchannel {
 			session.abort()
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)
@@ -199,12 +187,6 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 		return nil, status.NewTransactionExpired("txn %d not found in manager", id)
 	}
 	return session, nil
-}
-
-// RollbackAllInFlightTransactions rolls back all active transaction sessions.
-// Called ONLY in the failover scenario.
-func (m *TxnManager) RollbackAllInFlightTransactions() {
-	m.failTxnAtVChannel("", true)
 }
 
 // GracefulClose waits for all transactions to be cleaned up.

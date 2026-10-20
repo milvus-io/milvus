@@ -61,12 +61,6 @@ type ReplicateHeader struct {
 	VChannel               string
 }
 
-// IsLocalFlush reports whether this is a locally originated, unreplicable explicit flush.
-func IsLocalFlush(msg BasicMessage) bool {
-	return msg.IsUnreplicable() && msg.ReplicateHeader() == nil &&
-		(msg.MessageType() == MessageTypeManualFlush || msg.MessageType() == MessageTypeFlushAll)
-}
-
 // WithBroadcastControlChannel adds the control channel to the vchannels of the broadcast header
 // if it is not one of them.
 func WithBroadcastControlChannel(msg BroadcastMutableMessage, controlChannel string) BroadcastMutableMessage {
