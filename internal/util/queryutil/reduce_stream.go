@@ -44,10 +44,19 @@ type ReduceStream interface {
 type retrieveUnit struct {
 	result   *internalpb.RetrieveResults
 	rowIndex int64
+	byteSize int
 }
 
 func (u retrieveUnit) pk() any {
 	return typeutil.GetPK(u.result.GetIds(), u.rowIndex)
+}
+
+func (u retrieveUnit) timestamp() int64 {
+	timestamps := extractTimestamps(u.result)
+	if u.rowIndex >= int64(len(timestamps)) {
+		return 0
+	}
+	return timestamps[u.rowIndex]
 }
 
 func (u retrieveUnit) fieldData(fieldID int64) (*schemapb.FieldData, error) {
@@ -148,12 +157,14 @@ type OrderedReduceStream struct {
 	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
 	childBuffers []orderedChildBuffer
 
-	limit         int64
-	chunkBytes    int
-	emitted       int64
-	orderByFields []*planpb.OrderByField
-	hasLastPK     bool
-	lastPK        any
+	limit          int64
+	chunkBytes     int
+	emitted        int64
+	orderByFields  []*planpb.OrderByField
+	hasLastPK      bool
+	lastPK         any
+	deduplicatePKs bool
+	outputBuffer   []retrieveUnit
 
 	metadata        *internalpb.RetrieveResults
 	metadataEmitted bool
@@ -202,6 +213,19 @@ func NewReduceStream(
 	}, nil
 }
 
+// NewShardReduceStream resolves duplicate PKs by timestamp for PK-ordered worker results.
+// ORDER BY and Group By retain their existing reduction behavior.
+func NewShardReduceStream(request *internalpb.RetrieveRequest, schema *schemapb.CollectionSchema, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
+	stream, err := NewReduceStream(request, schema, childStreams, chunkBytes)
+	if err != nil {
+		return nil, err
+	}
+	if ordered, ok := stream.(*OrderedReduceStream); ok && len(ordered.orderByFields) == 0 {
+		ordered.deduplicatePKs = true
+	}
+	return stream, nil
+}
+
 func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	if s.finished {
 		return nil, io.EOF
@@ -210,9 +234,16 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		return nil, io.ErrClosedPipe
 	}
 
-	outputBuffer := make([]retrieveUnit, 0)
+	outputBuffer := s.outputBuffer
+	s.outputBuffer = nil
 	outputBytes := 0
-	for outputBytes < s.chunkBytes && s.emitted < s.limit {
+	for _, unit := range outputBuffer {
+		outputBytes += unit.byteSize
+	}
+	for s.deduplicatePKs || (outputBytes < s.chunkBytes && s.emitted < s.limit) {
+		if len(outputBuffer) == 0 && s.emitted >= s.limit {
+			break
+		}
 		readyBuffers, err := s.getReadyBuffers()
 		if err != nil {
 			return nil, s.fail(err)
@@ -233,6 +264,24 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		}
 
 		selected := winner.front()
+		// Resolve the trailing PK even after the byte threshold or row limit is reached.
+		// Returning its Chunk first would make a newer row in the next input Chunk too late.
+		if s.deduplicatePKs && len(outputBuffer) > 0 && comparePK(selected.pk(), s.lastPK) == 0 {
+			unit := winner.pop()
+			last := len(outputBuffer) - 1
+			if timestamp := unit.timestamp(); timestamp != 0 && timestamp > outputBuffer[last].timestamp() {
+				unit.byteSize, err = unit.reducibleByteSize()
+				if err != nil {
+					return nil, s.fail(err)
+				}
+				outputBytes += unit.byteSize - outputBuffer[last].byteSize
+				outputBuffer[last] = unit
+			}
+			continue
+		}
+		if outputBytes >= s.chunkBytes || s.emitted >= s.limit {
+			break
+		}
 		unitBytes, err := selected.reducibleByteSize()
 		if err != nil {
 			return nil, s.fail(err)
@@ -242,6 +291,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		}
 
 		unit := winner.pop()
+		unit.byteSize = unitBytes
 		if s.hasLastPK {
 			comparison := comparePK(unit.pk(), s.lastPK)
 			if comparison == 0 {
@@ -274,6 +324,13 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		return nil, io.EOF
 	}
 
+	last := len(outputBuffer) - 1
+	if s.deduplicatePKs && last > 0 && outputBuffer[last].byteSize > s.chunkBytes {
+		// A newer version can turn the trailing Unit into an oversized Unit.
+		// Keep it for the next Recv so it is still emitted alone.
+		s.outputBuffer = []retrieveUnit{outputBuffer[last]}
+		outputBuffer = outputBuffer[:last]
+	}
 	chunk, err := buildRetrieveChunk(outputBuffer)
 	if err != nil {
 		return nil, s.fail(err)
@@ -659,6 +716,7 @@ func (s *OrderedReduceStream) closeChildren() error {
 	for i := range s.childBuffers {
 		s.childBuffers[i] = orderedChildBuffer{}
 	}
+	s.outputBuffer = nil
 	s.metadata = nil
 	s.closeErr = s.childStreams.Close()
 	return s.closeErr
