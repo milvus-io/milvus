@@ -120,6 +120,11 @@ failure recovery, and fencing ends the old writer's authority. Neither permits a
 new attempt against the old in-memory state: WAL replay resolves the durable outcome
 before writes resume. See [Append retry and writer lifetime](../../../agent_guides/streaming-system/walbackend/walbackend.md#append-retry-and-writer-lifetime).
 
+The retry boundary checks the outer WAL append context, not just a backend's returned
+cancel/timeout error. Append timestamp allocation and barrier advancement likewise retry in
+`AckManager.AllocateForAppend` until success or WAL-context cancellation; an individual TSO RPC failure
+cannot leave a live writer with interceptor state that has no corresponding WAL record.
+
 There is no RetryCommit state restoration or extra failure-handler callback.
 A replicated Commit interrupted after preparation remains unresolved with its
 session references retained for teardown/recovery. A body-count mismatch is a

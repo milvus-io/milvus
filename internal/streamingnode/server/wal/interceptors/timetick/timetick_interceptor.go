@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
@@ -13,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const interceptorName = "timetick"
@@ -48,14 +47,9 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	if msg.MessageType() != message.MessageTypeTimeTick {
 		// Allocate new timestamp acker for message.
 		var acker *ack.Acker
-		if msg.BarrierTimeTick() == 0 {
-			if acker, err = ackManager.Allocate(ctx); err != nil {
-				return nil, errors.Wrap(err, "allocate timestamp failed")
-			}
-		} else {
-			if acker, err = ackManager.AllocateWithBarrier(ctx, msg.BarrierTimeTick()); err != nil {
-				return nil, errors.Wrap(err, "allocate timestamp with barrier failed")
-			}
+		acker, err = ackManager.AllocateForAppend(ctx, msg.BarrierTimeTick())
+		if err != nil {
+			return nil, merr.Wrap(err, "allocate timestamp failed")
 		}
 
 		// Assign timestamp to message and call the append method.

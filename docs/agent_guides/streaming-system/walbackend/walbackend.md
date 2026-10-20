@@ -32,8 +32,10 @@ Recovery, rather than the error result, determines which records became durable.
 
 This contract lets interceptors rely on the existing retry and recovery paths;
 they do not need their own Commit retry state machine or a context-carried callback
-to fence the WAL. A backend context error must obey the same lifecycle contract;
-an independent per-attempt timeout on a live writer belongs in the retry path.
+to fence the WAL. `appendOneWithRetry` checks the outer append context itself;
+a backend `context.Canceled` or `context.DeadlineExceeded` error alone does not
+end the retry loop. Independent per-attempt cancellation/timeouts on a live writer
+are retried. `ErrFenced` still terminates immediately because write authority is lost.
 Tests should cancel the actual WAL lifecycle when exercising final cancellation.
 
 Validation rejected before backend append is a separate case: no record was written,

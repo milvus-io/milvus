@@ -8,7 +8,23 @@ See [TimeTick Message Semantic](../message/message-semantic-time-tick.md) for th
 
 ### Allocation
 
-Every message receives a unique TimeTick from the TSO via `AckManager.Allocate()`. Transaction sub-messages each get their own TimeTick; the assembled transaction uses CommitTxn's TimeTick as its overall TimeTick.
+Every message receives a unique TimeTick from the TSO via `AckManager.AllocateForAppend()`. Transaction sub-messages each get their own TimeTick; the assembled transaction uses CommitTxn's TimeTick as its overall TimeTick.
+
+This append-specific entry retries both timestamp allocation and barrier advancement
+without an attempt or elapsed-time limit, until success or cancellation of its caller's
+context. For a WAL append, that context follows the WAL lifecycle, not the client RPC.
+The shared allocator's per-RPC 10-second timeout (or another transient coordinator error)
+must not escape as a failed append on a live WAL after an earlier interceptor changed
+in-memory state. Only successful allocation publishes an acker and advances the allocated
+watermark.
+
+Retries occur outside both the shared allocator's mutex and the AckManager mutex.
+Barrier waits also remain outside the AckManager mutex: the allocator's slow barrier
+path may need other allocations to advance it. Background TimeTick sync uses the
+single-attempt `Allocate()` entry and retries on the inspector's next sync; it has no
+preceding append mutation to preserve, and its context belongs to the process-wide
+inspector rather than the individual WAL. Making that path retry forever while holding
+the AckManager mutex could prevent a WAL from shutting down during a TSO outage.
 
 ### Confirm and Sync
 
