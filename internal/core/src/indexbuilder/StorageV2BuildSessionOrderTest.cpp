@@ -250,22 +250,27 @@ TEST_F(StorageV2BuildSessionOrderTest, VectorAndOptionalFieldKeepRowIds) {
     // quarter. Knowhere selects the isolated partition from the first
     // unmasked row, so pass the full category filter instead of an empty view.
     std::vector<uint8_t> excluded((rows + 7) / 8, 0xff);
+    std::vector<int64_t> expected_rows;
     for (int64_t row = 0; row < rows; ++row) {
         if (row < rows / 4 || (row >= rows / 2 && row < 5 * rows / 8)) {
             excluded[row / 8] &= static_cast<uint8_t>(~(1U << (row % 8)));
+            expected_rows.push_back(row);
         }
     }
+    // Request the entire category to use Knowhere's exhaustive search path.
+    // This checks every row mapping across both binlogs without depending on
+    // approximate HNSW recall for an exact top-1 assertion.
+    const auto topk = static_cast<int64_t>(expected_rows.size());
     SearchResult result;
     vectors->Search(GenDataset(1, dim, query.data()),
                     index::VectorSearchParams{
-                        .search_params_ = {{knowhere::indexparam::EF, 64}},
+                        .search_params_ = {{knowhere::indexparam::EF, topk}},
                         .metric_type_ = "L2",
-                        .topk_ = 1},
+                        .topk_ = topk},
                     BitsetView(excluded.data(), rows),
                     nullptr,
                     result);
-    ASSERT_EQ(result.seg_offsets_.size(), 1);
-    EXPECT_EQ(result.seg_offsets_[0], 0);
+    EXPECT_EQ(result.seg_offsets_, expected_rows);
 
     // Check the optional scalar's physical row IDs independently of HNSW's
     // category ordering, which is not part of its public reader contract.
