@@ -4521,20 +4521,20 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 
 	p.InterimIndexSparseIPAlgo = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.sparseIPIndexAlgo",
-		Version:      "3.0.0",
+		Version:      "2.6.23",
 		DefaultValue: "",
 		Formatter:    func(v string) string { return strings.ToUpper(strings.TrimSpace(v)) },
-		Doc:          "Sparse IP interim index algorithm for growing and unindexed sealed segments. Empty inherits the collection index parameters. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE, BLOCK_MAX_WAND, BLOCK_MAX_MAXSCORE, SINDI. SINDI requires interimIndex.targetIndexVersion >= 10. Takes effect after restart.",
+		Doc:          "Sparse IP interim index algorithm for growing and unindexed sealed segments. Empty preserves the collection index algorithm and index-type mapping. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE. An explicit non-WAND override uses SPARSE_INVERTED_INDEX_CC for a SPARSE_WAND collection index. Takes effect after restart.",
 		Export:       false,
 	}
 	p.InterimIndexSparseIPAlgo.Init(base.mgr)
 
 	p.InterimIndexSparseBM25Algo = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.sparseBM25IndexAlgo",
-		Version:      "3.0.0",
+		Version:      "2.6.23",
 		DefaultValue: "",
 		Formatter:    func(v string) string { return strings.ToUpper(strings.TrimSpace(v)) },
-		Doc:          "Sparse BM25 interim index algorithm for growing and unindexed sealed segments. Empty inherits the collection index parameters. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE, BLOCK_MAX_WAND, BLOCK_MAX_MAXSCORE, SINDI. SINDI requires interimIndex.targetIndexVersion >= 10. Takes effect after restart.",
+		Doc:          "Sparse BM25 interim index algorithm for growing and unindexed sealed segments. Empty preserves the collection index algorithm and index-type mapping. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE. An explicit non-WAND override uses SPARSE_INVERTED_INDEX_CC for a SPARSE_WAND collection index. Takes effect after restart.",
 		Export:       false,
 	}
 	p.InterimIndexSparseBM25Algo.Init(base.mgr)

@@ -163,12 +163,6 @@ class SegcoreConfig {
                           "unsupported sparse interim index algorithm: {}",
                           *algo);
             }
-            if (*algo == "SINDI" && get_interim_index_version() < 10) {
-                ThrowInfo(ConfigInvalid,
-                          "sparse interim index algorithm SINDI requires "
-                          "targetIndexVersion >= 10, resolved version is {}",
-                          get_interim_index_version());
-            }
         }
         sparse_ip_index_algo_ = std::move(ip_algo);
         sparse_bm25_index_algo_ = std::move(bm25_algo);
@@ -252,12 +246,8 @@ class SegcoreConfig {
             knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
     };
     inline static const std::unordered_set<std::string>
-        valid_sparse_index_algos_ = {"TAAT_NAIVE",
-                                     "DAAT_WAND",
-                                     "DAAT_MAXSCORE",
-                                     "BLOCK_MAX_WAND",
-                                     "BLOCK_MAX_MAXSCORE",
-                                     "SINDI"};
+        valid_sparse_index_algos_ = {
+            "TAAT_NAIVE", "DAAT_WAND", "DAAT_MAXSCORE"};
     inline static std::string sparse_ip_index_algo_;
     inline static std::string sparse_bm25_index_algo_;
     inline static bool enable_interim_segment_index_ = false;

@@ -11,6 +11,7 @@
 
 #include "pthread.h"
 #include <chrono>
+#include <new>
 #include "config/ConfigKnowhere.h"
 #include "fmt/core.h"
 #include "log/Log.h"
@@ -116,14 +117,11 @@ SegcoreSetSparseInterimIndexAlgorithms(const char* ip_algo,
         SegcoreConfig::default_config().set_sparse_interim_index_algos(
             ip_algo, bm25_algo);
         return milvus::SuccessCStatus();
-    }
-    catch (const std::bad_alloc& e) {
+    } catch (const std::bad_alloc& e) {
         return milvus::FailureCStatus(milvus::MemAllocateFailed, e.what());
-    }
-    catch (const std::exception& e) {
+    } catch (const std::exception& e) {
         return milvus::FailureCStatus(&e);
-    }
-    catch (...) {
+    } catch (...) {
         return milvus::FailureCStatus(milvus::UnexpectedError,
                                       "unknown exception");
     }

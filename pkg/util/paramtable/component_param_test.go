@@ -37,16 +37,22 @@ func TestQueryNodeSparseInterimIndexAlgorithms(t *testing.T) {
 	cfg := &params.QueryNodeCfg
 	assert.False(t, cfg.InterimIndexSparseIPAlgo.Export)
 	assert.False(t, cfg.InterimIndexSparseBM25Algo.Export)
+	for _, name := range []string{"InterimIndexSparseIPAlgo", "InterimIndexSparseBM25Algo"} {
+		field, ok := reflect.TypeOf(cfg).Elem().FieldByName(name)
+		require.True(t, ok)
+		assert.Equal(t, "false", field.Tag.Get("refreshable"))
+	}
 	assert.Empty(t, cfg.InterimIndexSparseIPAlgo.GetValue())
 	assert.Empty(t, cfg.InterimIndexSparseBM25Algo.GetValue())
-	require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, " sindi "))
+	require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, " taat_naive "))
 	require.NoError(t, params.Save(cfg.InterimIndexSparseBM25Algo.Key, "daat_maxscore"))
-	assert.Equal(t, "SINDI", cfg.InterimIndexSparseIPAlgo.GetValue())
+	assert.Equal(t, "TAAT_NAIVE", cfg.InterimIndexSparseIPAlgo.GetValue())
 	assert.Equal(t, "DAAT_MAXSCORE", cfg.InterimIndexSparseBM25Algo.GetValue())
 	require.NoError(t, params.Reset(cfg.InterimIndexSparseIPAlgo.Key))
 	assert.Empty(t, cfg.InterimIndexSparseIPAlgo.GetValue())
 	assert.Equal(t, "DAAT_MAXSCORE", cfg.InterimIndexSparseBM25Algo.GetValue())
 }
+
 func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()
 	f()

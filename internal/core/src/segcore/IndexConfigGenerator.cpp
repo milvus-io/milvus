@@ -50,15 +50,9 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
         const auto& index_params = index_meta_.GetIndexParams();
 
         // This allowlist is intentional: inherit only the algorithm and BM25
-        // scorer parameters, keeping interim parameters simele and independent of the
-        // persistent index. Because some build parameters are only for sealed index,
-        // not allowed for growing segment index.
-        // Do not forward quant_type, inverted_index_codec,
-        // sindi_window_size or block_max_block_size. Growing and unindexed
-        // sealed segments use Knowhere defaults for these settings, which may
-        // depend on the target index version. Quantization and scores can
-        // therefore differ from a persisted fp32/u32 index; the interim
-        // algorithm override does not guarantee matching its precision.
+        // scorer parameters. Persistent-index build options such as
+        // drop_ratio_build must not leak into growing or unindexed sealed
+        // interim indexes.
         if (auto algo_it =
                 index_params.find(knowhere::indexparam::INVERTED_INDEX_ALGO);
             algo_it != index_params.end()) {
@@ -79,9 +73,16 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
                                ? config.get_sparse_bm25_interim_index_algo()
                                : config.get_sparse_ip_interim_index_algo();
         if (!algo.empty()) {
-            // Override only the algorithm, preserving the index-type mapping
-            // and the BM25 scorer parameters copied above.
             build_params_[knowhere::indexparam::INVERTED_INDEX_ALGO] = algo;
+            // Knowhere 2.6 forces WAND for SPARSE_WAND_CC regardless of the
+            // algorithm parameter. Use the generic sparse index only when an
+            // explicit non-WAND override needs it; an empty override keeps the
+            // existing mapping and behavior.
+            if (index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND_CC &&
+                algo != "DAAT_WAND") {
+                index_type_ =
+                    knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC;
+            }
         }
     }
 

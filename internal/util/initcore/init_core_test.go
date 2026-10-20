@@ -43,12 +43,17 @@ func TestInitSparseInterimIndexAlgorithms(t *testing.T) {
 		wantErr                 bool
 	}{
 		{name: "inherit", version: "8"},
-		{name: "independent", ip: "sindi", bm25: "daat_wand", version: "10"},
-		{name: "bm25_sindi", ip: "TAAT_NAIVE", bm25: "SINDI", version: "10"},
+		{name: "independent", ip: "taat_naive", bm25: "daat_wand", version: "8"},
+		{name: "maxscore", ip: "DAAT_WAND", bm25: "DAAT_MAXSCORE", version: "10"},
+		{name: "ip_maxscore", ip: "DAAT_MAXSCORE", bm25: "TAAT_NAIVE", version: "9"},
 		{name: "invalid_ip", ip: "INVALID", version: "10", wantErr: true},
 		{name: "invalid_bm25", bm25: "INVALID", version: "10", wantErr: true},
-		{name: "ip_old_version", ip: "SINDI", version: "9", wantErr: true},
-		{name: "bm25_old_version", bm25: "SINDI", version: "9", wantErr: true},
+		{name: "ip_sindi", ip: "SINDI", version: "10", wantErr: true},
+		{name: "bm25_sindi", bm25: "SINDI", version: "10", wantErr: true},
+		{name: "ip_block_wand", ip: "BLOCK_MAX_WAND", version: "10", wantErr: true},
+		{name: "bm25_block_wand", bm25: "BLOCK_MAX_WAND", version: "10", wantErr: true},
+		{name: "ip_block_maxscore", ip: "BLOCK_MAX_MAXSCORE", version: "10", wantErr: true},
+		{name: "bm25_block_maxscore", bm25: "BLOCK_MAX_MAXSCORE", version: "10", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, tc.ip))
@@ -66,6 +71,7 @@ func TestInitSparseInterimIndexAlgorithms(t *testing.T) {
 		})
 	}
 }
+
 func TestTracer(t *testing.T) {
 	paramtable.Init()
 	InitTraceConfig(paramtable.Get())

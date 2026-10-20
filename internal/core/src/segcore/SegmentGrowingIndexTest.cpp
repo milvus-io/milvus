@@ -212,25 +212,50 @@ TEST(SparseInterimIndexConfigTest, OverridesAreMetricSpecificAndOptional) {
                         ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
                         : knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC);
 
-                config.set_sparse_interim_index_algos("SINDI", "DAAT_WAND");
-                VecIndexConfig overridden(100, meta, config, type, true);
-                params = overridden.GetBuildBaseParams(
-                    DataType::VECTOR_SPARSE_U32_F32);
-                EXPECT_EQ(
-                    params["inverted_index_algo"],
-                    metric == knowhere::metric::IP ? "SINDI" : "DAAT_WAND");
-                EXPECT_EQ(overridden.GetIndexType(), inherited.GetIndexType());
-                EXPECT_FALSE(params.contains("drop_ratio_build"));
-                EXPECT_FALSE(params.contains("inverted_index_codec"));
-                for (const auto* key : {"bm25_k1", "bm25_b", "bm25_avgdl"}) {
-                    if (metric == knowhere::metric::BM25) {
-                        EXPECT_EQ(params[key], meta.GetIndexParams().at(key));
-                    } else {
-                        EXPECT_FALSE(params.contains(key));
+                // Setting the other metric must not change this metric's
+                // inherited algorithm or WAND index-type mapping.
+                config.set_sparse_interim_index_algos(
+                    metric == knowhere::metric::IP ? "" : "TAAT_NAIVE",
+                    metric == knowhere::metric::BM25 ? "" : "TAAT_NAIVE");
+                VecIndexConfig other_metric(100, meta, config, type, true);
+                EXPECT_EQ(other_metric.GetIndexType(),
+                          inherited.GetIndexType());
+                EXPECT_EQ(other_metric.GetBuildBaseParams(
+                              DataType::VECTOR_SPARSE_U32_F32),
+                          params);
+
+                for (const auto& [ip_algo, bm25_algo] :
+                     {std::pair{"TAAT_NAIVE", "DAAT_WAND"},
+                      std::pair{"DAAT_WAND", "DAAT_MAXSCORE"},
+                      std::pair{"DAAT_MAXSCORE", "TAAT_NAIVE"}}) {
+                    config.set_sparse_interim_index_algos(ip_algo, bm25_algo);
+                    VecIndexConfig overridden(100, meta, config, type, true);
+                    params = overridden.GetBuildBaseParams(
+                        DataType::VECTOR_SPARSE_U32_F32);
+                    const std::string algo =
+                        metric == knowhere::metric::IP ? ip_algo : bm25_algo;
+                    EXPECT_EQ(params["inverted_index_algo"], algo);
+                    EXPECT_EQ(
+                        overridden.GetIndexType(),
+                        origin == knowhere::IndexEnum::INDEX_SPARSE_WAND &&
+                                algo == "DAAT_WAND"
+                            ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
+                            : knowhere::IndexEnum::
+                                  INDEX_SPARSE_INVERTED_INDEX_CC);
+                    EXPECT_FALSE(params.contains("drop_ratio_build"));
+                    EXPECT_FALSE(params.contains("inverted_index_codec"));
+                    for (const auto* key :
+                         {"bm25_k1", "bm25_b", "bm25_avgdl"}) {
+                        if (metric == knowhere::metric::BM25) {
+                            EXPECT_EQ(params[key],
+                                      meta.GetIndexParams().at(key));
+                        } else {
+                            EXPECT_FALSE(params.contains(key));
+                        }
                     }
+                    EXPECT_EQ(meta.GetIndexParams().at("inverted_index_algo"),
+                              "TAAT_NAIVE");
                 }
-                EXPECT_EQ(meta.GetIndexParams().at("inverted_index_algo"),
-                          "TAAT_NAIVE");
             }
         }
     }
@@ -250,7 +275,7 @@ TEST(SparseInterimIndexConfigTest, UnsetAlgorithmAndDenseDefaultsArePreserved) {
     EXPECT_FALSE(sparse.GetBuildBaseParams(DataType::VECTOR_SPARSE_U32_F32)
                      .contains("inverted_index_algo"));
 
-    config.set_sparse_interim_index_algos("SINDI", "DAAT_WAND");
+    config.set_sparse_interim_index_algos("DAAT_MAXSCORE", "DAAT_WAND");
     FieldIndexMeta dense_meta(FieldId(102),
                               {{"index_type", knowhere::IndexEnum::INDEX_HNSW},
                                {"metric_type", knowhere::metric::IP}},
@@ -267,23 +292,18 @@ TEST(SparseInterimIndexConfigTest, InvalidOverridesPreservePreviousSettings) {
     ScopedSegcoreConfigRestore restore(config);
     config.set_interim_index_target_version(10);
     config.set_sparse_interim_index_algos("DAAT_MAXSCORE", "DAAT_WAND");
-    for (const auto& algos :
-         {std::pair{"INVALID", "SINDI"}, std::pair{"SINDI", "INVALID"}}) {
-        auto status =
-            SegcoreSetSparseInterimIndexAlgorithms(algos.first, algos.second);
-        ASSERT_EQ(status.error_code, ConfigInvalid);
-        free(const_cast<char*>(status.error_msg));
-        EXPECT_EQ(config.get_sparse_ip_interim_index_algo(), "DAAT_MAXSCORE");
-        EXPECT_EQ(config.get_sparse_bm25_interim_index_algo(), "DAAT_WAND");
-    }
-    config.set_interim_index_target_version(9);
-    for (const auto& algos : {std::pair{"SINDI", ""}, std::pair{"", "SINDI"}}) {
-        auto status =
-            SegcoreSetSparseInterimIndexAlgorithms(algos.first, algos.second);
-        ASSERT_EQ(status.error_code, ConfigInvalid);
-        free(const_cast<char*>(status.error_msg));
-        EXPECT_EQ(config.get_sparse_ip_interim_index_algo(), "DAAT_MAXSCORE");
-        EXPECT_EQ(config.get_sparse_bm25_interim_index_algo(), "DAAT_WAND");
+    for (const auto* invalid :
+         {"INVALID", "SINDI", "BLOCK_MAX_WAND", "BLOCK_MAX_MAXSCORE"}) {
+        for (const auto& algos : {std::pair{invalid, "TAAT_NAIVE"},
+                                  std::pair{"TAAT_NAIVE", invalid}}) {
+            auto status = SegcoreSetSparseInterimIndexAlgorithms(algos.first,
+                                                                 algos.second);
+            ASSERT_EQ(status.error_code, ConfigInvalid);
+            free(const_cast<char*>(status.error_msg));
+            EXPECT_EQ(config.get_sparse_ip_interim_index_algo(),
+                      "DAAT_MAXSCORE");
+            EXPECT_EQ(config.get_sparse_bm25_interim_index_algo(), "DAAT_WAND");
+        }
     }
 }
 
@@ -395,6 +415,12 @@ TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
                        .get_vec_field_indexing(vec)
                        .get_segment_indexing();
         ASSERT_NE(pin.get(), nullptr);
+        // In 2.6 a SPARSE_WAND_CC index silently forces WAND, so verify the
+        // type as well as scores to catch an ineffective non-WAND override.
+        EXPECT_EQ(pin.get()->Type(),
+                  algo == "DAAT_WAND"
+                      ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
+                      : knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC);
         EXPECT_EQ(pin.get()->Count(), begin + count);
         check(*growing, begin + count);
     }
@@ -413,14 +439,9 @@ TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
 INSTANTIATE_TEST_SUITE_P(
     MetricsAndAlgorithms,
     SparseInterimIndexAlgorithmTest,
-    ::testing::Combine(::testing::Values(knowhere::metric::IP,
-                                         knowhere::metric::BM25),
-                       ::testing::Values("TAAT_NAIVE",
-                                         "DAAT_WAND",
-                                         "DAAT_MAXSCORE",
-                                         "BLOCK_MAX_WAND",
-                                         "BLOCK_MAX_MAXSCORE",
-                                         "SINDI")));
+    ::testing::Combine(
+        ::testing::Values(knowhere::metric::IP, knowhere::metric::BM25),
+        ::testing::Values("TAAT_NAIVE", "DAAT_WAND", "DAAT_MAXSCORE")));
 
 TEST_P(GrowingIndexTest, Correctness) {
     auto dim = 4;
