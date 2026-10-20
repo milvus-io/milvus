@@ -504,7 +504,7 @@ type CollectionDataReq struct {
 	RlsPrincipal   string                    `json:"rlsPrincipal"`
 	SkipRls        bool                      `json:"skipRls"`
 	PartitionName  string                    `json:"partitionName"`
-	Data           []map[string]interface{}  `json:"data" binding:"required"`
+	Data           []map[string]interface{}  `json:"data"`
 	PartialUpdate  bool                      `json:"partialUpdate"`
 	FieldOps       []FieldPartialUpdateOpReq `json:"fieldOps"`
 }

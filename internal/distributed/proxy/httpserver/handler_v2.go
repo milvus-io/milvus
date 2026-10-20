@@ -17,7 +17,9 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
+	stdjson "encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -438,7 +440,13 @@ type (
 func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
 		req := newReq()
-		if err := gCtx.ShouldBindBodyWith(req, binding.JSON); err != nil {
+		var bindErr error
+		if dataReq, ok := req.(*CollectionDataReq); ok {
+			bindErr = bindCollectionDataMetadata(gCtx, dataReq)
+		} else {
+			bindErr = gCtx.ShouldBindBodyWith(req, binding.JSON)
+		}
+		if err := bindErr; err != nil {
 			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", mlog.Err(err),
 				mlog.Any("url", gCtx.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
@@ -528,6 +536,42 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			}
 		}
 	}
+}
+
+// bindCollectionDataMetadata validates the JSON body without materializing its
+// data array as []map[string]interface{}. Insert and upsert parse that array
+// with the collection schema after fetching it from the proxy.
+func bindCollectionDataMetadata(c *gin.Context, req *CollectionDataReq) error {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	// Row conversion borrows this buffer through unsafe.String. Do not mutate
+	// or pool it after caching: converted field strings may still alias it.
+	c.Set(gin.BodyBytesKey, body)
+	if len(bytes.TrimSpace(body)) == 0 {
+		return io.EOF
+	}
+	metadata := struct {
+		*CollectionDataReq
+		Data *jsonArrayMarker `json:"data" binding:"required"`
+	}{CollectionDataReq: req}
+	if err := stdjson.Unmarshal(body, &metadata); err != nil {
+		return err
+	}
+	return binding.Validator.ValidateStruct(&metadata)
+}
+
+// jsonArrayMarker checks the shape of data without retaining a second copy of
+// the potentially large array. encoding/json validates the whole body first.
+type jsonArrayMarker struct{}
+
+func (*jsonArrayMarker) UnmarshalJSON(value []byte) error {
+	value = bytes.TrimSpace(value)
+	if len(value) == 0 || value[0] != '[' {
+		return merr.WrapErrParameterInvalidMsg("data must be a JSON array")
+	}
+	return nil
 }
 
 // restfulSizeMiddleware is the middleware fetchs metrics stats from gin struct.
@@ -1787,7 +1831,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	var validDataMap map[string][]bool
 	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Err(err), mlog.String("body", string(body.([]byte))))
+		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Err(err), mlog.Int("bodyBytes", len(body.([]byte))))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1798,7 +1842,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req.NumRows = uint32(len(httpReq.Data))
 	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, true, false)
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
+		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Err(err), mlog.Int("bodyBytes", len(body.([]byte))), mlog.Int("rows", len(httpReq.Data)))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1885,7 +1929,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	var validDataMap map[string][]bool
 	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), requestSchema, req.GetPartialUpdate(), fieldOps...)
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("body", body), mlog.Err(err))
+		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Int("bodyBytes", len(body.([]byte))), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1896,7 +1940,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req.NumRows = uint32(len(httpReq.Data))
 	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, requestSchema, false, req.GetPartialUpdate())
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
+		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Err(err), mlog.Int("bodyBytes", len(body.([]byte))), mlog.Int("rows", len(httpReq.Data)))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
