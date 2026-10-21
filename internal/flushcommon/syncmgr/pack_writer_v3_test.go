@@ -177,6 +177,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
 	s.Equal("parquet", gotInserts[0].GetFormat())
+	assertVectorArrayValidElementCounts(s.T(), pack, gotInserts, 103)
 	writtenBasePath, revision, err := packed.UnmarshalManifestPath(writtenManifestPath)
 	s.NoError(err)
 	s.Equal(basePath, writtenBasePath)
