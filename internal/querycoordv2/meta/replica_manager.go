@@ -122,6 +122,10 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 func (m *ReplicaManager) RecoverFrom(ctx context.Context, collections []int64, replicas []*querypb.Replica) error {
 	collectionSet := typeutil.NewUniqueSet(collections...)
 	grouped := make(map[int64][]*Replica)
+	recovered, cleared := 0, 0
+	// Per-replica lines are DEBUG; at INFO, hundreds of thousands of them
+	// slowed startup. A summary follows the loop.
+	debug := mlog.LevelEnabled(mlog.DebugLevel)
 	for _, replica := range replicas {
 		if len(replica.GetResourceGroup()) == 0 {
 			replica.ResourceGroup = DefaultResourceGroupName
@@ -130,19 +134,23 @@ func (m *ReplicaManager) RecoverFrom(ctx context.Context, collections []int64, r
 		if collectionSet.Contain(replica.GetCollectionID()) {
 			rep := NewReplicaWithPriority(replica, commonpb.LoadPriority_HIGH)
 			grouped[rep.GetCollectionID()] = append(grouped[rep.GetCollectionID()], rep)
-			mlog.Info(ctx, "recover replica",
-				mlog.FieldCollectionID(replica.GetCollectionID()),
-				mlog.Int64("replicaID", replica.GetID()),
-				mlog.Int64s("rwNodes", replica.GetNodes()),
-				mlog.Int64s("roNodes", replica.GetRoNodes()),
-				mlog.Int64s("rwSQNodes", replica.GetRwSqNodes()),
-				mlog.Int64s("roSQNodes", replica.GetRoNodes()),
-			)
+			recovered++
+			if debug {
+				mlog.Debug(ctx, "recover replica",
+					mlog.FieldCollectionID(replica.GetCollectionID()),
+					mlog.Int64("replicaID", replica.GetID()),
+					mlog.Int64s("rwNodes", replica.GetNodes()),
+					mlog.Int64s("roNodes", replica.GetRoNodes()),
+					mlog.Int64s("rwSQNodes", replica.GetRwSqNodes()),
+					mlog.Int64s("roSQNodes", replica.GetRoNodes()),
+				)
+			}
 		} else {
 			err := m.catalog.ReleaseReplica(ctx, replica.GetCollectionID(), replica.GetID())
 			if err != nil {
 				return err
 			}
+			cleared++
 			mlog.Info(ctx, "clear stale replica",
 				mlog.FieldCollectionID(replica.GetCollectionID()),
 				mlog.Int64("replicaID", replica.GetID()),
@@ -155,6 +163,11 @@ func (m *ReplicaManager) RecoverFrom(ctx context.Context, collections []int64, r
 		m.putReplicasInMemory(collID, reps...)
 		m.collLock.Unlock(collID)
 	}
+	mlog.Info(ctx, "recover replicas",
+		mlog.Int("recovered", recovered),
+		mlog.Int("collections", len(grouped)),
+		mlog.Int("cleared", cleared),
+	)
 	return nil
 }
 
