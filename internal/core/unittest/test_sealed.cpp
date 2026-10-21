@@ -4790,20 +4790,20 @@ TEST(SealedSegmentCowState, FieldTranslatorsRequireExplicitMmapWritebackMode) {
                                           bool,
                                           bool,
                                           std::string>));
-    EXPECT_FALSE(
-        (std::is_constructible_v<
-            GroupChunkTranslator,
-            int64_t,
-            GroupChunkType,
-            std::unordered_map<FieldId, FieldMeta>,
-            FieldDataInfo,
-            std::vector<std::shared_ptr<milvus_storage::PreparedParquetFile>>,
-            std::vector<milvus_storage::RowGroupMetadataVector>,
-            bool,
-            bool,
-            int64_t,
-            proto::common::LoadPriority,
-            std::string>));
+    EXPECT_FALSE((std::is_constructible_v<
+                  GroupChunkTranslator,
+                  int64_t,
+                  GroupChunkType,
+                  std::unordered_map<FieldId, FieldMeta>,
+                  FieldDataInfo,
+                  milvus_storage::ArrowFileSystemPtr,
+                  std::vector<std::string>,
+                  std::vector<milvus_storage::RowGroupMetadataVector>,
+                  bool,
+                  bool,
+                  int64_t,
+                  proto::common::LoadPriority,
+                  std::string>));
 }
 
 TEST(SealedSegmentCowState,
