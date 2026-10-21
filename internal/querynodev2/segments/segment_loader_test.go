@@ -901,6 +901,61 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		suite.Error(err)
 		suite.True(merr.IsCanceledOrTimeout(err))
 	})
+
+	suite.Run("wait_completed_before_wait", func() {
+		suite.SetupTest()
+
+		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).Return(nil)
+		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
+
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			NumOfRows:     100,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+
+		suite.loader.notifyLoadFinish(infos...)
+
+		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
+		suite.NoError(err)
+	})
+
+	suite.Run("wait_concurrent_waiters_all_woken", func() {
+		suite.SetupTest()
+
+		suite.segmentManager.EXPECT().Exist(mock.Anything, mock.Anything).Return(false)
+		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).Return(nil)
+		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
+
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			NumOfRows:     100,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+
+		const waiters = 16
+		results := make(chan error, waiters)
+		start := make(chan struct{})
+		for i := 0; i < waiters; i++ {
+			go func() {
+				<-start
+				results <- suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
+			}()
+		}
+		close(start)
+		time.Sleep(200 * time.Millisecond)
+
+		suite.loader.notifyLoadFinish(infos...)
+
+		for i := 0; i < waiters; i++ {
+			suite.NoError(<-results)
+		}
+	})
 }
 
 func (suite *SegmentLoaderDetailSuite) TestRequestResource() {

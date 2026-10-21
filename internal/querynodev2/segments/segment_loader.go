@@ -195,19 +195,20 @@ const (
 
 type loadResult struct {
 	status *atomic.Int32
-	cond   *sync.Cond
+	done   chan struct{}
 }
 
 func newLoadResult() *loadResult {
 	return &loadResult{
 		status: atomic.NewInt32(loading),
-		cond:   sync.NewCond(&sync.Mutex{}),
+		done:   make(chan struct{}),
 	}
 }
 
 func (r *loadResult) SetResult(status loadStatus) {
-	r.status.CompareAndSwap(loading, status)
-	r.cond.Broadcast()
+	if r.status.CompareAndSwap(loading, status) {
+		close(r.done)
+	}
 }
 
 // segmentLoader is only responsible for loading the field data from binlog
@@ -584,22 +585,9 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 
 		log.Info("wait segment loaded...", zap.Int64("segmentID", segmentID))
 
-		signal := make(chan struct{})
-		go func() {
-			select {
-			case <-signal:
-			case <-ctx.Done():
-				result.cond.Broadcast()
-			}
-		}()
-		result.cond.L.Lock()
-		for result.status.Load() == loading && ctx.Err() == nil {
-			result.cond.Wait()
-		}
-		result.cond.L.Unlock()
-		close(signal)
-
-		if ctx.Err() != nil {
+		select {
+		case <-result.done:
+		case <-ctx.Done():
 			log.Warn("failed to wait segment loaded due to context done", zap.Int64("segmentID", segmentID))
 			return ctx.Err()
 		}
