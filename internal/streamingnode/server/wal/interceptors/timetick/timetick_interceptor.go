@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -23,8 +24,10 @@ var (
 
 // timeTickAppendInterceptor is a append interceptor.
 type timeTickAppendInterceptor struct {
-	operator   *timeTickSyncOperator
-	txnManager *txn.TxnManager
+	operator    *timeTickSyncOperator
+	txnManager  *txn.TxnManager
+	commitLocks *lock.KeyLock[message.TxnID]
+	tombstones  *utility.TxnTombstones
 }
 
 func (impl *timeTickAppendInterceptor) Name() string {
@@ -33,6 +36,30 @@ func (impl *timeTickAppendInterceptor) Name() string {
 
 // Do implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
+	if msg.MessageType() != message.MessageTypeCommitTxn || msg.ReplicateHeader() != nil {
+		return impl.doAppend(ctx, msg, append)
+	}
+	id := msg.TxnContext().TxnID
+	// Serialize duplicate native commits through result publication, including
+	// the gap between session completion and TimeTick cleanup. Different txns
+	// remain concurrent; CDC is serialized by its existing replicate manager.
+	impl.commitLocks.Lock(id)
+	defer impl.commitLocks.Unlock(id)
+	if result := impl.tombstones.Get(id, msg.VChannel()); result != nil {
+		*utility.GetExtraAppendResult(ctx) = result.Result
+		return result.MessageID, nil
+	}
+	msgID, err = impl.doAppend(ctx, msg, append)
+	if err == nil {
+		impl.tombstones.Add(&utility.TxnTombstone{
+			VChannel: msg.VChannel(), MessageID: msgID,
+			Result: *utility.GetExtraAppendResult(ctx),
+		})
+	}
+	return msgID, err
+}
+
+func (impl *timeTickAppendInterceptor) doAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
 	cm := impl.operator.MVCCManager()
 	defer func() {
 		if err == nil {
@@ -95,6 +122,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	case message.MessageTypeTimeTick, message.MessageTypeMVCCBarrier:
 		// cleanup the expired transaction sessions and the already done transaction.
 		impl.txnManager.CleanupTxnUntil(msg.TimeTick())
+		impl.tombstones.Advance(msg.TimeTick())
 	default:
 		// handle the transaction body message.
 		if msg.TxnContext() != nil {
