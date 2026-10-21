@@ -1524,7 +1524,10 @@ func (m *indexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64)
 func (m *indexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.CollectionSchema) bool {
 	indexInfos := m.GetIndexesForCollection(collectionID, "")
 
-	vectorFields := typeutil.GetDenseVectorFieldSchemas(schema)
+	// dense vector fields only, struct vector sub-fields included
+	vectorFields := lo.Filter(typeutil.GetVectorFieldSchemas(schema), func(field *schemapb.FieldSchema, _ int) bool {
+		return !typeutil.IsSparseFloatVectorType(field.GetDataType())
+	})
 	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
 		return t.FieldID, GetIndexType(t.IndexParams)
 	})
