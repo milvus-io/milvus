@@ -70,7 +70,7 @@ func mockFileResourceBroadcast(t *testing.T, core *Core) *mock_broadcaster.MockB
 			require.Equal(t, []message.ResourceKey{message.NewExclusiveClusterResourceKey()}, keys)
 			return api, nil
 		}).Build()
-	t.Cleanup(patch.UnPatch)
+	t.Cleanup(func() { patch.UnPatch() })
 	return api
 }
 
