@@ -89,8 +89,11 @@ type MetaView interface {
 // provides all functionality directly — no catalog accessor is exposed.
 type MetaStore interface {
 	MetaView
+	VersionedSegments
 
-	// Segments — write (in-memory only)
+	// Segments — write (in-memory only). PutSegment and RemoveSegment force the
+	// write (see VersionedSegments); LoadSegments does not count the segments in
+	// DataCoordNumSegments, its caller emits the counts.
 	PutSegment(segment *datapb.SegmentInfo)
 	RemoveSegment(segmentID int64)
 	LoadSegments(segments []*datapb.SegmentInfo)
@@ -121,14 +124,86 @@ type MetaStore interface {
 	LoadFromCatalog(ctx context.Context, collectionIDs []int64, normalize SegmentNormalizer) error
 }
 
+// VersionedSegments is the segment storage of the store for the owner of the
+// segment metadata (DataCoord). Every live segment carries the version of the
+// value persisted for it (the store revision of its record). Reads are
+// lock-free and every write is a compare-and-swap of one segment, so writers
+// of different segments never wait for each other and readers never block.
+// A write with a version > 0 is rejected when the store already holds that or
+// a newer version of the segment; a version <= 0 forces the write and keeps
+// the stored version. A segment removed at a version > 0 leaves a tombstone
+// with that version until PruneSegment, so stale writes of it are rejected.
+// Every accepted write keeps DataCoordNumSegments in step, except LoadSegment.
+type VersionedSegments interface {
+	GetSegmentWithVersion(segmentID int64) (*datapb.SegmentInfo, int64, bool)
+	SegmentVersion(segmentID int64) (int64, bool)
+	NumSegments() int
+	RangeSegments(fn func(segmentID int64, segment *datapb.SegmentInfo) bool)
+	// RangeCollectionSegmentIDs and RangeChannelSegmentIDs visit the IDs
+	// indexed for a collection or a channel. A segment removed meanwhile may
+	// still be visited, so callers look the IDs up.
+	RangeCollectionSegmentIDs(collectionID int64, fn func(segmentID int64) bool)
+	RangeChannelSegmentIDs(channel string, fn func(segmentID int64) bool)
+
+	// InstallSegment writes segment at version. LoadSegment is InstallSegment
+	// without counting the segment, for a recovery that emits the counts of all
+	// the segments it loads at once. Both return the live value they replaced
+	// (the newer value kept when the write was rejected), nil when there was
+	// none, and whether the write applied.
+	InstallSegment(segmentID int64, segment *datapb.SegmentInfo, version int64) (*datapb.SegmentInfo, bool)
+	LoadSegment(segmentID int64, segment *datapb.SegmentInfo, version int64) (*datapb.SegmentInfo, bool)
+	// PublishSegments installs the persisted values of one mutation at their
+	// versions (keyed by segment ID). A multi-segment mutation is installed
+	// under the publication lock, so a ReadConsistent reader observes all of it
+	// or none of it. merge, when not nil, adjusts every value that replaces a
+	// live one.
+	PublishSegments(segments []*datapb.SegmentInfo, versions map[int64]int64, merge SegmentMerge) []SegmentPublication
+	// DropSegment removes a segment at version and returns the live value it
+	// removed, nil when the removal did not apply. A version <= 0 leaves no
+	// tombstone.
+	DropSegment(segmentID int64, version int64) *datapb.SegmentInfo
+	// PruneSegment removes the tombstone of a removed segment.
+	PruneSegment(segmentID int64)
+	// UpdateSegment replaces the live value of a segment with fn(current) and
+	// keeps its version: an in-memory change that no persisted write owns. fn
+	// may run more than once, must not modify current, and returns nil to leave
+	// the segment unchanged. Returns the replaced and the new value, nil when
+	// nothing changed.
+	UpdateSegment(segmentID int64, fn func(current *datapb.SegmentInfo) *datapb.SegmentInfo) (old, updated *datapb.SegmentInfo)
+	// ClearSegments removes every segment, tombstones included, for a recovery
+	// attempt that loads them all again.
+	ClearSegments()
+	// ReadConsistent runs read without observing a half-installed
+	// PublishSegments.
+	ReadConsistent(read func())
+}
+
+// SegmentMerge adjusts next, the value a publication is about to install, to
+// current, the live value it replaces. It may run more than once and must not
+// modify current.
+type SegmentMerge func(current, next *datapb.SegmentInfo)
+
+// SegmentPublication is the outcome of one segment of PublishSegments.
+type SegmentPublication struct {
+	// Old is the live value before the publication (the newer value kept when
+	// the publication was rejected), nil when the segment was not live.
+	Old     *datapb.SegmentInfo
+	Applied bool
+}
+
 type metaStore struct {
 	mu      sync.RWMutex
 	catalog metastore.DataCoordCatalog
 
-	// Segment storage + indexes
-	segments   map[int64]*datapb.SegmentInfo
-	segCollIdx map[int64]map[int64]struct{}
-	segChanIdx map[string]map[int64]struct{}
+	// Segment storage (see VersionedSegments); mu does not guard it. The
+	// indexes map a collection or a channel to the IDs of its segments (see
+	// segmentIndex).
+	segments   *versionedMap[int64, *datapb.SegmentInfo]
+	segCollIdx *segmentIndex[int64]
+	segChanIdx *segmentIndex[string]
+	// pubMu makes PublishSegments of several segments atomic for
+	// ReadConsistent. It is held only around in-memory installs.
+	pubMu sync.RWMutex
 
 	// Collection storage
 	collections map[int64]*CollectionInfo
@@ -142,9 +217,9 @@ type metaStore struct {
 func NewMetaStore(catalog metastore.DataCoordCatalog) MetaStore {
 	return &metaStore{
 		catalog:     catalog,
-		segments:    make(map[int64]*datapb.SegmentInfo),
-		segCollIdx:  make(map[int64]map[int64]struct{}),
-		segChanIdx:  make(map[string]map[int64]struct{}),
+		segments:    newVersionedMap[int64, *datapb.SegmentInfo](),
+		segCollIdx:  newSegmentIndex((*datapb.SegmentInfo).GetCollectionID),
+		segChanIdx:  newSegmentIndex((*datapb.SegmentInfo).GetInsertChannel),
 		collections: make(map[int64]*CollectionInfo),
 		checkpoints: make(map[string]*msgpb.MsgPosition),
 	}
@@ -161,18 +236,13 @@ func (s *metaStore) InternalCatalog() metastore.DataCoordCatalog {
 // --- Segment read methods ---
 
 func (s *metaStore) GetSegment(segmentID int64) (*datapb.SegmentInfo, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	seg, ok := s.segments[segmentID]
-	return seg, ok
+	return s.segments.Lookup(segmentID)
 }
 
 func (s *metaStore) GetSegmentsByIDs(segmentIDs []int64) map[int64]*datapb.SegmentInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	result := make(map[int64]*datapb.SegmentInfo, len(segmentIDs))
 	for _, id := range segmentIDs {
-		if seg, ok := s.segments[id]; ok {
+		if seg, ok := s.segments.Lookup(id); ok {
 			result[id] = seg
 		}
 	}
@@ -180,133 +250,303 @@ func (s *metaStore) GetSegmentsByIDs(segmentIDs []int64) map[int64]*datapb.Segme
 }
 
 func (s *metaStore) GetAllSegments() map[int64]*datapb.SegmentInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make(map[int64]*datapb.SegmentInfo, len(s.segments))
-	for id, seg := range s.segments {
+	result := make(map[int64]*datapb.SegmentInfo, s.segments.Len())
+	s.segments.Range(func(id int64, seg *datapb.SegmentInfo) bool {
 		result[id] = seg
-	}
+		return true
+	})
 	return result
 }
 
+// GetSegments returns the segments of a collection, nil when it has none.
 func (s *metaStore) GetSegments(collectionID int64) map[int64]*datapb.SegmentInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ids, ok := s.segCollIdx[collectionID]
+	ids, ok := s.segCollIdx.get(collectionID)
 	if !ok {
 		return nil
 	}
-	result := make(map[int64]*datapb.SegmentInfo, len(ids))
-	for id := range ids {
-		result[id] = s.segments[id]
+	return s.lookupIndexed(ids, func(seg *datapb.SegmentInfo) bool {
+		return seg.GetCollectionID() == collectionID
+	})
+}
+
+// GetSegmentsByChannel returns the segments of a channel, nil when it has none.
+func (s *metaStore) GetSegmentsByChannel(channel string) map[int64]*datapb.SegmentInfo {
+	ids, ok := s.segChanIdx.get(channel)
+	if !ok {
+		return nil
 	}
+	return s.lookupIndexed(ids, func(seg *datapb.SegmentInfo) bool {
+		return seg.GetInsertChannel() == channel
+	})
+}
+
+// lookupIndexed returns the live segments of the indexed IDs that match, nil
+// when none does: an indexed ID may belong to a segment removed meanwhile.
+func (s *metaStore) lookupIndexed(ids *typeutil.ConcurrentMap[int64, struct{}], match func(*datapb.SegmentInfo) bool) map[int64]*datapb.SegmentInfo {
+	var result map[int64]*datapb.SegmentInfo
+	ids.Range(func(id int64, _ struct{}) bool {
+		if seg, ok := s.segments.Lookup(id); ok && match(seg) {
+			if result == nil {
+				result = make(map[int64]*datapb.SegmentInfo, ids.Len())
+			}
+			result[id] = seg
+		}
+		return true
+	})
 	return result
 }
 
-func (s *metaStore) GetSegmentsByChannel(channel string) map[int64]*datapb.SegmentInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ids, ok := s.segChanIdx[channel]
-	if !ok {
-		return nil
+func (s *metaStore) GetSegmentWithVersion(segmentID int64) (*datapb.SegmentInfo, int64, bool) {
+	return s.segments.LookupWithVersion(segmentID)
+}
+
+func (s *metaStore) SegmentVersion(segmentID int64) (int64, bool) {
+	return s.segments.Version(segmentID)
+}
+
+func (s *metaStore) NumSegments() int {
+	return s.segments.Len()
+}
+
+func (s *metaStore) RangeSegments(fn func(segmentID int64, segment *datapb.SegmentInfo) bool) {
+	s.segments.Range(fn)
+}
+
+func (s *metaStore) RangeCollectionSegmentIDs(collectionID int64, fn func(segmentID int64) bool) {
+	if ids, ok := s.segCollIdx.get(collectionID); ok {
+		ids.Range(func(id int64, _ struct{}) bool { return fn(id) })
 	}
-	result := make(map[int64]*datapb.SegmentInfo, len(ids))
-	for id := range ids {
-		result[id] = s.segments[id]
+}
+
+func (s *metaStore) RangeChannelSegmentIDs(channel string, fn func(segmentID int64) bool) {
+	if ids, ok := s.segChanIdx.get(channel); ok {
+		ids.Range(func(id int64, _ struct{}) bool { return fn(id) })
 	}
-	return result
+}
+
+// ReadConsistent runs read without observing a half-installed PublishSegments.
+func (s *metaStore) ReadConsistent(read func()) {
+	s.pubMu.RLock()
+	defer s.pubMu.RUnlock()
+	read()
 }
 
 // --- Segment write methods (in-memory) ---
 
-// PutSegment inserts or replaces a segment and emits the matching
-// DataCoordNumSegments change.
+// PutSegment inserts or replaces a segment, keeping its stored version, and
+// emits the matching DataCoordNumSegments change.
 func (s *metaStore) PutSegment(segment *datapb.SegmentInfo) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.putSegmentLocked(segment)
+	s.InstallSegment(segment.GetID(), segment, 0)
 }
 
-// RemoveSegment deletes a segment and decrements DataCoordNumSegments.
+// RemoveSegment deletes a segment, leaving no tombstone, and decrements
+// DataCoordNumSegments.
 func (s *metaStore) RemoveSegment(segmentID int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	old, ok := s.segments[segmentID]
-	if !ok {
-		return
-	}
-	s.removeSegmentIndexes(segmentID, old)
-	delete(s.segments, segmentID)
-	labels := segMetricLabels(old)
-	metrics.DataCoordNumSegments.WithLabelValues(labels[:]...).Dec()
-}
-
-// putSegmentLocked is the single write path that keeps DataCoordNumSegments
-// in sync with the in-memory segments. Caller must hold s.mu.
-func (s *metaStore) putSegmentLocked(segment *datapb.SegmentInfo) {
-	id := segment.GetID()
-	if old, exists := s.segments[id]; exists {
-		s.emitSegmentMetricTransition(old, segment)
-		s.removeSegmentIndexes(id, old)
-	} else {
-		labels := segMetricLabels(segment)
-		metrics.DataCoordNumSegments.WithLabelValues(labels[:]...).Inc()
-	}
-	s.segments[id] = segment
-	s.addSegmentIndexes(id, segment)
+	s.DropSegment(segmentID, 0)
 }
 
 func (s *metaStore) LoadSegments(segments []*datapb.SegmentInfo) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, seg := range segments {
-		id := seg.GetID()
-		if old, exists := s.segments[id]; exists {
-			s.removeSegmentIndexes(id, old)
-		}
-		s.segments[id] = seg
-		s.addSegmentIndexes(id, seg)
+		s.LoadSegment(seg.GetID(), seg, 0)
 	}
 }
 
-func (s *metaStore) addSegmentIndexes(id int64, seg *datapb.SegmentInfo) {
-	collID := seg.GetCollectionID()
-	if s.segCollIdx[collID] == nil {
-		s.segCollIdx[collID] = make(map[int64]struct{})
+func (s *metaStore) InstallSegment(segmentID int64, segment *datapb.SegmentInfo, version int64) (*datapb.SegmentInfo, bool) {
+	old, applied := s.LoadSegment(segmentID, segment, version)
+	if applied {
+		segmentMetricTransition(old, segment)
 	}
-	s.segCollIdx[collID][id] = struct{}{}
-
-	ch := seg.GetInsertChannel()
-	if s.segChanIdx[ch] == nil {
-		s.segChanIdx[ch] = make(map[int64]struct{})
-	}
-	s.segChanIdx[ch][id] = struct{}{}
+	return old, applied
 }
 
-func (s *metaStore) removeSegmentIndexes(id int64, seg *datapb.SegmentInfo) {
-	collID := seg.GetCollectionID()
-	if ids, ok := s.segCollIdx[collID]; ok {
-		delete(ids, id)
-		if len(ids) == 0 {
-			delete(s.segCollIdx, collID)
-		}
+func (s *metaStore) LoadSegment(segmentID int64, segment *datapb.SegmentInfo, version int64) (*datapb.SegmentInfo, bool) {
+	old, _, applied := s.segments.Swap(segmentID, version, func(*datapb.SegmentInfo, bool) *datapb.SegmentInfo {
+		return segment
+	})
+	if applied {
+		s.indexSegment(segmentID, old, segment)
 	}
+	return old, applied
+}
 
-	ch := seg.GetInsertChannel()
-	if ids, ok := s.segChanIdx[ch]; ok {
-		delete(ids, id)
-		if len(ids) == 0 {
-			delete(s.segChanIdx, ch)
+func (s *metaStore) PublishSegments(segments []*datapb.SegmentInfo, versions map[int64]int64, merge SegmentMerge) []SegmentPublication {
+	if len(segments) > 1 {
+		s.pubMu.Lock()
+		defer s.pubMu.Unlock()
+	}
+	results := make([]SegmentPublication, len(segments))
+	for i, segment := range segments {
+		id := segment.GetID()
+		old, _, applied := s.segments.Swap(id, versions[id], func(current *datapb.SegmentInfo, live bool) *datapb.SegmentInfo {
+			if live && merge != nil {
+				merge(current, segment)
+			}
+			return segment
+		})
+		if applied {
+			s.indexSegment(id, old, segment)
+			segmentMetricTransition(old, segment)
+		} else {
+			// The store already holds this or a newer version.
+			currentVersion, _ := s.segments.Version(id)
+			mlog.Debug(context.TODO(), "stale segment publication ignored",
+				mlog.FieldSegmentID(id), mlog.Int64("version", versions[id]), mlog.Int64("currentVersion", currentVersion))
 		}
+		results[i] = SegmentPublication{Old: old, Applied: applied}
+	}
+	return results
+}
+
+func (s *metaStore) DropSegment(segmentID int64, version int64) *datapb.SegmentInfo {
+	// Erase first: a stale drop is rejected and must leave the indexes intact;
+	// a drop over a tombstone still advances the tombstone version. Only the
+	// drop that erases the live value counts it, so concurrent drops of one
+	// segment decrement once.
+	old := s.segments.Erase(segmentID, version)
+	if old != nil {
+		s.unindexSegment(segmentID, old)
+		segmentMetricTransition(old, nil)
+	}
+	if version <= 0 {
+		s.segments.Prune(segmentID)
+	}
+	return old
+}
+
+func (s *metaStore) PruneSegment(segmentID int64) {
+	s.segments.Prune(segmentID)
+}
+
+func (s *metaStore) UpdateSegment(segmentID int64, fn func(current *datapb.SegmentInfo) *datapb.SegmentInfo) (old, updated *datapb.SegmentInfo) {
+	// Transform may rerun fn after a lost race; the last run is the applied one.
+	if !s.segments.Transform(segmentID, func(current *datapb.SegmentInfo) (*datapb.SegmentInfo, bool) {
+		old, updated = current, fn(current)
+		return updated, updated != nil
+	}) {
+		return nil, nil
+	}
+	segmentMetricTransition(old, updated)
+	return old, updated
+}
+
+func (s *metaStore) ClearSegments() {
+	s.segments.clear()
+	s.segCollIdx.clear()
+	s.segChanIdx.clear()
+}
+
+// indexSegment indexes segment, which replaced old (nil when the segment was
+// not live). A segment's collection and channel only change in tests that
+// rewrite it wholesale.
+func (s *metaStore) indexSegment(segmentID int64, old, segment *datapb.SegmentInfo) {
+	if old != nil && (old.GetCollectionID() != segment.GetCollectionID() || old.GetInsertChannel() != segment.GetInsertChannel()) {
+		s.unindexSegment(segmentID, old)
+	}
+	s.segCollIdx.add(s.segments, segment.GetCollectionID(), segmentID)
+	s.segChanIdx.add(s.segments, segment.GetInsertChannel(), segmentID)
+}
+
+func (s *metaStore) unindexSegment(segmentID int64, segment *datapb.SegmentInfo) {
+	s.segCollIdx.remove(s.segments, segment.GetCollectionID(), segmentID)
+	s.segChanIdx.remove(s.segments, segment.GetInsertChannel(), segmentID)
+}
+
+// segmentIndex maps a key (a collection or a channel) to the bucket of the
+// IDs of its live segments. Adds and removes run without locks: an add checks
+// the segment again after it lands, and a removal takes an emptied bucket out
+// of the index, so the index neither keeps the IDs of removed segments nor
+// the buckets of dropped collections and channels.
+type segmentIndex[K comparable] struct {
+	buckets *typeutil.ConcurrentMap[K, *typeutil.ConcurrentMap[int64, struct{}]]
+	keyOf   func(*datapb.SegmentInfo) K
+}
+
+func newSegmentIndex[K comparable](keyOf func(*datapb.SegmentInfo) K) *segmentIndex[K] {
+	return &segmentIndex[K]{
+		buckets: typeutil.NewConcurrentMap[K, *typeutil.ConcurrentMap[int64, struct{}]](),
+		keyOf:   keyOf,
 	}
 }
 
-func (s *metaStore) emitSegmentMetricTransition(old, updated *datapb.SegmentInfo) {
-	oldLabels := segMetricLabels(old)
-	newLabels := segMetricLabels(updated)
-	if oldLabels != newLabels {
-		metrics.DataCoordNumSegments.WithLabelValues(oldLabels[:]...).Dec()
-		metrics.DataCoordNumSegments.WithLabelValues(newLabels[:]...).Inc()
+// indexes reports whether segmentID is a live segment of key.
+func (idx *segmentIndex[K]) indexes(segments *versionedMap[int64, *datapb.SegmentInfo], key K, segmentID int64) bool {
+	segment, ok := segments.Lookup(segmentID)
+	return ok && idx.keyOf(segment) == key
+}
+
+// add adds segmentID to the bucket of key. A removal may take the bucket out
+// of the index while the add lands in it; the add then goes again into the
+// bucket the index holds now. A removal of the segment that ran before the add
+// landed is undone by checking the segment afterwards: one that runs after
+// the check finds the add.
+func (idx *segmentIndex[K]) add(segments *versionedMap[int64, *datapb.SegmentInfo], key K, segmentID int64) {
+	for {
+		bucket, ok := idx.buckets.Get(key)
+		if !ok {
+			bucket, _ = idx.buckets.GetOrInsert(key, typeutil.NewConcurrentMap[int64, struct{}]())
+		}
+		bucket.Insert(segmentID, struct{}{})
+		if current, ok := idx.buckets.Get(key); ok && current == bucket {
+			break
+		}
+	}
+	if !idx.indexes(segments, key, segmentID) {
+		idx.remove(segments, key, segmentID)
+	}
+}
+
+// remove removes segmentID from the bucket of key, and the bucket from the
+// index once it is empty. The live segments added to the bucket while it was
+// being taken out move into the bucket the index holds now; until then a
+// reader of the index misses them, as it misses a segment whose install has
+// not indexed it yet.
+func (idx *segmentIndex[K]) remove(segments *versionedMap[int64, *datapb.SegmentInfo], key K, segmentID int64) {
+	bucket, ok := idx.buckets.Get(key)
+	if !ok {
+		return
+	}
+	bucket.Remove(segmentID)
+	if bucket.Len() > 0 || !idx.buckets.CompareAndDelete(key, bucket) {
+		return
+	}
+	bucket.Range(func(id int64, _ struct{}) bool {
+		if idx.indexes(segments, key, id) {
+			idx.add(segments, key, id)
+		}
+		return true
+	})
+}
+
+// get returns the bucket of key.
+func (idx *segmentIndex[K]) get(key K) (*typeutil.ConcurrentMap[int64, struct{}], bool) {
+	return idx.buckets.Get(key)
+}
+
+// clear removes every bucket.
+func (idx *segmentIndex[K]) clear() {
+	idx.buckets.Range(func(key K, _ *typeutil.ConcurrentMap[int64, struct{}]) bool {
+		idx.buckets.Remove(key)
+		return true
+	})
+}
+
+// segmentMetricTransition updates DataCoordNumSegments for a segment replaced
+// by updated. A nil old counts a new segment, a nil updated a removed one.
+func segmentMetricTransition(old, updated *datapb.SegmentInfo) {
+	switch {
+	case old == nil && updated == nil:
+	case old == nil:
+		labels := segMetricLabels(updated)
+		metrics.DataCoordNumSegments.WithLabelValues(labels[:]...).Inc()
+	case updated == nil:
+		labels := segMetricLabels(old)
+		metrics.DataCoordNumSegments.WithLabelValues(labels[:]...).Dec()
+	default:
+		oldLabels, newLabels := segMetricLabels(old), segMetricLabels(updated)
+		if oldLabels != newLabels {
+			metrics.DataCoordNumSegments.WithLabelValues(oldLabels[:]...).Dec()
+			metrics.DataCoordNumSegments.WithLabelValues(newLabels[:]...).Inc()
+		}
 	}
 }
 
@@ -620,10 +860,8 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 	// behind -- and if the catalog's collection set shrank in between, those
 	// orphans stay resolvable to QueryCoord forever. Start from empty so each
 	// attempt reflects exactly what the catalog holds now.
+	s.ClearSegments()
 	s.mu.Lock()
-	s.segments = make(map[int64]*datapb.SegmentInfo)
-	s.segCollIdx = make(map[int64]map[int64]struct{})
-	s.segChanIdx = make(map[string]map[int64]struct{})
 	s.checkpoints = make(map[string]*msgpb.MsgPosition)
 	s.mu.Unlock()
 
@@ -678,9 +916,7 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 
 	s.emitCheckpointMetrics()
 
-	s.mu.RLock()
-	numSegments := len(s.segments)
-	s.mu.RUnlock()
+	numSegments := s.segments.Len()
 
 	mlog.Info(ctx, "metaStore LoadFromCatalog done",
 		mlog.Int("numSegments", numSegments),
@@ -690,11 +926,8 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 }
 
 func (s *metaStore) emitSegmentMetrics() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	metrics.DataCoordNumSegments.Reset()
-	for _, segment := range s.segments {
+	s.segments.Range(func(_ int64, segment *datapb.SegmentInfo) bool {
 		labels := segMetricLabels(segment)
 		metrics.DataCoordNumSegments.WithLabelValues(labels[:]...).Inc()
 
@@ -710,7 +943,8 @@ func (s *metaStore) emitSegmentMetrics() {
 
 			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(stats.GetDeltaBinlogCount()))
 		}
-	}
+		return true
+	})
 }
 
 func (s *metaStore) emitCheckpointMetrics() {
