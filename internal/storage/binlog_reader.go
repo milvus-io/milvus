@@ -56,7 +56,12 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	}
 	reader.eventReader, err = newEventReader(reader.PayloadDataType, reader.buffer, nullable)
 	if err != nil {
-		return nil, err
+		if merr.IsMilvusError(err) {
+			return nil, err
+		}
+		// The event is decoded from an in-memory buffer: a raw failure is the
+		// file's content, not a transport fault.
+		return nil, merr.WrapErrDataIntegrityMsg("parse binlog event failed, error: %v", err)
 	}
 	return reader.eventReader, nil
 }
@@ -150,12 +155,21 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 func NewBinlogReader(data []byte, opts ...BinlogReaderOption) (*BinlogReader, error) {
 	buffer := bytes.NewBuffer(data)
 	if _, err := readMagicNumber(buffer); err != nil {
-		return nil, err
+		if merr.IsMilvusError(err) {
+			return nil, err
+		}
+		// The buffer is already in memory: a raw read failure here is the file's
+		// content, not a transport fault, so report it as data corruption
+		// instead of an error a caller may retry forever.
+		return nil, merr.WrapErrDataIntegrityMsg("parse binlog magic number failed, error: %v", err)
 	}
 
 	descriptor, err := ReadDescriptorEvent(buffer)
 	if err != nil {
-		return nil, err
+		if merr.IsMilvusError(err) {
+			return nil, err
+		}
+		return nil, merr.WrapErrDataIntegrityMsg("parse binlog descriptor failed, error: %v", err)
 	}
 
 	reader := BinlogReader{

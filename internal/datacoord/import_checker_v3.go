@@ -31,7 +31,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -143,22 +141,10 @@ func (c *importCheckerV3) checkJob(job ImportJob) {
 	jc := newImportV3JobContext(c, job)
 	if err := handler.Handle(jc); err != nil {
 		jc.log.Warn(jc.ctx, "import v3 job state handle failed", mlog.String("state", job.GetState().String()), mlog.Err(err))
-		if isTerminalImportV3JobErr(err) {
+		if importcommon.IsTerminalImportV3Err(err) {
 			jc.failJob(err.Error())
 		}
 	}
-}
-
-// isTerminalImportV3JobErr decides whether a state-handler error fails the job
-// immediately instead of retrying on the next tick. It is the shared denylist
-// plus disk-quota exhaustion, matching the V2 checker (import_checker.go): the
-// quota verdict is not input the user can fix by resubmitting the same
-// request, and a silent retry loop would re-read every reshard manifest on
-// each 2s tick while the job reports a fixed 40% with an empty reason. The
-// Planning state is the only quota consumer, so folding it into the shared
-// policy keeps every state's rule identical.
-func isTerminalImportV3JobErr(err error) bool {
-	return importcommon.IsTerminalImportV3Err(err) || errors.Is(err, merr.ErrServiceQuotaExceeded)
 }
 
 // runGCLoop is the checker's low-frequency pass. It runs the terminal-state

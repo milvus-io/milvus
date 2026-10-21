@@ -621,6 +621,31 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		s.NoError(merr.CheckRPCCall(status, err))
 	})
 
+	s.Run("malformed payload is a parameter error", func() {
+		req := &workerpb.CreateTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.PreImport,
+			},
+			Payload: []byte{0xff, 0xff, 0xff},
+		}
+		status, err := s.node.CreateTask(s.ctx, req)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrParameterInvalid), status.GetCode())
+	})
+
+	s.Run("unrecognized task type is unimplemented", func() {
+		req := &workerpb.CreateTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      "no-such-task",
+			},
+		}
+		status, err := s.node.CreateTask(s.ctx, req)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrServiceUnimplemented), status.GetCode())
+	})
+
 	s.Run("create stats task", func() {
 		statsReq := &workerpb.CreateStatsRequest{
 			StorageConfig: s.storageConfig,

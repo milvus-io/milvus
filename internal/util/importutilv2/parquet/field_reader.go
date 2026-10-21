@@ -84,7 +84,30 @@ func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex
 	return cr, nil
 }
 
+// wrapParquetErr classifies a failure raised while decoding one column's data.
+//
+// A Milvus error keeps its code and retry class: the retryable reader in front
+// of the decoder maps transient object-store faults to typed IO errors, and
+// Arrow wraps them with %w, so a persistent outage must stay retriable. Any
+// other error is a property of the immutable file -- a corrupt data page, a
+// bad dictionary, an invalid JSON/WKT value -- which a retry cannot fix, so it
+// becomes a terminal input error like the header/footer checks.
+func wrapParquetErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if merr.IsMilvusError(err) {
+		return err
+	}
+	return common.WrapDecodeErr(err, "read parquet column data")
+}
+
 func (c *FieldReader) Next(count int64) (any, any, error) {
+	data, validData, err := c.next(count)
+	return data, validData, wrapParquetErr(err)
+}
+
+func (c *FieldReader) next(count int64) (any, any, error) {
 	// Check if this FieldReader wraps a StructFieldReader
 	if c.structReader != nil {
 		return c.structReader.Next(count)

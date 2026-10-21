@@ -17,12 +17,15 @@
 package common
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -65,37 +68,37 @@ func TestWrapDecodeErr(t *testing.T) {
 	})
 }
 
+// A loon FFI failure whose producer marked the code permanent (access denied,
+// malformed input, corrupt data) must fail the task: retrying reruns the whole
+// reshard and cannot change the outcome.
+
 func TestIsTerminalImportV3Err(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-		want bool
+	for _, c := range []struct {
+		name     string
+		err      error
+		terminal bool
 	}{
 		{"nil", nil, false},
-		{"plain non-milvus error", errors.New("plain etcd/io"), false},
-		// ErrIoFailed is what mapObjectStorageError assigns to unenumerated
-		// 5xx/timeout codes; it must stay transient so a storage outage
-		// retries instead of failing the job.
-		{"ErrIoFailed is transient", merr.WrapErrIoFailed("x", errors.New("io failed")), false},
-		{"ErrServiceUnavailable is transient", merr.WrapErrServiceUnavailable("transient storage outage"), false},
-		{"ErrIoUnexpectEOF is transient", merr.WrapErrIoUnexpectEOF("x", errors.New("unexpected eof")), false},
-		{"ErrIoTooManyRequests is transient", merr.WrapErrIoTooManyRequests("x", errors.New("too many requests")), false},
-		{"ErrIoKeyNotFound is terminal", merr.WrapErrIoKeyNotFound("x", "not found"), true},
-		{"ErrIoPermissionDenied is terminal", merr.WrapErrIoPermissionDenied("x", errors.New("denied")), true},
-		{"ErrDataIntegrity is terminal", merr.WrapErrDataIntegrityMsg("corrupt manifest"), true},
-		{"ErrImportFailed is terminal", merr.WrapErrImportFailedMsg("bad file"), true},
-		{"ErrImportSysFailed is terminal", merr.WrapErrImportSysFailedMsg("bad plan"), true},
-		// Caller-input defects are deterministic: an oversized import file or
-		// a parquet type/dimension mismatch cannot be retried away, and an
-		// uncapped retry loop would burn one segment and log range per round.
-		{"ErrParameterInvalid is terminal", merr.WrapErrParameterInvalidMsg("import file size exceeds the maximum"), true},
-		// An RLS write-predicate denial is deterministic: the rows violate the
-		// principal's policy, so retrying the same import cannot succeed.
-		{"ErrPrivilegeNotPermitted is terminal", merr.WrapErrPrivilegeNotPermitted("import operation denied by RLS check expression"), true},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			require.Equal(t, c.want, IsTerminalImportV3Err(c.err))
-		})
+		{"data integrity", merr.WrapErrDataIntegrityMsg("bad manifest"), true},
+		{"import failed", merr.WrapErrImportFailedMsg("bad input"), true},
+		{"import sys failed", merr.WrapErrImportSysFailedMsg("config"), true},
+		{"parameter invalid", merr.WrapErrParameterInvalidMsg("bad request"), true},
+		{"privilege denied", merr.WrapErrPrivilegeNotPermitted("denied"), true},
+		{"permanent io", merr.WrapErrIoKeyNotFound("manifest", "missing"), true},
+		{"quota", merr.WrapErrServiceQuotaExceeded("disk quota"), true},
+		{"service unimplemented", merr.ErrServiceUnimplemented, true},
+		{"loon permanent", packed.ErrLoonPermanent, true},
+		{"typed io failure", merr.WrapErrIoFailed("manifest", errors.New("reset")), true},
+		{"service unavailable", merr.ErrServiceUnavailable, false},
+		{"service internal", merr.WrapErrServiceInternalMsg("internal"), true},
+		{"storage", merr.WrapErrStorage(errors.New("storage"), "write"), true},
+		{"storage wrapping loon transient", merr.WrapErrStorage(packed.ErrLoonTransient, "write"), false},
+		{"node not found", merr.ErrNodeNotFound, false},
+		{"deadline", context.DeadlineExceeded, false},
+		{"raw", errors.New("connection reset"), false},
+		{"loon transient", packed.ErrLoonTransient, false},
+		{"id exhausted", allocator.NewIDExhaustedError(0, 10, 5), false},
+	} {
+		require.Equal(t, c.terminal, IsTerminalImportV3Err(c.err), c.name)
 	}
 }
