@@ -306,6 +306,8 @@ func (t *clusteringCompactionTask) init() error {
 			clusteringKeyField = field
 		}
 	}
+	// Required fields are an internal plan contract, so missing fields use
+	// ServiceInternal. The nil-schema check retains its legacy error code.
 	if pkField == nil {
 		return merr.WrapErrServiceInternalMsg("no primary key field found")
 	}
@@ -725,6 +727,9 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
+		// clusteringScalarValue checks nil columns for PK, TTL, and scalar
+		// clustering keys; their lookup booleans are intentionally ignored.
+		// Timestamp is read directly, so validate its presence and type here.
 		pkColumn, _ := storage.TryRecordColumn(r, t.primaryKeyField.GetFieldID())
 		ts, exists := storage.TryRecordColumn(r, common.TimeStampField)
 		tsColumn, ok := ts.(*array.Int64)
@@ -813,7 +818,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 // default-value semantics consistent with the scalar analysis deserializer.
 func clusteringScalarValue(column arrow.Array, field *schemapb.FieldSchema, row int) (any, error) {
 	if column == nil {
-		return nil, merr.WrapErrServiceInternalMsg("missing clustering scalar column for field %d", field.GetFieldID())
+		return nil, merr.WrapErrServiceInternalMsg("missing required column for field %d in clustering compaction", field.GetFieldID())
 	}
 	if column.IsNull(row) {
 		if field.GetDefaultValue() != nil {
