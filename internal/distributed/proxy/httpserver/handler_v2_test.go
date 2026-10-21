@@ -7537,3 +7537,105 @@ func TestRequestHandlerFuncAllowsIdempotencyKeyHeaderInCORS(t *testing.T) {
 
 	assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), HTTPHeaderIdempotencyKey)
 }
+
+// A FloatVector sent as base64 reaches the proxy bit for bit, on every write
+// and search entry point, and mixes freely with the array spelling on insert.
+func TestFloatVectorBase64V2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil)
+
+	// book_intro has dim 2
+	first, second := lossyFloat32s[:2], lossyFloat32s[2:]
+	insertBody := []byte(fmt.Sprintf(`{"collectionName": "book", "data": [
+		{"book_id": 0, "word_count": 0, "book_intro": %q},
+		{"book_id": 1, "word_count": 1, "book_intro": [0.5, 2]},
+		{"book_id": 2, "word_count": 2, "book_intro": %q}
+	]}`, base64Float32(first...), base64Float32(second...)))
+	wantColumn := float32Bits(append(append(append([]float32{}, first...), 0.5, 2), second...))
+	assertColumn := func(fieldsData []*schemapb.FieldData) {
+		column := getFieldDataByName(fieldsData, FieldBookIntro)
+		require.NotNil(t, column)
+		assert.Equal(t, wantColumn, float32Bits(column.GetVectors().GetFloatVector().GetData()))
+	}
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+		assertColumn(req.GetFieldsData())
+		return &milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: 3, IDs: generateIDs(schemapb.DataType_Int64, 3)}, nil
+	}).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+		assertColumn(req.GetFieldsData())
+		return &milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: 3, IDs: generateIDs(schemapb.DataType_Int64, 3)}, nil
+	}).Once()
+
+	searchValues := [][]byte{}
+	mp.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		group := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(req.GetPlaceholderGroup(), group))
+		require.Len(t, group.GetPlaceholders(), 1)
+		assert.Equal(t, commonpb.PlaceholderType_FloatVector, group.GetPlaceholders()[0].GetType())
+		searchValues = append(searchValues, group.GetPlaceholders()[0].GetValues()...)
+		return &milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil
+	}).Times(2)
+	hybridValues := [][]byte{}
+	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+		for _, sub := range req.GetRequests() {
+			group := &commonpb.PlaceholderGroup{}
+			require.NoError(t, proto.Unmarshal(sub.GetPlaceholderGroup(), group))
+			hybridValues = append(hybridValues, group.GetPlaceholders()[0].GetValues()...)
+		}
+		return &milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil
+	}).Once()
+
+	testEngine := initHTTPServerV2(mp, false)
+	searchData := fmt.Sprintf(`[%q]`, base64Float32(0.1, 1.0/3))
+	validateTestCases(t, testEngine, []requestBodyTestCase{
+		{path: InsertAction, requestBody: insertBody},
+		{path: UpsertAction, requestBody: insertBody},
+		{
+			path: InsertAction,
+			requestBody: []byte(fmt.Sprintf(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "book_intro": %q}]}`,
+				base64Float32(0.1, 0.2, 0.3))),
+			errCode: 1804,
+			errMsg:  "field book_intro: base64 float vector byte length mismatch: expect 8 (dim 2), got 12",
+		},
+		{
+			path:        InsertAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "book_intro": "zczMPc3MTD4"}]}`),
+			errCode:     1804,
+			errMsg:      "field book_intro: float vector is not valid base64",
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": ` + searchData + `, "annsField": "book_intro", "limit": 4}`),
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.33333334]], "annsField": "book_intro", "limit": 4}`),
+		},
+		{
+			path: HybridSearchAction,
+			requestBody: []byte(`{"collectionName": "book", "search": [` +
+				`{"data": ` + searchData + `, "annsField": "book_intro", "metricType": "L2", "limit": 3},` +
+				`{"data": [[0.1, 0.33333334]], "annsField": "book_intro", "metricType": "L2", "limit": 3}` +
+				`], "rerank": {"strategy": "rrf", "params": {"k": 1}}}`),
+		},
+		{
+			path:        SearchAction,
+			requestBody: []byte(fmt.Sprintf(`{"collectionName": "book", "data": [%q], "annsField": "book_intro", "limit": 4}`, base64Float32(0.1))),
+			errCode:     1801,
+			errMsg:      "dimension: 2, bytesLen: 8, but length of []byte: 4",
+		},
+	}, false)
+
+	want := typeutil.Float32ArrayToBytes([]float32{0.1, 1.0 / 3})
+	assert.Equal(t, [][]byte{want, want}, searchValues, "base64 and array search must build the same placeholder")
+	assert.Equal(t, [][]byte{want, want}, hybridValues)
+}
