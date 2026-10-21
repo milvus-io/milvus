@@ -8864,6 +8864,9 @@ ChunkedSegmentSealedImpl::Reopen(
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(new_load_info, target_schema);
     new_local.InheritCachedColumnGroupsFrom(*current->load_info);
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
+    current_mutable.ResolveLegacyBinlogChildFields(nullptr);
+    new_local.ResolveLegacyBinlogChildFields(&current_mutable);
     for (auto fid : current->load_info->GetCreatedTextIndexes()) {
         if (field_exists_in_schema(target_schema, fid)) {
             new_local.SetTextIndexCreated(fid);
@@ -10370,6 +10373,8 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     for (auto fid : snapshot->load_info->GetCreatedTextIndexes()) {
         mutable_copy.SetTextIndexCreated(fid);
     }
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Load()");
+    mutable_copy.ResolveLegacyBinlogChildFields(nullptr);
     auto diff = mutable_copy.GetLoadDiff();
     LOG_DEBUG("Load segment {} with diff {}", id_, diff.ToString());
 
