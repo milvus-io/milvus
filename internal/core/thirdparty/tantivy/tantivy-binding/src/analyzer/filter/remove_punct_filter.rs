@@ -2,8 +2,8 @@ use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
 
 pub struct RemovePunctFilter;
 
-pub struct RemovePunctFilterStream<T> {
-    regex: regex::Regex,
+pub struct RemovePunctFilterStream<'a, T> {
+    regex: &'a regex::Regex,
     tail: T,
 }
 
@@ -11,24 +11,31 @@ impl TokenFilter for RemovePunctFilter {
     type Tokenizer<T: Tokenizer> = RemovePunctFilterWrapper<T>;
 
     fn transform<T: Tokenizer>(self, tokenizer: T) -> RemovePunctFilterWrapper<T> {
-        RemovePunctFilterWrapper(tokenizer)
+        RemovePunctFilterWrapper {
+            inner: tokenizer,
+            regex: regex::Regex::new(r"[\p{Punct}\s]+").unwrap(),
+        }
     }
 }
 #[derive(Clone)]
-pub struct RemovePunctFilterWrapper<T>(T);
+pub struct RemovePunctFilterWrapper<T> {
+    inner: T,
+    // Clone with the analyzer: share compiled state, but keep worker-local search caches.
+    regex: regex::Regex,
+}
 
 impl<T: Tokenizer> Tokenizer for RemovePunctFilterWrapper<T> {
-    type TokenStream<'a> = RemovePunctFilterStream<T::TokenStream<'a>>;
+    type TokenStream<'a> = RemovePunctFilterStream<'a, T::TokenStream<'a>>;
 
     fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
         RemovePunctFilterStream {
-            regex: regex::Regex::new(r"[\p{Punct}\s]+").unwrap(),
-            tail: self.0.token_stream(text),
+            regex: &self.regex,
+            tail: self.inner.token_stream(text),
         }
     }
 }
 
-impl<T: TokenStream> TokenStream for RemovePunctFilterStream<T> {
+impl<T: TokenStream> TokenStream for RemovePunctFilterStream<'_, T> {
     fn advance(&mut self) -> bool {
         while self.tail.advance() {
             if !self.regex.is_match(&self.tail.token().text) {

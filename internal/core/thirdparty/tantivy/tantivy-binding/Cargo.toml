@@ -82,5 +82,9 @@ tonic-build = "0.13.0"
 name = "analyzer_bench"
 harness = false
 
+[[bench]]
+name = "fixed_regex_filters"
+harness = false
+
 [lib]
 crate-type = ["staticlib", "rlib"]
