@@ -298,6 +298,45 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.Equal(t, int64(10), provider.queryRequest.GetCollectionID())
 }
 
+func TestQueryOnViewStreamPreservesElementIndices(t *testing.T) {
+	result := &internalpb.RetrieveResults{
+		Status: merr.Success(), ElementLevel: true, HasMoreResult: true,
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 101, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}},
+			}},
+		}},
+		ElementIndices: []*internalpb.ElementIndices{{Indices: []int32{0, 2, 4}}, {Indices: []int32{1, 3}}},
+	}
+	tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
+	server := NewServer(&streamTestProvider{queryTasks: tasks}, &streamTestScheduler{queryResult: result})
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
+		LegacyReq: &internalpb.RetrieveRequest{CollectionID: 10, Limit: 4},
+		ShardId:   &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+		Version: &viewpb.QueryViewVersion{
+			DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2}, QueryVersion: 3,
+		},
+		Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 10}, StreamChunkBytes: 1,
+	})
+	require.NoError(t, err)
+	for i := range 2 {
+		chunk, err := stream.Recv()
+		require.NoError(t, err)
+		require.True(t, chunk.GetElementLevel())
+		require.Equal(t, i == 0, chunk.GetHasMoreResult())
+		require.Equal(t, []int64{int64(i + 1)}, chunk.GetIds().GetIntId().GetData())
+		require.Equal(t, result.ElementIndices[i].GetIndices(), chunk.ElementIndices[0].GetIndices())
+	}
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, tasks.releaseCount)
+}
+
 func TestQueryOnViewStreamAcceptsOrderByQuery(t *testing.T) {
 	tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
 	provider := &streamTestProvider{queryTasks: tasks}

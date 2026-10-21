@@ -110,8 +110,9 @@ func (u retrieveUnit) reducibleByteSize() (int, error) {
 		return 0, err
 	}
 	return proto.Size(&internalpb.RetrieveResults{
-		Ids:        chunk.GetIds(),
-		FieldsData: chunk.GetFieldsData(),
+		Ids:            chunk.GetIds(),
+		FieldsData:     chunk.GetFieldsData(),
+		ElementIndices: chunk.GetElementIndices(),
 	}), nil
 }
 
@@ -143,8 +144,8 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 	if b.hasUnit() {
 		return merr.WrapErrServiceInternalMsg("Query child Buffer already contains Units")
 	}
-	if chunk.GetElementLevel() {
-		return merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "element-level Query streaming is not implemented"))
+	if err := validateElementLevelConsistency([]*internalpb.RetrieveResults{chunk}, nil); err != nil {
+		return err
 	}
 	b.hasMoreResult = b.hasMoreResult || chunk.GetHasMoreResult()
 	rowCount := typeutil.GetSizeOfIDs(chunk.GetIds())
@@ -174,6 +175,9 @@ type OrderedReduceStream struct {
 	lastPK         any
 	deduplicatePKs bool
 	outputBuffer   []retrieveUnit
+
+	elementLevel      bool
+	elementLevelKnown bool
 
 	metadata        *internalpb.RetrieveResults
 	metadataEmitted bool
@@ -288,6 +292,11 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 					return nil, s.fail(err)
 				}
 				outputBytes += unit.byteSize - outputBuffer[last].byteSize
+				if unit.result.GetElementLevel() {
+					// The winning document version also determines its matched-element count.
+					s.emitted += int64(len(unit.result.GetElementIndices()[unit.rowIndex].GetIndices())) -
+						int64(len(outputBuffer[last].result.GetElementIndices()[outputBuffer[last].rowIndex].GetIndices()))
+				}
 				outputBuffer[last] = unit
 			}
 			continue
@@ -316,7 +325,12 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		}
 		s.lastPK = unit.pk()
 		s.hasLastPK = true
-		s.emitted++
+		// A Unit remains a complete row, but element-level limits count its matches.
+		if unit.result.GetElementLevel() {
+			s.emitted += int64(len(unit.result.GetElementIndices()[unit.rowIndex].GetIndices()))
+		} else {
+			s.emitted++
+		}
 		outputBuffer = append(outputBuffer, unit)
 		outputBytes += unitBytes
 	}
@@ -370,6 +384,12 @@ func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
 			if err := s.childBuffers[childIndex].accept(chunk); err != nil {
 				return merr.Wrapf(err, "Query child stream %d returned an invalid Chunk", childIndex)
 			}
+			if s.childBuffers[childIndex].hasUnit() || chunk.GetElementLevel() {
+				if s.elementLevelKnown && s.elementLevel != chunk.GetElementLevel() {
+					return merr.WrapErrServiceInternalMsg("Query child stream %d returned an inconsistent element-level flag", childIndex)
+				}
+				s.elementLevel, s.elementLevelKnown = chunk.GetElementLevel(), true
+			}
 			return nil
 		},
 	)
@@ -414,6 +434,7 @@ func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.RetrieveResults) 
 }
 
 func (s *OrderedReduceStream) attachMetadata(chunk *internalpb.RetrieveResults) {
+	chunk.ElementLevel = s.elementLevel
 	if s.metadata == nil || s.metadataEmitted {
 		return
 	}
