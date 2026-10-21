@@ -34,6 +34,7 @@
 #include "index/contracts/build/VectorBuildInput.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/test_utils/TestArtifactIO.h"
+#include "index/vector/VectorIndexReader.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/artifact/LoadOptions.h"
@@ -47,7 +48,8 @@ constexpr int64_t kLogicalRows = 4;
 IIndexReaderBasePtr
 LoadFloatVectors(const VectorBuildInput<float>& input, bool vector_array) {
     auto adapted = AdaptIndexType({
-        .index_type = vector_array ? knowhere::IndexEnum::INDEX_HNSW : "FLAT",
+        .index_type =
+            vector_array ? knowhere::IndexEnum::INDEX_HNSW_SQ : "FLAT",
         .field_type =
             vector_array ? DataType::VECTOR_ARRAY : DataType::VECTOR_FLOAT,
         .element_type = vector_array ? DataType::VECTOR_FLOAT : DataType::NONE,
@@ -60,6 +62,8 @@ LoadFloatVectors(const VectorBuildInput<float>& input, bool vector_array) {
     });
     if (vector_array) {
         adapted.params[knowhere::indexparam::M] = 16;
+        adapted.params[knowhere::indexparam::REFINE] = true;
+        adapted.params[knowhere::indexparam::REFINE_TYPE] = "FLAT";
     }
     adapted.params["nullable"] = true;
     adapted.params[INDEX_NUM_ROWS_KEY] = input.logical_rows;
@@ -200,6 +204,73 @@ TEST(VectorReaderContractTest, SearchAndRetrievalUseLogicalRowIds) {
     std::array<float, kDim> after_close{};
     std::memcpy(after_close.data(), raw.data(), raw.size());
     EXPECT_EQ(after_close, (std::array<float, kDim>{3.0F, 3.0F}));
+}
+
+TEST(VectorReaderContractTest, ValidityIntersectionsPreserveBitmapWindows) {
+    const std::array<bool, 10> valid{
+        true, false, true, true, false, true, false, true, true, false};
+    const std::vector<float> values(6 * kDim, 1.0F);
+    auto reader = LoadFloatVectors(
+        {.physical_values = values,
+         .logical_rows = 10,
+         .physical_rows = 6,
+         .dim = kDim,
+         .parent_validity = ValidityView::FromExpanded(valid.data())},
+        false);
+    ASSERT_NE(reader, nullptr);
+    const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
+    ASSERT_NE(vectors, nullptr);
+    BitsetType range(24, true);
+    vectors->ApplyValidDataByRange(-2, 14, range.view(3, 14));
+    EXPECT_EQ(range.data()[0] & 0xffffff, 0xfe35a7);
+    const int64_t ids[] = {-1, 8, 1, 2, 2, 10, 9, 0};
+    BitsetType output(8, false);
+    output.data()[0] = 0x55;
+    vectors->ApplyValidDataByOffsets(ids, 8, output.view());
+    EXPECT_EQ(output.data()[0], 0x10);
+    EXPECT_FALSE(vectors->IsRowValid(-1));
+    EXPECT_FALSE(vectors->IsRowValid(10));
+}
+
+TEST(VectorReaderContractTest, ValidityKeepsFrozenGrowingPrefixAfterAppend) {
+    KnowhereEngine engine(
+        DataType::VECTOR_FLOAT,
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        false);
+    engine.SetDim(kDim);
+    const std::array<float, 4> initial{0, 0, 1, 1};
+    const uint8_t initial_validity = 0x05;
+    auto dataset = knowhere::GenDataSet(2, kDim, initial.data());
+    dataset->SetIdMapData(
+        knowhere::IdMapData::FromValidBitmap(&initial_validity, 3));
+    knowhere::BuildOptions options;
+    options.growing = true;
+    const knowhere::Json config{{"metric_type", "L2"}};
+    ASSERT_EQ(engine.native_index.Build(dataset, config, false, options),
+              knowhere::Status::success);
+    VectorIndexReader frozen(engine, 3, 2, knowhere::Json::object());
+
+    const std::array<float, 2> appended{2, 2};
+    const uint8_t appended_validity = 0x01;
+    dataset = knowhere::GenDataSet(1, kDim, appended.data());
+    dataset->SetIdMapData(
+        knowhere::IdMapData::FromValidBitmap(&appended_validity, 2));
+    ASSERT_EQ(engine.native_index.Add(dataset, config, false),
+              knowhere::Status::success);
+    EXPECT_TRUE(engine.native_index.IsRowValid(3).value());
+    EXPECT_EQ(frozen.ValidCount(), 2);
+    EXPECT_TRUE(frozen.IsRowValid(2));
+    EXPECT_FALSE(frozen.IsRowValid(3));
+    BitsetType range(8, true);
+    frozen.ApplyValidDataByRange(0, 5, range.view(0, 5));
+    EXPECT_EQ(range.data()[0] & 0xff, 0xe5);
+    const int64_t ids[] = {3, 2, -1, 0, 4};
+    BitsetType offsets(8, true);
+    frozen.ApplyValidDataByOffsets(ids, 5, offsets.view(0, 5));
+    EXPECT_EQ(offsets.data()[0] & 0xff, 0xea);
 }
 
 TEST(VectorReaderContractTest, AllNullRowsRemainInLogicalValidityDomain) {
