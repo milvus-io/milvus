@@ -71,6 +71,8 @@ enum MessageType {
     AlterRLSMetadata             = 47;
     DropRLSMetadata              = 48;
     UpdateImport                 = 49;
+    AddFileResource              = 50;
+    RemoveFileResource           = 51;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -170,6 +172,19 @@ message RecoveryBarrierMessageHeader {}
 
 // RecoveryBarrierMessageBody just nothing.
 message RecoveryBarrierMessageBody {}
+
+message AddFileResourceMessageHeader {}
+
+message AddFileResourceMessageBody {
+    internal.FileResourceInfo resource = 1;
+}
+
+message RemoveFileResourceMessageHeader {}
+
+message RemoveFileResourceMessageBody {
+    int64 resource_id = 1;
+    string name = 2;
+}
 
 // InsertMessageHeader is the header of insert message.
 message InsertMessageHeader {
