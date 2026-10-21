@@ -185,6 +185,50 @@ func TestReduceEmptyResults(t *testing.T) {
 	require.NotNil(t, out)
 }
 
+func TestEmptyGroupedAggregationHasZeroRows(t *testing.T) {
+	for _, op := range []planpb.AggregateOp{
+		planpb.AggregateOp_count, planpb.AggregateOp_sum, planpb.AggregateOp_min,
+		planpb.AggregateOp_max, planpb.AggregateOp_avg,
+	} {
+		t.Run(op.String(), func(t *testing.T) {
+			reducer := NewGroupAggReducer([]int64{1}, []*planpb.Aggregate{{Op: op, FieldId: 2}}, -1, makeTestSchema())
+			empty, err := reducer.EmptyAggResult()
+			require.NoError(t, err)
+			batch, err := reducer.Reduce(context.Background(), nil)
+			require.NoError(t, err)
+			stream, err := reducer.Result()
+			require.NoError(t, err)
+			for _, result := range []*AggregationResult{empty, batch, stream} {
+				fields := result.GetFieldDatas()
+				require.Len(t, fields, 2)
+				require.Equal(t, int64(1), fields[0].GetFieldId())
+				require.Equal(t, "category", fields[0].GetFieldName())
+				require.Zero(t, result.GetAllRetrieveCount())
+				for _, field := range fields {
+					accessor, err := NewFieldAccessor(field.GetType())
+					require.NoError(t, err)
+					accessor.SetVals(field)
+					require.Zero(t, accessor.RowCount())
+				}
+			}
+		})
+	}
+}
+
+func TestEmptyGlobalCountReturnsSingleZero(t *testing.T) {
+	reducer := NewGroupAggReducer(nil, []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 2}}, -1, makeTestSchema())
+	empty, err := reducer.EmptyAggResult()
+	require.NoError(t, err)
+	batch, err := reducer.Reduce(context.Background(), nil)
+	require.NoError(t, err)
+	stream, err := reducer.Result()
+	require.NoError(t, err)
+	for _, result := range []*AggregationResult{empty, batch, stream} {
+		require.Len(t, result.GetFieldDatas(), 1)
+		require.Equal(t, []int64{0}, result.GetFieldDatas()[0].GetScalars().GetLongData().GetData())
+	}
+}
+
 // TestReduceSingleResult verifies that reduce returns the single input unchanged.
 func TestReduceSingleResult(t *testing.T) {
 	reducer := makeGroupAggReducer()
