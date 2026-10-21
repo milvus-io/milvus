@@ -537,7 +537,18 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWCh
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil {
+		// External collection segments carry neither start nor dml position: they
+		// are produced by refresh instead of the WAL. Admit them by the same rule
+		// query recovery uses - a committed manifest or fake binlogs - otherwise
+		// GetPersistentSegmentInfo would drop every external segment. Fake binlogs
+		// are stripped on persistence, so the manifest is what survives a restart.
+		committed, err := hasCommittedManifest(s)
+		if err != nil {
+			mlog.Warn(ctx, "skip segment with invalid manifest in segments view",
+				mlog.FieldSegmentID(s.GetID()), mlog.Err(err))
+			continue
+		}
+		if !committed && s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
 			continue
 		}
 
