@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -3202,14 +3201,12 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 // The message is broadcast to the job's data vchannels so each vchannel's WAL flusher
 // can observe the commit fence, flush pending DML, and call HandleCommitVchannel.
 // (Control-channel-only broadcast is dropped by the flusher's IsControlChannel guard
-// before reaching the CommitImport case, so it cannot drive per-vchannel commits; the
-// control channel is added on top of the data vchannels for ordering only.)
+// before reaching the CommitImport case, so it cannot drive per-vchannel commits.)
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
-	channels := append(vchannels, streaming.WAL().ControlChannel())
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
@@ -3222,7 +3219,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 			JobId:        job.GetJobID(),
 		}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
-		WithBroadcast(channels).
+		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
@@ -3244,7 +3241,6 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 	if len(vchannels) == 0 {
 		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
 	}
-	channels := append(vchannels, streaming.WAL().ControlChannel())
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
@@ -3257,7 +3253,7 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 			JobId:        job.GetJobID(),
 		}).
 		WithBody(&messagespb.RollbackImportMessageBody{}).
-		WithBroadcast(channels).
+		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
@@ -3287,8 +3283,6 @@ func (s *Server) broadcastUpdateImportMessage(ctx context.Context, job ImportJob
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
-	channels := append(vchannels, streaming.WAL().ControlChannel())
-
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
@@ -3312,7 +3306,7 @@ func (s *Server) broadcastUpdateImportMessage(ctx context.Context, job ImportJob
 		WithBody(&messagespb.UpdateImportMessageBody{
 			IdRanges: idRanges,
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)

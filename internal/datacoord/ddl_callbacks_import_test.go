@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
-	mock_streaming "github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -67,14 +66,13 @@ import (
 // Import Callbacks Test Suite
 // ================================
 
-// patchSnapshotImportWAL gives a test a WAL accesser whose ControlChannel is
-// resolvable: import broadcasts now target the control channel too, and the
-// package-level WAL accesser is nil unless a test provides one.
 func patchSnapshotImportWAL(t *testing.T) {
 	t.Helper()
-	previous := streaming.WAL()
-	streaming.SetupNoopWALForTest()
-	t.Cleanup(func() { streaming.SetWALForTest(previous) })
+	type snapshotWAL struct{ streaming.WALAccesser }
+	control := mockey.Mock((*snapshotWAL).ControlChannel).Return(funcutil.GetControlChannel("snapshot-test")).Build()
+	t.Cleanup(func() { control.UnPatch() })
+	wal := mockey.Mock(streaming.WAL).Return(&snapshotWAL{}).Build()
+	t.Cleanup(func() { wal.UnPatch() })
 }
 
 func TestSnapshotPartitionTargetsValidation(t *testing.T) {
@@ -274,8 +272,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 					for _, file := range decoded.MustBody().GetFiles() {
 						require.Nil(t, file.GetPreAllocatedAutoIds())
 					}
-					require.ElementsMatch(t, []string{"v1", funcutil.GetControlChannel("noop")},
-						msg.BroadcastHeader().VChannels)
+					require.ElementsMatch(t, []string{"v1"}, msg.BroadcastHeader().VChannels)
 					return &types.BroadcastAppendResult{}, nil
 				}).Build()
 			defer transport.UnPatch()
@@ -863,10 +860,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	wal := mock_streaming.NewMockWALAccesser(s.T())
-	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
-	streaming.SetWALForTest(wal)
-
 	_, _, err := server.broadcastImport(
 		ctx,
 		100,
@@ -944,10 +937,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	wal := mock_streaming.NewMockWALAccesser(s.T())
-	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
-	streaming.SetWALForTest(wal)
-
 	_, _, err := server.broadcastImport(
 		ctx,
 		100,
@@ -963,9 +952,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	)
 
 	s.NoError(err)
-	// The import message targets the data vchannels plus the control channel ordering anchor.
-	s.ElementsMatch([]string{"v1", funcutil.GetControlChannel("by-dev-rootcoord-dml_0")},
-		mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
+	s.ElementsMatch([]string{"v1"}, mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
 	msg, err := message.AsBroadcastImportMessageV1(mockBroadcastAPI.capturedMsg)
 	s.NoError(err)
 	body, err := msg.Body()
@@ -1648,14 +1635,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
-	// Import messages target the job's data vchannels plus the control channel: the
-	// data copies drive the per-vchannel work (flush/commit), the control-channel copy is
-	// the ack-callback ordering anchor.
-	controlChannel := funcutil.GetControlChannel("by-dev-rootcoord-dml_0")
-	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().ControlChannel().Return(controlChannel).Maybe()
-	streaming.SetWALForTest(wal)
-
+	// Import messages target the job's data vchannels; the broadcaster adds the
+	// control-channel copy that anchors the ack-callback order.
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -1682,8 +1663,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	err := broadcastFn(server, ctx, job)
 	assert.NoError(t, err)
 	assert.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, append(wantVchannels, controlChannel), capture.captured.BroadcastHeader().VChannels,
-		"broadcast must target the job's data vchannels plus the control channel ordering anchor")
+	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 }
 
 // TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
@@ -2033,11 +2014,6 @@ func TestUpdateImportAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T) 
 func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
-	controlChannel := funcutil.GetControlChannel("by-dev-rootcoord-dml_0")
-	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().ControlChannel().Return(controlChannel).Maybe()
-	streaming.SetWALForTest(wal)
-
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -2075,8 +2051,8 @@ func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 	require.NoError(t, server.broadcastUpdateImportMessage(ctx, job, []int64{10, 0, 5}))
 
 	require.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, append(wantVchannels, controlChannel), capture.captured.BroadcastHeader().VChannels,
-		"UpdateImport must target the job's data vchannels plus the control channel, like ImportMsg")
+	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+		"UpdateImport must target the job's data vchannels; the broadcaster adds the control channel")
 
 	msg, err := message.AsBroadcastUpdateImportMessageV2(capture.captured)
 	require.NoError(t, err)
