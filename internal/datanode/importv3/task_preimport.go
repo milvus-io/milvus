@@ -80,6 +80,12 @@ func (t *preImportTask) Execute(ctx context.Context) (any, error) {
 	// A backup job needs no row counts, so it runs the size-only mode: it only
 	// sizes each source's expanded object list for DataCoord's reshard BFD.
 	backup := importutilv2.IsBackup(t.req.GetOptions())
+	// Snapshot sources share one factory so the source storage is resolved
+	// once per task, not once per file.
+	var snapshot *importutilv2.ReaderFactory
+	if importutilv2.IsSnapshotSource(t.req.GetOptions()) {
+		snapshot = importutilv2.NewReaderFactory(ctx, sourceCM, t.req.GetStorageConfig(), t.req.GetOptions())
+	}
 	mlog.Info(ctx, "start to preimport v3 (count-only)",
 		mlog.FieldTaskID(t.taskID),
 		mlog.FieldJobID(t.req.GetJobID()),
@@ -99,9 +105,12 @@ func (t *preImportTask) Execute(ctx context.Context) (any, error) {
 		f := pool.Submit(func() (any, error) {
 			var stat *datapb.ImportV3FileStats
 			var err error
-			if backup {
+			switch {
+			case snapshot != nil:
+				stat, err = t.snapshotFileSize(ctx, snapshot, file)
+			case backup:
 				stat, err = t.sizeOnlyFile(ctx, file)
-			} else {
+			default:
 				stat, err = t.countFile(ctx, sourceCM, file, bufferSize)
 			}
 			if err != nil {
@@ -147,6 +156,32 @@ func (t *preImportTask) sizeOnlyFile(ctx context.Context, file *internalpb.Impor
 	}
 	mlog.Info(ctx, "size file stat done (backup)",
 		mlog.FieldTaskID(t.taskID), mlog.Strings("files", file.GetPaths()),
+		mlog.Duration("dur", time.Since(start)))
+	return &datapb.ImportV3FileStats{
+		FileId:   file.GetId(),
+		FileSize: size,
+	}, nil
+}
+
+// snapshotFileSize sizes one snapshot source (a StorageV3 manifest with its LOB
+// references, or a StorageV2 segment's binlogs) without reading rows. Snapshot
+// jobs are backup jobs, so DataCoord only needs the physical size for reshard
+// BFD; L0 deletes are folded later in Reshard.
+func (t *preImportTask) snapshotFileSize(ctx context.Context, factory *importutilv2.ReaderFactory, file *internalpb.ImportFile) (*datapb.ImportV3FileStats, error) {
+	maxSize := paramtable.Get().DataNodeCfg.MaxImportFileSizeInGB.GetAsFloat() * 1024 * 1024 * 1024
+
+	start := time.Now()
+	size, err := factory.SnapshotFileSize(ctx, t.req.GetSchema(), file)
+	if err != nil {
+		return nil, err
+	}
+	if size > int64(maxSize) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"The import file size has reached the maximum limit allowed for importing, "+
+				"fileSize=%d, maxSize=%d", size, int64(maxSize))
+	}
+	mlog.Info(ctx, "size file stat done (snapshot)",
+		mlog.FieldTaskID(t.taskID), mlog.Int64("fileID", file.GetId()),
 		mlog.Duration("dur", time.Since(start)))
 	return &datapb.ImportV3FileStats{
 		FileId:   file.GetId(),

@@ -199,7 +199,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 	if source := t.req.GetSnapshotL0Source(); source != nil {
 		return executeSnapshotSharedRead(t.ctx, t, t.manager, len(files),
 			func(ctx context.Context, budget, bitmapBudget int64) (*binlog.SnapshotL0Deletes, error) {
-				return readers.PrepareSnapshotDeletes(ctx, t.GetSchema(), files, source, budget, bitmapBudget)
+				return readers.PrepareSnapshotDeletes(ctx, t.GetSchema(), files, []*internalpb.SnapshotImportL0Source{source}, budget, bitmapBudget)
 			},
 			func(ctx context.Context, i int, rowBuffer, budget int64, shared *binlog.SnapshotL0Deletes) error {
 				return fn(ctx, i, files[i], int(rowBuffer), budget, shared)

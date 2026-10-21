@@ -40,8 +40,9 @@ import (
 // The producer separately checks the encoded WAL reference message.
 const SnapshotSourcePlanMaxBytes = 256 * 1024
 
-// SnapshotPreparationVersion is a Pending-only descriptor. It cannot be sent
-// to workers; old consumers reject the version rather than losing semantics.
+// SnapshotPreparationVersion is a preparation-only descriptor. It cannot be
+// sent to workers; old consumers reject the version rather than losing
+// semantics.
 const SnapshotPreparationVersion = 9
 
 func IsSnapshotPreparation(files []*internalpb.ImportFile) bool {
@@ -330,9 +331,119 @@ func ValidateImportPlan(files []*internalpb.ImportFile, options Options, sources
 	return nil
 }
 
+// mergeSnapshotL0Paths appends one source's delete paths to dst, rejecting a
+// path that appears with both decoder contracts. seen is per destination entry.
+func mergeSnapshotL0Paths(dst, source *internalpb.SnapshotImportL0Source, seen map[string]bool) error {
+	for kind, paths := range [][]string{source.GetLegacyL0Deltalogs(), source.GetManifestL0Paths()} {
+		for _, path := range paths {
+			if previous, ok := seen[path]; ok {
+				if previous != (kind == 1) {
+					return merr.WrapErrServiceInternalMsg("snapshot delete path has conflicting decoder contracts")
+				}
+				continue
+			}
+			seen[path] = kind == 1
+			if kind == 1 {
+				dst.ManifestL0Paths = append(dst.ManifestL0Paths, path)
+			} else {
+				dst.LegacyL0Deltalogs = append(dst.LegacyL0Deltalogs, path)
+			}
+		}
+	}
+	return nil
+}
+
+// SnapshotTaskL0Sources selects and merges the job-wide L0 inventories a task
+// needs. A task may span several scopes so Import V3's BFD can pack snapshot
+// files without creating one tiny task (and one fragment per bucket) per source
+// channel/partition. Exact scopes get one entry each because validation requires
+// that durable proof; a channel-wide inventory is emitted once per channel
+// instead of being copied into every exact scope. Persisted jobs retain the
+// unmerged inventories for retries/recovery.
+func SnapshotTaskL0Sources(files []*internalpb.ImportFile, sources []*internalpb.SnapshotImportL0Source) ([]*internalpb.SnapshotImportL0Source, error) {
+	sharedFiles := 0
+	scopes := make(map[snapshotSourceScope]struct{})
+	channels := make(map[string]struct{})
+	for _, file := range files {
+		source := file.GetSnapshotSource()
+		if !SnapshotSourceUsesSharedL0(source) {
+			continue
+		}
+		sharedFiles++
+		scopes[snapshotSourceScope{source.GetSourceChannel(), source.GetSourcePartitionId()}] = struct{}{}
+		channels[source.GetSourceChannel()] = struct{}{}
+	}
+	if sharedFiles == 0 {
+		return nil, nil
+	}
+	if sharedFiles != len(files) {
+		return nil, merr.WrapErrServiceInternalMsg("mixed snapshot task source representations")
+	}
+
+	result := make([]*internalpb.SnapshotImportL0Source, 0, len(scopes)+len(channels))
+	for scope := range scopes {
+		merged := &internalpb.SnapshotImportL0Source{
+			SourceChannel:     scope.channel,
+			SourcePartitionId: scope.partitionID,
+		}
+		found := false
+		seen := make(map[string]bool)
+		for _, source := range sources {
+			if source.GetSourceChannel() != scope.channel || source.GetSourcePartitionId() != scope.partitionID {
+				continue
+			}
+			found = true
+			if err := mergeSnapshotL0Paths(merged, source, seen); err != nil {
+				return nil, err
+			}
+		}
+		if !found {
+			return nil, merr.WrapErrServiceInternalMsg("snapshot task lost its shared L0 inventory")
+		}
+		sort.Strings(merged.LegacyL0Deltalogs)
+		sort.Strings(merged.ManifestL0Paths)
+		result = append(result, merged)
+	}
+
+	// A channel-wide inventory applies to every partition of its channel, so
+	// one entry per channel serves all the task's scans. Repeating it per exact
+	// scope multiplies both the plan size and the DataNode's L0 reads.
+	for channel := range channels {
+		merged := &internalpb.SnapshotImportL0Source{
+			SourceChannel:     channel,
+			SourcePartitionId: common.AllPartitionsID,
+		}
+		seen := make(map[string]bool)
+		for _, source := range sources {
+			if source.GetSourceChannel() != channel || source.GetSourcePartitionId() != common.AllPartitionsID {
+				continue
+			}
+			if err := mergeSnapshotL0Paths(merged, source, seen); err != nil {
+				return nil, err
+			}
+		}
+		if len(merged.LegacyL0Deltalogs) == 0 && len(merged.ManifestL0Paths) == 0 {
+			continue
+		}
+		sort.Strings(merged.LegacyL0Deltalogs)
+		sort.Strings(merged.ManifestL0Paths)
+		result = append(result, merged)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].GetSourceChannel() != result[j].GetSourceChannel() {
+			return result[i].GetSourceChannel() < result[j].GetSourceChannel()
+		}
+		return result[i].GetSourcePartitionId() < result[j].GetSourcePartitionId()
+	})
+	return result, nil
+}
+
 // SnapshotTaskL0Source merges partition-local and channel-wide paths once per
 // task, not per segment. Tasks may be split by size/count but never mix source
 // scopes. Persisted jobs retain the unmerged inventories for retries/recovery.
+// This is the single-scope view of the V2 task protocol; Import V3 uses
+// SnapshotTaskL0Sources.
 func SnapshotTaskL0Source(files []*internalpb.ImportFile, sources []*internalpb.SnapshotImportL0Source) (*internalpb.SnapshotImportL0Source, error) {
 	if len(files) == 0 || !SnapshotSourceUsesSharedL0(files[0].GetSnapshotSource()) {
 		for _, file := range files {
@@ -358,21 +469,8 @@ func SnapshotTaskL0Source(files []*internalpb.ImportFile, sources []*internalpb.
 			continue
 		}
 		found = found || source.GetSourcePartitionId() == result.SourcePartitionId
-		for kind, paths := range [][]string{source.GetLegacyL0Deltalogs(), source.GetManifestL0Paths()} {
-			for _, path := range paths {
-				if previous, ok := seen[path]; ok {
-					if previous != (kind == 1) {
-						return nil, merr.WrapErrServiceInternalMsg("snapshot delete path has conflicting decoder contracts")
-					}
-					continue
-				}
-				seen[path] = kind == 1
-				if kind == 1 {
-					result.ManifestL0Paths = append(result.ManifestL0Paths, path)
-				} else {
-					result.LegacyL0Deltalogs = append(result.LegacyL0Deltalogs, path)
-				}
-			}
+		if err := mergeSnapshotL0Paths(result, source, seen); err != nil {
+			return nil, err
 		}
 	}
 	if !found {

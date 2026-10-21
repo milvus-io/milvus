@@ -56,7 +56,8 @@ func importV3NeedsIDRanges(job ImportJob) bool {
 func createPreImportV3Tasks(jc *importV3JobContext) error {
 	lacks := preImportV3LackFiles(jc)
 	if len(lacks) == 0 {
-		if jc.job.GetState() == internalpb.ImportJobState_Pending {
+		if jc.job.GetState() == internalpb.ImportJobState_Pending ||
+			jc.job.GetState() == internalpb.ImportJobState_SnapshotPreparing {
 			return jc.transitionTo(internalpb.ImportJobState_PreImporting)
 		}
 		return nil
