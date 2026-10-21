@@ -8002,7 +8002,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 	// path, which every version understands.
 	p.ImportEnableIDRangeMsg = ParamItem{
 		Key:          "dataCoord.import.enableIDRangeMsg",
-		Version:      "3.0.3-beta",
+		Version:      "3.0.4",
 		Export:       false,
 		PanicIfEmpty: false,
 		Doc: "Whether import assigns a per-file ID range after preimport and broadcasts it via " +
@@ -8015,7 +8015,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		VersionGateSwitcher: &VersionGateSwitcher{
 			EnableAutoSwitchValue: "auto",
 			PreSwitchValue:        "false",
-			GateVersion:           "3.0.3-beta",
+			GateVersion:           "3.0.4",
 			TargetValue:           "true",
 			SwitchDelay:           1 * time.Minute,
 		},
@@ -9365,8 +9365,9 @@ type streamingConfig struct {
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
 
 	// partial update
-	PartialUpdateEnableCAS            ParamItem `refreshable:"false"`
-	PartialUpdateVersionIndexMaxBytes ParamItem `refreshable:"false"`
+	PartialUpdateEnableCAS             ParamItem `refreshable:"false"`
+	PartialUpdateVersionIndexMaxBytes  ParamItem `refreshable:"false"`
+	PartialUpdateRecoveryDecodeTimeout ParamItem `refreshable:"true"`
 
 	// memory usage control
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
@@ -9767,6 +9768,15 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 		Export:       false,
 	}
 	p.PartialUpdateVersionIndexMaxBytes.Init(base.mgr)
+
+	p.PartialUpdateRecoveryDecodeTimeout = ParamItem{
+		Key:          "streaming.partialUpdate.recoveryDecodeTimeout",
+		Version:      "3.0.4",
+		DefaultValue: "5s",
+		Export:       false,
+		Doc:          "Total time budget, per WAL open, for rebuilding the write sets of pending transactions. A transaction whose bodies are not decoded within the budget is marked incomplete, and its commit is rejected and replayed. The budget is checked before each body decode, so 0 or a negative value marks every pending transaction with an insert or delete body incomplete. Larger values can delay WAL open when decoding stalls. Applies to WALs opened afterwards.",
+	}
+	p.PartialUpdateRecoveryDecodeTimeout.Init(base.mgr)
 
 	p.FlushMemoryThreshold = ParamItem{
 		Key:     "streaming.flush.memoryThreshold",

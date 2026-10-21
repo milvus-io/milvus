@@ -183,8 +183,8 @@ PlanEntries(storage::FileSource& source, const RuntimeParams& params) {
 }
 
 // Disk artifacts store the count header and the bitmap in one entry. The
-// decoded bytes stay owned by the caller: knowhere's IdMapData only views the
-// bitmap until AddFromData consumes it.
+// decoded bytes stay owned by the caller until Deserialize or ImportValidity
+// consumes the bitmap.
 ValidDataView
 DecodeValidityBytes(const std::vector<uint8_t>& bytes) {
     if (bytes.size() < sizeof(uint64_t)) {
@@ -202,17 +202,14 @@ DecodeValidityBytes(const std::vector<uint8_t>& bytes) {
     return {true, count, bytes.data() + sizeof(uint64_t)};
 }
 
-// Publish the persisted validity into the engine's knowhere IdMap (#50524).
-// Must run before Deserialize, which is what derives the dense id arrays.
-folly::coro::Task<RestoredIdMap>
-RestoreValidity(bool use_async,
-                const storage::LoadOptions& opts,
-                storage::FileSource& source,
-                const EntryPlan& plan,
-                const RuntimeParams& params,
-                KnowhereEngine& engine,
-                const std::string& local_prefix,
-                std::vector<uint8_t>& owned_bytes) {
+// Read the sidecar without publishing it before the engine load.
+folly::coro::Task<knowhere::LoadOptions>
+ReadValidity(bool use_async,
+             storage::FileSource& source,
+             const EntryPlan& plan,
+             const RuntimeParams& params,
+             const std::string& local_prefix,
+             std::vector<uint8_t>& owned_bytes) {
     if (!plan.has_validity) {
         co_return {};
     }
@@ -225,23 +222,7 @@ RestoreValidity(bool use_async,
         CountValidDataBitmap(valid_data.count, valid_data.bitmap) == 0) {
         mmap_flags = {};
     }
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
-    RestoredIdMap result;
-    auto local_io = [&] {
-        result = RestoreIdMapFromValidData(engine.native_index.GetIdMap(),
-                                           valid_data,
-                                           mmap_flags,
-                                           local_prefix);
-    };
-    if (use_async && mmap_flags.Any()) {
-        co_await storage::RunLocalFileIOAsync(local_io, priority);
-    } else {
-        local_io();
-    }
-    co_return result;
+    co_return MakeNullableLoadInput(valid_data, mmap_flags, local_prefix);
 }
 
 using detail::EmptyEmbeddingListState;
@@ -384,21 +365,23 @@ OpenIndex(bool use_async,
     }
     auto& engine = *owned_engine;
     const auto prefix = selected_handle->LocalPrefix();
-    // Keep the decoded payload alive until AddFromData has copied it.
+    // Keep the decoded payload alive until Knowhere consumes the load input.
     std::vector<uint8_t> validity_bytes;
-    const auto restored_id_map = co_await RestoreValidity(
-        use_async, opts, source, plan, params, engine, prefix, validity_bytes);
+    const auto input = co_await ReadValidity(
+        use_async, source, plan, params, prefix, validity_bytes);
 
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         auto empty = co_await DecodeEmptyEmbeddingList(use_async, source);
         engine.SetDim(empty.dim);
         engine.SetEmptyEmbListOffsets(std::move(empty.offsets));
-        if (restored_id_map.has_valid_data) {
+        if (input.validity.has_value()) {
             {
                 auto local_io = [&] {
-                    FinalizeRestoredIdMap(
-                        engine.native_index.Node(),
-                        "empty embedding-list disk vector load");
+                    const auto status = engine.native_index.ImportValidity(
+                        *input.validity, input.mmap);
+                    if (status != knowhere::Status::success) {
+                        ThrowDeserializeError(status);
+                    }
                 };
                 if (use_async && params.id_map_mmap.Any()) {
                     co_await storage::RunLocalFileIOAsync(local_io, priority);
@@ -418,11 +401,14 @@ OpenIndex(bool use_async,
                       "dim");
         }
         engine.SetDim(*params.runtime_dim);
-        if (restored_id_map.has_valid_data) {
+        if (input.validity.has_value()) {
             {
                 auto local_io = [&] {
-                    FinalizeRestoredIdMap(engine.native_index.Node(),
-                                          "all-null nullable disk vector load");
+                    const auto status = engine.native_index.ImportValidity(
+                        *input.validity, input.mmap);
+                    if (status != knowhere::Status::success) {
+                        ThrowDeserializeError(status);
+                    }
                 };
                 if (use_async && params.id_map_mmap.Any()) {
                     co_await storage::RunLocalFileIOAsync(local_io, priority);
@@ -477,7 +463,7 @@ OpenIndex(bool use_async,
         {
             auto local_io = [&] {
                 const auto status = engine.native_index.Deserialize(
-                    knowhere::BinarySet{}, config);
+                    knowhere::BinarySet{}, config, input);
                 selected_handle->RethrowFirstFailure();
                 // The knowhere deserialize API has no OpContext entrance. FileSource
                 // observes its captured cancellation/priority while materializing

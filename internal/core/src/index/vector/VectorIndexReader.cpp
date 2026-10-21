@@ -17,6 +17,7 @@
 #include "index/vector/VectorIndexReader.h"
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -95,11 +96,26 @@ FillRegularSearchResult(const DatasetPtr& native_result,
     }
 }
 
+knowhere::MutableBitmapView
+ValidityTarget(TargetBitmapView view) {
+    if (view.size() == 0) {
+        return {};
+    }
+    const auto intra = view.offset() % 8;
+    AssertInfo(view.size() <= std::numeric_limits<size_t>::max() - intra,
+               "validity window overflows");
+    const auto span = intra + view.size();
+    // Pass only the bytes addressed by this window, not an inferred capacity.
+    auto* bytes = reinterpret_cast<uint8_t*>(view.data());
+    AssertInfo(bytes != nullptr, "validity window data is null");
+    return {bytes + view.offset() / 8, span / 8 + (span % 8 != 0), intra};
+}
+
 }  // namespace
 
 VectorIndexReader::VectorIndexReader(KnowhereEngine engine)
     : engine_(std::move(engine)),
-      physical_count_(IsAllNullNullable(IdMap()) ||
+      physical_count_(IsAllNullNullable(engine_.native_index) ||
                               engine_.IsEmptyEmbListIndex()
                           ? 0
                           : engine_.native_index.Count()) {
@@ -110,7 +126,7 @@ VectorIndexReader::VectorIndexReader(uint32_t disk_ann_beamwidth,
     : engine_(std::move(engine)),
       backend_(Backend::Disk),
       disk_ann_beamwidth_(disk_ann_beamwidth),
-      physical_count_(IsAllNullNullable(IdMap()) ||
+      physical_count_(IsAllNullNullable(engine_.native_index) ||
                               engine_.IsEmptyEmbListIndex()
                           ? 0
                           : engine_.native_index.Count()) {
@@ -144,13 +160,19 @@ VectorIndexReader::VectorIndexReader(KnowhereEngine engine,
     }
     // The shared IdMap keeps growing behind this generation, so only the
     // frozen prefix may be compared against it.
-    const auto& id_map = IdMap();
-    AssertInfo(id_map.ValidBitmap().empty() ||
-                   static_cast<int64_t>(id_map.OutCount()) >= logical_count_,
-               "growing vector reader logical count {} exceeds the published "
-               "id map row domain {}",
-               logical_count_,
-               id_map.OutCount());
+    const auto logical_count_result = engine_.native_index.LogicalCount();
+    if (!logical_count_result.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(logical_count_result.error()),
+                  "failed to read growing logical count: {}",
+                  logical_count_result.what());
+    }
+    AssertInfo(
+        !HasValidData() || static_cast<int64_t>(logical_count_result.value()) >=
+                               logical_count_,
+        "growing vector reader logical count {} exceeds the published "
+        "id map row domain {}",
+        logical_count_,
+        logical_count_result.value());
 }
 
 cachinglayer::ResourceUsage
@@ -254,7 +276,7 @@ VectorIndexReader::GetVector(const DatasetPtr& dataset) const {
         return reject_sparse();
     }
     ValidateGenerationIds(dataset, "get vector");
-    if (IsAllNullNullable(IdMap())) {
+    if (IsAllNullNullable(engine_.native_index)) {
         ThrowInfo(UnexpectedError,
                   "failed to get vector, this nullable vector index contains "
                   "no valid vectors");
@@ -288,7 +310,7 @@ VectorIndexReader::GetSparseVector(const DatasetPtr& dataset) const {
     }
 
     ValidateGenerationIds(dataset, "get sparse vector");
-    if (IsAllNullNullable(IdMap())) {
+    if (IsAllNullNullable(engine_.native_index)) {
         ThrowInfo(UnexpectedError,
                   "failed to get vector, this nullable vector index contains "
                   "no valid vectors");
@@ -358,15 +380,29 @@ VectorIndexReader::PrepareSearchParams(const VectorSearchParams& params) const {
 
 bool
 VectorIndexReader::HasValidData() const {
-    return !IdMap().ValidBitmap().empty();
+    const auto result = engine_.native_index.HasValidity();
+    if (!result.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(result.error()),
+                  "failed to inspect nullable validity: {}",
+                  result.what());
+    }
+    return result.value();
 }
 
 int64_t
 VectorIndexReader::ValidCount() const {
     // A growing generation reports the vector count it froze, not the live
     // count of the shared engine.
-    return IsGrowingGeneration() ? physical_count_
-                                 : static_cast<int64_t>(IdMap().InCount());
+    if (IsGrowingGeneration()) {
+        return physical_count_;
+    }
+    const auto result = engine_.native_index.ValidCount();
+    if (!result.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(result.error()),
+                  "failed to read valid count: {}",
+                  result.what());
+    }
+    return static_cast<int64_t>(result.value());
 }
 
 bool
@@ -375,7 +411,13 @@ VectorIndexReader::IsRowValid(int64_t logical_offset) const {
         (logical_offset < 0 || logical_offset >= logical_count_)) {
         return false;
     }
-    return IdMap().IsValidOutId(logical_offset);
+    const auto result = engine_.native_index.IsRowValid(logical_offset);
+    if (!result.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(result.error()),
+                  "failed to read row validity: {}",
+                  result.what());
+    }
+    return result.value();
 }
 
 void
@@ -384,10 +426,15 @@ VectorIndexReader::ApplyValidDataByRange(int64_t logical_offset,
                                          TargetBitmapView valid_result) const {
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity range result size mismatch");
-    IdMap().AndValidityByRange(logical_offset,
-                               static_cast<size_t>(count),
-                               reinterpret_cast<uint8_t*>(valid_result.data()),
-                               valid_result.offset());
+    const auto status =
+        engine_.native_index.IntersectValidity(logical_offset,
+                                               static_cast<size_t>(count),
+                                               ValidityTarget(valid_result));
+    if (status != knowhere::Status::success) {
+        ThrowInfo(KnowhereStatusToErrorCode(status),
+                  "failed to apply validity range: {}",
+                  knowhere::Status2String(status));
+    }
     if (IsGrowingGeneration()) {
         for (int64_t i = 0; i < count; ++i) {
             const auto row = static_cast<uint64_t>(logical_offset) +
@@ -406,13 +453,20 @@ VectorIndexReader::ApplyValidDataByOffsets(
     TargetBitmapView valid_result) const {
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity offset result size mismatch");
-    IdMap().ApplyValidityByOffsets(
-        offsets, static_cast<size_t>(count), [&](size_t i, bool valid) {
-            if (!valid || (IsGrowingGeneration() &&
-                           (offsets[i] < 0 || offsets[i] >= logical_count_))) {
+    const auto status = engine_.native_index.IntersectValidityAt(
+        offsets, static_cast<size_t>(count), ValidityTarget(valid_result));
+    if (status != knowhere::Status::success) {
+        ThrowInfo(KnowhereStatusToErrorCode(status),
+                  "failed to apply validity offsets: {}",
+                  knowhere::Status2String(status));
+    }
+    if (IsGrowingGeneration()) {
+        for (int64_t i = 0; i < count; ++i) {
+            if (offsets[i] < 0 || offsets[i] >= logical_count_) {
                 valid_result[i] = false;
             }
-        });
+        }
+    }
 }
 
 knowhere::expected<knowhere::DataSetPtr>
@@ -695,7 +749,7 @@ VectorIndexReader::ValidateGenerationIds(const int64_t* ids,
                    operation,
                    ids[i],
                    logical_count_);
-        AssertInfo(IdMap().IsValidOutId(ids[i]),
+        AssertInfo(IsRowValid(ids[i]),
                    "{} id {} is a null row of this nullable vector index",
                    operation,
                    ids[i]);
@@ -707,7 +761,8 @@ VectorIndexReader::IsEmptyEngine() const {
     if (IsGrowingGeneration()) {
         return physical_count_ == 0;
     }
-    return IsAllNullNullable(IdMap()) || engine_.IsEmptyEmbListIndex();
+    return IsAllNullNullable(engine_.native_index) ||
+           engine_.IsEmptyEmbListIndex();
 }
 
 }  // namespace milvus::index

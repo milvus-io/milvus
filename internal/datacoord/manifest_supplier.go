@@ -39,7 +39,7 @@ func (s *Server) GetPublishedManifestPaths(ctx context.Context) ([]string, error
 	s.meta.segMu.RLock()
 	defer s.meta.segMu.RUnlock()
 	manifests := make([]string, 0)
-	for _, segment := range s.meta.segments.segments {
+	for _, segment := range s.meta.segments.GetSegments() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
