@@ -20,7 +20,7 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -62,7 +62,8 @@ type externalRefreshOwnershipSummary struct {
 // surviving file of a segment is visible to its owner task. Manifest I/O and
 // task/segment ID allocation deliberately stay outside this pure planner.
 func planExternalRefreshOwnership(
-	files []*datapb.ExternalFileInfo,
+	format, baselineFormat string,
+	files []packed.FileInfo,
 	segmentFragments packed.SegmentFragments,
 	filesPerTask int64,
 ) ([]externalRefreshOwnershipTaskPlan, externalRefreshOwnershipSummary, error) {
@@ -79,24 +80,29 @@ func planExternalRefreshOwnership(
 		)
 	}
 
-	fileIndexes := make(map[string]int64, len(files))
+	fileIndexes := make(map[externalRefreshFileKey]int64, len(files))
+	filePaths := make(map[string]struct{}, len(files))
 	for index, file := range files {
-		if file == nil || file.GetFilePath() == "" {
+		if file.FilePath == "" {
 			return nil, summary, merr.WrapErrDataIntegrityMsg(
 				"external refresh Explore result contains an invalid file at index %d",
 				index,
 			)
 		}
-		filePath := file.GetFilePath()
-		if previous, ok := fileIndexes[filePath]; ok {
+		key, err := externalRefreshOwnershipKey(format, file.FilePath, file.Properties)
+		if err != nil {
+			return nil, summary, err
+		}
+		if previous, ok := fileIndexes[key]; ok {
 			return nil, summary, merr.WrapErrDataIntegrityMsg(
 				"external refresh Explore result contains duplicate file path %q at indexes %d and %d",
-				filePath,
+				file.FilePath,
 				previous,
 				index,
 			)
 		}
-		fileIndexes[filePath] = int64(index)
+		fileIndexes[key] = int64(index)
+		filePaths[file.FilePath] = struct{}{}
 	}
 
 	fileCount := int64(len(files))
@@ -132,14 +138,18 @@ func planExternalRefreshOwnership(
 			if fragment.FilePath != "" {
 				if _, ok := baselineFilePaths[fragment.FilePath]; !ok {
 					baselineFilePaths[fragment.FilePath] = struct{}{}
-					if _, ok := fileIndexes[fragment.FilePath]; ok {
+					if _, ok := filePaths[fragment.FilePath]; ok {
 						summary.UnchangedFilePaths++
 					} else {
 						summary.RemovedFilePaths++
 					}
 				}
 			}
-			if fileIndex, ok := fileIndexes[fragment.FilePath]; ok {
+			key, err := externalRefreshOwnershipKey(baselineFormat, fragment.FilePath, fragment.Properties)
+			if err != nil {
+				return nil, summary, err
+			}
+			if fileIndex, ok := fileIndexes[key]; ok {
 				firstFileIndex = min(firstFileIndex, fileIndex)
 				lastFileIndex = max(lastFileIndex, fileIndex)
 			}
@@ -185,7 +195,7 @@ func planExternalRefreshOwnership(
 	summary.FinalTaskCount = len(tasks)
 	summary.ClosureRemovedBoundaries = summary.BaseTaskCount - summary.FinalTaskCount
 	summary.BaselineFilePaths = len(baselineFilePaths)
-	summary.AddedFilePaths = len(fileIndexes) - summary.UnchangedFilePaths
+	summary.AddedFilePaths = len(filePaths) - summary.UnchangedFilePaths
 	for _, task := range tasks {
 		summary.MaxTaskFiles = max(summary.MaxTaskFiles, int(task.FileIndexEnd-task.FileIndexBegin))
 		summary.MaxOwnedSegments = max(summary.MaxOwnedSegments, len(task.OwnedSegmentIDs))
@@ -194,4 +204,26 @@ func planExternalRefreshOwnership(
 		}
 	}
 	return tasks, summary, nil
+}
+
+type externalRefreshFileKey struct {
+	path          string
+	splitIdentity string
+}
+
+func externalRefreshOwnershipKey(format, filePath string, properties map[string]string) (externalRefreshFileKey, error) {
+	key := externalRefreshFileKey{path: filePath}
+	if format != externalspec.FormatPaimonTable || filePath == "" {
+		return key, nil
+	}
+	readPath, _, err := packed.PaimonRoutingMeta(properties)
+	if err != nil {
+		return key, err
+	}
+	if readPath == packed.PaimonDataSplitReadPath {
+		// DataSplits share a table path but carry distinct immutable descriptors.
+		// Leave row ranges unset: ownership is per entry, not per fragment range.
+		key.splitIdentity = packed.FragmentIdentity(packed.Fragment{FilePath: filePath, Properties: properties})
+	}
+	return key, nil
 }

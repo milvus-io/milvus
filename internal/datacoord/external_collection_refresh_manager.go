@@ -983,7 +983,27 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		mlog.Duration("duration", time.Since(manifestReadStart)))
 
 	filesPerTask := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64()
+	spec, err := externalspec.ParseExternalSpec(job.GetExternalSpec())
+	if err != nil {
+		return nil, err
+	}
+	baselineFormat := spec.Format
+	if len(segmentFragments) > 0 {
+		collection := m.mt.GetCollection(job.GetCollectionId())
+		if collection == nil {
+			return nil, merr.WrapErrCollectionNotFound(job.GetCollectionId())
+		}
+		// A refresh may replace source/spec; baseline manifests still belong
+		// to the collection's current format until the job finishes.
+		baselineSpec, err := externalspec.ParseExternalSpec(collection.Schema.GetExternalSpec())
+		if err != nil {
+			return nil, merr.Wrap(err, "parse external refresh baseline spec")
+		}
+		baselineFormat = baselineSpec.Format
+	}
 	taskPlans, ownershipSummary, err := planExternalRefreshOwnership(
+		spec.Format,
+		baselineFormat,
 		allFiles,
 		segmentFragments,
 		filesPerTask,
@@ -1158,7 +1178,7 @@ func (m *externalCollectionRefreshManager) GetActiveJobByCollectionID(collection
 func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	ctx context.Context,
 	job *datapb.ExternalCollectionRefreshJob,
-) ([]*datapb.ExternalFileInfo, string, error) {
+) ([]packed.FileInfo, string, error) {
 	// Revalidate source+spec at refresh time: etcd is not a trusted boundary,
 	// and validation rules may have tightened since the collection was created.
 	// Empty source is legal (see typeutil.IsExternalCollection); only validate
@@ -1209,15 +1229,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 		return nil, "", merr.Wrap(err, "failed to explore files returning manifest path")
 	}
 
-	// Convert to proto type
-	result := make([]*datapb.ExternalFileInfo, len(fileInfos))
-	for i, fi := range fileInfos {
-		result[i] = &datapb.ExternalFileInfo{
-			FilePath: fi.FilePath,
-			NumRows:  fi.NumRows,
-		}
-	}
-	return result, manifestPath, nil
+	return fileInfos, manifestPath, nil
 }
 
 func validateMilvusTableRefreshSchema(job *datapb.ExternalCollectionRefreshJob, targetSchema *schemapb.CollectionSchema) error {
