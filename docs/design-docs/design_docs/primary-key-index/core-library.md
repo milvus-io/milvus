@@ -330,17 +330,21 @@ outside every one of these locks.
 `SharedResources` holds one block cache and one table cache per node.
 Generations and committed readers all attach to it. `sst.ReadInfo`, which only
 reads metadata, reads without caching. `SharedConfig` sizes it: the block cache
-budget in bytes, the number of sstables the table cache keeps open (default
-4096), and the number of table cache shards (default `GOMAXPROCS`, as in
-pebble). The table cache serves only the generations' DBs; a committed reader
-holds its own file handle. Turning these sizes into Milvus configuration waits
-until a component uses the engine.
+budget in bytes (default 8 MiB, as in pebble), the number of sstables the table
+cache keeps open (default 4096), and the number of table cache shards (default
+`GOMAXPROCS`, as in pebble). The table cache serves only the generations' DBs;
+a committed reader holds its own file handle. Turning these sizes into Milvus
+configuration waits until a component uses the engine.
 
 A lookup on the write path runs while the caller holds a lock, so it must not
 be the thing that faults an index or a filter in from disk. `InstallCommitted`
 therefore calls `Reader.Preload` on every table it opens, before it swaps
 anything in, and its contract is that on return the index and filter of every
-committed table are in the block cache.
+committed table are in the block cache. Pebble splits the index of a table with
+more than a few thousand keys into a top index over partitions, and a seek that
+the filter rejects reads none of the partitions; `Preload` therefore walks the
+table layout, which reads every index block through the cache and no data
+block, and then runs one filter-rejected seek for the filter.
 
 Replacing the committed set usually repeats most of its tables, so a table
 already open under the same ID keeps its reader; only tables new to the set are
@@ -493,7 +497,9 @@ Unit tests, run with `-race`:
   `ReadInfo` matches what the Writer reported and does not scan the table; a
   size that does not match the manifest fails the open; a reader uses the cache
   it is given; in-range misses are answered by the filter, not by data blocks;
-  after `Preload` a miss costs no cache miss.
+  after `Preload` a miss costs no cache miss, and on a table with a two-level
+  index a hit misses only on its data block; keys out of order are rejected
+  as a caller bug, not as a disk failure.
 - engine: write then read; delete masks; the active generation overrides the
   committed set; committed recency order; the full handover cycle; concurrent
   writes during a cycle are all retained; several overlapping L0 tables in one

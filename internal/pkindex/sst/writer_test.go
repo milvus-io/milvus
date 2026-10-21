@@ -21,9 +21,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 )
 
@@ -55,6 +57,26 @@ func TestEmptyWriter(t *testing.T) {
 	assert.Nil(t, info.MinKey)
 	assert.Nil(t, info.MaxKey)
 	assert.Equal(t, fixtureID, info.ID)
+}
+
+// A key that is not above the previous one is a caller bug. The error must
+// not be classified as a disk failure, or an operator looks for a bad disk
+// where there is none.
+func TestAddRejectsKeysOutOfOrder(t *testing.T) {
+	for name, second := range map[string]int64{"duplicate": 5, "lower": 4} {
+		t.Run(name, func(t *testing.T) {
+			w, err := NewWriter(t.TempDir(), fixtureID)
+			require.NoError(t, err)
+			defer w.Abort()
+			require.NoError(t, w.Add(codec.EncodeInt64PK(5), codec.EncodePKEntry(codec.PKEntry{SegmentID: 1})))
+
+			err = w.Add(codec.EncodeInt64PK(second), codec.EncodePKEntry(codec.PKEntry{SegmentID: 1}))
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, errKeyOrder), "got %v", err)
+			assert.False(t, errors.Is(err, pkindex.ErrIO), "a caller bug must not look like a disk failure: %v", err)
+			assert.False(t, errors.Is(err, pkindex.ErrCorrupted), "got %v", err)
+		})
+	}
 }
 
 func TestAbort(t *testing.T) {

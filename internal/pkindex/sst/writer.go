@@ -29,6 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex"
 )
 
+// errKeyOrder is a caller bug: Add received a key that is not above the one
+// before it. It carries no category, like the engine's caller-bug errors.
+var errKeyOrder = errors.New("pkindex sst keys must be added in strictly increasing order")
+
 // FileName is the file name a table with this ID is written under.
 func FileName(id ID) string { return fmt.Sprintf("%d%s", int64(id), Extension) }
 
@@ -74,6 +78,11 @@ func NewWriter(dir string, id ID) (*Writer, error) {
 // Add appends one key/value pair; keys must arrive in strictly increasing
 // order under Comparer.
 func (w *Writer) Add(key, value []byte) error {
+	// checked here: pebble reports it as a plain error, which the
+	// classification below would turn into a disk failure
+	if w.entries > 0 && Comparer.Compare(key, w.maxKey) <= 0 {
+		return errors.Wrapf(errKeyOrder, "key %x after %x in sst %s", key, w.maxKey, w.tmpPath)
+	}
 	if err := w.w.Set(key, value); err != nil {
 		return MarkPebbleErr(errors.Wrapf(err, "write sst %s", w.tmpPath))
 	}

@@ -89,10 +89,15 @@ func OpenReader(path string, cache *pebble.Cache, opts ...ReaderOption) (*Reader
 
 // Preload reads the index and the filter into the block cache the reader was
 // opened with, so that a later lookup does not pay for them while a caller
-// holds a lock. Building an iterator loads the index; a seek that the filter
-// answers loads the filter. Both stay cached because the cache is the one
-// shared by the node, not one private to this reader.
+// holds a lock. Layout reads every index block through the cache, the top
+// index and each partition below it, and decodes only the handles of the data
+// blocks; a seek that the filter answers loads the filter. Both stay cached
+// because the cache is the one shared by the node, not one private to this
+// reader.
 func (r *Reader) Preload() error {
+	if _, err := r.r.Layout(); err != nil {
+		return MarkPebbleErr(errors.Wrapf(err, "preload sst index %s", r.name))
+	}
 	it, err := r.r.NewIter(nil, nil)
 	if err != nil {
 		return MarkPebbleErr(errors.Wrapf(err, "preload sst %s", r.name))

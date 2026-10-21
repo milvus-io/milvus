@@ -185,6 +185,27 @@ func TestSharedConfigTableCacheSize(t *testing.T) {
 	shared.Release()
 }
 
+// A zero SharedConfig must still give a block cache that keeps what Preload
+// put in it. A zero-byte pebble cache retains nothing, and every lookup would
+// then fault the index and the filter in under the engine's locks.
+func TestSharedConfigDefaultCacheBytes(t *testing.T) {
+	assert.Equal(t, int64(DefaultCacheBytes), SharedConfig{}.cacheBytes())
+	assert.Equal(t, int64(DefaultCacheBytes), SharedConfig{CacheBytes: -1}.cacheBytes())
+	assert.Equal(t, int64(1<<20), SharedConfig{CacheBytes: 1 << 20}.cacheBytes())
+
+	shared := NewSharedResources(SharedConfig{})
+	t.Cleanup(shared.Release)
+	e := newTestEngine(t, func(c *Config) { c.Shared = shared })
+	ctx := context.Background()
+	table := buildCommitted(t, t.TempDir(), 1, map[int64][]byte{1: entry(10), 100: entry(20)})
+	require.NoError(t, e.InstallCommitted(ctx, []CommittedTable{table}))
+
+	before := shared.cache.Metrics().Misses
+	assert.Nil(t, getOne(t, e, pk(50)), "in range, but no table holds it")
+	assert.Equal(t, before, shared.cache.Metrics().Misses,
+		"the default cache must hold the index and the filter that Preload read")
+}
+
 func TestStats(t *testing.T) {
 	e := newTestEngine(t)
 	ctx := context.Background()

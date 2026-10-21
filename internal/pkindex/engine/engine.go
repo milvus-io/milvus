@@ -78,10 +78,15 @@ type SharedResources struct {
 // MaxOpenFiles at zero.
 const DefaultMaxOpenFiles = 4096
 
+// DefaultCacheBytes is the block cache budget used when SharedConfig leaves
+// CacheBytes at zero. It is pebble's own default; a zero-byte pebble cache
+// retains nothing, so every lookup would fault the index and the filter in.
+const DefaultCacheBytes = 8 << 20
+
 // SharedConfig sizes the node-level caches. A zero field takes its default.
 type SharedConfig struct {
 	// CacheBytes is the block cache budget in bytes, shared by all engines on
-	// the node.
+	// the node. Zero means DefaultCacheBytes.
 	CacheBytes int64
 	// MaxOpenFiles is the number of sstables the table cache keeps open for the
 	// generations of all engines on the node. Zero means DefaultMaxOpenFiles.
@@ -91,6 +96,14 @@ type SharedConfig struct {
 	// MaxOpenFiles/TableCacheShards files under its own lock. Zero means
 	// runtime.GOMAXPROCS(0), the pebble default.
 	TableCacheShards int
+}
+
+// cacheBytes applies the default to the block cache budget.
+func (cfg SharedConfig) cacheBytes() int64 {
+	if cfg.CacheBytes <= 0 {
+		return DefaultCacheBytes
+	}
+	return cfg.CacheBytes
 }
 
 // tableCacheSize applies the defaults to the table cache settings.
@@ -113,7 +126,7 @@ func (cfg SharedConfig) tableCacheSize() (maxOpenFiles, shards int) {
 // NewSharedResources creates the node-level caches.
 func NewSharedResources(cfg SharedConfig) *SharedResources {
 	maxOpenFiles, shards := cfg.tableCacheSize()
-	c := pebble.NewCache(cfg.CacheBytes)
+	c := pebble.NewCache(cfg.cacheBytes())
 	return &SharedResources{
 		cache:      c,
 		tableCache: pebble.NewTableCache(c, shards, maxOpenFiles),

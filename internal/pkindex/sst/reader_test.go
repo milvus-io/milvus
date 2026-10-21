@@ -189,3 +189,33 @@ func TestPreloadWarmsIndexAndFilter(t *testing.T) {
 	assert.Equal(t, before, c.Metrics().Misses,
 		"a miss after Preload must not fault in the index or the filter")
 }
+
+// Beyond a few thousand keys the index no longer fits one block, and pebble
+// splits it into a top index over partitions. Preload must warm every
+// partition, not only the top: otherwise the first hit into each partition
+// faults it in while a caller holds a lock.
+func TestPreloadWarmsEveryIndexPartition(t *testing.T) {
+	dir := t.TempDir()
+	const n = 60000
+	_, path := writeFixture(t, dir, n)
+	c := pebble.NewCache(32 << 20)
+	defer c.Unref()
+
+	r, err := OpenReader(path, c)
+	require.NoError(t, err)
+	defer r.Close()
+	require.Greater(t, r.r.Properties.IndexPartitions, uint64(1), "the fixture must have a two-level index")
+	require.NoError(t, r.Preload())
+
+	// hits spread over the whole table reach every partition; each probe may
+	// fault in its own data block, and nothing else
+	before := c.Metrics().Misses
+	const probes = 10
+	for i := 0; i < probes; i++ {
+		_, ok, err := r.Get(codec.EncodeInt64PK(int64(i * (n / probes))))
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	assert.Equal(t, int64(probes), c.Metrics().Misses-before,
+		"after Preload a hit must miss only on its data block")
+}
