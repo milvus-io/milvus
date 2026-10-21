@@ -804,6 +804,15 @@ class SegmentLoadInfo {
     void
     InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source);
 
+    // StorageV2 binlogs written by 2.6.0/2.6.1 carry no child_fields and key a
+    // multi-field column group by a group id below START_USER_FIELDID, so the
+    // fields it stores are known only from its packed file footer. Every load
+    // diff keys fields by child_fields, so fill them in from the footer before
+    // computing one. A group whose files match one already resolved in
+    // `known` reuses its child_fields instead of reading the footer again.
+    void
+    ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known);
+
     /**
      * @brief Pre-populate the column group cache without parsing a manifest
      * @note Test-only hook: lets unit tests exercise diff logic that depends

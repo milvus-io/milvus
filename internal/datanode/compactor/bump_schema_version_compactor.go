@@ -327,11 +327,11 @@ func (t *bumpSchemaVersionCompactionTask) openRecordReader(segment *datapb.Compa
 // physical field set and classifies every gap the bump has to close.
 func (t *bumpSchemaVersionCompactionTask) schemaBumpDecision() (*schemaBumpPhysicalDiff, error) {
 	segment := t.plan.GetSegmentBinlogs()[0]
-	existingFields, err := compactionSegmentStorageFields(segment, t.compactionParams.StorageConfig)
+	schema := t.plan.GetSchema()
+	existingFields, err := compactionSegmentStorageFields(t.ctx, segment, schema, t.compactionParams.StorageConfig)
 	if err != nil {
 		return nil, err
 	}
-	schema := t.plan.GetSchema()
 
 	functionOutputFields, err := validateSchemaBumpIntegrity(schema, existingFields)
 	if err != nil {
