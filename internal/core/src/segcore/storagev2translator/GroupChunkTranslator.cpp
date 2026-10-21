@@ -316,19 +316,24 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     }
 
     // Submit cell-batch loading tasks. The same load-pool worker reads and
-    // finalizes every cell in its batch. Prepare the files for this call only:
-    // the shared plaintext footers die with the local contexts when get_cells
-    // returns, so they never stay resident across lazy loads or reloads.
-    PreparedParquetFiles prepared_files;
-    prepared_files.reserve(insert_files_.size());
-    for (const auto& file : insert_files_) {
+    // finalizes every cell in its batch. Prepare only the files referenced by
+    // the requested cells for this call: the shared plaintext footers die with
+    // the local contexts when get_cells returns, so they never stay resident
+    // across lazy loads or reloads, and a single-cell miss must not parse every
+    // footer in the column group.
+    std::vector<std::shared_ptr<milvus_storage::PreparedParquetFile>>
+        prepared_files(insert_files_.size());
+    for (const auto& spec : cell_specs) {
+        if (prepared_files[spec.file_idx] != nullptr) {
+            continue;
+        }
         auto result = milvus_storage::PreparedParquetFile::Open(
-            fs_, file, storage::GetReaderProperties());
+            fs_, insert_files_[spec.file_idx], storage::GetReaderProperties());
         AssertInfo(result.ok(),
                    "[StorageV2] Failed to prepare file {}: {}",
-                   file,
+                   insert_files_[spec.file_idx],
                    result.status().ToString());
-        prepared_files.push_back(std::move(result).ValueOrDie());
+        prepared_files[spec.file_idx] = std::move(result).ValueOrDie();
     }
     auto factory = milvus::segcore::MakeFileReaderFactory(prepared_files);
     auto finalize_cell =
