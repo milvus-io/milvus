@@ -4455,6 +4455,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
             output.resource_pins_.emplace_back(
                 std::move(vector_pin).IntoSharedLifetime());
         }
+        output.used_interim_index_ = true;
         milvus::tracer::AddEvent(
             "finish_searching_vector_temperate_binlog_index");
     } else if (get_bit(snapshot->index_ready_bitset, field_id)) {
