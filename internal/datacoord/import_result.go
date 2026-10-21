@@ -203,7 +203,8 @@ func importV3SegmentStatsNonZero(stats *datapb.Statistics) bool {
 		stats.GetTimestampTo() != 0 ||
 		stats.GetDeltaTimestampFrom() != 0 ||
 		stats.GetDeltaTimestampTo() != 0 ||
-		len(stats.GetNullCounts()) > 0
+		len(stats.GetNullCounts()) > 0 ||
+		len(stats.GetValidElementCounts()) > 0
 }
 
 func validateImportResultSegmentOperator(collectionID, segmentID int64, result *datapb.ImportTaskV3Result, sorted, namespaceSorted bool) UpdateOperator {
