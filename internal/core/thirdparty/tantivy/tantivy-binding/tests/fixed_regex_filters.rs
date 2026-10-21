@@ -164,7 +164,7 @@ fn fixed_regex_filters_preserve_builtin_chinese_and_chaining() {
 }
 
 #[test]
-fn fixed_regex_filter_clones_are_independent() {
+fn fixed_regex_filter_clones_and_instances_are_independent() {
     for (name, _, _) in FILTERS {
         let config = json!({"tokenizer":"jieba", "filter":["lowercase", name]});
         let mut original = create_analyzer(&config.to_string(), "").unwrap();
@@ -173,19 +173,55 @@ fn fixed_regex_filter_clones_are_independent() {
             .iter()
             .map(|text| collect(&mut original, text))
             .collect();
-        let workers: Vec<_> = (0..4).map(|_| original.clone()).collect();
+        let workers: Vec<_> = (0..4)
+            .map(|_| original.clone())
+            .chain((0..4).map(|_| create_analyzer(&config.to_string(), "").unwrap()))
+            .collect();
+        let start = std::sync::Barrier::new(workers.len());
         drop(original);
         std::thread::scope(|scope| {
             for mut worker in workers {
                 let inputs = &inputs;
                 let expected = &expected;
+                let start = &start;
                 scope.spawn(move || {
+                    start.wait();
                     for _ in 0..4 {
                         for (text, tokens) in inputs.iter().zip(expected) {
                             assert_eq!(&collect(&mut worker, text), tokens);
                         }
                     }
                 });
+            }
+        });
+    }
+}
+
+#[test]
+fn fixed_regex_filter_analyzer_can_move_between_threads() {
+    for (name, _, _) in FILTERS {
+        let config = json!({"tokenizer":"jieba", "filter":["lowercase", name]});
+        let mut analyzer = create_analyzer(&config.to_string(), "").unwrap();
+        let inputs = corpus();
+        let expected: Vec<_> = inputs
+            .iter()
+            .map(|text| collect(&mut analyzer, text))
+            .collect();
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let inputs = &inputs;
+                let expected = &expected;
+                // Join before the next move: the analyzer and its caches have
+                // one owner throughout, with no thread affinity requirement.
+                analyzer = scope
+                    .spawn(move || {
+                        for (text, tokens) in inputs.iter().zip(expected) {
+                            assert_eq!(&collect(&mut analyzer, text), tokens);
+                        }
+                        analyzer
+                    })
+                    .join()
+                    .unwrap();
             }
         });
     }
