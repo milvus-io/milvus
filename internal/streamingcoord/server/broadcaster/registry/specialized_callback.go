@@ -143,6 +143,10 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeAlterResourceGroupV2: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
 
+		// File resources
+		message.MessageTypeAddFileResourceV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRemoveFileResourceV2: syncutil.NewFuture[messageInnerAckCallback](),
+
 		// Snapshot
 		message.MessageTypeCreateSnapshotV2:            syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropSnapshotV2:              syncutil.NewFuture[messageInnerAckCallback](),
