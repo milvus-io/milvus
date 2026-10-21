@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
@@ -732,6 +733,26 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("datacoord catalog does not support DataView persistence")
 	}
+	// List the persisted DataViews while the phases below recover SegmentMeta
+	// and Collections. No DataView key can change before RecoverManager: every
+	// writer goes through the DataViewManager it builds, the DDL callbacks that
+	// reach the manager are registered only after recovery, and external RPCs
+	// wait for the recovery barrier. A failed RecoverManager attempt may have
+	// dropped or written keys, so only the first attempt uses this listing.
+	listCtx, cancelList := context.WithCancel(s.ctx)
+	var (
+		listed      = make(chan struct{})
+		listedErr   error
+		listedViews []*viewpb.DataViewOfCollection
+	)
+	go func() {
+		defer close(listed)
+		listedViews, listedErr = catalog.ListAllDataViews(listCtx)
+	}()
+	defer func() {
+		cancelList()
+		<-listed
+	}()
 	var recoveredMeta *meta
 	reloadEtcdFn := func() error {
 		var err error
@@ -760,7 +781,20 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return c.ID, c.VChannelNames
 	})
 	var manager dataview.Manager
+	firstAttempt := true
 	if err := retry.Do(s.ctx, func() error {
+		options := []dataview.Option{
+			dataview.WithRecoveryConcurrency(paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt()),
+		}
+		if firstAttempt {
+			firstAttempt = false
+			<-listed
+			if listedErr != nil {
+				return listedErr
+			}
+			options = append(options, dataview.WithListedDataViews(listedViews))
+			listedViews = nil
+		}
 		var err error
 		manager, err = dataview.RecoverManager(
 			s.ctx,
@@ -769,6 +803,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.loadableProjection,
 			collectionIDs,
 			collectionVChannels,
+			options...,
 		)
 		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
