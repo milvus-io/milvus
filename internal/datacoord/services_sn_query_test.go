@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/dataview"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -27,7 +28,8 @@ func TestStreamingNodeResourcesRespectDataViewManifest(t *testing.T) {
 	defer patch.UnPatch()
 	manager, err := dataview.RecoverManager(ctx, &catalogkv.Catalog{}, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
 	require.NoError(t, err)
-	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo()}}
+	store := metacache.NewMetaStore(nil)
+	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo(store), metaStore: store}}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	for _, id := range []int64{3, 4} {
 		s.meta.segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", ManifestPath: packed.MarshalManifestPath("segments", 9)}))
@@ -54,7 +56,8 @@ func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
 	manager, err := dataview.RecoverManager(ctx, &catalogkv.Catalog{}, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
 	require.NoError(t, err)
 	logs := []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 42}, {LogID: 43, LogPath: "existing/path/43"}}}}
-	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo()}}
+	store := metacache.NewMetaStore(nil)
+	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo(store), metaStore: store}}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	s.meta.segments.SetSegment(3, NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", Bm25Statslogs: logs}))
 	resp, err := s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})

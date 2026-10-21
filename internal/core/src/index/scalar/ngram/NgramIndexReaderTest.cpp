@@ -27,7 +27,9 @@
 #include <utility>
 #include <vector>
 
+#include "common/RegexQuery.h"
 #include "index/contracts/query/INgramReader.h"
+#include "index/scalar/ngram/NgramRegex.h"
 #include "index/test_utils/AssertHelpers.h"
 #include "index/test_utils/CaseTestDriver.h"
 
@@ -66,6 +68,30 @@ ConcreteNgramCases() {
              .literal = "hello",
              .initial_offsets = {{0, 2, 4, 6, 22, 30}},
              .expected_offsets = {0, 2, 4}},
+            // Regex alternation: AND within a branch, union across branches.
+            {.name = "RegexAlternationUnionsBranches",
+             .dataset = "NgramCoreNullable",
+             .op = PatternOp::RegexMatch,
+             .literal = "tested|banana",
+             .expected_offsets = {7, 13}},
+            // `\|` is a literal byte: "banana|split" occurs in no row, so only
+            // the second branch contributes candidates.
+            {.name = "RegexEscapedPipeIsLiteral",
+             .dataset = "NgramCoreNullable",
+             .op = PatternOp::RegexMatch,
+             .literal = "banana\\|split|tested",
+             .expected_offsets = {7}},
+            {.name = "RegexNestedAlternationIntersectsBranches",
+             .dataset = "NgramCoreNullable",
+             .op = PatternOp::RegexMatch,
+             .literal = "(?:tes|ban)(?:ted|ana)",
+             .expected_offsets = {7, 13}},
+            {.name = "RegexAlternationAndMergesInitialMask",
+             .dataset = "NgramCoreNullable",
+             .op = PatternOp::RegexMatch,
+             .literal = "tested|banana",
+             .initial_offsets = {{0, 7, 22}},
+             .expected_offsets = {7}},
         };
         for (const auto& test_case : table) {
             cases.Add(IndexTestCase<std::string_view>{
@@ -121,6 +147,122 @@ INSTANTIATE_TEST_SUITE_P(NgramHeap,
                          NgramIndexReaderTest,
                          ::testing::ValuesIn(ConcreteNgramCases().All()),
                          FilterParamName);
+
+using Condition = RegexLiteralCondition;
+
+TEST(NgramRegexPlanTest, TrimToUtf8KeepsWholeCharacters) {
+    const std::string zhong = "\xe4\xb8\xad";  // 中
+    const std::string wen = "\xe6\x96\x87";    // 文
+    EXPECT_EQ(TrimToUtf8("abc"), "abc");
+    EXPECT_EQ(TrimToUtf8(zhong + wen), zhong + wen);
+    // RE2 may cut a bounded atom inside a character at either end.
+    EXPECT_EQ(TrimToUtf8(zhong.substr(1) + wen), wen);
+    EXPECT_EQ(TrimToUtf8(wen + zhong.substr(0, 2)), wen);
+    EXPECT_EQ(TrimToUtf8(zhong.substr(2)), "");
+    // Invalid bytes end the usable prefix; surrogates are not valid UTF-8.
+    EXPECT_EQ(TrimToUtf8("ab\xff" + wen), "ab");
+    EXPECT_EQ(TrimToUtf8("\xed\xa0\x80" + wen), "");
+    EXPECT_EQ(TrimToUtf8(std::string("a\0b", 3)), std::string("a\0b", 3));
+}
+
+TEST(NgramRegexPlanTest, ProjectsConditionOntoMinGram) {
+    const auto literal = [](const std::string& text) {
+        return Condition{Condition::Op::Literal, text, {}};
+    };
+    const auto node = [](Condition::Op op, std::vector<Condition> children) {
+        return Condition{op, {}, std::move(children)};
+    };
+    using Op = Condition::Op;
+    // A short literal inside an AND is dropped; the AND keeps the rest.
+    EXPECT_EQ(PlanNgramRegexCondition(
+                  node(Op::And, {literal("ab"), literal("hello")}), 3),
+              literal("hello"));
+    // A short OR branch can match any row, so the whole OR is TRUE.
+    EXPECT_TRUE(PlanNgramRegexCondition(
+                    node(Op::Or, {literal("ab"), literal("hello")}), 3)
+                    .IsTrue());
+    EXPECT_TRUE(PlanNgramRegexCondition(
+                    node(Op::Or, {Condition{}, literal("hello")}), 2)
+                    .IsTrue());
+    EXPECT_EQ(PlanNgramRegexCondition(
+                  node(Op::Or, {literal("ab"), literal("hello")}), 2),
+              node(Op::Or, {literal("ab"), literal("hello")}));
+    // ... but an AND above it survives through its other children.
+    EXPECT_EQ(PlanNgramRegexCondition(
+                  node(Op::And,
+                       {node(Op::Or, {literal("ab"), literal("hello")}),
+                        literal("world")}),
+                  3),
+              literal("world"));
+    // Length is counted in UTF-8 characters, after trimming partial ones.
+    EXPECT_EQ(
+        PlanNgramRegexCondition(literal("\xb8\xad\xe6\x96\x87\xe5\xad\x97"), 2),
+        literal("\xe6\x96\x87\xe5\xad\x97"));
+    EXPECT_TRUE(PlanNgramRegexCondition(literal("\xe6\x96\x87"), 2).IsTrue());
+    // A tree over the shared node budget is rejected, never truncated.
+    std::vector<Condition> many;
+    for (int i = 0; i < 200; ++i) {
+        many.push_back(literal("w" + std::to_string(1000 + i)));
+    }
+    EXPECT_TRUE(
+        PlanNgramRegexCondition(node(Op::Or, std::move(many)), 2).IsTrue());
+}
+
+TEST(NgramRegexPlanTest, PlannedAtomsAreValidUtf8) {
+    std::string long_han;
+    for (int i = 0; i < 30; ++i) {
+        long_han += "\xe4\xb8\xad";  // 90 bytes, cut at 64 by RE2 atoms
+    }
+    const auto plan = PlanNgramRegex(long_han + "|tested", 2);
+    ASSERT_FALSE(plan.IsTrue());
+    std::vector<const Condition*> pending{&plan};
+    size_t literals = 0;
+    while (!pending.empty()) {
+        const auto* current = pending.back();
+        pending.pop_back();
+        if (current->op == Condition::Op::Literal) {
+            ++literals;
+            EXPECT_EQ(TrimToUtf8(current->literal), current->literal);
+            EXPECT_GE(
+                Utf8CharCount(current->literal.data(), current->literal.size()),
+                2);
+        }
+        for (const auto& child : current->children) {
+            pending.push_back(&child);
+        }
+    }
+    EXPECT_GE(literals, 2);
+}
+
+TEST(NgramRegexPlanTest, AppliesBranchesAsUnionOfIntersections) {
+    const std::vector<std::string> rows = {
+        "foo bar", "foo", "bar", "baz qux", "qux", "foo qux"};
+    const auto apply = [&rows](const std::vector<std::string>& literals,
+                               TargetBitmap& bitmap) {
+        for (const auto& literal : literals) {
+            for (size_t row = 0; row < rows.size(); ++row) {
+                if (rows[row].find(literal) == std::string::npos) {
+                    bitmap.reset(row);
+                }
+            }
+        }
+    };
+    const auto run = [&](const std::string& pattern,
+                         std::optional<std::vector<size_t>> initial) {
+        auto candidates = initial.has_value() ? Hits(rows.size(), *initial)
+                                              : TargetBitmap(rows.size(), true);
+        ApplyNgramRegexPlan(PlanNgramRegex(pattern, 3), candidates, apply);
+        return candidates;
+    };
+    ExpectBitmap(run("foo.*bar|baz.*qux", std::nullopt),
+                 Hits(rows.size(), {0, 3}));
+    ExpectBitmap(run("(?:foo|baz).*qux", std::nullopt),
+                 Hits(rows.size(), {3, 5}));
+    ExpectBitmap(run("foo|qux", std::vector<size_t>{0, 2, 4}),
+                 Hits(rows.size(), {0, 4}));
+    ExpectBitmap(run("foo|qux", std::vector<size_t>{}),
+                 TargetBitmap(rows.size()));
+}
 
 TEST(NgramFfiBoundaryTest, EmbeddedNulCrossesFfiIntact) {
     auto directory = storage::LocalDirectory::CreateOwned(

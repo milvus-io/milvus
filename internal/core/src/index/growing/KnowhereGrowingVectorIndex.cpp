@@ -260,9 +260,10 @@ KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count,
     std::vector<uint8_t> validity_bitmap;
     if (nullable) {
         validity_bitmap = MaterializeValidity(0, logical_count);
-        next.native_index.SetIdMapType(knowhere::IdMap::Type::GROWING);
     }
     const auto build_config = BuildConfig();
+    knowhere::BuildOptions options;
+    options.growing = nullable;
 
     WithSourceRows<T>(
         source_,
@@ -284,7 +285,7 @@ KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count,
                     static_cast<size_t>(logical_count)));
             }
             const auto status = next.native_index.Build(
-                dataset, build_config, next.UseBuildPool());
+                dataset, build_config, next.UseBuildPool(), options);
             if (status != knowhere::Status::success) {
                 ThrowInfo(
                     KnowhereBuildStatusToErrorCode(status),
@@ -324,7 +325,6 @@ KnowhereGrowingVectorIndex<T>::AddBatch(
         dataset->SetIsSparse(true);
     }
     if (nullable) {
-        engine_->native_index.SetIdMapType(knowhere::IdMap::Type::GROWING);
         dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
             validity_bitmap, static_cast<size_t>(logical_count)));
     }

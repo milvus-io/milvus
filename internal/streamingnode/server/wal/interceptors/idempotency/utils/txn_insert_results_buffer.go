@@ -10,6 +10,9 @@ import (
 )
 
 // CurrentTimeTickProvider returns the current MVCC timetick of a vchannel.
+// This retained write target can stay unchanged while the vchannel is idle; it
+// is not a wall clock. TxnActiveChecker independently allows the next buffer
+// operation to reclaim ended or expired transactions even when MVCC is idle.
 type CurrentTimeTickProvider func(vchannel string) (uint64, bool)
 
 // TxnActiveChecker reports whether a transaction is still tracked by the txn

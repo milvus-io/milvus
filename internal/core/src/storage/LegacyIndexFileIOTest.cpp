@@ -59,6 +59,28 @@ Encode(const std::vector<uint8_t>& payload,
     return codec->serialize_to_remote_file(std::move(encryption));
 }
 
+std::vector<uint8_t>
+EncodeLargeDescriptor() {
+    const auto original = Encode({1, 2, 3});
+    auto buffer = std::shared_ptr<uint8_t[]>(new uint8_t[original.size()]);
+    std::memcpy(buffer.get(), original.data(), original.size());
+    auto reader = std::make_shared<BinlogReader>(buffer, original.size());
+    ReadMediumType(reader);
+    DescriptorEvent descriptor(reader);
+    const auto old_offset = reader->Tell();
+    EventHeader event(reader);
+    descriptor.event_data.extras["padding"] = std::string(64 * 1024, 'x');
+    auto result = descriptor.Serialize();
+    const auto new_offset = result.size();
+    result.insert(result.end(), original.begin() + old_offset, original.end());
+    if (event.next_position_ != 0)
+        event.next_position_ += static_cast<int32_t>(new_offset - old_offset);
+    const auto event_header = event.Serialize();
+    std::copy(
+        event_header.begin(), event_header.end(), result.begin() + new_offset);
+    return result;
+}
+
 class LegacyIndexFileIOTest : public ::testing::Test {
  protected:
     void
@@ -152,22 +174,299 @@ TEST_F(LegacyIndexFileIOTest, ParquetInt8AndOldString) {
     }
 }
 
-TEST_F(LegacyIndexFileIOTest, CancelWaitingAdmissionBeforeAnyRead) {
+TEST_F(LegacyIndexFileIOTest,
+       SyncDownloadValidatesRawEncodedAndEncryptedFiles) {
+    test::TmpPath directory;
+    LocalChunkManager manager(directory.get().string());
+    const auto path = (directory.get() / "legacy").string();
+    auto& plugins = PluginLoader::GetInstance();
+    plugins.registerPluginForTest(
+        std::make_shared<test::CollectionBoundPlannerCipherPlugin>(1));
+    auto cleanup = folly::makeGuard(
+        [&] { plugins.unregisterPluginForTest("CipherPlugin"); });
+    auto encryption = std::make_shared<CPluginContext>();
+    encryption->collection_id = 1;
+    encryption->ez_id = 2;
+    for (bool encrypted : {false, true}) {
+        for (auto type : {DataType::NONE, DataType::INT8, DataType::STRING}) {
+            for (const auto& payload : std::vector<std::vector<uint8_t>>{
+                     {}, {0, 127, 128, 255, 42}}) {
+                auto encoded =
+                    Encode(payload, type, encrypted ? encryption : nullptr);
+                manager.Write(path, encoded.data(), encoded.size());
+                auto codec = ReadLegacyIndexFile(manager, path, kPriority);
+                ASSERT_EQ(codec->PayloadSize(), payload.size());
+                if (!payload.empty())
+                    EXPECT_EQ(std::vector<uint8_t>(
+                                  codec->PayloadData(),
+                                  codec->PayloadData() + codec->PayloadSize()),
+                              payload);
+                for (const size_t truncated :
+                     {size_t{0}, size_t{20}, encoded.size() - 1}) {
+                    manager.Write(path, encoded.data(), truncated);
+                    try {
+                        ReadLegacyIndexFile(manager, path, kPriority);
+                        FAIL() << "expected truncated envelope to fail";
+                    } catch (const SegcoreError& error) {
+                        EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+                    }
+                }
+                encoded[0] ^= 1;
+                manager.Write(path, encoded.data(), encoded.size());
+                try {
+                    ReadLegacyIndexFile(manager, path, kPriority);
+                    FAIL() << "expected invalid magic to fail";
+                } catch (const SegcoreError& error) {
+                    EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+                }
+            }
+        }
+    }
+}
+
+TEST_F(LegacyIndexFileIOTest, AsyncBatchDeduplicatesWithOneAdmissionSlot) {
+    test::TmpPath directory;
+    auto manager =
+        std::make_shared<LocalChunkManager>(directory.get().string());
+    std::vector<std::string> paths;
+    for (size_t i = 0; i < 3; ++i) {
+        paths.push_back((directory.get() / std::to_string(i)).string());
+        auto bytes = Encode(std::vector<uint8_t>(i + 1, 42));
+        manager->Write(paths.back(), bytes.data(), bytes.size());
+    }
+    paths.push_back(paths.front());
+    auto infos =
+        Run(InspectLegacyIndexFilesAsync(paths, manager, {}, kPriority));
+    ASSERT_EQ(infos->size(), 3);
+    for (size_t i = 0; i < 3; ++i)
+        EXPECT_EQ(infos->at(paths[i]).payload_bytes, i + 1);
+    paths.clear();
+    EXPECT_TRUE(Run(InspectLegacyIndexFilesAsync(paths, manager, {}, kPriority))
+                    ->empty());
+}
+
+TEST_F(LegacyIndexFileIOTest, SyncDownloadRejectsShortReads) {
+    class ShortReadManager : public LocalChunkManager {
+     public:
+        using LocalChunkManager::LocalChunkManager;
+        uint64_t
+        Read(const std::string& path, void* data, uint64_t bytes) override {
+            return LocalChunkManager::Read(path, 0, data, bytes - 1);
+        }
+    };
+    test::TmpPath directory;
+    ShortReadManager manager(directory.get().string());
+    const auto path = (directory.get() / "legacy").string();
+    auto bytes = Encode({1, 2, 3});
+    manager.Write(path, bytes.data(), bytes.size());
+    try {
+        ReadLegacyIndexFile(manager, path, kPriority);
+        FAIL() << "expected short read to fail";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+    }
+}
+
+TEST_F(LegacyIndexFileIOTest, PayloadAdmissionRemainsCancellable) {
     auto input = Open(Encode({1, 2, 3}));
+    const auto info = Run(InspectLegacyIndexFileAsync(*input, kPriority));
+    file_->ResetCounters();
+    std::vector<uint8_t> output(info.payload_bytes);
+    const EntryTarget target =
+        MemoryEntryTarget{nullptr, output.data(), output.size()};
     auto lease = Run([&]() -> folly::coro::Task<LoadAdmissionLease> {
         co_return co_await budget_.AcquireAsync({1, 1},
                                                 LoadAdmissionPriority::High);
     }());
     folly::CancellationSource cancel;
     auto task = std::async(std::launch::async, [&] {
-        return Run(
-            InspectLegacyIndexFileAsync(*input, kPriority, cancel.getToken()));
+        return Run(StreamLegacyIndexFileAsync(
+            *input, info, target, kPriority, cancel.getToken()));
     });
     EXPECT_EQ(task.wait_for(std::chrono::milliseconds(30)),
               std::future_status::timeout);
     cancel.requestCancellation();
     EXPECT_THROW(task.get(), SegcoreError);
     EXPECT_TRUE(file_->DirectReadCalls().empty());
+}
+
+TEST_F(LegacyIndexFileIOTest, SmallMetadataUsesSlotWithoutChargingBytes) {
+    auto lease = Run([&]() -> folly::coro::Task<LoadAdmissionLease> {
+        co_return co_await budget_.AcquireAsync({budget_.CapacityBytes(), 0},
+                                                LoadAdmissionPriority::High);
+    }());
+    auto input = Open(Encode({1, 2, 3}));
+    const auto info = Run(InspectLegacyIndexFileAsync(*input, kPriority));
+    EXPECT_EQ(info.payload_bytes, 3);
+}
+
+TEST_F(LegacyIndexFileIOTest, MetadataSlotWaitCancelsBeforeReading) {
+    auto lease = Run(AcquireMetadataLoadSlotAsync(kPriority));
+    auto input = Open(Encode({1, 2, 3}));
+    folly::CancellationSource cancel;
+    auto pending = std::async(std::launch::async, [&] {
+        return Run(
+            InspectLegacyIndexFileAsync(*input, kPriority, cancel.getToken()));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        lease.Release();
+        if (pending.valid())
+            pending.wait();
+    });
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    EXPECT_TRUE(file_->DirectReadCalls().empty());
+    cancel.requestCancellation();
+    try {
+        pending.get();
+        FAIL() << "expected cancelled metadata admission";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FollyCancel);
+    }
+    EXPECT_TRUE(file_->DirectReadCalls().empty());
+    lease.Release();
+    EXPECT_EQ(Run(InspectLegacyIndexFileAsync(*input, kPriority)).payload_bytes,
+              3);
+}
+
+TEST_F(LegacyIndexFileIOTest, StreamingOpenWaitHonorsExplicitCancellation) {
+    auto input = Open(Encode({1, 2, 3}));
+    const auto info = Run(InspectLegacyIndexFileAsync(*input, kPriority));
+    for (const size_t count : {1, 2}) {
+        std::vector<LegacyIndexFile> files(count, {"unused", info});
+        std::vector<uint8_t> data(count * info.payload_bytes);
+        const EntryTarget target =
+            MemoryEntryTarget{nullptr, data.data(), data.size()};
+        auto lease = Run(AcquireMetadataLoadSlotAsync(kPriority));
+        folly::CancellationSource cancel;
+        auto pending = std::async(std::launch::async, [&] {
+            Run(StreamLegacyIndexFilesAsync(
+                files, nullptr, nullptr, target, kPriority, cancel.getToken()));
+        });
+        auto cleanup = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            lease.Release();
+            if (pending.valid())
+                pending.wait();
+        });
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        cancel.requestCancellation();
+        ASSERT_EQ(pending.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        try {
+            pending.get();
+            FAIL() << "expected cancellation while waiting to open";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+    }
+}
+
+TEST_F(LegacyIndexFileIOTest, PathInspectionPreservesParentCancellation) {
+    auto lease = Run(AcquireMetadataLoadSlotAsync(kPriority));
+    folly::CancellationSource cancel;
+    const std::string path = "unused";
+    const ChunkManagerPtr manager;
+    const milvus_storage::ArrowFileSystemPtr fs;
+    const std::shared_ptr<const LegacyIndexFileInfos> infos;
+    auto pending = std::async(std::launch::async, [&] {
+        return Run(folly::coro::co_withCancellation(
+            cancel.getToken(),
+            InspectLegacyIndexFileAsync(path, manager, fs, infos, kPriority)));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        lease.Release();
+        if (pending.valid())
+            pending.wait();
+    });
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    cancel.requestCancellation();
+    ASSERT_EQ(pending.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    try {
+        pending.get();
+        FAIL() << "expected inherited cancellation while waiting to inspect";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FollyCancel);
+    }
+}
+
+TEST_F(LegacyIndexFileIOTest, LargeDescriptorWaitIsCancellable) {
+    auto lease = Run([&]() -> folly::coro::Task<LoadAdmissionLease> {
+        co_return co_await budget_.AcquireAsync({budget_.CapacityBytes(), 0},
+                                                LoadAdmissionPriority::High);
+    }());
+    auto input = Open(EncodeLargeDescriptor());
+    folly::CancellationSource cancel;
+    auto task = std::async(std::launch::async, [&] {
+        return Run(
+            InspectLegacyIndexFileAsync(*input, kPriority, cancel.getToken()));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        lease.Release();
+        if (task.valid())
+            task.wait();
+    });
+    ASSERT_TRUE(file_->WaitForCallCount(1));
+    EXPECT_EQ(task.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    cancel.requestCancellation();
+    EXPECT_THROW(task.get(), SegcoreError);
+    cleanup.dismiss();
+    EXPECT_EQ(file_->DirectReadCalls().size(), 1);
+    lease.Release();
+    EXPECT_EQ(Run(InspectLegacyIndexFileAsync(*input, kPriority)).payload_bytes,
+              3);
+}
+
+TEST_F(LegacyIndexFileIOTest, LargeDescriptorCancellationDrainsRead) {
+    auto input = Open(EncodeLargeDescriptor());
+    file_->SetAutoComplete(false);
+    folly::CancellationSource cancel;
+    auto task = std::async(std::launch::async, [&] {
+        return Run(
+            InspectLegacyIndexFileAsync(*input, kPriority, cancel.getToken()));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        file_->SetAutoComplete(true);
+        for (size_t i = 0; i < file_->DirectReadCalls().size(); ++i)
+            file_->Complete(i);
+        if (task.valid())
+            task.wait();
+    });
+    ASSERT_TRUE(file_->WaitForCallCount(1));
+    file_->Complete(0);
+    ASSERT_TRUE(file_->WaitForCallCount(2));
+    ExpectReserved();
+    cancel.requestCancellation();
+    EXPECT_EQ(task.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    file_->Complete(1);
+    EXPECT_THROW(task.get(), SegcoreError);
+}
+
+TEST_F(LegacyIndexFileIOTest, LargeDescriptorParseFailureReleasesAdmission) {
+    auto encoded = EncodeLargeDescriptor();
+    EventHeader header;
+    const auto json_offset = sizeof(MAGIC_NUM) + GetEventHeaderSize(header) +
+                             GetEventFixPartSize(EventType::DescriptorEvent) +
+                             static_cast<size_t>(EventType::EventTypeEnd) +
+                             sizeof(int32_t);
+    encoded[json_offset] = '!';
+    auto input = Open(std::move(encoded));
+    try {
+        Run(InspectLegacyIndexFileAsync(*input, kPriority));
+        FAIL() << "expected malformed descriptor JSON";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+    }
+    // TearDown also verifies that no admission lease remains held.
 }
 
 TEST_F(LegacyIndexFileIOTest, CancellationDrainsIssuedRead) {

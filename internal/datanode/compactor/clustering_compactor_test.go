@@ -1245,12 +1245,12 @@ func TestClusterBufferConcurrentRecords(t *testing.T) {
 }
 
 func TestClusteringScalarNullAndDefault(t *testing.T) {
-	for _, dataType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_VarChar} {
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_Timestamptz, schemapb.DataType_VarChar} {
 		t.Run(dataType.String(), func(t *testing.T) {
 			field := &schemapb.FieldSchema{DataType: dataType, Nullable: true}
 			var builder array.Builder
 			var expected any
-			if dataType == schemapb.DataType_Int64 {
+			if dataType != schemapb.DataType_VarChar {
 				b := array.NewInt64Builder(memory.DefaultAllocator)
 				b.Append(42)
 				builder, expected = b, int64(42)
@@ -1269,9 +1269,12 @@ func TestClusteringScalarNullAndDefault(t *testing.T) {
 			value, err = clusteringScalarValue(values, field, 1)
 			require.NoError(t, err)
 			require.Nil(t, value)
-			if dataType == schemapb.DataType_Int64 {
+			switch dataType {
+			case schemapb.DataType_Int64:
 				field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}
-			} else {
+			case schemapb.DataType_Timestamptz:
+				field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: 42}}
+			default:
 				field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "key"}}
 			}
 			value, err = clusteringScalarValue(values, field, 1)
@@ -1279,6 +1282,21 @@ func TestClusteringScalarNullAndDefault(t *testing.T) {
 			require.Equal(t, expected, value)
 		})
 	}
+}
+
+func TestClusteringSplitTimestamptzKeysInTimeOrder(t *testing.T) {
+	task := &clusteringCompactionTask{
+		clusteringKeyField: &schemapb.FieldSchema{DataType: schemapb.DataType_Timestamptz},
+		plan:               &datapb.CompactionPlan{MaxSegmentRows: 2, PreferSegmentRows: 2},
+		memoryLimit:        1 << 40,
+	}
+	// int64 unix microseconds, inserted out of order, plus one null key.
+	jan, feb, mar, apr := int64(1735689600000000), int64(1738368000000000), int64(1740787200000000), int64(1743465600000000)
+	dict := map[interface{}]int64{mar: 1, jan: 1, apr: 1, feb: 1, nil: 1}
+
+	buckets, hasNull := task.splitClusterByScalarValue(dict)
+	require.True(t, hasNull)
+	require.Equal(t, [][]interface{}{{jan, feb}, {mar, apr}}, buckets)
 }
 
 func TestClusterBufferFlushChunkAndCleanup(t *testing.T) {

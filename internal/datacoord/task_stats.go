@@ -230,7 +230,7 @@ func (st *statsTask) shouldDropExternalJSONStatsTask(segment *SegmentInfo) bool 
 	if st.GetSubJobType() != indexpb.StatsSubJob_JsonKeyIndexJob || canBuildExternalJSONKeyIndex(segment) {
 		return false
 	}
-	if st.meta == nil || st.meta.collections == nil {
+	if st.meta == nil {
 		return false
 	}
 	// External-table source data may stay unchanged, so the segment may never
@@ -365,11 +365,11 @@ func (st *statsTask) discardRejectedStatsResult(ctx context.Context, cluster ses
 }
 
 func (st *statsTask) shouldCleanupRejectedStatsResultFiles() bool {
-	if st.meta == nil || st.meta.collections == nil {
+	if st.meta == nil {
 		return false
 	}
-	collection, ok := st.meta.collections.Get(st.GetCollectionID())
-	if !ok {
+	collection := st.meta.GetCollection(st.GetCollectionID())
+	if collection == nil {
 		return false
 	}
 	return collection.IsExternal()

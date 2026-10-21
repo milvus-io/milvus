@@ -137,7 +137,9 @@ executor.
 The shared executor lives in `storage/AsyncLoadExecutor`, alongside admission and
 local file I/O. Its existing thread-count setting is
 `queryNode.segcore.storageV2.asyncLoadThreadPoolSize`. HIGH and LOW are priority
-views of that executor on the async path. There is no second async executor or
+views of that executor on the async path; both use Linux workers with nice 19,
+including workers added during resizing. CPU contention can therefore slow
+foreground loads as well as warmup. There is no second async executor or
 separate admission singleton for scalar indexes.
 
 Local file operations are awaited. If `LocalFileIOPool` is disabled, its existing

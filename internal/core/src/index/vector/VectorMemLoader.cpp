@@ -228,24 +228,18 @@ ThrowDeserializeError(knowhere::Status status) {
               knowhere::Status2String(status));
 }
 
-// Publish the persisted validity into the engine's id map. This must happen
-// BEFORE the engine is deserialized: knowhere derives both mapping directions
-// from the bitmap inside Deserialize, and a metadata-only artifact never
-// reaches Deserialize at all, so its map is finalized explicitly.
-folly::coro::Task<RestoredIdMap>
-RestoreValidity(bool use_async,
-                const storage::LoadOptions& opts,
-                storage::FileSource& source,
-                const EntryPlan& plan,
-                const RuntimeParams& params,
-                KnowhereEngine& engine,
-                const std::string& mmap_path_prefix,
-                knowhere::BinarySet* existing = nullptr) {
+// Keep sidecar bytes in the caller's BinarySet until Deserialize or
+// ImportValidity consumes the borrowed validity view.
+folly::coro::Task<knowhere::LoadOptions>
+ReadValidity(bool use_async,
+             storage::FileSource& source,
+             const EntryPlan& plan,
+             const RuntimeParams& params,
+             const std::string& mmap_path_prefix,
+             knowhere::BinarySet& entries) {
     if (!plan.has_validity) {
         co_return {};
     }
-    knowhere::BinarySet local;
-    auto& entries = existing == nullptr ? local : *existing;
     if (!entries.Contains(VALID_DATA_COUNT_KEY)) {
         co_await AppendReadEntry(
             use_async, source, VALID_DATA_COUNT_KEY, entries);
@@ -253,23 +247,8 @@ RestoreValidity(bool use_async,
     }
     const auto mmap_flags =
         mmap_path_prefix.empty() ? IdMapMmapFlags{} : params.id_map_mmap;
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
-    RestoredIdMap result;
-    auto local_io = [&] {
-        result = RestoreIdMapFromBinarySet(entries,
-                                           engine.native_index.GetIdMap(),
-                                           mmap_flags,
-                                           mmap_path_prefix);
-    };
-    if (use_async && mmap_flags.Any()) {
-        co_await storage::RunLocalFileIOAsync(local_io, priority);
-    } else {
-        local_io();
-    }
-    co_return result;
+    co_return MakeNullableLoadInput(
+        LoadValidDataViewFromBinarySet(entries), mmap_flags, mmap_path_prefix);
 }
 
 /**
@@ -339,25 +318,20 @@ PopulateState(bool use_async,
         state.engine.SetDim(empty.dim);
         state.engine.SetEmptyEmbListOffsets(std::move(empty.offsets));
         const auto id_map_path = co_await stage_id_map_mmap_dir();
-        const auto restored = co_await RestoreValidity(use_async,
-                                                       opts,
-                                                       source,
-                                                       plan,
-                                                       params,
-                                                       state.engine,
-                                                       id_map_path,
-                                                       &entries);
-        if (restored.has_valid_data) {
-            {
-                auto local_io = [&] {
-                    FinalizeRestoredIdMap(state.engine.native_index.Node(),
-                                          "empty embedding-list vector load");
-                };
-                if (use_async && id_map_mmap_requested) {
-                    co_await storage::RunLocalFileIOAsync(local_io, priority);
-                } else {
-                    local_io();
+        const auto input = co_await ReadValidity(
+            use_async, source, plan, params, id_map_path, entries);
+        if (input.validity.has_value()) {
+            auto local_io = [&] {
+                const auto status = state.engine.native_index.ImportValidity(
+                    *input.validity, input.mmap);
+                if (status != knowhere::Status::success) {
+                    ThrowDeserializeError(status);
                 }
+            };
+            if (use_async && id_map_mmap_requested) {
+                co_await storage::RunLocalFileIOAsync(local_io, priority);
+            } else {
+                local_io();
             }
         }
         ValidateLoadedDimension(params,
@@ -371,19 +345,21 @@ PopulateState(bool use_async,
         }
         state.engine.SetDim(*params.runtime_dim);
         const auto id_map_path = co_await stage_id_map_mmap_dir();
-        const auto restored = co_await RestoreValidity(
-            use_async, opts, source, plan, params, state.engine, id_map_path);
-        if (restored.has_valid_data) {
-            {
-                auto local_io = [&] {
-                    FinalizeRestoredIdMap(state.engine.native_index.Node(),
-                                          "all-null nullable vector load");
-                };
-                if (use_async && id_map_mmap_requested) {
-                    co_await storage::RunLocalFileIOAsync(local_io, priority);
-                } else {
-                    local_io();
+        knowhere::BinarySet entries;
+        const auto input = co_await ReadValidity(
+            use_async, source, plan, params, id_map_path, entries);
+        if (input.validity.has_value()) {
+            auto local_io = [&] {
+                const auto status = state.engine.native_index.ImportValidity(
+                    *input.validity, input.mmap);
+                if (status != knowhere::Status::success) {
+                    ThrowDeserializeError(status);
                 }
+            };
+            if (use_async && id_map_mmap_requested) {
+                co_await storage::RunLocalFileIOAsync(local_io, priority);
+            } else {
+                local_io();
             }
         }
         ValidateLoadedDimension(params,
@@ -432,15 +408,14 @@ PopulateState(bool use_async,
                     config[EMB_LIST_RAW_INDEX_PATH] = raw_path;
                 }
             }
-            // Restore before deserializing: Deserialize is what derives the
-            // dense id arrays from the validity bitmap.
-            co_await RestoreValidity(
-                use_async, opts, source, plan, params, state.engine, directory);
+            knowhere::BinarySet validity_entries;
+            const auto input = co_await ReadValidity(
+                use_async, source, plan, params, directory, validity_entries);
             {
                 auto local_io = [&] {
                     const auto status =
-                        state.engine.native_index.DeserializeFromFile(main_path,
-                                                                      config);
+                        state.engine.native_index.DeserializeFromFile(
+                            main_path, config, input);
                     // The knowhere deserialize API has no OpContext entrance. Remote
                     // reads and local materialization observe the context captured by
                     // FileSource; the borrowed opts.op_ctx is never retained here.
@@ -458,16 +433,10 @@ PopulateState(bool use_async,
             config[ENABLE_MMAP] = false;
             auto entries =
                 co_await ReadEntries(use_async, source, plan.all_names);
-            co_await RestoreValidity(use_async,
-                                     opts,
-                                     source,
-                                     plan,
-                                     params,
-                                     state.engine,
-                                     std::string{},
-                                     &entries);
+            const auto input = co_await ReadValidity(
+                use_async, source, plan, params, std::string{}, entries);
             const auto status =
-                state.engine.native_index.Deserialize(entries, config);
+                state.engine.native_index.Deserialize(entries, config, input);
             if (status != knowhere::Status::success) {
                 ThrowDeserializeError(status);
             }

@@ -245,12 +245,48 @@ AddCanHandleCases(IndexTestCases& cases) {
         "DeclineRegexShortLiterals",
         dataset,
         {.op = PatternOp::RegexMatch, .literal = "a.*b", .can_handle = false});
+    AddNgramCase<std::string_view>(
+        cases,
+        "RegexAlternationUsesEveryBranch",
+        dataset,
+        {.op = PatternOp::RegexMatch, .literal = "foo|hello"});
     AddNgramCase<std::string_view>(cases,
-                                   "DeclineRegexAlternation",
+                                   "DeclineRegexAlternationShortBranch",
                                    dataset,
                                    {.op = PatternOp::RegexMatch,
-                                    .literal = "foo|hello",
+                                    .literal = "hello|a",
                                     .can_handle = false});
+    AddNgramCase<std::string_view>(cases,
+                                   "DeclineRegexAlternationEmptyBranch",
+                                   dataset,
+                                   {.op = PatternOp::RegexMatch,
+                                    .literal = "hello|",
+                                    .can_handle = false});
+    AddNgramCase<std::string_view>(cases,
+                                   "DeclineRegexAlternationFoldedBranch",
+                                   dataset,
+                                   {.op = PatternOp::RegexMatch,
+                                    .literal = "hello|(?i)world",
+                                    .can_handle = false});
+    AddNgramCase<std::string_view>(cases,
+                                   "DeclineRegexEmptyMatch",
+                                   dataset,
+                                   {.op = PatternOp::RegexMatch,
+                                    .literal = "(?:hello|world)?",
+                                    .can_handle = false});
+    AddNgramCase<std::string_view>(
+        cases,
+        "Min2AcceptsRegexTwoCharacterBranch",
+        dataset,
+        {.op = PatternOp::RegexMatch, .literal = "hello|ab"},
+        kMinGram2);
+    AddNgramCase<std::string_view>(cases,
+                                   "Min3DeclinesRegexTwoCharacterBranch",
+                                   dataset,
+                                   {.op = PatternOp::RegexMatch,
+                                    .literal = "hello|ab",
+                                    .can_handle = false},
+                                   kMinGram3);
 
     AddNgramCase<std::string_view>(
         cases,
@@ -488,6 +524,40 @@ AddCoreCandidateCases(IndexTestCases& cases) {
                                    {
                                        .op = PatternOp::RegexMatch,
                                        .literal = "\\d+abc",
+                                   });
+    AddNgramCase<std::string_view>(
+        cases,
+        "RegexAlternationRetainsEveryBranch",
+        dataset,
+        {
+            .op = PatternOp::RegexMatch,
+            .literal = "hello|test",
+            .exact_offsets = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+        });
+    AddNgramCase<std::string_view>(cases,
+                                   "RegexGroupAlternationThenLiteral",
+                                   dataset,
+                                   {
+                                       .op = PatternOp::RegexMatch,
+                                       .literal = "(app|pine)le",
+                                       .exact_offsets = {11, 12},
+                                   });
+    AddNgramCase<std::string_view>(cases,
+                                   "RegexAnchoredAlternation",
+                                   dataset,
+                                   {
+                                       .op = PatternOp::RegexMatch,
+                                       .literal = "^(hello|abc)$",
+                                       .exact_offsets = {0, 23},
+                                   });
+    AddNgramCase<std::string_view>(cases,
+                                   "RegexNestedAlternationSparseMask",
+                                   dataset,
+                                   {
+                                       .op = PatternOp::RegexMatch,
+                                       .literal = "(?:tes|ban)(?:ted|ana)",
+                                       .initial_offsets = {{0, 6, 7, 13, 22}},
+                                       .exact_offsets = {7, 13},
                                    });
     AddNgramCase<std::string_view>(cases,
                                    "AllNullCandidates",

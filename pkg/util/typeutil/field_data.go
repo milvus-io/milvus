@@ -101,6 +101,21 @@ func normalizeFieldDataValidData(fieldData *schemapb.FieldData) {
 		return
 	}
 
+	// Older SDKs omit the sparse payload for an all-null batch. Materialize
+	// its empty container before moving legacy validity into VectorField,
+	// otherwise the default branch below discards the only null information.
+	// Keep the bitmap unchanged: row alignment still rejects missing vectors
+	// when any bit is true.
+	if fieldData.Field == nil && fieldData.GetType() == schemapb.DataType_SparseFloatVector && len(fieldData.GetValidData()) > 0 {
+		fieldData.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{},
+				},
+			},
+		}
+	}
+
 	switch fieldData.Field.(type) {
 	case *schemapb.FieldData_Scalars, *schemapb.FieldData_Vectors:
 		if validData := GetFieldDataValidData(fieldData); len(validData) > 0 {

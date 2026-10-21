@@ -60,6 +60,11 @@ class VectorDiskBuildFileManager final
     std::string
     IndexPrefix() const;
 
+    // Declare borrowed local inputs before invoking the synchronous backend Build.
+    // The caller keeps these files alive; they are never published or removed here.
+    void
+    SetInputFiles(std::vector<std::string> paths);
+
     void
     RegisterOwnedFile(const std::string& filename);
     void
@@ -90,6 +95,7 @@ class VectorDiskBuildFileManager final
 
     std::shared_ptr<storage::LocalDirectory> local_files_;
     mutable std::mutex mutex_;
+    std::vector<std::string> input_files_;
     std::unordered_map<std::string, VectorDiskArtifactFile> files_;
     std::unordered_map<std::string, size_t> pending_meta_;
     std::unordered_map<std::string, size_t> open_outputs_;

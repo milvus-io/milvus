@@ -1678,7 +1678,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	}
 	for _, channelName := range req.GetChannelNames() {
 		// TODO: redundant channel mark by now, remove it in future.
-		if err := s.meta.catalog.MarkChannelAdded(ctx, channelName); err != nil {
+		if err := s.meta.metaStore.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
 			mlog.Error(context.TODO(), "failed to mark channel added", mlog.Err(err))
 			resp.Status = merr.Status(err)
@@ -1890,34 +1890,33 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 		return merr.Status(err), nil
 	}
 
-	// get collection info from cache
-	clonedColl := s.meta.GetClonedCollectionInfo(req.CollectionID)
-
 	properties := make(map[string]string)
 	for _, pair := range req.Properties {
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	// cache miss and update cache
-	if clonedColl == nil {
-		collInfo := &collectionInfo{
-			ID:             req.GetCollectionID(),
-			Schema:         req.GetSchema(),
-			Partitions:     req.GetPartitionIDs(),
-			StartPositions: req.GetStartPositions(),
-			Properties:     properties,
-			DatabaseID:     req.GetDbID(),
-			DatabaseName:   req.GetSchema().GetDbName(),
-			VChannelNames:  req.GetVChannels(),
-		}
-		s.meta.AddCollection(collInfo)
-		return merr.Success(), nil
+	// RootCoord builds this request from its authoritative meta and populates
+	// every field (broker.go BroadcastAlteredCollection), so the request wins
+	// throughout. Taking Partitions/DatabaseName/DatabaseID from the existing
+	// entry instead -- as the pre-metacache code did -- pinned them to whatever
+	// the initial load saw: create/drop partition never refreshed Partitions,
+	// and a cross-database rename left DatabaseName stale for the resource-key
+	// locks built from it. CreatedAt is the one field the request lacks, so it
+	// is carried over.
+	info := &collectionInfo{
+		ID:             req.GetCollectionID(),
+		Schema:         req.GetSchema(),
+		Partitions:     req.GetPartitionIDs(),
+		StartPositions: req.GetStartPositions(),
+		Properties:     properties,
+		DatabaseID:     req.GetDbID(),
+		DatabaseName:   req.GetSchema().GetDbName(),
+		VChannelNames:  req.GetVChannels(),
 	}
-
-	clonedColl.Properties = properties
-	// add field will change the schema
-	clonedColl.Schema = req.GetSchema()
-	s.meta.AddCollection(clonedColl)
+	if existing := s.meta.GetCollection(req.GetCollectionID()); existing != nil {
+		info.CreatedAt = existing.CreatedAt
+	}
+	s.meta.AddCollection(info)
 	return merr.Success(), nil
 }
 
@@ -2131,6 +2130,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			mlog.String("originalState", originalState))
 		return resp, nil
 	}
+	recordImportFileTypes(in.GetFiles(), in.GetOptions())
 
 	resp.JobID = fmt.Sprint(jobID)
 	mlog.Info(context.TODO(), "import request broadcasted successfully", mlog.String("jobID", resp.JobID))
@@ -2431,6 +2431,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp.Reason = reason
 	resp.Progress = progress
 	resp.CollectionName = job.GetCollectionName()
+	resp.CollectionId = job.GetCollectionID()
 	resp.CreateTime = job.GetCreateTime()
 	resp.CompleteTime = job.GetCompleteTime()
 	resp.ImportedRows = importedRows
@@ -2469,6 +2470,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		resp.Reasons = append(resp.Reasons, reason)
 		resp.Progresses = append(resp.Progresses, progress)
 		resp.CollectionNames = append(resp.CollectionNames, job.GetCollectionName())
+		resp.CollectionIds = append(resp.CollectionIds, job.GetCollectionID())
 	}
 	return resp, nil
 }
@@ -3566,6 +3568,15 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		return merr.Status(err), nil
 	}
 	job := s.importMeta.GetJob(ctx, req.GetJobId())
+	if job == nil {
+		forgotten, err := s.importJobForgotten(ctx, req.GetJobId())
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if forgotten {
+			return merr.Success(), nil
+		}
+	}
 	if job != nil && job.GetCommitByCoordinator() {
 		return merr.Success(), nil
 	}

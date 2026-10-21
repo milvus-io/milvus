@@ -1019,7 +1019,7 @@ dataCoord:
     # importJob entries stay in etcd, each carrying its schema, file list and options
     # plus every preimport and import task under it.
     # The 48h default exists for BulkImport idempotency and only for it: the idempotency
-    # window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+    # window can extend beyond streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
     # earlier than its tombstone lets an in-window retry resolve to a jobID that
     # GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
     # as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
@@ -1027,7 +1027,8 @@ dataCoord:
     # remaining life by up to another maxLifetime, while this retention keeps counting
     # from the job's own completion. Equal values hold only for a window with no restart,
     # which is not a property a default may assume. Raise it further if StreamingCoord
-    # restarts more than once inside one tombstone lifetime.
+    # restarts more than once inside one tombstone lifetime or WAL checkpoint lag extends
+    # tombstone retention. No fixed multiple bounds retention during a checkpoint stall.
     # A cluster whose clients never send an Idempotency-Key is under no such requirement
     # and can lower this freely; 10800 was the default before idempotency keys existed.
     taskRetention: 172800
@@ -1334,6 +1335,8 @@ common:
       # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
       # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
       partialNullPolicy: error
+    externalSparseVector:
+      conversionMemoryLimit: 268435456 # Positive byte budget for estimated additional buffers per external sparse-vector normalization call. Includes output, Arrow offsets/validity, sorting and encoding scratch; excludes source data, allocator overhead and other concurrent calls. Ordered Binary arrays reused without conversion are exempt. Requires a restart.
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -1386,8 +1389,18 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
+    # Whether to expose the feature usage report at GET /management/feature_usage on the Proxy
+    # management port. The endpoint requires HTTP Basic Auth as root. See
+    # docs/design-docs/design_docs/20260902-feature-usage-reporting.md.
+    featureUsageEnabled: false
     internaltlsEnabled: false
     tlsMode: 0
+  featureUsage:
+    # Whether the components count feature usage on their request paths (Proxy, QueryNode)
+    # and at task creation (DataCoord). One branch and one atomic add per counted feature.
+    # It is read once at component start; the report endpoint is gated separately by
+    # common.security.featureUsageEnabled.
+    countersEnabled: true
   session:
     ttl: 15 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests

@@ -247,13 +247,16 @@ The `RegexMatch` op is integrated into the `UnaryExpr` execution pipeline:
 The ngram index is the primary optimization path for regex queries. It uses a two-phase approach:
 
 **Phase 1 — Coarse Filter (index-only)**:
-1. Extract fixed literal substrings from the regex pattern. For example:
-   - `"error.*timeout"` → `["error", "timeout"]`
-   - `"user_[0-9]+@gmail\.com"` → `["user_", "@gmail.com"]`
-   - `"[a-z]+"` → `[]` (no literals extractable)
+1. Plan a bounded AND/OR condition over required literal substrings (see
+   [3.2 NGRAM alternation](#32-ngram-alternation)). For example:
+   - `"error.*timeout"` → `error AND timeout`
+   - `"user_[0-9]+@gmail\.com"` → `user_ AND @gmail.com`
+   - `"(ERROR|WARN).*timeout"` → `(ERROR OR WARN) AND timeout`
+   - `"[a-z]+"` → TRUE (no usable literal)
 2. Break each literal into ngrams and query the ngram index.
-3. Intersect posting lists to produce a candidate bitmap.
-4. If no literals can be extracted, skip ngram optimization entirely (fall through to brute force).
+3. Intersect posting lists within a branch and union the branches to produce a
+   candidate bitmap.
+4. If the plan is TRUE, skip ngram optimization entirely (fall through to brute force).
 
 **Phase 2 — Fine Filter (raw data verification)**:
 1. For each candidate from Phase 1, load the raw field value.
@@ -279,38 +282,51 @@ retain coverage while selective literals can be chosen per segment. See the
 [FMIndex regex candidate design](20261004-fmindex-regex-candidates.md) for the
 condition contract and budgets.
 
-**Literal extraction strategy** (`extract_literals_from_regex`): A conservative parser walks the regex pattern character-by-character, collecting runs of non-metacharacter bytes. Key behaviors:
+### 3.2 NGRAM alternation
 
-| Input | Handling |
-|-------|----------|
-| Escaped metacharacters (`\.`, `\*`) | Treated as literal (whitelist: only escaped `.[]+*?^${}()\|\\` are literal) |
-| Shorthand classes (`\d`, `\w`, `\s`, `\b`) | Split point (not literal) |
-| `\p{Han}`, `\P{Script}` | Consumes the `{...}` block, treated as split point |
-| `(?i)` flag | Detected by scanning `[imsU-]` flag chars; causes bail-out (ngram skipped) |
-| Named groups `(?P<name>...)` | Not confused with `(?i)` — only `[imsU-]` are flag chars |
-| Alternation (`\|`) at any level | Bail-out (entire extraction returns empty) |
-| `+` quantifier | Flush current literal and restart (char before `+` may repeat) |
-| `?` quantifier | Remove last char from current literal before flush (char is optional) |
-| `*` quantifier | Remove last char from current literal before flush |
-| `{n}` exact quantifier | Expand: repeat last char n times |
-| `{n,m}` variable quantifier | Expand first n copies, then flush and restart |
-| Non-optional groups `(...)` | Penetrated: literals inside are collected |
-| Optional groups `(...)?`, `(...)*`, `(...){0,...}` | Skipped entirely (content is optional) |
+NGRAM `RegexMatch` planning reuses the FMIndex condition from
+`PartialRegexMatcher::PrepareIndexCondition` (section 3.1) instead of a
+separate hand-written parser, so alternation no longer disables the ngram
+filter. `PlanNgramRegex` (`index/scalar/ngram/NgramRegex.cpp`) restricts that
+condition to lookups the index can serve:
 
-Example extractions:
+- A literal is trimmed to whole UTF-8 characters (RE2 may cut a 64-byte atom
+  inside a character, and the ngram engine accepts only valid UTF-8). A
+  substring of a required literal is still required.
+- A literal shorter than `min_gram` characters becomes TRUE.
+- An AND drops TRUE children and keeps the rest.
+- An OR becomes TRUE when any branch is TRUE. A branch is never dropped.
+- A condition above the 127-node budget is TRUE. RE2 already turns an
+  over-budget OR into TRUE while building the condition.
 
-| Regex Pattern | Extracted Literals |
-|--------------|-------------------|
-| `"hello"` | `["hello"]` |
-| `"abc.*def"` | `["abc", "def"]` |
-| `"user_[0-9]+@gmail\.com"` | `["user_", "@gmail.com"]` |
-| `"abc(de)fg"` | `["abcdefg"]` |
-| `"colou?r"` | `["colo", "r"]` |
-| `"a{3}"` | `["aaa"]` |
-| `"(?i)error"` | `[]` (ngram skipped — case-insensitive) |
-| `"[a-z]+"` | `[]` (no optimization, brute force) |
-| `"foo\|bar"` | `[]` (alternation bail-out) |
-| `"\d{3}-\d{4}"` | `["-"]` |
+`CanHandle(RegexMatch)` is true only for a non-TRUE plan, so empty-match,
+case-folded, over-budget and short-branch patterns use the raw scan.
+`Candidates` AND-merges the plan into the caller's bitmap. The literal children
+of one AND are passed together to the existing batch/iterative cost policy.
+Each OR branch starts from the incoming candidates, and the branches are
+unioned. Work is bounded by the plan's node count, at most 126 literal lookups.
+Phase 2 always rechecks candidates with canonical RE2 `PartialMatch`, so
+results are unchanged.
+
+| Regex pattern | Plan (`min_gram = 3`) |
+|---------------|-----------------------|
+| `"hello"` | `hello` |
+| `"abc.*def"` | `abc AND def` |
+| `"cat\|dog"` | `cat OR dog` |
+| `"(cat\|dog)food"` | `(cat OR dog) AND food` |
+| `"abc(de\|fg)hi"` | `abc` (`de`, `fg` and `hi` are shorter than 3 characters) |
+| `"^(cat\|dog)$"` | `cat OR dog` (anchors are rechecked by RE2) |
+| `"a\\|bcd"`, `"\Qa\|b\E"` | `a\|bcd`, `a\|b` (escaped `\|` is a literal byte) |
+| `"cat\|do"`, `"foo\|"` | TRUE (a branch has no usable literal) |
+| `"(?i)error"`, `"colou?r\|(?i)x"` | TRUE (case folding) |
+| `"foo.{10,20}bar"` | `foo AND bar` |
+| 33+ unfactored `x.*y` branches | TRUE (over the node budget) |
+
+The removed extractor read a counted repetition after `.` or a class, as in
+`.{10,20}`, as the literal `10,20`. That dropped matching rows, and some group
+patterns threw `std::out_of_range`. Patterns above the shared 4096-byte
+pattern/program and visit budgets now scan. The old extractor could still
+prune some of them.
 
 ### 4. Case-Insensitive Matching and Ngram
 
@@ -318,7 +334,7 @@ RE2 supports inline flags such as `(?i)` for case-insensitive matching. The expr
 
 However, ngram indexes store tokens from the original (case-preserved) text. When a case-insensitive pattern is used, extracted literals like `"error"` may not match ngram terms like `"Err"` or `"ERR"` in the index. This causes the ngram coarse filter to produce false negatives — missing rows that should match.
 
-**Current behavior**: When the regex pattern contains a case-insensitive flag (`(?i)`), the literal extractor returns empty, causing ngram index optimization to be skipped entirely. The query falls back to brute-force `RE2::PartialMatch` on raw data with Volnitsky pre-filter. This is functionally correct but slower.
+**Current behavior**: When a case-insensitive flag (`(?i)`) covers a required literal, the regex condition has no case-sensitive atom for it. If that leaves the plan TRUE (section 3.2), ngram index optimization is skipped entirely. The query falls back to brute-force `RE2::PartialMatch` on raw data with Volnitsky pre-filter. This is functionally correct but slower.
 
 **Future optimization**: Introduce a case-folding option for ngram indexes. When enabled, both the indexed text and query literals are lowercased before ngram tokenization, enabling ngram acceleration for case-insensitive patterns.
 
@@ -396,7 +412,7 @@ Regex supports the same field types and access patterns as LIKE:
 ### Unit Tests (C++)
 - `PartialRegexMatcher` correctly implements substring matching: anchors, case-insensitive `(?i)`, dot\_nl, quantifiers, Unicode, named groups, control characters.
 - `UnaryExpr` with `RegexMatch` produces correct bitmaps on raw data (growing segment, 100K rows).
-- `extract_literals_from_regex`: 40+ direct extractor tests covering alternation bail-out, `(?i)` detection, `\p{...}` consumption, quantifier expansion, group penetration, whitelist escapes. Each test also verifies no false negatives (extracted literal must appear in any matching string).
+- `PlanNgramRegex`: direct plan tests covering alternation, nested groups, short and empty branches, `(?i)`, escaped `\|`, quantifier expansion, group penetration and the node budget. Each test also verifies no false negatives (the plan must accept any matching string). NGRAM reader and expression tests compare alternation, anchors, fallbacks and over-budget patterns with an RE2 scan.
 - `regex_to_tantivy_pattern`: `(?s)`/`(?-s)` flag awareness, scoped groups, escaped dots, character classes, non-capturing groups, combined flags.
 - ClickHouse edge case alignment: empty pattern, `.*`, dot\_nl, `(?-s)`, alternation, Unicode codepoints, emoji, word boundaries, backreference rejection.
 - Ngram two-phase execution (Phase1 + Phase2) produces correct results for `RegexMatch`.
@@ -472,7 +488,7 @@ Tantivy's `RegexQuery` uses FST+Automaton intersection for regex matching on the
 
 ### P2 — Future Optimizations
 
-- [ ] **Alternation OR splitting for ngram**: Currently `abc|xyz` bails out of ngram entirely. Optimization: split on top-level `|`, extract literals from each branch independently, query ngrams per branch, OR the candidate bitmaps. Requires changing `ExecutePhase1` from a single `vector<string>` (AND) to `vector<vector<string>>` (OR of ANDs).
+- [x] **Alternation OR splitting for ngram**: Done in section 3.2. NGRAM plans the bounded AND/OR condition shared with FMIndex, ANDs the literals within a branch and ORs the branch bitmaps.
 - [ ] **Hyperscan multi-pattern optimization**: When multiple regex filters target the same field (e.g., `field =~ "pattern_a" || field =~ "pattern_b"`), compile all patterns into a single Hyperscan DFA and scan each row once. O(n) regardless of pattern count, vs O(n×k) for k independent RE2 evaluations.
 
 ---
@@ -530,8 +546,8 @@ Both ClickHouse and Milvus optimize simple regex patterns to avoid the RE2 engin
 |--------|---------------------------------------------------|--------|
 | **Trivial literal detection** | If pattern has no metacharacters → `is_trivial=true`, uses `strstr()` | `tryOptimizeRegexToLike`: pure literal → `InnerMatch` (uses `string::find`) |
 | **Prefix detection** | Detects if required substring is at the start of the regex | `^literal` → `PrefixMatch` |
-| **Alternation handling** | Extracts list of alternative substrings for multi-pattern matching | Returns empty (bails out on `\|`) — more conservative |
-| **Required substring extraction** | Extracts longest required literal for Volnitsky pre-filter | Extracts all required literals for ngram AND-filtering + longest for Volnitsky pre-filter |
+| **Alternation handling** | Extracts list of alternative substrings for multi-pattern matching | Bounded AND/OR condition; NGRAM unions per-branch candidates, and any branch without a usable literal means scan |
+| **Required substring extraction** | Extracts longest required literal for Volnitsky pre-filter | RE2 AST condition for ngram/FMIndex candidates + longest required literal for Volnitsky pre-filter |
 | **Pre-filter algorithm** | Volnitsky on contiguous ColumnString buffer (single scan across all rows) | Volnitsky per-row on individual string\_view |
 
 #### Differences and Rationale

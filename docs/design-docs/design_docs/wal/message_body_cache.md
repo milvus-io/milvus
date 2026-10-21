@@ -1,6 +1,6 @@
 # Immutable Message Body Cache
 
-Status: implemented in this workspace. Updated on 2026-10-02.
+Status: implemented in this workspace. Updated on 2026-10-16.
 
 ## Purpose and current implementation
 
@@ -167,27 +167,46 @@ policy combines:
 
 - Idle expiry, refreshed by Body access.
 - A global estimated-byte budget for admitted cached results.
-- LRU eviction before admission when remaining capacity is insufficient.
-- Admission bypass only for results larger than the entire budget. The caller
-  still receives the successfully decoded Body without persistent residency.
+- Per-shard LRU eviction before admission when remaining capacity is insufficient.
+- Admission bypass for results larger than the entire budget, or when bounded
+  eviction cannot reserve space under concurrent pressure. The caller still
+  receives the successfully decoded Body without persistent residency.
 
-Capacity eviction, admission and byte accounting run atomically under the
-manager mutex. Every admitted entry can be evicted without waiting for readers,
-so a body within the budget can always make room for itself. The initial
-implementation uses a 256 MiB estimated budget, 30-second idle expiry and a
-one-second recycler interval. These are
-package defaults, not runtime configuration. A cache hit updates an LRU list
-under the manager mutex; decode and size estimation run outside that mutex.
+The process-wide manager uses a 128 MiB estimated budget, 16 shards, 30-second
+idle expiry and a one-second recycler interval. These are package defaults, not
+runtime configuration. Each immutable message construction allocates its slot
+and chooses a fixed shard through a global atomic round-robin counter, even if
+its Body is never accessed. Transaction property clones share that slot and
+shard. Only admitted bodies enter a shard's LRU list.
 
-Admission accounts for `256 + 2 * proto.Size(body)` bytes: a fixed allowance for
-small bodies and registration plus an approximate allowance for decoded data.
-This is deliberately an estimate, not an exact protobuf heap measurement.
-After decoding, admission removes entries from the LRU head until there is
-enough space, then registers the new body at the tail before returning. It does
-not discard the completed decode merely because the cache was full. Eviction
-reclaims only the space needed for admission; there is no pressure watermark,
-pressure notification or asynchronous admission retry. Bodies exceeding the
-entire budget bypass residency without evicting other entries.
+Each shard mutex protects its slots and LRU list. Hits update access time and
+LRU order under only that shard's lock. Decoding runs outside cache locks. A
+shared atomic byte counter reserves capacity before publication and includes
+unpublished reservations. Publication rechecks shutdown under the shard lock;
+a reservation that cannot be published is refunded.
+
+When space is insufficient, admission scans shards starting at the publisher's
+shard. Eviction and idle reclamation process at most 128 entries per lock hold,
+then release that shard's lock before continuing. This bounds each critical
+section, not the entire reclamation pass. No operation holds two shard locks.
+LRU ordering is local to a shard: a hotter entry in the first shard can be
+evicted before an older entry elsewhere. Round-robin construction does not
+guarantee uniformly distributed access heat.
+
+Admission bounds its eviction work using the initial accounted-byte count and
+fixed per-entry allowance. Other publishers may refill space or hold unpublished
+reservations that cannot yet be evicted. If capacity remains unavailable after
+that bounded work, the result bypasses residency; there is no asynchronous
+admission retry. Bodies exceeding the entire budget bypass residency without
+evicting other entries.
+
+Admission accounts for `256 + 2 * plaintextBytes`: a fixed allowance for small
+bodies and registration plus an approximate allowance for decoded data.
+`plaintextBytes` is the length consumed by protobuf decoding, after decryption;
+accounting does not retain that buffer or traverse the decoded protobuf with
+`proto.Size`. This remains a wire-size estimate, not an exact heap measurement.
+For example, packed small varints can occupy much less space than their decoded
+int64 slices. The multiplier does not guarantee an upper bound for every body.
 
 The budget bounds cache-owned estimated residency, not total process heap.
 Active decodes, consumer-held bodies and retained encoded WAL payloads also use
@@ -202,6 +221,13 @@ any use as an estimate must state its limitations.
 
 The manager owns recycler startup and shutdown, with deterministic close/cleanup
 for tests. It creates no per-VChannel or per-message background workers.
+
+The budget is per process, not per Collection or Segment. Message construction
+rate and concurrency determine pressure on the shard-selection atomic; body
+sizes, reuse and access skew determine residency and eviction costs. The existing
+single-message repeated-Body benchmark does not measure concurrent construction
+or large working sets. No throughput, tail-latency or heap bound at massive
+Collection/Segment counts is established by the cache's functional tests.
 
 ## Persistence and query boundaries
 

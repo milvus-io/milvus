@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -64,7 +65,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ServerSuite struct {
@@ -1150,7 +1150,7 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	s.NoError(err)
 	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
-	s.testServer.meta.SetRowCount(segID, 1)
+	setTestRowCount(s.testServer.meta, segID, 1)
 	ids, err := s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
 	s.NoError(err)
 	s.EqualValues(1, len(ids))
@@ -1328,7 +1328,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}}
+		s := &Server{meta: newEmptyTestMeta()}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1339,13 +1339,13 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		resp, err := s.BroadcastAlteredCollection(ctx, req)
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, s.meta.collections.Len())
+		assert.Equal(t, 1, len(s.meta.ListCollections()))
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
-		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(1, &collectionInfo{ID: 1})
-		s := &Server{meta: &meta{collections: collections}}
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&collectionInfo{ID: 1})
+		s := &Server{meta: &meta{metaStore: ms}}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1354,15 +1354,58 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
 		}
 
-		coll, ok := s.meta.collections.Get(1)
-		assert.True(t, ok)
+		coll := s.meta.GetCollection(1)
+		assert.NotNil(t, coll)
 		assert.Nil(t, coll.Properties)
 		resp, err := s.BroadcastAlteredCollection(ctx, req)
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
-		coll, ok = s.meta.collections.Get(1)
-		assert.True(t, ok)
+		coll = s.meta.GetCollection(1)
+		assert.NotNil(t, coll)
 		assert.NotNil(t, coll.Properties)
+	})
+
+	// RootCoord rebuilds this request from its authoritative meta on every
+	// alter, so an update must adopt the request's view wholesale. The previous
+	// code kept Partitions/StartPositions/DatabaseName/DatabaseID from the
+	// cached entry, which pinned them to whatever the initial load saw: create
+	// and drop partition never refreshed the partition list, and a rename that
+	// moves a collection to another database left the stale database on the
+	// entry that resource-key locks are built from.
+	t.Run("update adopts the request's partitions and database", func(t *testing.T) {
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&collectionInfo{
+			ID:             1,
+			Partitions:     []int64{10},
+			StartPositions: []*commonpb.KeyDataPair{{Key: "ch-0", Data: []byte{1}}},
+			DatabaseName:   "old_db",
+			DatabaseID:     100,
+			VChannelNames:  []string{"ch-0"},
+			CreatedAt:      42,
+		})
+		s := &Server{meta: &meta{metaStore: ms}}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+			CollectionID:   1,
+			Schema:         &schemapb.CollectionSchema{Name: "coll", DbName: "new_db"},
+			PartitionIDs:   []int64{10, 11},
+			StartPositions: []*commonpb.KeyDataPair{{Key: "ch-1", Data: []byte{2}}},
+			DbID:           200,
+			VChannels:      []string{"ch-1"},
+			Properties:     []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		coll := s.meta.GetCollection(1)
+		assert.Equal(t, []int64{10, 11}, coll.Partitions, "a newly created partition must show up")
+		assert.Equal(t, "new_db", coll.DatabaseName, "a cross-database rename must move the entry")
+		assert.Equal(t, int64(200), coll.DatabaseID)
+		assert.Equal(t, []string{"ch-1"}, coll.VChannelNames)
+		assert.Equal(t, "ch-1", coll.StartPositions[0].GetKey())
+		// The request carries no creation timestamp, so it is the one field the
+		// cached entry still owns.
+		assert.Equal(t, uint64(42), coll.CreatedAt)
 	})
 }
 
@@ -1384,6 +1427,7 @@ func TestServer_GcConfirm(t *testing.T) {
 		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		m.catalog = catalog
+		m.metaStore = metacache.NewMetaStore(catalog)
 
 		catalog.On("GcConfirm",
 			mock.Anything,
@@ -2074,15 +2118,17 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 			if test.prepare != nil {
 				test.prepare(seg)
 			}
+			store := metacache.NewMetaStore(nil)
 			svr := &Server{
 				ctx: ctx,
 				meta: &meta{
-					segments:           NewSegmentsInfo(),
+					segments:           NewSegmentsInfo(store),
 					partitionStatsMeta: &partitionStatsMeta{},
-					channelCPs:         newChannelCps(),
+					metaStore:          store,
+					channelSync:        newChannelSync(),
 				},
 			}
-			svr.meta.channelCPs.checkpoints[channelName] = checkpoint
+			store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{channelName: checkpoint})
 			svr.stateCode.Store(commonpb.StateCode_Healthy)
 			svr.meta.segments.SetSegment(segmentID, NewSegmentInfo(seg))
 			svr.handler = &ServerHandler{s: svr}
@@ -2209,9 +2255,10 @@ func TestImportV2(t *testing.T) {
 		// normal case
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
-				JobID:  0,
-				Schema: &schemapb.CollectionSchema{},
-				State:  internalpb.ImportJobState_Failed,
+				JobID:        0,
+				CollectionID: 42,
+				Schema:       &schemapb.CollectionSchema{},
+				State:        internalpb.ImportJobState_Failed,
 			},
 		}
 		err = s.importMeta.AddJob(context.TODO(), job)
@@ -2223,6 +2270,7 @@ func TestImportV2(t *testing.T) {
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 		assert.Equal(t, int64(0), resp.GetProgress())
 		assert.Equal(t, internalpb.ImportJobState_Failed, resp.GetState())
+		assert.Equal(t, int64(42), resp.GetCollectionId())
 	})
 
 	t.Run("ListImports", func(t *testing.T) {
@@ -2273,6 +2321,7 @@ func TestImportV2(t *testing.T) {
 		assert.Equal(t, 1, len(resp.GetStates()))
 		assert.Equal(t, 1, len(resp.GetReasons()))
 		assert.Equal(t, 1, len(resp.GetProgresses()))
+		assert.Equal(t, []int64{1}, resp.GetCollectionIds())
 	})
 }
 
@@ -2305,16 +2354,18 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	handler := NewNMockHandler(t)
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
+	store := metacache.NewMetaStore(nil)
 	s.meta = &meta{
-		segments: NewSegmentsInfo(),
+		metaStore: store,
+		segments:  NewSegmentsInfo(store),
 	}
-	s.meta.segments.segments[1] = NewSegmentInfo(&datapb.SegmentInfo{
+	s.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:                   1,
 		CollectionID:         0,
 		PartitionID:          0,
 		State:                commonpb.SegmentState_Growing,
 		IsCreatedByStreaming: false,
-	})
+	}))
 
 	assert.NoError(t, err)
 	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
@@ -2466,6 +2517,7 @@ func TestGcControlService(t *testing.T) {
 
 // createTestFlushAllServer creates a test server for FlushAll tests
 func createTestFlushAllServer() *Server {
+	ms := metacache.NewMetaStore(nil)
 	// Create a mock allocator that will be replaced by mockey
 	mockAlloc := &allocator.MockAllocator{}
 	mockBroker := &broker.MockBroker{}
@@ -2474,9 +2526,8 @@ func createTestFlushAllServer() *Server {
 		allocator: mockAlloc,
 		broker:    mockBroker,
 		meta: &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-			channelCPs:  newChannelCps(),
-			segments:    NewSegmentsInfo(),
+			metaStore: ms,
+			segments:  NewSegmentsInfo(ms),
 		},
 		// handler will be set to a mock in individual tests when needed
 	}
@@ -5405,6 +5456,7 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 }
 
 func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -5421,7 +5473,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		recomputeManager := &recordingDataViewManager{}
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo(), dataViewManager: recomputeManager},
+			meta: &meta{segments: NewSegmentsInfo(ms), dataViewManager: recomputeManager},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5460,7 +5512,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5496,7 +5548,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5538,7 +5590,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5592,7 +5644,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -6545,6 +6597,82 @@ func TestHandleCommitVchannelRPCIsNoOpForCoordinatorOwnedJob(t *testing.T) {
 	require.Error(t, merr.CheckRPCCall(resp, err))
 }
 
+func TestHandleCommitVchannelRPC_MissingJob_PrimaryIsNoOp(t *testing.T) {
+	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, nil)
+	server := &Server{importMeta: importMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// A StreamingNode replaying an old CommitImport after checkGC removed the
+	// job must get success, or it retries forever and blocks the pchannel.
+	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
+		JobId: 13, Vchannel: "vchan-0", CommitTimestamp: 300,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Nil(t, importMeta.GetJob(context.Background(), 13))
+}
+
+func TestHandleCommitVchannelRPC_MissingJob_SecondaryRetries(t *testing.T) {
+	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, secondaryReplicateConfiguration())
+	server := &Server{importMeta: importMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
+		JobId: 13, Vchannel: "vchan-0", CommitTimestamp: 300,
+	})
+	err = merr.CheckRPCCall(resp, err)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrImportSysFailed))
+}
+
+func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
+	ctx := context.Background()
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	addSegment := func(id int64, channel string, state commonpb.SegmentState, invisible bool) {
+		segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:            id,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: channel,
+			State:         state,
+			IsInvisible:   invisible,
+			Binlogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogID: id}},
+			}},
+		}})
+	}
+	addSegment(10, "vchan-0", commonpb.SegmentState_Dropped, false)
+	addSegment(20, "vchan-0", commonpb.SegmentState_Flushed, true)
+	addSegment(110, "vchan-0", commonpb.SegmentState_Flushed, false)
+	addSegment(120, "vchan-0", commonpb.SegmentState_Flushed, false)
+
+	meta := &meta{ctx: ctx, segments: segments}
+	actual, err := meta.loadableProjection(ctx, 100)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []dataview.LoadableSegment{
+		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10},
+		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10},
+	}, actual)
+}
+
+// recordingDataViewManager records async Recompute requests so tests can
+// assert that a mutation owner requested a reconciliation. All other Manager
+// methods panic through the embedded nil interface.
+type recordingDataViewManager struct {
+	dataview.Manager
+	mu    sync.Mutex
+	calls []int64
+}
+
+func (r *recordingDataViewManager) Recompute(_ context.Context, collectionID int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, collectionID)
+	return nil
+}
+
 // Named helper types for mockey interface-method patching. Using named types
 // instead of anonymous struct{ Iface } avoids a go1.26 `go vet` printf-pass
 // panic in x/tools refactor/satisfy on method expressions of *struct{...}.
@@ -6620,53 +6748,6 @@ func TestAbortImport_CommittingRejected(t *testing.T) {
 	assert.False(t, merr.Ok(resp))
 }
 
-func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
-	ctx := context.Background()
-	segments := NewSegmentsInfo()
-	addSegment := func(id int64, channel string, state commonpb.SegmentState, invisible bool) {
-		segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID:            id,
-			CollectionID:  100,
-			PartitionID:   10,
-			InsertChannel: channel,
-			State:         state,
-			IsInvisible:   invisible,
-			Binlogs: []*datapb.FieldBinlog{{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{{LogID: id}},
-			}},
-		}})
-	}
-	addSegment(10, "vchan-0", commonpb.SegmentState_Dropped, false)
-	addSegment(20, "vchan-0", commonpb.SegmentState_Flushed, true)
-	addSegment(110, "vchan-0", commonpb.SegmentState_Flushed, false)
-	addSegment(120, "vchan-0", commonpb.SegmentState_Flushed, false)
-
-	meta := &meta{ctx: ctx, segments: segments}
-	actual, err := meta.loadableProjection(ctx, 100)
-	require.NoError(t, err)
-	require.ElementsMatch(t, []dataview.LoadableSegment{
-		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10},
-		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10},
-	}, actual)
-}
-
-// recordingDataViewManager records async Recompute requests so tests can
-// assert that a mutation owner requested a reconciliation. All other Manager
-// methods panic through the embedded nil interface.
-type recordingDataViewManager struct {
-	dataview.Manager
-	mu    sync.Mutex
-	calls []int64
-}
-
-func (r *recordingDataViewManager) Recompute(_ context.Context, collectionID int64) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.calls = append(r.calls, collectionID)
-	return nil
-}
-
 func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing.T) {
 	ctx := context.Background()
 	const jobID int64 = 3003
@@ -6683,7 +6764,8 @@ func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing
 	importMetaMock.EXPECT().GetTaskByJob(mock.Anything, mock.Anything, mock.Anything).
 		Return([]ImportTask{completed, running})
 
-	segments := NewSegmentsInfo()
+	store := metacache.NewMetaStore(nil)
+	segments := NewSegmentsInfo(store)
 	for _, segment := range []*datapb.SegmentInfo{
 		{ID: 101, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
 		{ID: 102, InsertChannel: "vchan-0", State: commonpb.SegmentState_Importing, NumOfRows: 0, IsImporting: true},
@@ -6694,7 +6776,7 @@ func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing
 		segments.SetSegment(segment.GetID(), &SegmentInfo{SegmentInfo: segment})
 	}
 
-	server := &Server{importMeta: importMetaMock, meta: &meta{segments: segments}}
+	server := &Server{importMeta: importMetaMock, meta: &meta{segments: segments, metaStore: store}}
 	segIDs := server.getImportSegmentIDsByVchannel(ctx, jobID, "vchan-0")
 	assert.Equal(t, []int64{101}, segIDs)
 }
