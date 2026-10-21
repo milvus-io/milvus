@@ -54,7 +54,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     GroupChunkType group_chunk_type,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     FieldDataInfo column_group_info,
-    PreparedParquetFiles prepared_files,
+    milvus_storage::ArrowFileSystemPtr fs,
+    std::vector<std::string> insert_files,
     bool use_mmap,
     bool mmap_populate,
     int64_t num_fields,
@@ -80,7 +81,8 @@ GroupChunkTranslator::GroupChunkTranslator(
       }()),
       field_metas_(field_metas),
       column_group_info_(column_group_info),
-      prepared_files_(std::move(prepared_files)),
+      fs_(std::move(fs)),
+      insert_files_(std::move(insert_files)),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
       load_priority_(load_priority),
@@ -114,9 +116,16 @@ GroupChunkTranslator::GroupChunkTranslator(
                 /* is_index */ false),
             /* support_eviction */ true) {
     // Get row group metadata from files
-    row_group_meta_list_.reserve(prepared_files_.size());
-    for (const auto& prepared : prepared_files_) {
-        row_group_meta_list_.push_back(prepared->row_group_metadata());
+    row_group_meta_list_.reserve(insert_files_.size());
+    for (const auto& file : insert_files_) {
+        auto result = milvus_storage::PreparedParquetFile::Open(
+            fs_, file, storage::GetReaderProperties());
+        AssertInfo(result.ok(),
+                   "[StorageV2] Failed to prepare file {}: {}",
+                   file,
+                   result.status().ToString());
+        row_group_meta_list_.push_back(
+            std::move(result).ValueOrDie()->row_group_metadata());
     }
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
@@ -307,8 +316,21 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     }
 
     // Submit cell-batch loading tasks. The same load-pool worker reads and
-    // finalizes every cell in its batch.
-    auto factory = milvus::segcore::MakeFileReaderFactory(prepared_files_);
+    // finalizes every cell in its batch. Prepare the files for this call only:
+    // the shared plaintext footers die with the local contexts when get_cells
+    // returns, so they never stay resident across lazy loads or reloads.
+    PreparedParquetFiles prepared_files;
+    prepared_files.reserve(insert_files_.size());
+    for (const auto& file : insert_files_) {
+        auto result = milvus_storage::PreparedParquetFile::Open(
+            fs_, file, storage::GetReaderProperties());
+        AssertInfo(result.ok(),
+                   "[StorageV2] Failed to prepare file {}: {}",
+                   file,
+                   result.status().ToString());
+        prepared_files.push_back(std::move(result).ValueOrDie());
+    }
+    auto factory = milvus::segcore::MakeFileReaderFactory(prepared_files);
     auto finalize_cell =
         [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
                int64_t cid) {

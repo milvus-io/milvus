@@ -29,9 +29,7 @@
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
-#include "segcore/memory_planner.h"
 #include "segcore/Utils.h"
-#include "storage/KeyRetriever.h"
 #include "mmap/ChunkedColumnGroup.h"
 
 #include <memory>
@@ -161,43 +159,31 @@ TEST(GroupChunkLoadingUsageTest, EmptyBatchUsesNoResources) {
     EXPECT_EQ(loading, cachinglayer::ResourceUsage{});
 }
 
-TEST_P(GroupChunkTranslatorTest, PreparedFilesAreOwnedByColumnGroup) {
-    PreparedParquetFiles prepared_files;
-    prepared_files.reserve(paths_.size());
-    for (const auto& path : paths_) {
-        auto result = milvus_storage::PreparedParquetFile::Open(
-            fs_, path, storage::GetReaderProperties());
-        ASSERT_TRUE(result.ok()) << result.status();
-        prepared_files.push_back(std::move(result).ValueOrDie());
-    }
-    std::weak_ptr<milvus_storage::PreparedParquetFile> owner =
-        prepared_files.front();
-    auto reader_result = prepared_files.front()->MakeReader();
-    ASSERT_TRUE(reader_result.ok()) << reader_result.status();
-    auto reader = std::move(reader_result).ValueOrDie();
-    std::weak_ptr<parquet::FileMetaData> footer =
-        reader->file_metadata()->GetParquetMetadata();
-    ASSERT_TRUE(reader->Close().ok());
-    reader.reset();
-
+TEST_P(GroupChunkTranslatorTest, FooterReuseScopedToLoadOperation) {
+    // The translator must not retain the parsed parquet footer for the column
+    // group lifetime: it takes fs + file paths and re-prepares (and releases)
+    // the shared footer context per get_cells call.
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
         GroupChunkType::DEFAULT,
         schema_->get_fields(),
         FieldDataInfo(0, 3000, TestLocalPath),
-        std::move(prepared_files),
+        fs_,
+        paths_,
         GetParam(),
         true,
         schema_->get_field_ids().size(),
         milvus::proto::common::LoadPriority::LOW,
         "disable");
-    auto group = std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
-    EXPECT_FALSE(owner.expired());
-    EXPECT_FALSE(footer.expired());
-    group.reset();
-    EXPECT_TRUE(owner.expired());
-    EXPECT_TRUE(footer.expired());
+    // Load every cell once; this must succeed without the caller providing
+    // PreparedParquetFile contexts.
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
+        cids.push_back(i);
+    }
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), cids.size());
 }
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
@@ -209,21 +195,13 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
     auto column_group_info = FieldDataInfo(0, 3000, temp_dir.string());
 
-    PreparedParquetFiles prepared_files;
-    prepared_files.reserve(paths_.size());
-    for (const auto& path : paths_) {
-        auto result = milvus_storage::PreparedParquetFile::Open(
-            fs_, path, storage::GetReaderProperties());
-        ASSERT_TRUE(result.ok()) << result.status();
-        prepared_files.push_back(std::move(result).ValueOrDie());
-    }
-
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
         GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
-        std::move(prepared_files),
+        fs_,
+        paths_,
         use_mmap,
         true,
         schema_->get_field_ids().size(),
@@ -383,21 +361,13 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     std::filesystem::create_directory(temp_dir);
     auto column_group_info = FieldDataInfo(0, total_rows, temp_dir.string());
 
-    PreparedParquetFiles prepared_files;
-    prepared_files.reserve(multi_file_paths.size());
-    for (const auto& file_path : multi_file_paths) {
-        auto result = milvus_storage::PreparedParquetFile::Open(
-            fs_, file_path, storage::GetReaderProperties());
-        ASSERT_TRUE(result.ok()) << result.status();
-        prepared_files.push_back(std::move(result).ValueOrDie());
-    }
-
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
         GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
-        std::move(prepared_files),
+        fs_,
+        multi_file_paths,
         use_mmap,
         true,
         schema_->get_field_ids().size(),
