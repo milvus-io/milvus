@@ -31,6 +31,9 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 	if req.GetName() == "" {
 		return merr.WrapErrParameterMissing("file resource name")
 	}
+	if req.GetPath() == "" {
+		return merr.WrapErrParameterMissing("file resource path")
+	}
 	if exist, err := c.storage.Exist(ctx, req.GetPath()); err != nil {
 		return err
 	} else if !exist {

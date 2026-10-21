@@ -23,6 +23,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	metamocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -104,7 +105,7 @@ func TestFileResourceCallbacksNotifyAfterReplay(t *testing.T) {
 	ctx := context.Background()
 	meta, catalog := fileResourceTestMeta(t)
 	resource := &internalpb.FileResourceInfo{Id: 123, Name: "dictionary", Path: "dict/custom.txt"}
-	catalog.EXPECT().SaveFileResource(mock.Anything, resource, uint64(1)).Return(nil).Once()
+	catalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything, uint64(1)).Return(nil).Once()
 	catalog.EXPECT().RemoveFileResource(mock.Anything, resource.Id, uint64(2)).Return(nil).Once()
 	core := newTestCore(withMeta(meta))
 	observer := NewMockFileResourceObserver(t)
@@ -127,10 +128,10 @@ func TestFileResourceCallbacksPreserveIdentity(t *testing.T) {
 	meta, catalog := fileResourceTestMeta(t)
 	callback := &DDLCallback{Core: newTestCore(withMeta(meta))}
 	resource := &internalpb.FileResourceInfo{Id: 123, Name: "dictionary", Path: "dict/custom.txt"}
-	catalog.EXPECT().SaveFileResource(mock.Anything, resource, uint64(1)).Return(nil).Once()
+	catalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything, uint64(1)).Return(nil).Once()
 	require.NoError(t, callback.addFileResourceV2AckCallback(ctx, addFileResourceTestResult(resource)))
 	require.NoError(t, callback.addFileResourceV2AckCallback(ctx, addFileResourceTestResult(resource)))
-	require.Equal(t, resource, meta.fileResourceID2Meta[123])
+	require.True(t, proto.Equal(resource, meta.fileResourceID2Meta[123]))
 
 	conflict := &internalpb.FileResourceInfo{Id: 456, Name: resource.Name, Path: resource.Path}
 	require.ErrorIs(t, callback.addFileResourceV2AckCallback(ctx, addFileResourceTestResult(conflict)), merr.ErrServiceInternal)
@@ -139,7 +140,7 @@ func TestFileResourceCallbacksPreserveIdentity(t *testing.T) {
 
 	// A delayed remove for an earlier registration cannot delete the current ID.
 	require.NoError(t, callback.removeFileResourceV2AckCallback(ctx, removeFileResourceTestResult(122, resource.Name)))
-	require.Equal(t, resource, meta.fileResourceName2Meta[resource.Name])
+	require.True(t, proto.Equal(resource, meta.fileResourceName2Meta[resource.Name]))
 	require.Equal(t, uint64(1), meta.fileResourceVersion)
 }
 
@@ -149,8 +150,8 @@ func TestFileResourceCallbackCatalogFailure(t *testing.T) {
 	callback := &DDLCallback{Core: newTestCore(withMeta(meta))}
 	resource := &internalpb.FileResourceInfo{Id: 123, Name: "dictionary", Path: "dict/custom.txt"}
 	failure := merr.Wrap(merr.ErrIoTooManyRequests, "etcd unavailable")
-	catalog.EXPECT().SaveFileResource(mock.Anything, resource, uint64(1)).Return(failure).Once()
-	catalog.EXPECT().SaveFileResource(mock.Anything, resource, uint64(1)).Return(nil).Once()
+	catalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything, uint64(1)).Return(failure).Once()
+	catalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything, uint64(1)).Return(nil).Once()
 	require.ErrorIs(t, callback.addFileResourceV2AckCallback(ctx, addFileResourceTestResult(resource)), failure)
 	require.Empty(t, meta.fileResourceID2Meta)
 	require.Zero(t, meta.fileResourceVersion)
@@ -222,4 +223,21 @@ func TestFileResourceAddKeepsMetadataUnchangedBeforeBroadcast(t *testing.T) {
 	status, err := core.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{Name: "dictionary", Path: "dict/custom.txt"})
 	require.Error(t, merr.CheckRPCCall(status, err))
 	require.Empty(t, meta.fileResourceID2Meta)
+}
+
+func TestFileResourceRejectsMalformedMetadata(t *testing.T) {
+	ctx := context.Background()
+	core := newTestCore(withHealthyCode())
+	status, err := core.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{Name: "dictionary"})
+	require.ErrorIs(t, merr.CheckRPCCall(status, err), merr.ErrParameterMissing)
+	callback := &DDLCallback{Core: core}
+	for _, resource := range []*internalpb.FileResourceInfo{
+		nil,
+		{Id: 0, Name: "dictionary", Path: "dict/custom.txt"},
+		{Id: 123, Path: "dict/custom.txt"},
+		{Id: 123, Name: "dictionary"},
+	} {
+		require.ErrorIs(t, callback.addFileResourceV2AckCallback(ctx, addFileResourceTestResult(resource)), merr.ErrServiceInternal)
+	}
+	require.ErrorIs(t, callback.removeFileResourceV2AckCallback(ctx, removeFileResourceTestResult(0, "dictionary")), merr.ErrServiceInternal)
 }
