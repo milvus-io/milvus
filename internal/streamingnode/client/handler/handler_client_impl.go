@@ -43,6 +43,7 @@ type handlerClientImpl struct {
 	rebalanceTrigger           types.AssignmentRebalanceTrigger
 	newProducer                func(ctx context.Context, opts *producer.ProducerOptions, handler streamingpb.StreamingNodeHandlerServiceClient) (Producer, error)
 	newConsumer                func(ctx context.Context, opts *consumer.ConsumerOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (Consumer, error)
+	queryViewSyncClient        QueryViewSyncClient
 }
 
 // GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.

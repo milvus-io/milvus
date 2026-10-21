@@ -842,6 +842,7 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
+    repeated messages.LoadFieldConfig required_fields = 11; // Materialized internal scope; empty only in legacy persisted records.
 }
 
 message PartitionLoadInfo {
@@ -1264,5 +1265,4 @@ message GetQueryViewLoadInfoResponse {
     repeated messages.LoadFieldConfig load_fields = 5;
     repeated index.IndexInfo index_info_list = 6;
     repeated messages.LoadFieldConfig required_fields = 7;
-    bool skip_load_dynamic_field = 8;
 }

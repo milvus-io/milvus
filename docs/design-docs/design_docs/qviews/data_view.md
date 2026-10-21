@@ -56,10 +56,10 @@ Manifest version has two modes:
   and derive all Segment loading information from it. Such a Segment no longer
   needs the Coordinator SegmentMeta watcher for data updates.
 
-Zero is a resolution mode, not a comparable data revision. Existing persisted
-DataViews omit `segment_manifest_versions`; recovery expands the missing values
-to zero. Manifest versions are monotonic within successive DataViews: an
-existing Segment may keep its version or advance to a higher version, but it
+Zero is a resolution mode, not a comparable data revision. Every persisted
+DataView must include one `segment_manifest_versions` entry per Segment, even
+when its value is zero. Manifest versions are monotonic within successive
+DataViews: an existing Segment may keep its version or advance to a higher version, but it
 cannot regress. `Recompute` rebuilds every Manifest version from the current
 SegmentMeta, so a projection that reports a Manifest version lower than the
 stored one is rejected as a data-integrity error. A projection that reports
@@ -308,10 +308,10 @@ lifecycle record.
 
 For a valid Collection, recovery picks the maximum version as latest,
 initializes runtime ref counts to zero, and keeps the first of two identical
-snapshots under one version. It expands absent legacy
-`segment_manifest_versions` entries to zero. A malformed snapshot (missing
-DataVersion, invalid identity, or misaligned segment arrays) or a conflicting
-second snapshot under one version is skipped with a warning instead of aborting
+snapshots under one version. A malformed snapshot (missing DataVersion, invalid
+identity, or misaligned segment arrays, including an absent Manifest-version
+array for nonempty Segments) or a conflicting second snapshot under one version
+is skipped with a warning instead of aborting
 recovery, so a single bad key cannot brick the Coordinator. The snapshot is not
 deleted automatically: automatic deletion could turn metadata corruption into
 silent data loss. The bad key stays in etcd for operator inspection and manual
@@ -389,3 +389,61 @@ or caller-supplied protected-version lists. The event API is reduced to
 Create/Bootstrap/PrepareFlush/Recompute/Drop; membership is a materialized view
 of SegmentMeta rather than an event-accumulated log. The delete frontier remains
 a TODO until the StreamingNode shard barrier is implemented.
+
+## Native scheduling statistics
+
+The coordinator publication adapter exposes physical `RowNum` and scheduling
+`LogicalSize` per Segment. By default, `LogicalSize = RowNum +
+queryView.logicalSize.segmentBaseCost` (default 16). The static source
+`queryView.logicalSize.source` defaults to `rowCount` and is sampled
+once when the DataView manager is constructed, including recovery. For `insertBytes`,
+`LogicalSize = ceil(Size / bytesPerUnit) + segmentBaseCost`, where Size comes directly from
+`SegmentInfo.Stats.insert_binlog_size` (insert MemorySize bytes). It excludes
+stats/delta logs and indexes, and is not compressed file size. The static
+`queryView.logicalSize.bytesPerUnit` defaults to `64KB` (65536 bytes)
+and is parsed with `GetAsSize`; non-positive or invalid values use 64KB. It is
+also fixed at manager initialization. One logical unit represents this size; existing balance thresholds
+and the fixed cost remain in logical units. With `insertBytes` and the default
+64KB unit, the default base cost of 16 represents 1MiB of extra scheduling weight
+per Segment; it is not a measurement of memory overhead.
+
+A nonempty segment without a positive byte size uses `RowNum * bytesPerUnit` as its
+estimated bytes, equivalently `RowNum` logical units without multiplying.
+An empty zero-size segment therefore pays only the fixed cost. This estimate
+is a known footprint, not `LostStats`; the latter still means no published
+statistics at all. No Schema estimation or new availability flags are added.
+Unsupported source values use `rowCount`. Changing the source does not affect an existing manager, even on subsequent
+DataView updates; restart is required. Raw Size is retained alongside RowNum
+in the in-memory version statistics so incremental updates can carry members
+forward without repeatedly adding the fixed cost. Partition, shard, and collection
+publications aggregate physical rows and logical sizes independently. The flush
+producer captures the cumulative statistics being committed by that request;
+requests without Statistics use the row-based fallback. This adapter does not
+traverse binlogs or read object storage to reconstruct missing size.
+
+The DataView manager samples one valid cost for each new snapshot and computes
+all members' logical sizes before publication. Incremental flush/change-group
+snapshots include carried-over members in this calculation. Atomic transaction
+prepare freezes the statistics; changing configuration before commit cannot
+change the prepared snapshot's cost. Invalid cost values retain the manager's
+last valid sampled value.
+
+Changing configuration or Schema does not trigger a DataView update or balance
+pass. A membership/Manifest no-op retains the existing statistics. The next
+normal DataView update uses the then-current cost. Previously published native
+objects and retained DataViewRefs remain immutable, so historical QueryViews
+continue using their own footprint. Different DataVersions may therefore carry
+different logical sizes for the same Segment.
+
+Logical size follows the existing in-memory SegmentStats lifecycle; this change
+does not extend the persisted DataView protocol. After restart, absent statistics
+are initialized from the recovery projection and the current cost, using a new
+immutable entry. It does not preserve pre-restart cost estimates on disk.
+
+Balancer policy consumes logical sizes exclusively: selected target baselines,
+RG demand, shard/collection concentration, fanout, candidate ordering, migration
+and loading cost, manual movement, and published-view recovery. QueryView
+placement statistics forward the retained DataViewRef's physical and logical
+statistics together. A single `LostStats` flag describes absence of the entire
+footprint; known zero values do not imply missing statistics. The Balancer never
+recalculates the model or reads `segmentBaseCost`.
