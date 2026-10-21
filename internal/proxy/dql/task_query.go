@@ -1399,6 +1399,9 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 		}
 
 		rowCount := queryutil.GetRowCount(chunk)
+		if rowCount == 0 && len(output.GetFieldsData()) == 0 && chunk.GetElementLevel() {
+			output.ElementLevel = true
+		}
 		if rowCount > 0 {
 			if len(chunk.GetFieldsData()) == 0 {
 				return nil, merr.WrapErrServiceInternalMsg("final Query Chunk contains rows without field data")
@@ -1408,7 +1411,15 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 				return nil, merr.WrapErrServiceInternalMsg(
 					"final Query Chunk ID count %d does not match row count %d", idCount, rowCount)
 			}
+			if chunk.GetElementLevel() && len(chunk.GetElementIndices()) != rowCount {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"final Query Chunk element index count %d does not match row count %d", len(chunk.GetElementIndices()), rowCount)
+			}
+			if (len(output.GetFieldsData()) > 0 || output.GetElementLevel()) && output.GetElementLevel() != chunk.GetElementLevel() {
+				return nil, merr.WrapErrServiceInternalMsg("final Query Chunks have inconsistent element-level flags")
+			}
 			if len(output.GetFieldsData()) == 0 {
+				output.ElementLevel = chunk.GetElementLevel()
 				output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), max(t.GetLimit(), int64(rowCount)))
 			}
 			if len(output.GetFieldsData()) != len(chunk.GetFieldsData()) {
@@ -1421,6 +1432,11 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 				outputSize += typeutil.AppendFieldData(output.FieldsData, chunk.GetFieldsData(), int64(row), fieldIndexes...)
 				if idCount > 0 {
 					typeutil.AppendPKs(output.Ids, typeutil.GetPK(chunk.GetIds(), int64(row)))
+				}
+				if chunk.GetElementLevel() {
+					indices := chunk.GetElementIndices()[row]
+					output.ElementIndices = append(output.ElementIndices, indices)
+					outputSize += int64(proto.Size(indices))
 				}
 			}
 			if outputSize > maxOutputSize {

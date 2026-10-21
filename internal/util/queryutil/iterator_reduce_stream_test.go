@@ -26,7 +26,44 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestOrderedReduceStreamElementIteratorBoundary(t *testing.T) {
+	for _, mode := range []reduce.IReduceType{reduce.IReduceInOrder, reduce.IReduceInOrderForBest} {
+		request := &internalpb.RetrieveRequest{IsIterator: true, ReduceType: int32(mode), Limit: 20}
+		first := makeElementLevelResult([]int64{1}, []int64{10}, [][]int32{{0, 2}})
+		first.Status, first.HasMoreResult = merr.Success(), true
+		last := makeElementLevelResult([]int64{3}, []int64{10}, [][]int32{{1}})
+		last.Status = merr.Success()
+		sibling := makeElementLevelResult([]int64{2, 100}, []int64{10, 10}, [][]int32{{0}, {0}})
+		sibling.Status = merr.Success()
+		shard, err := NewShardReduceStream(request, nil, []ReduceStream{
+			&queryTestStream{recv: []queryTestRecv{{chunk: first}, {chunk: last}}},
+			&queryTestStream{recv: []queryTestRecv{{chunk: sibling}}},
+		}, 1)
+		require.NoError(t, err)
+		other := makeElementLevelResult([]int64{4}, []int64{10}, [][]int32{{0}})
+		other.Status = merr.Success()
+		stream, err := NewReduceStream(request, nil, []ReduceStream{
+			shard, &queryTestStream{recv: []queryTestRecv{{chunk: other}}},
+		}, 1)
+		require.NoError(t, err)
+		var ids []int64
+		for {
+			chunk, err := stream.Recv()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			require.True(t, chunk.GetElementLevel())
+			require.Equal(t, len(ids) == 0, chunk.GetHasMoreResult())
+			ids = append(ids, queryTestIDs(chunk)...)
+		}
+		require.Equal(t, []int64{1, 2, 3}, ids)
+		require.NoError(t, stream.Close())
+	}
+}
 
 func TestOrderedReduceStreamIteratorDrainParity(t *testing.T) {
 	for _, mode := range []reduce.IReduceType{reduce.IReduceNoOrder, reduce.IReduceInOrder, reduce.IReduceInOrderForBest} {

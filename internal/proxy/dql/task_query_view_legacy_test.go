@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -436,6 +437,43 @@ func TestSearchTaskDoesNotAddRequestRetryToBatchPath(t *testing.T) {
 
 	require.Error(t, task.Execute(context.Background()))
 	require.Equal(t, 1, legacy.searchCalled)
+}
+
+func TestQueryTaskConsumesElementChunks(t *testing.T) {
+	first := newFinalQueryChunk([]int64{1}, 10)
+	first.ElementLevel = true
+	first.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{0, 2, 4}}}
+	second := newFinalQueryChunk([]int64{2}, 10)
+	second.ElementLevel = true
+	second.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{1, 3}}}
+	task := newQueryViewQueryTask(nil, 4)
+	output, err := task.consumeQueryResultStream(&fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{
+		{chunk: &internalpb.RetrieveResults{Status: merr.Success(), ElementLevel: true}},
+		{chunk: first}, {chunk: second},
+	}})
+	require.NoError(t, err)
+	require.True(t, output.GetElementLevel())
+	require.Equal(t, []int64{1, 2}, output.GetIds().GetIntId().GetData())
+	require.Equal(t, []*internalpb.ElementIndices{first.ElementIndices[0], second.ElementIndices[0]}, output.ElementIndices)
+	for _, page := range [][2]int64{{4, 0}, {4, 4}, {3, 1}, {1, 3}, {1, 6}} {
+		op := queryutil.NewSortAndCheckPKPageOperator(0, nil, page[0], page[1])
+		got, err := op.Run(context.Background(), nil, []*internalpb.RetrieveResults{proto.Clone(output).(*internalpb.RetrieveResults)})
+		require.NoError(t, err)
+		batch, err := op.Run(context.Background(), nil, []*internalpb.RetrieveResults{first, second})
+		require.NoError(t, err)
+		require.True(t, proto.Equal(batch[0].(*internalpb.RetrieveResults), got[0].(*internalpb.RetrieveResults)),
+			"page=%v batch=%v streaming=%v", page, batch[0], got[0])
+	}
+	for _, inconsistent := range []bool{false, true} {
+		invalid := proto.Clone(second).(*internalpb.RetrieveResults)
+		if inconsistent {
+			invalid.ElementLevel = false
+		} else {
+			invalid.ElementIndices = nil
+		}
+		_, err := task.consumeQueryResultStream(&fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: first}, {chunk: invalid}}})
+		require.ErrorContains(t, err, "element")
+	}
 }
 
 func TestQueryTaskRetriesCompleteStreamAttempt(t *testing.T) {
