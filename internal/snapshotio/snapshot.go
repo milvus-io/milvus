@@ -46,7 +46,11 @@ const (
 	// handling before a future writer format is introduced.
 	SnapshotFormatVersion = 6
 	// SelfDescribingManifestVersion is the first format requiring OCF manifests.
+	// It must remain 6 when SnapshotFormatVersion increases, so V6 OCF manifests
+	// remain readable and V0-V5 manifests retain their raw binary format.
 	SelfDescribingManifestVersion = 6
+
+	ocfMagic = "Obj\x01"
 )
 
 var (
@@ -283,6 +287,7 @@ func MarshalSegmentManifest(segment *datapb.SegmentDescription) ([]byte, error) 
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to create avro container")
 	}
 	if err := encoder.Encode(SegmentToManifestEntry(segment)); err != nil {
+		_ = encoder.Close()
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to serialize entry to avro")
 	}
 	if err := encoder.Close(); err != nil {
@@ -297,7 +302,7 @@ func ParseSegmentManifest(data []byte, formatVersion int) (*datapb.SegmentDescri
 	if err := ValidateFormatVersion(formatVersion); err != nil {
 		return nil, merr.Wrap(err, "incompatible snapshot format")
 	}
-	if bytes.HasPrefix(data, []byte{'O', 'b', 'j', 1}) {
+	if bytes.HasPrefix(data, []byte(ocfMagic)) {
 		if formatVersion < SelfDescribingManifestVersion {
 			return nil, merr.WrapErrDataIntegrityMsg("snapshot format %d requires a raw binary manifest, got an avro container", formatVersion)
 		}

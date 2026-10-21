@@ -244,11 +244,18 @@ func TestMarshalSegmentManifestErrors(t *testing.T) {
 
 	schema, err := ManifestSchema()
 	require.NoError(t, err)
-	mockMarshal := mockey.Mock((*ocf.Encoder).Encode).Return(errors.New("marshal failed")).Build()
+	marshalErr := errors.New("marshal failed")
+	mockMarshal := mockey.Mock((*ocf.Encoder).Encode).Return(marshalErr).Build()
 	defer mockMarshal.UnPatch()
+	closeErr := errors.New("close failed")
+	mockClose := mockey.Mock((*ocf.Encoder).Close).Return(closeErr).Build()
+	defer mockClose.UnPatch()
 
-	_, err = MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 100})
-	require.Error(t, err)
+	data, err := MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 100})
+	require.ErrorIs(t, err, marshalErr)
+	assert.NotErrorIs(t, err, closeErr)
+	assert.Nil(t, data)
+	assert.Equal(t, 1, mockClose.Times())
 	assert.Contains(t, err.Error(), "failed to serialize entry to avro")
 	_ = schema
 }
