@@ -14,6 +14,7 @@
 #include <array>
 #include <filesystem>
 #include <memory>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -98,7 +99,8 @@ class ScalarBuildSessionTest : public ::testing::Test {
     }
 
     index::IIndexReaderBasePtr
-    BuildAndLoad(PreparedBuild prepared) const {
+    BuildAndLoad(PreparedBuild prepared,
+                 std::string_view expected_family = {}) const {
         const auto family = prepared.request.family;
         const auto params = prepared.request.params;
         const auto context = prepared.file_manager_context;
@@ -115,6 +117,9 @@ class ScalarBuildSessionTest : public ::testing::Test {
             {stats.Files()[0].file_name}, context);
         const auto resolved_family =
             index::ResolvePackedLoadFamily(family, source.Metadata(), params);
+        if (!expected_family.empty()) {
+            EXPECT_EQ(resolved_family, expected_family);
+        }
         // Cold-load planning annotates typed JSON completeness, as the sealed
         // index translator does before opening the reader.
         storage::LoadOptions options;
@@ -268,6 +273,142 @@ TYPED_TEST(ScalarMissingBinlogPrefixTest,
                         (upper_inclusive ? value <= upper : value < upper);
                     EXPECT_EQ(hits[row], valid && hit) << row;
                 }
+            }
+        }
+    }
+}
+
+TEST_F(ScalarBuildSessionTest, OrdinaryArraySortRejectsOldBuildTarget) {
+    auto info = Info(DataType::ARRAY, index::ASCENDING_SORT);
+    info.mutable_field_schema()->set_element_type(
+        proto::schema::DataType::Int64);
+    info.set_current_scalar_index_version(kArrayStlSortMinVersion - 1);
+    EXPECT_THROW(AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex),
+                 SegcoreError);
+}
+
+TEST_F(ScalarBuildSessionTest, OrdinaryArraySortFromBinlogKeepsParentRows) {
+    for (const auto element : {DataType::INT64,
+                               DataType::FLOAT,
+                               DataType::DOUBLE,
+                               DataType::VARCHAR}) {
+        for (const auto* index_type :
+             {index::ASCENDING_SORT, index::HYBRID_INDEX_TYPE}) {
+            SCOPED_TRACE(::testing::Message()
+                         << index_type << "/" << static_cast<int>(element));
+            auto info = Info(DataType::ARRAY, index_type);
+            info.set_current_scalar_index_version(kArrayStlSortMinVersion);
+            info.set_num_rows(5);
+            auto* schema = info.mutable_field_schema();
+            schema->set_element_type(
+                static_cast<proto::schema::DataType>(element));
+            schema->set_nullable(true);
+            auto prepared =
+                AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+            std::vector<Array> arrays;
+            for (const auto& values : std::vector<std::vector<int64_t>>{
+                     {1, 1, 100}, {}, {}, {2, 3}, {1, 4}}) {
+                proto::schema::ScalarField scalar;
+                if (element == DataType::VARCHAR) {
+                    auto* strings = scalar.mutable_string_data();
+                    for (const auto value : values)
+                        strings->add_data(std::to_string(value));
+                } else if (element == DataType::FLOAT) {
+                    scalar.mutable_float_data();
+                    for (const auto value : values)
+                        scalar.mutable_float_data()->add_data(value);
+                } else if (element == DataType::DOUBLE) {
+                    scalar.mutable_double_data();
+                    for (const auto value : values)
+                        scalar.mutable_double_data()->add_data(value);
+                } else {
+                    auto* longs = scalar.mutable_long_data();
+                    for (const auto value : values) longs->add_data(value);
+                }
+                arrays.emplace_back(scalar);
+            }
+            auto data =
+                storage::CreateFieldData(DataType::ARRAY, element, true);
+            const uint8_t validity = 0x1b;
+            data->FillFieldData(arrays.data(), &validity, arrays.size(), 0);
+            info.add_insert_files(
+                WriteBinlog(prepared.file_manager_context, data));
+            prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+            auto reader =
+                BuildAndLoad(std::move(prepared), index::families::kSort);
+            ASSERT_NE(reader, nullptr);
+            EXPECT_EQ(reader->Count(), 5);
+            EXPECT_EQ(reader->CoordDomain(), index::Domain::Row);
+            EXPECT_FALSE(reader->Caps().value_lookup);
+            const auto check = [&](const auto& key) {
+                using T = std::decay_t<decltype(key)>;
+                const auto* predicate =
+                    dynamic_cast<const index::IScalarPredicateReader<T>*>(
+                        reader.get());
+                ASSERT_NE(predicate, nullptr);
+                const auto hits = predicate->In(1, &key);
+                for (size_t row = 0; row < 5; ++row)
+                    EXPECT_EQ(hits[row], row == 0 || row == 4);
+            };
+            if (element == DataType::VARCHAR)
+                check(std::string_view("1"));
+            else if (element == DataType::FLOAT)
+                check(float{1});
+            else if (element == DataType::DOUBLE)
+                check(double{1});
+            else
+                check(int64_t{1});
+        }
+    }
+}
+
+TEST_F(ScalarBuildSessionTest, FloatingArraySortRejectsNonFiniteBinlogs) {
+    for (const auto element : {DataType::FLOAT, DataType::DOUBLE}) {
+        for (const auto* index_type :
+             {index::ASCENDING_SORT, index::HYBRID_INDEX_TYPE}) {
+            for (const double value :
+                 {std::numeric_limits<double>::quiet_NaN(),
+                  std::numeric_limits<double>::infinity(),
+                  -std::numeric_limits<double>::infinity()}) {
+                auto info = Info(DataType::ARRAY, index_type);
+                info.set_current_scalar_index_version(kArrayStlSortMinVersion);
+                info.set_num_rows(1);
+                info.mutable_field_schema()->set_element_type(
+                    static_cast<proto::schema::DataType>(element));
+                // Force HYBRID to choose SORT, not its low-cardinality bitmap.
+                if (std::string_view(index_type) == index::HYBRID_INDEX_TYPE) {
+                    for (auto& param : *info.mutable_index_params()) {
+                        if (param.key() ==
+                            index::BITMAP_INDEX_CARDINALITY_LIMIT)
+                            param.set_value("1");
+                    }
+                }
+                auto prepared =
+                    AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+                proto::schema::ScalarField scalar;
+                if (element == DataType::FLOAT) {
+                    scalar.mutable_float_data()->add_data(1);
+                    scalar.mutable_float_data()->add_data(value);
+                } else {
+                    scalar.mutable_double_data()->add_data(1);
+                    scalar.mutable_double_data()->add_data(value);
+                }
+                Array array(scalar);
+                auto data =
+                    storage::CreateFieldData(DataType::ARRAY, element, false);
+                data->FillFieldData(&array, 1);
+                info.add_insert_files(
+                    WriteBinlog(prepared.file_manager_context, data));
+                prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+                BuildSession session(std::move(prepared.request),
+                                     prepared.file_manager_context);
+                try {
+                    session.BuildFromSource();
+                    FAIL() << "non-finite ARRAY must fail before sorting";
+                } catch (const SegcoreError& error) {
+                    EXPECT_EQ(error.get_error_code(), DataFormatBroken);
+                }
+                EXPECT_THROW(session.Publish(), SegcoreError);
             }
         }
     }

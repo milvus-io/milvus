@@ -538,21 +538,41 @@ TEST(HybridIndexBuilderTest, NestedLowCardinalityKeepsBitmapAtAnyVersion) {
     }
 }
 
-// A regular (non-nested) ARRAY field keeps INVERTED at high cardinality even at
-// and above the gate version: the sort family cannot handle array values, only
-// flattened elements.
-TEST(HybridIndexBuilderTest,
-     ArrayRowsHighCardinalityKeepsInvertedAtAnyVersion) {
-    for (const int32_t version : {kHybridIndexConfigVersion,
-                                  kNestedHybridStlSortMinVersion,
-                                  kNestedHybridStlSortMinVersion + 1}) {
-        EXPECT_EQ(
-            SelectorAtEngineVersion<ArrayView>("HybridInt64ArrayNonNull",
-                                               version,
-                                               ArrayCardinalityData(16, false)),
-            ScalarIndexType::INVERTED)
-            << "scalar index engine version " << version;
+TEST(HybridIndexBuilderTest, ArrayRowsSelectSortOnlyFromGateVersion) {
+    for (const int32_t version : {kArrayStlSortMinVersion - 1,
+                                  kArrayStlSortMinVersion,
+                                  kArrayStlSortMinVersion + 1}) {
+        for (const size_t distinct : {size_t{15}, size_t{16}, size_t{17}}) {
+            const auto expected = distinct < 16 ? ScalarIndexType::BITMAP
+                                  : version < kArrayStlSortMinVersion
+                                      ? ScalarIndexType::INVERTED
+                                      : ScalarIndexType::STLSORT;
+            EXPECT_EQ(SelectorAtEngineVersion<ArrayView>(
+                          "HybridInt64Array",
+                          version,
+                          ArrayCardinalityData(distinct, true)),
+                      expected)
+                << "version=" << version << " distinct=" << distinct;
+        }
     }
+}
+
+TEST(HybridIndexBuilderTest, FloatingArraySelectsSortAtNewVersion) {
+    const std::vector<double> values{1, 2, 3};
+    ScalarTestData<ArrayView> data(
+        {OwnedArrayValue::FromFixed<double>(DataType::DOUBLE, values)});
+    const auto& backend =
+        ScalarReaderBackends().Get<ArrayView>("HybridDoubleArray");
+    auto params = backend.BuildParams();
+    params[SCALAR_INDEX_ENGINE_VERSION] = kArrayStlSortMinVersion;
+    params[BITMAP_INDEX_CARDINALITY_LIMIT] = 2;
+    auto builder =
+        BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
+            families::kHybrid, params);
+    ASSERT_NE(builder, nullptr);
+    const ScalarTestInput<ArrayView> input(data);
+    const auto artifact = std::move(*builder).Build(input.View());
+    EXPECT_EQ(PersistedSelector(*artifact), ScalarIndexType::STLSORT);
 }
 
 TEST(HybridIndexBuilderTest, InvalidPersistedSelectorIsRejected) {

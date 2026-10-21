@@ -44,6 +44,12 @@ func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb
 		}
 		return nil
 	}
+	if typeutil.IsArrayType(dataType) {
+		if !IsArraySTLSORTElementType(field.GetElementType()) {
+			return merr.WrapErrParameterInvalidMsg("STL_SORT on ordinary ARRAY supports bool, integer, float, double and varchar elements, got %s", field.GetElementType())
+		}
+		return nil
+	}
 	if typeutil.IsJSONType(dataType) {
 		return nil
 	}
@@ -55,4 +61,10 @@ func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb
 
 func newSTLSORTChecker() *STLSORTChecker {
 	return &STLSORTChecker{}
+}
+
+// IsArraySTLSORTElementType lists ordinary ARRAY SORT types. Floating values
+// must be finite at ingestion and are checked again before building SORT.
+func IsArraySTLSORTElementType(elementType schemapb.DataType) bool {
+	return typeutil.IsBoolType(elementType) || typeutil.IsIntegerType(elementType) || elementType == schemapb.DataType_Float || elementType == schemapb.DataType_Double || elementType == schemapb.DataType_VarChar
 }

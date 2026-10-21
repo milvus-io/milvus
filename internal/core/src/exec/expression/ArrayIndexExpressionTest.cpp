@@ -12,6 +12,7 @@
 #include <boost/container/vector.hpp>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -352,6 +353,124 @@ MakeInt64ArrayValue(const std::vector<int64_t>& values) {
 }
 
 }  // namespace
+
+TEST(ArrayIndexExpressionRegression, OrdinarySortedContainsMatchesRaw) {
+    const std::vector<boost::container::vector<int64_t>> arrays{
+        {1, 1, 100}, {}, {}, {2, 3}, {1, 4}};
+    const uint8_t parents = 0x1b;
+    auto field = ArrayField(arrays, true, &parents);
+    auto schema = std::make_shared<Schema>();
+    const auto field_id =
+        schema->AddDebugArrayField("array", DataType::INT64, true);
+    test::expr_index::RawFieldFiles raw_files;
+    auto raw = CreateSealedSegment(schema);
+    auto indexed = CreateSealedSegment(schema);
+    auto info = raw_files.Prepare(field_id, {field});
+    raw->LoadFieldData(info);
+    indexed->LoadFieldData(info);
+    auto opened =
+        test::expr_index::BuildIndex(field_id,
+                                     DataType::ARRAY,
+                                     index::ASCENDING_SORT,
+                                     {field},
+                                     {{index::SCALAR_INDEX_ENGINE_VERSION, 6}},
+                                     DataType::INT64);
+    ASSERT_EQ(opened.reader->CoordDomain(), index::Domain::Row);
+    ASSERT_FALSE(opened.reader->Caps().value_lookup);
+    const auto* null_reader =
+        dynamic_cast<const index::INullReader*>(opened.reader.get());
+    ASSERT_NE(null_reader, nullptr);
+    const auto validity = null_reader->IsNotNull();
+    for (size_t row = 0; row < arrays.size(); ++row)
+        EXPECT_EQ(validity[row], row != 2);
+    test::expr_index::InstallIndex(*indexed,
+                                   field_id,
+                                   DataType::ARRAY,
+                                   std::move(opened),
+                                   DataType::INT64);
+    const auto evaluate = [&](const expr::TypedExprPtr& expression,
+                              SegmentSealed* segment) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           expression);
+        return ExecuteQueryExpr(
+            plan,
+            dynamic_cast<ChunkedSegmentSealedImpl*>(segment),
+            arrays.size(),
+            MAX_TIMESTAMP);
+    };
+    for (const auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                          proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+        for (const auto& terms :
+             std::vector<std::vector<int64_t>>{{}, {1}, {1, 4, 1}, {1, 99}}) {
+            std::vector<proto::plan::GenericValue> values;
+            for (const auto term : terms) {
+                proto::plan::GenericValue value;
+                value.set_int64_val(term);
+                values.push_back(std::move(value));
+            }
+            for (const bool negate : {false, true}) {
+                const auto make_expr = [&]() -> expr::TypedExprPtr {
+                    auto contains = std::make_shared<expr::JsonContainsExpr>(
+                        expr::ColumnInfo(field_id,
+                                         DataType::ARRAY,
+                                         DataType::INT64,
+                                         {},
+                                         true),
+                        op,
+                        true,
+                        values);
+                    if (negate)
+                        return std::make_shared<expr::LogicalUnaryExpr>(
+                            expr::LogicalUnaryExpr::OpType::LogicalNot,
+                            contains);
+                    return contains;
+                };
+                const auto scan = evaluate(make_expr(), raw.get());
+                const auto sort = evaluate(make_expr(), indexed.get());
+                ASSERT_EQ(sort.size(), arrays.size());
+                for (size_t row = 0; row < arrays.size(); ++row) {
+                    bool expected =
+                        op == proto::plan::JSONContainsExpr_JSONOp_ContainsAll;
+                    for (const auto term : terms) {
+                        const bool found = std::find(arrays[row].begin(),
+                                                     arrays[row].end(),
+                                                     term) != arrays[row].end();
+                        if (op ==
+                            proto::plan::JSONContainsExpr_JSONOp_ContainsAll)
+                            expected &= found;
+                        else
+                            expected |= found;
+                    }
+                    expected = row != 2 && (negate ? !expected : expected);
+                    EXPECT_EQ(sort[row], expected);
+                    EXPECT_EQ(sort[row], scan[row]);
+                }
+            }
+        }
+    }
+    // Whole-array comparison still refines using raw values, preserving order
+    // and duplicates rather than treating membership as array equality.
+    for (const auto op :
+         {proto::plan::OpType::Equal, proto::plan::OpType::NotEqual}) {
+        const auto make_expr = [&] {
+            return std::make_shared<expr::UnaryRangeFilterExpr>(
+                expr::ColumnInfo(
+                    field_id, DataType::ARRAY, DataType::INT64, {}, true),
+                op,
+                MakeInt64ArrayValue({1, 4}),
+                std::vector<proto::plan::GenericValue>{});
+        };
+        const auto scan = evaluate(make_expr(), raw.get());
+        const auto sort = evaluate(make_expr(), indexed.get());
+        for (size_t row = 0; row < arrays.size(); ++row) {
+            const bool expected =
+                row != 2 &&
+                (op == proto::plan::OpType::Equal ? row == 4 : row != 4);
+            EXPECT_EQ(sort[row], expected);
+            EXPECT_EQ(sort[row], scan[row]);
+        }
+    }
+}
 
 TEST(ArrayIndexExpressionRegression,
      NestedMaterializationKeepsRowNullsOutOfElementValidity) {

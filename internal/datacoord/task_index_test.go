@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1116,4 +1117,26 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		s.NoError(err)
 		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
 	})
+}
+
+func (s *indexTaskSuite) TestPrepareArraySORTWaitsAfterCapabilityDrops() {
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	mt := &meta{indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID)}
+	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.True(ok)
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID: s.collID, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: s.fieldID, Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}},
+	}, nil)
+	manager := newIndexEngineVersionManager()
+	manager.Startup(map[string]*sessionutil.Session{"old-reader": {SessionRaw: sessionutil.SessionRaw{
+		ServerID: 1, ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5, MaximumIndexVersion: 5},
+	}}})
+	it := newIndexBuildTask(segIndex, 1, mt, handler, mocks.NewChunkManager(s.T()), manager)
+	req, err := it.prepareJobRequest(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: s.segID, CollectionID: s.collID, PartitionID: s.partID, NumOfRows: 4,
+	}}, segIndex, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}}, "STL_SORT")
+	s.Nil(req)
+	s.ErrorIs(err, merr.ErrServiceNotReady)
+	s.True(merr.Status(err).GetRetriable())
 }

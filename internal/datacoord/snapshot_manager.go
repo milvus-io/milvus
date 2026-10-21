@@ -1212,6 +1212,9 @@ func (sm *snapshotManager) RestoreIndexes(
 		if sm.indexEngineVersionManager != nil {
 			resolvedScalarVersion = sm.indexEngineVersionManager.ResolveScalarIndexVersion()
 		}
+		if err := checkArraySTLSORTIndex(coll.GetSchema(), index.FieldID, index.IndexParams, resolvedScalarVersion); err != nil {
+			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
+		}
 		if err := checkFMIndexEngineVersion(index.IndexParams, resolvedScalarVersion); err != nil {
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}

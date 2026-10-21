@@ -654,6 +654,11 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
 	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
+	// Recheck at dispatch: a queued explicit ARRAY SORT must wait if the
+	// reader capability drops after CreateIndex (for example during rollback).
+	if err := checkArraySTLSORTIndex(schema, fieldID, params, currentScalarIndexVersion); err != nil {
+		return nil, err
+	}
 
 	// Create the job request. The path layout (v0/v1) is propagated via
 	// IndexStorePathVersion; C++ indexbuilder assembles the remote prefix locally.

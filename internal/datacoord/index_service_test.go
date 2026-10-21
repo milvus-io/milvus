@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -3125,4 +3126,42 @@ func Test_checkFMIndexEngineVersion(t *testing.T) {
 	t.Run("non-fmindex always accepted regardless of version", func(t *testing.T) {
 		assert.NoError(t, checkFMIndexEngineVersion(invertedParams, 0))
 	})
+}
+
+func TestCheckArraySTLSORTIndex(t *testing.T) {
+	params := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT}}
+	for _, elem := range []schemapb.DataType{schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float, schemapb.DataType_Double, schemapb.DataType_VarChar} {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Array, ElementType: elem}}}
+		err := checkArraySTLSORTIndex(schema, 101, params, common.MinScalarIndexVersionForArrayStlSort-1)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+		assert.True(t, merr.Status(err).GetRetriable())
+		assert.ErrorIs(t, merr.CheckRPCCall(merr.Status(err), nil), merr.ErrServiceNotReady)
+		assert.NoError(t, checkArraySTLSORTIndex(schema, 101, params, common.MinScalarIndexVersionForArrayStlSort))
+		assert.NoError(t, checkArraySTLSORTIndex(schema, 101, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid}}, 0))
+	}
+	for _, elem := range []schemapb.DataType{schemapb.DataType_JSON} {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Array, ElementType: elem}}}
+		assert.ErrorIs(t, checkArraySTLSORTIndex(schema, 101, params, common.MinScalarIndexVersionForArrayStlSort), merr.ErrParameterInvalid)
+	}
+	assert.ErrorIs(t, checkArraySTLSORTIndex(nil, 101, params, common.MinScalarIndexVersionForArrayStlSort), merr.ErrServiceInternal)
+	// Scalar SORT is usable during upgrades; nested fields are not top-level
+	// ARRAYs and retain their existing gate.
+	assert.NoError(t, checkArraySTLSORTIndex(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Int64}}}, 101, params, 0))
+}
+
+func TestServerCreateArraySTLSORTWaitsForReaders(t *testing.T) {
+	initStreamingSystem(t)
+	b := broker.NewMockBroker(t)
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}},
+	}, nil).Twice()
+	s := &Server{broker: b}
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+	status, err := s.CreateIndex(context.Background(), &indexpb.CreateIndexRequest{
+		CollectionID: 100, FieldID: 101, IndexName: "tags_sort",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT}},
+	})
+	assert.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
+	assert.True(t, status.GetRetriable())
 }

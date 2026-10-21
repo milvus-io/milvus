@@ -9640,3 +9640,31 @@ func TestValidateNullableSparseWithoutPayload(t *testing.T) {
 		})
 	}
 }
+
+func TestArrayFloatFiniteValidation(t *testing.T) {
+	v := NewValidateUtil(WithNANCheck())
+	for _, elem := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		for _, value := range []float64{0, math.Copysign(0, -1), 1.5, math.NaN(), math.Inf(1), math.Inf(-1)} {
+			row := &schemapb.ScalarField{}
+			if elem == schemapb.DataType_Float {
+				row.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{float32(value)}}}
+			} else {
+				row.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{value}}}
+			}
+			field := &schemapb.FieldSchema{Name: "values", DataType: schemapb.DataType_Array, ElementType: elem}
+			field.FieldID = 101
+			helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+			require.NoError(t, err)
+			payload := &schemapb.FieldData{
+				FieldName: "values", FieldId: 101, Type: schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: elem, Data: []*schemapb.ScalarField{row}}}}},
+			}
+			err = v.Validate([]*schemapb.FieldData{payload}, helper, 1)
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			} else {
+				assert.NoError(t, err)
+			}
+		}
+	}
+}

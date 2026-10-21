@@ -29,6 +29,7 @@
 #include "index/Meta.h"
 #include "index/ParamUtils.h"
 #include "index/scalar/sort/SortedIndexFormat.h"
+#include "index/scalar/ScalarIndexUtils.h"
 #include "index/vector/VectorLoadResource.h"
 #include "log/Log.h"
 #include "storage/artifact/FileSource.h"
@@ -376,10 +377,18 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
         } else {
             if (request.index_type != HYBRID_INDEX_TYPE &&
                 request.index_type != BITMAP_INDEX_TYPE &&
-                request.index_type != INVERTED_INDEX_TYPE) {
+                request.index_type != INVERTED_INDEX_TYPE &&
+                request.index_type != ASCENDING_SORT) {
                 ThrowInfo(Unsupported,
                           "unsupported ARRAY index type: {}",
                           request.index_type);
+            }
+            if (request.index_type == ASCENDING_SORT &&
+                !SupportsArrayStlSort(request.element_type)) {
+                ThrowInfo(
+                    Unsupported,
+                    "ordinary ARRAY SORT does not support element type {}",
+                    static_cast<int>(request.element_type));
             }
             result.family =
                 ScalarFamily(request.index_type, request.element_type, false);

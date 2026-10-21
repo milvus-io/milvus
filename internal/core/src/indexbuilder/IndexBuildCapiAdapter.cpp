@@ -375,6 +375,18 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
     const auto element_type =
         static_cast<DataType>(info.field_schema().element_type());
 
+    // A queued explicit ARRAY SORT may be rebuilt after the negotiated target
+    // changes. Never emit parent-row postings for an older reader contract.
+    if (field_type == DataType::ARRAY && !is_nested &&
+        index_type == index::ASCENDING_SORT &&
+        info.current_scalar_index_version() < kArrayStlSortMinVersion) {
+        ThrowInfo(
+            Unsupported,
+            "ordinary ARRAY SORT requires scalar index version >= {}, got {}",
+            kArrayStlSortMinVersion,
+            info.current_scalar_index_version());
+    }
+
     params[index::SCALAR_INDEX_ENGINE_VERSION] =
         info.current_scalar_index_version();
     params[index::TANTIVY_INDEX_VERSION] =

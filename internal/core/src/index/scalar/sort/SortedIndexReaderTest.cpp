@@ -19,10 +19,16 @@
 #include <array>
 #include <algorithm>
 #include <cstdint>
+#include <limits>
+#include <cmath>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "index/IndexTypeAdapter.h"
+#include "common/Consts.h"
+#include "index/Meta.h"
+#include "index/scalar/sort/SortedIndexFormat.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
@@ -57,6 +63,150 @@ TEST(SortedIndexReaderTest, AdvertisesPrimitivePredicateMatrix) {
     ExpectPredicateProfiles<float>("Float");
     ExpectPredicateProfiles<double>("Double");
     ExpectPredicateProfiles<std::string_view>("Varchar");
+}
+
+// Start at the production type adapter, then build and independently reopen
+// the persisted artifact. An out-of-range sibling must not erase a row hit.
+TEST(SortedIndexReaderTest, ExplicitArraySortPreservesParentRowsAcrossReloads) {
+    const std::vector<int64_t> mixed{1, 1, 100}, empty{}, ignored{99},
+        others{2, 3}, both{1, 4};
+    ScalarTestData<ArrayView> data(
+        {OwnedArrayValue::FromFixed<int64_t>(DataType::INT64, mixed),
+         OwnedArrayValue::FromFixed<int64_t>(DataType::INT64, empty),
+         OwnedArrayValue::FromFixed<int64_t>(DataType::INT64, ignored),
+         OwnedArrayValue::FromFixed<int64_t>(DataType::INT64, others),
+         OwnedArrayValue::FromFixed<int64_t>(DataType::INT64, both)});
+    data.validity.reset(2);
+    data.batch_sizes = {2, 0, 3};
+    const auto adapted = AdaptIndexType({.index_type = ASCENDING_SORT,
+                                         .field_type = DataType::ARRAY,
+                                         .element_type = DataType::INT64});
+    ASSERT_EQ(adapted.family, families::kSort);
+    auto builder =
+        BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
+            adapted.family, adapted.params);
+    ASSERT_NE(builder, nullptr);
+    std::unique_ptr<storage::Artifact> artifact;
+    {
+        const ScalarTestInput<ArrayView> input(data);
+        artifact = std::move(*builder).Build(input.View());
+    }
+    const auto check = [](const IIndexReaderBase& reader) {
+        EXPECT_EQ(reader.Count(), 5);
+        EXPECT_EQ(reader.CoordDomain(), Domain::Row);
+        EXPECT_FALSE(reader.Caps().value_lookup);
+        EXPECT_FALSE(reader.Caps().nested);
+        const auto* predicate =
+            dynamic_cast<const IScalarPredicateReader<int64_t>*>(&reader);
+        const auto* nulls = dynamic_cast<const INullReader*>(&reader);
+        ASSERT_NE(predicate, nullptr);
+        ASSERT_NE(nulls, nullptr);
+        const int64_t one = 1, four = 4;
+        const auto any = predicate->In(1, &one);
+        auto all = any.clone();
+        all &= predicate->In(1, &four);
+        const auto not_in = predicate->NotIn(1, &one);
+        const auto range = predicate->Range(1, true, 4, true);
+        const auto valid = nulls->IsNotNull();
+        for (size_t row = 0; row < 5; ++row) {
+            EXPECT_EQ(any[row], row == 0 || row == 4);
+            EXPECT_EQ(all[row], row == 4);
+            EXPECT_EQ(not_in[row], row == 1 || row == 3);
+            EXPECT_EQ(range[row], row == 0 || row == 3 || row == 4);
+            EXPECT_EQ(valid[row], row != 2);
+        }
+    };
+    const auto& normal =
+        ScalarReaderBackends().Get<ArrayView>("SortedInt64Array");
+    auto missing_legacy_validity = SerializeV1V2(*artifact);
+    missing_legacy_validity.entries.erase(
+        std::string(sort_format::kValidBitset));
+    ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+        static_cast<void>(
+            OpenV1V2(normal, missing_legacy_validity, {.row_count = 5}));
+    });
+    auto missing_packed_aux = SerializeV3(*artifact);
+    missing_packed_aux.entries.erase(std::string(sort_format::kValidBitset));
+    missing_packed_aux.entries.erase(std::string(sort_format::kIdxToOffsets));
+    ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+        static_cast<void>(OpenV3(normal, missing_packed_aux, {.row_count = 5}));
+    });
+    for (const auto name : {"SortedInt64Array", "SortedInt64ArrayMmap"}) {
+        const auto& backend = ScalarReaderBackends().Get<ArrayView>(name);
+        const auto persisted = SerializeV1V2(*artifact);
+        auto legacy = OpenV1V2(backend, persisted, {.row_count = 5});
+        ASSERT_NE(legacy, nullptr);
+        check(*legacy);
+        for (const bool async : {false, true}) {
+            auto packed = OpenV3(
+                backend, SerializeV3(*artifact), {.row_count = 5}, async);
+            ASSERT_NE(packed, nullptr);
+            check(*packed);
+        }
+    }
+}
+
+template <typename T>
+void
+CheckFloatingArraySort(DataType type, const char* backend_name) {
+    for (const auto* index_type : {ASCENDING_SORT, HYBRID_INDEX_TYPE}) {
+        auto adapted = AdaptIndexType({.index_type = index_type,
+                                       .field_type = DataType::ARRAY,
+                                       .element_type = type});
+        adapted.params[SCALAR_INDEX_ENGINE_VERSION] = kArrayStlSortMinVersion;
+        adapted.params[BITMAP_INDEX_CARDINALITY_LIMIT] = 1;
+        for (const T value : {T(1.5),
+                              T(0),
+                              -T(0),
+                              std::numeric_limits<T>::quiet_NaN(),
+                              std::numeric_limits<T>::infinity(),
+                              -std::numeric_limits<T>::infinity()}) {
+            const std::vector<T> values{T(2), value, T(2)};
+            ScalarTestData<ArrayView> data(
+                {OwnedArrayValue::FromFixed<T>(type, values)});
+            const ScalarTestInput<ArrayView> input(data);
+            auto builder =
+                BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
+                    adapted.family, adapted.params);
+            if (!std::isfinite(value)) {
+                ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+                    static_cast<void>(std::move(*builder).Build(input.View()));
+                });
+            } else {
+                auto artifact = std::move(*builder).Build(input.View());
+                ASSERT_NE(artifact, nullptr);
+                // Open the concrete SORT payload selected by either entry.
+                const auto& backend =
+                    ScalarReaderBackends().Get<ArrayView>(backend_name);
+                const auto check = [&](const IIndexReaderBase& reader) {
+                    EXPECT_EQ(reader.Count(), 1);
+                    EXPECT_EQ(reader.CoordDomain(), Domain::Row);
+                    const auto* predicate =
+                        dynamic_cast<const IScalarPredicateReader<T>*>(&reader);
+                    ASSERT_NE(predicate, nullptr);
+                    EXPECT_TRUE(predicate->In(1, &value)[0]);
+                    EXPECT_TRUE(predicate->Range(T(0), true, T(3), true)[0]);
+                };
+                auto legacy = OpenV1V2(
+                    backend, SerializeV1V2(*artifact), {.row_count = 1});
+                ASSERT_NE(legacy, nullptr);
+                check(*legacy);
+                for (const bool async : {false, true}) {
+                    auto packed = OpenV3(backend,
+                                         SerializeV3(*artifact),
+                                         {.row_count = 1},
+                                         async);
+                    ASSERT_NE(packed, nullptr);
+                    check(*packed);
+                }
+            }
+        }
+    }
+}
+
+TEST(SortedIndexReaderTest, FloatingArraySortRequiresFiniteValues) {
+    CheckFloatingArraySort<float>(DataType::FLOAT, "SortedFloatArray");
+    CheckFloatingArraySort<double>(DataType::DOUBLE, "SortedDoubleArray");
 }
 
 TEST(SortedIndexReaderTest, ProvidesInt64Queries) {

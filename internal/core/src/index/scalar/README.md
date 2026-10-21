@@ -39,6 +39,21 @@ of string dictionary/postings are each encapsulated in a type-specific storage v
 keys use `owned_t<T>`, and string lookups use transparent comparison; `Lookup` returns owned values,
 and the `string_view` from `Gather` is valid only during the synchronous callback.
 
+## Ordinary ARRAY SORT
+
+Ordinary ARRAY SORT uses `ScalarBuildInput<ArrayView>` and parent-row postings,
+not flattened nested coordinates. Empty arrays are valid rows with no postings;
+NULL rows remain invalid. Persisted validity is authoritative after reload.
+The reader advertises `Domain::Row` and disables value lookup: the raw ARRAY
+column is still needed for projection and positional/whole-array operations.
+High-cardinality HYBRID selects SORT from scalar engine v6 for BOOL, integer,
+VARCHAR and FLOAT/DOUBLE arrays; older targets retain INVERTED. Floating ARRAY
+values must be finite: Proxy DML and DataNode import reject NaN/Inf, and the SORT
+builder checks stored values again before sorting (including HYBRID selection).
+Invalid stored values fail the build with DataFormatBroken; no partial index is
+published and no values are discarded or rewritten. Nested
+Struct sub-fields keep their existing v4 gate and element-coordinate contract.
+
 ## V3 loading
 
 V3 Artifacts write directly to `IndexEntryWriter`. Reads use `IndexEntryReader` or

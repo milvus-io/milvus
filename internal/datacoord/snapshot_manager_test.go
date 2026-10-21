@@ -2280,6 +2280,52 @@ func TestSnapshotManager_RestoreIndexes_FMINDEXNilVersionManager(t *testing.T) {
 	assert.False(t, broadcasterCalled)
 }
 
+func TestSnapshotManager_RestoreIndexes_ArraySTLSORTNilVersionManager(t *testing.T) {
+	ctx := context.Background()
+	const collectionID = int64(100)
+
+	mockAllocator := allocator.NewMockAllocator(t)
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
+		&milvuspb.DescribeCollectionResponse{DbName: "default", Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}}}, nil,
+	).Once()
+
+	sm := NewSnapshotManager(
+		nil,
+		nil,
+		nil,
+		mockAllocator,
+		nil,
+		mockBroker,
+		nil,
+		nil, // indexEngineVersionManager
+	)
+
+	broadcasterCalled := false
+	startBroadcaster := func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) {
+		broadcasterCalled = true
+		return nil, nil
+	}
+
+	err := sm.RestoreIndexes(ctx, &snapshotstorage.SnapshotData{
+		Indexes: []*indexpb.IndexInfo{
+			{
+				IndexName: "array_sort_idx",
+				FieldID:   101,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "STL_SORT"},
+				},
+			},
+		},
+	}, collectionID, startBroadcaster, "snapshot")
+
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	assert.True(t, merr.Status(err).GetRetriable())
+	assert.False(t, broadcasterCalled)
+}
+
 // --- Test ReadSnapshotData ---
 
 func TestSnapshotManager_ReadSnapshotData_Success(t *testing.T) {

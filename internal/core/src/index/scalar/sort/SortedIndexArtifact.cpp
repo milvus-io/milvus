@@ -152,12 +152,14 @@ SortedIndexArtifact<T>::SortedIndexArtifact(std::vector<IndexStructure<T>> data,
                                             TargetBitmap valid_bitset,
                                             std::vector<int32_t> idx_to_offsets,
                                             size_t total_num_rows,
-                                            bool nested)
+                                            bool nested,
+                                            bool array_rows)
     : data_(std::move(data)),
       valid_bitset_(std::move(valid_bitset)),
       idx_to_offsets_(std::move(idx_to_offsets)),
       total_num_rows_(total_num_rows),
-      nested_(nested) {
+      nested_(nested),
+      array_rows_(array_rows) {
     static_assert(std::is_trivially_copyable_v<IndexStructure<T>>);
 }
 
@@ -193,6 +195,13 @@ SortedIndexArtifact<T>::SerializeImpl(Output& sink) const {
                         sizeof(total_num_rows_));
         sink.WriteEntry(
             std::string(sort_format::kLegacyNested), &nested_, sizeof(nested_));
+        // Empty ARRAY rows have no postings but remain non-null. Legacy scalar
+        // artifacts can rebuild validity; ARRAY artifacts must persist it.
+        if (array_rows_) {
+            sink.WriteEntry(std::string(sort_format::kValidBitset),
+                            valid_bitset_.data(),
+                            valid_bitset_.size_in_bytes());
+        }
         return;
     }
 

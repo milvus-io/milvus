@@ -38,7 +38,8 @@ class SortedIndexArtifact final : public storage::Artifact {
                         TargetBitmap valid_bitset,
                         std::vector<int32_t> idx_to_offsets,
                         size_t total_num_rows,
-                        bool nested);
+                        bool nested,
+                        bool array_rows = false);
 
     ~SortedIndexArtifact() override;
 
@@ -58,6 +59,7 @@ class SortedIndexArtifact final : public storage::Artifact {
     std::vector<int32_t> idx_to_offsets_;
     size_t total_num_rows_{0};
     bool nested_{false};
+    bool array_rows_{false};
 };
 
 class SortedStringIndexArtifact final : public storage::Artifact {

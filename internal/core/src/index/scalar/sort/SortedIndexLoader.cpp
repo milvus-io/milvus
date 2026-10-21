@@ -614,6 +614,27 @@ LoadNumericState(bool use_async,
 
     auto rebuilt = RebuildNumericAux(
         args.storage.data, args.storage.size, meta.count, params);
+    if (source.HasEntry(sort_format::kValidBitset)) {
+        const auto bytes =
+            co_await ReadEntryVector<uint8_t>(use_async,
+                                              opts,
+                                              source,
+                                              sort_format::kValidBitset,
+                                              rebuilt.first.size_in_bytes(),
+                                              opts.mmap_dir_path);
+        if (!bytes->empty()) {
+            std::memcpy(rebuilt.first.data(), bytes->data(), bytes->size());
+        }
+        ValidateNumericAux(args.storage.data,
+                           args.storage.size,
+                           rebuilt.first,
+                           rebuilt.second->data(),
+                           meta.count,
+                           params);
+    } else if (!params.one_value_per_coordinate) {
+        ThrowInfo(DataFormatBroken,
+                  "ordinary ARRAY SORT requires persisted validity");
+    }
     args.state.valid_bitset =
         std::make_shared<const TargetBitmap>(std::move(rebuilt.first));
     args.state.idx_to_offsets = rebuilt.second->data();
@@ -1132,7 +1153,8 @@ SortedIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     const bool string = IsStringDataType(state->params.value_type);
     state->has_offsets = directory.HasEntry(sort_format::kIdxToOffsets);
     const bool has_validity = directory.HasEntry(sort_format::kValidBitset);
-    if ((string && !has_validity) ||
+    if ((!state->params.one_value_per_coordinate && !has_validity) ||
+        (string && !has_validity) ||
         (!string && has_validity != state->has_offsets)) {
         ThrowInfo(DataFormatBroken,
                   "sorted V3 auxiliary entries are incomplete");

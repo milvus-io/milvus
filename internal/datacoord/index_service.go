@@ -148,6 +148,36 @@ func checkFMIndexEngineVersion(indexParams []*commonpb.KeyValuePair, resolvedSca
 	return nil
 }
 
+// checkArraySTLSORTIndex rejects ordinary ARRAY SORT before all readers can
+// handle parent-row postings. RestoreIndexes must apply the same check because
+// it broadcasts CreateIndex directly. A rolling upgrade is a system readiness
+// condition, not an invalid user request. Build workers must be upgraded first,
+// as with FMINDEX; the version manager currently negotiates reader capability.
+func checkArraySTLSORTIndex(schema *schemapb.CollectionSchema, fieldID int64, indexParams []*commonpb.KeyValuePair, resolvedScalarVersion int32) error {
+	if common.GetIndexType(indexParams) != indexparamcheck.IndexSTLSORT {
+		return nil
+	}
+	if typeutil.GetField(schema, fieldID) == nil {
+		return merr.WrapErrServiceInternalMsg("cannot validate ARRAY STL_SORT capability without schema field %d", fieldID)
+	}
+	// Only top-level fields use parent-row postings. Struct sub-fields retain
+	// their existing element-domain policy and version gate.
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() != fieldID || field.GetDataType() != schemapb.DataType_Array {
+			continue
+		}
+		if !indexparamcheck.IsArraySTLSORTElementType(field.GetElementType()) {
+			return merr.WrapErrParameterInvalidMsg("STL_SORT on ordinary ARRAY supports bool, integer, float, double and varchar elements, got %s", field.GetElementType())
+		}
+		if resolvedScalarVersion < common.MinScalarIndexVersionForArrayStlSort {
+			return merr.WrapErrServiceNotReadyMsg(
+				"ARRAY STL_SORT requires scalar index engine version >= %d, current resolved version: %d (a rolling upgrade may still be in progress)",
+				common.MinScalarIndexVersionForArrayStlSort, resolvedScalarVersion)
+		}
+	}
+	return nil
+}
+
 // CreateIndex create an index on collection.
 // Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
@@ -233,6 +263,16 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 					return merr.Status(err), nil
 				}
 			}
+		}
+	}
+
+	if common.GetIndexType(req.GetIndexParams()) == indexparamcheck.IndexSTLSORT {
+		resolved := int32(0)
+		if s.indexEngineVersionManager != nil {
+			resolved = s.indexEngineVersionManager.ResolveScalarIndexVersion()
+		}
+		if err := checkArraySTLSORTIndex(schema, req.GetFieldID(), req.GetIndexParams(), resolved); err != nil {
+			return merr.Status(err), nil
 		}
 	}
 

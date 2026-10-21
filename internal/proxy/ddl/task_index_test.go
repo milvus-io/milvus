@@ -995,7 +995,12 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 		}
 		err := cit3.parseIndexParams(context.TODO())
-		assert.Error(t, err)
+		assert.NoError(t, err)
+		assert.Contains(t, cit3.newIndexParams, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: "STL_SORT"})
+		for _, element := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+			cit3.fieldSchema.ElementType = element
+			assert.NoError(t, cit3.parseIndexParams(context.TODO()))
+		}
 	})
 
 	t.Run("pass vector index type on scalar field", func(t *testing.T) {

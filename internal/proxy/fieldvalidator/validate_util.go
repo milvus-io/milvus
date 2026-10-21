@@ -1237,6 +1237,11 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 			if err := validateValidity(validData, len(row.GetFloatData().GetData()), rowIdx); err != nil {
 				return err
 			}
+			if v.checkNAN {
+				if err := typeutil.VerifyFloats32(row.GetFloatData().GetData()); err != nil {
+					return merr.Wrapf(err, "field %s array row %d", field.GetName(), rowIdx)
+				}
+			}
 		}
 	case schemapb.DataType_Double:
 		for rowIdx, row := range data {
@@ -1251,6 +1256,11 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 			}
 			if err := validateValidity(validData, len(row.GetDoubleData().GetData()), rowIdx); err != nil {
 				return err
+			}
+			if v.checkNAN {
+				if err := typeutil.VerifyFloats64(row.GetDoubleData().GetData()); err != nil {
+					return merr.Wrapf(err, "field %s array row %d", field.GetName(), rowIdx)
+				}
 			}
 		}
 	case schemapb.DataType_VarChar, schemapb.DataType_String:

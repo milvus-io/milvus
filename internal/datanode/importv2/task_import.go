@@ -298,6 +298,9 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *importid.FileID
 		}
 		// the same check has been done in preimport task, double-check here since
 		// the actual import task re-reads the files
+		if err := CheckArrayFiniteValues(data); err != nil {
+			return err
+		}
 		err = CheckStructArrayConsistency(t.GetSchema(), data)
 		if err != nil {
 			return err
