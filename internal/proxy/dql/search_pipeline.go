@@ -3112,7 +3112,7 @@ func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*
 	return p.run(ctx, span, msg, 0)
 }
 
-// RunFromReduced continues a Plain Search pipeline after its first reduction node.
+// RunFromReduced continues a Search pipeline, including aggregation, after its first reduction node.
 func (p *pipeline) RunFromReduced(ctx context.Context, span trace.Span, reduced *milvuspb.SearchResults, metricType string, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
 	if len(p.nodes) == 0 || p.nodes[0].opName != searchReduceOp {
 		return nil, storageCost, merr.WrapErrServiceInternal("SearchPipeline does not start with Plain Search reduction")
