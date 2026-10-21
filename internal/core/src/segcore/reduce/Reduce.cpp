@@ -204,9 +204,27 @@ void
 ReduceHelper::FillPrimaryKey() {
     tracer::AutoSpan span("ReduceHelper::FillPrimaryKey",
                           tracer::GetRootSpan());
-    // Avoid scheduling resident PK reads; eviction can turn them into loads.
-    if (num_segments_ > 1 &&
-        cachinglayer::Manager::GetInstance().isEvictionEnabled()) {
+    // Bound inline PK work before reduction; strings can be costly even when resident.
+    bool fanout = false;
+    if (num_segments_ > 1) {
+        const auto pk_field_id = plan_->schema_->get_primary_field_id();
+        fanout =
+            cachinglayer::Manager::GetInstance().isEvictionEnabled() ||
+            (pk_field_id.has_value() &&
+             plan_->schema_->GetFieldType(*pk_field_id) == DataType::VARCHAR);
+        if (!fanout) {
+            size_t remaining_rows = kSearchFanoutMinRows;
+            for (const auto* search_result : search_results_) {
+                const auto rows = search_result->seg_offsets_.size();
+                if (rows >= remaining_rows) {
+                    fanout = true;
+                    break;
+                }
+                remaining_rows -= rows;
+            }
+        }
+    }
+    if (fanout) {
         // Isolate search fanout from background field and index loading.
         auto& pool = ThreadPools::GetThreadPool(
             milvus::ThreadPoolPriority::SEARCH_FANOUT);

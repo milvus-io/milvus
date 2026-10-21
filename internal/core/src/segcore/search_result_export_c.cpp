@@ -1059,12 +1059,10 @@ MaterializeOrderedFields(
         materialize_segment_fields(segment, materialized);
     };
 
-    // shortcut: rows ignore field width/skew; retune with end-to-end data.
-    constexpr int64_t kFanoutMinRows = 16 * 1024;
     const bool fanout =
         segment_fields.size() > 1 &&
         (milvus::cachinglayer::Manager::GetInstance().isEvictionEnabled() ||
-         total_rows >= kFanoutMinRows ||
+         total_rows >= milvus::segcore::kSearchFanoutMinRows ||
          std::any_of(field_ids.begin(), field_ids.end(), [&](auto field_id) {
              const auto type =
                  plan->schema_->operator[](field_id).get_data_type();
