@@ -277,8 +277,7 @@ type DeleteRunner struct {
 	initRequestOnce sync.Once
 	req             *milvuspb.DeleteRequest
 	result          *milvuspb.MutationResult
-	// userPlanIsSimple: the user's filter, before any row-level-security
-	// predicate, names primary keys only (delete by ids).
+	// userPlanIsSimple: the user's filter names primary keys only (delete by ids).
 	userPlanIsSimple bool
 	node             taskmodel.TaskNode
 	metaCache        Cache
@@ -398,8 +397,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	}
 
 	colTimezone := dql.GetColTimezone(colInfo)
-	// The user's own filter is counted: the parser reports it before the
-	// rewriter, and the row-level-security predicate is merged in afterwards.
+	// Count the user's filter before the rewriter changes it.
 	var exprFeatures featureusage.FeatureSet
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone, OnParsedExpr: dql.ExprFeatureObserver(&exprFeatures)}
 
@@ -423,9 +421,6 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
-	// The mode is the shape of the user's request. With row-level security
-	// the predicate merged below turns every delete into a filter delete,
-	// which is how the server runs it but not what the client asked for.
 	if featureusage.Enabled() {
 		dr.userPlanIsSimple = isSimpleDeletePlan(userPlan)
 	}

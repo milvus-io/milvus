@@ -483,8 +483,6 @@ const (
 	// namespace sharding
 	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
 
-	// row level security
-
 	// warmup related
 	WarmupKey            = "warmup"
 	WarmupScalarFieldKey = "warmup.scalarField"

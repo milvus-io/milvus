@@ -54,10 +54,6 @@ func TestOfficialFeatureKeysCoverDottedConstants(t *testing.T) {
 	exempt := map[string]struct{}{
 		"uber-trace-id":           {},
 		"client-request-unixmsec": {},
-		// Message properties the Proxy and RootCoord pass between them for
-		// row-level security, not collection or database properties.
-		RLSPrincipalNameKey: {},
-		RLSClearAllCacheKey: {},
 	}
 
 	var missing []string
