@@ -998,3 +998,35 @@ func TestGetResourceGroupName(t *testing.T) {
 		assert.Equal(t, "my_rg", s.GetResourceGroupName())
 	})
 }
+
+func TestRevokeLeasesBeforeExit(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	defer etcdKV.RemoveWithPrefix(ctx, "")
+
+	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s.Init("revoketest", "testAddr", false)
+	s.Register()
+	sessions, _, err := s.GetSessions(ctx, "revoketest")
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	_, live := liveSessions.Load(s)
+	require.True(t, live)
+
+	RevokeLeasesBeforeExit(time.Second)
+
+	// The session key goes with its lease at once, not after the TTL.
+	sessions, _, err = s.GetSessions(ctx, "revoketest")
+	require.NoError(t, err)
+	require.Empty(t, sessions)
+	ttl, err := etcdCli.TimeToLive(ctx, *s.LeaseID)
+	require.NoError(t, err)
+	require.EqualValues(t, -1, ttl.TTL)
+
+	s.Stop()
+	_, live = liveSessions.Load(s)
+	require.False(t, live)
+}
