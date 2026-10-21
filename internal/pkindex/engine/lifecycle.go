@@ -103,20 +103,9 @@ func (e *Engine) InstallCommitted(ctx context.Context, tables []CommittedTable, 
 	}
 	// resolve every generation before touching anything, so a bad argument
 	// leaves the engine exactly as it was
-	retiring := make([]*generation, 0, len(retire))
-	seenGen := make(map[Generation]struct{}, len(retire))
-	for _, gen := range retire {
-		if _, dup := seenGen[gen]; dup {
-			// retiring a generation twice would close its DB twice, which
-			// pebble answers with a panic
-			return errors.Wrapf(errDuplicateRetire, "generation %d", gen)
-		}
-		seenGen[gen] = struct{}{}
-		g := e.findFrozen(gen)
-		if g == nil {
-			return errors.Wrapf(ErrNotFrozen, "generation %d", gen)
-		}
-		retiring = append(retiring, g)
+	retiring, err := e.resolveRetire(retire)
+	if err != nil {
+		return err
 	}
 	// the same table twice would open two readers for one file and leak the
 	// one that the next install does not find under its ID
@@ -192,25 +181,66 @@ func (e *Engine) InstallCommitted(ctx context.Context, tables []CommittedTable, 
 	return nil
 }
 
-// DropFrozen retires one frozen generation without installing anything.
-func (e *Engine) DropFrozen(ctx context.Context, gen Generation) error {
+// DropFrozen retires frozen generations without installing anything.
+func (e *Engine) DropFrozen(ctx context.Context, gens ...Generation) error {
 	e.cycleMu.Lock()
 	defer e.cycleMu.Unlock()
 	if e.closed {
 		return errClosed
 	}
-	g := e.findFrozen(gen)
-	if g == nil {
-		return errors.Wrapf(ErrNotFrozen, "generation %d", gen)
-	}
-	e.mu.Lock()
-	e.frozen = withoutGenerations(e.frozen, []*generation{g})
-	e.mu.Unlock()
-	if err := g.retire(); err != nil {
+	retiring, err := e.resolveRetire(gens)
+	if err != nil {
 		return err
 	}
-	e.logger.Info(ctx, "pkindex generation dropped", mlog.Int64("gen", int64(gen)))
+	e.mu.Lock()
+	e.frozen = withoutGenerations(e.frozen, retiring)
+	e.mu.Unlock()
+	// every generation is out of the read path now; retire them all and
+	// report the first failure, since none of them is retried
+	var retireErr error
+	for _, g := range retiring {
+		if err := g.retire(); err != nil && retireErr == nil {
+			retireErr = err
+		}
+	}
+	if retireErr != nil {
+		return retireErr
+	}
+	e.logger.Info(ctx, "pkindex generations dropped", mlog.Int("dropped", len(retiring)))
 	return nil
+}
+
+// resolveRetire checks the generations a caller wants to retire and returns
+// them, without changing anything. Each must be frozen and named once, and
+// together they must be the oldest frozen generations, with none left
+// between them and the committed set. The caller holds cycleMu.
+func (e *Engine) resolveRetire(retire []Generation) ([]*generation, error) {
+	retiring := make([]*generation, 0, len(retire))
+	seen := make(map[Generation]struct{}, len(retire))
+	for _, gen := range retire {
+		if _, dup := seen[gen]; dup {
+			// retiring a generation twice would close its DB twice, which
+			// pebble answers with a panic
+			return nil, errors.Wrapf(errDuplicateRetire, "generation %d", gen)
+		}
+		seen[gen] = struct{}{}
+		g := e.findFrozen(gen)
+		if g == nil {
+			return nil, errors.Wrapf(ErrNotFrozen, "generation %d", gen)
+		}
+		retiring = append(retiring, g)
+	}
+	// Frozen generations are ordered newest first, and a lookup reads them
+	// before the committed set. A younger generation left behind when an older
+	// one retires would mask the newer values the set now holds, so the
+	// retired ones must be the tail of the list.
+	tail := e.frozen[len(e.frozen)-len(retiring):]
+	for _, g := range tail {
+		if _, ok := seen[g.gen]; !ok {
+			return nil, errors.Wrapf(errRetireOutOfOrder, "generation %d stays frozen behind a retired one", g.gen)
+		}
+	}
+	return retiring, nil
 }
 
 func (e *Engine) findFrozen(gen Generation) *generation {

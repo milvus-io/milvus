@@ -232,8 +232,17 @@ engine cannot see them.
   uploading and then retire them, leaving the first reading staging that has
   been deleted. A single background task per vchannel satisfies this.
 
-A handover with nothing to publish retires its empty generations with
-`DropFrozen`.
+A handover with nothing to publish retires its empty generations with one
+`DropFrozen` call.
+
+A lookup reads the frozen generations newest first, before the committed set,
+so a younger generation left frozen when an older one retires would mask the
+newer values the committed set holds. The engine therefore accepts a `retire`
+list, in `InstallCommitted` and in `DropFrozen` alike, only when it is the
+oldest frozen generations with none left in between. It does not check that
+the installed tables cover the retired data: after a compaction the manifest
+lists other tables than the ones a generation staged, so only the manifest
+knows what covers what, and that remains the caller's contract.
 
 None of this runs under an engine lock. Uploading and committing take as long
 as the network does and must not block writes or another component's install,
@@ -378,7 +387,7 @@ type Lifecycle interface {
     StageFrozen(ctx, gen) ([]StagedTable, error)  // newest first, staged by ID
     FrozenGenerations() []Generation               // newest first
     InstallCommitted(ctx, tables []CommittedTable, retire ...Generation) error
-    DropFrozen(ctx, gen) error
+    DropFrozen(ctx, gens ...Generation) error        // the oldest frozen ones, in one call
     Stats() Stats
     Close() error                                    // keeps disk state
     Destroy() error                                  // deletes the data directory
@@ -420,8 +429,9 @@ the caller's policy; the engine offers no threshold callback.
   integrity is Pebble's per-block checksum, verified on every read.
 - If opening or preloading a new table fails, nothing changes: the committed
   set and the generations are exactly as they were.
-- `InstallCommitted` fails before changing anything if a generation named in
-  `retire` is not frozen.
+- `InstallCommitted` and `DropFrozen` fail before changing anything if a
+  generation to retire is not frozen, is named twice, or is not among the
+  oldest frozen generations.
 - A failed `RotateIncrement` leaves the engine unchanged.
 - A failed `DropFrozen` has already removed the generation from the read
   path and must not be retried. If the rename to `retired-N` happened, the

@@ -388,6 +388,64 @@ func TestInstallCommittedRejectsDuplicateRetire(t *testing.T) {
 	assert.Empty(t, e.FrozenGenerations())
 }
 
+// A lookup reads the frozen generations newest first, before the committed
+// set. Retiring a younger generation while an older one stays frozen would
+// leave the older value in front of the committed set, so only the oldest
+// frozen generations can retire, through either path.
+func TestRetireMustBeOldestFrozen(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+	require.NoError(t, e.Write(ctx, []Mutation{{Key: pk(1), Value: entry(10)}}))
+	older, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+	require.NoError(t, e.Write(ctx, []Mutation{{Key: pk(1), Value: entry(20)}}))
+	newer, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []Generation{newer, older}, e.FrozenGenerations())
+
+	table := buildCommitted(t, t.TempDir(), 1, map[int64][]byte{1: entry(20)})
+	err = e.InstallCommitted(ctx, []CommittedTable{table}, newer)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errRetireOutOfOrder), "got %v", err)
+	err = e.DropFrozen(ctx, newer)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errRetireOutOfOrder), "got %v", err)
+
+	// nothing changed
+	assert.Equal(t, []Generation{newer, older}, e.FrozenGenerations())
+	assert.Zero(t, e.Stats().CommittedTables)
+	requireSegment(t, e, pk(1), 20)
+
+	// the oldest alone, then the rest, in either path
+	require.NoError(t, e.DropFrozen(ctx, older))
+	require.NoError(t, e.InstallCommitted(ctx, []CommittedTable{table}, newer))
+	assert.Empty(t, e.FrozenGenerations())
+	requireSegment(t, e, pk(1), 20)
+}
+
+// A handover that has nothing to publish drops every frozen generation; they
+// go in one call, which is what lets the oldest-first rule hold for all of
+// them at once.
+func TestDropFrozenRetiresSeveralAtOnce(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+	require.NoError(t, e.Write(ctx, []Mutation{{Key: pk(1), Value: entry(10)}}))
+	older, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+	newer, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+
+	err = e.DropFrozen(ctx, newer, newer)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errDuplicateRetire), "got %v", err)
+	assert.Equal(t, []Generation{newer, older}, e.FrozenGenerations())
+
+	require.NoError(t, e.DropFrozen(ctx, newer, older))
+	assert.Empty(t, e.FrozenGenerations())
+	assert.Nil(t, getOne(t, e, pk(1)), "the dropped data is gone from the read path")
+	assert.Error(t, e.DropFrozen(ctx, older), "dropping twice must fail")
+}
+
 // The same table twice would open two readers for one file and leak the one a
 // later install does not find under its ID, so the duplicate is rejected.
 func TestInstallCommittedRejectsDuplicateTable(t *testing.T) {

@@ -112,17 +112,24 @@ func (_c *MockLifecycle_Destroy_Call) RunAndReturn(run func() error) *MockLifecy
 	return _c
 }
 
-// DropFrozen provides a mock function with given fields: ctx, gen
-func (_m *MockLifecycle) DropFrozen(ctx context.Context, gen engine.Generation) error {
-	ret := _m.Called(ctx, gen)
+// DropFrozen provides a mock function with given fields: ctx, gens
+func (_m *MockLifecycle) DropFrozen(ctx context.Context, gens ...engine.Generation) error {
+	_va := make([]interface{}, len(gens))
+	for _i := range gens {
+		_va[_i] = gens[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropFrozen")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, engine.Generation) error); ok {
-		r0 = rf(ctx, gen)
+	if rf, ok := ret.Get(0).(func(context.Context, ...engine.Generation) error); ok {
+		r0 = rf(ctx, gens...)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -137,14 +144,21 @@ type MockLifecycle_DropFrozen_Call struct {
 
 // DropFrozen is a helper method to define mock.On call
 //   - ctx context.Context
-//   - gen engine.Generation
-func (_e *MockLifecycle_Expecter) DropFrozen(ctx interface{}, gen interface{}) *MockLifecycle_DropFrozen_Call {
-	return &MockLifecycle_DropFrozen_Call{Call: _e.mock.On("DropFrozen", ctx, gen)}
+//   - gens ...engine.Generation
+func (_e *MockLifecycle_Expecter) DropFrozen(ctx interface{}, gens ...interface{}) *MockLifecycle_DropFrozen_Call {
+	return &MockLifecycle_DropFrozen_Call{Call: _e.mock.On("DropFrozen",
+		append([]interface{}{ctx}, gens...)...)}
 }
 
-func (_c *MockLifecycle_DropFrozen_Call) Run(run func(ctx context.Context, gen engine.Generation)) *MockLifecycle_DropFrozen_Call {
+func (_c *MockLifecycle_DropFrozen_Call) Run(run func(ctx context.Context, gens ...engine.Generation)) *MockLifecycle_DropFrozen_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(engine.Generation))
+		variadicArgs := make([]engine.Generation, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(engine.Generation)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
 	})
 	return _c
 }
@@ -154,7 +168,7 @@ func (_c *MockLifecycle_DropFrozen_Call) Return(_a0 error) *MockLifecycle_DropFr
 	return _c
 }
 
-func (_c *MockLifecycle_DropFrozen_Call) RunAndReturn(run func(context.Context, engine.Generation) error) *MockLifecycle_DropFrozen_Call {
+func (_c *MockLifecycle_DropFrozen_Call) RunAndReturn(run func(context.Context, ...engine.Generation) error) *MockLifecycle_DropFrozen_Call {
 	_c.Call.Return(run)
 	return _c
 }

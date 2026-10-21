@@ -55,6 +55,7 @@ var (
 	errReservedTombstoneValue = errors.New("pkindex value is the reserved tombstone encoding")
 	errDuplicateRetire        = errors.New("pkindex generation is listed twice in retire")
 	errDuplicateTable         = errors.New("pkindex table ID is listed twice in the committed set")
+	errRetireOutOfOrder       = errors.New("pkindex retire must name the oldest frozen generations")
 )
 
 // errClosed is ErrClosed in the form the methods return: a closed engine is

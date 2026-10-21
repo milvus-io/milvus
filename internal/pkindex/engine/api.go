@@ -136,8 +136,12 @@ type Lifecycle interface {
 	// Passing no tables clears the committed set.
 	//
 	// Installing and retiring together is what keeps coverage from going
-	// backwards. A generation named in retire that is not frozen fails the
-	// call before anything changes.
+	// backwards. The generations in retire must be the oldest frozen ones,
+	// with none left between them and the committed set: a lookup reads the
+	// frozen generations before the committed set, so a younger generation
+	// left behind would mask the newer values the set now holds. A generation
+	// that is not frozen, is named twice, or is not among the oldest fails
+	// the call before anything changes.
 	//
 	// A table already open under the same ID keeps its reader, so a set that
 	// mostly repeats itself neither reopens files nor loses what their blocks
@@ -151,14 +155,15 @@ type Lifecycle interface {
 	// checksum, not a whole-file hash.
 	InstallCommitted(ctx context.Context, tables []CommittedTable, retire ...Generation) error
 
-	// DropFrozen retires a frozen generation without installing anything.
-	// It is for a generation an already-committed manifest covers, which a
-	// warm start finds on disk and must not upload again. On error the
-	// generation is out of the read path regardless and must not be retried.
-	// If the rename to retired-N happened, the next Open deletes what is left;
-	// if not, the next Open restores the generation as frozen and the caller
-	// drops it again.
-	DropFrozen(ctx context.Context, gen Generation) error
+	// DropFrozen retires frozen generations without installing anything. It
+	// is for generations an already-committed manifest covers, or that hold
+	// nothing to publish. The same rule as for retire applies: they must be
+	// the oldest frozen ones, so a caller that drops several passes them in
+	// one call. On error the generations are out of the read path regardless
+	// and must not be retried. If the rename to retired-N happened, the next
+	// Open deletes what is left; if not, the next Open restores the generation
+	// as frozen and the caller drops it again.
+	DropFrozen(ctx context.Context, gens ...Generation) error
 
 	// Stats snapshots the engine's shape, for triggering policies and metrics.
 	Stats() Stats
