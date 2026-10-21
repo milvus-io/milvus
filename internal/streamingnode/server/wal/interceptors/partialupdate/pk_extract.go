@@ -14,8 +14,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// latestCollectionSchemaVersion asks ShardManager for its current PK descriptor
-// when an insert header does not carry an explicit version.
+// latestCollectionSchemaVersion asks ShardManager for the PK descriptor of the
+// current schema without comparing it with the version an insert carries.
+// Milvus cannot alter the primary key field, so every schema version of a
+// collection has the same PK field; the shard interceptor, not PK extraction,
+// rejects a schema version mismatch on a live append. Recovered transaction
+// bodies are not re-validated (see the design doc).
 const latestCollectionSchemaVersion int32 = -1
 
 type casInsertScope struct {
@@ -23,17 +27,17 @@ type casInsertScope struct {
 	schemaVersion int32
 }
 
-// extractPKs extracts row-content primary keys from WAL delete messages.
+// extractPKsFromDelete extracts row-content primary keys from WAL delete messages.
 // ok=false means callers must handle inserts and collection-wide writes separately.
-func extractPKs(msg message.MutableMessage) ([]any, bool, error) {
-	keys, ok, err := extractPKsWithContext(context.Background(), msg)
+func extractPKsFromDelete(msg message.MutableMessage) ([]any, bool, error) {
+	keys, ok, err := extractPKsFromDeleteWithContext(context.Background(), msg)
 	if !ok {
 		return nil, false, err
 	}
 	return keys.toAny(), true, err
 }
 
-func extractPKsWithContext(ctx context.Context, msg message.MutableMessage) (primaryKeys, bool, error) {
+func extractPKsFromDeleteWithContext(ctx context.Context, msg message.BasicMessage) (primaryKeys, bool, error) {
 	if msg == nil {
 		return primaryKeys{}, false, nil
 	}
@@ -56,9 +60,9 @@ func extractPKsFromInsert(msg message.MutableMessage, fieldID int64) ([]any, err
 	return keys.toAny(), err
 }
 
-func extractPKsFromInsertWithContext(ctx context.Context, msg message.MutableMessage, fieldID int64) (primaryKeys, error) {
+func extractPKsFromInsertWithContext(ctx context.Context, msg message.BasicMessage, fieldID int64) (primaryKeys, error) {
 	if msg == nil || fieldID <= 0 {
-		return primaryKeys{}, status.NewUnrecoverableError("partial update insert primary key field id is invalid")
+		return primaryKeys{}, status.NewUnrecoverableError("insert primary key field id is invalid")
 	}
 	body, err := decodeInsertBody(ctx, msg)
 	if err != nil {
@@ -79,7 +83,7 @@ func extractPKsFromCASInsert(
 
 func extractPKsFromCASInsertWithContext(
 	ctx context.Context,
-	msg message.MutableMessage,
+	msg message.BasicMessage,
 	descriptorGetter primaryKeyDescriptorGetter,
 ) (primaryKeys, casInsertScope, string, error) {
 	if descriptorGetter == nil {
@@ -87,14 +91,13 @@ func extractPKsFromCASInsertWithContext(
 			"partial update primary key descriptor getter is unavailable",
 		)
 	}
-	insertMsg, err := message.AsMutableInsertMessageV1(msg)
+	header, err := insertHeader(msg)
 	if err != nil {
 		return primaryKeys{}, casInsertScope{}, "", status.NewUnrecoverableError(
 			"decode partial update insert message failed: %v",
 			err,
 		)
 	}
-	header := insertMsg.Header()
 	if header.GetCollectionId() == 0 {
 		return primaryKeys{}, casInsertScope{}, "", status.NewUnrecoverableError(
 			"partial update CAS insert collection id is empty",
@@ -110,29 +113,9 @@ func extractPKsFromCASInsertWithContext(
 		collectionID:  header.GetCollectionId(),
 		schemaVersion: header.GetSchemaVersion(),
 	}
-	descriptor, err := descriptorGetter.GetPrimaryKeyDescriptor(
-		scope.collectionID,
-		scope.schemaVersion,
-	)
+	descriptor, err := primaryKeyDescriptorOf(descriptorGetter, scope.collectionID)
 	if err != nil {
-		if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
-			return primaryKeys{}, casInsertScope{}, "", status.NewSchemaVersionMismatch(
-				"schema version mismatch while validating partial update CAS, collection: %d, schema version: %d",
-				scope.collectionID,
-				scope.schemaVersion,
-			)
-		}
-		return primaryKeys{}, casInsertScope{}, "", status.NewUnrecoverableError(
-			"get primary key descriptor for partial update CAS failed: %v",
-			err,
-		)
-	}
-	if descriptor.FieldID <= 0 || !typeutil.IsPrimaryFieldType(descriptor.DataType) {
-		return primaryKeys{}, casInsertScope{}, "", status.NewUnrecoverableError(
-			"partial update primary key descriptor is invalid, field: %d, type: %s",
-			descriptor.FieldID,
-			descriptor.DataType.String(),
-		)
+		return primaryKeys{}, casInsertScope{}, "", err
 	}
 
 	body, err := decodeInsertBody(ctx, msg)
@@ -152,68 +135,96 @@ func extractPKsFromCASInsertWithContext(
 	return keys, scope, encoded, nil
 }
 
-// extractPKsFromOrdinaryInsert returns exact PKs when schema is available, or
-// a collection fence ID for a schema-less legacy insert accepted by shard.
-func extractPKsFromOrdinaryInsert(msg message.MutableMessage, descriptorGetter primaryKeyDescriptorGetter) (pks []any, fenceCollectionID int64, err error) {
-	keys, fenceCollectionID, err := extractPKsFromOrdinaryInsertWithContext(context.Background(), msg, descriptorGetter)
-	return keys.toAny(), fenceCollectionID, err
+// extractPKsFromOrdinaryInsert extracts the PKs of an ordinary insert, with or
+// without a schema version, through the PK field of its collection's schema.
+func extractPKsFromOrdinaryInsert(msg message.MutableMessage, descriptorGetter primaryKeyDescriptorGetter) ([]any, error) {
+	keys, err := extractPKsFromOrdinaryInsertWithContext(context.Background(), msg, descriptorGetter)
+	return keys.toAny(), err
 }
 
 func extractPKsFromOrdinaryInsertWithContext(
 	ctx context.Context,
-	msg message.MutableMessage,
+	msg message.BasicMessage,
 	descriptorGetter primaryKeyDescriptorGetter,
-) (pks primaryKeys, fenceCollectionID int64, err error) {
+) (primaryKeys, error) {
+	header, err := insertHeader(msg)
+	if err != nil {
+		return primaryKeys{}, status.NewUnrecoverableError("decode insert message for partial update tracking failed: %v", err)
+	}
+	if header.GetCollectionId() == 0 {
+		return primaryKeys{}, status.NewUnrecoverableError("insert collection id is empty")
+	}
 	if descriptorGetter == nil {
-		return primaryKeys{}, 0, status.NewUnrecoverableError("partial update primary key descriptor getter is unavailable")
+		return primaryKeys{}, status.NewUnrecoverableError("partial update primary key descriptor getter is unavailable")
 	}
-	insertMsg, err := message.AsMutableInsertMessageV1(msg)
+	descriptor, err := primaryKeyDescriptorOf(descriptorGetter, header.GetCollectionId())
 	if err != nil {
-		return primaryKeys{}, 0, status.NewUnrecoverableError("decode insert message for partial update tracking failed: %v", err)
-	}
-	header := insertMsg.Header()
-	schemaVersion := latestCollectionSchemaVersion
-	if header.SchemaVersion != nil {
-		schemaVersion = header.GetSchemaVersion()
-	}
-	descriptor, err := descriptorGetter.GetPrimaryKeyDescriptor(header.GetCollectionId(), schemaVersion)
-	if err != nil {
-		if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
-			return primaryKeys{}, 0, status.NewSchemaVersionMismatch(
-				"schema version mismatch while tracking partial update writes, collection: %d, schema version: %d",
-				header.GetCollectionId(), header.GetSchemaVersion())
-		}
-		// Shard accepts schema-less legacy inserts during rolling upgrades.
-		// Fence the collection when their exact PK field cannot be recovered.
-		if header.SchemaVersion == nil && errors.Is(err, shards.ErrCollectionSchemaNotFound) {
-			if header.GetCollectionId() == 0 {
-				return primaryKeys{}, 0, status.NewUnrecoverableError("partial update ordinary insert collection id is empty")
-			}
-			return primaryKeys{}, header.GetCollectionId(), nil
-		}
-		return primaryKeys{}, 0, status.NewUnrecoverableError("get primary key descriptor for partial update tracking failed: %v", err)
-	}
-	if !typeutil.IsPrimaryFieldType(descriptor.DataType) {
-		return primaryKeys{}, 0, status.NewUnrecoverableError(
-			"partial update primary key field %d has unsupported data type %s",
-			descriptor.FieldID,
-			descriptor.DataType.String(),
-		)
+		return primaryKeys{}, err
 	}
 
 	body, err := decodeInsertBody(ctx, msg)
 	if err != nil {
-		return primaryKeys{}, 0, err
+		return primaryKeys{}, err
 	}
 	keys, err := extractPKsFromFieldData(body.GetFieldsData(), descriptor.FieldID)
 	if err == nil {
 		err = validatePrimaryKeysScalarType(keys, descriptor.DataType)
 	}
-	return keys, 0, err
+	return keys, err
 }
 
-func decodeInsertBody(ctx context.Context, msg message.MutableMessage) (*msgpb.InsertRequest, error) {
-	if _, err := message.AsMutableInsertMessageV1(msg); err != nil {
+// primaryKeyDescriptorOf resolves the PK field from the schema ShardManager
+// holds for the collection. Every collection on a supported path has one:
+// CreateCollection carries the schema and vchannel recovery meta has persisted
+// it since 2.6.0. A missing collection or schema is therefore an invariant
+// violation, and the write fails before the WAL append instead of being
+// exempted from row locks.
+func primaryKeyDescriptorOf(
+	descriptorGetter primaryKeyDescriptorGetter,
+	collectionID int64,
+) (shards.PrimaryKeyDescriptor, error) {
+	descriptor, err := descriptorGetter.GetPrimaryKeyDescriptor(collectionID, latestCollectionSchemaVersion)
+	switch {
+	case err == nil:
+	case errors.Is(err, shards.ErrCollectionNotFound):
+		return shards.PrimaryKeyDescriptor{}, status.NewUnrecoverableError(
+			"partial update cannot derive primary keys: collection %d not found", collectionID)
+	case errors.Is(err, shards.ErrCollectionSchemaNotFound):
+		return shards.PrimaryKeyDescriptor{}, status.NewUnrecoverableError(
+			"partial update cannot derive primary keys: collection %d schema not provided by create collection message", collectionID)
+	default:
+		return shards.PrimaryKeyDescriptor{}, status.NewUnrecoverableError(
+			"get primary key descriptor for partial update failed, collection: %d: %v", collectionID, err)
+	}
+	if descriptor.FieldID <= 0 || !typeutil.IsPrimaryFieldType(descriptor.DataType) {
+		return shards.PrimaryKeyDescriptor{}, status.NewUnrecoverableError(
+			"partial update primary key descriptor is invalid, field: %d, type: %s",
+			descriptor.FieldID,
+			descriptor.DataType.String(),
+		)
+	}
+	return descriptor, nil
+}
+
+// Recovery bodies are immutable. Decode their headers with the matching typed
+// reader rather than passing them to a mutable-message conversion.
+func insertHeader(msg message.BasicMessage) (*message.InsertMessageHeader, error) {
+	if immutable, ok := msg.(message.ImmutableMessage); ok {
+		insert, err := message.AsImmutableInsertMessageV1(immutable)
+		if err != nil {
+			return nil, err
+		}
+		return insert.Header(), nil
+	}
+	insert, err := message.AsMutableInsertMessageV1(msg)
+	if err != nil {
+		return nil, err
+	}
+	return insert.Header(), nil
+}
+
+func decodeInsertBody(ctx context.Context, msg message.BasicMessage) (*msgpb.InsertRequest, error) {
+	if _, err := insertHeader(msg); err != nil {
 		return nil, status.NewUnrecoverableError("decode partial update insert message failed: %v", err)
 	}
 	payload, err := message.DecodePayload(ctx, msg)
@@ -227,9 +238,15 @@ func decodeInsertBody(ctx context.Context, msg message.MutableMessage) (*msgpb.I
 	return body, nil
 }
 
-func decodeDeleteBody(ctx context.Context, msg message.MutableMessage) (*msgpb.DeleteRequest, error) {
-	if _, err := message.AsMutableDeleteMessageV1(msg); err != nil {
-		return nil, status.NewUnrecoverableError("decode partial update delete message failed: %v", err)
+func decodeDeleteBody(ctx context.Context, msg message.BasicMessage) (*msgpb.DeleteRequest, error) {
+	var headerErr error
+	if immutable, ok := msg.(message.ImmutableMessage); ok {
+		_, headerErr = message.AsImmutableDeleteMessageV1(immutable)
+	} else {
+		_, headerErr = message.AsMutableDeleteMessageV1(msg)
+	}
+	if headerErr != nil {
+		return nil, status.NewUnrecoverableError("decode partial update delete message failed: %v", headerErr)
 	}
 	payload, err := message.DecodePayload(ctx, msg)
 	if err != nil {
@@ -260,7 +277,7 @@ func extractPKsFromDescriptor(
 	}
 	if field.GetType() != descriptor.DataType {
 		return primaryKeys{}, status.NewUnrecoverableError(
-			"partial update primary key field type %s does not match schema type %s",
+			"primary key field type %s does not match schema type %s",
 			field.GetType().String(),
 			descriptor.DataType.String(),
 		)
@@ -283,7 +300,7 @@ func findPKFieldData(fields []*schemapb.FieldData, fieldID int64) (*schemapb.Fie
 		}
 		if matched != nil {
 			return nil, status.NewUnrecoverableError(
-				"partial update insert primary key field %d is duplicated",
+				"insert primary key field %d is duplicated",
 				fieldID,
 			)
 		}
@@ -291,7 +308,7 @@ func findPKFieldData(fields []*schemapb.FieldData, fieldID int64) (*schemapb.Fie
 	}
 	if matched == nil {
 		return nil, status.NewUnrecoverableError(
-			"partial update insert primary key field %d is missing",
+			"insert primary key field %d is missing",
 			fieldID,
 		)
 	}
@@ -301,7 +318,7 @@ func findPKFieldData(fields []*schemapb.FieldData, fieldID int64) (*schemapb.Fie
 func primaryKeysFromFieldData(field *schemapb.FieldData, fieldID int64) (primaryKeys, error) {
 	if field == nil {
 		return primaryKeys{}, status.NewUnrecoverableError(
-			"partial update insert primary key field %d is missing",
+			"insert primary key field %d is missing",
 			fieldID,
 		)
 	}
@@ -309,21 +326,21 @@ func primaryKeysFromFieldData(field *schemapb.FieldData, fieldID int64) (primary
 	switch values := scalars.GetData().(type) {
 	case *schemapb.ScalarField_LongData:
 		if values == nil {
-			return primaryKeys{}, status.NewUnrecoverableError("partial update int64 primary keys are nil")
+			return primaryKeys{}, status.NewUnrecoverableError("int64 primary keys are nil")
 		}
 		return primaryKeysFromIDs(&schemapb.IDs{
 			IdField: &schemapb.IDs_IntId{IntId: values.LongData},
 		})
 	case *schemapb.ScalarField_StringData:
 		if values == nil {
-			return primaryKeys{}, status.NewUnrecoverableError("partial update varchar primary keys are nil")
+			return primaryKeys{}, status.NewUnrecoverableError("varchar primary keys are nil")
 		}
 		return primaryKeysFromIDs(&schemapb.IDs{
 			IdField: &schemapb.IDs_StrId{StrId: values.StringData},
 		})
 	default:
 		return primaryKeys{}, status.NewUnrecoverableError(
-			"partial update insert primary key field %d must be int64 or varchar",
+			"insert primary key field %d must be int64 or varchar",
 			fieldID,
 		)
 	}
@@ -331,15 +348,15 @@ func primaryKeysFromFieldData(field *schemapb.FieldData, fieldID int64) (primary
 
 func primaryKeysFromIDs(ids *schemapb.IDs) (primaryKeys, error) {
 	if ids == nil {
-		return primaryKeys{}, status.NewUnrecoverableError("partial update primary keys are nil")
+		return primaryKeys{}, status.NewUnrecoverableError("primary keys are nil")
 	}
 	switch values := ids.GetIdField().(type) {
 	case *schemapb.IDs_IntId:
 		if values == nil || values.IntId == nil {
-			return primaryKeys{}, status.NewUnrecoverableError("partial update int64 primary keys are nil")
+			return primaryKeys{}, status.NewUnrecoverableError("int64 primary keys are nil")
 		}
 		if len(values.IntId.GetData()) == 0 {
-			return primaryKeys{}, status.NewUnrecoverableError("partial update primary keys are empty")
+			return primaryKeys{}, status.NewUnrecoverableError("primary keys are empty")
 		}
 		return primaryKeys{
 			kind:        primaryKeyKindInt64,
@@ -347,17 +364,17 @@ func primaryKeysFromIDs(ids *schemapb.IDs) (primaryKeys, error) {
 		}, nil
 	case *schemapb.IDs_StrId:
 		if values == nil || values.StrId == nil {
-			return primaryKeys{}, status.NewUnrecoverableError("partial update varchar primary keys are nil")
+			return primaryKeys{}, status.NewUnrecoverableError("varchar primary keys are nil")
 		}
 		if len(values.StrId.GetData()) == 0 {
-			return primaryKeys{}, status.NewUnrecoverableError("partial update primary keys are empty")
+			return primaryKeys{}, status.NewUnrecoverableError("primary keys are empty")
 		}
 		return primaryKeys{
 			kind:         primaryKeyKindString,
 			stringValues: values.StrId.GetData(),
 		}, nil
 	default:
-		return primaryKeys{}, status.NewUnrecoverableError("unsupported partial update primary key ids type %T", values)
+		return primaryKeys{}, status.NewUnrecoverableError("unsupported primary key ids type %T", values)
 	}
 }
 
@@ -370,13 +387,13 @@ func validatePrimaryKeysScalarType(pks primaryKeys, dataType schemapb.DataType) 
 		expected = primaryKeyKindString
 	default:
 		return status.NewUnrecoverableError(
-			"partial update primary key has unsupported data type %s",
+			"primary key has unsupported data type %s",
 			dataType.String(),
 		)
 	}
 	if pks.kind != expected {
 		return status.NewUnrecoverableError(
-			"partial update primary key payload does not match schema type %s",
+			"primary key payload does not match schema type %s",
 			dataType.String(),
 		)
 	}
@@ -391,13 +408,20 @@ func decodePayloadError(kind string, err error) error {
 }
 
 // extractCollectionFenceID extracts collections affected by wide data mutations.
-func extractCollectionFenceID(msg message.MutableMessage) (int64, bool) {
+func extractCollectionFenceID(msg message.BasicMessage) (int64, bool) {
 	if msg == nil {
 		return 0, false
 	}
 
 	switch msg.MessageType() {
 	case message.MessageTypeTruncateCollection:
+		if immutable, ok := msg.(message.ImmutableMessage); ok {
+			truncateMsg, err := message.AsImmutableTruncateCollectionMessageV2(immutable)
+			if err != nil {
+				return 0, true
+			}
+			return truncateMsg.Header().GetCollectionId(), true
+		}
 		truncateMsg, err := message.AsMutableTruncateCollectionMessageV2(msg)
 		if err != nil {
 			return 0, true
@@ -414,9 +438,16 @@ func extractCollectionFenceID(msg message.MutableMessage) (int64, bool) {
 
 // extractDropCollectionID identifies the collection whose fence can be
 // discarded after DropCollection is durably appended.
-func extractDropCollectionID(msg message.MutableMessage) (int64, bool) {
+func extractDropCollectionID(msg message.BasicMessage) (int64, bool) {
 	if msg == nil || msg.MessageType() != message.MessageTypeDropCollection {
 		return 0, false
+	}
+	if immutable, ok := msg.(message.ImmutableMessage); ok {
+		dropMsg, err := message.AsImmutableDropCollectionMessageV1(immutable)
+		if err != nil {
+			return 0, true
+		}
+		return dropMsg.Header().GetCollectionId(), true
 	}
 	dropMsg, err := message.AsMutableDropCollectionMessageV1(msg)
 	if err != nil {

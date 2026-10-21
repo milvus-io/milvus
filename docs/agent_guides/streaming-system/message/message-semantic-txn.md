@@ -19,6 +19,7 @@ Messages managing transactions on a single VChannel.
 - BeginTxn must precede all body messages and CommitTxn/RollbackTxn for the same transaction.
 - Body messages must arrive within the keepalive window, otherwise the transaction expires. After expiration, no messages for that transaction will appear in the WAL.
 - CommitTxn/RollbackTxn must come after all body messages have completed (inFlightCount == 0).
+- With partial-update CAS enabled, the lock interceptor enforces the body-before-commit order for local transactions before TimeTick: a CommitTxn freezes its transaction on arrival, later bodies are rejected with `TRANSACTION_EXPIRED`, and a commit that arrives while a body is still in flight is rejected with `TRANSACTION_EXPIRED` before TimeTick, so the row locks of an admitted commit cover the complete write set. See the [partial-update design](../../../design-docs/design_docs/20260601-partial-update-optimistic-lock-design.md).
 - The consumer assembles Begin + body messages into a single ImmutableTxnMessage using **CommitTxn's TimeTick and LastConfirmedMessageID** as the transaction's overall TimeTick and LastConfirmedMessageID.
 - On RollbackTxn, the consumer discards the corresponding Begin + body messages.
 
