@@ -40,14 +40,6 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err != nil {
 		return nil, err
 	}
-	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
-		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Segment().(ReadableSealedSegment).Collection().Schema()); err != nil {
-			for _, handle := range handles {
-				handle.Release()
-			}
-			return nil, err
-		}
-	}
 	tasks := make([]QNSearchSegmentTask, 0, len(handles))
 	for _, handle := range handles {
 		tasks = append(tasks, QNSearchSegmentTask{
@@ -86,14 +78,6 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view, mvcc.GetTransformingTimetick())
 	if err != nil {
 		return nil, err
-	}
-	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
-		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Segment().(ReadableSealedSegment).Collection().Schema()); err != nil {
-			for _, handle := range handles {
-				handle.Release()
-			}
-			return nil, err
-		}
 	}
 	tasks := make([]QNQuerySegmentTask, 0, len(handles))
 	for _, handle := range handles {

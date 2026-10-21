@@ -1,170 +1,189 @@
 package mvcc
 
 import (
+	"context"
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// NewQueryMVCCManager creates a new per-vchannel query MVCC manager.
-func NewQueryMVCCManager(_ uint64) *QueryMVCCManager {
+func NewQueryMVCCManager(recoveryTimeTick uint64) *QueryMVCCManager {
 	return &QueryMVCCManager{
-		vchannelMVCCs:        make(map[string]QueryVChannelMVCC),
-		unconfirmedVChannels: make(map[string]struct{}),
+		through:   recoveryTimeTick,
+		frontiers: make(map[string]QueryVChannelMVCC),
+		pending:   make(map[string]uint64),
+		changed:   make(chan struct{}),
 	}
 }
 
-// QueryMVCCManager is the manager that manages all the mvcc state of one wal.
-// It tracks the persisted query-plan frontiers of each recovered vchannel.
+// QueryMVCCManager owns query snapshots and their freshness bounds. Only ordered
+// WAB publication changes executable frontiers and channel membership. Append
+// callbacks merely raise a minimum prefix for Strong reads; they may run after
+// publication because Acker.Ack precedes the callback.
 type QueryMVCCManager struct {
-	mu                   sync.Mutex
-	vchannelMVCCs        map[string]QueryVChannelMVCC
-	unconfirmedVChannels map[string]struct{}
+	mu         sync.Mutex
+	frontiers  map[string]QueryVChannelMVCC
+	pending    map[string]uint64
+	pendingAll uint64
+	through    uint64
+	changed    chan struct{}
 }
 
-// GetQueryMVCCOfVChannel gets the query MVCC frontiers of the vchannel.
-func (cm *QueryMVCCManager) GetQueryMVCCOfVChannel(vchannel string) QueryVChannelMVCC {
+// ApplyRecoveryBarrier runs for live channels before append admission opens.
+// Recovery has consumed the complete prefix through this owner's opening fence.
+func (cm *QueryMVCCManager) ApplyRecoveryBarrier(channel string, tick uint64) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-
-	return cm.vchannelMVCCs[vchannel]
+	cm.frontiers[channel] = QueryVChannelMVCC{GrowingTimetick: tick, TransformingTimetick: tick}
+	cm.through = max(cm.through, tick)
 }
 
-// ApplyRecoveryBarrier initializes or advances the recovered query MVCC baseline
-// of one live vchannel.
-func (cm *QueryMVCCManager) ApplyRecoveryBarrier(vchannel string, timetick uint64) {
+// ObserveAppend records completed, query-relevant writes without changing the
+// snapshot. A callback already covered by publication cannot recreate state,
+// including a delayed Create callback after an ordered Create/Drop prefix.
+func (cm *QueryMVCCManager) ObserveAppend(msg message.MutableMessage) {
+	if !msg.IsPersisted() || (msg.TxnContext() != nil && msg.MessageType() != message.MessageTypeCommitTxn) {
+		return
+	}
+	kind, channel, tick := msg.MessageType(), msg.VChannel(), msg.TimeTick()
+	if kind != message.MessageTypeInsert && !messageutil.AdvancesQueryTransformMVCC(msg) {
+		return
+	}
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-
-	mvcc := cm.vchannelMVCCs[vchannel]
-	mvcc.GrowingTimetick = max(mvcc.GrowingTimetick, timetick)
-	mvcc.TransformingTimetick = max(mvcc.TransformingTimetick, timetick)
-	mvcc.Confirmed = true
-	cm.vchannelMVCCs[vchannel] = mvcc
-	delete(cm.unconfirmedVChannels, vchannel)
+	if tick <= cm.through {
+		return
+	}
+	if messageutil.IsPChannelTransformBarrier(kind) && (channel == "" || msg.IsPChannelLevel()) {
+		cm.pendingAll = max(cm.pendingAll, tick)
+	} else if channel != "" && !msg.IsPChannelLevel() && !funcutil.IsControlChannel(channel) {
+		cm.pending[channel] = max(cm.pending[channel], tick)
+	}
 }
 
-// UpdateMVCC updates the mvcc state by incoming message.
-func (cm *QueryMVCCManager) UpdateMVCC(msg interface {
-	message.BasicMessage
-	VChannel() string
-},
-) {
-	if msg.MessageType() == message.MessageTypeMVCCBarrier {
+// Minimum fixes the required prefix once per query. Eventually may reuse the
+// current complete snapshot; a channel whose Create is still pending must first
+// become visible. Strong also covers completed channel and global publications.
+func (cm *QueryMVCCManager) Minimum(channel string, strong bool) uint64 {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	minimum := cm.through
+	if _, live := cm.frontiers[channel]; strong || !live {
+		minimum = max(minimum, cm.pending[channel], cm.pendingAll)
+	}
+	return minimum
+}
+
+// Snapshot returns one pair from one complete prefix, never append-time maxima.
+// A ready zero pair denotes an absent channel. The caller's minimum is fixed
+// while waiting, so concurrent writes cannot keep moving the wait target.
+func (cm *QueryMVCCManager) Snapshot(channel string, minimum uint64) (QueryVChannelMVCC, bool) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.frontiers[channel], cm.through >= minimum
+}
+
+func (cm *QueryMVCCManager) WaitSnapshot(ctx context.Context, channel string, minimum uint64) (QueryVChannelMVCC, error) {
+	for {
 		cm.mu.Lock()
-		defer cm.mu.Unlock()
-		tick := msg.TimeTick()
-		var channels []string
-		if immutable, ok := msg.(message.ImmutableMessage); ok {
-			channels = message.MustAsImmutableMVCCBarrierMessageV2(immutable).Header().GetVchannels()
-		} else {
-			channels = message.MustAsMutableMVCCBarrierMessageV2(msg).Header().GetVchannels()
+		snapshot, live := cm.frontiers[channel]
+		ready, changed := cm.through >= minimum, cm.changed
+		cm.mu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return QueryVChannelMVCC{}, err
 		}
-		for _, channel := range channels {
-			mvcc := cm.vchannelMVCCs[channel]
-			mvcc.GrowingTimetick = max(mvcc.GrowingTimetick, tick)
-			mvcc.TransformingTimetick = max(mvcc.TransformingTimetick, tick)
-			mvcc.Confirmed = false
-			cm.vchannelMVCCs[channel] = mvcc
-			cm.unconfirmedVChannels[channel] = struct{}{}
+		if ready {
+			if !live {
+				return QueryVChannelMVCC{}, merr.WrapErrChannelNotFound(channel)
+			}
+			return snapshot, nil
 		}
-		cm.sync(msg.TimeTick())
-		return
+		select {
+		case <-ctx.Done():
+			return QueryVChannelMVCC{}, ctx.Err()
+		case <-changed:
+		}
 	}
-	if !msg.IsPersisted() {
-		// Ordinary non-persisted heartbeats do not advance query frontiers.
-		return
-	}
+}
 
-	tt := msg.TimeTick()
-	msgType := msg.MessageType()
-	vchannel := msg.VChannel()
-	isTxn := msg.TxnContext() != nil
-
+// Publish consumes successful ACK messages in TimeTick order after WAB.Append.
+// The serialized sync operator supplies exactly one newly completed prefix.
+func (cm *QueryMVCCManager) Publish(messages []message.ImmutableMessage, confirmation message.ImmutableMessage) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	for _, msg := range messages {
+		cm.applyLocked(msg)
+		channel := msg.VChannel()
+		if cm.pending[channel] <= confirmation.TimeTick() {
+			delete(cm.pending, channel)
+		}
+	}
+	if confirmation.MessageType() == message.MessageTypeMVCCBarrier {
+		for _, channel := range message.MustAsImmutableMVCCBarrierMessageV2(confirmation).Header().GetVchannels() {
+			if current, live := cm.frontiers[channel]; live {
+				current.GrowingTimetick = max(current.GrowingTimetick, confirmation.TimeTick())
+				current.TransformingTimetick = max(current.TransformingTimetick, confirmation.TimeTick())
+				cm.frontiers[channel] = current
+			}
+		}
+	}
+	cm.through = confirmation.TimeTick()
+	if cm.pendingAll <= cm.through {
+		cm.pendingAll = 0
+	}
+	close(cm.changed)
+	cm.changed = make(chan struct{})
+}
 
-	if messageutil.IsTimeTickConfirmBarrier(msgType) {
-		cm.sync(tt)
+func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage) {
+	if !msg.IsPersisted() || (msg.TxnContext() != nil && msg.MessageType() != message.MessageTypeCommitTxn) {
 		return
 	}
-
-	// If the message belongs to a transaction, the query MVCC frontiers cannot
-	// move forward until the transaction is committed.
-	// because of an unconfirmed transaction may be rollback and cannot be seen at read side.
-	if isTxn && msgType != message.MessageTypeCommitTxn {
-		return
-	}
-	if vchannel == "" || msg.IsPChannelLevel() {
-		if messageutil.IsPChannelTransformBarrier(msgType) {
-			cm.advanceTransformingAllLocked(tt)
+	channel, kind, tick := msg.VChannel(), msg.MessageType(), msg.TimeTick()
+	if channel == "" || msg.IsPChannelLevel() {
+		if messageutil.IsPChannelTransformBarrier(kind) {
+			for channel, current := range cm.frontiers {
+				current.TransformingTimetick = max(current.TransformingTimetick, tick)
+				cm.frontiers[channel] = current
+			}
 		}
 		return
 	}
-	mvcc := cm.vchannelMVCCs[vchannel]
-	switch msgType {
+	if funcutil.IsControlChannel(channel) {
+		return
+	}
+	if kind == message.MessageTypeDropCollection {
+		delete(cm.frontiers, channel)
+		return
+	}
+	current, live := cm.frontiers[channel]
+	if !live && kind != message.MessageTypeCreateCollection {
+		return
+	}
+	switch kind {
 	case message.MessageTypeCreateCollection:
-		if tt <= max(mvcc.GrowingTimetick, mvcc.TransformingTimetick) {
-			return
-		}
-		mvcc.GrowingTimetick = tt
-		mvcc.TransformingTimetick = tt
+		current.GrowingTimetick = tick
+		current.TransformingTimetick = tick
 	case message.MessageTypeInsert:
-		if tt <= mvcc.GrowingTimetick {
-			return
-		}
-		mvcc.GrowingTimetick = tt
+		current.GrowingTimetick = max(current.GrowingTimetick, tick)
 	case message.MessageTypeDelete, message.MessageTypeCommitTxn:
-		if tt <= mvcc.TransformingTimetick {
-			return
-		}
-		mvcc.TransformingTimetick = tt
-		mvcc.GrowingTimetick = max(mvcc.GrowingTimetick, mvcc.TransformingTimetick)
+		current.TransformingTimetick = max(current.TransformingTimetick, tick)
+		current.GrowingTimetick = max(current.GrowingTimetick, tick)
 	default:
-		// Publication/schema barriers advance only the transform frontier.
-		// Inserts into sealed segments must not make growing queries wait.
-		if !messageutil.AdvancesQueryTransformMVCC(msg) || tt <= mvcc.TransformingTimetick {
+		if !messageutil.AdvancesQueryTransformMVCC(msg) {
 			return
 		}
-		mvcc.TransformingTimetick = tt
+		current.TransformingTimetick = max(current.TransformingTimetick, tick)
 	}
-
-	mvcc.Confirmed = false
-	cm.vchannelMVCCs[vchannel] = mvcc
-	cm.unconfirmedVChannels[vchannel] = struct{}{}
+	cm.frontiers[channel] = current
 }
 
-// sync confirms the unconfirmed vchannel MVCC states covered by the incoming timetick message.
-func (cm *QueryMVCCManager) sync(tt uint64) {
-	for vchannel := range cm.unconfirmedVChannels {
-		mvcc := cm.vchannelMVCCs[vchannel]
-		if max(mvcc.GrowingTimetick, mvcc.TransformingTimetick) <= tt {
-			mvcc.Confirmed = true
-			cm.vchannelMVCCs[vchannel] = mvcc
-			delete(cm.unconfirmedVChannels, vchannel)
-		}
-	}
-}
-
-func (cm *QueryMVCCManager) advanceTransformingAllLocked(tt uint64) {
-	for vchannel, mvcc := range cm.vchannelMVCCs {
-		if tt <= mvcc.TransformingTimetick {
-			continue
-		}
-		mvcc.TransformingTimetick = tt
-		mvcc.Confirmed = false
-		cm.vchannelMVCCs[vchannel] = mvcc
-		cm.unconfirmedVChannels[vchannel] = struct{}{}
-	}
-}
-
-// QueryVChannelMVCC is a mvcc of one vchannel
-// which is used to identify the maximum query-plan timeticks persisted into the wal of one vchannel.
-// The state of mvcc that is confirmed if the timetick is synced by timeticksync message,
-// otherwise, the mvcc is not confirmed.
+// QueryVChannelMVCC is the executable projection of one complete WAL prefix.
+// Pure growing writes leave the Transform frontier unchanged.
 type QueryVChannelMVCC struct {
 	GrowingTimetick      uint64
 	TransformingTimetick uint64
-	Confirmed            bool
 }

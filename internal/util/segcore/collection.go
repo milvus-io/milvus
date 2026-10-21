@@ -81,11 +81,13 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 }
 
 // CCollection is just a wrapper of the underlying C-structure CCollection.
-// Contains some additional immutable properties of collection.
+// Schema snapshots follow successful native updates and remain immutable for readers.
 type CCollection struct {
-	ptr           C.CCollection
-	collectionID  int64
-	schemaMu      sync.RWMutex
+	ptr          C.CCollection
+	collectionID int64
+	schemaMu     sync.RWMutex
+	// schemaVersion uses the same ordering token as the native Collection.
+	// WAL callers pass a timetick, not the logical Schema.Version.
 	schemaVersion uint64
 	schema        *schemapb.CollectionSchema
 	indexMetaMu   sync.RWMutex
@@ -138,12 +140,12 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 	if sch == nil {
 		return merr.WrapErrServiceInternal("update collection schema with nil")
 	}
-
 	c.schemaMu.Lock()
 	defer c.schemaMu.Unlock()
 	if version <= c.schemaVersion {
 		return nil
 	}
+
 	schemaBlob, err := proto.Marshal(sch)
 	if err != nil {
 		return err

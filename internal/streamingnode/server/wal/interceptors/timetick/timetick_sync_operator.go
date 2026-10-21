@@ -210,6 +210,7 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	tsMsg := msg.IntoImmutableMessage(msgID)
 	// Add it into write ahead buffer.
 	impl.interceptorBuildParam.WriteAheadBuffer.Append(msgs, tsMsg)
+	impl.MVCCManager().QueryMVCC().Publish(msgs, tsMsg)
 	impl.lastPublishedTick = ts
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -27,6 +28,9 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
+	}
 
 	if err := h.localOptimizer.OptimizeSearch(ctx, req); err != nil {
 		return nil, err
@@ -45,7 +49,11 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, selectedPartitionIDs(req.GetPartitionIDs()))
+	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
+	if err != nil {
+		return nil, err
+	}
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +86,9 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
+	}
 
 	if err := h.localOptimizer.OptimizeRetrieve(ctx, req); err != nil {
 		return nil, err
@@ -96,7 +107,11 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, selectedPartitionIDs(req.GetPartitionIDs()))
+	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
+	if err != nil {
+		return nil, err
+	}
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
 	if err != nil {
 		return nil, err
 	}

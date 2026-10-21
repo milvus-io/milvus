@@ -857,9 +857,9 @@ message VChannelMeta {
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
+    uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
     // Oldest DataVersion reconstructible after segment recovery metadata cleanup.
     view.DataVersion segment_data_version_summary = 6;
-    uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -1046,8 +1046,9 @@ message StreamingFieldAnalyzer {
     int64 collection_id = 1;
     string vchannel = 2;
     int64 field_id = 3;
-    reserved 4;
-    reserved "schema_version";
+    // Internal rendering binds the search schema, including version zero.
+    // Omitted for standalone analyzer requests, which use the WAL write schema.
+    optional int32 read_schema_version = 4;
     repeated string analyzer_names = 5;
     PChannelInfo pchannel = 6;
 }
@@ -1069,13 +1070,13 @@ message TransformRequest {
 }
 
 message CreateTransformSubscriptionRequest {
-    uint64 end_time_tick = 4;
     int64 subscription_id = 1;
     string vchannel = 2;
 
     // Exclusive. Server sends TransformLog entries with time_tick >
     // start_after_time_tick.
     uint64 start_after_time_tick = 3;
+    uint64 end_time_tick = 4;
 }
 
 message CloseTransformSubscriptionRequest {
@@ -1102,13 +1103,13 @@ message TransformResponse {
 message CreateTransformStreamResponse {}
 
 message CreateTransformSubscriptionResponse {
-    uint64 end_time_tick = 5;
     int64 subscription_id = 1;
     string vchannel = 2;
     uint64 start_after_time_tick = 3;
 
     // Current SN TransformLog truncation cursor.
     uint64 truncate_time_tick = 4;
+    uint64 end_time_tick = 5;
 }
 
 message CloseTransformSubscriptionResponse {

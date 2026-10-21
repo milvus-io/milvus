@@ -76,12 +76,14 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 	}
 	if _, ok := m.refs[req.Key]; !ok {
 		version := req.Key.QueryViewVersion.DataVersion
-		if m.err != nil || (len(m.refs) != 0 && m.latestDataVersion.GT(version)) {
+		if m.err != nil || (len(m.refs) != 0 && m.latestDataVersion.GT(version) && !m.retainsReadBaseLocked(req.Meta)) {
 			m.mu.Unlock()
 			m.Reject(req)
 			return
 		}
-		m.latestDataVersion = version
+		if version.GT(m.latestDataVersion) {
+			m.latestDataVersion = version
+		}
 		if m.refs == nil {
 			m.refs = make(map[qviews.QueryViewKey]queryViewRef)
 		}
@@ -100,6 +102,20 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 	if notifyReady {
 		m.submitReady(req.Key, req.OnReady)
 	}
+}
+
+// A published-schema placement repair may arrive after a newer schema. Its
+// exact retained base is still pinned by an existing view, so sharing that base
+// does not rewind resource reclamation. Unretained older bases remain rejected.
+func (m *Manager) retainsReadBaseLocked(meta *viewpb.QueryViewMeta) bool {
+	version := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
+	for key, ref := range m.refs {
+		if key.QueryViewVersion.DataVersion.EQ(version) && ref.meta.GetSchemaVersion() == meta.GetSchemaVersion() &&
+			ref.meta.GetLoadInfoVersion() == meta.GetLoadInfoVersion() {
+			return true
+		}
+	}
+	return false
 }
 
 // TryBuildLocked retries a deferred query runtime build after the owning
@@ -131,6 +147,19 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	}
 	if len(m.refs) == 0 {
 		runtime, task = m.takeRuntimeLocked()
+	}
+	if m.runtime != nil && m.task == nil {
+		m.runtime.mu.Lock()
+		retained := make(map[uint64]bool, len(m.refs))
+		for _, ref := range m.refs {
+			retained[ref.meta.GetLoadInfoVersion()] = true
+		}
+		for version := range m.runtime.partitionScopes {
+			if !retained[version] {
+				delete(m.runtime.partitionScopes, version)
+			}
+		}
+		m.runtime.mu.Unlock()
 	}
 	if task != nil {
 		m.releasing.Add(1)
@@ -181,6 +210,16 @@ func (m *Manager) QueryRuntime(key qviews.QueryViewKey) (*QueryRuntime, bool) {
 		return nil, false
 	}
 	return m.runtime, true
+}
+
+func (m *Manager) ReadRuntime(key qviews.QueryViewKey) (*ReadRuntime, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ref, ok := m.refs[key]
+	if !ok || m.task != nil || m.runtime == nil || m.err != nil {
+		return nil, false
+	}
+	return m.runtime.ReadRuntime(ref.meta)
 }
 
 func (m *Manager) OldestDataVersion() (qviews.DataVersion, bool) {
@@ -326,6 +365,7 @@ func (m *Manager) resolveLoadInfo(ctx context.Context, view walview.VChannelWALV
 	// snapshot retains the legacy unrestricted scope.
 	view.PartitionIDs = append([]int64{}, loadInfo.PartitionIDs...)
 	view.LoadFields = loadInfo.LoadFields
+	view.RequiredFields = qviews.ResolveRequiredFields(view.Schema, loadInfo.RequiredFields)
 	view.IndexInfos = loadInfo.IndexInfos
 	return view, nil
 }
@@ -411,16 +451,36 @@ func (m *Manager) submitReady(key qviews.QueryViewKey, onReady func()) {
 
 func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onReady func()) error {
 	m.mu.Lock()
-	_, ok := m.refs[key]
+	ref, ok := m.refs[key]
 	runtime := m.runtime
 	ready := ok && runtime != nil && m.task == nil && m.err == nil
 	m.mu.Unlock()
 	if !ready {
 		return nil
 	}
-	// TODO(#40451): bind/reprepare resources when load_info_version or schema
-	// changes. Reusing this runtime currently preserves its initial load scope.
-	if err := runtime.PrepareQueryView(ctx, key.QueryViewVersion.DataVersion); err != nil {
+	// Schema transitions are applied on the WAL path; fence that path before
+	// checking the target revision and refreshing shared search index metadata.
+	// Modules prepare changed load scopes before this view can become Ready.
+	err := func() error {
+		var schemaErr error
+		runtime.RangeModules(func(module QueryRuntimeModule) bool {
+			if resource, ok := module.(QueryRuntimeSchemaModule); ok {
+				schemaErr = resource.PrepareSchema(ctx, ref.meta, m.loadInfoProvider)
+			}
+			return schemaErr == nil
+		})
+		if schemaErr != nil {
+			return schemaErr
+		}
+		if err := runtime.PrepareQueryView(ctx, ref.meta); err != nil {
+			return err
+		}
+		if err := runtime.CheckWriteSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {
+			return err
+		}
+		return runtime.PrepareIndexMeta(ctx, ref.meta, m.loadInfoProvider)
+	}()
+	if err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			return err
 		}

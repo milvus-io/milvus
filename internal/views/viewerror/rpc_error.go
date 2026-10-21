@@ -44,8 +44,9 @@ func NewGRPCStatusFromViewError(e *ViewError) *status.Status {
 }
 
 // NewGRPCStatusFromError preserves business error codes as native gRPC details.
-// View lifecycle errors keep their existing retry protocol. Older clients can
-// still decode the ViewError detail and ignore the additional common.Status.
+// View lifecycle errors keep their retry protocol. For business errors,
+// common.Status carries the code/classification and ViewError carries the cause
+// rendered by ViewClientStatus.Error.
 func NewGRPCStatusFromError(err error) *status.Status {
 	st := NewGRPCStatusFromViewError(AsViewError(err))
 	var lifecycle *ViewError

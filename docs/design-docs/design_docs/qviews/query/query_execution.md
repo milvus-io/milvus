@@ -1,5 +1,7 @@
-> Extraction scope: this document describes the full query protocol. This change
-> wires only the QueryNode half; see the [extraction boundary](../querynode_extraction.md).
+> Integration scope: this baseline combines the QueryNode extraction, scoped WAL
+> barriers, coordinator components, and StreamingNode query execution/client.
+> Production Proxy switching and Coordinator runtime activation remain separate.
+> See the [QueryNode extraction boundary](../querynode_extraction.md) for its source scope.
 
 # Query Execution Node-Side Design
 
@@ -96,9 +98,8 @@ type ViewQueryTaskProvider interface {
 }
 ```
 
-`AcquireRequerySegmentTasks` is intentionally not part of the first runnable
-contract. Requery segment targeting and execution are deferred until the
-Search/Query path is runnable.
+`AcquireRequerySegmentTasks` is intentionally not a separate task-provider API.
+Retained requery uses `QueryOnView` with the original plan, as described below.
 
 SN and QN provide this interface through their local QueryView handlers:
 
@@ -372,9 +373,10 @@ execution. The task refs keep selected segment resources alive until
 ## 11. Requery
 
 Requery sends `QueryOnView` requests for the reduced PKs to the original plan's
-work nodes, retaining its QueryView version, Schema binding and MVCC. Required
-output/render fields are validated during Phase 1. There is no separate requery
-RPC or node-side stub. Existing local PK pruning and Query reduction apply.
+work nodes, retaining its QueryView version, exact read Schema and MVCC.
+Field errors are reported when executing against that retained Schema.
+The client uses no separate requery RPC or node-side stub. Existing local PK
+pruning and Query reduction apply.
 
 ## 12. Error Semantics
 
@@ -450,3 +452,78 @@ The first node-side Phase 2 milestone is:
 7. Implement `SearchOnView` and `QueryOnView` RPC paths using provider plus
    scheduler.
 8. Reuse QueryOnView for requery with the original validated plan.
+
+## 16. Integrated StreamingNode execution and schema identity
+
+The injectable [query client](query_client.md) plans on the primary SN and fans
+out the sealed portion to QN. Production Proxy routing is not switched here.
+
+`SNQueryViewHandler` acquires the exact plan version in Up state. UpRecovering
+waits for local state-change notifications within the caller context. An accessed
+Up view renews its [serving lease](../query_view_lease.md). Phase 2 borrows
+metadata without copying a topology it does not use.
+
+The handler validates the request's schema version against the leased View,
+waits for the fixed Growing/Transform frontiers, and resolves the View's partition
+scope through the required runtime interface and acquires growing segment handles.
+Handles expose the selected exact read-schema CCollection, while physical segments retain their own encoding
+schema. A query error releases every acquired handle. Successful tasks own them
+through execution, reduction and result conversion; QueryView replacement cannot
+revoke resources from a task already acquired.
+
+CCollection serializes schema updates and publishes its Go schema cache only
+after a successful native update. The native ordering token is a WAL timestamp,
+separate from the logical SchemaVersion. The growing runtime reports the logical
+schema version applied on the ordered write path through `WriteSchemaVersion`;
+exact read resources are prepared by
+`ReadSchemaKey` and do not impose a global read-schema watermark. Preparing an
+older read schema cannot invalidate a newer View's readiness.
+
+The ALTER component test exercises the native update, preservation of existing
+segment encoding and the schema selected for new segments. This combined baseline also retains the QueryNode extraction's native
+initialization and legacy repeated-version recovery changes. Component checks
+alone do not establish full dynamic-schema integration or recovery.
+
+The existing SN scheduler executes `SearchTask` / `QueryTask.ExecuteOnSegments`
+with segment adapters. It does not use the old QueryNode scheduler or delegate
+historical work to SN. The client fans out the sealed portion separately.
+The QueryNode loaders, ReadState management and native implementation in this
+combined baseline remain owned by the QueryNode extraction.
+
+## Required interfaces
+
+- Phase 1: QueryPlanService returns actual shard identity, View version,
+  QueryPlanMVCC, optimized request and work nodes.
+- Phase 2: ViewQueryService accepts SearchOnView / QueryOnView with those same
+  identities. QN implementation must wait and execute on the bound resources.
+- Fixed-snapshot coverage: TimeTickSyncInspector.EnsureBarrier certifies
+  publication of an ordered complete WAL prefix after request-scoped TSO
+  admission. The query runtime must then apply the fixed Growing/Transform
+  frontiers. WAL-owner cancellation allows replanning on the replacement owner.
+- Load scope: GetQueryViewLoadInfoResponse carries explicit required_fields
+  alongside scope and indexes. The integrated coordinator supplies this metadata;
+  its current contract has no skip_load_dynamic_field response field.
+
+Retained requery uses QueryOnView with the original plan, workers, Schema and
+MVCC. It does not select new resources through Phase 1 or use a separate requery
+RPC.
+
+## Error and validation boundary
+
+View lifecycle errors retain their ViewCode and retry semantics. The query RPC
+adapters attach common.Status details for business errors, preserving their
+Milvus code/classification. The ViewError detail also retains the cause rendered
+by the current client error formatter. Caller cancellation and deadlines retain
+their existing meaning.
+
+The [plan contract](query_plan.md) describes View-based schema identity,
+fixed snapshots, Strong snapshots for CAS and payload reuse. Component tests
+inject query workers and exercise barrier cancellation and fixed-snapshot
+planning. Scoped barrier production and delivery have their own WAL tests; these
+checks do not prove production Proxy/QN integration or cluster-level recovery.
+
+Key source paths:
+`internal/streamingnode/server/wal/snview/{query_lease,query_task_provider}.go`,
+`internal/streamingnode/server/viewquery/`,
+`internal/streamingnode/server/wal/vchannel/queryresource/read_schema.go`,
+`internal/views/viewerror/rpc_error.go`.

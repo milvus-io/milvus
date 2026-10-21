@@ -93,5 +93,5 @@ func toRPCError(err error) error {
 	if errors.As(err, &viewErr) {
 		return viewerror.NewGRPCStatusFromViewError(viewErr).Err()
 	}
-	return viewerror.NewGRPCStatusFromViewError(viewerror.AsViewError(err)).Err()
+	return viewerror.NewGRPCStatusFromError(err).Err()
 }

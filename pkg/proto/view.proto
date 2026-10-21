@@ -203,14 +203,6 @@ message QueryPlanMVCC {
     // Latest timetick of the transforming stream. StreamingNode and QueryNode
     // wait for transform visibility up to this timetick before execution.
     uint64 transforming_timetick = 2;
-    QuerySchemaBinding schema_binding = 3;
-}
-
-message QuerySchemaBinding {
-    int32 schema_version = 1;
-    uint64 growing_timetick = 2;
-    uint64 transforming_timetick = 3;
-    repeated int64 field_ids = 4;
 }
 
 // QueryPlanService generates shard-level query plans.
@@ -281,6 +273,10 @@ message QueryPlan {
         internal.SearchRequest legacy_search_request = 5;
         internal.RetrieveRequest legacy_retrieve_request = 6;
     }
+    // Unchanged large payloads are omitted from request and borrowed from the
+    // original Phase 1 request by Proxy. All other optimized parameters remain
+    // explicit, including empty payloads when the optimizer clears a field.
+    QueryPayloadReuse reused_payloads = 7;
 }
 
 //
@@ -295,9 +291,6 @@ service ViewQueryService {
     rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
-    // RequeryOnView fetches output fields for a set of PKs after Proxy-side reduce.
-    // Uses the same view version as the preceding search/query to ensure consistency.
-    rpc RequeryOnView(RequeryOnViewRequest) returns (RequeryOnViewResponse) {}
 }
 
 message SearchOnViewRequest {
@@ -326,15 +319,9 @@ message QueryOnViewResponse {
     internal.RetrieveResults legacy_results = 1;
 }
 
-message RequeryOnViewRequest {
-    // TODO: replace with native view request types once legacy internal protos are removed.
-    internal.RetrieveRequest legacy_req = 1;
-    ShardID shard_id = 2;
-    QueryViewVersion version = 3;
-    QueryPlanMVCC mvcc = 4;
-}
-
-message RequeryOnViewResponse {
-    // TODO: replace with native view result types once legacy internal protos are removed.
-    internal.RetrieveResults legacy_results = 1;
+message QueryPayloadReuse {
+    bool placeholder_group = 1;
+    bool serialized_expr_plan = 2;
+    // Positional, parallel to SearchRequest.sub_reqs.
+    repeated QueryPayloadReuse sub_requests = 3;
 }
