@@ -29,7 +29,7 @@ enum ThreadPoolPriority {
     HIGH = 0,
     MIDDLE = 1,
     LOW = 2,
-    // Independent search executor with MIDDLE sizing.
+    // Isolate search fanout from MIDDLE's field/index loading queue.
     // TODO: Migrate search fanout to global coroutines.
     SEARCH_FANOUT = 3,
 };
