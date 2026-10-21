@@ -150,6 +150,68 @@ func TestLegacyClientPlainANNUsesStreamingWhenEnabled(t *testing.T) {
 	require.NoError(t, result.Stream.Close())
 }
 
+func TestLegacyClientGroupedSearchStreamingSwitch(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "Batch", true: "Streaming"}[enabled], func(t *testing.T) {
+			shard := qviews.ShardID{ReplicaID: 1, VChannel: "grouped-search-vchannel"}
+			node := qviews.NewQueryNode(11)
+			input := newTestSearchChunk(2, []int64{1, 2, 3}, []float32{.9, .8, .7})
+			input.ResultData.GroupByFieldValues = []*schemapb.FieldData{{
+				FieldId: 101, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20, 10}}},
+				}},
+			}}
+			streamCalls := 0
+			service := &legacyServiceClient{searchResults: map[string]*internalpb.SearchResults{shard.VChannel: input}}
+			service.searchOnViewStream = func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+				streamCalls++
+				chunks, err := searchutil.SplitSearchResult(proto.Clone(input).(*internalpb.SearchResults), int(req.GetStreamChunkBytes()))
+				if err != nil {
+					return nil, err
+				}
+				stream := &fakeSearchStream{ctx: ctx}
+				for _, chunk := range chunks {
+					stream.recv = append(stream.recv, fakeSearchStreamRecv{chunk: chunk})
+				}
+				return stream, nil
+			}
+			client := NewLegacyViewQueryClient(
+				ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: enabled, ReduceStreamChunkBytes: 1},
+				&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{shard.VChannel: legacySearchPlan(shard, node)}},
+				service, &legacyResolver{vchannels: []string{shard.VChannel}},
+			)
+			result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
+				AllowStreaming: true,
+				Req: &internalpb.SearchRequest{CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+					Nq: 1, Topk: 2, GroupSize: 2, GroupByFieldIds: []int64{101}, MetricType: "IP"},
+			})
+			require.NoError(t, err)
+			if !enabled {
+				require.Zero(t, streamCalls)
+				require.Nil(t, result.Stream)
+				require.Len(t, result.Results, 1)
+				return
+			}
+			require.Equal(t, 1, streamCalls)
+			require.NotNil(t, result.Stream)
+			defer result.Stream.Close()
+			var ids, groups []int64
+			for {
+				chunk, err := result.Stream.Recv()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				require.NoError(t, err)
+				ids = append(ids, chunk.GetResultData().GetIds().GetIntId().GetData()...)
+				groups = append(groups, chunk.GetResultData().GetGroupByFieldValues()[0].GetScalars().GetLongData().GetData()...)
+			}
+			require.Equal(t, []int64{1, 2, 3}, ids)
+			require.Equal(t, []int64{10, 20, 10}, groups)
+		})
+	}
+}
+
 func TestLegacyClientIteratorSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
