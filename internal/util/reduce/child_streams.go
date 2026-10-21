@@ -17,14 +17,16 @@
 package reduce
 
 import (
+	"context"
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ChildStream is the portion of a ReduceStream needed to receive and close
-// child streams.
+// child streams. Close must unblock an active Recv so shutdown can join it.
 type ChildStream[T any] interface {
 	Recv() (T, error)
 	Close() error
@@ -37,12 +39,16 @@ type childRecvCompletion[T any] struct {
 }
 
 // ChildStreams manages one pending Recv per child stream. Its methods must be
-// called serially by the owning ReduceStream.
+// called serially by the owning ReduceStream, except Cancel, which may run
+// concurrently to wake a pending receive wait.
 type ChildStreams[T any] struct {
 	streams     []ChildStream[T]
 	receiving   []bool
 	drained     []bool
 	completions chan childRecvCompletion[T]
+	done        chan struct{}
+	cancelOnce  sync.Once
+	pending     sync.WaitGroup
 
 	closed   bool
 	closeErr error
@@ -59,6 +65,7 @@ func NewChildStreams[T any, S ChildStream[T]](streams []S) *ChildStreams[T] {
 		receiving:   make([]bool, len(children)),
 		drained:     make([]bool, len(children)),
 		completions: make(chan childRecvCompletion[T], max(1, len(children))),
+		done:        make(chan struct{}),
 	}
 }
 
@@ -68,6 +75,12 @@ func (s *ChildStreams[T]) ReceiveUntilReady(
 	acceptChunk func(childIndex int, chunk T) error,
 ) error {
 	for {
+		select {
+		case <-s.done:
+			return context.Canceled
+		default:
+		}
+
 		allReady := true
 		for i, stream := range s.streams {
 			if s.drained[i] || hasUnit(i) {
@@ -80,7 +93,9 @@ func (s *ChildStreams[T]) ReceiveUntilReady(
 			}
 
 			s.receiving[i] = true
+			s.pending.Add(1)
 			go func(childIndex int, childStream ChildStream[T]) {
+				defer s.pending.Done()
 				chunk, err := childStream.Recv()
 				s.completions <- childRecvCompletion[T]{
 					childIndex: childIndex,
@@ -94,7 +109,12 @@ func (s *ChildStreams[T]) ReceiveUntilReady(
 			return nil
 		}
 
-		received := <-s.completions
+		var received childRecvCompletion[T]
+		select {
+		case <-s.done:
+			return context.Canceled
+		case received = <-s.completions:
+		}
 		s.receiving[received.childIndex] = false
 		if errors.Is(received.err, io.EOF) {
 			s.drained[received.childIndex] = true
@@ -115,6 +135,12 @@ func (s *ChildStreams[T]) ReceiveAnyReady(
 	acceptChunk func(childIndex int, chunk T) error,
 ) error {
 	for {
+		select {
+		case <-s.done:
+			return context.Canceled
+		default:
+		}
+
 		active := false
 		for i, stream := range s.streams {
 			if s.drained[i] {
@@ -129,7 +155,9 @@ func (s *ChildStreams[T]) ReceiveAnyReady(
 			}
 
 			s.receiving[i] = true
+			s.pending.Add(1)
 			go func(childIndex int, childStream ChildStream[T]) {
+				defer s.pending.Done()
 				chunk, err := childStream.Recv()
 				s.completions <- childRecvCompletion[T]{
 					childIndex: childIndex,
@@ -142,7 +170,12 @@ func (s *ChildStreams[T]) ReceiveAnyReady(
 			return nil
 		}
 
-		received := <-s.completions
+		var received childRecvCompletion[T]
+		select {
+		case <-s.done:
+			return context.Canceled
+		case received = <-s.completions:
+		}
 		s.receiving[received.childIndex] = false
 		if errors.Is(received.err, io.EOF) {
 			s.drained[received.childIndex] = true
@@ -162,20 +195,33 @@ func (s *ChildStreams[T]) IsDrained(childIndex int) bool {
 	return s.drained[childIndex]
 }
 
-// Close idempotently closes every child stream.
+// Cancel wakes receive waits without changing the owner's Buffers or closing
+// child streams. Close performs that cleanup after the owner's Recv unwinds.
+func (s *ChildStreams[T]) Cancel() {
+	s.cancelOnce.Do(func() { close(s.done) })
+}
+
+// Close idempotently closes every child stream and joins pending receives.
+// The owner must serialize it with receive scheduling, so no Add races Wait.
 func (s *ChildStreams[T]) Close() error {
 	if s.closed {
 		return s.closeErr
 	}
 	s.closed = true
+	s.Cancel()
 
 	closeErrors := make([]error, 0, len(s.streams))
 	for i, stream := range s.streams {
 		if err := stream.Close(); err != nil {
 			closeErrors = append(closeErrors, merr.Wrapf(err, "close child stream %d", i))
 		}
-		s.receiving[i] = false
 	}
+	s.pending.Wait()
+	// A completion can retain a Chunk that was never accepted after an error.
+	for len(s.completions) > 0 {
+		<-s.completions
+	}
+	clear(s.receiving)
 	s.closeErr = errors.Join(closeErrors...)
 	return s.closeErr
 }

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -33,7 +34,7 @@ type grpcReduceStream struct {
 
 	closeOnce sync.Once
 	closeErr  error
-	closed    bool
+	closed    atomic.Bool
 	finished  bool
 }
 
@@ -70,7 +71,7 @@ func (s *grpcReduceStream) Recv() (*internalpb.SearchResults, error) {
 	if s.finished {
 		return nil, io.EOF
 	}
-	if s.closed {
+	if s.closed.Load() {
 		return nil, io.ErrClosedPipe
 	}
 
@@ -96,7 +97,7 @@ func (s *grpcReduceStream) Recv() (*internalpb.SearchResults, error) {
 
 func (s *grpcReduceStream) Close() error {
 	s.closeOnce.Do(func() {
-		s.closed = true
+		s.closed.Store(true)
 		s.closeErr = s.client.CloseSend()
 		s.cancel()
 	})
