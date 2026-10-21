@@ -5911,3 +5911,118 @@ func TestExpr_BooleanLiteral(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+const elemNullStrFieldID = 10007
+
+// LIKE and regex on an element-nullable VarChar sub-field parse inside
+// MATCH_* and element_filter to an element-level UnaryRangeExpr; simple
+// patterns are rewritten to prefix / postfix / inner / equal matches.
+func TestExpr_ElementLevelLikeAndRegex(t *testing.T) {
+	schema := newTestSchema(true)
+	structField := schema.StructArrayFields[0]
+	structField.Fields = append(structField.Fields,
+		&schemapb.FieldSchema{
+			FieldID: elemNullScalarFieldID, Name: "struct_array[en]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64, ElementNullable: true,
+		},
+		&schemapb.FieldSchema{
+			FieldID: elemNullStrFieldID, Name: "struct_array[en_str]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_VarChar, ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}},
+		},
+	)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	contexts := []string{
+		`MATCH_ANY(struct_array, %s)`,
+		`MATCH_ALL(struct_array, %s)`,
+		`MATCH_LEAST(struct_array, %s, threshold=2)`,
+		`MATCH_MOST(struct_array, %s, threshold=1)`,
+		`MATCH_EXACT(struct_array, %s, threshold=1)`,
+		`element_filter(struct_array, %s)`,
+	}
+	predicateOf := func(t *testing.T, expr string) *planpb.Expr {
+		node := parseSearchPredicates(t, helper, expr)
+		if match := node.GetMatchExpr(); match != nil {
+			assert.Equal(t, "struct_array", match.GetStructName(), expr)
+			return match.GetPredicate()
+		}
+		elementFilter := node.GetElementFilterExpr()
+		require.NotNil(t, elementFilter, expr)
+		assert.Equal(t, "struct_array", elementFilter.GetStructName(), expr)
+		return elementFilter.GetElementExpr()
+	}
+	requireUnary := func(t *testing.T, expr string, node *planpb.Expr, op planpb.OpType, operand string, fieldID int64) {
+		unary := node.GetUnaryRangeExpr()
+		require.NotNil(t, unary, "%s: %v", expr, node)
+		assert.Equal(t, op, unary.GetOp(), expr)
+		assert.Equal(t, operand, unary.GetValue().GetStringVal(), expr)
+		column := unary.GetColumnInfo()
+		assert.Equal(t, fieldID, column.GetFieldId(), expr)
+		assert.True(t, column.GetIsElementLevel(), expr)
+		assert.Equal(t, schemapb.DataType_VarChar, column.GetElementType(), expr)
+		assert.Empty(t, column.GetNestedPath(), expr)
+	}
+
+	single := []struct {
+		text    string
+		op      planpb.OpType
+		operand string
+	}{
+		{`$[en_str] like "a%"`, planpb.OpType_PrefixMatch, "a"},
+		{`$[en_str] LIKE "%b"`, planpb.OpType_PostfixMatch, "b"},
+		{`$[en_str] like "%b%"`, planpb.OpType_InnerMatch, "b"},
+		{`$[en_str] like "a_"`, planpb.OpType_Match, "a_"},
+		{`$[en_str] like "a%c"`, planpb.OpType_Match, "a%c"},
+		{`$[en_str] like "_b%"`, planpb.OpType_Match, "_b%"},
+		{`$[en_str] =~ "b"`, planpb.OpType_RegexMatch, "b"},
+		{`$[en_str] =~ "^a.$"`, planpb.OpType_RegexMatch, "^a.$"},
+		{`$[en_str] =~ "^ab"`, planpb.OpType_PrefixMatch, "ab"},
+		{`$[en_str] =~ "c$"`, planpb.OpType_PostfixMatch, "c"},
+		{`$[en_str] =~ "^ab$"`, planpb.OpType_Equal, "ab"},
+		{`$[sub_str] like "a%"`, planpb.OpType_PrefixMatch, "a"},
+	}
+	for _, format := range contexts {
+		for _, test := range single {
+			expr := fmt.Sprintf(format, test.text)
+			fieldID := int64(elemNullStrFieldID)
+			if strings.Contains(test.text, "sub_str") {
+				fieldID = structSubStrFieldID
+			}
+			requireUnary(t, expr, predicateOf(t, expr), test.op, test.operand, fieldID)
+		}
+
+		// NOT and !~ keep the negation, so a null element stays UNKNOWN.
+		for _, text := range []string{`not ($[en_str] like "a_")`, `$[en_str] !~ "a."`} {
+			expr := fmt.Sprintf(format, text)
+			node := predicateOf(t, expr)
+			not := node.GetUnaryExpr()
+			require.NotNil(t, not, "%s: %v", expr, node)
+			assert.Equal(t, planpb.UnaryExpr_Not, not.GetOp(), expr)
+			op, operand := planpb.OpType_Match, "a_"
+			if strings.Contains(text, "!~") {
+				op, operand = planpb.OpType_RegexMatch, "a."
+			}
+			requireUnary(t, expr, not.GetChild(), op, operand, elemNullStrFieldID)
+		}
+
+		// Two element-nullable sub-fields with different null layouts.
+		expr := fmt.Sprintf(format, `$[en_str] like "a%" && $[en] == 1`)
+		and := requireBinaryExpr(t, expr, predicateOf(t, expr), planpb.BinaryExpr_LogicalAnd)
+		left, right := and.GetLeft(), and.GetRight()
+		if left.GetUnaryRangeExpr().GetOp() != planpb.OpType_PrefixMatch {
+			left, right = right, left
+		}
+		requireUnary(t, expr, left, planpb.OpType_PrefixMatch, "a", elemNullStrFieldID)
+		equal := right.GetUnaryRangeExpr()
+		require.NotNil(t, equal, expr)
+		assert.Equal(t, planpb.OpType_Equal, equal.GetOp(), expr)
+		assert.Equal(t, int64(elemNullScalarFieldID), equal.GetColumnInfo().GetFieldId(), expr)
+		assert.True(t, equal.GetColumnInfo().GetNullable(), expr)
+	}
+
+	// An invalid regex is a query-plan error.
+	_, err = ParseExpr(helper, `MATCH_ANY(struct_array, $[en_str] =~ "a(")`, nil)
+	require.ErrorIs(t, err, merr.ErrQueryPlan)
+}
