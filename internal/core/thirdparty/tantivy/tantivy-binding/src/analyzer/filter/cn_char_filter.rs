@@ -2,8 +2,8 @@ use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
 
 pub struct CnCharOnlyFilter;
 
-pub struct CnCharOnlyFilterStream<T> {
-    regex: regex::Regex,
+pub struct CnCharOnlyFilterStream<'a, T> {
+    regex: &'a regex::Regex,
     tail: T,
 }
 
@@ -11,25 +11,32 @@ impl TokenFilter for CnCharOnlyFilter {
     type Tokenizer<T: Tokenizer> = CnCharOnlyFilterWrapper<T>;
 
     fn transform<T: Tokenizer>(self, tokenizer: T) -> CnCharOnlyFilterWrapper<T> {
-        CnCharOnlyFilterWrapper(tokenizer)
-    }
-}
-
-#[derive(Clone)]
-pub struct CnCharOnlyFilterWrapper<T>(T);
-
-impl<T: Tokenizer> Tokenizer for CnCharOnlyFilterWrapper<T> {
-    type TokenStream<'a> = CnCharOnlyFilterStream<T::TokenStream<'a>>;
-
-    fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
-        CnCharOnlyFilterStream {
+        CnCharOnlyFilterWrapper {
+            inner: tokenizer,
             regex: regex::Regex::new("\\p{Han}+").unwrap(),
-            tail: self.0.token_stream(text),
         }
     }
 }
 
-impl<T: TokenStream> TokenStream for CnCharOnlyFilterStream<T> {
+#[derive(Clone)]
+pub struct CnCharOnlyFilterWrapper<T> {
+    inner: T,
+    // Clone with the analyzer: share compiled state, but keep worker-local search caches.
+    regex: regex::Regex,
+}
+
+impl<T: Tokenizer> Tokenizer for CnCharOnlyFilterWrapper<T> {
+    type TokenStream<'a> = CnCharOnlyFilterStream<'a, T::TokenStream<'a>>;
+
+    fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
+        CnCharOnlyFilterStream {
+            regex: &self.regex,
+            tail: self.inner.token_stream(text),
+        }
+    }
+}
+
+impl<T: TokenStream> TokenStream for CnCharOnlyFilterStream<'_, T> {
     fn advance(&mut self) -> bool {
         while self.tail.advance() {
             if self.regex.is_match(&self.tail.token().text) {
@@ -51,8 +58,8 @@ impl<T: TokenStream> TokenStream for CnCharOnlyFilterStream<T> {
 
 pub struct CnAlphaNumOnlyFilter;
 
-pub struct CnAlphaNumOnlyFilterStream<T> {
-    regex: regex::Regex,
+pub struct CnAlphaNumOnlyFilterStream<'a, T> {
+    regex: &'a regex::Regex,
     tail: T,
 }
 
@@ -60,24 +67,31 @@ impl TokenFilter for CnAlphaNumOnlyFilter {
     type Tokenizer<T: Tokenizer> = CnAlphaNumOnlyFilterWrapper<T>;
 
     fn transform<T: Tokenizer>(self, tokenizer: T) -> CnAlphaNumOnlyFilterWrapper<T> {
-        CnAlphaNumOnlyFilterWrapper(tokenizer)
+        CnAlphaNumOnlyFilterWrapper {
+            inner: tokenizer,
+            regex: regex::Regex::new(r"[\p{Han}a-zA-Z0-9]+").unwrap(),
+        }
     }
 }
 #[derive(Clone)]
-pub struct CnAlphaNumOnlyFilterWrapper<T>(T);
+pub struct CnAlphaNumOnlyFilterWrapper<T> {
+    inner: T,
+    // Clone with the analyzer: share compiled state, but keep worker-local search caches.
+    regex: regex::Regex,
+}
 
 impl<T: Tokenizer> Tokenizer for CnAlphaNumOnlyFilterWrapper<T> {
-    type TokenStream<'a> = CnAlphaNumOnlyFilterStream<T::TokenStream<'a>>;
+    type TokenStream<'a> = CnAlphaNumOnlyFilterStream<'a, T::TokenStream<'a>>;
 
     fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
         CnAlphaNumOnlyFilterStream {
-            regex: regex::Regex::new(r"[\p{Han}a-zA-Z0-9]+").unwrap(),
-            tail: self.0.token_stream(text),
+            regex: &self.regex,
+            tail: self.inner.token_stream(text),
         }
     }
 }
 
-impl<T: TokenStream> TokenStream for CnAlphaNumOnlyFilterStream<T> {
+impl<T: TokenStream> TokenStream for CnAlphaNumOnlyFilterStream<'_, T> {
     fn advance(&mut self) -> bool {
         while self.tail.advance() {
             if self.regex.is_match(&self.tail.token().text) {
