@@ -119,6 +119,29 @@ func (s *CollectionSuite) TestCreateCollection() {
 		err := s.client.CreateCollection(ctx, SimpleCreateCollectionOptions("test_collection", 128))
 		s.Error(err)
 	})
+
+	s.Run("index_build_failed", func() {
+		s.resetMock()
+		defer s.resetMock()
+		s.mock.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		s.mock.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{
+			Status: merr.Success(),
+			IndexDescriptions: []*milvuspb.IndexDescription{
+				{FieldName: "vector", State: commonpb.IndexState_Failed, IndexStateFailReason: "mocked index failure"},
+			},
+		}, nil).Once()
+		s.mock.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
+		s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{
+			Status:   merr.Success(),
+			Progress: 100,
+		}, nil).Maybe()
+
+		err := s.client.CreateCollection(ctx, SimpleCreateCollectionOptions("test_collection", 128))
+		s.Error(err)
+		s.ErrorContains(err, "mocked index failure")
+		s.mock.AssertNotCalled(s.T(), "LoadCollection", mock.Anything, mock.Anything)
+	})
 }
 
 func (s *CollectionSuite) TestCreateCollectionOptions() {
