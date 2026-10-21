@@ -20,6 +20,7 @@
 #include <queue>
 #include <vector>
 
+#include "cachinglayer/Manager.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -203,8 +204,9 @@ void
 ReduceHelper::FillPrimaryKey() {
     tracer::AutoSpan span("ReduceHelper::FillPrimaryKey",
                           tracer::GetRootSpan());
-    // Second pass: fill primary keys
-    if (num_segments_ > 1) {
+    // Avoid scheduling resident PK reads; eviction can turn them into loads.
+    if (num_segments_ > 1 &&
+        cachinglayer::Manager::GetInstance().isEvictionEnabled()) {
         // Isolate search fanout from background field and index loading.
         auto& pool = ThreadPools::GetThreadPool(
             milvus::ThreadPoolPriority::SEARCH_FANOUT);
@@ -231,10 +233,12 @@ ReduceHelper::FillPrimaryKey() {
         for (auto& future : futures) {
             future.get();
         }
-    } else if (num_segments_ == 1) {
-        auto segment =
-            static_cast<SegmentInterface*>(search_results_[0]->segment_);
-        segment->FillPrimaryKeys(plan_, *search_results_[0], op_ctx_);
+    } else {
+        for (auto* search_result : search_results_) {
+            auto* segment =
+                static_cast<SegmentInterface*>(search_result->segment_);
+            segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
+        }
     }
 }
 
