@@ -1245,3 +1245,34 @@ func TestTargetObserver(t *testing.T) {
 	suite.Run(t, new(TargetObserverSuite))
 	suite.Run(t, new(TargetObserverCheckSuite))
 }
+
+func TestUpdatePartitionReturnsOnContextDone(t *testing.T) {
+	t.Run("loop never takes the request", func(t *testing.T) {
+		ob := &TargetObserver{updateChan: make(chan targetUpdateRequest)}
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_, err := ob.UpdatePartition(ctx, 1, 2)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("loop takes the request but never replies", func(t *testing.T) {
+		ob := &TargetObserver{updateChan: make(chan targetUpdateRequest, 1)}
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_, err := ob.UpdatePartition(ctx, 1, 2)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+		// A reply that arrives after the caller left must not block the loop.
+		req := <-ob.updateChan
+		replied := make(chan struct{})
+		go func() {
+			req.Notifier <- nil
+			close(replied)
+		}()
+		select {
+		case <-replied:
+		case <-time.After(time.Second):
+			t.Fatal("late reply blocked the schedule loop")
+		}
+	})
+}
