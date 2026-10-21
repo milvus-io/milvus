@@ -298,7 +298,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 			// A segment whose task is already in meta must not be re-submitted;
 			// filtering it out here keeps the per-tick work proportional to the
 			// segments that still need a task instead of to all of them.
-			// Note this runs under meta.segMu.RLock, so keep it to a map read.
+			// Note this runs once per selected segment, so keep it to a map read.
 			return !si.mt.statsTaskMeta.HasStatsTask(seg.GetID(), indexpb.StatsSubJob_TextIndexJob)
 		}))
 

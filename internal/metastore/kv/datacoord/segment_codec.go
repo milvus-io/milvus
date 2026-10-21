@@ -306,6 +306,16 @@ func SegmentBinlogPrefixesOf(collectionID, partitionID, segmentID typeutil.Uniqu
 	return prefixes
 }
 
+// SegmentBinlogPrefixesOfCollection lists the binlog KV prefixes of the
+// segments of a collection, in the order of SegmentBinlogPrefixes.
+func SegmentBinlogPrefixesOfCollection(collectionID typeutil.UniqueID) []string {
+	prefixes := make([]string, len(segmentBinlogFamilies))
+	for i, family := range segmentBinlogFamilies {
+		prefixes[i] = fmt.Sprintf("%s/%d/", family.prefix, collectionID)
+	}
+	return prefixes
+}
+
 // DecodeFieldBinlog decodes a binlog KV into the segment it belongs to and its
 // field binlog.
 func DecodeFieldBinlog(key string, value []byte) (typeutil.UniqueID, *datapb.FieldBinlog, error) {

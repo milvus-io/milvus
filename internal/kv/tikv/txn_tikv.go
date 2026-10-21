@@ -76,7 +76,7 @@ var (
 
 func wrapWriteBuildErr(reason string, err error) error {
 	wrapped := merr.WrapErrIoFailedReason(reason, err.Error())
-	if isLocalMutationValidationErr(err) {
+	if IsLocalMutationValidationErr(err) {
 		return markBuildAbort(wrapped)
 	}
 	return wrapped
@@ -90,7 +90,10 @@ func markBuildAbort(err error) error {
 	return errors.Mark(err, errBuildAbort)
 }
 
-func isLocalMutationValidationErr(err error) bool {
+// IsLocalMutationValidationErr reports a mutation the TiKV client rejects
+// before sending it (an oversized key or entry, a nil value): no retry of it
+// can succeed.
+func IsLocalMutationValidationErr(err error) bool {
 	var keyTooLarge *tikverr.ErrKeyTooLarge
 	if errors.As(err, &keyTooLarge) {
 		return true

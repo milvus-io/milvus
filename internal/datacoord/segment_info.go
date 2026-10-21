@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // dcSegmentState holds the DC-only fields that are not part of the shared
@@ -43,26 +45,24 @@ type dcSegmentState struct {
 	lastWrittenTime time.Time
 }
 
-// SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation.
-//
-// Locking is split by design and the two halves are NOT interchangeable: the
-// shared store guards itself with its own RWMutex and may be read directly by
-// other components (QueryCoord, through metacache.MetaView), whereas dcState
-// and compactionTo are DataCoord-private and carry NO lock of their own --
-// every access must happen under meta.segMu. A future reader that reaches the
-// store directly therefore sees segment protos but never dcState, and must not
-// touch compactionTo at all.
+// SegmentsInfo is the segment metadata of meta. The persisted segment protos
+// live in the shared MetaStore, which serves them lock-free to DataCoord and,
+// through MetaView, to QueryCoord (see metacache.VersionedSegments): writes
+// compare-and-swap the store version of a segment, so they never serialize on a
+// lock. The DataCoord-only state of a segment and the compaction relations,
+// which never go through MetaStore, live here.
 type SegmentsInfo struct {
-	// store is the primary proto storage. Self-synchronized.
 	store metacache.MetaStore
 
-	// dcState holds the DataCoord-only per-segment state. Requires meta.segMu.
-	dcState map[UniqueID]*dcSegmentState
+	// dcState holds the DataCoord-only state of the segments whose state is not
+	// the zero one. A stored state is never modified: a change stores a new one
+	// (updateDCState).
+	dcState *typeutil.ConcurrentMap[UniqueID, *dcSegmentState]
 
-	// map the compact relation, value is the segment which `CompactFrom` contains key.
-	// now segment could be compacted to multiple segments.
-	// Requires meta.segMu.
-	compactionTo map[UniqueID][]UniqueID
+	// compactionTo maps a compaction input to its outputs. Writers serialize on
+	// compactionToMu and replace the slice; readers are lock-free.
+	compactionToMu sync.Mutex
+	compactionTo   *typeutil.ConcurrentMap[UniqueID, []UniqueID]
 }
 
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
@@ -75,11 +75,11 @@ type SegmentInfo struct {
 }
 
 // EnsureStats returns a non-nil Statistics view for read-only aggregate
-// queries. It does NOT mutate s — concurrent readers under m.segMu.RLock()
-// would race otherwise. The persisted s.Stats is populated eagerly by
+// queries. It does NOT mutate s — concurrent lock-free readers would race
+// otherwise. The persisted s.Stats is populated eagerly by
 // NewSegmentInfo on construction and by the array-mutating operators
 // (AddBinlogsOperator, UpdateBinlogsFromSaveBinlogPathsOperator,
-// UpdateSegmentStats), both of which run under m.segMu.Lock(). When a
+// UpdateSegmentStats), both of which run on the update pack's private clone. When a
 // caller hands us a SegmentInfo built via the struct literal
 // `&SegmentInfo{SegmentInfo: ...}` with a nil Stats (the only remaining
 // path is now legacy tests), we fall back to a transient recompute so
@@ -148,13 +148,12 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 
 // NewSegmentsInfo creates a `SegmentsInfo` instance backed by the
 // provided MetaStore as the primary proto storage. DC-only fields are kept
-// in a local dcState map. Note that no mutex is wrapped so external
-// concurrent control is needed.
+// in a local dcState map.
 func NewSegmentsInfo(store metacache.MetaStore) *SegmentsInfo {
 	return &SegmentsInfo{
 		store:        store,
-		dcState:      make(map[UniqueID]*dcSegmentState),
-		compactionTo: make(map[UniqueID][]UniqueID),
+		dcState:      typeutil.NewConcurrentMap[UniqueID, *dcSegmentState](),
+		compactionTo: typeutil.NewConcurrentMap[UniqueID, []UniqueID](),
 	}
 }
 
@@ -164,16 +163,17 @@ func NewSegmentsInfo(store metacache.MetaStore) *SegmentsInfo {
 // the compaction relations and the per-segment transient state would stay
 // empty until each segment happens to be written again.
 func (s *SegmentsInfo) RebuildFromStore() {
-	for id, segProto := range s.store.GetAllSegments() {
-		s.addCompactTo(&SegmentInfo{SegmentInfo: segProto})
-		s.dcState[id] = newDCSegmentState(segProto)
-	}
+	s.store.RangeSegments(func(segmentID int64, segProto *datapb.SegmentInfo) bool {
+		s.addCompactTo(segProto)
+		s.setDCState(segmentID, newDCSegmentState(segProto))
+		return true
+	})
 }
 
 // newDCSegmentState seeds the transient state of a segment read back from the
 // catalog, mirroring what NewSegmentInfo sets for a growing segment.
-func newDCSegmentState(segProto *datapb.SegmentInfo) *dcSegmentState {
-	dc := &dcSegmentState{}
+func newDCSegmentState(segProto *datapb.SegmentInfo) dcSegmentState {
+	dc := dcSegmentState{}
 	if segProto.GetState() == commonpb.SegmentState_Growing {
 		dc.allocations = make([]*Allocation, 0, 16)
 		dc.lastFlushTime = time.Now().Add(-1 * paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second))
@@ -183,33 +183,38 @@ func newDCSegmentState(segProto *datapb.SegmentInfo) *dcSegmentState {
 	return dc
 }
 
-// dcStateFor returns the transient state of a segment, creating it when the
-// segment entered memory through the store rather than through SetSegment.
-func (s *SegmentsInfo) dcStateFor(segmentID UniqueID) *dcSegmentState {
-	if dc, ok := s.dcState[segmentID]; ok {
-		return dc
+func dcStateOf(segment *SegmentInfo) dcSegmentState {
+	return dcSegmentState{
+		allocations:     segment.allocations,
+		lastFlushTime:   segment.lastFlushTime,
+		isCompacting:    segment.isCompacting,
+		lastWrittenTime: segment.lastWrittenTime,
 	}
-	segProto, ok := s.store.GetSegment(segmentID)
-	if !ok {
-		return nil
-	}
-	dc := newDCSegmentState(segProto)
-	s.dcState[segmentID] = dc
-	return dc
 }
 
-// assemble combines a proto SegmentInfo (from MetaStore) with the DC-only
-// state (from dcState) into a *SegmentInfo. dc may be nil.
-// Callers MUST NOT mutate the returned SegmentInfo.SegmentInfo proto; use the
-// SegmentsInfo setter methods which clone before writing.
-func (s *SegmentsInfo) assemble(segProto *datapb.SegmentInfo, dc *dcSegmentState) *SegmentInfo {
-	si := &SegmentInfo{SegmentInfo: segProto}
-	if dc != nil {
+func (dc *dcSegmentState) isZero() bool {
+	return len(dc.allocations) == 0 && dc.lastFlushTime.IsZero() && !dc.isCompacting && dc.lastWrittenTime.IsZero()
+}
+
+// fill sets si to a segment proto of the store combined with the DataCoord
+// state of the segment. Callers MUST NOT mutate the proto.
+func (s *SegmentsInfo) fill(si *SegmentInfo, segmentID UniqueID, segProto *datapb.SegmentInfo) {
+	*si = SegmentInfo{SegmentInfo: segProto}
+	if dc, ok := s.dcState.Get(segmentID); ok {
 		si.allocations = dc.allocations
 		si.lastFlushTime = dc.lastFlushTime
 		si.isCompacting = dc.isCompacting
 		si.lastWrittenTime = dc.lastWrittenTime
 	}
+}
+
+// assemble combines a proto SegmentInfo (from MetaStore) with the DC-only
+// state (from dcState) into a *SegmentInfo.
+// Callers MUST NOT mutate the returned SegmentInfo.SegmentInfo proto; use the
+// SegmentsInfo setter methods which clone before writing.
+func (s *SegmentsInfo) assemble(segmentID UniqueID, segProto *datapb.SegmentInfo) *SegmentInfo {
+	si := &SegmentInfo{}
+	s.fill(si, segmentID, segProto)
 	return si
 }
 
@@ -222,71 +227,94 @@ func (s *SegmentsInfo) GetSegment(segmentID UniqueID) *SegmentInfo {
 	if !ok {
 		return nil
 	}
-	return s.assemble(segProto, s.dcState[segmentID])
+	return s.assemble(segmentID, segProto)
+}
+
+// GetSegmentWithVersion returns the segment and the store version of that
+// value, read together: a write built from the segment compares against the
+// version. Returns (nil, 0) if not found.
+func (s *SegmentsInfo) GetSegmentWithVersion(segmentID UniqueID) (*SegmentInfo, int64) {
+	segProto, version, ok := s.store.GetSegmentWithVersion(segmentID)
+	if !ok {
+		return nil, 0
+	}
+	return s.assemble(segmentID, segProto), version
 }
 
 // GetSegments iterates internal map and returns all SegmentInfo in a slice
 // no deep copy applied
 // the logPath in meta is empty
 func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
-	all := s.store.GetAllSegments()
-	result := make([]*SegmentInfo, 0, len(all))
-	for id, segProto := range all {
-		result = append(result, s.assemble(segProto, s.dcState[id]))
-	}
-	return result
-}
-
-func (s *SegmentsInfo) getCandidates(criterion *segmentCriterion) map[UniqueID]*SegmentInfo {
-	var protos map[int64]*datapb.SegmentInfo
-	switch {
-	case criterion.collectionID > 0 && criterion.channel != "":
-		collSegs := s.store.GetSegments(criterion.collectionID)
-		protos = make(map[int64]*datapb.SegmentInfo)
-		for id, seg := range collSegs {
-			if seg.GetInsertChannel() == criterion.channel {
-				protos[id] = seg
-			}
-		}
-	case criterion.collectionID > 0:
-		protos = s.store.GetSegments(criterion.collectionID)
-	case criterion.channel != "":
-		protos = s.store.GetSegmentsByChannel(criterion.channel)
-	default:
-		protos = s.store.GetAllSegments()
-	}
-	result := make(map[UniqueID]*SegmentInfo, len(protos))
-	for id, segProto := range protos {
-		result[id] = s.assemble(segProto, s.dcState[id])
-	}
+	result := make([]*SegmentInfo, 0, s.store.NumSegments())
+	s.store.RangeSegments(func(segmentID int64, segProto *datapb.SegmentInfo) bool {
+		result = append(result, s.assemble(segmentID, segProto))
+		return true
+	})
 	return result
 }
 
 func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*SegmentInfo {
+	result := make([]*SegmentInfo, 0)
+	s.RangeReused(func(segment *SegmentInfo) bool {
+		result = append(result, segment.ShadowClone())
+		return true
+	}, filters...)
+	return result
+}
+
+// RangeReused visits the live segments the filters select with one reused
+// value, valid only during fn; fn returns false to stop. A visitor that keeps
+// a segment keeps segment.ShadowClone(). Unlike the reads returning segments,
+// it allocates nothing per segment, which matters to scans of every segment.
+func (s *SegmentsInfo) RangeReused(fn func(segment *SegmentInfo) bool, filters ...SegmentFilter) {
 	criterion := &segmentCriterion{}
 	for _, filter := range filters {
 		filter.AddFilter(criterion)
 	}
-
-	// apply criterion
-	candidates := s.getCandidates(criterion)
-	result := make([]*SegmentInfo, 0, len(candidates))
-	for _, segment := range candidates {
-		if criterion.Match(segment) {
-			result = append(result, segment)
+	segment := &SegmentInfo{}
+	s.rangeCandidates(criterion, func(segmentID int64, segProto *datapb.SegmentInfo) bool {
+		s.fill(segment, segmentID, segProto)
+		if !criterion.Match(segment) {
+			return true
 		}
+		return fn(segment)
+	})
+}
+
+// rangeCandidates visits the live segments of the criterion's collection and
+// channel, every live segment when it has neither.
+func (s *SegmentsInfo) rangeCandidates(criterion *segmentCriterion, fn func(segmentID int64, segProto *datapb.SegmentInfo) bool) {
+	switch {
+	case criterion.collectionID > 0:
+		s.store.RangeCollectionSegmentIDs(criterion.collectionID, func(segmentID int64) bool {
+			segProto, ok := s.store.GetSegment(segmentID)
+			if !ok || segProto.GetCollectionID() != criterion.collectionID ||
+				(criterion.channel != "" && segProto.GetInsertChannel() != criterion.channel) {
+				return true
+			}
+			return fn(segmentID, segProto)
+		})
+	case criterion.channel != "":
+		s.store.RangeChannelSegmentIDs(criterion.channel, func(segmentID int64) bool {
+			segProto, ok := s.store.GetSegment(segmentID)
+			if !ok || segProto.GetInsertChannel() != criterion.channel {
+				return true
+			}
+			return fn(segmentID, segProto)
+		})
+	default:
+		s.store.RangeSegments(fn)
 	}
-	return result
 }
 
 func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
-	protos := s.store.GetSegmentsByChannel(channel)
 	var result []*SegmentInfo
-	for id, p := range protos {
-		if !p.GetIsFake() {
-			result = append(result, s.assemble(p, s.dcState[id]))
+	s.rangeCandidates(&segmentCriterion{channel: channel}, func(segmentID int64, segProto *datapb.SegmentInfo) bool {
+		if !segProto.GetIsFake() {
+			result = append(result, s.assemble(segmentID, segProto))
 		}
-	}
+		return true
+	})
 	return result
 }
 
@@ -296,27 +324,29 @@ func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo 
 // Return (notnil, true) if given segmentID can be found and has compaction to.
 func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) ([]*SegmentInfo, bool) {
 	_, exist := s.store.GetSegment(fromSegmentID)
-	if compactTos, ok := s.compactionTo[fromSegmentID]; ok {
-		result := []*SegmentInfo{}
-		for _, compactTo := range compactTos {
-			segProto, ok := s.store.GetSegment(compactTo)
-			if !ok {
-				mlog.Warn(context.TODO(), "compactionTo relation is broken", mlog.Int64("from", fromSegmentID), mlog.Int64("to", compactTo))
-				return nil, exist
-			}
-			result = append(result, s.assemble(segProto, s.dcState[compactTo]))
-		}
-		return result, exist
+	compactTos, ok := s.compactionTo.Get(fromSegmentID)
+	if !ok {
+		return nil, exist
 	}
-	return nil, exist
+	result := make([]*SegmentInfo, 0, len(compactTos))
+	for _, compactTo := range compactTos {
+		to := s.GetSegment(compactTo)
+		if to == nil {
+			mlog.Warn(context.TODO(), "compactionTo relation is broken", mlog.Int64("from", fromSegmentID), mlog.Int64("to", compactTo))
+			return nil, exist
+		}
+		result = append(result, to)
+	}
+	return result, exist
 }
 
-func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
-	if seg, ok := s.store.GetSegment(segmentID); ok {
-		s.deleteCompactFrom(seg.GetCompactionFrom())
+// DropSegment removes the segment. A version > 0 is retained as a tombstone
+// so that stale writes are rejected.
+func (s *SegmentsInfo) DropSegment(segmentID UniqueID, version ...int64) {
+	if old := s.store.DropSegment(segmentID, versionArg(version)); old != nil {
+		s.deleteCompactTo(old)
+		s.dcState.Remove(segmentID)
 	}
-	s.store.RemoveSegment(segmentID)
-	delete(s.dcState, segmentID)
 }
 
 // normalizeSegmentRowCount reconciles a V1/V2 segment's NumOfRows with its
@@ -335,69 +365,205 @@ func normalizeSegmentRowCount(segProto *datapb.SegmentInfo) {
 	segmentutil.ReCalcRowCount(segProto, segProto)
 }
 
-func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
-	if old, ok := s.store.GetSegment(segmentID); ok {
-		s.deleteCompactFrom(old.GetCompactionFrom())
-	}
+// SetSegment inserts or overwrites a segment, its DataCoord state included. A
+// version > 0 is the store version of the value and is stale-protected
+// (rejected when the store already holds an equal or newer version); without
+// one the write is forced and keeps the stored version.
+func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo, version ...int64) {
 	normalizeSegmentRowCount(segment.SegmentInfo)
-	s.store.PutSegment(segment.SegmentInfo)
-	s.dcState[segmentID] = &dcSegmentState{
-		allocations:     segment.allocations,
-		lastFlushTime:   segment.lastFlushTime,
-		isCompacting:    segment.isCompacting,
-		lastWrittenTime: segment.lastWrittenTime,
-	}
-	s.addCompactTo(segment)
-}
-
-// modifyProto clones the proto for segmentID, applies fn, and writes it back.
-func (s *SegmentsInfo) modifyProto(segmentID UniqueID, fn func(*datapb.SegmentInfo)) {
-	seg, ok := s.store.GetSegment(segmentID)
-	if !ok {
+	old, applied := s.store.InstallSegment(segmentID, segment.SegmentInfo, versionArg(version))
+	if !applied {
 		return
 	}
-	cloned := proto.Clone(seg).(*datapb.SegmentInfo)
-	fn(cloned)
-	s.store.PutSegment(cloned)
+	s.setDCState(segmentID, dcStateOf(segment))
+	s.reindexCompactTo(old, segment.SegmentInfo)
+}
+
+// PublishSegments installs the persisted values of one mutation and returns
+// the live values they replaced. A multi-segment mutation is installed
+// atomically (metacache.VersionedSegments.PublishSegments), so a consistent
+// reader observes all of it or none of it. The DataCoord state of a live
+// segment is kept: it may have changed after the writer cloned the segment,
+// and no persisted write owns it.
+func (s *SegmentsInfo) PublishSegments(segments []*SegmentInfo, versions map[int64]int64) map[int64]*SegmentInfo {
+	// A reader that does not wait for the whole mutation sees the segments it
+	// adds or keeps before the ones it retires.
+	segments = retiredLast(segments)
+	protos := make([]*datapb.SegmentInfo, len(segments))
+	for i, segment := range segments {
+		normalizeSegmentRowCount(segment.SegmentInfo)
+		protos[i] = segment.SegmentInfo
+	}
+	results := s.store.PublishSegments(protos, versions, keepLastExpireTime)
+	previous := make(map[int64]*SegmentInfo, len(segments))
+	for i, segment := range segments {
+		result := results[i]
+		segmentID := segment.GetID()
+		if result.Applied {
+			if result.Old == nil {
+				// A new segment brings its DataCoord state, unless a setter
+				// already gave it one.
+				s.initDCState(segmentID, dcStateOf(segment))
+			}
+			s.reindexCompactTo(result.Old, segment.SegmentInfo)
+		}
+		if result.Old != nil {
+			previous[segmentID] = s.assemble(segmentID, result.Old)
+		}
+	}
+	return previous
+}
+
+// retiredLast orders segments so that the ones a write retires (Dropped) come
+// after the others: a compaction's outputs then exist before any of its inputs
+// is retired, in the store when a write is split over the op limit and in the
+// cache for readers that do not wait for a whole publication (see
+// retrieveSegment).
+func retiredLast[S interface{ GetState() commonpb.SegmentState }](segments []S) []S {
+	ordered := make([]S, 0, len(segments))
+	var retired []S
+	for _, segment := range segments {
+		if segment.GetState() == commonpb.SegmentState_Dropped {
+			retired = append(retired, segment)
+		} else {
+			ordered = append(ordered, segment)
+		}
+	}
+	return append(ordered, retired...)
+}
+
+// keepLastExpireTime is the publication merge of DataCoord: LastExpireTime
+// only advances in memory (allocation, seal), so a writer that cloned the
+// segment earlier must not move it back.
+func keepLastExpireTime(current, next *datapb.SegmentInfo) {
+	if current.GetLastExpireTime() > next.GetLastExpireTime() {
+		next.LastExpireTime = current.GetLastExpireTime()
+	}
+}
+
+// ReadConsistent runs read without observing a half-installed PublishSegments.
+func (s *SegmentsInfo) ReadConsistent(read func()) {
+	s.store.ReadConsistent(read)
+}
+
+func versionArg(version []int64) int64 {
+	if len(version) == 0 {
+		return 0
+	}
+	return version[0]
+}
+
+// updateProto applies a local-only change to a clone of the persisted proto,
+// keeping its version: readers of the previous value may still hold it.
+func (s *SegmentsInfo) updateProto(segmentID UniqueID, change func(*datapb.SegmentInfo)) {
+	s.store.UpdateSegment(segmentID, func(current *datapb.SegmentInfo) *datapb.SegmentInfo {
+		next := proto.Clone(current).(*datapb.SegmentInfo)
+		change(next)
+		return next
+	})
+}
+
+// updateDCState stores the DataCoord state of a live segment changed by
+// change, starting from the default state when the segment has none.
+func (s *SegmentsInfo) updateDCState(segmentID UniqueID, change func(*dcSegmentState)) {
+	for {
+		current, existed := s.dcState.Get(segmentID)
+		var next dcSegmentState
+		if existed {
+			next = *current
+		} else {
+			segProto, live := s.store.GetSegment(segmentID)
+			if !live {
+				return
+			}
+			next = newDCSegmentState(segProto)
+		}
+		change(&next)
+		if s.replaceDCState(segmentID, current, existed, &next) {
+			break
+		}
+	}
+	// A segment dropped meanwhile does not keep the state this change gave it.
+	if _, live := s.store.GetSegment(segmentID); !live {
+		s.dcState.Remove(segmentID)
+	}
+}
+
+// replaceDCState replaces current, the stored state of the segment (absent
+// when !existed), with next, and reports whether current was still stored.
+func (s *SegmentsInfo) replaceDCState(segmentID UniqueID, current *dcSegmentState, existed bool, next *dcSegmentState) bool {
+	switch {
+	case next.isZero() && !existed:
+		return true
+	case next.isZero():
+		return s.dcState.CompareAndDelete(segmentID, current)
+	case !existed:
+		_, loaded := s.dcState.GetOrInsert(segmentID, next)
+		return !loaded
+	default:
+		return s.dcState.CompareAndSwap(segmentID, current, next)
+	}
+}
+
+// setDCState stores the DataCoord state of an installed segment.
+func (s *SegmentsInfo) setDCState(segmentID UniqueID, state dcSegmentState) {
+	if state.isZero() {
+		s.dcState.Remove(segmentID)
+		return
+	}
+	s.dcState.Insert(segmentID, &state)
+}
+
+// initDCState stores the DataCoord state a new segment brings, unless a setter
+// already gave the segment one.
+func (s *SegmentsInfo) initDCState(segmentID UniqueID, state dcSegmentState) {
+	if !state.isZero() {
+		s.dcState.GetOrInsert(segmentID, &state)
+	}
 }
 
 func (s *SegmentsInfo) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
-	if dc := s.dcStateFor(segmentID); dc != nil {
+	s.updateDCState(segmentID, func(dc *dcSegmentState) {
 		dc.allocations = allocations
-	}
+	})
 }
 
 func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation) {
-	s.modifyProto(segmentID, func(seg *datapb.SegmentInfo) {
+	s.updateProto(segmentID, func(seg *datapb.SegmentInfo) {
 		seg.LastExpireTime = allocation.ExpireTime
 	})
-	if dc := s.dcStateFor(segmentID); dc != nil {
-		dc.allocations = append(dc.allocations, allocation)
-	}
+	s.updateDCState(segmentID, func(dc *dcSegmentState) {
+		// Clip: a reader of the previous state may hold the same array.
+		dc.allocations = append(slices.Clip(dc.allocations), allocation)
+	})
 }
 
 func (s *SegmentsInfo) SetLastWrittenTime(segmentID UniqueID) {
-	if dc := s.dcStateFor(segmentID); dc != nil {
+	s.updateDCState(segmentID, func(dc *dcSegmentState) {
 		dc.lastWrittenTime = time.Now()
-	}
+	})
 }
 
 func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
-	if dc := s.dcStateFor(segmentID); dc != nil {
+	s.updateDCState(segmentID, func(dc *dcSegmentState) {
 		dc.lastFlushTime = t
-	}
+	})
+}
+
+// SetLastExpire sets the last expire time of the segment allocations.
+func (s *SegmentsInfo) SetLastExpire(segmentID UniqueID, lastExpire uint64) {
+	s.updateProto(segmentID, func(seg *datapb.SegmentInfo) {
+		seg.LastExpireTime = lastExpire
+	})
 }
 
 // SetIsCompacting sets compaction status for segment. This is DC-only
 // transient state, so it touches dcState and nothing else: the segment proto
-// is not rewritten and the store's indexes are not involved. The stale
-// secondary-index problem the old implementation had here is gone with the
-// indexes themselves, which now live in MetaStore and are maintained on every
-// write through putSegmentLocked.
+// is not rewritten and the store's indexes are not involved.
 func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
-	if dc := s.dcStateFor(segmentID); dc != nil {
+	s.updateDCState(segmentID, func(dc *dcSegmentState) {
 		dc.isCompacting = isCompacting
-	}
+	})
 }
 
 func (s *SegmentInfo) IsDeltaLogExists(logID int64) bool {
@@ -423,7 +589,7 @@ func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
 }
 
 func (s *SegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
-	s.modifyProto(segmentID, func(seg *datapb.SegmentInfo) { seg.Level = level })
+	s.updateProto(segmentID, func(seg *datapb.SegmentInfo) { seg.Level = level })
 }
 
 // Clone deep clone the segment info and return a new instance. Stats lives
@@ -462,15 +628,40 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	return cloned
 }
 
-func (s *SegmentsInfo) addCompactTo(segment *SegmentInfo) {
+// reindexCompactTo updates the compaction relations after old (nil when the
+// segment was not live) was replaced by segment.
+func (s *SegmentsInfo) reindexCompactTo(old, segment *datapb.SegmentInfo) {
+	if old != nil && !slices.Equal(old.GetCompactionFrom(), segment.GetCompactionFrom()) {
+		s.deleteCompactTo(old)
+	}
+	s.addCompactTo(segment)
+}
+
+func (s *SegmentsInfo) addCompactTo(segment *datapb.SegmentInfo) {
+	if len(segment.GetCompactionFrom()) == 0 {
+		return
+	}
+	s.compactionToMu.Lock()
+	defer s.compactionToMu.Unlock()
 	for _, from := range segment.GetCompactionFrom() {
-		s.compactionTo[from] = append(s.compactionTo[from], segment.GetID())
+		existing, _ := s.compactionTo.Get(from)
+		if slices.Contains(existing, segment.GetID()) {
+			continue
+		}
+		updated := make([]UniqueID, 0, len(existing)+1)
+		updated = append(updated, existing...)
+		s.compactionTo.Insert(from, append(updated, segment.GetID()))
 	}
 }
 
-func (s *SegmentsInfo) deleteCompactFrom(compactionFrom []int64) {
-	for _, from := range compactionFrom {
-		delete(s.compactionTo, from)
+func (s *SegmentsInfo) deleteCompactTo(segment *datapb.SegmentInfo) {
+	if len(segment.GetCompactionFrom()) == 0 {
+		return
+	}
+	s.compactionToMu.Lock()
+	defer s.compactionToMu.Unlock()
+	for _, from := range segment.GetCompactionFrom() {
+		s.compactionTo.Remove(from)
 	}
 }
 

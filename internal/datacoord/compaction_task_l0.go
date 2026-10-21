@@ -481,9 +481,9 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	v3Deltalogs := make(map[int64][]*datapb.FieldBinlog)
 	for _, seg := range outputSegs {
 		if len(seg.GetDeltalogs()) > 0 {
-			// The manifest transaction must run outside UpdateSegmentsInfo: that
-			// method holds segMu, whereas CommitSegmentManifest only holds the
-			// per-segment lock while it performs object-storage I/O.
+			// The manifest transaction must run outside UpdateSegmentsInfo, whose
+			// operators perform no object-storage I/O: CommitSegmentManifest holds
+			// the per-segment manifest lock while it performs it.
 			current := t.meta.GetSegment(ctx, seg.GetSegmentID())
 			if current != nil && current.GetStorageVersion() == storage.StorageV3 && current.GetManifestPath() != "" {
 				// A target retired by a concurrent compaction while the L0 plan
@@ -556,7 +556,7 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 // commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
 // extraOperators — the L0 input-segment retirement — in ONE catalog transaction.
 // CommitSegmentManifests acquires all targets' manifest locks as a single atomic
-// operation, runs the loon transactions in parallel outside segMu (from the same
+// operation, runs the loon transactions in parallel (from the same
 // dataCoord.manifestCommitConcurrency executor), and lands every pointer
 // advance plus extraOperators in one catalog transaction (a single UpdateSegmentsInfo).
 // Folding the input drops in makes the whole L0 result atomic — the targets gain their

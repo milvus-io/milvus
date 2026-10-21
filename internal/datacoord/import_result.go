@@ -309,7 +309,7 @@ func dropImportV3Segments(segmentIDs []int64) UpdateOperator {
 			// nothing — and failed-job GC calls here every tick during
 			// retention. The peek reads without cloning (same pattern as
 			// CreateL0Operator).
-			committed := pack.meta.segments.GetSegment(segmentID)
+			committed := pack.Peek(segmentID)
 			if committed == nil || !committed.GetIsImporting() ||
 				committed.GetState() == commonpb.SegmentState_Dropped {
 				continue

@@ -1170,7 +1170,5 @@ func TestAllocNewGrowingSegment_ManifestPath(t *testing.T) {
 // simulate a growing segment filling up still need the poke, so it lives here
 // rather than widening the production surface again.
 func setTestRowCount(m *meta, segmentID UniqueID, rowCount int64) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-	m.segments.modifyProto(segmentID, func(seg *datapb.SegmentInfo) { seg.NumOfRows = rowCount })
+	m.segments.updateProto(segmentID, func(seg *datapb.SegmentInfo) { seg.NumOfRows = rowCount })
 }

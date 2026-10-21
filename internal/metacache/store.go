@@ -121,7 +121,7 @@ type MetaStore interface {
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
 
 	// Loading
-	LoadFromCatalog(ctx context.Context, collectionIDs []int64, normalize SegmentNormalizer) error
+	LoadFromCatalog(ctx context.Context, collectionIDs []int64, list SegmentLister, normalize SegmentNormalizer) error
 }
 
 // VersionedSegments is the segment storage of the store for the owner of the
@@ -849,9 +849,14 @@ func (s *metaStore) GcConfirm(ctx context.Context, collectionID, partitionID typ
 // the input itself.
 type SegmentNormalizer func(segment *datapb.SegmentInfo) (*datapb.SegmentInfo, error)
 
-// LoadFromCatalog loads segments and channel checkpoints. A non-nil normalize
-// runs on every segment first; if it fails, no segment is installed.
-func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, normalize SegmentNormalizer) error {
+// SegmentLister lists the persisted segments of a collection with the store
+// version of each.
+type SegmentLister func(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, []int64, error)
+
+// LoadFromCatalog loads the segments list returns, at their store versions,
+// and the channel checkpoints. A non-nil normalize runs on every segment
+// first; if it fails, no segment is installed.
+func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, list SegmentLister, normalize SegmentNormalizer) error {
 	record := timerecord.NewTimeRecorder("metaStore")
 
 	// Recovery retries (newMeta is wrapped in retry.Do) reuse this store,
@@ -868,16 +873,18 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 	defer pool.Release()
 	collectionSegments := make([][]*datapb.SegmentInfo, len(collectionIDs))
+	collectionVersions := make([][]int64, len(collectionIDs))
 	futures := make([]*conc.Future[any], 0, len(collectionIDs))
 	for i, collID := range collectionIDs {
 		i := i
 		collID := collID
 		futures = append(futures, pool.Submit(func() (any, error) {
-			segments, err := s.catalog.ListSegments(ctx, collID)
+			segments, versions, err := list(ctx, collID)
 			if err != nil {
 				return nil, err
 			}
 			collectionSegments[i] = segments
+			collectionVersions[i] = versions
 			return nil, nil
 		}))
 	}
@@ -897,8 +904,10 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 			collectionSegments[i] = normalized
 		}
 	}
-	for _, segments := range collectionSegments {
-		s.LoadSegments(segments)
+	for i, segments := range collectionSegments {
+		for j, segment := range segments {
+			s.LoadSegment(segment.GetID(), segment, collectionVersions[i][j])
+		}
 	}
 
 	s.emitSegmentMetrics()

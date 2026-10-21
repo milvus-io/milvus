@@ -199,6 +199,56 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.MetricsEqual(metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel, datapb.SegmentLevel_Legacy.String(), "unsorted", "0", "legacy"), 1)
 	})
 
+	suite.Run("cas store recovers the segments of the listed collections with their versions", func() {
+		defer suite.resetMock()
+		brk := broker.NewMockBroker(suite.T())
+		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
+			Status: merr.Success(),
+			DbCollections: []*rootcoordpb.DBCollections{
+				{
+					DbName:        "db_1",
+					CollectionIDs: []int64{1, 2},
+				},
+			},
+		}, nil)
+		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
+		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
+		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+		// No ListSegments expectation: segments are read from the store.
+
+		persist := NewOptimisticTxnMemoryPersist[string, *datapb.SegmentInfo](&SegmentInfoMarshaler{})
+		txn := persist.Txn(ctx)
+		for _, segment := range []*datapb.SegmentInfo{
+			{ID: 10, CollectionID: 1, PartitionID: 100, State: commonpb.SegmentState_Flushed},
+			{ID: 20, CollectionID: 2, PartitionID: 200, State: commonpb.SegmentState_Flushed},
+			// Collection 3 is not listed by RootCoord.
+			{ID: 30, CollectionID: 3, PartitionID: 300, State: commonpb.SegmentState_Flushed},
+		} {
+			key := testSegmentStoreRoot + "/" + segmentRecordKey(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+			txn.PutIfVersion(key, segment, 0, false)
+		}
+		_, err := txn.Commit()
+		suite.Require().NoError(err)
+
+		meta, err := newMetaWithPersist(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk, persist, testSegmentStoreRoot)
+		suite.Require().NoError(err)
+		suite.NotNil(meta.GetSegment(ctx, 10))
+		suite.NotNil(meta.GetSegment(ctx, 20))
+		suite.Nil(meta.GetSegment(ctx, 30))
+		version, ok := cachedVersion(meta, 10)
+		suite.True(ok)
+		suite.Positive(version)
+	})
+
 	suite.Run("ListIndexes_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
@@ -425,7 +475,9 @@ func (suite *MetaBasicSuite) TestCollection() {
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	ms := metacache.NewMetaStore(nil)
 	getLatestSegments := func() *SegmentsInfo {
-		latestSegments := NewSegmentsInfo(ms)
+		// A fresh store each time: a store keeps the versions its segments were
+		// published at, which would reject the next run's publications.
+		latestSegments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
@@ -745,7 +797,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 
 	suite.Run("test L2 sort", func() {
 		getLatestSegments := func() *SegmentsInfo {
-			latestSegments := NewSegmentsInfo(ms)
+			latestSegments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 			for segID, segment := range map[UniqueID]*SegmentInfo{
 				1: {SegmentInfo: &datapb.SegmentInfo{
 					ID:           1,
@@ -1201,7 +1253,7 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 		segments: NewSegmentsInfo(ms),
 	}
 
-	err := m.batchSaveDropSegments(context.TODO(), "ch-1", modSegments)
+	err := m.batchSaveDropSegments(context.TODO(), "ch-1", modSegments, nil)
 	suite.NoError(err)
 
 	// One UpdateSegment per dropped segment (2), then the channel tombstone.
@@ -2027,7 +2079,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				{SegmentID: 1},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.Nil(infos)
 	})
@@ -2047,7 +2099,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				{SegmentID: 2}, // two results — should error
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.Nil(infos)
 	})
@@ -2067,7 +2119,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				{SegmentID: 99},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.ErrorIs(err, merr.ErrSegmentNotFound)
 		suite.Nil(infos)
@@ -2087,7 +2139,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				{SegmentID: 1},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.ErrorIs(err, merr.ErrSegmentNotFound)
 		suite.Nil(infos)
@@ -2121,7 +2173,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(1, infos[0].GetID())
@@ -2168,7 +2220,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.Require().NotNil(infos[0].GetStats())
@@ -2221,7 +2273,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 
@@ -2272,7 +2324,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 
@@ -2337,7 +2389,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		// The pre-existing group survives and both newly appended groups are
@@ -2358,7 +2410,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		// Replay: the segment now sits at resultManifest, so this is the
 		// idempotent-adoption branch. The merge must not duplicate either new
 		// group, and the manifest-gated increment must not be accumulated twice.
-		replayed, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		replayed, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(replayed, 1)
 		suite.Require().Len(replayed[0].GetBinlogs(), 3)
@@ -2406,7 +2458,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		_, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		_, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 
 		updated := m.segments.GetSegment(1)
@@ -2466,7 +2518,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
@@ -2510,7 +2562,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 						},
 					},
 				}
-				infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+				infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 				suite.Error(err)
 				suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 				suite.Nil(infos)
@@ -2550,7 +2602,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.Equal("base/manifest-12", infos[0].GetManifestPath())
@@ -2575,7 +2627,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.Nil(infos)
 	})
@@ -2617,7 +2669,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(2, infos[0].GetID())
@@ -2665,7 +2717,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(2, infos[0].GetID())
@@ -2725,7 +2777,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					},
 				}
 
-				infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+				infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 				suite.NoError(err)
 				suite.Require().Len(infos, 1)
 				suite.Equal(tc.inputIsSorted, infos[0].GetIsSorted())
@@ -2764,7 +2816,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(2, infos[0].GetID())
@@ -2797,7 +2849,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
 	})
@@ -2827,7 +2879,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
 	})
@@ -2854,7 +2906,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.Nil(infos)
 	})
@@ -2882,7 +2934,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.Nil(infos)
 	})
@@ -2918,7 +2970,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.Nil(infos)
 	})
@@ -2942,7 +2994,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.Error(err)
 		suite.Nil(infos)
 	})
@@ -2984,7 +3036,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 
@@ -3031,7 +3083,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.Equal(manifestPath, infos[0].GetManifestPath())
@@ -3074,7 +3126,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(350, infos[0].GetStats().GetInsertBinlogSize())
@@ -3110,7 +3162,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.Equal(manifestPath, infos[0].GetManifestPath())
@@ -3142,7 +3194,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
 		suite.Empty(m.segments.GetSegment(1).GetManifestPath())
@@ -3170,7 +3222,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.Equal(commonpb.SegmentState_Dropped, infos[0].GetState())
@@ -3209,7 +3261,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, catalogErr)
 		suite.Nil(infos)
 		unchanged := m.segments.GetSegment(1)
@@ -3245,7 +3297,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, catalogErr)
 		suite.Nil(infos)
 		suite.Equal(commonpb.SegmentState_Flushed, m.segments.GetSegment(1).GetState())
@@ -3278,7 +3330,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
@@ -3312,7 +3364,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
@@ -3346,7 +3398,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
@@ -3379,7 +3431,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
@@ -3412,7 +3464,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
@@ -3423,7 +3475,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		// Binlogs/Deltalogs come back empty, and Stats is the only durable
 		// record of the segment's footprint. Two successive materializations
 		// must both land on top of it.
-		segs := NewSegmentsInfo(ms)
+		segs := NewSegmentsInfo(metacache.NewMetaStore(nil))
 		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             1,
 			CollectionID:   100,
@@ -3472,7 +3524,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					},
 				},
 			}
-			_, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+			_, err := m.completeBumpSchemaVersionCompactionMutation(cacheReads(m), task, result)
 			suite.NoError(err)
 		}
 
@@ -4170,14 +4222,22 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *
 	require.Empty(t, updated2.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 }
 
+// Two L0 manifest updates of one segment may both build on the manifest they
+// read. The store accepts one of them; the other runs again on the manifest
+// the first published, so neither update is lost.
 func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	manifest8 := packed.MarshalManifestPath(basePath, 8)
 	manifest9 := packed.MarshalManifestPath(basePath, 9)
 
-	meta, err := newMemoryMeta(t)
+	brk := broker.NewMockBroker(t)
+	brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	persist := NewOptimisticTxnMemoryPersist[string, *datapb.SegmentInfo](&SegmentInfoMarshaler{})
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	meta, err := newMetaWithPersist(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), brk, persist, "")
 	require.NoError(t, err)
+	t.Cleanup(meta.closeManifestCommitExecutor)
 	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
 		ID:           200,
 		CollectionID: 1,
@@ -4226,7 +4286,9 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *t
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	require.Equal(t, []string{oldManifest, manifest8}, calls)
+	// The last update built on a manifest the other one published.
+	require.Equal(t, oldManifest, calls[0])
+	require.NotEqual(t, oldManifest, calls[len(calls)-1])
 
 	updated := meta.GetSegment(context.TODO(), 200)
 	require.Equal(t, manifest9, updated.GetManifestPath())

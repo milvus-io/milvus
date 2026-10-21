@@ -255,8 +255,8 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	}
 
 	// Build the desired final state from the caller-supplied baseline and durable
-	// worker result. Current segment state is validated later while
-	// UpdateSegmentsInfo holds the segment metadata write lock.
+	// worker result. Current segment state is validated later inside
+	// UpdateSegmentsInfo, against the values its write compares.
 	segmentsToDrop := make([]int64, 0)
 	baselineSegmentMap := make(map[int64]struct{}, len(baselineSegmentIDs))
 	for _, segmentID := range baselineSegmentIDs {
@@ -354,7 +354,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 
 	validationOperator := func(modPack *updateSegmentPack) bool {
 		for segmentID := range baselineSegmentMap {
-			existing := modPack.meta.segments.GetSegment(segmentID)
+			existing := modPack.Peek(segmentID)
 			incoming := upsertSegmentMap[segmentID]
 			kept := keptSegmentMap[segmentID]
 
@@ -377,6 +377,11 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				if existing.GetState() == commonpb.SegmentState_Dropped {
 					return modPack.fail(merr.WrapErrServiceInternalMsg("cannot keep dropped segment %d", segmentID))
 				}
+				// Rewrite the kept segment unchanged, so the write compares the
+				// version this check read: a drop of the collection committed
+				// meanwhile makes it run again and fail here, instead of adding
+				// segments to a dropped collection.
+				modPack.Get(segmentID)
 				continue
 			}
 			if incoming == nil {
@@ -406,7 +411,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 			if _, isPatch := baselineSegmentMap[segmentID]; isPatch {
 				continue
 			}
-			existing := modPack.meta.segments.GetSegment(segmentID)
+			existing := modPack.Peek(segmentID)
 			if existing == nil {
 				continue
 			}
@@ -429,7 +434,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	// ownership plan this list is limited to its immutable baseline.
 	dropOperator := func(modPack *updateSegmentPack) bool {
 		for _, segmentID := range segmentsToDrop {
-			current := modPack.meta.segments.GetSegment(segmentID)
+			current := modPack.Peek(segmentID)
 			if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
 				continue
 			}
@@ -645,18 +650,17 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 }
 
 // getExternalRefreshSegmentSnapshots returns clones in the same order as
-// segmentIDs while holding segMu across the full read, preventing one worker
-// request from observing segment metadata from different update generations.
+// segmentIDs under the publication lock, preventing one worker request from
+// observing segment metadata from different update generations.
 func getExternalRefreshSegmentSnapshots(mt *meta, segmentIDs []int64) []*SegmentInfo {
-	mt.segMu.RLock()
-	defer mt.segMu.RUnlock()
-
 	result := make([]*SegmentInfo, len(segmentIDs))
-	for i, segmentID := range segmentIDs {
-		if segment := mt.segments.GetSegment(segmentID); segment != nil {
-			result[i] = segment.Clone()
+	mt.segments.ReadConsistent(func() {
+		for i, segmentID := range segmentIDs {
+			if segment := mt.segments.GetSegment(segmentID); segment != nil {
+				result[i] = segment.Clone()
+			}
 		}
-	}
+	})
 	return result
 }
 
