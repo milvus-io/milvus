@@ -1749,13 +1749,8 @@ streaming:
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
   walWriteAheadBuffer:
-    capacity: 64m # Evict consumed cache records above this size; also scales the WAB slowdown threshold.
-    keepalive: 30s # Evict expired records only after consumption; retain the durable catchup anchor.
-  walRateLimit:
-    writeAheadBuffer:
-      slowdownRatio: 1 # Slowdown threshold = WAB capacity * this ratio; minimum 1, immediately refreshable.
-      slowdownRate: 32m # Bytes/second at the slowdown threshold; reduced linearly to rejection. Live-updatable.
-      rejectRatio: 2 # Reject DML at this multiple of the slowdown threshold (capacity * slowdownRatio) (>1); updates immediately re-evaluate current backlog.
+    capacity: 64m # WAB cache capacity. Capacity/keepalive eviction only removes records consumed by RecoveryStorage and preserves the durable catchup anchor. Also scales walRateLimit.writeAheadBuffer.slowdownRatio.
+    keepalive: 30s # WAB cache TTL. Expired records are evictable only after RecoveryStorage consumes them; the durable catchup anchor is retained.
   walReadAheadBuffer:
     # The buffer length (pending message count) of read ahead buffer of each wal scanner can be used, 128 by default.
     # Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.
@@ -1806,6 +1801,11 @@ streaming:
       lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
       softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
       highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
+  walRateLimit:
+    writeAheadBuffer:
+      slowdownRatio: 1 # Start proportional slowdown above this multiple of the WAB instance's cache capacity. Takes effect immediately; values below 1 are clamped to 1, invalid/non-finite values use 1.
+      slowdownRate: 32m # Producer byte rate per second at the WAB slowdown threshold. Takes effect immediately; invalid/nonpositive values use the default.
+      rejectRatio: 2 # Reject new DML when WAB bytes reach this multiple of the slowdown threshold (capacity * slowdownRatio). Takes effect immediately. Must be finite and greater than 1; invalid values use 2.
   replication:
     pendingMessagesQueueLength: 128 # The capacity of pending message queue for each replication stream client.
     pendingMessagesQueueMaxSize: 134217728 # The maximum size (in bytes) of pending message queue for each replication stream client. Default is 128MB.
