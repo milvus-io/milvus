@@ -1209,7 +1209,7 @@ common:
   loadTransientBudgetBytes: 0 # Process-wide transient memory budget in bytes shared by scalar index V3 entry streaming and storage v2/v3 field-data loading. It gates in-flight transient data across concurrent load tasks. Lower values reduce peak transient memory at the cost of load throughput. Oversized requests are still allowed to proceed exclusively to guarantee progress. Set to 0 to disable the limit.
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
-    middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
+    middlePriority: 5 # Thread-to-core ratio for each of the independent middle priority and search fanout pools; both follow maxThreadsSize.
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
     maxThreadsSize: 16 # The maximum number of threads in the thread pool, only effective when greater than 0
   buildIndexThreadPoolRatio: 0.75

@@ -29,6 +29,8 @@ enum ThreadPoolPriority {
     HIGH = 0,
     MIDDLE = 1,
     LOW = 2,
+    // Independent search executor with MIDDLE sizing.
+    SEARCH_FANOUT = 3,
 };
 
 inline ThreadPoolPriority
@@ -51,6 +53,7 @@ class ThreadPools {
     static ThreadPool&
     GetThreadPool(ThreadPoolPriority priority);
 
+    // MIDDLE and SEARCH_FANOUT share sizing, including before first use.
     static void
     ResizeThreadPool(ThreadPoolPriority priority, float ratio);
 
@@ -74,7 +77,8 @@ class ThreadPools {
         static std::map<ThreadPoolPriority, std::string> name_map = {
             {HIGH, "HIGH_SEGC_POOL"},
             {MIDDLE, "MIDD_SEGC_POOL"},
-            {LOW, "LOW_SEGC_POOL"}};
+            {LOW, "LOW_SEGC_POOL"},
+            {SEARCH_FANOUT, "SRCH_FAN_POOL"}};
         return name_map;
     }
 
@@ -101,6 +105,9 @@ struct fmt::formatter<milvus::ThreadPoolPriority> : formatter<std::string> {
                 break;
             case milvus::LOW:
                 name = "LOW";
+                break;
+            case milvus::SEARCH_FANOUT:
+                name = "SEARCH_FANOUT";
                 break;
             default:
                 name = "UNKNOWN";
