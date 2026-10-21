@@ -2,6 +2,7 @@ package wab
 
 import (
 	"io"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -16,18 +17,22 @@ var (
 
 // messageWithOffset is a message with an offset as a unique continuous identifier.
 type messageWithOffset struct {
-	Message message.ImmutableMessage
-	Offset  int
+	Message  message.ImmutableMessage
+	Offset   int
+	Eviction time.Time
 }
 
 // newPendingQueue creates a new pendingQueue with given configuration
-func newPendingQueue(lastConfirmedMessage message.ImmutableMessage) *pendingQueue {
+func newPendingQueue(capacity int, keepAlive time.Duration, lastConfirmedMessage message.ImmutableMessage) *pendingQueue {
 	pq := &pendingQueue{
-		lastTimeTick:  0,
-		readableAfter: lastConfirmedMessage.TimeTick(),
-		latestOffset:  -1,
-		buf:           make([]messageWithOffset, 0, 10),
-		size:          0,
+		lastTimeTick:    0,
+		readableAfter:   lastConfirmedMessage.TimeTick(),
+		consumedThrough: lastConfirmedMessage.TimeTick(),
+		capacity:        capacity,
+		keepAlive:       keepAlive,
+		latestOffset:    -1,
+		buf:             make([]messageWithOffset, 0, 10),
+		size:            0,
 	}
 	pq.Push([]message.ImmutableMessage{lastConfirmedMessage})
 	return pq
@@ -36,11 +41,14 @@ func newPendingQueue(lastConfirmedMessage message.ImmutableMessage) *pendingQueu
 // pendingQueue is a buffer that stores messages in order of time tick.
 // It retains data and scoped confirmations until RecoveryStorage consumes them.
 type pendingQueue struct {
-	readableAfter uint64 // All messages strictly after this boundary remain readable.
-	lastTimeTick  uint64
-	latestOffset  int
-	buf           []messageWithOffset
-	size          int
+	readableAfter   uint64 // Actual eviction boundary, independent of consumption.
+	consumedThrough uint64 // Only records at or below this boundary may be evicted.
+	capacity        int
+	keepAlive       time.Duration
+	lastTimeTick    uint64
+	latestOffset    int
+	buf             []messageWithOffset
+	size            int
 }
 
 // Len returns the length of the buffer.
@@ -63,8 +71,9 @@ func (q *pendingQueue) EarliestTimeTick() uint64 {
 
 // Push adds messages to the buffer.
 func (q *pendingQueue) Push(msgs []message.ImmutableMessage) {
+	now := time.Now()
 	for _, msg := range msgs {
-		q.pushOne(msg)
+		q.pushOne(msg, now)
 	}
 }
 
@@ -79,7 +88,7 @@ func (q *pendingQueue) CurrentOffset() int {
 }
 
 // push adds a message to the buffer.
-func (q *pendingQueue) pushOne(msg message.ImmutableMessage) {
+func (q *pendingQueue) pushOne(msg message.ImmutableMessage, now time.Time) {
 	isSync := msg.MessageType() == message.MessageTypeTimeTick || msg.MessageType() == message.MessageTypeMVCCBarrier
 	if (isSync && msg.TimeTick() < q.lastTimeTick) || (!isSync && msg.TimeTick() <= q.lastTimeTick) {
 		// Confirmations may share the last data message's TimeTick.
@@ -87,8 +96,9 @@ func (q *pendingQueue) pushOne(msg message.ImmutableMessage) {
 	}
 	q.latestOffset++
 	q.buf = append(q.buf, messageWithOffset{
-		Offset:  q.latestOffset,
-		Message: msg,
+		Offset:   q.latestOffset,
+		Message:  msg,
+		Eviction: now.Add(q.keepAlive),
 	})
 	q.size += msg.EstimateSize()
 	q.lastTimeTick = msg.TimeTick()
@@ -140,23 +150,35 @@ func (q *pendingQueue) makeSnapshot(idx int) []messageWithOffset {
 	return snapshot
 }
 
-// ReleaseThrough releases only the prefix acknowledged by RecoveryStorage.
-// Neither queue size nor elapsed time permits dropping unconsumed messages.
+// ReleaseThrough makes a consumed prefix eligible for cache eviction.
+// Consumption alone does not discard cached records.
 func (q *pendingQueue) ReleaseThrough(tick uint64) {
-	if tick < q.readableAfter {
-		return
-	}
-	q.readableAfter = tick
+	q.consumedThrough = max(q.consumedThrough, tick)
+	q.Evict()
+}
+
+func (q *pendingQueue) Evict() {
+	q.evict(time.Now())
+}
+
+// evict retains the original capacity/TTL policy, constrained by consumption.
+// The durable catchup anchor is retained separately by WriteAheadBuffer.
+func (q *pendingQueue) evict(now time.Time) {
 	n := 0
-	for n < len(q.buf) && q.buf[n].Message.TimeTick() <= tick {
-		q.size -= q.buf[n].Message.EstimateSize()
+	for n < len(q.buf) {
+		msg := q.buf[n]
+		if msg.Message.TimeTick() > q.consumedThrough {
+			break
+		}
+		if q.size <= q.capacity && !msg.Eviction.Before(now) {
+			break
+		}
+		q.readableAfter = max(q.readableAfter, msg.Message.TimeTick())
+		q.size -= msg.Message.EstimateSize()
 		q.buf[n] = messageWithOffset{}
 		n++
 	}
 	q.buf = q.buf[n:]
-	if len(q.buf) == 0 {
-		q.buf = nil
-	}
 }
 
 // lowerboundOfMessageList returns the lowerbound of the message list.

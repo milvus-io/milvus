@@ -31,15 +31,16 @@ func NewWriteAheadBuffer(
 	pchannel string,
 	logger *mlog.Logger,
 	capacity int,
-	_ time.Duration, // Retained for compatibility; consumption now controls retention.
+	keepalive time.Duration,
 	lastConfirmedTimeTickMessage message.ImmutableMessage,
 ) *WriteAheadBuffer {
 	return &WriteAheadBuffer{
-		logger:              logger,
-		cond:                syncutil.NewContextCond(&sync.Mutex{}),
-		pendingMessages:     newPendingQueue(lastConfirmedTimeTickMessage),
-		lastTimeTickMessage: lastConfirmedTimeTickMessage,
-		metrics:             metricsutil.NewWriteAheadBufferMetrics(pchannel, capacity),
+		logger:                       logger,
+		cond:                         syncutil.NewContextCond(&sync.Mutex{}),
+		pendingMessages:              newPendingQueue(capacity, keepalive, lastConfirmedTimeTickMessage),
+		lastTimeTickMessage:          lastConfirmedTimeTickMessage,
+		lastPersistedTimeTickMessage: lastConfirmedTimeTickMessage,
+		metrics:                      metricsutil.NewWriteAheadBufferMetrics(pchannel, capacity),
 	}
 }
 
@@ -51,11 +52,13 @@ type WriteAheadBuffer struct {
 	pendingMessages *pendingQueue // The pending message is always sorted by timetick in monotonic ascending order.
 	// Ordinary volatile TimeTicks may coalesce; scoped MVCCBarriers are queued.
 	lastTimeTickMessage message.ImmutableMessage
-	metrics             *metricsutil.WriteAheadBufferMetrics
-	pressureMu          sync.Mutex // Serializes notifications without holding the queue lock.
-	pressureRegistry    *ratelimit.MuxRateLimitObserverRegistryImpl
-	pressureWatcher     config.EventHandler
-	pressureState       ratelimit.RateLimitState
+	// Retained independently of the cache, so consumed volatile barriers can expire.
+	lastPersistedTimeTickMessage message.ImmutableMessage
+	metrics                      *metricsutil.WriteAheadBufferMetrics
+	pressureMu                   sync.Mutex // Serializes notifications without holding the queue lock.
+	pressureRegistry             *ratelimit.MuxRateLimitObserverRegistryImpl
+	pressureWatcher              config.EventHandler
+	pressureState                ratelimit.RateLimitState
 }
 
 // Append appends a message to the buffer.
@@ -90,9 +93,12 @@ func (w *WriteAheadBuffer) Append(msgs []message.ImmutableMessage, tsMsg message
 		w.pendingMessages.Push([]message.ImmutableMessage{tsMsg})
 	}
 
-	// Durable catchup can observe a confirmation before its WAB publication.
-	// Do not retain a late-published batch that RecoveryStorage already consumed.
-	w.pendingMessages.ReleaseThrough(w.pendingMessages.readableAfter)
+	if tsMsg.IsPersisted() {
+		w.lastPersistedTimeTickMessage = tsMsg
+	}
+	// A late-published batch may already be consumed, but capacity/TTL still
+	// decides when it is evicted. Volatile heartbeats never move the WAL anchor.
+	w.pendingMessages.Evict()
 	w.lastTimeTickMessage = tsMsg
 	w.metrics.Observe(
 		w.pendingMessages.Len(),
@@ -125,6 +131,9 @@ func (w *WriteAheadBuffer) createSnapshotFromOffset(ctx context.Context, offset 
 			return nil, ErrClosed
 		}
 		msgs, err := w.pendingMessages.CreateSnapshotFromOffset(offset)
+		if errors.Is(err, ErrEvicted) {
+			msgs, err = w.snapshotAfterEviction(timeTick)
+		}
 		if err == nil {
 			w.cond.L.Unlock()
 			return msgs, nil
@@ -162,6 +171,9 @@ func (w *WriteAheadBuffer) createSnapshotFromTimeTick(ctx context.Context, timeT
 			return nil, 0, ErrClosed
 		}
 		msgs, err := w.pendingMessages.CreateSnapshotFromExclusiveTimeTick(timeTick)
+		if errors.Is(err, ErrEvicted) {
+			msgs, err = w.snapshotAfterEviction(timeTick)
+		}
 		if err == nil {
 			w.cond.L.Unlock()
 			return msgs, msgs[0].Offset, nil
@@ -195,7 +207,22 @@ func (w *WriteAheadBuffer) createSnapshotFromTimeTick(ctx context.Context, timeT
 	}
 }
 
-// ReleaseThrough is called only after RecoveryStorage has observed the complete
+// snapshotAfterEviction is called under the queue lock. A reader at or past the
+// latest durable confirmation has already covered all persisted data that could
+// have been evicted. Only consumed volatile confirmations may be skipped, so it
+// can join the remaining queue (or wait at its end) without another WAL write.
+// Older readers must catch up through the WAL to avoid skipping persisted data.
+func (w *WriteAheadBuffer) snapshotAfterEviction(timeTick uint64) ([]messageWithOffset, error) {
+	if timeTick < w.lastPersistedTimeTickMessage.TimeTick() {
+		return nil, ErrEvicted
+	}
+	if w.pendingMessages.Len() == 0 {
+		return nil, io.EOF
+	}
+	return w.pendingMessages.makeSnapshot(0), nil
+}
+
+// ReleaseThrough permits eviction only after RecoveryStorage has observed the complete
 // ordered prefix, including scoped Summary progress and VChannel resource events.
 // It is not a persistence checkpoint or a reader's prefetch position.
 func (w *WriteAheadBuffer) ReleaseThrough(tick uint64) {
@@ -218,6 +245,7 @@ func (w *WriteAheadBuffer) Close() {
 		w.pendingMessages.buf = nil
 		w.pendingMessages.size = 0
 		w.lastTimeTickMessage = nil
+		w.lastPersistedTimeTickMessage = nil
 		w.metrics.Close()
 	}
 	w.cond.L.Unlock()

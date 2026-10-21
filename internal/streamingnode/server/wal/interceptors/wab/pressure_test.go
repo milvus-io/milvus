@@ -3,7 +3,6 @@ package wab
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -45,29 +44,29 @@ func TestPressureReleasesOnlyItsOwnSource(t *testing.T) {
 		observer := &mock_ratelimit.MockRateLimitObserver{}
 		registry.Register(observer)
 		defer registry.Unregister(observer)
-		one := createMVCCBarrier(10, "a")
+		one := createTimeTickMessage(10, true)
 		w := NewWriteAheadBuffer("pressure", mlog.With(), 2*one.EstimateSize(), 0, createTimeTickMessage(1, true))
 		defer w.Close()
 		w.ReleaseThrough(1)
 		paramtable.Init()
 		params := paramtable.Get()
 		for key, value := range map[string]string{
-			params.StreamingCfg.WALRateLimitWABSlowdownThreshold.Key: strconv.Itoa(2 * one.EstimateSize()),
-			params.StreamingCfg.WALRateLimitWABSlowdownRate.Key:      "1000",
-			params.StreamingCfg.WALRateLimitWABRejectRatio.Key:       "2",
+			params.StreamingCfg.WALRateLimitWABSlowdownRatio.Key: "1",
+			params.StreamingCfg.WALRateLimitWABSlowdownRate.Key:  "1000",
+			params.StreamingCfg.WALRateLimitWABRejectRatio.Key:   "2",
 		} {
 			require.NoError(t, params.Save(key, value))
 			t.Cleanup(func() { _ = params.Reset(key) })
 		}
 		w.SetPressureController(registry)
 		for _, tick := range []uint64{10, 20, 30} {
-			msg := createMVCCBarrier(tick, "a")
+			msg := createTimeTickMessage(tick, true)
 			require.Equal(t, one.EstimateSize(), msg.EstimateSize())
 			w.Append(nil, msg)
 		}
 		require.Equal(t, streamingpb.WALRateLimitState_WAL_RATE_LIMIT_STATE_SLOWDOWN, state.State)
 		require.EqualValues(t, 500, state.Rate)
-		fourth := createMVCCBarrier(35, "a")
+		fourth := createTimeTickMessage(35, true)
 		require.Equal(t, one.EstimateSize(), fourth.EstimateSize())
 		w.Append(nil, fourth)
 		require.True(t, registry.IsRejected())
@@ -90,6 +89,7 @@ func TestRecoveryAcknowledgesBeforeWABPublication(t *testing.T) {
 	w.ReleaseThrough(20) // Durable catchup can lead the serialized WAB append.
 	w.Append([]message.ImmutableMessage{createInsertMessage(10)}, createTimeTickMessage(20, true))
 	require.Zero(t, w.pendingMessages.Size())
+	require.EqualValues(t, 20, w.lastPersistedTimeTickMessage.TimeTick())
 	reader, err := w.ReadFromExclusiveTimeTick(t.Context(), 20)
 	require.NoError(t, err)
 	w.Append(nil, createMVCCBarrier(30, "a"))
@@ -112,7 +112,7 @@ func TestTenThousandScopesStayOrderedUnderPressure(t *testing.T) {
 		}
 		w.Append(nil, createMVCCBarrier(uint64(10+batch), channels...))
 	}
-	w.Append(nil, createTimeTickMessage(20, false))
+	w.Append(nil, createTimeTickMessage(20, true))
 	require.Greater(t, w.pendingMessages.Size(), 1024)
 	for batch := 0; batch < 10; batch++ {
 		msg, err := reader.Next(ctx)
@@ -123,7 +123,7 @@ func TestTenThousandScopesStayOrderedUnderPressure(t *testing.T) {
 		require.Equal(t, fmt.Sprintf("p_%dv0", batch*1000), channels[0])
 		w.ReleaseThrough(msg.TimeTick())
 	}
-	require.Zero(t, w.pendingMessages.Size())
+	require.Equal(t, createTimeTickMessage(20, true).EstimateSize(), w.pendingMessages.Size())
 }
 
 func TestWABCloseWakesBlockedReaders(t *testing.T) {
@@ -152,12 +152,12 @@ func TestPressureConfigurationTakesEffectWithoutTraffic(t *testing.T) {
 		paramtable.Init()
 		params := paramtable.Get()
 		cfg := &params.StreamingCfg
-		one := createMVCCBarrier(10, "a")
+		one := createTimeTickMessage(10, true)
 		threshold := 2 * one.EstimateSize()
 		for key, value := range map[string]string{
-			cfg.WALRateLimitWABSlowdownThreshold.Key: strconv.Itoa(threshold),
-			cfg.WALRateLimitWABSlowdownRate.Key:      "1000",
-			cfg.WALRateLimitWABRejectRatio.Key:       "2",
+			cfg.WALRateLimitWABSlowdownRatio.Key: "1",
+			cfg.WALRateLimitWABSlowdownRate.Key:  "1000",
+			cfg.WALRateLimitWABRejectRatio.Key:   "2",
 		} {
 			require.NoError(t, params.Save(key, value))
 			t.Cleanup(func() { _ = params.Reset(key) })
@@ -172,12 +172,12 @@ func TestPressureConfigurationTakesEffectWithoutTraffic(t *testing.T) {
 		observer := &mock_ratelimit.MockRateLimitObserver{}
 		registry.Register(observer)
 		defer registry.Unregister(observer)
-		// Legacy cache capacity is deliberately much smaller than the new pressure threshold.
-		w := NewWriteAheadBuffer("live-config", mlog.With(), 1, 0, createTimeTickMessage(1, true))
+		// The slowdown threshold is derived from this WAB instance's capacity.
+		w := NewWriteAheadBuffer("live-config", mlog.With(), threshold, 0, createTimeTickMessage(1, true))
 		defer w.Close()
 		w.SetPressureController(registry)
 		for _, tick := range []uint64{10, 20, 30} {
-			w.Append(nil, createMVCCBarrier(tick, "a"))
+			w.Append(nil, createTimeTickMessage(tick, true))
 		}
 		require.EqualValues(t, 500, state.Rate)
 		// No append, consume, or periodic tick occurs during these updates.
@@ -188,15 +188,22 @@ func TestPressureConfigurationTakesEffectWithoutTraffic(t *testing.T) {
 		require.NoError(t, params.Save(cfg.WALRateLimitWABSlowdownRate.Key, "2000"))
 		require.NoError(t, params.Save(cfg.WALRateLimitWABRejectRatio.Key, "2"))
 		require.EqualValues(t, 1000, state.Rate)
-		require.NoError(t, params.Save(cfg.WALRateLimitWABSlowdownThreshold.Key, strconv.Itoa(2*threshold)))
+		require.NoError(t, params.Save(cfg.WALRateLimitWABSlowdownRatio.Key, "2"))
 		require.Equal(t, ratelimit.NewNormalRateLimitState(), state)
 		for _, invalid := range []string{"0", "1", "NaN", "+Inf", "invalid"} {
 			require.NoError(t, params.Save(cfg.WALRateLimitWABRejectRatio.Key, invalid))
 			require.EqualValues(t, 2, cfg.WALRateLimitWABRejectRatio.GetAsFloat())
 		}
+		for _, invalid := range []string{"0", "-1", "0.5", "NaN", "+Inf", "invalid"} {
+			require.NoError(t, params.Save(cfg.WALRateLimitWABSlowdownRatio.Key, invalid))
+			require.EqualValues(t, 1, cfg.WALRateLimitWABSlowdownRatio.GetAsFloat())
+			require.EqualValues(t, 1000, state.Rate)
+		}
+		require.NoError(t, params.Save(cfg.WALRateLimitWABSlowdownRatio.Key, "1.5"))
+		require.Equal(t, ratelimit.NewNormalRateLimitState(), state)
 		w.Close()
 		before := updates
-		require.NoError(t, params.Save(cfg.WALRateLimitWABSlowdownThreshold.Key, "1"))
+		require.NoError(t, params.Save(cfg.WALRateLimitWABSlowdownRatio.Key, "1"))
 		require.Equal(t, before, updates, "closed owners must detach config callbacks")
 	})
 }

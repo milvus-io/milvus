@@ -24,16 +24,16 @@ func (w *WriteAheadBuffer) SetPressureController(registry *ratelimit.MuxRateLimi
 
 func pressureConfigKeys() []string {
 	cfg := &paramtable.Get().StreamingCfg
-	return []string{cfg.WALRateLimitWABSlowdownThreshold.Key, cfg.WALRateLimitWABSlowdownRate.Key, cfg.WALRateLimitWABRejectRatio.Key}
+	return []string{cfg.WALRateLimitWABSlowdownRatio.Key, cfg.WALRateLimitWABSlowdownRate.Key, cfg.WALRateLimitWABRejectRatio.Key}
 }
 
 // pressureState uses the current backlog ratio, never time spent in a mode.
 // The rate falls linearly from baseRate at threshold to zero at rejectRatio.
-func pressureState(size, threshold int, baseRate int64, rejectRatio float64) ratelimit.RateLimitState {
-	if size <= threshold {
+func pressureState(size int, threshold float64, baseRate int64, rejectRatio float64) ratelimit.RateLimitState {
+	if float64(size) <= threshold {
 		return ratelimit.NewNormalRateLimitState()
 	}
-	ratio := float64(size) / float64(threshold)
+	ratio := float64(size) / threshold
 	if threshold <= 0 || ratio >= rejectRatio {
 		return ratelimit.RateLimitState{State: streamingpb.WALRateLimitState_WAL_RATE_LIMIT_STATE_REJECT}
 	}
@@ -51,7 +51,7 @@ func (w *WriteAheadBuffer) refreshPressure() {
 	defer w.pressureMu.Unlock()
 	w.cond.L.Lock()
 	registry := w.pressureRegistry
-	size, closed := w.pendingMessages.Size(), w.closed
+	size, capacity, closed := w.pendingMessages.Size(), w.pendingMessages.capacity, w.closed
 	w.cond.L.Unlock()
 	if registry == nil {
 		return
@@ -59,15 +59,13 @@ func (w *WriteAheadBuffer) refreshPressure() {
 	state := ratelimit.NewNormalRateLimitState()
 	if !closed {
 		cfg := &paramtable.Get().StreamingCfg
-		threshold, baseRate := cfg.WALRateLimitWABSlowdownThreshold.GetAsSize(), cfg.WALRateLimitWABSlowdownRate.GetAsSize()
-		// Invalid live size/rate settings retain the documented safe defaults.
-		if threshold <= 0 {
-			threshold = 64 * 1024 * 1024
-		}
+		threshold := float64(capacity) * cfg.WALRateLimitWABSlowdownRatio.GetAsFloat()
+		baseRate := cfg.WALRateLimitWABSlowdownRate.GetAsSize()
+		// Invalid live rates retain the documented safe default.
 		if baseRate <= 0 {
 			baseRate = 32 * 1024 * 1024
 		}
-		state = pressureState(size, int(threshold), baseRate, cfg.WALRateLimitWABRejectRatio.GetAsFloat())
+		state = pressureState(size, threshold, baseRate, cfg.WALRateLimitWABRejectRatio.GetAsFloat())
 	}
 	if state != w.pressureState {
 		w.pressureState = state

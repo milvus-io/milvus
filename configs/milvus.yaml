@@ -1749,13 +1749,13 @@ streaming:
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
   walWriteAheadBuffer:
-    capacity: 64m # Legacy cache capacity retained for compatibility/metrics; does not control backpressure or evict unconsumed records.
-    keepalive: 30s # Deprecated compatibility setting; RecoveryStorage consumption controls WAB retention.
+    capacity: 64m # Evict consumed cache records above this size; also scales the WAB slowdown threshold.
+    keepalive: 30s # Evict expired records only after consumption; retain the durable catchup anchor.
   walRateLimit:
     writeAheadBuffer:
-      slowdownThreshold: 64m # Pending bytes at which proportional slowdown starts; independent of cache capacity. Live-updatable.
+      slowdownRatio: 1 # Slowdown threshold = WAB capacity * this ratio; minimum 1, immediately refreshable.
       slowdownRate: 32m # Bytes/second at the slowdown threshold; reduced linearly to rejection. Live-updatable.
-      rejectRatio: 2 # Reject DML at this multiple of slowdownThreshold (>1); updates immediately re-evaluate current backlog.
+      rejectRatio: 2 # Reject DML at this multiple of the slowdown threshold (capacity * slowdownRatio) (>1); updates immediately re-evaluate current backlog.
   walReadAheadBuffer:
     # The buffer length (pending message count) of read ahead buffer of each wal scanner can be used, 128 by default.
     # Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.

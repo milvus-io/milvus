@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -254,4 +255,37 @@ func TestRecoveryScannerDeliversQueuedVolatileMVCCBarriers(t *testing.T) {
 		require.False(t, msg.IsPersisted())
 		require.Equal(t, []string{channel}, message.MustAsImmutableMVCCBarrierMessageV2(msg).Header().GetVchannels())
 	}
+}
+
+func TestOrdinaryCatchupReturnsToIdleWABAfterRecoveryConsumption(t *testing.T) {
+	resource.InitForTest(t)
+	l := newRecoveryTestWAL(t)
+	durable := appendRecoveryTestMessage(t, l, message.MessageTypeTimeTick, 100)
+	buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), 1, 0, durable)
+	defer buffer.Close()
+	scoped := message.NewMVCCBarrierMessageBuilderV2().WithAllVChannel().WithNotPersisted().
+		WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v1"}}).
+		WithBody(&message.MVCCBarrierMessageBody{}).MustBuildMutable().WithTimeTick(110).
+		WithLastConfirmed(durable.MessageID()).IntoImmutableMessage(durable.MessageID())
+	buffer.Append(nil, scoped)
+	heartbeat := message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithNotPersisted().
+		WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{}).
+		MustBuildMutable().WithTimeTick(120).WithLastConfirmed(durable.MessageID()).IntoImmutableMessage(durable.MessageID())
+	buffer.Append(nil, heartbeat)
+	buffer.ReleaseThrough(120)
+	messages := make(chan message.ImmutableMessage, 8)
+	scanner := newSwithableScanner("idle-catchup", mlog.With(), l, buffer,
+		options.DeliverPolicyStartFrom(durable.MessageID()), messages, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	next, err := scanner.Do(ctx)
+	require.NoError(t, err, "catchup must switch without another durable write")
+	tailing, ok := next.(*tailingScanner)
+	require.True(t, ok)
+	require.Equal(t, durable.TimeTick(), (<-messages).TimeTick())
+	// The scoped barrier was consumed and expired; catchup must still reach
+	// the latest volatile heartbeat without another durable write.
+	msg, err := tailing.reader.Next(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 120, msg.TimeTick())
 }

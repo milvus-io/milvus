@@ -9277,7 +9277,7 @@ type streamingConfig struct {
 	WALRateLimitNodeMemoryRecoverThreshold       ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemoryAdaptiveRateLimit      AdaptiveRateLimitConfig
 	WALRateLimitRecoveryStorageAdaptiveRateLimit AdaptiveRateLimitConfig
-	WALRateLimitWABSlowdownThreshold             ParamItem `refreshable:"true"`
+	WALRateLimitWABSlowdownRatio                 ParamItem `refreshable:"true"`
 	WALRateLimitWABSlowdownRate                  ParamItem `refreshable:"true"`
 	WALRateLimitWABRejectRatio                   ParamItem `refreshable:"true"`
 	WALRateLimitAppendRateEnabled                ParamItem `refreshable:"true"`
@@ -9593,7 +9593,7 @@ limits; requests that carry no key are accepted at any value.`,
 	p.WALWriteAheadBufferCapacity = ParamItem{
 		Key:          "streaming.walWriteAheadBuffer.capacity",
 		Version:      "2.6.0",
-		Doc:          "Legacy WAB cache capacity, retained for compatibility and capacity metrics. Consumption controls retention; walRateLimit.writeAheadBuffer controls backpressure.",
+		Doc:          "WAB cache capacity. Capacity/keepalive eviction only removes records consumed by RecoveryStorage and preserves the durable catchup anchor. Also scales walRateLimit.writeAheadBuffer.slowdownRatio.",
 		DefaultValue: "64m",
 		Export:       true,
 	}
@@ -9601,7 +9601,7 @@ limits; requests that carry no key are accepted at any value.`,
 	p.WALWriteAheadBufferKeepalive = ParamItem{
 		Key:          "streaming.walWriteAheadBuffer.keepalive",
 		Version:      "2.6.0",
-		Doc:          "Deprecated compatibility setting; RecoveryStorage consumption controls write ahead buffer retention.",
+		Doc:          "WAB cache TTL. Expired records are evictable only after RecoveryStorage consumes them; the durable catchup anchor is retained.",
 		DefaultValue: "30s",
 		Export:       true,
 	}
@@ -9956,12 +9956,19 @@ so we set 1 second here as a threshold.`,
 		Export:                       false,
 	})
 
-	p.WALRateLimitWABSlowdownThreshold = ParamItem{
-		Key:     "streaming.walRateLimit.writeAheadBuffer.slowdownThreshold",
-		Version: "3.0.0", DefaultValue: "64m", Export: true,
-		Doc: "Pending WAB byte threshold for proportional producer slowdown, independent of cache capacity. Takes effect immediately; invalid/nonpositive values use the default.",
+	p.WALRateLimitWABSlowdownRatio = ParamItem{
+		Key:     "streaming.walRateLimit.writeAheadBuffer.slowdownRatio",
+		Version: "3.0.0", DefaultValue: "1", Export: true,
+		Doc: "Start proportional slowdown above this multiple of the WAB instance's cache capacity. Takes effect immediately; values below 1 are clamped to 1, invalid/non-finite values use 1.",
+		Formatter: func(v string) string {
+			ratio, err := strconv.ParseFloat(v, 64)
+			if err != nil || ratio < 1 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+				return "1"
+			}
+			return v
+		},
 	}
-	p.WALRateLimitWABSlowdownThreshold.Init(base.mgr)
+	p.WALRateLimitWABSlowdownRatio.Init(base.mgr)
 	p.WALRateLimitWABSlowdownRate = ParamItem{
 		Key:     "streaming.walRateLimit.writeAheadBuffer.slowdownRate",
 		Version: "3.0.0", DefaultValue: "32m", Export: true,
@@ -9971,7 +9978,7 @@ so we set 1 second here as a threshold.`,
 	p.WALRateLimitWABRejectRatio = ParamItem{
 		Key:     "streaming.walRateLimit.writeAheadBuffer.rejectRatio",
 		Version: "3.0.0", DefaultValue: "2", Export: true,
-		Doc: "Reject new DML when WAB bytes reach this multiple of slowdownThreshold. Takes effect immediately. Must be finite and greater than 1; invalid values use 2.",
+		Doc: "Reject new DML when WAB bytes reach this multiple of the slowdown threshold (capacity * slowdownRatio). Takes effect immediately. Must be finite and greater than 1; invalid values use 2.",
 		Formatter: func(v string) string {
 			ratio, err := strconv.ParseFloat(v, 64)
 			if err != nil || ratio <= 1 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {

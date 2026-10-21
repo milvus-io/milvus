@@ -46,29 +46,42 @@ requests only; it does not keep carrying scopes from previously published barrie
 
 RecoveryStorage acknowledges a complete consumed prefix after observing a
 confirmation, including Summary coverage and ordered VChannel query-barrier
-events. WAB releases only records at or below this boundary. Prefetching a record
+events. This only makes the prefix eligible for eviction. The original cache
+policy still evicts when total cached bytes exceed capacity or a record's
+keepalive expires, and only within the consumed prefix. Prefetching a record
 or sending it to the recovery channel is not consumption. Capacity and elapsed
 keepalive never authorize eviction of an unconsumed record. This also protects
 live messages while startup recovery is paused at the RecoveryBarrier.
+
+The latest persisted confirmation is retained separately from the pending queue;
+it does not pin its suffix. Consumed volatile barriers can expire or be evicted
+for capacity without waiting for another durable write. A reader at or past this
+confirmation can rejoin the remaining queue, or receive the latest heartbeat
+when the queue is empty, after consumed volatile confirmations were evicted.
+This applies to both catchup handoff and an existing tailing reader's offset.
+Readers behind an evicted durable prefix must still catch up through the WAL;
+RecoveryStorage never skips unconsumed barriers. Cache capacity is a target,
+not a hard limit on unconsumed records.
 
 WAB pressure has independent live configuration under
 `streaming.walRateLimit.writeAheadBuffer`:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `slowdownThreshold` | `64m` | Pending-byte threshold C |
+| `slowdownRatio` | `1` | Multiple S of the WAB instance capacity; finite and at least 1 |
 | `slowdownRate` | `32m` | Initial slowdown rate R in bytes/second |
 | `rejectRatio` | `2` | Rejection multiple Q of C; finite and greater than 1 |
 
-For current queued estimated bytes B:
+For current total cached estimated bytes B and threshold C = capacity * S:
 
 - B <= C: normal admission.
 - C < B < Q*C: slowdown rate `max(1, floor(R * (Q - B/C) / (Q - 1)))`.
 - B >= Q*C: reject new DML through the existing WAL admission path.
 
 Append, consumption, and config-change callbacks recalculate pressure immediately.
-Changing Q can enter or leave rejection even with no queue traffic. Invalid Q
-falls back to 2; nonpositive/invalid byte threshold or rate uses its default.
+Changing S or Q can enter or leave rejection even with no queue traffic.
+S below 1 is clamped to 1; invalid/non-finite S uses 1. Invalid Q uses 2;
+nonpositive/invalid rate uses its default.
 There is no elapsed-time ramp, timer, or additional goroutine. Watchers are
 removed when the WAB closes.
 
@@ -78,10 +91,10 @@ its own source. WAB.Append never waits for capacity; confirmations and accepted
 appends can still progress. In-flight work and non-DML messages can exceed the
 threshold, so this is not a hard RSS bound.
 
-Legacy `walWriteAheadBuffer.capacity` remains accepted for source/configuration
-compatibility and capacity metrics, but does not set the pressure threshold.
-`keepalive` remains accepted but no longer controls retention. Consumption
-controls release. Scanner `RateLimitControl`/`AppendRateCounter`, its read-rate
+`walWriteAheadBuffer.capacity` and `keepalive` retain their cache eviction
+roles. Each WAB captures them at construction as before; live slowdownRatio
+scales that same instance capacity. RecoveryStorage consumption adds an eviction
+constraint, not an immediate release command. Scanner `RateLimitControl`/`AppendRateCounter`, its read-rate
 checker, and the unused FlusherRecovering controller/configuration are removed.
 `recoveryStorage.adaptiveRateLimit` remains active for RecoveryTail persistence
 pressure, and node-memory/append-rate controls remain independent.
