@@ -741,7 +741,7 @@ func (opt *hybridSearchOption) WithOffset(offset int) *hybridSearchOption {
 
 func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, error) {
 	// Hybrid search does not support highlighter: convertHybridSearchToSearch
-	// (internal/proxy/search_util.go:1158) drops each sub-SearchRequest's
+	// (internal/proxy/search_util.go) drops each sub-SearchRequest's
 	// Highlighter into SubSearchRequest, which has no such field. Until the
 	// server carries the per-leg highlighter through (e.g., via a proto
 	// change to SubSearchRequest), reject client-side so the user gets a

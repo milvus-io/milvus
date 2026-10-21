@@ -27,8 +27,8 @@ import (
 )
 
 // Server-recognized param keys. Kept private — these are wire-protocol details,
-// not public API. The server reads them from Highlighter.Params at
-// internal/proxy/highlighter.go:28-40.
+// not public API. The server reads them from Highlighter.Params in
+// internal/proxy/highlighter.go.
 const (
 	preTagsKey             = "pre_tags"
 	postTagsKey            = "post_tags"
@@ -99,6 +99,9 @@ func (l *LexicalHighlighter) WithQuery(field, text, queryType string) *LexicalHi
 
 // WithPreTags sets the tags inserted before each matched term. Tags rotate by
 // match sequence when multiple are provided. The server default is ["<em>"].
+//
+// An empty string is a valid tag and produces undecorated fragments; passing
+// no tags at all leaves the server default in place.
 func (l *LexicalHighlighter) WithPreTags(tags ...string) *LexicalHighlighter {
 	l.preTags = append([]string(nil), tags...)
 	return l
@@ -106,6 +109,9 @@ func (l *LexicalHighlighter) WithPreTags(tags ...string) *LexicalHighlighter {
 
 // WithPostTags sets the tags inserted after each matched term. The server
 // default is ["</em>"].
+//
+// An empty string is a valid tag and produces undecorated fragments; passing
+// no tags at all leaves the server default in place.
 func (l *LexicalHighlighter) WithPostTags(tags ...string) *LexicalHighlighter {
 	l.postTags = append([]string(nil), tags...)
 	return l
@@ -176,16 +182,11 @@ func (l *LexicalHighlighter) protoMessage() (*commonpb.Highlighter, error) {
 			return nil, fmt.Errorf("highlight_query[%d]: type must be non-empty", i)
 		}
 	}
-	for i, tag := range l.preTags {
-		if tag == "" {
-			return nil, fmt.Errorf("pre_tags[%d] must be non-empty", i)
-		}
-	}
-	for i, tag := range l.postTags {
-		if tag == "" {
-			return nil, fmt.Errorf("post_tags[%d] must be non-empty", i)
-		}
-	}
+	// Tag elements are not validated individually: the server only rejects an
+	// empty *list* (internal/proxy/highlighter.go) and accepts [""].
+	// buildStringFragments appends the tag bytes verbatim, so an empty tag
+	// yields undecorated fragments. An empty list is never emitted — the
+	// len(...) > 0 gates below leave the server default in place instead.
 
 	params := make([]*commonpb.KeyValuePair, 0, 7)
 	var err error

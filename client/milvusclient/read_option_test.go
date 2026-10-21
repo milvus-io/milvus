@@ -501,6 +501,27 @@ func (s *SearchOptionSuite) TestSearchOptionHighlighterNilIsNoOp() {
 	s.Nil(req.GetHighlighter())
 }
 
+// Empty-string tags are a valid server configuration for plain-text snippets:
+// the proxy rejects only an empty tag *list* (internal/proxy/highlighter.go)
+// and buildStringFragments appends "" verbatim, producing undecorated fragments.
+func (s *SearchOptionSuite) TestSearchOptionHighlighterAllowsEmptyStringTags() {
+	opt := NewSearchOption("coll", 10, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+		WithHighlighter(NewLexicalHighlighter().
+			WithHighlightSearchText(true).
+			WithPreTags("").
+			WithPostTags(""))
+
+	req, err := opt.Request()
+	s.Require().NoError(err)
+	s.Require().NotNil(req.GetHighlighter())
+	s.Equal(HighlightTypeLexical, req.GetHighlighter().GetType())
+
+	params := entity.KvPairsMap(req.GetHighlighter().GetParams())
+	s.Equal(`[""]`, params[preTagsKey])
+	s.Equal(`[""]`, params[postTagsKey])
+	s.Equal("true", params[highlightSearchTextKey])
+}
+
 func TestSearchOption(t *testing.T) {
 	suite.Run(t, new(SearchOptionSuite))
 }
