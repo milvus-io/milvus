@@ -158,6 +158,28 @@ message identity. Zero deliberately skips validation for compatibility. These
 preconditions do not remove the local transaction's mutex or in-flight wait: primary
 body appends can be concurrent even though replicated appends are serialized.
 
+### Successful Commit result retention
+
+Native Commit retries consult a bounded tombstone cache before allocating another
+TimeTick or looking up the active session. A hit returns the original MessageID,
+TimeTick, LCMID and transaction context without appending or advancing MVCC. Commits
+of the same TxnID are serialized through result publication. Only successful appends
+publish results; session cleanup and scoped abort do not remove committed results.
+
+`streaming.txn.tombstoneMaxCount` (default 1024 per WAL) and
+`streaming.txn.tombstoneMaxLifetime` (default 1m of WAL TimeTick) bound retention.
+Either limit at zero disables retention. Duplicate requests do not renew the age.
+Tombstones retain neither transaction bodies nor active-session references and do
+not pin LCMID. Startup recovery reconstructs native Commit results from complete
+transactions in its replay range, preserving their original age. Records before
+the checkpoint are not restored: this is best-effort retention, not a durable
+exactly-once window. CDC keeps its source-checkpoint deduplication.
+
+After an ambiguous native Commit attempt, a producer retry that encounters an
+unavailable transaction reports an unrecoverable unknown outcome. Missing history
+does not authorize replay with a new TxnID. A first, definite expiration or body-count
+rejection retains the existing retry behavior, including CAS retry restrictions.
+
 ## LastConfirmedMessageID
 
 A property attached to every ImmutableMessage. **Guarantee**: reading from this MessageID ensures all subsequent messages have TimeTick strictly greater than this message's TimeTick (including assembled transaction messages).
@@ -168,6 +190,15 @@ A property attached to every ImmutableMessage. **Guarantee**: reading from this 
 2. **Txn resolved** (if transactional): the transaction is committed, rolled back, or expired — no more body messages can appear under this transaction.
 
 When both hold, no future message can have a MessageID smaller than this entry, so it is safe to advance.
+
+Recovery rebuilds this same heap from every unfinished transaction's Begin and
+body messages, referencing the actual recovered `TxnSession`. The recovery barrier
+is their conservative EndTimestamp because it fences all old-writer appends. The
+initial LCMID remains the minimum of the barrier MessageID and unfinished Begin
+LCMIDs; subsequent ordinary ACKs remain constrained by the reconstructed heap.
+Commit, rollback, expiration and scoped abort release the recovered entries through
+the normal session lifecycle. Historical entries are not republished into the
+write-ahead buffer as new acknowledgements.
 
 ## Key Packages
 
