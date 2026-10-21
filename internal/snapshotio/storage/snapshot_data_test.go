@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3818,4 +3819,96 @@ func TestSnapshotReaderSamePrefixRelocationBoundaries(t *testing.T) {
 			require.Equal(t, []string{"root/snapshots/1/manifests/20.avro"}, got.ManifestPaths)
 		})
 	}
+}
+
+func TestReadSnapshotFromMetadataConcurrentBoundedAndOrdered(t *testing.T) {
+	const count = 24
+	const maxConcurrency = 8
+
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+		Layout:        datapb.SnapshotLayout_SnapshotLayoutReferenced,
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Name:       "snap",
+			S3Location: "s3://bucket/root/snapshots/1/metadata/2.json",
+		},
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{Name: "coll"},
+		},
+	}
+	payloads := make(map[string][]byte, count)
+	for i := 0; i < count; i++ {
+		segID := int64(100 + i)
+		manifestPath := fmt.Sprintf("root/snapshots/1/manifests/%d.avro", segID)
+		data, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{
+			SegmentId:      segID,
+			StorageVersion: storage.StorageV3,
+			SegmentLevel:   datapb.SegmentLevel_L1,
+		})
+		require.NoError(t, err)
+		payloads[manifestPath] = data
+		metadata.ManifestList = append(metadata.ManifestList, manifestPath)
+		metadata.SegmentIds = append(metadata.SegmentIds, segID)
+	}
+
+	t.Run("preserves manifest order under bounded concurrency", func(t *testing.T) {
+		var inFlight, peak atomic.Int32
+		read := mockey.Mock((*storage.LocalChunkManager).Read).To(func(_ *storage.LocalChunkManager, _ context.Context, filePath string) ([]byte, error) {
+			cur := inFlight.Add(1)
+			defer inFlight.Add(-1)
+			for {
+				prev := peak.Load()
+				if cur <= prev || peak.CompareAndSwap(prev, cur) {
+					break
+				}
+			}
+			// Stagger completion so earlier indices finish later than later ones.
+			if filePath == metadata.ManifestList[0] {
+				time.Sleep(15 * time.Millisecond)
+			} else {
+				time.Sleep(3 * time.Millisecond)
+			}
+			return payloads[filePath], nil
+		}).Build()
+		defer read.UnPatch()
+
+		got, err := snapshotstorage.NewSnapshotReader(storage.NewLocalChunkManager()).
+			ReadSnapshotFromMetadata(context.Background(), metadata.SnapshotInfo.S3Location, metadata, true)
+		require.NoError(t, err)
+		require.Len(t, got.Segments, count)
+		for i, seg := range got.Segments {
+			require.EqualValues(t, 100+i, seg.GetSegmentId())
+		}
+		require.LessOrEqual(t, int(peak.Load()), maxConcurrency)
+		require.Greater(t, int(peak.Load()), 1)
+	})
+
+	t.Run("cancels sibling reads on first error", func(t *testing.T) {
+		siblingEntered := make(chan struct{}, count)
+		var sawCancel atomic.Bool
+		read := mockey.Mock((*storage.LocalChunkManager).Read).To(func(_ *storage.LocalChunkManager, ctx context.Context, filePath string) ([]byte, error) {
+			if filePath == metadata.ManifestList[0] {
+				<-siblingEntered
+				return nil, merr.ErrIoKeyNotFound
+			}
+			select {
+			case siblingEntered <- struct{}{}:
+			default:
+			}
+			select {
+			case <-ctx.Done():
+				sawCancel.Store(true)
+				return nil, ctx.Err()
+			case <-time.After(2 * time.Second):
+				return payloads[filePath], nil
+			}
+		}).Build()
+		defer read.UnPatch()
+
+		got, err := snapshotstorage.NewSnapshotReader(storage.NewLocalChunkManager()).
+			ReadSnapshotFromMetadata(context.Background(), metadata.SnapshotInfo.S3Location, metadata, true)
+		require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+		require.Nil(t, got)
+		require.True(t, sawCancel.Load())
+	})
 }

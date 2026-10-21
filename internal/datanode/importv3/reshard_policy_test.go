@@ -20,8 +20,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/reshardmem"
+	"github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -76,6 +78,37 @@ func TestGetReshardPolicyDerivesRunConfiguration(t *testing.T) {
 	// One spill stream per bucket, capped by the configured stream limit.
 	require.Equal(t, int(min(bucketCount, int64(bt.DataNodeCfg.ReshardSpillMaxStreams.GetAsInt()))),
 		policy.write.spillStreams)
+}
+
+// TestGetReshardPolicySnapshotBudgets pins that a snapshot task's frozen L0
+// reservations are removed from the fragment/sort budget while remaining
+// visible to the snapshot readers.
+func TestGetReshardPolicySnapshotBudgets(t *testing.T) {
+	initReshardPipelineParams(t)
+	bt := paramtable.Get()
+	fix := newReshardPipelineFixture()
+
+	source := fix.source(1)
+	source.SnapshotSource = &internalpb.SnapshotImportSource{
+		Version: 5, SourceChannel: "ch", SourcePartitionId: 10,
+	}
+	plan := fix.plan([]*internalpb.ImportFile{source}, 8<<20)
+	plan.Options = []*commonpb.KeyValuePair{
+		{Key: importutilv2.BackupFlag, Value: "true"},
+		{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot},
+	}
+	plan.SnapshotL0Sources = []*internalpb.SnapshotImportL0Source{{SourceChannel: "ch", SourcePartitionId: 10}}
+	const deleteBudget, bitmapBudget = int64(1 << 20), int64(2 << 20)
+	plan.SnapshotBudget = &importv3pb.SnapshotBudget{DeleteBudget: deleteBudget, BitmapBudget: bitmapBudget}
+
+	policy, err := getReshardPolicy(fix.request(plan, 3), plan)
+	require.NoError(t, err)
+	require.True(t, policy.source.snapshot)
+	require.Equal(t, deleteBudget, policy.source.snapshotDeleteBudget)
+	require.Equal(t, bitmapBudget, policy.source.snapshotBitmapBudget)
+
+	fullBudget := int64(3) * reshardmem.MemoryPerSlot(bt.DataNodeCfg.WorkerSlotUnit.GetAsInt64(), bt.DataNodeCfg.BuildParallel.GetAsInt64())
+	require.Equal(t, fullBudget-deleteBudget-bitmapBudget, policy.memory.budget)
 }
 
 // TestGetReshardPolicyClampsSlotAndRejectsBadTarget covers the two boundary

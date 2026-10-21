@@ -59,7 +59,7 @@ func NewDeleteMerger(cm storage.ChunkManager, cfg *indexpb.StorageConfig, pkType
 	retryAttempts uint, budget int64,
 ) (*DeleteMerger, error) {
 	if budget <= 0 {
-		return nil, merr.Wrapf(merr.ErrServiceResourceInsufficient, "snapshot delete-map budget must be positive")
+		return nil, merr.WrapErrImportFailedMsg("snapshot delete-map budget must be positive")
 	}
 	if pkType != schemapb.DataType_Int64 && pkType != schemapb.DataType_VarChar {
 		return nil, merr.WrapErrDataIntegrityMsg("unsupported primary key type %s in deltalog", pkType.String())
@@ -82,7 +82,7 @@ func loadSnapshotL0Deletes(ctx context.Context, cm storage.ChunkManager, schema 
 		return nil, merr.WrapErrServiceInternalMsg("snapshot L0 loading requires a batch consumer")
 	}
 	if budget <= 0 {
-		return nil, merr.Wrapf(merr.ErrServiceResourceInsufficient, "snapshot delete-map budget must be positive")
+		return nil, merr.WrapErrImportFailedMsg("snapshot delete-map budget must be positive")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -124,7 +124,7 @@ func loadSnapshotL0Deletes(ctx context.Context, cm storage.ChunkManager, schema 
 				}
 			}
 			if charge > budget-merger.used {
-				return merr.Wrapf(merr.ErrServiceResourceInsufficient, "snapshot L0 path inventory exceeds shared delete budget")
+				return merr.WrapErrImportFailedMsg("snapshot L0 path inventory exceeds shared delete budget")
 			}
 			merger.used += charge
 			merger.fixed += charge
@@ -307,9 +307,7 @@ func (m *DeleteMerger) merge(pk any, ts uint64) error {
 		}
 	}
 	if charge > m.budget-m.used {
-		return merr.Wrapf(merr.ErrServiceResourceInsufficient,
-			"snapshot delete map exceeds its %d byte budget (accounted=%d, next key=%d); increase dataNode.import.readDeleteBufferSizeInMB and ensure sufficient dataNode.import.memoryLimitPercentage allowance",
-			m.budget, m.used, charge)
+		return merr.WrapErrImportFailedMsg("snapshot delete map exceeds its %d byte budget (accounted=%d, next key=%d); increase dataNode.import.readDeleteBufferSizeInMB and ensure sufficient dataNode.import.memoryLimitPercentage allowance", m.budget, m.used, charge)
 	}
 	if str, ok := pk.(string); ok {
 		pk = strings.Clone(str)

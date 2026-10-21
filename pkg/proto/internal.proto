@@ -451,11 +451,12 @@ enum ImportJobState {
   AssigningIDRange = 10;
   Planning = 11;
   Resharding = 12;
+  SnapshotPreparing = 13;
 }
 
 // Immutable, coordinator-expanded input for typed snapshot jobs.
 message SnapshotImportSource {
-  // Version 9 is a coordinator-only Pending marker, never a worker file.
+  // Version 9 is a coordinator-only preparation marker, never a worker file.
   // The metadata URI and layout are stored in job options. Expansion
   // atomically replaces this marker with executable segment descriptors.
   uint32 version = 1;
@@ -478,7 +479,7 @@ message SnapshotImportSource {
   SnapshotImportV2Reference v2_reference = 9;
 }
 
-// Stored once per source scope in the job after Pending preparation.
+// Stored once per source scope in the job after snapshot preparation.
 // Channel-wide deletes use the all-partitions sentinel. Each worker task
 // receives the merged exact scope.
 message SnapshotImportL0Source {

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -41,6 +42,8 @@ func handlerFor(state internalpb.ImportJobState) importV3StateHandler {
 	switch state {
 	case internalpb.ImportJobState_Pending:
 		return pendingHandler{}
+	case internalpb.ImportJobState_SnapshotPreparing:
+		return snapshotPreparingHandler{}
 	case internalpb.ImportJobState_PreImporting:
 		return preImportingHandler{}
 	case internalpb.ImportJobState_AssigningIDRange:
@@ -202,15 +205,77 @@ func (h indexBuildingHandler) Handle(jc *importV3JobContext) error {
 	return nil
 }
 
-// pendingHandler is the first V3 state. Every import runs the count-only
-// preimport phase first: an ordinary import needs the exact per-file row count
-// before Reshard can generate deterministic PK/RowID (the exact ID ranges are
-// then allocated and broadcast in AssigningIDRange), while a backup import,
-// which carries its own PK/RowID and needs no ranges, runs the same stage in a
-// size-only mode so DataCoord has the per-file packing size for BFD.
+// pendingHandler is the first V3 state. Snapshot jobs hand off to
+// SnapshotPreparing for the coordinator-only source expansion; every other
+// import runs the count-only preimport phase first: an ordinary import needs
+// the exact per-file row count before Reshard can generate deterministic
+// PK/RowID (the exact ID ranges are then allocated and broadcast in
+// AssigningIDRange), while a backup import, which carries its own PK/RowID and
+// needs no ranges, runs the same stage in a size-only mode so DataCoord has the
+// per-file packing size for BFD.
 type pendingHandler struct{}
 
 func (h pendingHandler) Handle(jc *importV3JobContext) error {
+	// Snapshot-sourced jobs first resolve their metadata into the executable
+	// file plan. That preparation does source I/O, so it runs in its own state
+	// instead of blocking this tick.
+	if importutilv2.IsSnapshotPreparation(jc.job.GetFiles()) {
+		return jc.transitionTo(internalpb.ImportJobState_SnapshotPreparing)
+	}
+	return createPreImportV3Tasks(jc)
+}
+
+// snapshotPreparingHandler drives SnapshotPreparing on the state-machine loop.
+// Source I/O runs asynchronously through SnapshotExpandManager; once a result
+// is ready, this handler allocates file IDs, validates and persists the plan,
+// and immediately creates the PreImportV3 tasks. Returned errors flow through
+// checkJob's shared terminal/retry policy.
+type snapshotPreparingHandler struct{}
+
+func (h snapshotPreparingHandler) Handle(jc *importV3JobContext) error {
+	if !importutilv2.IsSnapshotPreparation(jc.job.GetFiles()) {
+		return createPreImportV3Tasks(jc)
+	}
+	if jc.snapshotExpandManager == nil {
+		return nil
+	}
+	res, ready := jc.snapshotExpandManager.PollOrStart(jc.job)
+	if !ready {
+		return nil
+	}
+	if res.err != nil {
+		return res.err
+	}
+	start, _, err := jc.alloc.AllocN(int64(len(res.files)))
+	if err != nil {
+		jc.log.Warn(jc.ctx, "failed to allocate snapshot import file IDs", mlog.Err(err))
+		return nil
+	}
+	for i, file := range res.files {
+		file.Id = start + int64(i)
+	}
+	// Preparation can rebase paths and add external/routing descriptors after
+	// its intermediate checks. Validate the complete durable plan, including
+	// the allocated IDs, before persisting it.
+	if err := importutilv2.ValidateImportPlan(res.files, res.options, res.sources); err != nil {
+		return err
+	}
+	var updated ImportJob
+	if err := jc.importMeta.UpdateJob(jc.ctx, jc.job.GetJobID(), func(current ImportJob) {
+		if current.GetState() != internalpb.ImportJobState_SnapshotPreparing || !importutilv2.IsSnapshotPreparation(current.GetFiles()) {
+			return
+		}
+		j := current.(*Job)
+		j.Files, j.Options, j.SnapshotL0Sources = res.files, res.options, res.sources
+		updated = current.Clone()
+	}); err != nil {
+		jc.log.Warn(jc.ctx, "failed to persist expanded snapshot import", mlog.Err(err))
+		return nil
+	}
+	if updated == nil {
+		return nil
+	}
+	jc.job = updated
 	return createPreImportV3Tasks(jc)
 }
 

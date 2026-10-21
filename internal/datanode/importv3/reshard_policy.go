@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -77,6 +78,12 @@ type sourceSpec struct {
 	// way.
 	backup       bool
 	runFunctions bool
+	// Snapshot-source reads: the L0 inventories this task folds and the
+	// delete-map/bitmap reservations frozen into its plan.
+	snapshot             bool
+	snapshotL0Sources    []*internalpb.SnapshotImportL0Source
+	snapshotDeleteBudget int64
+	snapshotBitmapBudget int64
 }
 
 // reshardPolicy bundles the immutable per-run configuration derived once from
@@ -112,12 +119,17 @@ func getReshardPolicy(req *datapb.ReshardTaskRequest, plan *importv3pb.ReshardTa
 	if slot <= 0 {
 		slot = 1
 	}
-	// The task's slot budget is charged in the node's own slot unit, the same one
+	// DataCoord charges the snapshot delete-map and bitmap reservations into the
+	// slot (both zero for other jobs). They are held by the delete merger and
+	// masks, so they are not available to fragment buffering and sort. The
+	// task's slot budget is charged in the node's own slot unit, the same one
 	// DataCoord estimated the slot with (reshardmem.MemoryPerSlot), not the
 	// import-specific memoryLimitPerSlot.
-	memoryBudget := slot * reshardmem.MemoryPerSlot(
+	snapshotBudget := plan.GetSnapshotBudget()
+	memoryBudget := slot*reshardmem.MemoryPerSlot(
 		paramtable.Get().DataNodeCfg.WorkerSlotUnit.GetAsInt64(),
-		paramtable.Get().DataNodeCfg.BuildParallel.GetAsInt64())
+		paramtable.Get().DataNodeCfg.BuildParallel.GetAsInt64()) -
+		snapshotBudget.GetDeleteBudget() - snapshotBudget.GetBitmapBudget()
 	// Fixed bucket-to-shard mapping: every range of one bucket lands in the same
 	// spill file, so reading a bucket back never touches the others and the
 	// file/fd count stays at min(buckets, reshardSpillMaxStreams).
@@ -160,12 +172,16 @@ func getReshardPolicy(req *datapb.ReshardTaskRequest, plan *importv3pb.ReshardTa
 			model:          memModel,
 		},
 		source: sourceSpec{
-			collectionSchema: plan.GetCollectionSchema(),
-			options:          plan.GetOptions(),
-			storageConfig:    req.GetStorageConfig(),
-			bufferSize:       bufferSize,
-			backup:           backup,
-			runFunctions:     !backup,
+			collectionSchema:     plan.GetCollectionSchema(),
+			options:              plan.GetOptions(),
+			storageConfig:        req.GetStorageConfig(),
+			bufferSize:           bufferSize,
+			backup:               backup,
+			runFunctions:         !backup,
+			snapshot:             importutilv2.IsSnapshotSource(plan.GetOptions()),
+			snapshotL0Sources:    plan.GetSnapshotL0Sources(),
+			snapshotDeleteBudget: snapshotBudget.GetDeleteBudget(),
+			snapshotBitmapBudget: snapshotBudget.GetBitmapBudget(),
 		},
 		write: writeSpec{
 			req:            req,

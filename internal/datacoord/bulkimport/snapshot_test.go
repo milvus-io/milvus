@@ -20,9 +20,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +34,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -58,8 +62,397 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestSnapshotExpansionContextCapsUnboundedJob(t *testing.T) {
+	now := time.Now()
+	ctx, cancel, capped, expired := snapshotExpansionContext(context.Background(), &Job{ImportJob: &datapb.ImportJob{}})
+	defer cancel()
+
+	require.False(t, expired)
+	require.True(t, capped)
+	deadline, ok := ctx.Deadline()
+	require.True(t, ok)
+	require.WithinDuration(t, now.Add(snapshotExpansionTimeout), deadline, time.Minute)
+}
+
+func TestSnapshotExpansionContextUsesShorterJobDeadline(t *testing.T) {
+	job := &Job{ImportJob: &datapb.ImportJob{
+		TimeoutTs: tsoutil.ComposeTSByTime(time.Now().Add(time.Minute)),
+	}}
+	ctx, cancel, capped, expired := snapshotExpansionContext(context.Background(), job)
+	defer cancel()
+
+	require.False(t, expired)
+	require.False(t, capped)
+	deadline, ok := ctx.Deadline()
+	require.True(t, ok)
+	require.WithinDuration(t, time.Now().Add(time.Minute), deadline, 5*time.Second)
+}
+
+func TestSnapshotExpansionContextSkipsExpiredJob(t *testing.T) {
+	job := &Job{ImportJob: &datapb.ImportJob{
+		TimeoutTs: tsoutil.ComposeTSByTime(time.Now().Add(-time.Second)),
+	}}
+	ctx, cancel, capped, expired := snapshotExpansionContext(context.Background(), job)
+	require.True(t, expired)
+	require.False(t, capped)
+	require.Nil(t, ctx)
+	require.Nil(t, cancel)
+}
+
+// TestSnapshotPreparingV3HandlerPreparesAndPublishes pins the V3 Submit/Poll
+// contract: tick 1 starts asynchronous expansion without blocking or mutating
+// meta; once complete, tick 2 harvests the result, allocates file IDs,
+// persists the validated plan, creates PreImportV3 tasks, and transitions to
+// PreImporting in the same tick.
+func TestSnapshotPreparingV3HandlerPreparesAndPublishes(t *testing.T) {
+	paramtable.Init()
+	type sourceCM struct{ milvusstorage.ChunkManager }
+	type alloc struct{ allocator.Allocator }
+	instance := mockey.Mock(snapshotstorage.ValidateInstanceSnapshotImportURI).Return(nil).Build()
+	defer instance.UnPatch()
+
+	snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	uri := "s3://source/root/snapshots/1/metadata/2.json"
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+		SnapshotInfo:  snapshot.SnapshotInfo,
+		Collection:    snapshot.Collection,
+		Layout:        snapshot.Layout,
+	}
+	objects := map[string][]byte{}
+	for _, segment := range snapshot.Segments {
+		segment.CommitTimestamp = 300
+		key := fmt.Sprintf("root/snapshots/1/manifests/2/%d", segment.SegmentId)
+		payload, err := snapshotio.MarshalSegmentManifest(segment)
+		require.NoError(t, err)
+		objects[key] = payload
+		metadata.ManifestList = append(metadata.ManifestList, key)
+		metadata.SegmentIds = append(metadata.SegmentIds, segment.SegmentId)
+		if segment.ManifestPath != "" {
+			metadata.Storagev2ManifestList = append(metadata.Storagev2ManifestList, &datapb.StorageV2SegmentManifest{
+				SegmentId: segment.SegmentId, Manifest: segment.ManifestPath,
+			})
+		}
+	}
+	payload, err := protojson.Marshal(metadata)
+	require.NoError(t, err)
+	objects["root/snapshots/1/metadata/2.json"] = payload
+	read := mockey.Mock((*sourceCM).Read).To(func(_ *sourceCM, _ context.Context, key string) ([]byte, error) {
+		data, ok := objects[key]
+		if !ok {
+			return nil, merr.ErrIoKeyNotFound
+		}
+		return data, nil
+	}).Build()
+	defer read.UnPatch()
+
+	files, options, err := PrepareSnapshotImportFiles(context.Background(), nil, &sourceCM{}, SnapshotImportTestSchema(),
+		[]*internalpb.ImportFile{{Paths: []string{uri}}}, SnapshotImportTestOptions())
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	importMeta := NewMockImportMeta(t)
+	cm := &sourceCM{}
+	mt := &meta.Meta{ChunkManager: cm}
+	al := &alloc{}
+	checker := &importCheckerV3{
+		ctx: ctx, meta: mt, importMeta: importMeta, alloc: al,
+		snapshotExpandManager: NewSnapshotExpandManager(ctx, cm),
+	}
+	job := &Job{ImportJob: &datapb.ImportJob{
+		JobID: 10, CollectionID: 2, State: internalpb.ImportJobState_SnapshotPreparing,
+		Files: files, Options: options, Schema: SnapshotImportTestSchema(),
+	}, Tr: timerecord.NewTimeRecorder("import job")}
+	allocCalls := 0
+	ids := mockey.Mock((*alloc).AllocN).To(func(_ *alloc, n int64) (int64, int64, error) {
+		allocCalls++
+		switch allocCalls {
+		case 1:
+			// AllocN failure must retry on the next tick, never fail the job
+			// even when the error wraps ErrIoFailed.
+			return 0, 0, merr.ErrIoFailed
+		case 2, 3:
+			return 100, 100 + n, nil
+		default:
+			return 200, 200 + n, nil
+		}
+	}).Build()
+	defer ids.UnPatch()
+
+	// Tick 1: starts background expansion, does not touch importMeta yet.
+	checker.checkJob(job)
+	checker.snapshotExpandManager.wait()
+
+	// Tick 2: AllocN returns ErrIoFailed -> stays SnapshotPreparing (not Failed).
+	checker.checkJob(job)
+	require.Equal(t, internalpb.ImportJobState_SnapshotPreparing, job.GetState())
+	require.True(t, importutilv2.IsSnapshotPreparation(job.GetFiles()))
+
+	// Tick 3: starts re-expansion after AllocN failure; wait for completion.
+	checker.checkJob(job)
+	checker.snapshotExpandManager.wait()
+
+	// Tick 4: UpdateJob returns ErrIoFailed -> stays SnapshotPreparing (not Failed).
+	importMeta.EXPECT().UpdateJob(mock.Anything, int64(10), mock.Anything).Return(merr.ErrIoFailed).Once()
+	checker.checkJob(job)
+	require.Equal(t, internalpb.ImportJobState_SnapshotPreparing, job.GetState())
+	require.True(t, importutilv2.IsSnapshotPreparation(job.GetFiles()))
+
+	// Tick 5: starts re-expansion after UpdateJob failure; wait for completion.
+	checker.checkJob(job)
+	checker.snapshotExpandManager.wait()
+
+	// Tick 6: harvests expanded plan, persists files, creates PreImportV3 task,
+	// and transitions to PreImporting.
+	var published ImportJob
+	var addedTask ImportTask
+	importMeta.EXPECT().UpdateJob(mock.Anything, int64(10), mock.Anything).RunAndReturn(
+		func(_ context.Context, _ int64, actions ...UpdateJobAction) error {
+			for _, a := range actions {
+				a(job)
+			}
+			published = job.Clone()
+			return nil
+		}).Twice()
+	importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(10), mock.Anything).Return(nil).Once()
+	importMeta.EXPECT().AddTask(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, task ImportTask) error {
+		addedTask = task
+		return nil
+	}).Once()
+
+	checker.checkJob(job)
+	require.NotNil(t, published)
+	require.Equal(t, internalpb.ImportJobState_PreImporting, published.GetState())
+	require.False(t, importutilv2.IsSnapshotPreparation(published.GetFiles()))
+	require.Len(t, published.GetFiles(), 2)
+	require.EqualValues(t, 100, published.GetFiles()[0].GetId())
+	require.NotNil(t, addedTask)
+	require.Equal(t, PreImportTaskV3Type, addedTask.GetType())
+	require.NoError(t, importutilv2.ValidateImportPlan(published.GetFiles(), published.GetOptions(), published.GetSnapshotL0Sources()))
+}
+
+// TestSnapshotExpansionTerminalFailureSchedulesCleanup pins that a terminal
+// expansion error returned by SnapshotExpandManager flows through checkJob and
+// ImportV3JobTransitTo: credentials are stripped and CleanupTs becomes finite
+// so job GC can reclaim the record.
+func TestSnapshotExpansionTerminalFailureSchedulesCleanup(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	importMeta := NewMockImportMeta(t)
+	checker := &importCheckerV3{
+		ctx: ctx, importMeta: importMeta,
+		snapshotExpandManager: NewSnapshotExpandManager(ctx, nil),
+	}
+	job := &Job{ImportJob: &datapb.ImportJob{
+		JobID: 7, State: internalpb.ImportJobState_SnapshotPreparing,
+		Files: []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: 9}}},
+		Options: []*commonpb.KeyValuePair{
+			{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/snapshot"},
+			{Key: importutilv2.ExternalSpec, Value: "external"},
+			{Key: "keep", Value: "me"},
+		},
+		RequestedDiskSize: 1 << 30,
+		CleanupTs:         math.MaxUint64,
+	}, Tr: timerecord.NewTimeRecorder("import job")}
+
+	expandMock := mockey.Mock(expandSnapshotSource).Return(
+		nil, nil, nil, merr.WrapErrImportFailedMsg("snapshot contains no data segments"),
+	).Build()
+	defer expandMock.UnPatch()
+
+	var published ImportJob
+	importMeta.EXPECT().UpdateJob(mock.Anything, int64(7), mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, _ int64, actions ...UpdateJobAction) error {
+			current := job.Clone()
+			for _, action := range actions {
+				action(current)
+			}
+			published = current
+			return nil
+		}).Once()
+
+	// Tick 1: starts background expansion.
+	checker.checkJob(job)
+	checker.snapshotExpandManager.wait()
+	require.Nil(t, published)
+
+	// Tick 2: harvests terminal error and fails the job through checkJob.
+	checker.checkJob(job)
+	require.NotNil(t, published)
+	require.Equal(t, internalpb.ImportJobState_Failed, published.GetState())
+	require.Contains(t, published.GetReason(), "snapshot contains no data segments")
+	require.NotZero(t, published.GetCleanupTs())
+	require.NotEqual(t, uint64(math.MaxUint64), published.GetCleanupTs())
+	require.Zero(t, published.GetRequestedDiskSize())
+	require.Len(t, published.GetOptions(), 1)
+	require.Equal(t, "keep", published.GetOptions()[0].GetKey())
+}
+
+// TestSnapshotExpandManagerLifecycle pins the pure Submit/Poll manager's
+// concurrency, retry, pruning, and single-client-resolution invariants.
+func TestSnapshotExpandManagerLifecycle(t *testing.T) {
+	paramtable.Init()
+	mkJob := func(id int64) ImportJob {
+		return &Job{ImportJob: &datapb.ImportJob{
+			JobID: id, State: internalpb.ImportJobState_SnapshotPreparing,
+			Files: []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: importutilv2.SnapshotPreparationVersion}}},
+		}, Tr: timerecord.NewTimeRecorder("import job")}
+	}
+
+	t.Run("transient error retries on next tick", func(t *testing.T) {
+		ctx := context.Background()
+		importMeta := NewMockImportMeta(t)
+		checker := &importCheckerV3{
+			ctx: ctx, importMeta: importMeta,
+			snapshotExpandManager: NewSnapshotExpandManager(ctx, nil),
+		}
+		var calls atomic.Int32
+		expandMock := mockey.Mock(expandSnapshotSource).To(func(_ context.Context, _ milvusstorage.ChunkManager, _ ImportJob) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
+			if calls.Add(1) == 1 {
+				return nil, nil, nil, merr.ErrServiceUnavailable
+			}
+			return []*internalpb.ImportFile{{Id: 1}}, nil, nil, nil
+		}).Build()
+		defer expandMock.UnPatch()
+
+		job := mkJob(11)
+		checker.checkJob(job) // start attempt 1
+		checker.snapshotExpandManager.wait()
+		checker.checkJob(job) // harvest transient error: must not call UpdateJob/fail
+		require.EqualValues(t, 1, calls.Load())
+
+		checker.checkJob(job) // start attempt 2
+		checker.snapshotExpandManager.wait()
+		require.EqualValues(t, 2, calls.Load())
+	})
+
+	t.Run("concurrency cap releases slot immediately upon completion", func(t *testing.T) {
+		ctx := context.Background()
+		mgr := NewSnapshotExpandManager(ctx, nil)
+		defer mgr.Close()
+
+		gates := make([]chan struct{}, snapshotExpandConcurrency+1)
+		started := make([]chan struct{}, snapshotExpandConcurrency+1)
+		for i := range gates {
+			gates[i] = make(chan struct{})
+			started[i] = make(chan struct{})
+		}
+		expandMock := mockey.Mock(expandSnapshotSource).To(func(runCtx context.Context, _ milvusstorage.ChunkManager, job ImportJob) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
+			idx := int(job.GetJobID() - 1)
+			close(started[idx])
+			select {
+			case <-gates[idx]:
+				return nil, nil, nil, nil
+			case <-runCtx.Done():
+				return nil, nil, nil, runCtx.Err()
+			}
+		}).Build()
+		defer expandMock.UnPatch()
+
+		for i := 0; i < snapshotExpandConcurrency; i++ {
+			_, ready := mgr.PollOrStart(mkJob(int64(i + 1)))
+			require.False(t, ready)
+			<-started[i]
+		}
+		// Next job must wait while all concurrency slots are running.
+		_, ready := mgr.PollOrStart(mkJob(int64(snapshotExpandConcurrency + 1)))
+		require.False(t, ready)
+		select {
+		case <-started[snapshotExpandConcurrency]:
+			t.Fatal("expected concurrency cap to defer the queued expansion")
+		default:
+		}
+
+		// Finish job 1 WITHOUT polling its result yet; its concurrency slot must
+		// free immediately so the queued job can start.
+		close(gates[0])
+		require.Eventually(t, func() bool {
+			mgr.mu.Lock()
+			defer mgr.mu.Unlock()
+			return mgr.running == snapshotExpandConcurrency-1
+		}, 2*time.Second, 5*time.Millisecond)
+
+		_, ready = mgr.PollOrStart(mkJob(int64(snapshotExpandConcurrency + 1)))
+		require.False(t, ready)
+		<-started[snapshotExpandConcurrency]
+
+		for i := 1; i < len(gates); i++ {
+			close(gates[i])
+		}
+		mgr.wait()
+
+		// Job 1's cached result is still intact for polling.
+		_, ready = mgr.PollOrStart(mkJob(1))
+		require.True(t, ready)
+	})
+
+	t.Run("prune cancels inflight and drops cached result", func(t *testing.T) {
+		ctx := context.Background()
+		mgr := NewSnapshotExpandManager(ctx, nil)
+		defer mgr.Close()
+
+		started := make(chan struct{})
+		canceled := make(chan struct{})
+		expandMock := mockey.Mock(expandSnapshotSource).To(func(runCtx context.Context, _ milvusstorage.ChunkManager, job ImportJob) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
+			if job.GetJobID() == 1 {
+				return []*internalpb.ImportFile{{Id: 1}}, nil, nil, nil
+			}
+			close(started)
+			<-runCtx.Done()
+			close(canceled)
+			return nil, nil, nil, runCtx.Err()
+		}).Build()
+		defer expandMock.UnPatch()
+
+		// Job 1 completes and sits cached; job 2 stays in-flight.
+		mgr.PollOrStart(mkJob(1))
+		mgr.wait()
+		mgr.PollOrStart(mkJob(2))
+		<-started
+
+		mgr.Prune(func(int64) bool { return false })
+		<-canceled
+		mgr.wait()
+
+		mgr.mu.Lock()
+		require.Empty(t, mgr.entries)
+		mgr.mu.Unlock()
+	})
+
+	t.Run("external storage resolved once per expansion", func(t *testing.T) {
+		type sourceCM struct{ milvusstorage.ChunkManager }
+		uri := "s3://ext-bucket/root/snapshots/1/metadata/2.json"
+		opts := append(SnapshotImportTestOptions(),
+			&commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: uri},
+			&commonpb.KeyValuePair{Key: importutilv2.SnapshotLayout, Value: "referenced"},
+			&commonpb.KeyValuePair{Key: importutilv2.ExternalSpec, Value: `{"extfs":{"region":"us-east-1"}}`},
+		)
+		job := &Job{ImportJob: &datapb.ImportJob{
+			JobID: 21, State: internalpb.ImportJobState_SnapshotPreparing,
+			Files:   []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: importutilv2.SnapshotPreparationVersion}}},
+			Options: opts, Schema: SnapshotImportTestSchema(),
+		}}
+
+		extCM := &sourceCM{}
+		resolve := mockey.Mock(importutilv2.ResolveSnapshotImportStorage).Return(extCM, nil, nil).Build()
+		defer resolve.UnPatch()
+		bucketCheck := mockey.Mock(snapshotstorage.ValidateSnapshotObjectPathForBucket).Return(nil).Build()
+		defer bucketCheck.UnPatch()
+		readMeta := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{}, nil).Build()
+		defer readMeta.UnPatch()
+		readSnap := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(nil, merr.ErrIoKeyNotFound).Build()
+		defer readSnap.UnPatch()
+
+		_, _, _, err := expandSnapshotSource(context.Background(), &sourceCM{}, job)
+		require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+		require.Equal(t, 1, resolve.Times(), "external snapshot storage must be resolved once per expansion")
+	})
+}
 
 func TestImportTaskConstructionDependencyErrors(t *testing.T) {
 	paramtable.Init()
@@ -289,15 +682,16 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 			require.NoError(t, err)
 			objects["root/snapshots/1/metadata/2.json"] = payload
 			m := &Meta{Jobs: make(map[int64]ImportJob), tasks: newImportTasks(), Catalog: &catalog{}}
-			reads := 0
+			var reads atomic.Int32
 			read := mockey.Mock((*sourceCM).Read).To(func(_ *sourceCM, _ context.Context, key string) ([]byte, error) {
-				reads++
-				if reads > 1 {
+				if reads.Add(1) > 1 {
 					if (mode == "missing_segment" || mode == "fail_save") && key != "root/snapshots/1/metadata/2.json" {
 						return nil, merr.ErrIoKeyNotFound
 					}
 					if mode == "aborted" {
-						require.NoError(t, m.UpdateJob(ctx, 10, UpdateJobState(internalpb.ImportJobState_Failed)))
+						if err := m.UpdateJob(ctx, 10, UpdateJobState(internalpb.ImportJobState_Failed)); err != nil {
+							return nil, err
+						}
 					}
 					if mode == "canceled" {
 						cancel()
@@ -377,7 +771,7 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 					require.Contains(t, got.GetReason(), "invalid task-shared snapshot source descriptor")
 				}
 				if mode == "missing_uri" {
-					require.Equal(t, 1, reads, "malformed recovered references must fail before I/O")
+					require.EqualValues(t, 1, reads.Load(), "malformed recovered references must fail before I/O")
 				}
 			case "canceled", "cancel_allocate":
 				require.Equal(t, internalpb.ImportJobState_Pending, got.GetState())
@@ -690,7 +1084,7 @@ func TestSnapshotImportL0URIRead(t *testing.T) {
 		file := &internalpb.ImportFile{}
 		require.NoError(t, proto.Unmarshal(encoded, file))
 		readers := importutilv2.NewReaderFactory(ctx, cm, cfg, SnapshotImportTestOptions())
-		shared, err := readers.PrepareSnapshotDeletes(ctx, schema, []*internalpb.ImportFile{file}, l0Source, 1024, 1024)
+		shared, err := readers.PrepareSnapshotDeletes(ctx, schema, []*internalpb.ImportFile{file}, []*internalpb.SnapshotImportL0Source{l0Source}, 1024, 1024)
 		require.NoError(t, err)
 		reader, err := readers.NewReader(ctx, schema, file, 1024, 1024, shared)
 		require.NoError(t, err)
@@ -1693,9 +2087,12 @@ func TestExpandSnapshotImportParsedMetadata(t *testing.T) {
 			original := proto.Clone(metadata)
 			// Expansion receives parsed metadata from Pending. It must
 			// not reopen the root object during expansion.
+			var readsMu sync.Mutex
 			var reads []string
 			read := mockey.Mock((*sourceCM).Read).To(func(_ *sourceCM, _ context.Context, key string) ([]byte, error) {
+				readsMu.Lock()
 				reads = append(reads, key)
+				readsMu.Unlock()
 				payload, ok := objects[key]
 				if !ok {
 					return nil, merr.ErrIoKeyNotFound
@@ -1713,7 +2110,7 @@ func TestExpandSnapshotImportParsedMetadata(t *testing.T) {
 				require.Len(t, result, 2)
 				require.Equal(t, []string{snapshot.Segments[1].ManifestPath}, result[0].Paths)
 				require.Equal(t, []string{snapshot.Segments[0].ManifestPath}, result[1].Paths)
-				require.Equal(t, metadata.ManifestList, reads)
+				require.ElementsMatch(t, metadata.ManifestList, reads)
 				require.True(t, proto.Equal(original, metadata), "expansion must not mutate parsed metadata")
 				reads = nil
 			}
@@ -3004,6 +3401,7 @@ type bucketMemoryChunkManager struct {
 	milvusstorage.ChunkManager
 	bucket  string
 	objects map[string][]byte
+	mu      sync.Mutex
 	reads   []string
 }
 
@@ -3012,7 +3410,9 @@ func (m *bucketMemoryChunkManager) BucketName() string {
 }
 
 func (m *bucketMemoryChunkManager) Read(_ context.Context, key string) ([]byte, error) {
+	m.mu.Lock()
 	m.reads = append(m.reads, key)
+	m.mu.Unlock()
 	data, ok := m.objects[key]
 	if !ok {
 		return nil, merr.WrapErrIoKeyNotFound(key)
@@ -3257,7 +3657,9 @@ func TestSnapshotImportBareKeyAcrossPrimaryAndSecondaryBuckets(t *testing.T) {
 					require.Equal(t, packed.MarshalManifestPath(expectedDataBase, 8), expandedFiles[1].GetSnapshotSource().GetManifestPath())
 					require.Len(t, l0Sources, 1)
 					require.Equal(t, []string{expectedDeltaPath}, l0Sources[0].GetLegacyL0Deltalogs())
-					require.Equal(t, []string{tc.bareMetadataKey, v2AvroObjectKey, v3AvroObjectKey, l0AvroObjectKey}, cluster.cm.reads)
+					require.Len(t, cluster.cm.reads, 4)
+					require.Equal(t, tc.bareMetadataKey, cluster.cm.reads[0])
+					require.ElementsMatch(t, []string{v2AvroObjectKey, v3AvroObjectKey, l0AvroObjectKey}, cluster.cm.reads[1:])
 
 					// DataNode deferred path validator accepts bare references under root
 					// and rejects any scheme-bearing URI when top-level source is a bare key.

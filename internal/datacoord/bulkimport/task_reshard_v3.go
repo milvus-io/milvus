@@ -157,6 +157,7 @@ func reshardDispatchable(state internalpb.ImportJobState) bool {
 func importV3PreReshardState(state internalpb.ImportJobState) bool {
 	switch state {
 	case internalpb.ImportJobState_Pending,
+		internalpb.ImportJobState_SnapshotPreparing,
 		internalpb.ImportJobState_PreImporting,
 		internalpb.ImportJobState_AssigningIDRange:
 		return true
