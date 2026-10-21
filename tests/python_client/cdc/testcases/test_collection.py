@@ -694,7 +694,7 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
         )
 
     def test_flush(self, upstream_client, downstream_client, sync_timeout):
-        """Test FLUSH operation sync."""
+        """Test independent local flushes while data replicates downstream."""
         # Store upstream client for teardown
         self._upstream_client = upstream_client
 
@@ -731,7 +731,7 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
 
         # Wait for flush data to be visible with timeout
         expected_count = (
-            insert_result.get("insert_count", 100) if insert_result else 100
+            insert_result.get("insert_count", len(test_data)) if insert_result else len(test_data)
         )
 
         def check_flush_stats():
@@ -761,7 +761,7 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
         stats_after = upstream_client.get_collection_stats(collection_name)
         logger.info(f"Stats after flush: {stats_after}")
 
-        # Wait for flush to sync downstream
+        # Flush is local; repeat while later CDC batches are still arriving.
         def check_flush():
             try:
                 downstream_stats = downstream_client.get_collection_stats(
@@ -770,12 +770,16 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
                 logger.info(
                     f"DEBUG: get collection stats in downstream {collection_name}: {downstream_stats}"
                 )
-                return downstream_stats.get("row_count", 0) >= 100
-            except:
+                if downstream_stats.get("row_count", 0) >= expected_count:
+                    return True
+                downstream_client.flush(collection_name, timeout=sync_timeout)
+                return False
+            except Exception as e:
+                logger.warning(f"Error flushing or checking downstream stats: {e}")
                 return False
 
         assert self.wait_for_sync(
-            check_flush, sync_timeout, f"flush collection {collection_name}"
+            check_flush, sync_timeout, f"replicate and locally flush collection {collection_name}"
         )
 
     def test_load_collection_with_load_fields(

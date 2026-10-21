@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -29,6 +30,38 @@ import (
 )
 
 const fenceTestTimeout = 5 * time.Second
+
+func TestReplicaOrFlushAppendStopsOnWALCancellation(t *testing.T) {
+	for _, replicated := range []bool{false, true} {
+		t.Run(strconv.FormatBool(replicated), func(t *testing.T) {
+			var persisted atomic.Int32
+			var cancelWAL context.CancelFunc
+			walImpls := newFirstTimeTickWALImpls(func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+				persisted.Add(1)
+				cancelWAL() // Recovery will determine the durable outcome.
+				<-ctx.Done()
+				return nil, ctx.Err()
+			})
+			w := newFenceTestWAL(t, walImpls)
+			cancelWAL = w.availableCancel
+			var msg message.MutableMessage
+			if replicated {
+				msg = message.CreateTestEmptyInsertMesage(1, nil).WithReplicateHeader(&message.ReplicateHeader{
+					ClusterID: "source", VChannel: "v1", MessageID: walimplstest.NewTestMessageID(1), LastConfirmedMessageID: walimplstest.NewTestMessageID(0), TimeTick: 100,
+				})
+			} else {
+				msg = message.NewFlushAllMessageBuilderV2().WithAllVChannel().WithUnreplicable().WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).MustBuildMutable()
+			}
+			msg.WithTimeTick(100).WithLastConfirmedUseMessageID()
+			_, err := w.Append(context.Background(), msg)
+			require.ErrorIs(t, err, context.Canceled)
+			require.Error(t, w.availableCtx.Err())
+			_, err = w.Append(context.Background(), message.CreateTestEmptyInsertMesage(1, nil))
+			require.Error(t, err)
+			require.EqualValues(t, 1, persisted.Load(), "an uncertain append must be recovered before any further write")
+		})
+	}
+}
 
 func TestAppendBeforeAlterWALCompletesBeforeFence(t *testing.T) {
 	insertStarted := make(chan struct{})

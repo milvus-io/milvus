@@ -97,6 +97,11 @@ func (impl *replicatesManagerImpl) SwitchReplicateMode(_ context.Context, msg me
 			)
 		}
 	}
+	// A non-ignored topology change is a PChannel transaction boundary.
+	// The outer WAL lock excludes transaction appends until sessions are aborted.
+	if impl.secondaryState != nil {
+		impl.secondaryState.clear()
+	}
 	impl.replicateConfigHelper = newGraph
 	return nil
 }
@@ -114,6 +119,24 @@ func (impl *replicatesManagerImpl) BeginReplicateMessage(ctx context.Context, ms
 	if msg.IsUnreplicable() {
 		if rh != nil {
 			return nil, status.NewIgnoreOperation("wal unreplicable message cannot be replicated")
+		}
+		if msg.MessageType().IsExclusiveRequired() {
+			// The outer WAL lock excludes appends in the affected scope until
+			// both the prefix and sessions are cleared. Only lock shared replication
+			// state during cleanup, so other VChannels can append concurrently.
+			return replicateAckerImpl(func(err error) {
+				if err != nil {
+					return
+				}
+				impl.mu.Lock()
+				defer impl.mu.Unlock()
+				if impl.secondaryState != nil {
+					helper := impl.secondaryState.replicateTxnHelper
+					if msg.IsPChannelLevel() || msg.VChannel() == "" || msg.VChannel() == impl.pchannel.Name || msg.VChannel() == helper.vchannel {
+						helper.clear()
+					}
+				}
+			}), nil
 		}
 		return nil, ErrNotHandledByReplicateManager
 	}
@@ -199,23 +222,23 @@ func (impl *replicatesManagerImpl) startReplicateTxnMessage(_ context.Context, m
 	txn := msg.TxnContext()
 	switch msg.MessageType() {
 	case message.MessageTypeBeginTxn:
-		if err := impl.secondaryState.StartBegin(txn, rh); err != nil {
+		if err := impl.secondaryState.StartBegin(txn); err != nil {
 			return nil, err
 		}
 		return replicateAckerImpl(func(err error) {
 			if err == nil {
-				impl.secondaryState.BeginDone(txn)
+				impl.secondaryState.BeginDone(txn, msg.VChannel())
 			}
 			impl.mu.Unlock()
 		}), nil
 	case message.MessageTypeCommitTxn:
-		if err := impl.secondaryState.StartCommit(txn); err != nil {
+		if err := impl.secondaryState.StartCommit(txn, message.MustAsMutableCommitTxnMessageV2(msg).Header().BodyCnt); err != nil {
 			return nil, err
 		}
 		// only update the checkpoint when the txn is committed.
 		return replicateAckerImpl(func(err error) {
 			if err == nil {
-				impl.secondaryState.CommitDone(txn)
+				impl.secondaryState.CommitDone()
 				impl.secondaryState.PushForwardCheckpoint(rh.TimeTick, rh.LastConfirmedMessageID)
 			}
 			impl.mu.Unlock()

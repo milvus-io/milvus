@@ -22,8 +22,8 @@ type lockAppendInterceptor struct {
 }
 
 func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	g := r.acquireLockGuard(ctx, msg)
-	defer g()
+	unlock := r.acquireLockGuard(msg)
+	defer unlock()
 
 	// Row locks are taken under the shard lifecycle lock and before TimeTick
 	// allocates the write timestamp, so a later lock holder always receives a
@@ -39,7 +39,25 @@ func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 		}
 		defer release()
 	}
-	return append(ctx, msg)
+
+	msgID, err := append(ctx, msg)
+	if err != nil || !msg.MessageType().IsExclusiveRequired() {
+		return msgID, err
+	}
+	if msg.MessageType() == message.MessageTypeAlterReplicateConfig &&
+		message.MustAsMutableAlterReplicateConfigMessageV2(msg).Header().Ignore {
+		return msgID, nil
+	}
+
+	// Only a durable exclusive operation ends transactions, while still holding
+	// the WAL lock. Failed, deduplicated and explicitly ignored operations do not.
+	vchannel := msg.VChannel()
+	if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
+		r.txnManager.FailTxnAtVChannel("")
+	} else if !funcutil.IsControlChannel(vchannel) {
+		r.txnManager.FailTxnAtVChannel(vchannel)
+	}
+	return msgID, nil
 }
 
 func (r *lockAppendInterceptor) rowLock() interceptors.MessageRowLock {
@@ -49,30 +67,17 @@ func (r *lockAppendInterceptor) rowLock() interceptors.MessageRowLock {
 	return r.buildParam.RowLock
 }
 
-// acquireLockGuard acquires the lock for the vchannel and return a function as a guard.
-func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.MutableMessage) func() {
+// acquireLockGuard acquires the required WAL locks and returns only their unlock function.
+func (r *lockAppendInterceptor) acquireLockGuard(msg message.MutableMessage) func() {
 	vchannel := msg.VChannel()
 	if msg.MessageType().IsExclusiveRequired() {
 		if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
 			r.glock.Lock()
-			return func() {
-				// fail all transactions at all vchannels.
-				r.txnManager.FailTxnAtVChannel("")
-				r.glock.Unlock()
-			}
+			return r.glock.Unlock
 		} else if !funcutil.IsControlChannel(vchannel) {
 			r.glock.RLock()
 			r.vchannelLocker.Lock(vchannel)
 			return func() {
-				// For exclusive messages, we need to fail all transactions at the vchannel.
-				// Otherwise, the transaction message may cross the exclusive message.
-				// e.g. an exclusive message like `ManualFlush` happens, it will flush all the growing segment.
-				// But the transaction insert message that use those segments may not be committed,
-				// if we allow it to be committed, a insert message can be seen after the manual flush message, lead to the wrong wal message order.
-				// So we need to fail all transactions at the vchannel, it will be retried at client side with new txn.
-				//
-				// the append operation of exclusive message should be low rate, so it's acceptable to fail all transactions at the vchannel.
-				r.txnManager.FailTxnAtVChannel(vchannel)
 				r.vchannelLocker.Unlock(vchannel)
 				r.glock.RUnlock()
 			}

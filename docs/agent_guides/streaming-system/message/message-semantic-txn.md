@@ -30,3 +30,9 @@ Consumer sees: ImmutableTxnMessage@tt=15 (contains all body messages)
 BeginTxn@tt=10 → Insert@tt=11 → RollbackTxn@tt=15
 Consumer sees: (nothing — body messages discarded)
 ```
+
+Commit carries `body_cnt`, the expected logical body count excluding Begin/Commit
+and backend retries. Primary and secondary validate nonzero counts before Commit
+append; zero skips validation for legacy WAL. CDC forwards the original count,
+and consumption/recovery do not revalidate durable commits. Successful exclusive
+WAL appends abort scoped unfinished transactions. See [Local Flush](../wal/local-flush.md).

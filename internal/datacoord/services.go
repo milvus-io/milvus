@@ -189,7 +189,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}
 
 	// Create a new broadcaster with exclusive cluster resource key.
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+	broadcaster, err := broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
@@ -199,6 +199,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 
 	cc := channel.GetClusterChannels()
 	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
+		WithUnreplicable().
 		WithHeader(&message.FlushAllMessageHeader{}).
 		WithBody(&message.FlushAllMessageBody{}).
 		WithClusterLevelBroadcast(cc).

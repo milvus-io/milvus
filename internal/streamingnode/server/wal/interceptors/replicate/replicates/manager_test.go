@@ -124,8 +124,8 @@ func TestReplicateManager_UnreplicableMessage(t *testing.T) {
 
 	msg := newCreateSnapshotMutableMessage()
 	g, err := rm.BeginReplicateMessage(context.Background(), msg)
-	assert.ErrorIs(t, err, ErrNotHandledByReplicateManager)
-	assert.Nil(t, g)
+	require.ErrorIs(t, err, ErrNotHandledByReplicateManager)
+	require.Nil(t, g)
 
 	msg = newCreateSnapshotMutableMessage().WithReplicateHeader(&message.ReplicateHeader{
 		ClusterID:              "test2",
@@ -381,7 +381,7 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	}
 }
 
-func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *testing.T) {
+func TestSecondaryReplicateManagerCommitFailureRecoversPrefix(t *testing.T) {
 	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	recovered := newReplicateTxnMessage("test1", "test2", 2)
 	for _, msg := range []message.MutableMessage{recovered[0], recovered[2]} {
@@ -412,12 +412,15 @@ func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *t
 	})
 	require.NoError(t, err)
 
+	walCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	firstReplay := newReplicateTxnMessage("test1", "test2", 2)
 	for _, msg := range firstReplay {
-		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
+		acker, appendErr := rm.BeginReplicateMessage(walCtx, msg)
 		if msg.MessageType() == message.MessageTypeCommitTxn && acker != nil {
 			require.NoError(t, appendErr)
-			acker.Ack(status.NewTransactionExpired("recovered transaction"))
+			cancel()
+			acker.Ack(walCtx.Err())
 			continue
 		}
 		require.Nil(t, acker)
@@ -427,6 +430,14 @@ func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *t
 	require.NoError(t, err)
 	require.EqualValues(t, 1, checkpoint.TimeTick)
 
+	// WAL cancellation ends the old writer. Reopen from the durable prefix.
+	rm, err = RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 2},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: newReplicateRecoverySnapshot(
+			newReplicateConfiguration("test2", "test1"), checkpoint, txnBuffer),
+	})
+	require.NoError(t, err)
 	accepted := make([]message.MessageType, 0, 3)
 	for _, msg := range newReplicateTxnMessage("test1", "test2", 2) {
 		acker, appendErr := rm.BeginReplicateMessage(context.Background(), msg)
@@ -438,11 +449,9 @@ func TestSecondaryReplicateManagerRecoveredTxnCommitFailureAllowsFullReplay(t *t
 		accepted = append(accepted, msg.MessageType())
 		acker.Ack(nil)
 	}
-	require.Equal(t, []message.MessageType{
-		message.MessageTypeBeginTxn,
-		message.MessageTypeCreateDatabase,
-		message.MessageTypeCommitTxn,
-	}, accepted)
+	// A failed local Commit retains the recovered transaction and its body.
+	// Recovery must deduplicate Begin/body and append only Commit.
+	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, accepted)
 	checkpoint, err = rm.GetReplicateCheckpoint()
 	require.NoError(t, err)
 	require.EqualValues(t, 2, checkpoint.TimeTick)
@@ -891,4 +900,15 @@ func newImmutableTxnMessageWithTxnID(clusterID string, timetick uint64, txnID me
 			IntoImmutableMessage(walimplstest.NewTestMessageID(1)),
 	}
 	return immutables
+}
+
+// 3.0 persists replication control in WALCheckpoint.
+func newReplicateRecoverySnapshot(config *commonpb.ReplicateConfiguration, checkpoint *utility.ReplicateCheckpoint, buffer *utility.TxnBuffer) *recovery.RecoverySnapshot {
+	return &recovery.RecoverySnapshot{
+		Checkpoint: &utility.WALCheckpoint{
+			MessageID: checkpoint.MessageID, TimeTick: checkpoint.TimeTick,
+			ReplicateConfig: config, ReplicateCheckpoint: checkpoint,
+		},
+		TxnBuffer: buffer,
+	}
 }

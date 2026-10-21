@@ -25,7 +25,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
-| ManualFlush | Single VChannel | Yes (VChannel) | — |
+| ManualFlush | Single VChannel, Unreplicable (`_ur`) | Yes (VChannel) | — |
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | AlterRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
@@ -125,3 +125,7 @@ CreateCollection(p0)@tt=1                    (creates collection with default pa
   → ManualFlush@tt=18                        (exclusive, seals remaining segments)
 → DropCollection@tt=20                       (exclusive, flushes all segments, collection terminated)
 ```
+
+ManualFlush is produced by Proxy and the growing-source release preparer on either
+replication role. It stays local and preserves the existing FlushTs/SegmentIds and
+flush-state or release-progress completion checks. See [Local Flush](../wal/local-flush.md).

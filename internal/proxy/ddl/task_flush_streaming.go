@@ -109,6 +109,7 @@ func (t *FlushTask) Execute(ctx context.Context) error {
 func sendManualFlushToWAL(ctx context.Context, collID int64, vchannel string, flushTs uint64) ([]int64, error) {
 	logger := mlog.With(mlog.FieldCollectionID(collID), mlog.FieldVChannel(vchannel))
 	flushMsg, err := message.NewManualFlushMessageBuilderV2().
+		WithUnreplicable().
 		WithVChannel(vchannel).
 		WithHeader(&message.ManualFlushMessageHeader{
 			CollectionId: collID,
