@@ -1591,11 +1591,11 @@ func (suite *TaskSuite) TestRemoveByNodeWaitsForSchedule() {
 	suite.NoError(suite.scheduler.Add(task))
 	suite.AssertTaskNum(0, 1, 0, 1)
 
-	suite.scheduler.scheduleMu.Lock()
+	suite.scheduler.lifecycleMu.Lock()
 	locked := true
 	defer func() {
 		if locked {
-			suite.scheduler.scheduleMu.Unlock()
+			suite.scheduler.lifecycleMu.Unlock()
 		}
 	}()
 
@@ -1607,18 +1607,18 @@ func (suite *TaskSuite) TestRemoveByNodeWaitsForSchedule() {
 
 	select {
 	case <-done:
-		suite.FailNow("RemoveByNode should wait for scheduleMu")
+		suite.FailNow("RemoveByNode should wait for lifecycleMu")
 	case <-time.After(50 * time.Millisecond):
 	}
 	suite.AssertTaskNum(0, 1, 0, 1)
 
-	suite.scheduler.scheduleMu.Unlock()
+	suite.scheduler.lifecycleMu.Unlock()
 	locked = false
 
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		suite.FailNow("RemoveByNode blocked after scheduleMu was released")
+		suite.FailNow("RemoveByNode blocked after lifecycleMu was released")
 	}
 	suite.AssertTaskNum(0, 0, 0, 0)
 }
@@ -1860,7 +1860,7 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 
 	// new delegator distribution hasn't updated, block balance
 	suite.scheduler.preProcess(task)
-	suite.Equal(0, task.step)
+	suite.Equal(0, task.Step())
 
 	suite.dist.ChannelDistManager.Update(1, &meta.DmChannel{
 		VchannelInfo: &datapb.VchannelInfo{
@@ -1880,12 +1880,12 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 
 	// new delegator distribution updated, task step up
 	suite.scheduler.preProcess(task)
-	suite.Equal(1, task.step)
+	suite.Equal(1, task.Step())
 
 	suite.dist.ChannelDistManager.Update(2)
 	// old delegator removed
 	suite.scheduler.preProcess(task)
-	suite.Equal(2, task.step)
+	suite.Equal(2, task.Step())
 }
 
 func (suite *TaskSuite) TestGetTasksJSON() {
@@ -2404,10 +2404,23 @@ func TestChannelTaskDeltaDefensiveBranches(t *testing.T) {
 	delta.Sub(channelTask)
 	assert.Equal(t, 0, delta.Get(1, 100))
 
+	// Keep another reservation live while exercising a missing aggregate.
+	other, err := NewChannelTask(context.Background(), time.Second, WrapIDSource(0),
+		100, replica, NewChannelAction(2, ActionTypeGrow, "other"))
+	assert.NoError(t, err)
+	other.SetID(2)
+	delta.Add(other)
 	delta.taskIDRecords.Insert(channelTask.ID())
 	delete(delta.data, int64(1))
 	delta.Sub(channelTask)
 	assert.Equal(t, -1, delta.Get(1, 100))
+
+	// Retiring the final reservation reclaims even defensive aggregate entries.
+	delta.Sub(other)
+	assert.Zero(t, delta.Get(1, 100))
+	assert.Zero(t, delta.Get(2, 100))
+	assert.Empty(t, delta.data)
+	assert.Empty(t, delta.nodeTotalDelta)
 }
 
 func TestMockSchedulerGetSegmentTaskDeltaSnapshot(t *testing.T) {
