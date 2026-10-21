@@ -1,9 +1,15 @@
+use super::fixed_regex::FixedRegex;
+use once_cell::sync::Lazy;
+use regex_automata::meta::Regex;
 use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
+
+static HAN_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\p{Han}+").unwrap());
+static HAN_ALPHANUM_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"[\p{Han}a-zA-Z0-9]+").unwrap());
 
 pub struct CnCharOnlyFilter;
 
 pub struct CnCharOnlyFilterStream<'a, T> {
-    regex: &'a regex::Regex,
+    regex: &'a mut FixedRegex,
     tail: T,
 }
 
@@ -13,7 +19,7 @@ impl TokenFilter for CnCharOnlyFilter {
     fn transform<T: Tokenizer>(self, tokenizer: T) -> CnCharOnlyFilterWrapper<T> {
         CnCharOnlyFilterWrapper {
             inner: tokenizer,
-            regex: regex::Regex::new("\\p{Han}+").unwrap(),
+            regex: FixedRegex::new(&HAN_REGEX),
         }
     }
 }
@@ -21,8 +27,7 @@ impl TokenFilter for CnCharOnlyFilter {
 #[derive(Clone)]
 pub struct CnCharOnlyFilterWrapper<T> {
     inner: T,
-    // Clone with the analyzer: share compiled state, but keep worker-local search caches.
-    regex: regex::Regex,
+    regex: FixedRegex,
 }
 
 impl<T: Tokenizer> Tokenizer for CnCharOnlyFilterWrapper<T> {
@@ -30,7 +35,7 @@ impl<T: Tokenizer> Tokenizer for CnCharOnlyFilterWrapper<T> {
 
     fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
         CnCharOnlyFilterStream {
-            regex: &self.regex,
+            regex: &mut self.regex,
             tail: self.inner.token_stream(text),
         }
     }
@@ -59,7 +64,7 @@ impl<T: TokenStream> TokenStream for CnCharOnlyFilterStream<'_, T> {
 pub struct CnAlphaNumOnlyFilter;
 
 pub struct CnAlphaNumOnlyFilterStream<'a, T> {
-    regex: &'a regex::Regex,
+    regex: &'a mut FixedRegex,
     tail: T,
 }
 
@@ -69,15 +74,14 @@ impl TokenFilter for CnAlphaNumOnlyFilter {
     fn transform<T: Tokenizer>(self, tokenizer: T) -> CnAlphaNumOnlyFilterWrapper<T> {
         CnAlphaNumOnlyFilterWrapper {
             inner: tokenizer,
-            regex: regex::Regex::new(r"[\p{Han}a-zA-Z0-9]+").unwrap(),
+            regex: FixedRegex::new(&HAN_ALPHANUM_REGEX),
         }
     }
 }
 #[derive(Clone)]
 pub struct CnAlphaNumOnlyFilterWrapper<T> {
     inner: T,
-    // Clone with the analyzer: share compiled state, but keep worker-local search caches.
-    regex: regex::Regex,
+    regex: FixedRegex,
 }
 
 impl<T: Tokenizer> Tokenizer for CnAlphaNumOnlyFilterWrapper<T> {
@@ -85,7 +89,7 @@ impl<T: Tokenizer> Tokenizer for CnAlphaNumOnlyFilterWrapper<T> {
 
     fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
         CnAlphaNumOnlyFilterStream {
-            regex: &self.regex,
+            regex: &mut self.regex,
             tail: self.inner.token_stream(text),
         }
     }

@@ -1,9 +1,14 @@
+use super::fixed_regex::FixedRegex;
+use once_cell::sync::Lazy;
+use regex_automata::meta::Regex;
 use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
+
+static PUNCT_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"[\p{Punct}\s]+").unwrap());
 
 pub struct RemovePunctFilter;
 
 pub struct RemovePunctFilterStream<'a, T> {
-    regex: &'a regex::Regex,
+    regex: &'a mut FixedRegex,
     tail: T,
 }
 
@@ -13,15 +18,14 @@ impl TokenFilter for RemovePunctFilter {
     fn transform<T: Tokenizer>(self, tokenizer: T) -> RemovePunctFilterWrapper<T> {
         RemovePunctFilterWrapper {
             inner: tokenizer,
-            regex: regex::Regex::new(r"[\p{Punct}\s]+").unwrap(),
+            regex: FixedRegex::new(&PUNCT_REGEX),
         }
     }
 }
 #[derive(Clone)]
 pub struct RemovePunctFilterWrapper<T> {
     inner: T,
-    // Clone with the analyzer: share compiled state, but keep worker-local search caches.
-    regex: regex::Regex,
+    regex: FixedRegex,
 }
 
 impl<T: Tokenizer> Tokenizer for RemovePunctFilterWrapper<T> {
@@ -29,7 +33,7 @@ impl<T: Tokenizer> Tokenizer for RemovePunctFilterWrapper<T> {
 
     fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
         RemovePunctFilterStream {
-            regex: &self.regex,
+            regex: &mut self.regex,
             tail: self.inner.token_stream(text),
         }
     }
