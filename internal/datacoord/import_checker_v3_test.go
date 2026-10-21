@@ -22,6 +22,7 @@ import (
 	"path"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -349,7 +350,7 @@ func TestCreateReshardTaskRejectsInvalidFragmentSize(t *testing.T) {
 		err = createTask(newImportV3JobContext(checker, job), 10, []reshardSource{{file: &internalpb.ImportFile{Id: 1}, size: 1}})
 		require.Error(t, err, "value=%q", invalid)
 		require.Contains(t, err.Error(), "fragmentSizeInMB")
-		require.True(t, importcommon.IsTerminalImportV3Err(err), "value=%q", invalid)
+		require.True(t, errors.Is(err, merr.ErrImportSysFailed), "value=%q", invalid)
 	}
 }
 
@@ -543,7 +544,7 @@ func TestBuildImportV3TaskPlanDerivesExecutionInput(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestImportCheckerV3PlanningQuotaFailsJob pins V2 parity for disk-quota
+// TestImportCheckerV3PlanningQuotaFailsJob pins the disk-quota
 // exhaustion during Planning, driving the production checkPlanningJob ->
 // planImportV3Job -> CheckImportV3DiskQuota path end to end: the job fails immediately
 // with the quota reason instead of retrying silently every 2s tick with a
@@ -810,13 +811,13 @@ func TestGroupSourcesBFDInvariants(t *testing.T) {
 // exhaustion: the terminal codes fail the job immediately, while retriable
 // errors (service not ready, a bare timeout) are left for the next tick.
 func TestIsTerminalImportV3JobErr(t *testing.T) {
-	require.True(t, isTerminalImportV3JobErr(merr.WrapErrDataIntegrityMsg("bad data")))
-	require.True(t, isTerminalImportV3JobErr(merr.WrapErrImportSysFailedMsg("system failure")))
-	require.True(t, isTerminalImportV3JobErr(merr.WrapErrImportFailedMsg("input defect")))
-	require.True(t, isTerminalImportV3JobErr(merr.WrapErrServiceQuotaExceeded("disk quota exceeded")))
-	require.False(t, isTerminalImportV3JobErr(merr.WrapErrServiceNotReadyMsg("collection cache warming")))
-	require.False(t, isTerminalImportV3JobErr(context.DeadlineExceeded))
-	require.False(t, isTerminalImportV3JobErr(nil))
+	require.True(t, importcommon.IsTerminalImportV3Err(merr.WrapErrDataIntegrityMsg("bad data")))
+	require.True(t, importcommon.IsTerminalImportV3Err(merr.WrapErrImportSysFailedMsg("system failure")))
+	require.True(t, importcommon.IsTerminalImportV3Err(merr.WrapErrImportFailedMsg("input defect")))
+	require.True(t, importcommon.IsTerminalImportV3Err(merr.WrapErrServiceQuotaExceeded("disk quota exceeded")))
+	require.False(t, importcommon.IsTerminalImportV3Err(merr.WrapErrServiceNotReadyMsg("collection cache warming")))
+	require.False(t, importcommon.IsTerminalImportV3Err(context.DeadlineExceeded))
+	require.False(t, importcommon.IsTerminalImportV3Err(nil))
 }
 
 // TestImportCheckerV3CheckJobNonPlanningDispatch pins checkJob's shared error
