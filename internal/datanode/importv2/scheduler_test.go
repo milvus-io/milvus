@@ -1276,6 +1276,270 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 	s.NoError(err)
 }
 
+// fakeTask embeds ImportTask with a custom Execute function for scheduler tests.
+type fakeTask struct {
+	*ImportTask
+	manager   TaskManager
+	executeFn func() []*conc.Future[any]
+}
+
+func newFakeImportTask(taskID int64, manager TaskManager, executeFn func() []*conc.Future[any]) *fakeTask {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &fakeTask{
+		ImportTask: &ImportTask{
+			ImportTaskV2: &datapb.ImportTaskV2{
+				JobID:  taskID,
+				TaskID: taskID,
+				State:  datapb.ImportTaskStateV2_Pending,
+			},
+			ctx:     ctx,
+			cancel:  cancel,
+			req:     &datapb.ImportRequest{},
+			manager: manager,
+		},
+		manager:   manager,
+		executeFn: executeFn,
+	}
+}
+
+func (t *fakeTask) Execute() []*conc.Future[any] {
+	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	return t.executeFn()
+}
+
+// Clone returns an ImportTask for the manager's state updates.
+func (t *fakeTask) Clone() Task {
+	return t.ImportTask.Clone()
+}
+
+func (s *SchedulerSuite) TestScheduler_ScheduleWithoutBatchBlocking() {
+	release1 := make(chan struct{})
+	started1 := make(chan struct{})
+	var once1 sync.Once
+	task1 := newFakeImportTask(1001, s.manager, func() []*conc.Future[any] {
+		once1.Do(func() { close(started1) })
+		return []*conc.Future[any]{conc.Go(func() (any, error) {
+			<-release1
+			return nil, nil
+		})}
+	})
+	s.manager.Add(task1)
+
+	go s.scheduler.Start()
+	defer s.scheduler.Close()
+
+	// Wait for task1 to start.
+	select {
+	case <-started1:
+	case <-time.After(10 * time.Second):
+		s.FailNow("task1 was not scheduled")
+	}
+
+	// Schedule task2 while task1 is still running.
+	task2 := newFakeImportTask(1002, s.manager, func() []*conc.Future[any] {
+		return []*conc.Future[any]{conc.Go(func() (any, error) {
+			return nil, nil
+		})}
+	})
+	s.manager.Add(task2)
+
+	s.Eventually(func() bool {
+		return s.manager.Get(1002).GetState() == datapb.ImportTaskStateV2_Completed
+	}, 10*time.Second, 100*time.Millisecond)
+	s.Equal(datapb.ImportTaskStateV2_InProgress, s.manager.Get(1001).GetState())
+
+	close(release1)
+	s.Eventually(func() bool {
+		return s.manager.Get(1001).GetState() == datapb.ImportTaskStateV2_Completed
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func (s *SchedulerSuite) TestScheduler_ScheduleReturnsWhileExecuteBlocked() {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	executeExited := make(chan struct{})
+	returned := make(chan struct{})
+
+	task := newFakeImportTask(5001, s.manager, func() []*conc.Future[any] {
+		defer close(executeExited)
+		close(entered)
+		<-release
+		return nil
+	})
+	s.manager.Add(task)
+
+	// Release Execute even when an assertion fails, and let both calls exit.
+	defer func() {
+		close(release)
+		select {
+		case <-executeExited:
+		case <-time.After(5 * time.Second):
+			s.Fail("Execute did not exit after being released")
+		}
+		select {
+		case <-returned:
+		case <-time.After(5 * time.Second):
+			s.Fail("scheduleTasks did not exit after Execute was released")
+		}
+	}()
+
+	go func() {
+		s.scheduler.scheduleTasks()
+		close(returned)
+	}()
+
+	// Confirm Execute is blocked before checking whether scheduling can return.
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		s.FailNow("Execute was not called")
+	}
+
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		s.Fail("scheduleTasks must return while Execute is still blocked")
+	}
+}
+
+func (s *SchedulerSuite) TestScheduler_CollectCompletedTasksWhileExecuteBlocked() {
+	scheduler := s.scheduler
+	manager := s.manager
+	releaseA := make(chan struct{})
+	releaseB := make(chan struct{})
+	enteredB := make(chan struct{})
+	stopped := make(chan struct{})
+	var releaseAOnce sync.Once
+
+	futureA := conc.Go(func() (any, error) {
+		<-releaseA
+		return nil, nil
+	})
+	taskA := newFakeImportTask(6001, manager, func() []*conc.Future[any] {
+		return []*conc.Future[any]{futureA}
+	})
+	taskB := newFakeImportTask(6002, manager, func() []*conc.Future[any] {
+		close(enteredB)
+		<-releaseB
+		return nil
+	})
+	manager.Add(taskA)
+	manager.Add(taskB)
+
+	defer func() {
+		releaseAOnce.Do(func() { close(releaseA) })
+		close(releaseB)
+		scheduler.Close()
+		select {
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			s.Fail("scheduler did not stop after Execute was released")
+		}
+		// Close stops the ticker loop; also wait for asynchronous submission.
+		scheduler.submitMu.Lock()
+		defer scheduler.submitMu.Unlock()
+		_, _ = futureA.Await()
+	}()
+
+	go func() {
+		scheduler.Start()
+		close(stopped)
+	}()
+
+	select {
+	case <-enteredB:
+	case <-time.After(5 * time.Second):
+		s.FailNow("task B did not enter Execute")
+	}
+	s.Equal(datapb.ImportTaskStateV2_InProgress, manager.Get(6001).GetState())
+
+	// A finishes only after B is blocked, so collection must happen independently
+	// of the submission goroutine, which cannot proceed until cleanup releases B.
+	releaseAOnce.Do(func() { close(releaseA) })
+	s.Require().Eventually(func() bool {
+		return manager.Get(6001).GetState() == datapb.ImportTaskStateV2_Completed
+	}, 5*time.Second, 10*time.Millisecond, "task A was not collected while task B was blocked")
+	s.Equal(datapb.ImportTaskStateV2_InProgress, manager.Get(6002).GetState())
+}
+
+func (s *SchedulerSuite) TestScheduler_CollectCompletedTasks() {
+	doneTask := newFakeImportTask(2001, s.manager, nil)
+	blockedTask := newFakeImportTask(2002, s.manager, nil)
+	s.manager.Add(doneTask)
+	s.manager.Add(blockedTask)
+
+	release := make(chan struct{})
+	defer close(release)
+	doneFuture := conc.Go(func() (any, error) { return nil, nil })
+	blockedFuture := conc.Go(func() (any, error) {
+		<-release
+		return nil, nil
+	})
+	s.scheduler.futures[2001] = []*conc.Future[any]{doneFuture}
+	s.scheduler.futures[2002] = []*conc.Future[any]{blockedFuture}
+
+	s.Eventually(func() bool { return doneFuture.Done() }, 5*time.Second, 10*time.Millisecond)
+
+	s.scheduler.collectCompletedTasks()
+
+	_, ok := s.scheduler.futures[2001]
+	s.False(ok)
+	_, ok = s.scheduler.futures[2002]
+	s.True(ok)
+	s.Equal(datapb.ImportTaskStateV2_Completed, s.manager.Get(2001).GetState())
+	s.Equal(datapb.ImportTaskStateV2_Pending, s.manager.Get(2002).GetState())
+}
+
+func (s *SchedulerSuite) TestScheduler_CollectDropsFailedAndRemovedTasks() {
+	failedTask := newFakeImportTask(3001, s.manager, nil)
+	removedTask := newFakeImportTask(3002, s.manager, nil)
+	s.manager.Add(failedTask)
+	s.manager.Add(removedTask)
+
+	// Both tasks still have an unfinished file future.
+	release := make(chan struct{})
+	defer close(release)
+	blocked := func() *conc.Future[any] {
+		return conc.Go(func() (any, error) {
+			<-release
+			return nil, nil
+		})
+	}
+	s.scheduler.futures[3001] = []*conc.Future[any]{blocked()}
+	s.scheduler.futures[3002] = []*conc.Future[any]{blocked()}
+
+	// Mark one task Failed and remove the other.
+	s.manager.Update(3001, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason("mock failure"))
+	s.manager.Remove(3002)
+
+	s.scheduler.collectCompletedTasks()
+
+	s.Empty(s.scheduler.futures)
+	s.Equal(datapb.ImportTaskStateV2_Failed, s.manager.Get(3001).GetState())
+	s.Nil(s.manager.Get(3002))
+}
+
+func (s *SchedulerSuite) TestScheduler_FailedTaskWithNoFuturesStaysFailed() {
+	// Simulate validation failure with no returned futures.
+	task := newFakeImportTask(3003, s.manager, nil)
+	task.executeFn = func() []*conc.Future[any] {
+		s.manager.Update(3003, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason("validation failed"))
+		return nil
+	}
+	s.manager.Add(task)
+
+	s.scheduler.scheduleTasks()
+
+	// Wait for submission before collecting the result, as the ticker does.
+	s.scheduler.submitMu.Lock()
+	defer s.scheduler.submitMu.Unlock()
+	s.scheduler.collectCompletedTasks()
+
+	s.Empty(s.scheduler.futures)
+	s.Equal(datapb.ImportTaskStateV2_Failed, s.manager.Get(3003).GetState())
+	s.Equal("validation failed", s.manager.Get(3003).GetReason())
+}
+
 func TestScheduler(t *testing.T) {
 	suite.Run(t, new(SchedulerSuite))
 }
