@@ -86,9 +86,6 @@ func TestLiveTransformRPC(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("live stream did not reconnect")
 	}
-	event = recvStreamEvent(t, handler.events)
-	require.NotNil(t, event.SyncUp, "accepted Delete must not be replayed")
-	require.GreaterOrEqual(t, event.SyncUp.TimeTick, cursor)
 	proxy, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer proxy.Close()
@@ -98,6 +95,8 @@ func TestLiveTransformRPC(t *testing.T) {
 	for {
 		event = recvStreamEvent(t, handler.events)
 		if event.Entry == nil {
+			require.Greater(t, event.SyncUp.TimeTick, cursor)
+			cursor = event.SyncUp.TimeTick
 			continue
 		}
 		require.Equal(t, result.GetTimestamp(), event.Entry.GetTimeTick())

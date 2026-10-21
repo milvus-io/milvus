@@ -383,6 +383,12 @@ cursor and optional end timestamp. Owner loss after creation is handled by the
 existing resumable layer; its next factory call validates the owner again.
 The handshake does not change logical subscription lifetime or accepted cursors.
 
+The logical subscription filters events before Handle: entries at or below its
+exclusive cursor and SyncUp below that cursor are discarded. SyncUp at an already
+delivered SyncUp watermark is also discarded across physical attempts. Entry(T)
+does not suppress the first SyncUp(T), including bounded completion; the first
+SyncUp at the initial cursor (including zero) is still delivered. Each logical
+subscription owns its own filtering state.
 The resumable layer checkpoints Entries/SyncUp after Handle returns. On any
 underlying failure it closes that attempt and resubscribes from those cursors,
 aligning with WAL Consumer. Explicit Close ends the logical lifetime; canceling
@@ -429,8 +435,19 @@ in force. Remote subscription progress alone is not a retention guarantee.
 A closing physical stream reports a typed shutdown so new subscriptions can
 reacquire an owner. SubscriptionError responses end the physical attempt, just
 like an RPC failure; errors are never delivered through Handle. The resume loop
-closes failed attempts outside receive callbacks. Reconnect backoff resets after
-delivered Entry/SyncUp progress, not merely after opening a gRPC stream.
+closes failed attempts outside receive callbacks. Reconnect backoff resets only
+after an attempt remains available for at least ten seconds after its initial
+subscriptions are created. Delivery by a healthy sibling, including repeated
+SyncUp, does not reset the backoff of a repeatedly failing shared stream. New
+subscriptions wait for an ongoing failure backoff; explicit Close cancels it.
+The client acquires or resumes a physical stream only while logical subscriptions
+exist. Closing the last subscription keeps an established stream available for
+reuse for one minute; the background resume loop then retires it and sleeps
+until a new subscription arrives. Local and remote streams use this same policy.
+An acquisition still waiting for an owner or creation ACK is canceled as soon as
+its final subscriber leaves. A subscription waiting for data is active and is
+never retired just because no events arrive. Explicit stream Close ends the
+logical lifetime and releases the current attempt immediately.
 The server's execution loop owns sends and handles their failures. Summary
 workers deliver data through a cancellable channel, and read failures wake the
 execution loop through the Summary stream's Done/Error, even with no incoming

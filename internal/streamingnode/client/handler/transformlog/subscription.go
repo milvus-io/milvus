@@ -89,7 +89,8 @@ func (s *eventSubscription) finish(err error) {
 		s.markReady(readyErr)
 		s.handler.Close()
 		close(s.done)
-		s.stream.onSubscriptionFinished(s.subscriptionID)
+		// The stream owner controls the RPC lifetime, including idle periods.
+		s.stream.removeSubscription(s.subscriptionID)
 	})
 }
 

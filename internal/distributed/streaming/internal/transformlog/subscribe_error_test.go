@@ -43,6 +43,8 @@ func TestResumableStreamStopsWhenClientCloses(t *testing.T) {
 	stream := NewResumableStream(t.Context(), "p", func(context.Context, string) (wal.TransformLogStream, error) {
 		return nil, handler.ErrClientClosed
 	})
+	_, err := stream.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: "v", Handler: newRecordingHandler()})
+	require.ErrorIs(t, err, handler.ErrClientClosed)
 	select {
 	case <-stream.Done():
 	case <-time.After(time.Second):

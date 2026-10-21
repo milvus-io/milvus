@@ -112,8 +112,7 @@ func TestTransformRPCResumesAcceptedEntryAndSyncUp(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("owner cancellation did not reconnect")
 	}
-	// No old Delete is redelivered after the accepted empty interval.
-	require.EqualValues(t, 20, recvStreamEvent(t, h.events).SyncUp.TimeTick)
+	// Neither the old Delete nor the equal-tick SyncUp is redelivered.
 	observeDelete(manager, 21)
 	require.EqualValues(t, 21, recvStreamEvent(t, h.events).Entry.GetTimeTick())
 	require.EqualValues(t, 21, recvStreamEvent(t, h.events).SyncUp.TimeTick)
@@ -283,12 +282,51 @@ func TestTransformReadFailureResumesAllSubscriptions(t *testing.T) {
 			failNext.Store(true)
 			manager.ObserveQueryBarrier("p_1v0", 21)
 			require.EqualValues(t, 21, recvStreamEvent(t, a.events).SyncUp.TimeTick)
-			require.EqualValues(t, 30, recvStreamEvent(t, b.events).SyncUp.TimeTick)
+			// A later frontier proves B resumed without redelivering SyncUp(30).
+			manager.ObserveQueryBarrier("p_2v0", 31)
+			require.EqualValues(t, 31, recvStreamEvent(t, b.events).SyncUp.TimeTick)
 			require.EqualValues(t, 2, attempts.Load())
 			require.Zero(t, a.closed.Load())
 			require.Zero(t, b.closed.Load())
 			require.NoError(t, stream.Close())
 			require.Eventually(t, func() bool { return a.closed.Load() == 1 && b.closed.Load() == 1 }, time.Second, time.Millisecond)
 		})
+	}
+}
+
+// Closing the final subscription must leave the physical RPC reusable until
+// the logical owner's idle retirement or explicit Close.
+func TestTransformRPCReusesStreamAfterLastSubscription(t *testing.T) {
+	client, _, acquired := summaryRPC(t)
+	var attempts atomic.Int64
+	stream := resumable.NewResumableStream(t.Context(), "p", func(ctx context.Context, _ string) (wal.TransformLogStream, error) {
+		return remote.CreateEventStream(ctx, rpcOptions(attempts.Add(1)), client)
+	})
+	defer stream.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	subscribe := func() wal.TransformLogSubscription {
+		h := newRecordingHandler()
+		sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", StartAfterTimeTick: 20, Handler: h})
+		require.NoError(t, err)
+		require.EqualValues(t, 20, recvStreamEvent(t, h.events).SyncUp.TimeTick)
+		return sub
+	}
+	first := subscribe()
+	owner := <-acquired
+	require.NoError(t, first.Close())
+	select {
+	case <-owner.Done():
+		t.Fatal("last subscription close must not close the RPC owner")
+	case <-time.After(200 * time.Millisecond):
+	}
+	second := subscribe()
+	require.EqualValues(t, 1, attempts.Load(), "the next subscription should reuse the RPC")
+	require.NoError(t, second.Close())
+	require.NoError(t, stream.Close())
+	select {
+	case <-owner.Done():
+	case <-ctx.Done():
+		t.Fatal("logical Close did not release the server owner")
 	}
 }

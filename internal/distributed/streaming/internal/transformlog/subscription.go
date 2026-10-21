@@ -123,6 +123,9 @@ type checkpointEventHandler struct {
 	closed bool
 	sub    *resumableSubscription
 	inner  wal.TransformLogEventHandler
+	// Whether SyncUp has been delivered at the current exclusive cursor.
+	// A newer Entry clears this so Entry(T) still permits the first SyncUp(T).
+	hasSyncUp bool
 }
 
 func (h *checkpointEventHandler) Handle(event wal.TransformLogStreamEvent) {
@@ -131,17 +134,26 @@ func (h *checkpointEventHandler) Handle(event wal.TransformLogStreamEvent) {
 	if h.closed {
 		return
 	}
+	// The exclusive cursor survives physical attempts. Reject stale entries and
+	// regressing watermarks before handing them to the caller.
+	after := h.sub.option().StartAfterTimeTick
+	if event.Entry != nil && event.Entry.GetTimeTick() <= after {
+		return
+	}
+	if event.SyncUp != nil && (event.SyncUp.TimeTick < after ||
+		(h.hasSyncUp && event.SyncUp.TimeTick == after)) {
+		return
+	}
 	event.SubscriptionID = h.sub.ID()
 	event.VChannel = h.sub.VChannel()
 	h.inner.Handle(event)
 	if event.Entry != nil {
 		h.sub.advance(event.Entry.GetTimeTick())
+		h.hasSyncUp = false
 	}
 	if event.SyncUp != nil {
 		h.sub.advance(event.SyncUp.TimeTick)
-	}
-	if event.Entry != nil || event.SyncUp != nil {
-		h.sub.stream.accepted.Store(true)
+		h.hasSyncUp = true
 	}
 }
 

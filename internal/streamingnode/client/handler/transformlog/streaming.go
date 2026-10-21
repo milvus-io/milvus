@@ -226,26 +226,6 @@ func (s *EventStream) removeSubscription(subscriptionID int64) {
 	delete(s.subscriptions, subscriptionID)
 }
 
-func (s *EventStream) onSubscriptionFinished(subscriptionID int64) {
-	shouldClose := false
-	s.mu.Lock()
-	delete(s.subscriptions, subscriptionID)
-	if len(s.subscriptions) == 0 {
-		select {
-		case <-s.done:
-		default:
-			s.closing = true
-			shouldClose = true
-		}
-	}
-	s.mu.Unlock()
-	if shouldClose {
-		go func() {
-			_ = s.Close()
-		}()
-	}
-}
-
 func (s *EventStream) sendCloseSubscription(subscriptionID int64) error {
 	return s.send(&streamingpb.TransformRequest{
 		Request: &streamingpb.TransformRequest_CloseSubscription{

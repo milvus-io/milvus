@@ -2,7 +2,7 @@ package transformlog
 
 import (
 	"context"
-	"sync/atomic"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 func TestResumableStreamRetriesAllSubscribeErrors(t *testing.T) {
@@ -87,34 +88,124 @@ func TestResumableStreamClosesFailedConnectionAttempt(t *testing.T) {
 	}
 }
 
-func TestResumableStreamResetsBackoffAfterAcceptedProgress(t *testing.T) {
-	var resets atomic.Int32
-	var original func(*backoff.ExponentialBackOff)
-	patch := mockey.Mock((*backoff.ExponentialBackOff).Reset).Origin(&original).To(func(b *backoff.ExponentialBackOff) {
-		resets.Add(1)
-		original(b)
+// Keep retry waits under test control while exercising the real resume loop,
+// per-subscription checkpoints and event delivery.
+func TestResumableStreamBackoffSurvivesSiblingProgress(t *testing.T) {
+	for _, advancing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("advancing=%t", advancing), func(t *testing.T) {
+			b := backoff.NewExponentialBackOff()
+			b.RandomizationFactor = 0
+			backoffPatch := mockey.Mock(backoff.NewExponentialBackOff).Return(b).Build()
+			defer backoffPatch.UnPatch()
+			delays := make(chan time.Duration, 1)
+			retry := make(chan struct{})
+			waitPatch := mockey.Mock((*resumableStream).waitNextRetry).To(func(s *resumableStream, delay time.Duration) error {
+				delays <- delay
+				select {
+				case <-retry:
+					return nil
+				case <-s.ctx.Done():
+					return s.ctx.Err()
+				}
+			}).Build()
+			defer waitPatch.UnPatch()
+			owners := make(chan *fakeTransformLogStream, 1)
+			stream := NewResumableStream(t.Context(), "p", func(context.Context, string) (wal.TransformLogStream, error) {
+				owner := newFakeTransformLogStream()
+				owners <- owner
+				return owner, nil
+			})
+			defer stream.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			a, healthy := newRecordingHandler(), newRecordingHandler()
+			_, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "a", StartAfterTimeTick: 10, Handler: a})
+			require.NoError(t, err)
+			_, err = stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "b", StartAfterTimeTick: 30, Handler: healthy})
+			require.NoError(t, err)
+			tick := uint64(30)
+			for _, expected := range []time.Duration{100 * time.Millisecond, 150 * time.Millisecond, 225 * time.Millisecond} {
+				owner := receiveSubscribeClose(t, owners)
+				require.Eventually(t, func() bool { return owner.subscriptionID("a") != 0 && owner.subscriptionID("b") != 0 }, time.Second, time.Millisecond)
+				require.EqualValues(t, 10, owner.startAfter("a"))
+				require.Equal(t, tick, owner.startAfter("b"))
+				if advancing {
+					tick++
+					owner.emit(wal.TransformLogStreamEvent{SubscriptionID: owner.subscriptionID("b"), Entry: &streamingpb.TransformLogEntry{TimeTick: tick}})
+					require.Equal(t, tick, recvStreamEvent(t, healthy.events).Entry.GetTimeTick())
+				}
+				owner.emit(wal.TransformLogStreamEvent{SubscriptionID: owner.subscriptionID("b"), SyncUp: &wal.TransformLogSyncUp{TimeTick: tick}})
+				if advancing || expected == 100*time.Millisecond {
+					require.Equal(t, tick, recvStreamEvent(t, healthy.events).SyncUp.TimeTick)
+				} else {
+					require.Empty(t, healthy.events, "duplicate SyncUp must be filtered")
+				}
+				owner.finish(walsummary.ErrStoreCorrupted)
+				require.Equal(t, expected, receiveSubscribeClose(t, delays))
+				if expected != 225*time.Millisecond {
+					retry <- struct{}{}
+				}
+			}
+			require.Empty(t, a.events)
+			require.NoError(t, stream.Close(), "Close must interrupt failure backoff")
+		})
+	}
+}
+
+func TestResumableStreamResetsBackoffAfterStableAttempt(t *testing.T) {
+	b := backoff.NewExponentialBackOff()
+	b.RandomizationFactor = 0
+	backoffPatch := mockey.Mock(backoff.NewExponentialBackOff).Return(b).Build()
+	defer backoffPatch.UnPatch()
+	delays := make(chan time.Duration, 4)
+	waitPatch := mockey.Mock((*resumableStream).waitNextRetry).To(func(s *resumableStream, delay time.Duration) error {
+		delays <- delay
+		return s.ctx.Err()
 	}).Build()
-	defer patch.UnPatch()
-	owners := make(chan *walsummary.Stream, 4)
-	var attempts atomic.Int32
+	defer waitPatch.UnPatch()
+	owners := make(chan *fakeTransformLogStream, 1)
+	calls := 0
 	stream := NewResumableStream(t.Context(), "p", func(context.Context, string) (wal.TransformLogStream, error) {
-		if attempts.Add(1) <= 2 {
+		calls++
+		if calls <= 2 {
 			return nil, status.NewOnShutdownError("owner migrating")
 		}
-		owner := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
+		owner := newFakeTransformLogStream()
 		owners <- owner
 		return owner, nil
 	})
 	defer stream.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	handler := newRecordingHandler()
-	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v", Handler: handler})
+	_, err := stream.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: "v", Handler: newRecordingHandler()})
 	require.NoError(t, err)
-	defer sub.Close()
-	require.NotNil(t, recvStreamEvent(t, handler.events).SyncUp)
-	before := resets.Load()
-	require.NoError(t, (<-owners).Close())
-	require.NotNil(t, recvStreamEvent(t, handler.events).SyncUp)
-	require.Equal(t, before+1, resets.Load(), "successful delivery starts a fresh reconnect backoff")
+	require.Equal(t, 100*time.Millisecond, receiveSubscribeClose(t, delays))
+	require.Equal(t, 150*time.Millisecond, receiveSubscribeClose(t, delays))
+	first := receiveSubscribeClose(t, owners)
+	// A quiet subscription is healthy too. No handler event is needed.
+	time.Sleep(reconnectBackoffResetInterval + 100*time.Millisecond)
+	first.finish(walsummary.ErrStoreCorrupted)
+	require.Equal(t, 100*time.Millisecond, receiveSubscribeClose(t, delays))
+	receiveSubscribeClose(t, owners)
+	require.NoError(t, stream.Close())
+}
+
+func TestResumableStreamFailureBackoffIgnoresWake(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stream := &resumableStream{ctx: ctx, wake: make(chan struct{}, 1)}
+	stream.wakeResume() // A pending Subscribe must not skip failure backoff.
+	finished := make(chan error, 1)
+	go func() { finished <- stream.waitNextRetry(time.Hour) }()
+	select {
+	case err := <-finished:
+		t.Fatalf("subscription wake skipped backoff: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	require.ErrorIs(t, receiveSubscribeClose(t, finished), context.Canceled)
+
+	// Expiry still advances retries even when no new subscription arrives.
+	stream.ctx = t.Context()
+	started := time.Now()
+	require.NoError(t, stream.waitNextRetry(10*time.Millisecond))
+	require.GreaterOrEqual(t, time.Since(started), 10*time.Millisecond)
 }
