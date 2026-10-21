@@ -9,6 +9,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -206,6 +207,15 @@ func (rs *resumableSyncer) recvLoop(ctx context.Context, stream viewpb.ViewSyncS
 				return receivedResponse
 			}
 			continue
+		}
+		if !receivedResponse {
+			header, err := stream.Header()
+			protocol := header.Get(common.QueryViewSchemaProtocolHeader)
+			if err != nil || len(protocol) != 1 || protocol[0] != common.QueryViewSchemaProtocol {
+				mlog.Warn(ctx, "QueryView worker does not attest the schema protocol",
+					mlog.String("node", rs.node.String()), mlog.Strings("protocol", protocol), mlog.Err(err))
+				return false
+			}
 		}
 		receivedResponse = true
 
