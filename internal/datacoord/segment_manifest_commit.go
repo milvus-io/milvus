@@ -75,6 +75,10 @@ type ManifestMutation struct {
 // SegmentCatalogMutation contains the segment fields that become visible with
 // the manifest pointer. Each addition here is a reviewable catalog contract.
 type SegmentCatalogMutation struct {
+	// TextStats / JSONKeyStats install the supplied per-field stats (keyed by
+	// field ID) atomically with the manifest pointer. A nil entry value retires
+	// that field's stats instead, so a commit dropping a column can invalidate
+	// text-index / json-key stats built from the dropped data.
 	TextStats    map[int64]*datapb.TextIndexStats
 	JSONKeyStats map[int64]*datapb.JsonKeyStats
 	State        *commonpb.SegmentState
@@ -206,6 +210,10 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	var removalIndexIDs []int64
 	if segment != nil {
 		removalIndexIDs = m.resolveDroppedColumnIndexIDs(segment.GetCollectionID(), commit)
+		// A drop also leaves the segment's text/json-key stats entries pointing
+		// at the removed column's data: retract them atomically with the pointer
+		// so the next stats pass rebuilds from the replacement values.
+		commit.CatalogMutation.TextStats, commit.CatalogMutation.JSONKeyStats = clearedStatsForDroppedColumns(segment, commit, commit.CatalogMutation.TextStats, commit.CatalogMutation.JSONKeyStats)
 	}
 	commit.CatalogMutation.SegmentIndexes = m.retractReplacedColumnIndexRecords(commit, removalIndexIDs)
 
@@ -594,6 +602,61 @@ func (m *meta) resolveDroppedColumnIndexIDs(collectionID int64, commit SegmentMa
 	return out
 }
 
+// droppedColumnFieldIDs parses a commit's DropColumns (field IDs expressed as
+// strings) into int64 IDs. Non-decimal entries are skipped; they cannot name a
+// live field, so no stats entry can exist under them.
+func droppedColumnFieldIDs(columns []string) []int64 {
+	out := make([]int64, 0, len(columns))
+	for _, col := range columns {
+		fid, err := strconv.ParseInt(col, 10, 64)
+		if err != nil {
+			continue
+		}
+		out = append(out, fid)
+	}
+	return out
+}
+
+// clearedStatsForDroppedColumns returns text-index and json-key stats removals
+// (field ID -> nil, the SegmentCatalogMutation retire convention) for every
+// column the commit drops that currently has a stats entry in the segment.
+// milvus-storage's DropColumns leaves TextStatsLogs / JsonKeyStats untouched,
+// so without this a replace on a VARCHAR field with full-text enabled (or a
+// JSON field with key statistics) would keep serving text-match / JSON filters
+// from the OLD column values: needDoTextIndex / needDoJSONKeyIndex only check
+// entry existence and would never rebuild. Resolving here, under the manifest
+// lock, retires the stale entries atomically with the new manifest pointer so
+// the next stats pass rebuilds from the replaced data. Caller-supplied entries
+// are preserved (the caller's explicit value wins over a removal).
+func clearedStatsForDroppedColumns(segment *SegmentInfo, commit SegmentManifestCommit, textStats map[int64]*datapb.TextIndexStats, jsonKeyStats map[int64]*datapb.JsonKeyStats) (map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats) {
+	if commit.Mutation.Type != ManifestMutationCommitUpdates || commit.Mutation.Updates == nil {
+		return textStats, jsonKeyStats
+	}
+	dropped := droppedColumnFieldIDs(commit.Mutation.Updates.DropColumns)
+	if len(dropped) == 0 {
+		return textStats, jsonKeyStats
+	}
+	for _, fid := range dropped {
+		if segment.GetTextStatsLogs()[fid] != nil {
+			if textStats == nil {
+				textStats = make(map[int64]*datapb.TextIndexStats)
+			}
+			if _, ok := textStats[fid]; !ok {
+				textStats[fid] = nil
+			}
+		}
+		if segment.GetJsonKeyStats()[fid] != nil {
+			if jsonKeyStats == nil {
+				jsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+			}
+			if _, ok := jsonKeyStats[fid]; !ok {
+				jsonKeyStats[fid] = nil
+			}
+		}
+	}
+	return textStats, jsonKeyStats
+}
+
 // indexIDsByDroppedColumns returns the set of index IDs whose field the commit
 // drops, resolved from the CURRENT index definitions. Called outside segMu (an
 // index definition may be created during the commit window; taking fieldIndexLock
@@ -897,19 +960,30 @@ func validateExpectedManifestUsage(commit SegmentManifestCommit) error {
 // onto a segment clone. It is shared by the single-segment applySegmentCatalogMutation
 // and the batch publish operator so both make the exact same field-level changes.
 func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalogMutation) {
-	if len(mutation.TextStats) > 0 {
-		if segment.TextStatsLogs == nil {
-			segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
-		}
+	// A nil entry value retires the field's stats instead of installing one,
+	// so a commit that drops a column can invalidate its text/json-key stats
+	// atomically with the manifest pointer (see CommitSegmentManifest).
+	if mutation.TextStats != nil {
 		for fieldID, stats := range mutation.TextStats {
+			if stats == nil {
+				delete(segment.TextStatsLogs, fieldID)
+				continue
+			}
+			if segment.TextStatsLogs == nil {
+				segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
+			}
 			segment.TextStatsLogs[fieldID] = proto.Clone(stats).(*datapb.TextIndexStats)
 		}
 	}
-	if len(mutation.JSONKeyStats) > 0 {
-		if segment.JsonKeyStats == nil {
-			segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
-		}
+	if mutation.JSONKeyStats != nil {
 		for fieldID, stats := range mutation.JSONKeyStats {
+			if stats == nil {
+				delete(segment.JsonKeyStats, fieldID)
+				continue
+			}
+			if segment.JsonKeyStats == nil {
+				segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+			}
 			segment.JsonKeyStats[fieldID] = proto.Clone(stats).(*datapb.JsonKeyStats)
 		}
 	}

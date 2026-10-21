@@ -326,6 +326,59 @@ func TestCommitSegmentManifestRebasesCatalogMutationAfterManifestIO(t *testing.T
 	require.True(t, updated.GetIsImporting())
 }
 
+// A backfill replace drops a column whose text/json-key stats were built from
+// the OLD values; milvus-storage's DropColumns leaves the segment's stats
+// entries alone, so the commit must retire them atomically with the manifest
+// pointer or needDoTextIndex/needDoJSONKeyIndex would never rebuild and
+// text-match / JSON filters would keep answering from data that no longer
+// exists.
+func TestCommitSegmentManifestClearsDroppedColumnStats(t *testing.T) {
+	const segmentID = 300
+	basePath := "/tmp/milvus/insert_log/1/10/300"
+	oldManifest := packed.MarshalManifestPath(basePath, 1)
+	newManifest := packed.MarshalManifestPath(basePath, 2)
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {FieldID: 100, BuildID: 11, Files: []string{"text_100.parquet"}},
+			101: {FieldID: 101, BuildID: 21, Files: []string{"text_101.parquet"}},
+		},
+		JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+			100: {FieldID: 100, BuildID: 12, Files: []string{"json_100.parquet"}},
+		},
+	})))
+
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(context.Context, *packed.ManifestIOContext, string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+			return mockManifestUpdateResult(newManifest, nil), nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:     segmentID,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{DropColumns: []string{"100"}},
+		},
+	}))
+
+	updated := meta.GetSegment(context.Background(), segmentID)
+	require.Equal(t, newManifest, updated.GetManifestPath())
+	// The stale entries for the dropped field are gone so the next stats pass
+	// rebuilds them from the replacement column data.
+	require.Nil(t, updated.GetTextStatsLogs()[100])
+	require.Nil(t, updated.GetJsonKeyStats()[100])
+	// Entries for fields the commit does NOT drop are preserved.
+	require.Equal(t, int64(21), updated.GetTextStatsLogs()[101].GetBuildID())
+}
+
 // A CAS-free commit (the stats path) whose manifest pointer is advanced mid-I/O by
 // an out-of-lock writer (the DDL/backfill ack adopting an externally minted version)
 // must fail stale instead of publishing: the loon transaction does not merge the

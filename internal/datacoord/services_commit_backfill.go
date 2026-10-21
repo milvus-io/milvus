@@ -26,9 +26,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -59,21 +61,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		log.Warn(ctx, "CommitBackfillResult failed to load result JSON", mlog.Err(err))
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
-
-	units, statuses := s.classifyBackfillSegments(ctx, result)
 	total := int32(len(result.Segments))
-
-	// Nothing passed pre-validation: surface as top-level failure so the caller
-	// knows no commit happened. segment_statuses still carry per-segment
-	// diagnostics.
-	if len(units) == 0 {
-		return &datapb.CommitBackfillResultResponse{
-			Status:          merr.Status(merr.WrapErrParameterInvalidMsg("no backfill segments passed pre-validation")),
-			TotalSegments:   total,
-			SegmentStatuses: statuses,
-			FailedSegments:  int32(len(statuses)),
-		}, nil
-	}
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, result.CollectionID)
 	if err != nil {
@@ -96,6 +84,25 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			TotalSegments:   total,
 			FailedSegments:  int32(len(result.Segments)),
 			SegmentStatuses: allSegmentsFailed(result, err.Error()),
+		}, nil
+	}
+
+	// Classification validates each segment's op columns / column-group field
+	// IDs against the live schema (see checkBackfillOpColumns), so a producer
+	// writing a field name instead of an ID, or targeting the primary key, a
+	// system field, or a function output, is rejected per segment instead of
+	// committing a phantom column group.
+	units, statuses := s.classifyBackfillSegments(ctx, result, coll)
+
+	// Nothing passed pre-validation: surface as top-level failure so the caller
+	// knows no commit happened. segment_statuses still carry per-segment
+	// diagnostics.
+	if len(units) == 0 {
+		return &datapb.CommitBackfillResultResponse{
+			Status:          merr.Status(merr.WrapErrParameterInvalidMsg("no backfill segments passed pre-validation")),
+			TotalSegments:   total,
+			SegmentStatuses: statuses,
+			FailedSegments:  int32(len(statuses)),
 		}, nil
 	}
 
@@ -397,9 +404,12 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 // current pointer; V3 legacy entries (a pre-baked version) become a Noop
 // commit pinned by ExpectedManifest to the result's sourceVersion. Returns the
 // units plus per-segment failure statuses recorded during pre-validation (so
-// callers can surface them even when a segment never reached a commit).
-func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult) ([]backfillCommitUnit, []*datapb.CommitBackfillResultSegmentStatus) {
+// callers can surface them even when a segment never reached a commit). coll is
+// the live collection description: op columns and V2 column-group field IDs
+// are validated against its schema (nil schema disables the check).
+func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult, coll *milvuspb.DescribeCollectionResponse) ([]backfillCommitUnit, []*datapb.CommitBackfillResultSegmentStatus) {
 	bucket := bucketFromChunkManager(s.meta.chunkManager)
+	validFields := backfillOpColumnFieldIDs(coll.GetSchema())
 
 	// Deterministic order so commit units & diagnostic output are stable.
 	segIDs := make([]string, 0, len(result.Segments))
@@ -427,7 +437,7 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 			// have not started yet and record them as failed below.
 			res := classifySegmentResult{segIDStr: segIDStr}
 			if gCtx.Err() == nil {
-				res = s.classifyOneBackfillSegment(gCtx, bucket, result, segIDStr)
+				res = s.classifyOneBackfillSegment(gCtx, bucket, result, segIDStr, validFields)
 				res.segIDStr = segIDStr
 			} else {
 				res.err = gCtx.Err()
@@ -497,7 +507,9 @@ func inferKindFromSegIDStr(result *BackfillResult, segIDStr string) string {
 // classifyOneBackfillSegment validates one segment entry and constructs its
 // commit unit (or a pre-validation failure status). Pure: reads only, no shared
 // state mutated, so it is safe to run concurrently under bounded concurrency.
-func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, result *BackfillResult, segIDStr string) classifySegmentResult {
+// validFields is the schema's backfillable field-ID set; nil disables the
+// schema-column check (see checkBackfillOpColumns).
+func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, result *BackfillResult, segIDStr string, validFields map[int64]struct{}) classifySegmentResult {
 	entry := result.Segments[segIDStr]
 	segID, perr := strconv.ParseInt(segIDStr, 10, 64)
 	if perr != nil {
@@ -544,6 +556,11 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 				Reason: "segment storage version is not V2",
 			}}
 		}
+		if err := checkBackfillV2GroupFields(validFields, &entry); err != nil {
+			return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v2", Reason: err.Error(),
+			}}
+		}
 		groups, err := buildV2Groups(bucket, &entry)
 		if err != nil {
 			return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
@@ -585,6 +602,17 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 	// lock (rebase semantics), so concurrent stats/index commits are
 	// preserved rather than rejected.
 	if entry.IsV3Delta() {
+		// Schema-column pre-check: a producer writing a field NAME instead of an
+		// ID (columns are keyed by ID) would make DropColumns a no-op and land a
+		// phantom column group, and a replace on the PK / a system field / a
+		// function output must not go through. Reject before the manifest read.
+		for i := range entry.Ops {
+			if err := checkBackfillOpColumns(validFields, entry.Ops[i].Columns); err != nil {
+				return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+					SegmentId: segID, Ok: false, Kind: "v3", Reason: err.Error(),
+				}}
+			}
+		}
 		// Already-applied replay detection: an op whose target column already
 		// exists in the manifest with exactly the op's descriptors is a
 		// re-submission of a committed result and must return success instead of
@@ -830,6 +858,69 @@ func inferKind(entry *BackfillSegment) string {
 		return "v2"
 	}
 	return "v3"
+}
+
+// backfillOpColumnFieldIDs returns the set of field IDs a backfill result may
+// target: user fields that are not the primary key, not a system field (row ID
+// / timestamp) and not a function output. A nil schema (a describe response
+// without schema) yields nil, which disables the column check — production
+// describes always carry the schema.
+func backfillOpColumnFieldIDs(schema *schemapb.CollectionSchema) map[int64]struct{} {
+	if schema == nil {
+		return nil
+	}
+	fields := make(map[int64]struct{}, len(schema.GetFields()))
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() || field.GetIsFunctionOutput() || common.IsSystemField(field.GetFieldID()) {
+			continue
+		}
+		fields[field.GetFieldID()] = struct{}{}
+	}
+	return fields
+}
+
+// checkBackfillOpColumns validates the field IDs a V3 delta op targets against
+// the schema's backfillable set. Columns are keyed by field ID, but nothing in
+// the result contract stops a producer from writing a field NAME instead: the
+// drop becomes a no-op and a phantom column group lands in the manifest while
+// the real field stays untouched, and the segment is reported committed. A
+// replace on the primary key, a system field, or a function output is the same
+// class of corruption. This is an Input error: the result violates the external
+// contract and retrying cannot fix it.
+func checkBackfillOpColumns(validFields map[int64]struct{}, columns []string) error {
+	if validFields == nil {
+		return nil
+	}
+	for _, col := range columns {
+		fid, err := strconv.ParseInt(col, 10, 64)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("backfill manifest op column %q is not a field ID", col)
+		}
+		if _, ok := validFields[fid]; !ok {
+			return merr.WrapErrParameterInvalidMsg(
+				"backfill manifest op column %d is not a backfillable field: must be a user field that is not the primary key, a system field, or a function output", fid)
+		}
+	}
+	return nil
+}
+
+// checkBackfillV2GroupFields validates the field IDs a V2 column group carries,
+// with the same contract as checkBackfillOpColumns. Field IDs are the only form
+// V2 can express (the JSON field is an integer array), but a valid integer that
+// is not a live user field would still register a phantom column group.
+func checkBackfillV2GroupFields(validFields map[int64]struct{}, entry *BackfillSegment) error {
+	if validFields == nil {
+		return nil
+	}
+	for i := range entry.ColumnGroups {
+		for _, fid := range entry.ColumnGroups[i].FieldIDs {
+			if _, ok := validFields[fid]; !ok {
+				return merr.WrapErrParameterInvalidMsg(
+					"backfill V2 column group field %d is not a backfillable field: must be a user field that is not the primary key, a system field, or a function output", fid)
+			}
+		}
+	}
+	return nil
 }
 
 // checkBackfillSchemaVersion enforces the schema-version fence on a backfill
