@@ -510,7 +510,7 @@ func (s *ReadSuite) TestHybridSearch() {
 
 // TestHybridSearch_RejectsHighlighterAnyLeg exercises the client-side guard
 // that rejects hybrid search when any AnnRequest leg carries a highlighter.
-// The server-side convertHybridSearchToSearch (internal/proxy/search_util.go:1158)
+// The server-side convertHybridSearchToSearch (internal/proxy/search_util.go)
 // drops the per-leg Highlighter because SubSearchRequest has no such field.
 // The expected outcome is a client-side error before any wire call.
 func (s *ReadSuite) TestHybridSearch_RejectsHighlighterAnyLeg() {

@@ -188,14 +188,6 @@ func TestLexicalHighlighterValidate(t *testing.T) {
 			name: "negative num fragments",
 			hl:   NewLexicalHighlighter().WithNumFragments(-1),
 		},
-		{
-			name: "empty pre tag in list",
-			hl:   NewLexicalHighlighter().WithPreTags("", "ok"),
-		},
-		{
-			name: "empty post tag in list",
-			hl:   NewLexicalHighlighter().WithPostTags("ok", ""),
-		},
 	}
 
 	for _, tc := range cases {
@@ -222,6 +214,21 @@ func TestLexicalHighlighterValidCases(t *testing.T) {
 		{
 			name: "highlight search text disabled",
 			hl:   NewLexicalHighlighter().WithHighlightSearchText(false),
+		},
+		{
+			// The server rejects only an empty tag *list*; [""] is accepted and
+			// yields undecorated (plain-text) fragments.
+			name: "empty string tags",
+			hl: NewLexicalHighlighter().
+				WithHighlightSearchText(true).
+				WithPreTags("").
+				WithPostTags(""),
+		},
+		{
+			name: "empty tag mixed with non-empty tags",
+			hl: NewLexicalHighlighter().
+				WithPreTags("", "<em>").
+				WithPostTags("", "</em>"),
 		},
 		{
 			name: "full",
