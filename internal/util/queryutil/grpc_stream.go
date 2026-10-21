@@ -21,6 +21,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,7 +37,7 @@ type grpcReduceStream struct {
 
 	closeOnce sync.Once
 	closeErr  error
-	closed    bool
+	closed    atomic.Bool
 	finished  bool
 }
 
@@ -70,7 +71,7 @@ func (s *grpcReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	if s.finished {
 		return nil, io.EOF
 	}
-	if s.closed {
+	if s.closed.Load() {
 		return nil, io.ErrClosedPipe
 	}
 
@@ -96,7 +97,7 @@ func (s *grpcReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 
 func (s *grpcReduceStream) Close() error {
 	s.closeOnce.Do(func() {
-		s.closed = true
+		s.closed.Store(true)
 		s.closeErr = s.client.CloseSend()
 		s.cancel()
 	})

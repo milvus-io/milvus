@@ -19,6 +19,7 @@ package queryutil
 import (
 	"errors"
 	"io"
+	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -35,6 +36,7 @@ import (
 )
 
 // ReduceStream is the Query counterpart of the Search ReduceStream contract.
+// Recv calls must be serial; Close may run concurrently with Recv to cancel it.
 // The first Chunk carries HasMoreResult: whether matching rows exist beyond
 // this stream's current result, not whether more Chunks will arrive. It is
 // known before any rows are emitted and may be omitted from later Chunks.
@@ -159,6 +161,7 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 
 // OrderedReduceStream performs the bounded Query ordered merge.
 type OrderedReduceStream struct {
+	recvMu       sync.Mutex
 	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
 	childBuffers []orderedChildBuffer
 
@@ -234,6 +237,9 @@ func NewShardReduceStream(request *internalpb.RetrieveRequest, schema *schemapb.
 }
 
 func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+
 	if s.finished {
 		return nil, io.EOF
 	}
@@ -444,6 +450,7 @@ func buildRetrieveChunk(units []retrieveUnit) (*internalpb.RetrieveResults, erro
 
 // UnOrderedReduceStream merges Query Group By results without depending on child arrival order.
 type UnOrderedReduceStream struct {
+	recvMu       sync.Mutex
 	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
 	childBuffers []*internalpb.RetrieveResults
 	reducer      *agg.GroupAggReducer
@@ -480,6 +487,9 @@ func newUnOrderedReduceStream(
 }
 
 func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+
 	if s.finished {
 		return nil, io.EOF
 	}
@@ -605,18 +615,23 @@ func (s *UnOrderedReduceStream) attachMetadata(chunk *internalpb.RetrieveResults
 }
 
 func (s *UnOrderedReduceStream) fail(err error) error {
-	return errors.Join(err, s.Close())
+	return errors.Join(err, s.closeChildren())
 }
 
 func (s *UnOrderedReduceStream) Close() error {
+	s.childStreams.Cancel()
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+	return s.closeChildren()
+}
+
+// closeChildren runs with recvMu held, including on the Recv error path.
+func (s *UnOrderedReduceStream) closeChildren() error {
 	if s.closed {
 		return s.closeErr
 	}
 	s.closed = true
-	return s.closeChildren()
-}
-
-func (s *UnOrderedReduceStream) closeChildren() error {
+	s.closeErr = s.childStreams.Close()
 	for i := range s.childBuffers {
 		s.childBuffers[i] = nil
 	}
@@ -625,7 +640,6 @@ func (s *UnOrderedReduceStream) closeChildren() error {
 	}
 	s.reducer = nil
 	s.metadata = nil
-	s.closeErr = s.childStreams.Close()
 	return s.closeErr
 }
 
@@ -718,24 +732,28 @@ func mergeQueryCost(current, incoming *internalpb.CostAggregation) *internalpb.C
 }
 
 func (s *OrderedReduceStream) fail(err error) error {
-	return errors.Join(err, s.Close())
+	return errors.Join(err, s.closeChildren())
 }
 
 func (s *OrderedReduceStream) Close() error {
+	s.childStreams.Cancel()
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+	return s.closeChildren()
+}
+
+// closeChildren runs with recvMu held, including on the Recv error path.
+func (s *OrderedReduceStream) closeChildren() error {
 	if s.closed {
 		return s.closeErr
 	}
 	s.closed = true
-	return s.closeChildren()
-}
-
-func (s *OrderedReduceStream) closeChildren() error {
+	s.closeErr = s.childStreams.Close()
 	for i := range s.childBuffers {
 		s.childBuffers[i] = orderedChildBuffer{}
 	}
 	s.outputBuffer = nil
 	s.metadata = nil
-	s.closeErr = s.childStreams.Close()
 	return s.closeErr
 }
 
