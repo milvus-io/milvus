@@ -54,13 +54,13 @@ def pytest_addoption(parser):
         "--xgboost-proxy-sync",
         action="store_true",
         default=False,
-        help="run XGBoost L2 tests after verifying Proxy FileResource synchronization is enabled",
+        help="run L3 XGBoost L2-rerank tests after verifying Proxy FileResource synchronization is enabled",
     )
     parser.addoption(
         "--xgboost-proxy-uri",
         action="append",
         default=[],
-        help="direct Proxy Pod URI for the multi-Proxy XGBoost L2 case; repeat for each Proxy",
+        help="direct Proxy Pod URI for the L3 multi-Proxy XGBoost L2-rerank case; repeat for each Proxy",
     )
     parser.addoption("--database_name", action="store", default="default", help="name of database")
     parser.addoption("--partition_name", action="store", default="partition_name", help="name of partition")

@@ -1545,12 +1545,12 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             },
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "stage",
         [
-            pytest.param(FunctionChainStage.L1_RERANK, id="l1"),
-            pytest.param(FunctionChainStage.L2_RERANK, id="l2"),
+            pytest.param(FunctionChainStage.L1_RERANK, marks=pytest.mark.tags(CaseLabel.L1), id="l1"),
+            # Proxy FileResource synchronization requires a dedicated deployment.
+            pytest.param(FunctionChainStage.L2_RERANK, marks=pytest.mark.tags(CaseLabel.L3), id="l2"),
         ],
     )
     def test_milvus_client_xgboost_supports_l1_l2_rerank_stages(
@@ -4012,7 +4012,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
                 fixture["remote_path"],
             )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_milvus_client_xgboost_l2_matches_each_proxy(self, tmp_path, minio_host, minio_bucket, request):
         """target: independent Proxy L2 execution; method: direct Pod URIs and one shared model; expected: exact scores and recovery."""
         self.skip_global_role_cleanup = True
