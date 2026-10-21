@@ -333,7 +333,7 @@ func createMilvusTableManifest(
 	// its stale deletes. Version allocation still advances past existing files.
 	var handle C.LoonTransactionHandle
 	if err := HandleLoonFFIResult(C.loon_transaction_open(cBasePath, cProperties,
-		C.int64_t(ManifestEarliest), C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
+		C.int64_t(ManifestEarliest), C.int64_t(-1), C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)); err != nil {
 		return "", merr.WrapErrStorage(err, "begin milvus-table manifest")
 	}
@@ -376,7 +376,7 @@ func createMilvusTableManifest(
 		return "", err
 	}
 	var committedVersion C.int64_t
-	if err := HandleLoonFFIResult(C.loon_transaction_commit(handle, &committedVersion)); err != nil {
+	if err := HandleLoonFFIResult(C.loon_transaction_commit(handle, &committedVersion, nil)); err != nil {
 		return "", merr.WrapErrStorage(err, "commit milvus-table manifest")
 	}
 	return MarshalManifestPath(basePath, int64(committedVersion)), nil

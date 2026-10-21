@@ -76,6 +76,7 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
     auto begin = loon_transaction_open(base_path.c_str(),
                                        &properties,
                                        0,
+                                       -1,
                                        LOON_TRANSACTION_RESOLVE_OVERWRITE,
                                        10,
                                        &transaction);
