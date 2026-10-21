@@ -230,14 +230,7 @@ ReduceHelper::FillPrimaryKey() {
             milvus::ThreadPoolPriority::SEARCH_FANOUT);
         std::vector<std::future<void>> futures;
         futures.reserve(num_segments_);
-        for (auto& search_result : search_results_) {
-            auto future = pool.Submit([this, search_result] {
-                auto segment =
-                    static_cast<SegmentInterface*>(search_result->segment_);
-                segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
-            });
-            futures.emplace_back(std::move(future));
-        }
+        // Drain accepted tasks even if a later submission throws.
         auto futures_guard = folly::makeGuard([&futures]() {
             for (auto& f : futures) {
                 if (f.valid()) {
@@ -248,6 +241,14 @@ ReduceHelper::FillPrimaryKey() {
                 }
             }
         });
+        for (auto& search_result : search_results_) {
+            auto future = pool.Submit([this, search_result] {
+                auto segment =
+                    static_cast<SegmentInterface*>(search_result->segment_);
+                segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
+            });
+            futures.emplace_back(std::move(future));
+        }
         for (auto& future : futures) {
             future.get();
         }
@@ -480,6 +481,17 @@ ReduceHelper::RefineDistances() {
             milvus::ThreadPoolPriority::SEARCH_FANOUT);
         std::vector<std::future<void>> futures;
         futures.reserve(num_segments_);
+        // Drain accepted tasks even if a later submission throws.
+        auto futures_guard = folly::makeGuard([&futures]() {
+            for (auto& f : futures) {
+                if (f.valid()) {
+                    try {
+                        f.get();
+                    } catch (...) {
+                    }
+                }
+            }
+        });
         for (auto& search_result : search_results_) {
             if (!IsSearchResultRefineEnabled(search_result)) {
                 continue;
@@ -502,16 +514,6 @@ ReduceHelper::RefineDistances() {
             });
             futures.emplace_back(std::move(future));
         }
-        auto futures_guard = folly::makeGuard([&futures]() {
-            for (auto& f : futures) {
-                if (f.valid()) {
-                    try {
-                        f.get();
-                    } catch (...) {
-                    }
-                }
-            }
-        });
         for (auto& future : futures) {
             future.get();
         }
