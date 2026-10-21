@@ -856,10 +856,11 @@ func TestNewReduceStreamValidatesPlainANNSearch(t *testing.T) {
 	require.ErrorContains(t, err, "positive topK")
 
 	_, err = NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, IsIterator: true, IsAdvanced: true}, []ReduceStream{child}, 1)
-	require.ErrorContains(t, err, "Plain ANN Search only")
+	require.ErrorContains(t, err, "Plain ANN Search and Search Group By only")
 
-	_, err = NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, IsIterator: true, GroupByFieldIds: []int64{101}}, []ReduceStream{child}, 1)
-	require.ErrorContains(t, err, "Plain ANN Search only")
+	grouped, err := NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, GroupByFieldIds: []int64{101}}, []ReduceStream{child}, 1)
+	require.NoError(t, err)
+	require.NoError(t, grouped.Close())
 
 	stream, err := NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1}, []ReduceStream{child}, 1)
 	require.NoError(t, err)
