@@ -1748,6 +1748,8 @@ streaming:
     concurrencyRatio: 4 # The concurrency ratio based on number of CPU for wal broadcaster, 4 by default.
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
+    tombstoneMaxCount: 1024 # Maximum cached successful Commit results per WAL; zero disables retention.
+    tombstoneMaxLifetime: 1m # Maximum result age in WAL TimeTick; capacity and the recovery replay floor may shorten retention.
   walWriteAheadBuffer:
     capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
     keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
