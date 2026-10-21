@@ -229,7 +229,7 @@ func createTextIndex(ctx context.Context,
 
 // V1 readers do not share compaction's schema-reconciliation contract, so filter physical fields before opening them.
 func newCompactionSegmentRecordReader(ctx context.Context, segment *datapb.CompactionSegmentBinlogs, schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig, opts ...storage.RwOption) (storage.RecordReader, map[int64]struct{}, error) {
-	existingFields, err := compactionSegmentStorageFields(segment, storageConfig)
+	existingFields, err := compactionSegmentStorageFields(ctx, segment, schema, storageConfig)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -247,7 +247,7 @@ func newTextDecodedCompactionSegmentRecordReader(
 	if segment.GetManifest() == "" || len(textColumnConfigs) == 0 {
 		return newCompactionSegmentRecordReader(ctx, segment, schema, storageConfig, opts...)
 	}
-	existingFields, err := compactionSegmentStorageFields(segment, storageConfig)
+	existingFields, err := compactionSegmentStorageFields(ctx, segment, schema, storageConfig)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -262,13 +262,34 @@ func newTextDecodedCompactionSegmentRecordReader(
 	return reader, existingFields, err
 }
 
-func compactionSegmentStorageFields(segment *datapb.CompactionSegmentBinlogs, storageConfig *indexpb.StorageConfig) (map[int64]struct{}, error) {
+func compactionSegmentStorageFields(ctx context.Context, segment *datapb.CompactionSegmentBinlogs, schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig) (map[int64]struct{}, error) {
 	if segment.GetManifest() != "" {
 		return packed.GetManifestFieldIDs(segment.GetManifest(), storageConfig)
 	}
-	return compactionSegmentBinlogFields(segment), nil
+	if segment.GetStorageVersion() == storage.StorageV1 {
+		return compactionSegmentBinlogFields(segment), nil
+	}
+	// Packed binlogs written by 2.6.0/2.6.1 carry no ChildFields and key FieldID
+	// by column group; the stored fields then come from the file footers.
+	fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(segment.GetFieldBinlogs()))
+	for _, fieldBinlog := range lo.Compact(segment.GetFieldBinlogs()) {
+		fieldBinlogs = append(fieldBinlogs, proto.Clone(fieldBinlog).(*datapb.FieldBinlog))
+	}
+	rootPath := ""
+	if storageConfig != nil {
+		rootPath = storageConfig.GetRootPath()
+	}
+	if err := binlog.DecompressBinLogWithRootPath(rootPath, storage.InsertBinlog,
+		segment.GetCollectionID(), segment.GetPartitionID(), segment.GetSegmentID(), fieldBinlogs); err != nil {
+		return nil, err
+	}
+	return storage.PackedBinlogPresentFields(ctx, fieldBinlogs, schema,
+		storage.WithCollectionID(segment.GetCollectionID()),
+		storage.WithStorageConfig(storageConfig))
 }
 
+// compactionSegmentBinlogFields returns the fields of StorageV1 binlogs, whose
+// FieldID is the field id.
 func compactionSegmentBinlogFields(segment *datapb.CompactionSegmentBinlogs) map[int64]struct{} {
 	fields := make(map[int64]struct{})
 	for _, fieldBinlog := range segment.GetFieldBinlogs() {
@@ -306,8 +327,8 @@ func droppedSchemaFieldIDs(schema *schemapb.CollectionSchema, existingFields map
 	return dropped
 }
 
-func segmentDroppedFieldIDs(schema *schemapb.CollectionSchema, segment *datapb.CompactionSegmentBinlogs, storageConfig *indexpb.StorageConfig) ([]int64, error) {
-	existingFields, err := compactionSegmentStorageFields(segment, storageConfig)
+func segmentDroppedFieldIDs(ctx context.Context, schema *schemapb.CollectionSchema, segment *datapb.CompactionSegmentBinlogs, storageConfig *indexpb.StorageConfig) ([]int64, error) {
+	existingFields, err := compactionSegmentStorageFields(ctx, segment, schema, storageConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -343,6 +364,11 @@ func newCompactionSegmentRecordReaderWithFields(ctx context.Context, segment *da
 		return nil, nil, err
 	}
 
+	if segment.GetStorageVersion() != storage.StorageV1 {
+		// existingFields is the segment's physically-present field set; hand it
+		// over so the reader does not read the packed footers again.
+		opts = append(opts, storage.WithPresentFields(existingFields))
+	}
 	reader, err := storage.NewBinlogRecordReader(ctx, fieldBinlogs, readSchema, opts...)
 	return reader, existingFields, err
 }
