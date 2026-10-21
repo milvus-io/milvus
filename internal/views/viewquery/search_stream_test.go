@@ -218,6 +218,7 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 			},
 		},
 		AllRetrieveCount: 3,
+		HasMoreResult:    true,
 	}}
 	server := NewServer(provider, scheduler)
 	client, cleanup := startSearchStreamTestServer(t, server)
@@ -244,12 +245,14 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.Equal(t, []int64{1, 2}, first.GetIds().GetIntId().GetData())
 	require.Equal(t, []int64{10, 20}, first.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 	require.Equal(t, int64(3), first.GetAllRetrieveCount())
+	require.True(t, first.GetHasMoreResult())
 
 	second, err := stream.Recv()
 	require.NoError(t, err)
 	require.Equal(t, []int64{3}, second.GetIds().GetIntId().GetData())
 	require.Equal(t, []int64{30}, second.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 	require.Zero(t, second.GetAllRetrieveCount())
+	require.False(t, second.GetHasMoreResult())
 
 	chunk, err := stream.Recv()
 	require.Nil(t, chunk)

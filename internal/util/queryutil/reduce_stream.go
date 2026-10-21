@@ -35,6 +35,9 @@ import (
 )
 
 // ReduceStream is the Query counterpart of the Search ReduceStream contract.
+// The first Chunk carries HasMoreResult: whether matching rows exist beyond
+// this stream's current result, not whether more Chunks will arrive. It is
+// known before any rows are emitted and may be omitted from later Chunks.
 type ReduceStream interface {
 	Recv() (*internalpb.RetrieveResults, error)
 	Close() error
@@ -111,8 +114,9 @@ func (u retrieveUnit) reducibleByteSize() (int, error) {
 }
 
 type orderedChildBuffer struct {
-	chunk  *internalpb.RetrieveResults
-	cursor int64
+	chunk         *internalpb.RetrieveResults
+	cursor        int64
+	hasMoreResult bool // Retained from the first Chunk after its rows are consumed.
 }
 
 func (b *orderedChildBuffer) hasUnit() bool {
@@ -140,6 +144,7 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 	if chunk.GetElementLevel() {
 		return merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "element-level Query streaming is not implemented"))
 	}
+	b.hasMoreResult = b.hasMoreResult || chunk.GetHasMoreResult()
 	rowCount := typeutil.GetSizeOfIDs(chunk.GetIds())
 	if rowCount > 0 && len(chunk.GetFieldsData()) == 0 {
 		return merr.WrapErrServiceInternalMsg("Query Chunk contains %d IDs without field data", rowCount)
@@ -159,6 +164,7 @@ type OrderedReduceStream struct {
 
 	limit          int64
 	chunkBytes     int
+	reduceType     reduce.IReduceType
 	emitted        int64
 	orderByFields  []*planpb.OrderByField
 	hasLastPK      bool
@@ -209,6 +215,7 @@ func NewReduceStream(
 		childBuffers:  make([]orderedChildBuffer, len(childStreams)),
 		limit:         request.GetLimit(),
 		chunkBytes:    chunkBytes,
+		reduceType:    reduce.ToReduceType(request.GetReduceType()),
 		orderByFields: request.GetOrderByFields(),
 	}, nil
 }
@@ -340,6 +347,8 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 }
 
 func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
+	// Every active child supplies its first Chunk before our first output, so
+	// HasMoreResult can be forwarded then, even if that child reaches EOF later.
 	err := s.childStreams.ReceiveUntilReady(
 		func(childIndex int) bool {
 			return s.childBuffers[childIndex].hasUnit()
@@ -364,6 +373,12 @@ func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
 
 	ready := make([]*orderedChildBuffer, 0, len(s.childBuffers))
 	for i := range s.childBuffers {
+		// EOF ends only this child's current result. Iterator reduction must
+		// stop if matching rows remain outside it, rather than skip those rows.
+		if reduce.ShouldStopWhenDrained(s.reduceType) &&
+			s.childStreams.IsDrained(i) && s.childBuffers[i].hasMoreResult {
+			return nil, nil
+		}
 		if s.childBuffers[i].hasUnit() {
 			ready = append(ready, &s.childBuffers[i])
 		}
@@ -670,6 +685,8 @@ func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]
 		chunks = append(chunks, chunk)
 	}
 
+	// Workers materialize the result before splitting it, so HasMoreResult is
+	// already known. Carry it in the first Chunk, including an empty result.
 	first := chunks[0]
 	first.Base = result.GetBase()
 	first.ReqID = result.GetReqID()

@@ -34,6 +34,7 @@ func TestSplitRetrieveResult(t *testing.T) {
 	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
 	result.ReqID = 100
 	result.AllRetrieveCount = 3
+	result.HasMoreResult = true
 
 	chunks, err := SplitRetrieveResult(result, queryChunkBytes(t, result, 2))
 
@@ -43,10 +44,12 @@ func TestSplitRetrieveResult(t *testing.T) {
 	require.Equal(t, []int64{10, 20}, chunks[0].GetFieldsData()[0].GetScalars().GetLongData().GetData())
 	require.Equal(t, int64(100), chunks[0].GetReqID())
 	require.Equal(t, int64(3), chunks[0].GetAllRetrieveCount())
+	require.True(t, chunks[0].GetHasMoreResult())
 	require.Equal(t, []int64{3}, chunks[1].GetIds().GetIntId().GetData())
 	require.Equal(t, []int64{30}, chunks[1].GetFieldsData()[0].GetScalars().GetLongData().GetData())
 	require.Zero(t, chunks[1].GetReqID())
 	require.Zero(t, chunks[1].GetAllRetrieveCount())
+	require.False(t, chunks[1].GetHasMoreResult())
 }
 
 func TestSplitRetrieveResultAcceptsUnitThatCrossesThreshold(t *testing.T) {
