@@ -514,6 +514,26 @@ func (m *Manager) applyFinishedJobSegments(ctx context.Context, job *datapb.Exte
 		mlog.Int64("refreshedRows", refreshedRows),
 		mlog.Int64("rowDelta", refreshedRows-baselineRows))
 
+	sourceConfirmedEmpty := false
+	if len(baselineSegmentIDs) > 0 && len(keptSegments) == 0 && len(updatedSegments) == 0 && len(tasks) == 1 {
+		task := tasks[0]
+		if task.GetFileIndexBegin() == 0 && task.GetFileIndexEnd() == 0 && task.GetExploreManifestPath() != "" {
+			spec, err := externalspec.ParseExternalSpec(job.GetExternalSpec())
+			if err != nil {
+				return err
+			}
+			if spec.Format == externalspec.FormatPaimonTable {
+				// Confirm the coordinator's pinned explore result, not the worker's
+				// empty response or the source table's potentially newer snapshot.
+				files, err := packed.ReadFileInfosFromManifestPath(task.GetExploreManifestPath(), meta.CreateStorageConfig())
+				if err != nil {
+					return merr.Wrap(err, "verify empty Paimon refresh manifest")
+				}
+				sourceConfirmedEmpty = len(files) == 0
+			}
+		}
+	}
+
 	// Intentionally allow the collection schema to advance while tasks are
 	// running. For the current additive-only scope, an older-schema refresh can
 	// be applied; it may miss newly added external columns, and the next refresh
@@ -528,6 +548,7 @@ func (m *Manager) applyFinishedJobSegments(ctx context.Context, job *datapb.Exte
 		keptSegments,
 		updatedSegments,
 		job.GetTransformStartAfterTimeticks(),
+		sourceConfirmedEmpty,
 		mlog.FieldJobID(job.GetJobId()),
 	); err != nil {
 		return err
@@ -984,7 +1005,11 @@ func (m *Manager) createTasksForJob(
 		}
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to explore external files")
 	}
-	if len(allFiles) == 0 {
+	spec, err := externalspec.ParseExternalSpec(job.GetExternalSpec())
+	if err != nil {
+		return nil, err
+	}
+	if len(allFiles) == 0 && spec.Format != externalspec.FormatPaimonTable {
 		return nil, newNonRetriableJobError("no files found in external source: %s", job.GetExternalSource())
 	}
 	// NOTE: zero-total-rows cannot be detected here. PlainFormat::explore
@@ -1010,12 +1035,31 @@ func (m *Manager) createTasksForJob(
 		}
 	}
 
+	baselineFormat := spec.Format
+	var baselineColumns []string
+	if len(baselineSegments) > 0 {
+		collection := m.mt.GetCollection(job.GetCollectionId())
+		if collection == nil {
+			return nil, merr.WrapErrCollectionNotFound(job.GetCollectionId())
+		}
+		// A refresh may replace source/spec; baseline manifests still belong
+		// to the collection's current format until the job finishes.
+		baselineSpec, err := externalspec.ParseExternalSpec(collection.Schema.GetExternalSpec())
+		if err != nil {
+			return nil, merr.Wrap(err, "parse external refresh baseline spec")
+		}
+		baselineFormat = baselineSpec.Format
+		if baselineFormat == externalspec.FormatPaimonTable {
+			// Function outputs use separate, non-Paimon column groups.
+			baselineColumns = packed.GetColumnNamesFromSchema(collection.Schema)
+		}
+	}
 	manifestReadStart := time.Now()
 	segmentFragments, err := packed.BuildCurrentSegmentFragmentsConcurrently(
 		ctx,
 		baselineSegments,
 		meta.CreateStorageConfig(),
-		nil,
+		baselineColumns,
 		externalRefreshManifestReadConcurrency,
 	)
 	if err != nil {
@@ -1029,6 +1073,8 @@ func (m *Manager) createTasksForJob(
 
 	filesPerTask := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64()
 	taskPlans, ownershipSummary, err := planExternalRefreshOwnership(
+		spec.Format,
+		baselineFormat,
 		allFiles,
 		segmentFragments,
 		filesPerTask,
@@ -1210,7 +1256,7 @@ func (m *Manager) GetActiveJobByCollectionID(collectionID int64) *datapb.Externa
 func (m *Manager) exploreExternalFiles(
 	ctx context.Context,
 	job *datapb.ExternalCollectionRefreshJob,
-) ([]*datapb.ExternalFileInfo, string, error) {
+) ([]packed.FileInfo, string, error) {
 	// Revalidate source+spec at refresh time: etcd is not a trusted boundary,
 	// and validation rules may have tightened since the collection was created.
 	// Empty source is legal (see typeutil.IsExternalCollection); only validate
@@ -1261,15 +1307,7 @@ func (m *Manager) exploreExternalFiles(
 		return nil, "", merr.Wrap(err, "failed to explore files returning manifest path")
 	}
 
-	// Convert to proto type
-	result := make([]*datapb.ExternalFileInfo, len(fileInfos))
-	for i, fi := range fileInfos {
-		result[i] = &datapb.ExternalFileInfo{
-			FilePath: fi.FilePath,
-			NumRows:  fi.NumRows,
-		}
-	}
-	return result, manifestPath, nil
+	return fileInfos, manifestPath, nil
 }
 
 func validateMilvusTableRefreshSchema(job *datapb.ExternalCollectionRefreshJob, targetSchema *schemapb.CollectionSchema) error {
