@@ -788,13 +788,14 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                std::vector<const char*> views;
-                views.reserve(len);
+                std::vector<const char*> views(len);
+                std::vector<size_t> lengths(len);
                 for (uintptr_t i = 0; i < len; i++) {
-                    views.push_back(terms[i].c_str());
+                    views[i] = terms[i].data();
+                    lengths[i] = terms[i].size();
                 }
-                return tantivy_terms_query_keyword(
-                    reader_, views.data(), len, bitset);
+                return tantivy_terms_query_keyword_with_len(
+                    reader_, views.data(), lengths.data(), len, bitset);
             }
 
             throw fmt::format(

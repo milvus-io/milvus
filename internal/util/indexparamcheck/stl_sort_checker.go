@@ -1,6 +1,8 @@
 package indexparamcheck
 
 import (
+	"strings"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -14,7 +16,7 @@ type STLSORTChecker struct {
 	scalarIndexChecker
 }
 
-var validSTLSORTJSONCastTypes = []string{"DOUBLE", "VARCHAR"}
+var validSTLSORTJSONCastTypes = []string{"DOUBLE", "VARCHAR", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"}
 
 func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if typeutil.IsJSONType(dataType) {
@@ -25,6 +27,9 @@ func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType sche
 		if !lo.Contains(validSTLSORTJSONCastTypes, castType) {
 			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported for STL_SORT index", castType)
 		}
+		if castFunction, exists := params[common.JSONCastFunctionKey]; exists && strings.HasPrefix(castType, "ARRAY_") {
+			return merr.WrapErrParameterInvalidMsg("json_cast_function %v is not supported for json_cast_type %v", castFunction, castType)
+		}
 		if _, exist := params[common.JSONPathKey]; !exist {
 			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
 		}
@@ -34,12 +39,14 @@ func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType sche
 
 func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	dataType := field.GetDataType()
-	if typeutil.IsArrayType(dataType) && typeutil.IsStructSubField(field.GetName()) {
+	if typeutil.IsArrayType(dataType) {
 		elemType := field.GetElementType()
-		if !typeutil.IsArithmetic(elemType) && !typeutil.IsStringType(elemType) && !typeutil.IsTimestamptzType(elemType) {
-			return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar or timestamptz field, got struct sub-field of %s", field.GetElementType())
+		nested := typeutil.IsStructSubField(field.GetName())
+		if typeutil.IsArithmetic(elemType) || typeutil.IsStringType(elemType) ||
+			(nested && typeutil.IsTimestamptzType(elemType)) || (!nested && elemType == schemapb.DataType_Bool) {
+			return nil
 		}
-		return nil
+		return merr.WrapErrParameterInvalidMsg("STL_SORT does not support array element type %s", elemType)
 	}
 	if typeutil.IsJSONType(dataType) {
 		return nil

@@ -80,7 +80,9 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
         if (index_ptr->GetIndexType() ==
                 milvus::index::ScalarIndexType::HYBRID ||
             index_ptr->GetIndexType() ==
-                milvus::index::ScalarIndexType::BITMAP) {
+                milvus::index::ScalarIndexType::BITMAP ||
+            index_ptr->GetIndexType() ==
+                milvus::index::ScalarIndexType::STLSORT) {
             return false;
         }
     }

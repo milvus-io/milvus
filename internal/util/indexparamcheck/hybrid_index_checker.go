@@ -1,6 +1,8 @@
 package indexparamcheck
 
 import (
+	"strings"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -13,7 +15,7 @@ type HYBRIDChecker struct {
 	scalarIndexChecker
 }
 
-var validHYBRIDJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR"}
+var validHYBRIDJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"}
 
 func (c *HYBRIDChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if typeutil.IsJSONType(dataType) {
@@ -23,6 +25,9 @@ func (c *HYBRIDChecker) CheckTrain(dataType schemapb.DataType, elementType schem
 		}
 		if !lo.Contains(validHYBRIDJSONCastTypes, castType) {
 			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported for HYBRID index", castType)
+		}
+		if castFunction, exists := params[common.JSONCastFunctionKey]; exists && strings.HasPrefix(castType, "ARRAY_") {
+			return merr.WrapErrParameterInvalidMsg("json_cast_function %v is not supported for json_cast_type %v", castFunction, castType)
 		}
 		if _, exist := params[common.JSONPathKey]; !exist {
 			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")

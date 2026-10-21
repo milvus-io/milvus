@@ -15,6 +15,7 @@
 #include <type_traits>
 
 #include "common/FieldData.h"
+#include "common/Array.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
@@ -39,7 +40,8 @@ ProcessJsonFieldData(
     JsonDataAdder<T> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder) {
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder) {
     int64_t offset = 0;
     using SIMDJSON_T =
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
@@ -60,7 +62,15 @@ ProcessJsonFieldData(
                 continue;
             }
 
-            auto exists = path_exists(json_column->dom_doc(), tokens);
+            auto doc = json_column->dom_doc();
+            // Empty arrays are valid for contains even when the existing
+            // EXISTS policy considers them absent. Record this before its
+            // early return and reuse the parsed document for extraction.
+            if (is_array && array_validity_adder &&
+                !doc.at_pointer(nested_path).get_array().error()) {
+                array_validity_adder(offset);
+            }
+            auto exists = path_exists(doc.value(), tokens);
             if (!exists || !json_column->exist(nested_path)) {
                 error_recorder(
                     *json_column, nested_path, simdjson::NO_SUCH_FIELD);
@@ -71,7 +81,6 @@ ProcessJsonFieldData(
 
             values.clear();
             if (is_array) {
-                auto doc = json_column->dom_doc();
                 auto array_res = doc.at_pointer(nested_path).get_array();
                 if (array_res.error() != simdjson::SUCCESS) {
                     error_recorder(
@@ -119,7 +128,8 @@ ProcessJsonFieldData<bool>(
     JsonDataAdder<bool> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder);
 
 template void
 ProcessJsonFieldData<int64_t>(
@@ -131,7 +141,8 @@ ProcessJsonFieldData<int64_t>(
     JsonDataAdder<int64_t> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder);
 
 template void
 ProcessJsonFieldData<double>(
@@ -143,7 +154,8 @@ ProcessJsonFieldData<double>(
     JsonDataAdder<double> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder);
 
 template void
 ProcessJsonFieldData<std::string>(
@@ -155,7 +167,8 @@ ProcessJsonFieldData<std::string>(
     JsonDataAdder<std::string> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder);
 
 namespace {
 
@@ -175,6 +188,56 @@ GetMilvusDataType() {
     }
 }
 
+template <typename T>
+JsonToTypedResult
+ConvertJsonToArrayFieldData(const std::vector<FieldDataPtr>& fields,
+                            const proto::schema::FieldSchema& schema,
+                            const std::string& path,
+                            const JsonCastType& cast_type,
+                            JsonCastFunction cast_function,
+                            int64_t rows) {
+    std::vector<Array> values(rows);
+    std::vector<uint8_t> validity((rows + 7) / 8, 0);
+    std::vector<size_t> non_exist;
+    ProcessJsonFieldData<T>(
+        fields,
+        schema,
+        path,
+        cast_type,
+        cast_function,
+        [&values](const T* data, int64_t count, int64_t offset) {
+            ScalarFieldProto array;
+            if constexpr (std::is_same_v<T, bool>) {
+                auto* elements = array.mutable_bool_data();
+                for (int64_t i = 0; i < count; ++i) elements->add_data(data[i]);
+            } else if constexpr (std::is_same_v<T, int64_t>) {
+                auto* elements = array.mutable_long_data();
+                for (int64_t i = 0; i < count; ++i) elements->add_data(data[i]);
+            } else if constexpr (std::is_same_v<T, double>) {
+                auto* elements = array.mutable_double_data();
+                for (int64_t i = 0; i < count; ++i) elements->add_data(data[i]);
+            } else {
+                auto* elements = array.mutable_string_data();
+                for (int64_t i = 0; i < count; ++i) elements->add_data(data[i]);
+            }
+            values[offset] = Array(array);
+        },
+        [](int64_t) {},
+        [&non_exist](int64_t offset) { non_exist.push_back(offset); },
+        [](const Json&, const std::string&, simdjson::error_code) {},
+        [&validity](int64_t offset) {
+            validity[offset / 8] |= uint8_t{1} << (offset % 8);
+        });
+    // Predicate validity follows raw contains: the path must hold an array.
+    // Empty arrays and arrays without matching element types are still valid.
+    // The existing non-exist sidecar retains its independent EXISTS semantics.
+    auto result =
+        std::make_shared<FieldData<Array>>(DataType::ARRAY, true, rows);
+    result->FillFieldData(values.data(), validity.data(), rows, 0);
+    return {.field_data = std::move(result),
+            .non_exist_offsets = std::move(non_exist)};
+}
+
 }  // namespace
 
 template <typename T>
@@ -188,6 +251,15 @@ ConvertJsonToTypedFieldData(
     int64_t total_rows = 0;
     for (const auto& data : json_field_datas) {
         total_rows += data->get_num_rows();
+    }
+
+    if (cast_type.data_type() == JsonCastType::DataType::ARRAY) {
+        return ConvertJsonToArrayFieldData<T>(json_field_datas,
+                                              schema,
+                                              nested_path,
+                                              cast_type,
+                                              cast_function,
+                                              total_rows);
     }
 
     auto data_type = GetMilvusDataType<T>();

@@ -1196,6 +1196,10 @@ func (sm *snapshotManager) RestoreIndexes(
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
+		if err := checkOrdinaryArraySortIndex(typeutil.GetField(coll.GetSchema(), index.FieldID), GetIndexType(index.IndexParams), sm.indexEngineVersionManager); err != nil {
+			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
+		}
+
 		// Check scalar index engine version for JSON path indexes with new types
 		if err := sm.checkJSONPathIndexVersion(index); err != nil {
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
@@ -1945,7 +1949,7 @@ func (sm *snapshotManager) calculateTimeCost(job CopySegmentJob) uint64 {
 
 // checkJSONPathIndexVersion rejects JSON path indexes with STL_SORT, BITMAP,
 // or HYBRID if the cluster's scalar index engine version is below
-// MinScalarIndexVersionForJsonPathMultiType.
+// the existing scalar/packed-array format threshold, or the software gate is off.
 func (sm *snapshotManager) checkJSONPathIndexVersion(index *model.Index) error {
 	indexType := GetIndexType(index.IndexParams)
 	if indexType != indexparamcheck.IndexSTLSORT &&
@@ -1959,13 +1963,17 @@ func (sm *snapshotManager) checkJSONPathIndexVersion(index *model.Index) error {
 		return nil
 	}
 
+	if err := checkJSONArrayIndexEnabled(indexType, indexParams[common.JSONCastTypeKey]); err != nil {
+		return err
+	}
 	if sm.indexEngineVersionManager != nil {
 		resolved := sm.indexEngineVersionManager.ResolveScalarIndexVersion()
-		if resolved < common.MinScalarIndexVersionForJsonPathMultiType {
+		required := requiredJSONPathIndexVersion(indexType, indexParams[common.JSONCastTypeKey])
+		if resolved < required {
 			return merr.WrapErrParameterInvalidMsg(
 				"JSON path index with %s requires scalar index engine version >= %d, "+
 					"current resolved version: %d; please complete the rolling upgrade first",
-				indexType, common.MinScalarIndexVersionForJsonPathMultiType, resolved)
+				indexType, required, resolved)
 		}
 	}
 	return nil

@@ -47,6 +47,8 @@
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
+#include "index/HybridScalarIndex.h"
+#include "index/StringIndexSort.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
@@ -651,6 +653,41 @@ class ArrayEqualityCountingIndex : public index::InvertedIndexTantivy<int64_t> {
                     const std::function<void(size_t)>& callback) override {
         ++callback_calls;
         InvertedIndexTantivy::InApplyCallback(n, values, callback);
+    }
+};
+
+class ArraySortExprIndex : public index::StringIndexSort {
+ public:
+    using StringIndexSort::StringIndexSort;
+    int64_t in_calls = 0;
+
+    const TargetBitmap
+    In(size_t n, const std::string* values) override {
+        ++in_calls;
+        return StringIndexSort::In(n, values);
+    }
+};
+
+class ArrayHybridExprIndex : public index::HybridScalarIndex<std::string> {
+ public:
+    using HybridScalarIndex::HybridScalarIndex;
+    int64_t in_calls = 0;
+
+    void
+    BuildForTest(const FieldDataPtr& data) {
+        scalar_index_version_ = kArrayHybridStlSortMinVersion;
+        enable_array_sort_index_ = true;
+        bitmap_index_cardinality_limit_ = 1;
+        SelectIndexBuildType({data});
+        BuildInternal({data});
+        is_built_ = true;
+        ComputeByteSize();
+    }
+
+    const TargetBitmap
+    In(size_t n, const std::string* values) override {
+        ++in_calls;
+        return HybridScalarIndex::In(n, values);
     }
 };
 
@@ -4584,7 +4621,10 @@ TEST(Expr, TestArrayLengthExprCanExecuteAllAtOnce) {
 // Evaluating a sealed segment larger than one batch, without the single-pass
 // optimization, checks that slicing the cached index bitmap preserves the
 // match results, including when the query contains duplicate terms.
-TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
+static void
+CheckArrayContainsIndexPathAcrossBatches(bool hybrid_sort,
+                                         bool mmap = false,
+                                         bool explicit_sort = false) {
     milvus::test::ExprBatchSizeGuard batch_size_guard(8192);
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
@@ -4625,8 +4665,11 @@ TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
         storage::IndexMeta{kSegmentID, str_array_fid.get(), 4001, 4001};
 
     // Build, serialize and reload so the index is in its query-ready state.
-    auto root_path =
-        fmt::format("{}/array_contains_across_batches", TestLocalPath);
+    auto root_path = fmt::format("{}/array_contains_across_batches_{}_{}_{}",
+                                 TestLocalPath,
+                                 hybrid_sort,
+                                 mmap,
+                                 explicit_sort);
     boost::filesystem::remove_all(root_path);
     storage::StorageConfig storage_config;
     storage_config.storage_type = "local";
@@ -4635,23 +4678,57 @@ TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
     auto fs = storage::InitArrowFileSystem(storage_config);
     storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
 
-    auto build_index =
-        std::make_unique<index::BitmapIndex<std::string>>(ctx, false);
-    build_index->BuildWithFieldData({field_data});
-    auto binary_set = build_index->Serialize({});
-    auto bitmap_index =
-        std::make_unique<index::BitmapIndex<std::string>>(ctx, false);
-    bitmap_index->Load(binary_set, {});
-    ASSERT_FALSE(bitmap_index->IsNestedIndex());
-    ASSERT_EQ(bitmap_index->Count(), N);
+    std::unique_ptr<index::ScalarIndex<std::string>> scalar_index;
+    ArrayHybridExprIndex* hybrid_reader = nullptr;
+    ArraySortExprIndex* sort_reader = nullptr;
+    if (explicit_sort) {
+        auto built = std::make_unique<ArraySortExprIndex>(ctx);
+        built->BuildWithFieldData({field_data});
+        auto stats = built->UploadUnified({});
+        Config config{{index::INDEX_FILES, stats->GetIndexFiles()},
+                      {index::ENABLE_MMAP, mmap}};
+        if (mmap)
+            config[index::MMAP_FILE_PATH] = root_path + "/mmap";
+        auto loaded = std::make_unique<ArraySortExprIndex>(ctx);
+        loaded->LoadUnified(config);
+        ASSERT_EQ(loaded->GetIndexType(), index::ScalarIndexType::STLSORT);
+        sort_reader = loaded.get();
+        scalar_index = std::move(loaded);
+    } else if (hybrid_sort) {
+        ArrayHybridExprIndex built(7, ctx, false);
+        built.BuildForTest(field_data);
+        ASSERT_EQ(built.internal_index_type_, index::ScalarIndexType::STLSORT);
+        auto stats = built.UploadUnified({});
+        Config config{{index::INDEX_FILES, stats->GetIndexFiles()},
+                      {index::ENABLE_MMAP, mmap}};
+        if (mmap)
+            config[index::MMAP_FILE_PATH] = root_path + "/mmap";
+        auto loaded = std::make_unique<ArrayHybridExprIndex>(7, ctx, false);
+        loaded->LoadUnified(config);
+        ASSERT_EQ(loaded->internal_index_type_,
+                  index::ScalarIndexType::STLSORT);
+        hybrid_reader = loaded.get();
+        scalar_index = std::move(loaded);
+    } else {
+        auto built =
+            std::make_unique<index::BitmapIndex<std::string>>(ctx, false);
+        built->BuildWithFieldData({field_data});
+        auto binary_set = built->Serialize({});
+        auto loaded =
+            std::make_unique<index::BitmapIndex<std::string>>(ctx, false);
+        loaded->Load(binary_set, {});
+        scalar_index = std::move(loaded);
+    }
+    ASSERT_FALSE(scalar_index->IsNestedIndex());
+    ASSERT_EQ(scalar_index->Count(), N);
 
     LoadIndexInfo load_index_info;
     load_index_info.field_id = str_array_fid.get();
     load_index_info.field_type = DataType::ARRAY;
     load_index_info.element_type = DataType::VARCHAR;
-    load_index_info.index_params = GenIndexParams(bitmap_index.get());
+    load_index_info.index_params = GenIndexParams(scalar_index.get());
     load_index_info.cache_index =
-        CreateTestCacheIndex("array_bitmap_str", std::move(bitmap_index));
+        CreateTestCacheIndex("array_contains_str", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
 
     auto row_values = [&](int i) {
@@ -4731,4 +4808,60 @@ TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
             return contains(values, all_terms[0]) &&
                    contains(values, all_terms[1]);
         });
+
+    if (hybrid_sort || explicit_sort) {
+        if (hybrid_sort)
+            ASSERT_GT(hybrid_reader->in_calls, 0);
+        if (explicit_sort)
+            ASSERT_GT(sort_reader->in_calls, 0);
+        auto target = row_values(0);
+        auto reversed = target;
+        std::reverse(reversed.begin(), reversed.end());
+        auto duplicated = target;
+        if (!target.empty())
+            duplicated.push_back(target.front());
+        for (const auto& values : std::vector<std::vector<std::string>>{
+                 {}, target, reversed, duplicated}) {
+            for (const bool negate : {false, true}) {
+                proto::plan::GenericValue literal;
+                auto* array = literal.mutable_array_val();
+                array->set_element_type(proto::schema::DataType::VarChar);
+                array->set_same_type(true);
+                for (const auto& value : values) {
+                    array->add_array()->set_string_val(value);
+                }
+                auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+                    expr::ColumnInfo(
+                        str_array_fid, DataType::ARRAY, DataType::VARCHAR),
+                    negate ? proto::plan::NotEqual : proto::plan::Equal,
+                    literal);
+                auto evaluation =
+                    milvus::test::EvalExprInBatches(expr, segment.get(), N);
+                ASSERT_EQ(evaluation.result->size(), N);
+                BitsetTypeView bits(evaluation.result->GetRawData(), N);
+                for (int i = 0; i < N; ++i) {
+                    EXPECT_EQ(bits[i], (row_values(i) == values) != negate)
+                        << "row " << i;
+                }
+            }
+        }
+    }
+}
+
+TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
+    CheckArrayContainsIndexPathAcrossBatches(false);
+}
+
+TEST(Expr, TestArrayHybridSortContainsAndEqualityAcrossBatches) {
+    for (const bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        CheckArrayContainsIndexPathAcrossBatches(true, mmap);
+    }
+}
+
+TEST(Expr, TestArrayExplicitSortContainsAndEqualityAcrossBatches) {
+    for (const bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        CheckArrayContainsIndexPathAcrossBatches(false, mmap, true);
+    }
 }

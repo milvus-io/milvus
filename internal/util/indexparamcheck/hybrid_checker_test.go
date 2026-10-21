@@ -42,11 +42,34 @@ func Test_HybridIndexChecker(t *testing.T) {
 	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
 		"json_cast_type": "VARCHAR", "json_path": "/name",
 	}))
-	// unsupported cast type for HYBRID
+	for _, castType := range []string{"ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"} {
+		assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+			"json_cast_type": castType, "json_path": "/values",
+		}))
+		assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+			"json_cast_type": castType,
+		}))
+	}
+	// Whole JSON remains the INVERTED JSON-flat family.
 	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
-		"json_cast_type": "ARRAY_BOOL", "json_path": "/flags",
+		"json_cast_type": "JSON", "json_path": "/values",
 	}))
 
 	assert.Error(t, c.CheckTrain(schemapb.DataType_Float, schemapb.DataType_None, map[string]string{"bitmap_cardinality_limit": "0"}))
 	assert.Error(t, c.CheckTrain(schemapb.DataType_Double, schemapb.DataType_None, map[string]string{"bitmap_cardinality_limit": "2000"}))
+}
+
+func Test_JSONArrayRejectsCastFunction(t *testing.T) {
+	for _, indexType := range []string{IndexHybrid, IndexSTLSORT} {
+		for _, cast := range []string{"ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"} {
+			for _, function := range []string{"STRING_TO_DOUBLE", "", "UNKNOWN"} {
+				t.Run(indexType+"/"+cast+"/"+function, func(t *testing.T) {
+					// Validate through the field-aware entry point used by CreateIndex.
+					assert.ErrorContains(t, ValidateFieldIndexParams(&schemapb.FieldSchema{DataType: schemapb.DataType_JSON}, map[string]string{
+						"index_type": indexType, "json_cast_type": cast, "json_path": "/a", "json_cast_function": function,
+					}), "json_cast_function")
+				})
+			}
+		}
+	}
 }

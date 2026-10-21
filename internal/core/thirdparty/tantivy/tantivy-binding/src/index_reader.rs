@@ -230,20 +230,23 @@ impl IndexReaderWrapper {
     }
 
     pub fn terms_query_keyword(&self, terms: &[*const c_char], bitset: *mut c_void) -> Result<()> {
-        let mut term_strs = Vec::with_capacity(terms.len());
+        let terms = terms
+            .iter()
+            .map(|&term| c_ptr_to_str(term))
+            .collect::<Result<Vec<_>>>()?;
+        self.terms_query_keyword_strs(&terms, bitset)
+    }
+
+    pub fn terms_query_keyword_strs(&self, terms: &[&str], bitset: *mut c_void) -> Result<()> {
         if terms.len() < BATCH_THRESHOLD {
             return terms
                 .iter()
-                .try_for_each(|term| self.term_query_keyword(c_ptr_to_str(*term)?, bitset));
+                .try_for_each(|term| self.term_query_keyword(term, bitset));
         }
-
-        for term in terms {
-            let term_str = c_ptr_to_str(*term)?;
-            term_strs.push(Term::from_field_text(self.field, term_str));
-        }
-        let q = TermSetQuery::new(term_strs);
-
-        self.search(&q, bitset)
+        let term_strs = terms
+            .iter()
+            .map(|term| Term::from_field_text(self.field, term));
+        self.search(&TermSetQuery::new(term_strs), bitset)
     }
 
     pub fn term_query_keyword_i64(&self, term: &str) -> Result<Vec<i64>> {
@@ -985,5 +988,43 @@ mod test {
             .terms_query_keyword(&arrays, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res.len(), 20000);
+    }
+    #[test]
+    fn test_keyword_terms_with_len_preserves_nul() {
+        let mut schema_builder = Schema::builder();
+        crate::index_writer_v7::index_writer::schema_builder_add_field(
+            &mut schema_builder,
+            "keyword",
+            crate::data_type::TantivyDataType::Keyword,
+        );
+        schema_builder.enable_user_specified_doc_id();
+        let schema = schema_builder.build();
+        let keyword = schema.get_field("keyword").unwrap();
+        let index = Index::create_in_ram(schema);
+        let mut writer = index.writer(50_000_000).unwrap();
+        for (row, text) in ["a", "a\0b", "中文"].into_iter().enumerate() {
+            writer
+                .add_document_with_doc_id(row as u32, doc!(keyword => text))
+                .unwrap();
+        }
+        writer.commit().unwrap();
+        let mut reader = IndexReaderWrapper::from_index(Arc::new(index), set_bitset).unwrap();
+        for (row, text) in ["a", "a\0b", "中文"].into_iter().enumerate() {
+            // Exercise both individual TermQuery and batched TermSetQuery.
+            for count in [1, super::BATCH_THRESHOLD] {
+                let terms = vec![text.as_ptr() as *const std::ffi::c_char; count];
+                let lengths = vec![text.len(); count];
+                let mut hits: HashSet<u32> = HashSet::new();
+                let result = crate::index_reader_c::tantivy_terms_query_keyword_with_len(
+                    &mut reader as *mut _ as *mut c_void,
+                    terms.as_ptr(),
+                    lengths.as_ptr(),
+                    count,
+                    &mut hits as *mut _ as *mut c_void,
+                );
+                assert!(result.success);
+                assert_eq!(hits, HashSet::from([row as u32]));
+            }
+        }
     }
 }

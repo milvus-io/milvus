@@ -281,6 +281,12 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
                        std::vector<int32_t>& idx_to_offsets);
 
     void
+    BuildFromArrayData(const std::vector<FieldDataPtr>& field_datas,
+                       size_t total_num_rows,
+                       TargetBitmap& valid_bitset,
+                       std::vector<int32_t>& idx_to_offsets);
+
+    void
     BuildFromArrayDataNested(const std::vector<FieldDataPtr>& field_datas,
                              size_t total_num_rows,
                              TargetBitmap& valid_bitset,

@@ -57,6 +57,18 @@ MakeJsonCastContext(const storage::FileManagerContext& ctx,
     return modified;
 }
 
+inline storage::FileManagerContext
+MakeJsonArrayCastContext(const storage::FileManagerContext& ctx,
+                         const JsonCastType& cast_type) {
+    auto result = MakeJsonCastContext(ctx, cast_type);
+    if (cast_type.data_type() == JsonCastType::DataType::ARRAY) {
+        result.fieldDataMeta.field_schema.set_data_type(proto::schema::Array);
+        result.fieldDataMeta.field_schema.set_element_type(
+            static_cast<proto::schema::DataType>(cast_type.ToMilvusDataType()));
+    }
+    return result;
+}
+
 template <typename T, typename BaseIndex>
 class JsonScalarIndexWrapper : public BaseIndex {
     static constexpr bool kIsInverted =
@@ -71,7 +83,9 @@ class JsonScalarIndexWrapper : public BaseIndex {
                            const storage::FileManagerContext& original_ctx,
                            Args&&... args)
         : BaseIndex(std::forward<Args>(args)...,
-                    MakeJsonCastContext(original_ctx, cast_type)),
+                    kIsInverted
+                        ? MakeJsonCastContext(original_ctx, cast_type)
+                        : MakeJsonArrayCastContext(original_ctx, cast_type)),
           cast_type_(cast_type),
           nested_path_(nested_path),
           cast_function_(cast_function),

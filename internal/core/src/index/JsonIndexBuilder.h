@@ -43,16 +43,18 @@ using JsonErrorRecorder = std::function<void(const Json& json,
 
 using JsonNullAdder = std::function<void(int64_t offset)>;
 using JsonNonExistAdder = std::function<void(int64_t offset)>;
+using JsonArrayValidityAdder = std::function<void(int64_t offset)>;
 
 // Result of converting JSON field data to typed FieldData.
 struct JsonToTypedResult {
-    // Typed field data with nullable semantics. Rows where the path doesn't
-    // exist or the cast fails are marked as invalid.
+    // Scalar projections mark missing/failed casts invalid. HYBRID/SORT ARRAY
+    // projections are valid only where the path is an array, including empty
+    // arrays and arrays without elements matching the requested cast type.
     FieldDataPtr field_data;
 
     // Offsets of rows where the JSON path does not exist (row is null, path
-    // missing, or path value is null). This is a SUBSET of the invalid rows
-    // in field_data — rows that exist but fail to cast are NOT included.
+    // missing, or path value is null). Rows that exist but fail to cast are
+    // NOT included.
     // Used for EXISTS queries: Exists() should return true for rows where
     // the path exists, even if the value can't be cast to the index type.
     std::vector<size_t> non_exist_offsets;
@@ -113,7 +115,8 @@ ProcessJsonFieldData(
     JsonDataAdder<T> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder = {});
 
 extern template void
 ProcessJsonFieldData<bool>(
@@ -125,7 +128,8 @@ ProcessJsonFieldData<bool>(
     JsonDataAdder<bool> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder);
 
 extern template void
 ProcessJsonFieldData<int64_t>(
@@ -137,7 +141,8 @@ ProcessJsonFieldData<int64_t>(
     JsonDataAdder<int64_t> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder);
 
 extern template void
 ProcessJsonFieldData<double>(
@@ -149,7 +154,8 @@ ProcessJsonFieldData<double>(
     JsonDataAdder<double> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder);
 
 extern template void
 ProcessJsonFieldData<std::string>(
@@ -161,6 +167,7 @@ ProcessJsonFieldData<std::string>(
     JsonDataAdder<std::string> data_adder,
     JsonNullAdder null_adder,
     JsonNonExistAdder non_exist_adder,
-    JsonErrorRecorder error_recorder);
+    JsonErrorRecorder error_recorder,
+    JsonArrayValidityAdder array_validity_adder);
 
 }  // namespace milvus::index

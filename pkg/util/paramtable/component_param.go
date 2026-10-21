@@ -204,6 +204,7 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.ProxyCfg.RLSImportEnforcementEnabled,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
+		&p.DataCoordCfg.EnableArraySortIndex,
 	}
 }
 
@@ -5945,6 +5946,7 @@ type dataCoordConfig struct {
 	TargetVecIndexVersion          ParamItem `refreshable:"true"`
 	ForceRebuildScalarSegmentIndex ParamItem `refreshable:"true"`
 	TargetScalarIndexVersion       ParamItem `refreshable:"true"`
+	EnableArraySortIndex           ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
@@ -6754,7 +6756,7 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Key:          "dataCoord.index.hybridIndex.highCardinalityIndexType",
 		Version:      "2.6.10",
 		DefaultValue: "STL_SORT",
-		Doc:          "Index type for high cardinality fields in hybrid index. Does not apply to Array types (always INVERTED).",
+		Doc:          "Index type for high cardinality fields in hybrid index. Array types use their version-dependent SORT/INVERTED policy instead.",
 		Export:       false,
 	}
 	p.HybridIndexHighCardinalityIndexType.Init(base.mgr)
@@ -7294,6 +7296,22 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export: true,
 	}
 	p.TargetScalarIndexVersion.Init(base.mgr)
+
+	p.EnableArraySortIndex = ParamItem{
+		Key:          "dataCoord.enableArraySortIndex",
+		Version:      "3.0.4",
+		DefaultValue: "auto",
+		Export:       true,
+		Doc:          "Whether ordinary ARRAY HYBRID may select STL_SORT, ordinary ARRAY may use explicit STL_SORT, and typed JSON ARRAY paths may use HYBRID or STL_SORT. auto: enable once all registered online components reach 3.0.4 and the stability window elapses; false: keep ordinary ARRAY HYBRID high cardinality on INVERTED, downgrade affected AUTOINDEX requests to INVERTED, and reject explicit ARRAY STL_SORT or JSON ARRAY HYBRID/STL_SORT; true: force enable and bypass the software-version gate.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.0.4",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+	}
+	p.EnableArraySortIndex.Init(base.mgr)
 
 	p.SegmentFlushInterval = ParamItem{
 		Key:          "dataCoord.segmentFlushInterval",

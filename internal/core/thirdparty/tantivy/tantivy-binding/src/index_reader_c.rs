@@ -99,6 +99,25 @@ pub extern "C" fn tantivy_terms_query_keyword(
     unsafe { (*real).terms_query_keyword(terms, bitset).into() }
 }
 
+// Explicit UTF-8 byte lengths preserve embedded NUL in keyword terms.
+#[no_mangle]
+pub extern "C" fn tantivy_terms_query_keyword_with_len(
+    ptr: *mut c_void,
+    terms: *const *const c_char,
+    lengths: *const usize,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    let lengths = unsafe { convert_to_rust_slice!(lengths, len) };
+    let mut strings = Vec::with_capacity(len);
+    for (&term, &length) in terms.iter().zip(lengths) {
+        strings.push(ptr_to_str!(term, length));
+    }
+    unsafe { (*real).terms_query_keyword_strs(&strings, bitset).into() }
+}
+
 #[no_mangle]
 pub extern "C" fn tantivy_term_query_keyword_i64(
     ptr: *mut c_void,

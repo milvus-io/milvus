@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -152,6 +153,11 @@ ScalarIndexSort<T>::BuildWithFieldData(
     const std::vector<milvus::FieldDataPtr>& field_datas) {
     index_build_begin_ = std::chrono::system_clock::now();
 
+    if (is_array_field_ && !is_nested_index_) {
+        BuildWithArrayData(field_datas);
+        return;
+    }
+
     if (is_nested_index_) {
         BuildWithArrayDataNested(field_datas);
         return;
@@ -193,6 +199,50 @@ ScalarIndexSort<T>::BuildWithFieldData(
     idx_to_offsets_size_ = idx_to_offsets_.size();
     is_built_ = true;
 
+    setup_data_pointers();
+    ComputeByteSize();
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::BuildWithArrayData(const std::vector<FieldDataPtr>& datas) {
+    total_num_rows_ = 0;
+    constexpr uint64_t max_rows =
+        uint64_t{std::numeric_limits<int32_t>::max()} + 1;
+    for (const auto& data : datas) {
+        if (static_cast<uint64_t>(data->get_num_rows()) >
+            max_rows - total_num_rows_) {
+            ThrowInfo(DataTypeInvalid,
+                      "ARRAY sorted row count exceeds int32 posting domain");
+        }
+        total_num_rows_ += data->get_num_rows();
+    }
+    if (total_num_rows_ == 0) {
+        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build zero rows!");
+    }
+    data_.clear();
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    int64_t row = 0;
+    for (const auto& data : datas) {
+        for (int64_t i = 0; i < data->get_num_rows(); ++i, ++row) {
+            if (!data->is_valid(i)) {
+                continue;
+            }
+            // A valid empty array has no postings but is not NULL.
+            valid_bitset_.set(row);
+            const auto* array =
+                reinterpret_cast<const Array*>(data->RawValue(i));
+            for (int64_t j = 0; j < array->length(); ++j) {
+                data_.emplace_back(IndexStructure(array->get_data<T>(j), row));
+            }
+        }
+    }
+    std::sort(data_.begin(), data_.end());
+    // Scalar reverse lookup cannot reconstruct an ARRAY row.
+    idx_to_offsets_.assign(total_num_rows_, -1);
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
+    is_built_ = true;
     setup_data_pointers();
     ComputeByteSize();
 }
@@ -464,6 +514,9 @@ const TargetBitmap
 ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count());
+    if (Size() == 0) {
+        return bitset;
+    }
     for (size_t i = 0; i < n; ++i) {
         const auto target = IndexStructure<T>(*(values + i));
         auto lb = std::lower_bound(begin(), end(), target);
@@ -488,6 +541,9 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     // NotIn must keep null rows false, so start from the validity bitmap.
     auto bitset = valid_bitset_.clone();
+    if (Size() == 0) {
+        return bitset;
+    }
     for (size_t i = 0; i < n; ++i) {
         const auto target = IndexStructure<T>(*(values + i));
         auto lb = std::lower_bound(begin(), end(), target);
@@ -553,7 +609,7 @@ ScalarIndexSort<T>::Range(const T& value, const OpType op) {
     size_t hit_count = ub - lb;
     size_t total_count = Count();
 
-    if (hit_count > total_count / 2) {
+    if ((!is_array_field_ || is_nested_index_) && hit_count > total_count / 2) {
         // Most elements are in range, initialize with `valid_bitset` and set non-matching to false
         TargetBitmap bitset = valid_bitset_.clone();
         // Set elements before lb to false
@@ -612,7 +668,7 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
     size_t hit_count = ub - lb;
     size_t total_count = Count();
 
-    if (hit_count > total_count / 2) {
+    if ((!is_array_field_ || is_nested_index_) && hit_count > total_count / 2) {
         // Most elements are in range, initialize with `valid_bitset_` and set non-matching to false
         TargetBitmap bitset = valid_bitset_.clone();
         // Set elements before lb to false
@@ -637,6 +693,9 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
 template <typename T>
 std::optional<T>
 ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
+    if (is_array_field_ && !is_nested_index_) {
+        return std::nullopt;
+    }
     AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
     AssertInfo(is_built_, "index has not been built");
 

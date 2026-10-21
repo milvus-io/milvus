@@ -238,6 +238,8 @@ class HybridScalarIndex : public ScalarIndex<T> {
     // gates whether nested (struct sub-field) high-cardinality data may
     // select STL_SORT (see kNestedHybridStlSortMinVersion).
     int32_t scalar_index_version_{0};
+    // BuildWithFieldData callers also default to the legacy INVERTED family.
+    bool enable_array_sort_index_{false};
     proto::schema::DataType field_type_;
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};

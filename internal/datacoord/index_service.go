@@ -121,6 +121,48 @@ func setIndexParam(indexParams []*commonpb.KeyValuePair, key, value string) {
 	}
 }
 
+func isTypedJSONArrayIndex(indexType, castType string) bool {
+	if indexType != indexparamcheck.IndexHybrid && indexType != indexparamcheck.IndexSTLSORT {
+		return false
+	}
+	switch castType {
+	case "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR":
+		return true
+	default:
+		return false
+	}
+}
+
+func checkJSONArrayIndexEnabled(indexType, castType string) error {
+	if isTypedJSONArrayIndex(indexType, castType) &&
+		!Params.DataCoordCfg.EnableArraySortIndex.GetAsBool() {
+		return merr.WrapErrServiceNotReadyMsg("JSON ARRAY HYBRID and STL_SORT are disabled by the cluster software upgrade gate")
+	}
+	return nil
+}
+
+// Explicit SORT on ordinary ARRAY is a new logical index type for old readers.
+// Nested ARRAY SORT retains its existing admission rules.
+func checkOrdinaryArraySortIndex(field *schemapb.FieldSchema, indexType string, versions IndexEngineVersionManager) error {
+	if indexType != indexparamcheck.IndexSTLSORT || field.GetDataType() != schemapb.DataType_Array || typeutil.IsStructSubField(field.GetName()) {
+		return nil
+	}
+	if !Params.DataCoordCfg.EnableArraySortIndex.GetAsBool() {
+		return merr.WrapErrServiceNotReadyMsg("ARRAY STL_SORT is disabled by the cluster software upgrade gate")
+	}
+	if versions.ResolveScalarIndexVersion() < 3 {
+		return merr.WrapErrParameterInvalidMsg("ARRAY STL_SORT requires the existing packed scalar index format (version >= 3)")
+	}
+	return nil
+}
+
+func requiredJSONPathIndexVersion(indexType, castType string) int32 {
+	if isTypedJSONArrayIndex(indexType, castType) {
+		return 3 // Existing packed scalar index format; no new engine version.
+	}
+	return common.MinScalarIndexVersionForJsonPathMultiType
+}
+
 // CreateIndex create an index on collection.
 // Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
@@ -156,6 +198,16 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
 	}
 
+	if err := checkOrdinaryArraySortIndex(typeutil.GetField(schema, req.GetFieldID()), common.GetIndexType(req.GetIndexParams()), s.indexEngineVersionManager); err != nil {
+		if !req.GetIsAutoIndex() {
+			return merr.Status(err), nil
+		}
+		mlog.Info(ctx, "downgrading ARRAY AutoIndex to INVERTED",
+			mlog.FieldCollectionID(req.GetCollectionID()), mlog.FieldFieldID(req.GetFieldID()),
+			mlog.String("requestedType", common.GetIndexType(req.GetIndexParams())), mlog.Err(err))
+		setIndexParam(req.GetIndexParams(), common.IndexTypeKey, indexparamcheck.IndexINVERTED)
+	}
+
 	isJSON := isJSONField(schema, req.GetFieldID())
 	if isJSON {
 		// check json_path and json_cast_type exist
@@ -164,7 +216,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			mlog.Warn(context.TODO(), "get json path failed", mlog.Err(err))
 			return merr.Status(err), nil
 		}
-		_, err = getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
+		castType, err := getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
 		if err != nil {
 			mlog.Warn(context.TODO(), "get json cast type failed", mlog.Err(err))
 			return merr.Status(err), nil
@@ -179,30 +231,41 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
 
 		// JSON path index on STL_SORT, BITMAP, HYBRID requires scalar index
-		// engine version >= MinScalarIndexVersionForJsonPathMultiType.
+		// engine version >= the existing scalar/packed-array format threshold.
 		//
 		// For AutoIndex requests, transparently downgrade the requested type
 		// to INVERTED if the cluster version is too low — this keeps AutoIndex
 		// creating *some* usable index during rolling upgrade instead of
 		// failing outright. For explicit user requests, return an error.
 		indexType := common.GetIndexType(req.GetIndexParams())
+		if err := checkJSONArrayIndexEnabled(indexType, castType); err != nil {
+			if !req.GetIsAutoIndex() {
+				return merr.Status(err), nil
+			}
+			mlog.Info(ctx, "downgrading JSON ARRAY AutoIndex to INVERTED because the software upgrade gate is closed",
+				mlog.FieldCollectionID(req.GetCollectionID()), mlog.FieldFieldID(req.GetFieldID()),
+				mlog.String("requestedType", indexType), mlog.Err(err))
+			indexType = indexparamcheck.IndexINVERTED
+			setIndexParam(req.GetIndexParams(), common.IndexTypeKey, indexType)
+		}
 		if indexType == indexparamcheck.IndexSTLSORT ||
 			indexType == indexparamcheck.IndexBitmap ||
 			indexType == indexparamcheck.IndexHybrid {
 			resolved := s.indexEngineVersionManager.ResolveScalarIndexVersion()
-			if resolved < common.MinScalarIndexVersionForJsonPathMultiType {
+			required := requiredJSONPathIndexVersion(indexType, castType)
+			if resolved < required {
 				if req.GetIsAutoIndex() {
-					mlog.Info(context.TODO(), "downgrading JSON AutoIndex to INVERTED because cluster scalar index version is too low",
+					mlog.Info(ctx, "downgrading JSON AutoIndex to INVERTED because cluster scalar index version is too low",
 						mlog.String("requestedType", indexType),
 						mlog.Int32("resolvedVersion", resolved),
-						mlog.Int32("requiredVersion", common.MinScalarIndexVersionForJsonPathMultiType))
+						mlog.Int32("requiredVersion", required))
 					setIndexParam(req.GetIndexParams(), common.IndexTypeKey,
 						indexparamcheck.IndexINVERTED)
 				} else {
 					err := merr.WrapErrParameterInvalidMsg(
 						"JSON path index with %s requires scalar index engine version >= %d, current resolved version: %d",
-						indexType, common.MinScalarIndexVersionForJsonPathMultiType, resolved)
-					mlog.Warn(context.TODO(), "scalar index engine version too low for JSON path index", mlog.Err(err))
+						indexType, required, resolved)
+					mlog.Warn(ctx, "scalar index engine version too low for JSON path index", mlog.Err(err))
 					return merr.Status(err), nil
 				}
 			}

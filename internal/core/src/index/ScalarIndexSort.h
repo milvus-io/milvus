@@ -181,6 +181,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     void
     BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
 
+    void
+    BuildWithArrayData(const std::vector<FieldDataPtr>& datas);
+
     bool
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
 
@@ -237,10 +240,10 @@ class ScalarIndexSort : public ScalarIndex<T> {
         if (is_mmap_) {
             data_ptr_ = reinterpret_cast<IndexStructure<T>*>(mmap_data_);
             size_ = data_size_ / sizeof(IndexStructure<T>);
-            end_ptr_ = data_ptr_ + size_;
+            end_ptr_ = size_ == 0 ? data_ptr_ : data_ptr_ + size_;
         } else {
             data_ptr_ = data_.data();
-            end_ptr_ = data_ptr_ + data_.size();
+            end_ptr_ = data_.empty() ? data_ptr_ : data_ptr_ + data_.size();
             size_ = data_.size();
         }
     }

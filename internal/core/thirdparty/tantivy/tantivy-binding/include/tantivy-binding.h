@@ -174,6 +174,12 @@ RustResult tantivy_terms_query_keyword(void *ptr,
                                        uintptr_t len,
                                        void *bitset);
 
+RustResult tantivy_terms_query_keyword_with_len(void *ptr,
+                                                const char *const *terms,
+                                                const uintptr_t *lengths,
+                                                uintptr_t len,
+                                                void *bitset);
+
 RustResult tantivy_term_query_keyword_i64(void *ptr, const char *term);
 
 RustResult tantivy_lower_bound_range_query_i64(void *ptr,

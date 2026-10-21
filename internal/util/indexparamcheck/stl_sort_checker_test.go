@@ -24,11 +24,30 @@ func Test_STLSORTIndexChecker(t *testing.T) {
 	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}))
 	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float}))
 	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[name]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar}))
+	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[time]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Timestamptz}))
 	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[flag]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool}))
 	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[meta]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_JSON}))
 
-	// regular Array field (not a struct sub-field) should still be rejected
-	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}))
+	for _, elementType := range []schemapb.DataType{
+		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
+		schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float,
+		schemapb.DataType_Double, schemapb.DataType_VarChar,
+	} {
+		assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{
+			Name: "values", DataType: schemapb.DataType_Array, ElementType: elementType,
+		}), elementType.String())
+	}
+	for _, unsupported := range []schemapb.DataType{
+		schemapb.DataType_JSON, schemapb.DataType_Array, schemapb.DataType_ArrayOfStruct,
+		schemapb.DataType_FloatVector, schemapb.DataType_Geometry, schemapb.DataType_Timestamptz,
+	} {
+		assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{
+			Name: "values", DataType: schemapb.DataType_Array, ElementType: unsupported,
+		}), unsupported.String())
+	}
+	for _, unsupported := range []schemapb.DataType{schemapb.DataType_ArrayOfStruct, schemapb.DataType_FloatVector, schemapb.DataType_Geometry} {
+		assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{DataType: unsupported}))
+	}
 
 	// JSON path index: CheckTrain validation
 	assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
@@ -48,5 +67,19 @@ func Test_STLSORTIndexChecker(t *testing.T) {
 	// unsupported cast type for STL_SORT
 	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
 		"json_cast_type": "BOOL", "json_path": "/flag",
+	}))
+	for _, cast := range []string{"ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"} {
+		params := map[string]string{"json_cast_type": cast, "json_path": "/values"}
+		assert.NoError(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, params))
+		delete(params, "json_path")
+		assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, params))
+		params["json_path"] = "/values"
+		for _, function := range []string{"STRING_TO_DOUBLE", "", "UNKNOWN"} {
+			params["json_cast_function"] = function
+			assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, params))
+		}
+	}
+	assert.Error(t, c.CheckTrain(schemapb.DataType_JSON, schemapb.DataType_None, map[string]string{
+		"json_cast_type": "JSON", "json_path": "/object",
 	}))
 }

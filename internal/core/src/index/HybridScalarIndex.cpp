@@ -181,6 +181,9 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
+            if (!data->is_valid(i)) {
+                continue;
+            }
             auto array =
                 reinterpret_cast<const milvus::Array*>(data->RawValue(i));
             for (size_t j = 0; j < array->length(); ++j) {
@@ -194,19 +197,16 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
             }
         }
     }
-    // For array types, always use BITMAP for low cardinality. For high
-    // cardinality, nested indexes index the flattened scalar elements, so the
-    // sort index can serve them and STL_SORT replaces INVERTED once the whole
-    // cluster is guaranteed to run scalar_index_version_ >=
-    // kNestedHybridStlSortMinVersion; below that, an older reader's
-    // ScalarIndexSort predates nested-index support and cannot load a nested
-    // STL_SORT physical index. Regular array fields keep INVERTED because the
-    // sort index cannot handle array values. These are hardcoded and config
-    // parameters don't apply to arrays.
+    // Ordinary ARRAY postings use parent rows; nested indexes use flattened
+    // element offsets. Ordinary SORT also requires the cluster software gate.
+    // Configurable scalar low/high index types do not apply to ARRAY.
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
+        const auto min_sort_version = is_nested_index_
+                                          ? kNestedHybridStlSortMinVersion
+                                          : kArrayHybridStlSortMinVersion;
         internal_index_type_ =
-            (is_nested_index_ &&
-             scalar_index_version_ >= kNestedHybridStlSortMinVersion)
+            scalar_index_version_ >= min_sort_version &&
+                    (is_nested_index_ || enable_array_sort_index_)
                 ? ScalarIndexType::STLSORT
                 : ScalarIndexType::INVERTED;
     } else {
@@ -309,6 +309,9 @@ HybridScalarIndex<T>::Build(const Config& config) {
         GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
             .value_or(kLastVersionWithoutHybridIndexConfig);
     scalar_index_version_ = scalar_index_version;
+    enable_array_sort_index_ =
+        GetValueFromConfig<bool>(config, ENABLE_ARRAY_SORT_INDEX)
+            .value_or(false);
 
     if (scalar_index_version >= kHybridIndexConfigVersion) {
         // Version 3+: Use configurable index types

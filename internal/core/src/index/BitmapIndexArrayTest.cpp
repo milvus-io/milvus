@@ -19,10 +19,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <iosfwd>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "common/Array.h"
@@ -1821,9 +1825,8 @@ MakeStringArrayFieldData(const std::vector<ScalarFieldProto>& scalar_arrays) {
 // Nested (struct sub-field) HYBRID indexes flatten scalar elements, so the
 // sort index can serve high-cardinality data: STL_SORT must replace INVERTED
 // once distinct values reach the bitmap cardinality limit (default 100) AND
-// scalar_index_version_ >= kNestedHybridStlSortMinVersion. Regular array
-// fields keep INVERTED regardless of version because the sort index cannot
-// handle array values.
+// scalar_index_version_ >= kNestedHybridStlSortMinVersion. Ordinary arrays use
+// parent-row postings from kArrayHybridStlSortMinVersion.
 TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
     auto root_path =
         fmt::format("{}/hybrid_nested_high_card_stlsort", TestLocalPath);
@@ -1840,13 +1843,13 @@ TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
                   std::vector<FieldDataPtr>{high_card_field_data}),
               ScalarIndexType::STLSORT);
 
-    // Regular (non-nested) array fields must stay on INVERTED at high
-    // cardinality, even at/above the nested STL_SORT version threshold.
+    // Ordinary arrays additionally require the software gate.
     TestHybridScalarIndexString regular(7, ctx, false);
     regular.scalar_index_version_ = kNestedHybridStlSortMinVersion;
+    regular.enable_array_sort_index_ = true;
     EXPECT_EQ(regular.SelectIndexBuildTypePublic(
                   std::vector<FieldDataPtr>{high_card_field_data}),
-              ScalarIndexType::INVERTED);
+              ScalarIndexType::STLSORT);
 
     // Low cardinality keeps BITMAP for both nested and regular arrays.
     auto low_card_field_data =
@@ -1892,4 +1895,269 @@ TEST(BitmapIndexArrayNestedTest,
     }
 
     boost::filesystem::remove_all(root_path);
+}
+
+namespace {
+
+template <typename T>
+class OrdinaryArrayHybridForTest : public HybridScalarIndex<T> {
+ public:
+    using HybridScalarIndex<T>::HybridScalarIndex;
+
+    ScalarIndexType
+    SelectRows(const std::vector<FieldDataPtr>& fields) {
+        return this->SelectIndexBuildType(fields);
+    }
+};
+
+template <typename T>
+ScalarFieldProto
+OrdinaryArrayValues(std::initializer_list<T> values) {
+    ScalarFieldProto result;
+    if constexpr (std::is_same_v<T, bool>) {
+        auto* data = result.mutable_bool_data();
+        for (auto value : values) data->add_data(value);
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+        auto* data = result.mutable_long_data();
+        for (auto value : values) data->add_data(value);
+    } else if constexpr (std::is_integral_v<T>) {
+        auto* data = result.mutable_int_data();
+        for (auto value : values) data->add_data(value);
+    } else if constexpr (std::is_same_v<T, float>) {
+        auto* data = result.mutable_float_data();
+        for (auto value : values) data->add_data(value);
+    } else if constexpr (std::is_same_v<T, double>) {
+        auto* data = result.mutable_double_data();
+        for (auto value : values) data->add_data(value);
+    } else {
+        auto* data = result.mutable_string_data();
+        for (const auto& value : values) data->add_data(value);
+    }
+    return result;
+}
+
+template <typename T>
+void
+CheckOrdinaryArrayHybrid(DataType element_type, const T& a, const T& b) {
+    const auto root = fmt::format("{}/ordinary_array_sort_{}",
+                                  TestLocalPath,
+                                  static_cast<int>(element_type));
+    auto ctx = MakeNestedCtx(root,
+                             static_cast<proto::schema::DataType>(element_type),
+                             true,
+                             3200 + static_cast<int>(element_type));
+    ctx.fieldDataMeta.field_schema.set_name("array");
+    std::vector<Array> arrays{Array(OrdinaryArrayValues<T>({a, b, a})),
+                              Array(OrdinaryArrayValues<T>({})),
+                              Array(OrdinaryArrayValues<T>({b})),
+                              Array(OrdinaryArrayValues<T>({a}))};
+    const uint8_t validity = 0x0b;
+    auto field = storage::CreateFieldData(DataType::ARRAY, element_type, true);
+    field->FillFieldData(arrays.data(), &validity, arrays.size(), 0);
+    for (const int version : {kArrayHybridStlSortMinVersion - 1,
+                              kArrayHybridStlSortMinVersion,
+                              kNestedHybridStlSortMinVersion}) {
+        for (const int limit : {2, 3}) {
+            for (const bool gate : {false, true}) {
+                OrdinaryArrayHybridForTest<T> index(7, ctx, false);
+                EXPECT_FALSE(index.enable_array_sort_index_);
+                index.scalar_index_version_ = version;
+                index.enable_array_sort_index_ = gate;
+                index.bitmap_index_cardinality_limit_ = limit;
+                EXPECT_EQ(index.SelectRows({field}),
+                          limit == 3 ? ScalarIndexType::BITMAP
+                          : !gate || version < kArrayHybridStlSortMinVersion
+                              ? ScalarIndexType::INVERTED
+                              : ScalarIndexType::STLSORT);
+            }
+        }
+    }
+
+    CreateIndexInfo sort_info;
+    sort_info.field_type = DataType::ARRAY;
+    sort_info.field_name = "array";
+    sort_info.index_type = ASCENDING_SORT;
+    sort_info.scalar_index_engine_version = kArrayHybridStlSortMinVersion;
+    sort_info.tantivy_index_version = 7;
+    auto payload = std::make_shared<storage::PayloadReader>(field);
+    storage::InsertData insert(payload);
+    insert.SetFieldDataMeta(ctx.fieldDataMeta);
+    insert.SetTimestamps(0, 100);
+    auto source_bytes = insert.Serialize(storage::StorageType::Remote);
+    const auto source_path = root + "/insert/0";
+    ctx.chunkManagerPtr->Write(
+        source_path, source_bytes.data(), source_bytes.size());
+    for (const auto& [explicit_sort, gate] : {std::pair{false, false},
+                                              std::pair{false, true},
+                                              std::pair{true, false}}) {
+        SCOPED_TRACE(explicit_sort);
+        SCOPED_TRACE(gate);
+        auto info = sort_info;
+        std::unique_ptr<ScalarIndex<T>> built;
+        if (explicit_sort) {
+            auto base =
+                index::IndexFactory::GetInstance().CreateIndex(info, ctx);
+            auto* scalar = dynamic_cast<ScalarIndex<T>*>(base.get());
+            ASSERT_NE(scalar, nullptr);
+            scalar->BuildWithFieldData({field});
+            ASSERT_EQ(scalar->GetIndexType(), ScalarIndexType::STLSORT);
+            base.release();
+            built.reset(scalar);
+        } else {
+            info.index_type = HYBRID_INDEX_TYPE;
+            auto hybrid =
+                std::make_unique<OrdinaryArrayHybridForTest<T>>(7, ctx, false);
+            Config build_config{
+                {INSERT_FILES_KEY, std::vector<std::string>{source_path}},
+                {INDEX_NUM_ROWS_KEY, arrays.size()},
+                {BITMAP_INDEX_CARDINALITY_LIMIT, "2"},
+                {SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion},
+                {ENABLE_ARRAY_SORT_INDEX, gate ? "true" : "false"}};
+            hybrid->Build(build_config);
+            ASSERT_EQ(
+                hybrid->internal_index_type_,
+                gate ? ScalarIndexType::STLSORT : ScalarIndexType::INVERTED);
+            built = std::move(hybrid);
+        }
+        auto stats = built->UploadUnified({});
+        for (const bool mmap : {false, true}) {
+            SCOPED_TRACE(mmap);
+            Config config{{INDEX_FILES, stats->GetIndexFiles()},
+                          {ENABLE_MMAP, mmap}};
+            if (mmap)
+                config[MMAP_FILE_PATH] = root + "/mmap-array";
+            auto base =
+                index::IndexFactory::GetInstance().CreateIndex(info, ctx);
+            auto* loaded = dynamic_cast<ScalarIndex<T>*>(base.get());
+            ASSERT_NE(loaded, nullptr);
+            loaded->LoadUnified(config);
+            ASSERT_EQ(loaded->Count(), 4);
+            EXPECT_FALSE(loaded->IsNestedIndex());
+            EXPECT_FALSE(loaded->HasRawData());
+            if (explicit_sort || gate)
+                EXPECT_FALSE(loaded->Reverse_Lookup(0).has_value());
+            auto nulls = loaded->IsNull();
+            EXPECT_EQ(nulls.count(), 1);
+            EXPECT_TRUE(nulls[2]);
+            EXPECT_EQ(loaded->IsNotNull().count(), 3);
+            auto hits = loaded->In(1, &a);
+            EXPECT_EQ(hits.count(), 2);
+            EXPECT_TRUE(hits[0]);
+            EXPECT_TRUE(hits[3]);
+            auto all = hits.clone();
+            all &= loaded->In(1, &b);
+            EXPECT_EQ(all.count(), 1);
+            EXPECT_TRUE(all[0]);
+            auto miss = loaded->NotIn(1, &a);
+            EXPECT_EQ(miss.count(), 1);
+            EXPECT_TRUE(miss[1]);
+            // Row zero has both a matching and a non-matching element.
+            EXPECT_EQ(loaded->Range(a, true, a, true).count(), 2);
+            EXPECT_EQ(loaded->Range(a, OpType::LessEqual).count(), 2);
+        }
+    }
+
+    // Force the physical sorted builder to cover an entirely empty posting
+    // list. HYBRID itself correctly selects BITMAP for this cardinality.
+    std::vector<Array> empty_arrays{Array(OrdinaryArrayValues<T>({})),
+                                    Array(OrdinaryArrayValues<T>({}))};
+    const uint8_t empty_validity = 1;
+    auto empty = storage::CreateFieldData(DataType::ARRAY, element_type, true);
+    empty->FillFieldData(empty_arrays.data(), &empty_validity, 2, 0);
+    std::shared_ptr<ScalarIndex<T>> empty_built;
+    if constexpr (std::is_same_v<T, std::string>) {
+        empty_built = std::make_shared<StringIndexSort>(ctx);
+    } else {
+        empty_built = std::make_shared<ScalarIndexSort<T>>(ctx);
+    }
+    empty_built->BuildWithFieldData({empty});
+    auto empty_stats = empty_built->UploadUnified({});
+    for (const bool mmap : {false, true}) {
+        Config config{{INDEX_FILES, empty_stats->GetIndexFiles()},
+                      {ENABLE_MMAP, mmap}};
+        if (mmap)
+            config[MMAP_FILE_PATH] = root + "/mmap-empty-array";
+        std::shared_ptr<ScalarIndex<T>> loaded;
+        if constexpr (std::is_same_v<T, std::string>) {
+            loaded = std::make_shared<StringIndexSort>(ctx);
+        } else {
+            loaded = std::make_shared<ScalarIndexSort<T>>(ctx);
+        }
+        loaded->LoadUnified(config);
+        ASSERT_EQ(loaded->Count(), 2);
+        EXPECT_TRUE(loaded->IsNotNull()[0]);
+        EXPECT_TRUE(loaded->IsNull()[1]);
+        EXPECT_EQ(loaded->In(1, &a).count(), 0);
+        EXPECT_EQ(loaded->NotIn(1, &a).count(), 1);
+    }
+    boost::filesystem::remove_all(root);
+}
+
+}  // namespace
+
+TEST(OrdinaryArrayHybridSortTest, AllElementTypesAndPackedReloads) {
+    CheckOrdinaryArrayHybrid<bool>(DataType::BOOL, false, true);
+    CheckOrdinaryArrayHybrid<int8_t>(DataType::INT8, 1, 100);
+    CheckOrdinaryArrayHybrid<int16_t>(DataType::INT16, 1, 100);
+    CheckOrdinaryArrayHybrid<int32_t>(DataType::INT32, 1, 100);
+    CheckOrdinaryArrayHybrid<int64_t>(DataType::INT64, 1, 100);
+    CheckOrdinaryArrayHybrid<float>(DataType::FLOAT, 1, 100);
+    CheckOrdinaryArrayHybrid<double>(DataType::DOUBLE, 1, 100);
+    CheckOrdinaryArrayHybrid<std::string>(DataType::VARCHAR, "a", "z");
+}
+
+namespace {
+
+class CountOnlyArrayData : public FieldData<Array> {
+ public:
+    explicit CountOnlyArrayData(int64_t rows)
+        : FieldData<Array>(DataType::ARRAY, false), rows_(rows) {
+    }
+
+    int64_t
+    get_num_rows() const override {
+        return rows_;
+    }
+
+ private:
+    int64_t rows_;
+};
+
+}  // namespace
+
+TEST(OrdinaryArrayHybridSortTest, RejectsUnrepresentableParentOffsets) {
+    auto root = fmt::format("{}/ordinary_array_sort_row_limit", TestLocalPath);
+    auto ctx = MakeNestedCtx(root, proto::schema::DataType::Int64, false, 3290);
+    ctx.fieldDataMeta.field_schema.set_name("array");
+    const int64_t numeric_limit =
+        int64_t{std::numeric_limits<int32_t>::max()} + 1;
+    const int64_t string_limit =
+        int64_t{std::numeric_limits<uint32_t>::max()} + 1;
+    for (const bool split : {false, true}) {
+        SCOPED_TRACE(split);
+        auto fields = [split](int64_t limit) {
+            std::vector<FieldDataPtr> result;
+            result.push_back(std::make_shared<CountOnlyArrayData>(
+                split ? limit : limit + 1));
+            if (split)
+                result.push_back(std::make_shared<CountOnlyArrayData>(1));
+            return result;
+        };
+        auto check = [](auto& index, const std::vector<FieldDataPtr>& data) {
+            try {
+                index.BuildWithFieldData(data);
+                FAIL() << "an unrepresentable parent offset must be rejected";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::DataTypeInvalid);
+            }
+        };
+        ScalarIndexSort<int64_t> numeric(ctx);
+        check(numeric, fields(numeric_limit));
+        auto string_ctx = ctx;
+        string_ctx.fieldDataMeta.field_schema.set_element_type(
+            proto::schema::DataType::VarChar);
+        StringIndexSort strings(string_ctx);
+        check(strings, fields(string_limit));
+    }
+    boost::filesystem::remove_all(root);
 }

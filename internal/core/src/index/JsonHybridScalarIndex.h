@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/FieldDataInterface.h"
+#include "common/Consts.h"
 #include "common/JsonCastFunction.h"
 #include "common/JsonCastType.h"
 #include "index/HybridScalarIndex.h"
@@ -47,8 +48,9 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
                           const proto::schema::FieldSchema& json_schema,
                           uint32_t tantivy_index_version,
                           const storage::FileManagerContext& original_ctx)
-        : HybridScalarIndex<T>(tantivy_index_version,
-                               MakeJsonCastContext(original_ctx, cast_type)),
+        : HybridScalarIndex<T>(
+              tantivy_index_version,
+              MakeJsonArrayCastContext(original_ctx, cast_type)),
           cast_type_(cast_type),
           nested_path_(nested_path),
           cast_function_(cast_function),
@@ -59,6 +61,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) override {
+        const bool array =
+            cast_type_.data_type() == JsonCastType::DataType::ARRAY;
         auto result = ConvertJsonToTypedFieldData<T>(field_datas,
                                                      json_schema_,
                                                      nested_path_,
@@ -68,19 +72,23 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
 
         auto n = result.field_data->get_num_rows();
         int64_t total_rows = n;
-        std::set<T> distinct_vals;
-        for (size_t i = 0; i < n; ++i) {
-            if (result.field_data->is_valid(i)) {
-                auto val =
-                    reinterpret_cast<const T*>(result.field_data->RawValue(i));
-                distinct_vals.insert(*val);
-                if (distinct_vals.size() >=
-                    this->bitmap_index_cardinality_limit_) {
-                    break;
+        if (array) {
+            this->SelectIndexBuildType({result.field_data});
+        } else {
+            std::set<T> distinct_vals;
+            for (size_t i = 0; i < n; ++i) {
+                if (result.field_data->is_valid(i)) {
+                    auto val = reinterpret_cast<const T*>(
+                        result.field_data->RawValue(i));
+                    distinct_vals.insert(*val);
+                    if (distinct_vals.size() >=
+                        this->bitmap_index_cardinality_limit_) {
+                        break;
+                    }
                 }
             }
+            this->SelectIndexTypeByCardinality(distinct_vals.size());
         }
-        this->SelectIndexTypeByCardinality(distinct_vals.size());
         this->BuildInternal({result.field_data});
 
         this->is_built_ = true;
@@ -100,6 +108,10 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         auto scalar_index_version =
             GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
                 .value_or(kLastVersionWithoutHybridIndexConfig);
+        this->scalar_index_version_ = scalar_index_version;
+        this->enable_array_sort_index_ =
+            GetValueFromConfig<bool>(config, ENABLE_ARRAY_SORT_INDEX)
+                .value_or(false);
 
         if (scalar_index_version >= kHybridIndexConfigVersion) {
             this->low_cardinality_index_type_ =
@@ -113,37 +125,7 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
 
         auto json_field_datas =
             storage::CacheRawDataAndFillMissing(json_file_manager_, config);
-
-        auto result = ConvertJsonToTypedFieldData<T>(json_field_datas,
-                                                     json_schema_,
-                                                     nested_path_,
-                                                     cast_type_,
-                                                     cast_function_);
-
-        non_exist_offsets_ = std::move(result.non_exist_offsets);
-
-        auto n = result.field_data->get_num_rows();
-        int64_t total_rows = n;
-        // Do cardinality counting that respects is_valid(), unlike the base
-        // class SelectBuildTypeForPrimitiveType which counts invalid rows too.
-        std::set<T> distinct_vals;
-        for (size_t i = 0; i < n; ++i) {
-            if (result.field_data->is_valid(i)) {
-                auto val =
-                    reinterpret_cast<const T*>(result.field_data->RawValue(i));
-                distinct_vals.insert(*val);
-                if (distinct_vals.size() >=
-                    this->bitmap_index_cardinality_limit_) {
-                    break;
-                }
-            }
-        }
-        this->SelectIndexTypeByCardinality(distinct_vals.size());
-        this->BuildInternal({result.field_data});
-
-        this->is_built_ = true;
-        this->ComputeByteSize();
-        BuildExistsBitset(total_rows);
+        BuildWithFieldData(json_field_datas);
     }
 
     TargetBitmap

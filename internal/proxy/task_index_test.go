@@ -963,39 +963,47 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create index on array field", func(t *testing.T) {
-		cit3 := &createIndexTask{
-			Condition: nil,
-			req: &milvuspb.CreateIndexRequest{
-				Base:           nil,
-				DbName:         "",
-				CollectionName: "",
-				FieldName:      "",
-				ExtraParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.IndexTypeKey,
-						Value: "STL_SORT",
+		for _, tc := range []struct {
+			elementType schemapb.DataType
+			supported   bool
+		}{
+			{schemapb.DataType_Bool, true},
+			{schemapb.DataType_Int8, true},
+			{schemapb.DataType_Int16, true},
+			{schemapb.DataType_Int32, true},
+			{schemapb.DataType_Int64, true},
+			{schemapb.DataType_Float, true},
+			{schemapb.DataType_Double, true},
+			{schemapb.DataType_VarChar, true},
+			{schemapb.DataType_JSON, false},
+			{schemapb.DataType_Array, false},
+			{schemapb.DataType_ArrayOfStruct, false},
+			{schemapb.DataType_FloatVector, false},
+			{schemapb.DataType_Geometry, false},
+			{schemapb.DataType_Timestamptz, false},
+		} {
+			t.Run(tc.elementType.String(), func(t *testing.T) {
+				cit := &createIndexTask{
+					req: &milvuspb.CreateIndexRequest{
+						ExtraParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT},
+						},
 					},
-				},
-				IndexName: "",
-			},
-			ctx:            nil,
-			mixCoord:       nil,
-			result:         nil,
-			isAutoIndex:    false,
-			newIndexParams: nil,
-			newTypeParams:  nil,
-			collectionID:   0,
-			fieldSchema: &schemapb.FieldSchema{
-				FieldID:      101,
-				Name:         "FieldID",
-				IsPrimaryKey: false,
-				Description:  "field no.1",
-				DataType:     schemapb.DataType_Array,
-				ElementType:  schemapb.DataType_Int64,
-			},
+					fieldSchema: &schemapb.FieldSchema{
+						FieldID: 101, Name: "values", DataType: schemapb.DataType_Array,
+						ElementType: tc.elementType,
+					},
+				}
+				err := cit.parseIndexParams(context.Background())
+				if tc.supported {
+					assert.NoError(t, err)
+					assert.Equal(t, indexparamcheck.IndexSTLSORT, common.GetIndexType(cit.newIndexParams))
+					assert.False(t, cit.isAutoIndex)
+				} else {
+					assert.Error(t, err)
+				}
+			})
 		}
-		err := cit3.parseIndexParams(context.TODO())
-		assert.Error(t, err)
 	})
 
 	t.Run("pass vector index type on scalar field", func(t *testing.T) {

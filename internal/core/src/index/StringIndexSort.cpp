@@ -241,6 +241,14 @@ StringIndexSort::BuildWithFieldData(
         }
     } else {
         for (const auto& data : field_datas) {
+            constexpr uint64_t max_rows =
+                uint64_t{std::numeric_limits<uint32_t>::max()} + 1;
+            if (is_array_field_ && static_cast<uint64_t>(data->get_num_rows()) >
+                                       max_rows - total_num_rows_) {
+                ThrowInfo(
+                    DataTypeInvalid,
+                    "ARRAY sorted row count exceeds uint32 posting domain");
+            }
             total_num_rows_ += data->get_num_rows();
         }
     }
@@ -258,6 +266,10 @@ StringIndexSort::BuildWithFieldData(
     if (is_nested_index_) {
         static_cast<StringIndexSortMemoryImpl*>(impl_.get())
             ->BuildFromArrayDataNested(
+                field_datas, total_num_rows_, valid_bitset_, idx_to_offsets_);
+    } else if (is_array_field_) {
+        static_cast<StringIndexSortMemoryImpl*>(impl_.get())
+            ->BuildFromArrayData(
                 field_datas, total_num_rows_, valid_bitset_, idx_to_offsets_);
     } else {
         static_cast<StringIndexSortMemoryImpl*>(impl_.get())
@@ -523,6 +535,9 @@ StringIndexSort::PatternMatch(const std::string& pattern,
 
 std::optional<std::string>
 StringIndexSort::Reverse_Lookup(size_t offset) const {
+    if (is_array_field_ && !is_nested_index_) {
+        return std::nullopt;
+    }
     assert(impl_ != nullptr);
     return impl_->Reverse_Lookup(offset,
                                  total_num_rows_,
@@ -839,6 +854,33 @@ StringIndexSortMemoryImpl::BuildFromFieldData(
         }
     }
 
+    BuildFromMap(std::move(map), total_num_rows, idx_to_offsets);
+}
+
+void
+StringIndexSortMemoryImpl::BuildFromArrayData(
+    const std::vector<FieldDataPtr>& field_datas,
+    size_t total_num_rows,
+    TargetBitmap& valid_bitset,
+    std::vector<int32_t>& idx_to_offsets) {
+    std::map<std::string, PostingList> map;
+    size_t row_id = 0;
+    for (const auto& data : field_datas) {
+        for (size_t i = 0; i < data->get_num_rows(); ++i, ++row_id) {
+            if (!data->is_valid(i)) {
+                continue;
+            }
+            valid_bitset.set(row_id);
+            const auto* array =
+                reinterpret_cast<const Array*>(data->RawValue(i));
+            for (size_t j = 0; j < array->length(); ++j) {
+                auto& postings = map[array->get_data<std::string>(j)];
+                if (postings.empty() || postings.back() != row_id) {
+                    postings.push_back(static_cast<uint32_t>(row_id));
+                }
+            }
+        }
+    }
     BuildFromMap(std::move(map), total_num_rows, idx_to_offsets);
 }
 

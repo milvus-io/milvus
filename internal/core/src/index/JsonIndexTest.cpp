@@ -10,10 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -22,6 +24,7 @@
 #include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
 #include <simdjson.h>
+#include <nlohmann/json.hpp>
 
 #include "NamedType/named_type_impl.hpp"
 #include "bitset/bitset.h"
@@ -39,10 +42,12 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/JsonScalarIndexWrapper.h"
+#include "index/JsonHybridScalarIndex.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "pb/plan.pb.h"
@@ -55,6 +60,8 @@
 #include "simdjson/error.h"
 #include "simdjson/padded_string.h"
 #include "storage/FileManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -614,4 +621,277 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
     EXPECT_EQ(stats.count, json_raw_data.size());
     EXPECT_EQ(stats.exists_count, 10);
     EXPECT_EQ(stats.null_count, 20);
+}
+
+namespace {
+
+template <typename T>
+void
+CheckJsonArrayHybrid(const std::string& cast, const T& first, const T& second) {
+    using JsonValue = nlohmann::json;
+    const JsonValue foreign = std::is_same_v<T, std::string>
+                                  ? JsonValue(123)
+                                  : JsonValue("not-the-cast-type");
+    std::vector<JsonValue> rows{
+        {{"a", JsonValue::array({first, second, first})}},
+        {{"a", JsonValue::array()}},
+        {{"a", JsonValue::array({second})}},
+        JsonValue::object(),
+        {{"a", nullptr}},
+        {{"a", 42}},
+        {{"a", JsonValue::array({foreign, second})}},
+        {{"a", JsonValue::array({first})}},
+        {{"a",
+          JsonValue::array(
+              {foreign, nullptr, JsonValue::object(), JsonValue::array()})}}};
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = schema->AddDebugField("json", DataType::JSON, true);
+    auto field_meta =
+        segcore::gen_field_meta(1, 2, 3, field_id.get(), DataType::JSON);
+    field_meta.field_schema.set_nullable(true);
+    auto index_meta = gen_index_meta(3, field_id.get(), 4300, 4300);
+    auto root = (boost::filesystem::path(TestLocalPath) /
+                 boost::filesystem::unique_path("json-array-hybrid-%%%%-%%%%"))
+                    .string();
+    auto storage_config = gen_local_storage_config(root);
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+    arrow::BinaryBuilder source;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (i == 2) {
+            ASSERT_TRUE(source.AppendNull().ok());
+        } else {
+            ASSERT_TRUE(source.Append(rows[i].dump()).ok());
+        }
+    }
+    std::shared_ptr<arrow::Array> source_array;
+    ASSERT_TRUE(source.Finish(&source_array).ok());
+    auto field = std::make_shared<FieldData<Json>>(DataType::JSON, true);
+    field->FillFieldData(source_array);
+    auto first_batch = std::make_shared<FieldData<Json>>(DataType::JSON, true);
+    first_batch->FillFieldData(source_array->Slice(0, 5));
+    auto second_batch = std::make_shared<FieldData<Json>>(DataType::JSON, true);
+    second_batch->FillFieldData(source_array->Slice(5));
+    const std::vector<FieldDataPtr> batches{first_batch, second_batch};
+    std::vector<std::string> binlogs;
+    for (size_t i = 0; i < batches.size(); ++i) {
+        auto payload = std::make_shared<storage::PayloadReader>(batches[i]);
+        storage::InsertData insert(payload);
+        insert.SetFieldDataMeta(field_meta);
+        insert.SetTimestamps(0, 100);
+        auto bytes = insert.Serialize(storage::StorageType::Remote);
+        const auto path = root + "/insert/" + std::to_string(i);
+        chunk_manager->Write(path, bytes.data(), bytes.size());
+        binlogs.push_back(path);
+    }
+
+    CreateIndexInfo info;
+    info.index_type = HYBRID_INDEX_TYPE;
+    info.json_cast_type = JsonCastType::FromString(cast);
+    info.json_path = "/a";
+    info.tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION;
+    info.scalar_index_engine_version = kArrayHybridStlSortMinVersion;
+
+    auto expect_rows = [&](const TargetBitmap& result,
+                           std::initializer_list<size_t> expected) {
+        ASSERT_EQ(result.size(), rows.size());
+        EXPECT_EQ(result.count(), expected.size());
+        for (const auto row : expected) EXPECT_TRUE(result[row]) << row;
+    };
+    struct BuildCase {
+        const char* gate;  // nullptr exercises the default-disabled gate.
+        int version;       // 0 omits the version and exercises the v2 default.
+        int limit;         // 0 selects explicit SORT.
+    };
+    for (const auto& test : {BuildCase{"true", 3, 2},
+                             BuildCase{"true", 3, 3},
+                             BuildCase{"false", 3, 2},
+                             BuildCase{nullptr, 3, 2},
+                             BuildCase{"true", 0, 2},
+                             BuildCase{nullptr, 3, 0}}) {
+        const auto limit = test.limit;
+        const auto case_name = cast + "/limit=" + std::to_string(limit) +
+                               "/gate=" + (test.gate ? test.gate : "missing") +
+                               "/version=" + std::to_string(test.version);
+        SCOPED_TRACE(case_name);
+        info.index_type = limit == 0 ? ASCENDING_SORT : HYBRID_INDEX_TYPE;
+        auto built = IndexFactory::GetInstance().CreateJsonIndex(info, ctx);
+        auto* scalar = dynamic_cast<ScalarIndex<T>*>(built.get());
+        ASSERT_NE(scalar, nullptr);
+        const auto expected_family =
+            limit == 3 ? ScalarIndexType::BITMAP
+            : limit == 0 || (test.version >= 3 && test.gate &&
+                             std::string_view(test.gate) == "true")
+                ? ScalarIndexType::STLSORT
+                : ScalarIndexType::INVERTED;
+        if (limit != 0) {
+            auto* hybrid = dynamic_cast<JsonHybridScalarIndex<T>*>(scalar);
+            ASSERT_NE(hybrid, nullptr);
+            Config build_config{
+                {INSERT_FILES_KEY, binlogs},
+                {INDEX_NUM_ROWS_KEY, rows.size()},
+                {BITMAP_INDEX_CARDINALITY_LIMIT, std::to_string(limit)}};
+            if (test.gate)
+                build_config[ENABLE_ARRAY_SORT_INDEX] = test.gate;
+            if (test.version)
+                build_config[SCALAR_INDEX_ENGINE_VERSION] = test.version;
+            hybrid->Build(build_config);
+            ASSERT_EQ(hybrid->scalar_index_version_,
+                      test.version ? test.version : 2);
+            ASSERT_EQ(hybrid->internal_index_type_, expected_family);
+        } else {
+            scalar->BuildWithFieldData(batches);
+            ASSERT_EQ(scalar->GetIndexType(), ScalarIndexType::STLSORT);
+        }
+        // The missing-version case verifies Build's legacy v2 family choice.
+        // This fixture explicitly uses packed upload; it does not claim to
+        // exercise the production v2 serialization path.
+        const auto stats = scalar->UploadUnified({});
+        for (const bool mmap : {false, true}) {
+            SCOPED_TRACE(mmap);
+            auto loaded =
+                IndexFactory::GetInstance().CreateJsonIndex(info, ctx);
+            Config config{{INDEX_FILES, stats->GetIndexFiles()},
+                          {ENABLE_MMAP, mmap}};
+            if (mmap)
+                config[MMAP_FILE_PATH] = root + "/mmap";
+            loaded->LoadUnified(config);
+            auto* index = dynamic_cast<ScalarIndex<T>*>(loaded.get());
+            ASSERT_NE(index, nullptr);
+            if (limit == 0) {
+                ASSERT_EQ(index->GetIndexType(), ScalarIndexType::STLSORT);
+            } else {
+                auto* hybrid = dynamic_cast<JsonHybridScalarIndex<T>*>(index);
+                ASSERT_NE(hybrid, nullptr);
+                ASSERT_EQ(hybrid->internal_index_type_, expected_family);
+            }
+            ASSERT_EQ(index->Count(), rows.size());
+            EXPECT_FALSE(index->HasRawData());
+            expect_rows(index->IsNull(), {2, 3, 4, 5});
+            expect_rows(index->IsNotNull(), {0, 1, 6, 7, 8});
+            // Preserve existing JSON Exists behavior: empty arrays are not
+            // present, although they remain valid parent rows for NotIn.
+            expect_rows(index->Exists(), {0, 5, 6, 7, 8});
+            expect_rows(index->In(1, &first), {0, 7});
+            expect_rows(index->In(1, &second), {0, 6});
+            expect_rows(index->NotIn(1, &first), {1, 6, 8});
+
+            auto segment =
+                segcore::CreateSealedSegment(schema, empty_index_meta, 43001);
+            segcore::LoadIndexInfo load;
+            load.field_id = field_id.get();
+            load.field_type = DataType::JSON;
+            load.index_params = {{INDEX_TYPE, info.index_type},
+                                 {JSON_PATH, "/a"},
+                                 {JSON_CAST_TYPE, cast}};
+            load.cache_index = CreateTestCacheIndex(
+                "json_array_hybrid_" + case_name + "_" + std::to_string(mmap),
+                std::move(loaded));
+            segment->LoadIndex(load);
+            auto raw = PrepareSingleFieldInsertBinlog(
+                0,
+                0,
+                0,
+                field_id.get(),
+                {field},
+                storage::RemoteChunkManagerSingleton::GetInstance()
+                    .GetRemoteChunkManager());
+            segment->LoadFieldData(raw);
+            auto raw_segment =
+                segcore::CreateSealedSegment(schema, empty_index_meta, 43002);
+            raw_segment->LoadFieldData(raw);
+            auto value = [](const T& input) {
+                proto::plan::GenericValue result;
+                if constexpr (std::is_same_v<T, bool>) {
+                    result.set_bool_val(input);
+                } else if constexpr (std::is_same_v<T, double>) {
+                    result.set_float_val(input);
+                } else {
+                    result.set_string_val(input);
+                }
+                return result;
+            };
+            for (const auto op :
+                 {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                  proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+                for (const bool empty_query : {false, true}) {
+                    SCOPED_TRACE(empty_query);
+                    std::vector<proto::plan::GenericValue> terms;
+                    if (!empty_query) {
+                        terms = {value(first), value(second), value(first)};
+                    }
+                    auto expression = std::make_shared<expr::JsonContainsExpr>(
+                        expr::ColumnInfo(field_id, DataType::JSON, {"a"}, true),
+                        op,
+                        true,
+                        terms);
+                    if (!empty_query) {
+                        ASSERT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+                            expression, segment.get(), rows.size()));
+                    }
+                    for (const bool negate : {false, true}) {
+                        SCOPED_TRACE(negate);
+                        expr::TypedExprPtr evaluated = expression;
+                        if (negate) {
+                            evaluated =
+                                std::make_shared<expr::LogicalUnaryExpr>(
+                                    expr::LogicalUnaryExpr::OpType::LogicalNot,
+                                    expression);
+                        }
+                        auto actual = milvus::test::EvalExprInBatches(
+                            evaluated, segment.get(), rows.size());
+                        auto expected = milvus::test::EvalExprInBatches(
+                            evaluated, raw_segment.get(), rows.size());
+                        BitsetTypeView actual_valid(
+                            actual.result->GetValidRawData(), rows.size());
+                        BitsetTypeView expected_valid(
+                            expected.result->GetValidRawData(), rows.size());
+                        auto plan = std::make_shared<plan::FilterBitsNode>(
+                            DEFAULT_PLANNODE_ID, evaluated);
+                        auto result = query::ExecuteQueryExpr(
+                            plan, segment.get(), rows.size(), MAX_TIMESTAMP);
+                        auto reference =
+                            query::ExecuteQueryExpr(plan,
+                                                    raw_segment.get(),
+                                                    rows.size(),
+                                                    MAX_TIMESTAMP);
+                        ASSERT_EQ(result.size(), rows.size());
+                        ASSERT_EQ(reference.size(), rows.size());
+                        for (size_t row = 0; row < rows.size(); ++row) {
+                            EXPECT_EQ(actual_valid[row], expected_valid[row])
+                                << row;
+                            // Empty queries retain their existing short-circuit
+                            // semantics rather than changing NULL handling.
+                            EXPECT_EQ(result[row], reference[row]) << row;
+                            if (!empty_query) {
+                                const bool array_row = row == 0 || row == 1 ||
+                                                       row == 6 || row == 7 ||
+                                                       row == 8;
+                                const bool matched =
+                                    op == proto::plan::
+                                                JSONContainsExpr_JSONOp_ContainsAny
+                                        ? row == 0 || row == 6 || row == 7
+                                        : row == 0;
+                                EXPECT_EQ(actual_valid[row], array_row) << row;
+                                EXPECT_EQ(result[row],
+                                          array_row && (matched != negate))
+                                    << row;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    boost::filesystem::remove_all(root);
+}
+
+}  // namespace
+
+TEST(JsonIndexTest, ArrayHybridRetainsAllElementsAndParentRows) {
+    CheckJsonArrayHybrid<bool>("ARRAY_BOOL", false, true);
+    CheckJsonArrayHybrid<double>("ARRAY_DOUBLE", 1.5, 2.5);
+    CheckJsonArrayHybrid<std::string>(
+        "ARRAY_VARCHAR", std::string("a\0b", 3), "中文");
 }

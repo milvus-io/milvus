@@ -1003,7 +1003,7 @@ IndexFactory::CreateCompositeScalarIndex(
     const storage::FileManagerContext& file_manager_context) {
     auto index_type = create_index_info.index_type;
     if (index_type == HYBRID_INDEX_TYPE || index_type == BITMAP_INDEX_TYPE ||
-        index_type == INVERTED_INDEX_TYPE) {
+        index_type == INVERTED_INDEX_TYPE || index_type == ASCENDING_SORT) {
         auto element_type = static_cast<DataType>(
             file_manager_context.fieldDataMeta.field_schema.element_type());
         return CreatePrimitiveScalarIndex(
@@ -1036,13 +1036,15 @@ template <typename T>
 IndexBasePtr
 MakeJsonHybrid(const CreateIndexInfo& info,
                const storage::FileManagerContext& ctx) {
-    return std::make_unique<JsonHybridScalarIndex<T>>(
+    auto index = std::make_unique<JsonHybridScalarIndex<T>>(
         info.json_cast_type,
         info.json_path,
         JsonCastFunction::FromString(info.json_cast_function),
         ctx.fieldDataMeta.field_schema,
         info.tantivy_index_version,
         ctx);
+    index->scalar_index_version_ = info.scalar_index_engine_version;
+    return index;
 }
 
 }  // namespace
@@ -1059,6 +1061,14 @@ IndexFactory::CreateJsonIndex(
     // Sort index
     if (index_type == ASCENDING_SORT) {
         switch (cast_dtype.element_type()) {
+            case JsonCastType::DataType::BOOL:
+                if (cast_dtype.data_type() != JsonCastType::DataType::ARRAY) {
+                    ThrowInfo(DataTypeInvalid,
+                              "Invalid cast type for JSON sort index: {}",
+                              cast_dtype);
+                }
+                return MakeJsonWrapped<bool, ScalarIndexSort<bool>>(
+                    create_index_info, file_manager_context);
             case JsonCastType::DataType::DOUBLE:
                 return MakeJsonWrapped<double, ScalarIndexSort<double>>(
                     create_index_info, file_manager_context);
