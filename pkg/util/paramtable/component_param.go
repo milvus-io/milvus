@@ -2744,6 +2744,7 @@ type proxyConfig struct {
 	CostMetricsExpireTime             ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
 	WorkloadToleranceFactor           ParamItem `refreshable:"false"`
+	WorkloadMetricSmoothingFactor     ParamItem `refreshable:"false"`
 	RetryTimesOnReplica               ParamItem `refreshable:"true"`
 	RetryTimesOnHealthCheck           ParamItem `refreshable:"true"`
 	ReplicaBlacklistDuration          ParamItem `refreshable:"true"`
@@ -3218,7 +3219,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
 		DefaultValue: "look_aside",
-		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
+		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin, look_aside and refined_look_aside",
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
 
@@ -3254,6 +3255,14 @@ please adjust in embedded Milvus: false`,
 		proxy will compute each querynode's workload score, and assign request to the lowest workload node; otherwise, it will assign request to the node by round robin`,
 	}
 	p.WorkloadToleranceFactor.Init(base.mgr)
+
+	p.WorkloadMetricSmoothingFactor = ParamItem{
+		Key:          "proxy.workloadMetricSmoothingFactor",
+		Version:      "3.0.4",
+		DefaultValue: "0.2",
+		Doc:          "EWMA smoothing factor for query node cost metrics used by refined_look_aside replica selection. Lower value smooths more but reacts slower; range (0,1].",
+	}
+	p.WorkloadMetricSmoothingFactor.Init(base.mgr)
 
 	p.RetryTimesOnReplica = ParamItem{
 		Key:          "proxy.retryTimesOnReplica",
