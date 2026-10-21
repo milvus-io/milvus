@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -85,21 +84,6 @@ func (l *lockGuard) Unlock() {
 // FastLock locks the resource keys without waiting.
 // return error if the resource key is already locked.
 func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, error) {
-	g, failedKey, ok := r.tryLock(keys...)
-	if !ok {
-		return nil, merr.Wrapf(errFastLockFailed, "fast lock failed at resource key %s", failedKey.String())
-	}
-	return g, nil
-}
-
-// TryLock locks the resource keys without waiting and without allocating an error on lock contention.
-// It returns false if any resource key is already locked.
-func (r *resourceKeyLocker) TryLock(keys ...message.ResourceKey) (*lockGuards, bool) {
-	g, _, ok := r.tryLock(keys...)
-	return g, ok
-}
-
-func (r *resourceKeyLocker) tryLock(keys ...message.ResourceKey) (*lockGuards, message.ResourceKey, bool) {
 	keys = uniqueSortResourceKeys(keys)
 
 	g := &lockGuards{}
@@ -115,9 +99,11 @@ func (r *resourceKeyLocker) tryLock(keys ...message.ResourceKey) (*lockGuards, m
 			continue
 		}
 		g.Unlock()
-		return nil, key, false
+		// The ACK scheduler retries a blocked task on every pass, so fail without
+		// building an error.
+		return nil, errFastLockFailed
 	}
-	return g, message.ResourceKey{}, true
+	return g, nil
 }
 
 // Lock locks the resource keys.

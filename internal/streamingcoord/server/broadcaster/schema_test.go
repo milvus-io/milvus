@@ -43,10 +43,6 @@ func (*schemaTestCatalog) ListBroadcastTask(context.Context) ([]*streamingpb.Bro
 	panic("unpatched")
 }
 
-func (*schemaTestCatalog) RemoveBroadcastTasks(context.Context, []uint64) error {
-	return nil
-}
-
 func (bm *broadcastTaskManager) schemaTaskCount(collectionID int64) int {
 	bm.schemaTasks.mu.RLock()
 	defer bm.schemaTasks.mu.RUnlock()
@@ -153,7 +149,8 @@ func TestSchemaTargetPersistenceBoundary(t *testing.T) {
 		require.Contains(t, bm.tasks, uint64(1), "retirement preserves the tombstone and deduplication")
 		require.NoError(t, task.MarkAckCallbackDone(t.Context()))
 		require.Nil(t, task.schemaForTarget, "completion releases the task's cached schema")
-		require.NoError(t, bm.DropTombstones(t.Context(), []uint64{1}))
+		task.markTombstoneDropped()
+		bm.removeBroadcastTask(1)
 		require.Zero(t, bm.schemaTaskCount(100))
 	})
 }
@@ -200,7 +197,7 @@ func TestSchemaTargetSecondaryAndRecovery(t *testing.T) {
 			if id < 11 {
 				requireSchemaTarget(t, next, 100, id+1)
 			}
-			require.NoError(t, next.DropTombstones(t.Context(), []uint64{id}))
+			next.removeBroadcastTask(id)
 		}
 		requireSchemaTarget(t, next, 100, 0)
 		requireSchemaTarget(t, next, 999, 0)

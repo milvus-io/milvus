@@ -346,7 +346,10 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	return t.Ack(ctx, msg)
 }
 
-// DropTombstones removes retained terminal tasks after durable catalog deletion.
+// DropTombstones drops the tombstones of the broadcast tasks with one catalog
+// call, which splits the keys into bounded transactions, and then removes the
+// tasks from the manager. After the tombstones are dropped, the idempotency and
+// deduplication can not be guaranteed.
 func (bm *broadcastTaskManager) DropTombstones(ctx context.Context, broadcastIDs []uint64) error {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("broadcaster is closing")
@@ -355,34 +358,23 @@ func (bm *broadcastTaskManager) DropTombstones(ctx context.Context, broadcastIDs
 	ctx, cancel := contextutil.MergeContext(ctx, bm.ctx)
 	defer cancel()
 
-	// Snapshot and deduplicate IDs without taking task locks under the manager lock.
-	tasks := make(map[uint64]*broadcastTask, len(broadcastIDs))
 	bm.mu.Lock()
+	tasks := make([]*broadcastTask, 0, len(broadcastIDs))
 	for _, id := range broadcastIDs {
-		if task, ok := bm.tasks[id]; ok {
-			tasks[id] = task
+		if t, ok := bm.tasks[id]; ok {
+			tasks = append(tasks, t)
 		}
 	}
 	bm.mu.Unlock()
-	ids := make([]uint64, 0, len(tasks))
-	for id, task := range tasks {
-		if state := task.State(); state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
-			return merr.WrapErrServiceInternalMsg("cannot drop broadcast task %d in state %s", id, state.String())
-		}
-		ids = append(ids, id)
+	// Mark DONE before deleting: a save that races the deletion then writes DONE,
+	// which the catalog turns into a removal.
+	for _, t := range tasks {
+		t.markTombstoneDropped()
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	// Terminal tasks ignore late ACKs, so deletion needs neither task locks nor
-	// the manager lock. Keep all tasks on failure, including an ambiguous commit.
-	if err := resource.Resource().StreamingCatalog().RemoveBroadcastTasks(ctx, ids); err != nil {
+	if err := resource.Resource().StreamingCatalog().RemoveBroadcastTasks(ctx, broadcastIDs); err != nil {
 		return err
 	}
-	for _, task := range tasks {
-		task.markTombstoneDropped()
-	}
-	bm.removeBroadcastTasks(tasks)
+	bm.removeBroadcastTask(broadcastIDs...)
 	return nil
 }
 
@@ -435,7 +427,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 			return t, false
 		}
 		// tasks and idempotencyIndex are written together under this lock and
-		// removeBroadcastTasks drops the index entry first, so a scope whose owner
+		// removeBroadcastTask drops the index entry first, so a scope whose owner
 		// has no task is unreachable. Say so rather than trusting the entry, and
 		// fall through to registration.
 		bm.Logger().Warn(ctx, "idempotency index entry has no task, treating it as a miss",
@@ -456,7 +448,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 }
 
 // getOrCreateBroadcastTask returns the task by the broadcastID
-// return false if the task is terminal.
+// return false if the task is tombstone.
 // if the task is not found, it will create a new task.
 func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMessage) (*broadcastTask, bool) {
 	bm.mu.Lock()
@@ -464,7 +456,8 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	t, ok := bm.tasks[bh.BroadcastID]
 	if ok {
 		bm.mu.Unlock()
-		return t, !isTerminalState(t.State())
+		state := t.State()
+		return t, state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE && state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
 	}
 	if msg.ReplicateHeader() == nil {
 		bm.mu.Unlock()
@@ -490,17 +483,16 @@ func (bm *broadcastTaskManager) getBroadcastTaskByID(broadcastID uint64) (*broad
 	return t, ok
 }
 
-// removeBroadcastTasks removes the given tasks unless their IDs now map to other tasks.
-func (bm *broadcastTaskManager) removeBroadcastTasks(tasks map[uint64]*broadcastTask) {
+// removeBroadcastTask removes the broadcast tasks by the broadcastIDs.
+func (bm *broadcastTaskManager) removeBroadcastTask(broadcastIDs ...uint64) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
-	for id, task := range tasks {
-		if bm.tasks[id] != task {
-			continue
+	for _, broadcastID := range broadcastIDs {
+		if t, ok := bm.tasks[broadcastID]; ok {
+			bm.idempotencyIndex.Remove(t.IdempotencyScope(), broadcastID)
 		}
-		bm.idempotencyIndex.Remove(task.IdempotencyScope(), id)
-		delete(bm.tasks, id)
+		delete(bm.tasks, broadcastID)
 	}
 }
 
@@ -518,7 +510,7 @@ func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 }
 
 // GetPendingSchemaFileResources returns collection ID -> file resource IDs
-// for all non-terminal schema broadcast tasks. Used during recovery to rebuild
+// for all non-tombstone schema broadcast tasks. Used during recovery to rebuild
 // file resource refCnt for resources referenced by pending schema changes.
 func (bm *broadcastTaskManager) GetPendingSchemaFileResources() map[int64][]int64 {
 	result := make(map[int64][]int64)

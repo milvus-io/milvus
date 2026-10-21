@@ -1385,6 +1385,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		reQuery:        true,
 		node:           op.node,
 		skipRuntimeRLS: true,
+		internalTask:   true,
 		chMgr:          op.node.ChMgr(),
 	}
 	queryRunner, ok := op.node.(taskmodel.QueryRunner)

@@ -7,6 +7,7 @@ import (
 	"github.com/google/btree"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -97,7 +98,7 @@ func (i *schemaTaskIndex) update(task *broadcastTask) {
 
 // pendingSchemaTarget snapshots the task under its lock (or before publication).
 func (b *broadcastTask) pendingSchemaTarget() *SchemaTarget {
-	if isTerminalState(b.task.State) {
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE || b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
 		b.schemaForTarget = nil
 		return nil
 	}

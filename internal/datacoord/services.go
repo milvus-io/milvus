@@ -2130,6 +2130,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			mlog.String("originalState", originalState))
 		return resp, nil
 	}
+	recordImportFileTypes(in.GetFiles(), in.GetOptions())
 
 	resp.JobID = fmt.Sprint(jobID)
 	mlog.Info(context.TODO(), "import request broadcasted successfully", mlog.String("jobID", resp.JobID))
@@ -3567,6 +3568,15 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		return merr.Status(err), nil
 	}
 	job := s.importMeta.GetJob(ctx, req.GetJobId())
+	if job == nil {
+		forgotten, err := s.importJobForgotten(ctx, req.GetJobId())
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if forgotten {
+			return merr.Success(), nil
+		}
+	}
 	if job != nil && job.GetCommitByCoordinator() {
 		return merr.Success(), nil
 	}

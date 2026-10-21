@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -44,9 +45,22 @@ import (
 func TestBroadcaster(t *testing.T) {
 	registry.ResetRegistration()
 	paramtable.Init()
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("10ms")
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("20ms")
+	// These scheduling tests have no persisted WAL checkpoints. GC must retain
+	// their tasks; dedicated tombstone tests exercise checkpoint publication.
+	checkpointPatch := mockey.Mock((*mock_metastore.MockStreamingCoordCataLog).ListPChannel).Return(nil, nil).Build()
+	t.Cleanup(func() { checkpointPatch.UnPatch() })
+	oldWALBroadcasterTombstoneCheckInternal := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("10ms")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue(oldWALBroadcasterTombstoneCheckInternal)
+	})
+	oldWALBroadcasterTombstoneMaxCount := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue(oldWALBroadcasterTombstoneMaxCount)
+	})
+	oldWALBroadcasterTombstoneMaxLifetime := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("20ms")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue(oldWALBroadcasterTombstoneMaxLifetime)
+	})
 
 	mb := mock_balancer.NewMockBalancer(t)
 	mb.EXPECT().ReplicateRole().Return(replicateutil.RolePrimary)
@@ -86,7 +100,6 @@ func TestBroadcaster(t *testing.T) {
 					[]byte{0x00, 0x00, 0x00}),
 			}, nil
 		}).Times(1)
-	meta.EXPECT().RemoveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 	done := typeutil.NewConcurrentSet[uint64]()
 	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, broadcastID uint64, bt *streamingpb.BroadcastTask) error {
 		if ctx.Err() != nil {
@@ -221,12 +234,6 @@ func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) *at
 
 	streaming.SetWALForTest(operator)
 	return appended
-}
-
-func registerDropCollectionNoopCallbacks() {
-	registry.RegisterDropCollectionV1AckCallback(func(context.Context, message.BroadcastResultDropCollectionMessageV1) error {
-		return nil
-	})
 }
 
 func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) message.BroadcastMutableMessage {
@@ -518,7 +525,6 @@ func TestWithUnreplicableResourceKeys(t *testing.T) {
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 	meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
 	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-	meta.EXPECT().RemoveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 	rc := idalloc.NewMockRootCoordClient(t)
 	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	f.Set(rc)

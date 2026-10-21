@@ -224,6 +224,7 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 		ScannedTotalBytes:  reducedResult.GetScannedTotalBytes(),
 		ElementLevel:       reducedResult.GetElementLevel(),
 		ElementIndices:     convertSegcoreElementIndicesToInternal(reducedResult.GetElementIndices()),
+		FeatureBits:        retrievePlan.FeatureBits() | segments.ColdReadFeatureBit(reducedResult.GetScannedRemoteBytes()),
 	}
 	return nil
 }

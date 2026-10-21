@@ -391,12 +391,14 @@ type commonConfig struct {
 	DiskWriteRateLimiterMiddlePriorityRatio ParamItem `refreshable:"true"`
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
-	AuthorizationEnabled  ParamItem `refreshable:"false"`
-	AdminAuthEnabled      ParamItem `refreshable:"true"`
-	SuperUsers            ParamItem `refreshable:"true"`
-	DefaultRootPassword   ParamItem `refreshable:"false"`
-	RootShouldBindRole    ParamItem `refreshable:"true"`
-	EnablePublicPrivilege ParamItem `refreshable:"false"`
+	AuthorizationEnabled        ParamItem `refreshable:"false"`
+	AdminAuthEnabled            ParamItem `refreshable:"true"`
+	SuperUsers                  ParamItem `refreshable:"true"`
+	DefaultRootPassword         ParamItem `refreshable:"false"`
+	RootShouldBindRole          ParamItem `refreshable:"true"`
+	EnablePublicPrivilege       ParamItem `refreshable:"false"`
+	FeatureUsageEnabled         ParamItem `refreshable:"false"`
+	FeatureUsageCountersEnabled ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -1191,6 +1193,29 @@ Not settable through /management/config/alter. Watch milvus_admin_auth_total.`,
 		// is off, so an anonymous request cannot persist a disabling value.
 	}
 	p.AdminAuthEnabled.Init(base.mgr)
+
+	p.FeatureUsageEnabled = ParamItem{
+		Key:          "common.security.featureUsageEnabled",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc: `Whether to expose the feature usage report at GET /management/feature_usage on the Proxy
+management port. The endpoint requires HTTP Basic Auth as root. See
+docs/design-docs/design_docs/20260902-feature-usage-reporting.md.`,
+		Export: true,
+	}
+	p.FeatureUsageEnabled.Init(base.mgr)
+
+	p.FeatureUsageCountersEnabled = ParamItem{
+		Key:          "common.featureUsage.countersEnabled",
+		Version:      "3.0.1",
+		DefaultValue: "true",
+		Doc: `Whether the components count feature usage on their request paths (Proxy, QueryNode)
+and at task creation (DataCoord). One branch and one atomic add per counted feature.
+It is read once at component start; the report endpoint is gated separately by
+common.security.featureUsageEnabled.`,
+		Export: true,
+	}
+	p.FeatureUsageCountersEnabled.Init(base.mgr)
 
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
@@ -2744,6 +2769,7 @@ type proxyConfig struct {
 	CostMetricsExpireTime             ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
 	WorkloadToleranceFactor           ParamItem `refreshable:"false"`
+	WorkloadMetricSmoothingFactor     ParamItem `refreshable:"false"`
 	RetryTimesOnReplica               ParamItem `refreshable:"true"`
 	RetryTimesOnHealthCheck           ParamItem `refreshable:"true"`
 	ReplicaBlacklistDuration          ParamItem `refreshable:"true"`
@@ -3218,7 +3244,7 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
 		DefaultValue: "look_aside",
-		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
+		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin, look_aside and refined_look_aside",
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
 
@@ -3254,6 +3280,14 @@ please adjust in embedded Milvus: false`,
 		proxy will compute each querynode's workload score, and assign request to the lowest workload node; otherwise, it will assign request to the node by round robin`,
 	}
 	p.WorkloadToleranceFactor.Init(base.mgr)
+
+	p.WorkloadMetricSmoothingFactor = ParamItem{
+		Key:          "proxy.workloadMetricSmoothingFactor",
+		Version:      "3.0.4",
+		DefaultValue: "0.2",
+		Doc:          "EWMA smoothing factor for query node cost metrics used by refined_look_aside replica selection. Lower value smooths more but reacts slower; range (0,1].",
+	}
+	p.WorkloadMetricSmoothingFactor.Init(base.mgr)
 
 	p.RetryTimesOnReplica = ParamItem{
 		Key:          "proxy.retryTimesOnReplica",
@@ -6349,6 +6383,10 @@ user-task-polling:
 // /////////////////////////////////////////////////////////////////////////////
 // --- datacoord ---
 type dataCoordConfig struct {
+	TalonPrewarmEnabled   ParamItem `refreshable:"false"`
+	TalonPrewarmInterval  ParamItem `refreshable:"false"`
+	TalonPrewarmBatchSize ParamItem `refreshable:"false"`
+
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
 	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
@@ -6566,6 +6604,31 @@ type dataCoordConfig struct {
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
+	p.TalonPrewarmEnabled = ParamItem{
+		Key:          "dataCoord.talonPrewarm.enabled",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Export:       false,
+		Doc:          "Enable Talon prewarming, currently covering published manifests of all collections. Remote storage only. Requires a restart.",
+	}
+	p.TalonPrewarmEnabled.Init(base.mgr)
+	p.TalonPrewarmInterval = ParamItem{
+		Key:          "dataCoord.talonPrewarm.interval",
+		Version:      "3.0.1",
+		DefaultValue: "600",
+		Export:       false,
+		Doc:          "Seconds to wait after completing each Talon prewarm round. Valid range: [1, 86400]. Requires a restart.",
+	}
+	p.TalonPrewarmInterval.Init(base.mgr)
+	p.TalonPrewarmBatchSize = ParamItem{
+		Key:          "dataCoord.talonPrewarm.batchSize",
+		Version:      "3.0.1",
+		DefaultValue: "256",
+		Export:       false,
+		Doc:          "Maximum objects per Talon batch. Valid range: [1, 4096]. Requires a restart.",
+	}
+	p.TalonPrewarmBatchSize.Init(base.mgr)
+
 	p.WatchTimeoutInterval = ParamItem{
 		Key:          "dataCoord.channel.watchTimeoutInterval",
 		Version:      "2.2.3",
@@ -7830,7 +7893,7 @@ neither Completed nor Failed -- so this value alone decides how many finished
 importJob entries stay in etcd, each carrying its schema, file list and options
 plus every preimport and import task under it.
 The 48h default exists for BulkImport idempotency and only for it: the idempotency
-window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+window can extend beyond streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
 earlier than its tombstone lets an in-window retry resolve to a jobID that
 GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
 as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
@@ -7838,7 +7901,8 @@ age is measured from the last StreamingCoord start: every restart extends its
 remaining life by up to another maxLifetime, while this retention keeps counting
 from the job's own completion. Equal values hold only for a window with no restart,
 which is not a property a default may assume. Raise it further if StreamingCoord
-restarts more than once inside one tombstone lifetime.
+restarts more than once inside one tombstone lifetime or WAL checkpoint lag extends
+tombstone retention. No fixed multiple bounds retention during a checkpoint stall.
 A cluster whose clients never send an Idempotency-Key is under no such requirement
 and can lower this freely; 10800 was the default before idempotency keys existed.`,
 		DefaultValue: "172800",
@@ -7973,7 +8037,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 	// path, which every version understands.
 	p.ImportEnableIDRangeMsg = ParamItem{
 		Key:          "dataCoord.import.enableIDRangeMsg",
-		Version:      "3.0.3-beta",
+		Version:      "3.0.4",
 		Export:       false,
 		PanicIfEmpty: false,
 		Doc: "Whether import assigns a per-file ID range after preimport and broadcasts it via " +
@@ -7986,7 +8050,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		VersionGateSwitcher: &VersionGateSwitcher{
 			EnableAutoSwitchValue: "auto",
 			PreSwitchValue:        "false",
-			GateVersion:           "3.0.3-beta",
+			GateVersion:           "3.0.4",
 			TargetValue:           "true",
 			SwitchDelay:           1 * time.Minute,
 		},
@@ -9336,8 +9400,9 @@ type streamingConfig struct {
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
 
 	// partial update
-	PartialUpdateEnableCAS            ParamItem `refreshable:"false"`
-	PartialUpdateVersionIndexMaxBytes ParamItem `refreshable:"false"`
+	PartialUpdateEnableCAS             ParamItem `refreshable:"false"`
+	PartialUpdateVersionIndexMaxBytes  ParamItem `refreshable:"false"`
+	PartialUpdateRecoveryDecodeTimeout ParamItem `refreshable:"true"`
 
 	// memory usage control
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
@@ -9641,9 +9706,10 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALBroadcasterTombstoneMaxCount = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxCount",
 		Version: "2.6.0",
-		Doc: `The max count of tombstone, 8192 by default. 
-Tombstone is used to reject duplicate submissions of DDL messages,
-too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		Doc: `The maximum number of tombstones satisfying the persisted WAL checkpoint checks, 8192 by default.
+After collecting expired eligible tombstones, evict the smallest BroadcastIDs until the
+remaining eligible count is at most maxCount, even before their TTL expires.
+Tombstones blocked by WAL checkpoints do not count toward this limit and cannot be evicted.`,
 		DefaultValue: "8192",
 		Export:       false,
 	}
@@ -9652,9 +9718,10 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALBroadcasterTombstoneMaxLifetime = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxLifetime",
 		Version: "2.6.0",
-		Doc: `The max lifetime of tombstone, 24h by default.
-Tombstone is used to reject duplicate submissions of DDL messages,
-too few tombstones may lead to ABA issues in the state of milvus cluster.`,
+		Doc: `The tombstone age threshold for GC, 24h by default.
+GC always requires every participating persisted WAL checkpoint to pass the broadcast.
+Eligible tombstones may be evicted earlier to satisfy maxCount.
+Coordinator recovery restarts the retention clock; checkpoint lag can extend it further.`,
 		DefaultValue: "24h",
 		Export:       false,
 	}
@@ -9738,6 +9805,15 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 		Export:       false,
 	}
 	p.PartialUpdateVersionIndexMaxBytes.Init(base.mgr)
+
+	p.PartialUpdateRecoveryDecodeTimeout = ParamItem{
+		Key:          "streaming.partialUpdate.recoveryDecodeTimeout",
+		Version:      "3.0.4",
+		DefaultValue: "5s",
+		Export:       false,
+		Doc:          "Total time budget, per WAL open, for rebuilding the write sets of pending transactions. A transaction whose bodies are not decoded within the budget is marked incomplete, and its commit is rejected and replayed. The budget is checked before each body decode, so 0 or a negative value marks every pending transaction with an insert or delete body incomplete. Larger values can delay WAL open when decoding stalls. Applies to WALs opened afterwards.",
+	}
+	p.PartialUpdateRecoveryDecodeTimeout.Init(base.mgr)
 
 	p.FlushMemoryThreshold = ParamItem{
 		Key:     "streaming.flush.memoryThreshold",

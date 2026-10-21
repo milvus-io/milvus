@@ -229,13 +229,6 @@ func (b *broadcastTask) State() streamingpb.BroadcastTaskState {
 	return b.task.State
 }
 
-// isTerminalState reports whether a task is a tombstone or was dropped from the
-// catalog; such a task takes no further ACKs and references no pending schema.
-func isTerminalState(state streamingpb.BroadcastTaskState) bool {
-	return state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
-		state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
-}
-
 // PendingBroadcastMessages returns the pending broadcast message of current broadcast.
 // If the vchannel is already acked, it will be filtered out.
 func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
@@ -280,12 +273,12 @@ func (b *broadcastTask) MessageTypeWithVersion() message.MessageTypeWithVersion 
 }
 
 // PendingSchemaFileResourceSnapshot returns the collection and file resource
-// IDs referenced by a non-terminal CreateCollection or AlterCollection task.
+// IDs referenced by a non-tombstone CreateCollection or AlterCollection task.
 func (b *broadcastTask) PendingSchemaFileResourceSnapshot() (int64, []int64, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if isTerminalState(b.task.State) {
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		return 0, nil, false
 	}
 	switch b.messageTypeWithVersion {
@@ -428,11 +421,6 @@ func (b *broadcastTask) Ack(ctx context.Context, msgs message.ImmutableMessage) 
 // ack acknowledges the message at the specified vchannel.
 // Caller must resolve callback before acquiring b.mu and hold b.mu while calling.
 func (b *broadcastTask) ack(ctx context.Context, callback registry.ResolvedMessageAckOnceCallback, msgs ...message.ImmutableMessage) (err error) {
-	// A caller may have obtained this task before its callback completed. Never
-	// let a late ACK recreate a tombstone concurrently with catalog deletion.
-	if isTerminalState(b.task.State) {
-		return nil
-	}
 	isControlChannelAcked := b.copyAndSetAckedCheckpoints(msgs...)
 	if !b.dirty {
 		return nil
@@ -590,15 +578,36 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 	return b.ack(ctx, callback, msgs...)
 }
 
-// markTombstoneDropped retires a task after its catalog record was deleted.
+// canDropTombstone requires every local broadcast copy to be strictly behind
+// its PChannel's durable replay checkpoint. ACK/callback completion alone does
+// not establish this boundary, for either primary or replicated tasks.
+func (b *broadcastTask) canDropTombstone(checkpoints map[string]*streamingpb.WALCheckpoint) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for idx, vchannel := range b.header().VChannels {
+		acked := b.task.AckedCheckpoints[idx]
+		if acked.GetTimeTick() == 0 {
+			// Legacy tasks without positions cannot prove they are safe to remove.
+			return false
+		}
+		if checkpoints[funcutil.ToPhysicalChannel(vchannel)].GetTimeTick() <= acked.GetTimeTick() {
+			return false
+		}
+	}
+	return true
+}
+
+// markTombstoneDropped marks the task DONE before its tombstone is deleted from
+// recovery storage.
 func (b *broadcastTask) markTombstoneDropped() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
-		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
-		b.ObserveStateChanged(b.task.State)
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+		return // A retry after a failed deletion.
 	}
+	b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
+	b.ObserveStateChanged(b.task.State)
 }
 
 // isAllDone check if all the vchannels are acked.
