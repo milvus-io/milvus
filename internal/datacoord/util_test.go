@@ -22,11 +22,15 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -481,4 +485,111 @@ func (suite *UtilSuite) TestMergeFieldBinlogsPreservesColumnGroupMetadata() {
 	suite.Equal([]int64{102, 103}, result[0].GetChildFields())
 	suite.Equal("parquet", result[0].GetFormat())
 	suite.Len(result[0].GetBinlogs(), 2)
+}
+
+// TestFilterInIndexedSegmentsStructVector: a segment is indexed only when the
+// index of every vector field is Finished, struct vector sub-fields included.
+// A fake-finished build (too few vectors, e.g. all null) is Finished too.
+func TestFilterInIndexedSegmentsStructVector(t *testing.T) {
+	const (
+		collectionID   = int64(1)
+		subVecFieldID  = int64(102)
+		topVecFieldID  = int64(104)
+		subVecIndexID  = int64(1002)
+		topVecIndexID  = int64(1004)
+		fakeFinishedOK = "fake finished index success"
+	)
+	structField := &schemapb.StructArrayFieldSchema{FieldID: 101, Name: "items", Fields: []*schemapb.FieldSchema{
+		{FieldID: subVecFieldID, Name: "items[vec]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector},
+		{FieldID: 103, Name: "items[ints]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+	}}
+	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+
+	type segIndex struct {
+		indexID int64
+		state   commonpb.IndexState
+		reason  string
+	}
+	run := func(t *testing.T, schema *schemapb.CollectionSchema, indexedFields []int64, segments map[int64][]segIndex, want []int64) {
+		handler := NewNMockHandler(t)
+		handler.EXPECT().GetCollection(mock.Anything, collectionID).Return(&collectionInfo{ID: collectionID, Schema: schema}, nil)
+		indexes := make(map[UniqueID]*model.Index)
+		for _, fieldID := range indexedFields {
+			indexID := subVecIndexID
+			if fieldID == topVecFieldID {
+				indexID = topVecIndexID
+			}
+			indexes[indexID] = &model.Index{CollectionID: collectionID, FieldID: fieldID, IndexID: indexID}
+		}
+		im := &indexMeta{
+			indexes:        map[UniqueID]map[UniqueID]*model.Index{collectionID: indexes},
+			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		}
+		var infos []*SegmentInfo
+		for segmentID := int64(1); segmentID <= int64(len(segments)); segmentID++ {
+			infos = append(infos, NewSegmentInfo(&datapb.SegmentInfo{
+				ID: segmentID, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, NumOfRows: 10,
+			}))
+			if len(segments[segmentID]) == 0 {
+				continue
+			}
+			byIndex := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+			for _, idx := range segments[segmentID] {
+				byIndex.Insert(idx.indexID, &model.SegmentIndex{
+					CollectionID: collectionID, SegmentID: segmentID, IndexID: idx.indexID,
+					IndexState: idx.state, FailReason: idx.reason,
+				})
+			}
+			im.segmentIndexes.Insert(segmentID, byIndex)
+		}
+		got := FilterInIndexedSegments(context.Background(), handler, &meta{indexMeta: im}, false, infos...)
+		gotIDs := make([]int64, 0, len(got))
+		for _, segment := range got {
+			gotIDs = append(gotIDs, segment.GetID())
+		}
+		require.ElementsMatch(t, want, gotIDs)
+	}
+
+	t.Run("struct_vector_only", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk}, StructArrayFields: []*schemapb.StructArrayFieldSchema{structField}}
+		run(t, schema, []int64{subVecFieldID}, map[int64][]segIndex{
+			1: {{subVecIndexID, commonpb.IndexState_Unissued, ""}},
+			2: {{subVecIndexID, commonpb.IndexState_InProgress, ""}},
+			3: {{subVecIndexID, commonpb.IndexState_Failed, "build failed"}},
+			4: {{subVecIndexID, commonpb.IndexState_Finished, ""}},
+			5: {{subVecIndexID, commonpb.IndexState_Finished, fakeFinishedOK}},
+			6: nil, // no index task yet
+		}, []int64{4, 5})
+	})
+
+	t.Run("struct_vector_without_index", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk}, StructArrayFields: []*schemapb.StructArrayFieldSchema{structField}}
+		run(t, schema, nil, map[int64][]segIndex{1: nil}, nil)
+	})
+
+	t.Run("top_level_and_struct_vector", func(t *testing.T) {
+		top := &schemapb.FieldSchema{FieldID: topVecFieldID, Name: "embedding", DataType: schemapb.DataType_FloatVector}
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, top}, StructArrayFields: []*schemapb.StructArrayFieldSchema{structField}}
+		run(t, schema, []int64{topVecFieldID, subVecFieldID}, map[int64][]segIndex{
+			1: {{topVecIndexID, commonpb.IndexState_Finished, ""}, {subVecIndexID, commonpb.IndexState_Finished, fakeFinishedOK}},
+			2: {{topVecIndexID, commonpb.IndexState_Finished, ""}, {subVecIndexID, commonpb.IndexState_InProgress, ""}},
+			3: {{topVecIndexID, commonpb.IndexState_InProgress, ""}, {subVecIndexID, commonpb.IndexState_Finished, ""}},
+			4: {{topVecIndexID, commonpb.IndexState_Finished, ""}, {subVecIndexID, commonpb.IndexState_Failed, "build failed"}},
+			5: {{topVecIndexID, commonpb.IndexState_Finished, ""}},
+		}, []int64{1})
+		// A struct vector without any index keeps every segment unindexed, as
+		// for a top-level vector without an index.
+		run(t, schema, []int64{topVecFieldID}, map[int64][]segIndex{
+			1: {{topVecIndexID, commonpb.IndexState_Finished, ""}},
+		}, nil)
+	})
+
+	t.Run("top_level_vector_only", func(t *testing.T) {
+		top := &schemapb.FieldSchema{FieldID: topVecFieldID, Name: "embedding", DataType: schemapb.DataType_FloatVector}
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, top}}
+		run(t, schema, []int64{topVecFieldID}, map[int64][]segIndex{
+			1: {{topVecIndexID, commonpb.IndexState_Finished, ""}},
+			2: {{topVecIndexID, commonpb.IndexState_InProgress, ""}},
+		}, []int64{1})
+	})
 }

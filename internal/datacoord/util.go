@@ -106,11 +106,9 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 
 		// get vector field id
 		var targetFieldIds []int64
-		// wait all vector datatype fields only
-		for _, field := range coll.Schema.GetFields() {
-			if typeutil.IsVectorType(field.GetDataType()) {
-				targetFieldIds = append(targetFieldIds, field.GetFieldID())
-			}
+		// wait all vector datatype fields only, struct vector sub-fields included
+		for _, field := range typeutil.GetVectorFieldSchemas(coll.Schema) {
+			targetFieldIds = append(targetFieldIds, field.GetFieldID())
 		}
 
 		// include all scalar fields with index
