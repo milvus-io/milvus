@@ -13,7 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package proxy
+package dml
 
 import (
 	"context"
@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -153,9 +154,9 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 							m := mockey.Mock(target).Return(results...).Build()
 							t.Cleanup(func() { m.UnPatch() })
 						}
-						patch((*MetaCache).GetCollectionID, int64(1001), nil)
-						patch((*MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, nil)
-						patch((*MetaCache).GetPartitionID, int64(1002), nil)
+						patch((*metacache.MetaCache).GetCollectionID, int64(1001), nil)
+						patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, nil)
+						patch((*metacache.MetaCache).GetPartitionID, int64(1002), nil)
 						allocation := mockey.Mock(common.AllocAutoID).To(func(_ func(uint32) (int64, int64, error), rowNum uint32, _ uint64) (int64, int64, error) {
 							return 1000, 1000 + int64(rowNum), nil
 						}).Build()
