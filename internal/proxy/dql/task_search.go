@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
@@ -1566,6 +1567,12 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 	legacy := t.viewQueryClient.Legacy()
 	allowStreaming := t.supportsStreamingReduce()
 	retryStreaming := allowStreaming && legacy.ReduceStreamEnabled()
+	searchRequest := t.SearchRequest
+	if retryStreaming && len(t.orderByFields) > 0 &&
+		(t.GetGroupByFieldId() > 0 || len(t.GetGroupByFieldIds()) > 0) {
+		searchRequest = proto.Clone(searchRequest).(*internalpb.SearchRequest)
+		searchRequest.Offset = 0 // Scalar ordering applies group pagination after reduction.
+	}
 	maxAttempts := 1
 	if retryStreaming {
 		maxAttempts = max(1, legacy.MaxRetries())
@@ -1574,7 +1581,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		result, err := legacy.Search(ctx, &queryclient.LegacySearchRequest{
-			Req:              t.SearchRequest,
+			Req:              searchRequest,
 			RequiredFieldIDs: fields,
 			BarrierMVCC:      t.MvccTimestamp,
 			AllowStreaming:   allowStreaming,
@@ -1652,10 +1659,11 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 	if req == nil ||
 		t.aggCtx != nil ||
 		req.GetIsAdvanced() ||
-		len(req.GetSubReqs()) > 0 ||
-		req.GetGroupByFieldId() > 0 ||
-		len(req.GetGroupByFieldIds()) > 0 {
+		len(req.GetSubReqs()) > 0 {
 		return false
+	}
+	if req.GetGroupByFieldId() > 0 || len(req.GetGroupByFieldIds()) > 0 {
+		return !req.GetIsIterator()
 	}
 
 	// Iterator Search is classified as SearchType_DEFAULT. After rejecting
@@ -1744,6 +1752,22 @@ func appendFinalSearchChunk(
 	} else if len(output.GetFieldsData()) > 0 && hitCount > 0 {
 		return 0, errors.New("Search CHUNK is missing fields present in earlier CHUNKs")
 	}
+	chunkGroups := chunk.GetGroupByFieldValues()
+	if len(chunkGroups) == 0 && chunk.GetGroupByFieldValue() != nil {
+		chunkGroups = []*schemapb.FieldData{chunk.GetGroupByFieldValue()}
+	}
+	var groupIndexComputer *typeutil.FieldDataIdxComputer
+	if len(chunkGroups) > 0 {
+		if len(output.GetGroupByFieldValues()) == 0 {
+			output.GroupByFieldValues = typeutil.PrepareResultFieldData(chunkGroups, output.GetNumQueries()*limit)
+		}
+		if len(output.GetGroupByFieldValues()) != len(chunkGroups) {
+			return 0, merr.WrapErrServiceInternalMsg("Search Chunk group-by field count changed")
+		}
+		groupIndexComputer = typeutil.NewFieldDataIdxComputer(chunkGroups)
+	} else if len(output.GetGroupByFieldValues()) > 0 && hitCount > 0 {
+		return 0, merr.WrapErrServiceInternalMsg("Search Chunk is missing group-by fields")
+	}
 
 	negateScore := !metric.PositivelyRelated(metricType)
 	rowIndex := int64(0)
@@ -1760,6 +1784,10 @@ func appendFinalSearchChunk(
 			if fieldIndexComputer != nil {
 				fieldIndexes := fieldIndexComputer.Compute(rowIndex)
 				appendedSize += typeutil.AppendFieldData(output.FieldsData, chunk.GetFieldsData(), rowIndex, fieldIndexes...)
+			}
+			if groupIndexComputer != nil {
+				fieldIndexes := groupIndexComputer.Compute(rowIndex)
+				appendedSize += typeutil.AppendFieldData(output.GroupByFieldValues, chunkGroups, rowIndex, fieldIndexes...)
 			}
 			typeutil.AppendPKs(output.Ids, typeutil.GetPK(chunk.GetIds(), rowIndex))
 			score := chunk.GetScores()[rowIndex]
@@ -1787,7 +1815,17 @@ func (t *SearchTask) consumeResultStream(
 ) (*milvuspb.SearchResults, string, error) {
 	offset := t.GetOffset()
 	limit := t.GetTopk() - offset
-	if len(t.orderByFields) > 0 {
+	groupByFieldIDs := t.GetGroupByFieldIds()
+	if len(groupByFieldIDs) == 0 && t.GetGroupByFieldId() > 0 {
+		groupByFieldIDs = []int64{t.GetGroupByFieldId()}
+	}
+	if len(groupByFieldIDs) > 0 {
+		offset = 0 // The final ReduceStream applies group offset before emitting hits.
+		if len(t.orderByFields) > 0 {
+			limit = t.GetTopk()
+		}
+		limit *= max(1, t.GetGroupSize())
+	} else if len(t.orderByFields) > 0 {
 		offset = 0
 		limit = t.GetTopk()
 	}
@@ -1851,10 +1889,70 @@ func (t *SearchTask) consumeResultStream(
 	if len(data.GetTopks()) > 0 {
 		data.TopK = data.GetTopks()[len(data.GetTopks())-1]
 	}
+	if len(groupByFieldIDs) > 0 {
+		var err error
+		data, err = regroupFinalSearchResult(data, groupByFieldIDs)
+		if err != nil {
+			return nil, metricType, err
+		}
+	}
 	return &milvuspb.SearchResults{
 		Status:  merr.Success(),
 		Results: data,
 	}, metricType, nil
+}
+
+// regroupFinalSearchResult arranges already-selected hits by group without ranking them again.
+func regroupFinalSearchResult(data *schemapb.SearchResultData, groupByFieldIDs []int64) (*schemapb.SearchResultData, error) {
+	if typeutil.GetSizeOfIDs(data.GetIds()) == 0 {
+		return data, nil
+	}
+	extractKey := buildMultiGroupKeyExtractor(data, groupByFieldIDs)
+	rows := make([]reduce.RowRef, 0, len(data.GetScores()))
+	var start int64
+	for _, count := range data.GetTopks() {
+		groups := make(map[uint64][]*multiGroupEntry)
+		var groupOrder []*multiGroupEntry
+		for row := start; row < start+count; row++ {
+			hash, values := extractKey(int(row))
+			group := findMultiGroupEntry(groups[hash], values)
+			if group == nil {
+				group = &multiGroupEntry{values: values}
+				groups[hash] = append(groups[hash], group)
+				groupOrder = append(groupOrder, group)
+			}
+			group.refs = append(group.refs, reduce.RowRef{RowIdx: row})
+		}
+		for _, group := range groupOrder {
+			rows = append(rows, group.refs...)
+		}
+		start += count
+	}
+	grouped := &schemapb.SearchResultData{
+		NumQueries: data.GetNumQueries(), TopK: data.GetTopK(), Topks: data.GetTopks(),
+		Ids: &schemapb.IDs{}, Scores: make([]float32, 0, len(rows)),
+		FieldsData:   typeutil.PrepareResultFieldData(data.GetFieldsData(), int64(len(rows))),
+		OutputFields: data.GetOutputFields(), PrimaryFieldName: data.GetPrimaryFieldName(),
+		AllSearchCount: data.GetAllSearchCount(),
+	}
+	computer := typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
+	for _, row := range rows {
+		typeutil.AppendPKs(grouped.Ids, typeutil.GetPK(data.GetIds(), row.RowIdx))
+		grouped.Scores = append(grouped.Scores, data.GetScores()[row.RowIdx])
+		if len(grouped.FieldsData) > 0 {
+			typeutil.AppendFieldData(grouped.FieldsData, data.GetFieldsData(), row.RowIdx, computer.Compute(row.RowIdx)...)
+		}
+		if data.GetElementIndices() != nil {
+			if grouped.ElementIndices == nil {
+				grouped.ElementIndices = &schemapb.LongArray{}
+			}
+			grouped.ElementIndices.Data = append(grouped.ElementIndices.Data, data.GetElementIndices().GetData()[row.RowIdx])
+		}
+	}
+	if err := reduce.WriteGroupByFieldValues(grouped, rows, []*schemapb.SearchResultData{data}, groupByFieldIDs); err != nil {
+		return nil, merr.Wrap(err, "assemble final Search Group By fields")
+	}
+	return grouped, nil
 }
 
 func isEmbeddingListPlaceholderType(pt commonpb.PlaceholderType) bool {

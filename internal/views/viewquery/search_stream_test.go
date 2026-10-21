@@ -163,13 +163,49 @@ func TestSearchOnViewStreamRejectsUnsupportedSearch(t *testing.T) {
 	defer cleanup()
 
 	request := streamTestRequest()
-	request.LegacyReq.GroupByFieldId = 100
+	request.LegacyReq.IsAdvanced = true
 	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)
 
 	chunk, err := stream.Recv()
 	require.Nil(t, chunk)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestSearchOnViewStreamSendsGroupByColumns(t *testing.T) {
+	result := streamTestResult()
+	result.ResultData.GroupByFieldValues = []*schemapb.FieldData{{
+		FieldId: 100, Type: schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 1, 2, 1, 2}}},
+		}},
+	}}
+	server := NewServer(
+		&streamTestProvider{searchTasks: &streamTestSearchTasks{tasks: []SearchSegmentTask{struct{}{}}}},
+		&streamTestScheduler{result: result},
+	)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	request := streamTestRequest()
+	request.LegacyReq.IsIterator = false
+	request.LegacyReq.GroupByFieldIds = []int64{100}
+	request.LegacyReq.GroupSize = 2
+	request.StreamChunkBytes = 1
+	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
+	require.NoError(t, err)
+	defer stream.Close()
+	var ids, groups []int64
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		ids = append(ids, chunk.GetResultData().GetIds().GetIntId().GetData()...)
+		groups = append(groups, chunk.GetResultData().GetGroupByFieldValues()[0].GetScalars().GetLongData().GetData()...)
+	}
+	require.Equal(t, []int64{1, 2, 3, 10, 11}, ids)
+	require.Equal(t, []int64{1, 1, 2, 1, 2}, groups)
 }
 
 func TestSearchOnViewStreamCloseCancelsServer(t *testing.T) {

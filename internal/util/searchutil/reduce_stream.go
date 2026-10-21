@@ -81,16 +81,19 @@ func (u orderedUnit) reducibleByteSize() (int, error) {
 	}
 	data := chunk.GetResultData()
 	return proto.Size(&schemapb.SearchResultData{
-		FieldsData:     data.GetFieldsData(),
-		Scores:         data.GetScores(),
-		Ids:            data.GetIds(),
-		ElementIndices: data.GetElementIndices(),
+		FieldsData:         data.GetFieldsData(),
+		Scores:             data.GetScores(),
+		Ids:                data.GetIds(),
+		ElementIndices:     data.GetElementIndices(),
+		GroupByFieldValue:  data.GetGroupByFieldValue(),
+		GroupByFieldValues: data.GetGroupByFieldValues(),
 	}), nil
 }
 
 type orderedChildBuffer struct {
-	units  []orderedUnit
-	cursor int
+	units    []orderedUnit
+	cursor   int
+	groupKey func(int) (uint64, []any)
 }
 
 func (b *orderedChildBuffer) hasUnit() bool {
@@ -107,6 +110,7 @@ func (b *orderedChildBuffer) pop() orderedUnit {
 	if !b.hasUnit() {
 		b.units = nil
 		b.cursor = 0
+		b.groupKey = nil
 	}
 	return unit
 }
@@ -295,7 +299,13 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*int
 	return chunks, nil
 }
 
-// OrderedReduceStream merges Plain ANN Search child Chunks by score.
+type searchGroup struct {
+	values  []any
+	count   int64
+	skipped bool
+}
+
+// OrderedReduceStream merges ANN Search child Chunks by score, with optional group limits.
 type OrderedReduceStream struct {
 	recvMu       sync.Mutex
 	childStreams *reduce.ChildStreams[*internalpb.SearchResults]
@@ -308,6 +318,11 @@ type OrderedReduceStream struct {
 	currentQuery    int64
 	emittedPerQuery []int64
 	seenPKs         map[any]struct{}
+	groupByFieldIDs []int64
+	groupSize       int64
+	groupOffset     int64
+	groups          map[uint64][]*searchGroup
+	groupCount      int64
 	isTopKReduce    bool
 	isRecallEval    bool
 	metadata        *internalpb.SearchResults
@@ -318,7 +333,7 @@ type OrderedReduceStream struct {
 	closeErr error
 }
 
-// NewReduceStream creates the Plain ANN Search iterator OrderedReduceStream implementation.
+// NewReduceStream creates the ANN Search or Search Group By OrderedReduceStream implementation.
 func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
 	if request == nil {
 		return nil, errors.New("NewReduceStream requires a Search request")
@@ -329,8 +344,8 @@ func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStr
 	if request.GetTopk() <= 0 {
 		return nil, fmt.Errorf("NewReduceStream requires a positive topK, got %d", request.GetTopk())
 	}
-	if request.GetIsAdvanced() || len(request.GetSubReqs()) > 0 || request.GetGroupByFieldId() > 0 || len(request.GetGroupByFieldIds()) > 0 {
-		return nil, errors.New("NewReduceStream currently supports Plain ANN Search only")
+	if request.GetIsAdvanced() || len(request.GetSubReqs()) > 0 {
+		return nil, errors.New("NewReduceStream supports Plain ANN Search and Search Group By only")
 	}
 	if chunkBytes <= 0 {
 		return nil, fmt.Errorf("NewReduceStream requires positive Chunk bytes, got %d", chunkBytes)
@@ -341,7 +356,7 @@ func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStr
 		}
 	}
 
-	return &OrderedReduceStream{
+	stream := &OrderedReduceStream{
 		childStreams:    reduce.NewChildStreams[*internalpb.SearchResults](childStreams),
 		childBuffers:    make([]orderedChildBuffer, len(childStreams)),
 		nq:              request.GetNq(),
@@ -349,7 +364,21 @@ func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStr
 		chunkBytes:      chunkBytes,
 		metricType:      request.GetMetricType(),
 		emittedPerQuery: make([]int64, request.GetNq()),
-	}, nil
+		groupByFieldIDs: append([]int64(nil), request.GetGroupByFieldIds()...),
+		groupSize:       1,
+	}
+	if len(stream.groupByFieldIDs) == 0 && request.GetGroupByFieldId() > 0 {
+		stream.groupByFieldIDs = []int64{request.GetGroupByFieldId()}
+	}
+	if len(stream.groupByFieldIDs) > 0 {
+		if request.GetOffset() < 0 || request.GetOffset() >= request.GetTopk() {
+			return nil, merr.WrapErrServiceInternalMsg("Search Group By requires offset in [0, topK)")
+		}
+		stream.groupSize = max(1, request.GetGroupSize())
+		stream.groupOffset = request.GetOffset()
+		stream.groups = make(map[uint64][]*searchGroup)
+	}
+	return stream, nil
 }
 
 // NewShardReduceStream merges worker results within one vchannel, deduplicating hits per query.
@@ -359,6 +388,7 @@ func NewShardReduceStream(request *internalpb.SearchRequest, childStreams []Redu
 		return nil, err
 	}
 	stream.(*OrderedReduceStream).seenPKs = make(map[any]struct{})
+	stream.(*OrderedReduceStream).groupOffset = 0
 	return stream, nil
 }
 
@@ -452,6 +482,25 @@ func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
 			if err != nil {
 				return merr.Wrapf(err, "child stream %d returned an invalid Chunk", childIndex)
 			}
+			if len(s.groupByFieldIDs) > 0 && s.childBuffers[childIndex].hasUnit() {
+				iters := make([]func(int) any, len(s.groupByFieldIDs))
+				fields := make([]*schemapb.FieldData, len(s.groupByFieldIDs))
+				for i, fieldID := range s.groupByFieldIDs {
+					field := reduce.FindGroupByFieldData(data, fieldID, len(s.groupByFieldIDs) == 1)
+					if field == nil {
+						return merr.WrapErrServiceInternalMsg("child stream %d is missing group-by field %d", childIndex, fieldID)
+					}
+					if field.GetFieldId() != fieldID {
+						field = proto.Clone(field).(*schemapb.FieldData)
+						field.FieldId = fieldID
+					}
+					fields[i] = field
+					iters[i] = typeutil.GetDataIterator(field)
+				}
+				data.GroupByFieldValues = fields
+				data.GroupByFieldValue = nil
+				s.childBuffers[childIndex].groupKey = reduce.MakeCompositeKeyExtractor(iters)
+			}
 			s.acceptMetadata(chunk, data)
 			return nil
 		},
@@ -539,11 +588,14 @@ func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.SearchResults, da
 }
 
 func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffer, outputBytes int) (*orderedUnit, bool, error) {
+	hitLimit := (s.topK - s.groupOffset) * s.groupSize
 	for s.currentQuery < s.nq {
-		if s.emittedPerQuery[s.currentQuery] >= s.topK {
+		if s.emittedPerQuery[s.currentQuery] >= hitLimit {
 			if s.currentQuery == s.nq-1 {
 				s.currentQuery++
 				clear(s.seenPKs)
+				clear(s.groups)
+				s.groupCount = 0
 				return nil, false, nil
 			}
 
@@ -557,6 +609,8 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 			}
 			s.currentQuery++
 			clear(s.seenPKs)
+			clear(s.groups)
+			s.groupCount = 0
 			continue
 		}
 
@@ -587,6 +641,8 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 		if winner == -1 {
 			s.currentQuery++
 			clear(s.seenPKs)
+			clear(s.groups)
+			s.groupCount = 0
 			continue
 		}
 
@@ -608,6 +664,34 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 				return nil, false, nil
 			}
 		}
+		var group *searchGroup
+		var groupHash uint64
+		if len(s.groupByFieldIDs) > 0 {
+			var values []any
+			groupHash, values = readyBuffers[winner].groupKey(int(selected.rowIndex))
+			for _, candidate := range s.groups[groupHash] {
+				if reduce.EqualGroupValues(candidate.values, values) {
+					group = candidate
+					break
+				}
+			}
+			if group == nil {
+				if s.groupCount >= s.topK {
+					s.pop(readyBuffers[winner])
+					return nil, false, nil
+				}
+				group = &searchGroup{values: values, skipped: s.groupCount < s.groupOffset}
+			}
+			if group.skipped || group.count >= s.groupSize {
+				if group.skipped && group.count == 0 {
+					group.count = 1
+					s.groups[groupHash] = append(s.groups[groupHash], group)
+					s.groupCount++
+				}
+				s.pop(readyBuffers[winner])
+				return nil, false, nil
+			}
+		}
 		unitBytes, err := selected.reducibleByteSize()
 		if err != nil {
 			return nil, false, err
@@ -621,10 +705,19 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 		if s.seenPKs != nil {
 			s.seenPKs[key] = struct{}{}
 		}
+		if group != nil {
+			if group.count == 0 {
+				s.groups[groupHash] = append(s.groups[groupHash], group)
+				s.groupCount++
+			}
+			group.count++
+		}
 		s.emittedPerQuery[s.currentQuery]++
-		if s.emittedPerQuery[s.currentQuery] == s.topK && s.currentQuery == s.nq-1 {
+		if s.emittedPerQuery[s.currentQuery] == hitLimit && s.currentQuery == s.nq-1 {
 			s.currentQuery++
 			clear(s.seenPKs)
+			clear(s.groups)
+			s.groupCount = 0
 		}
 		return &oneReduceResult, false, nil
 	}
@@ -736,8 +829,29 @@ func buildSearchChunk(
 		PrimaryFieldName: first.data.GetPrimaryFieldName(),
 	}
 	fieldIndexComputers := make(map[*schemapb.SearchResultData]*typeutil.FieldDataIdxComputer)
+	groupFields := first.data.GetGroupByFieldValues()
+	legacyGroupField := len(groupFields) == 0 && first.data.GetGroupByFieldValue() != nil
+	if legacyGroupField {
+		groupFields = []*schemapb.FieldData{first.data.GetGroupByFieldValue()}
+	}
+	groupFieldIDs := make([]int64, len(groupFields))
+	for i, field := range groupFields {
+		groupFieldIDs[i] = field.GetFieldId()
+	}
+	var groupRows []reduce.RowRef
+	var groupSources []*schemapb.SearchResultData
+	groupSourceIndexes := make(map[*schemapb.SearchResultData]int)
 
 	for _, unit := range units {
+		if len(groupFieldIDs) > 0 {
+			index, exists := groupSourceIndexes[unit.data]
+			if !exists {
+				index = len(groupSources)
+				groupSourceIndexes[unit.data] = index
+				groupSources = append(groupSources, unit.data)
+			}
+			groupRows = append(groupRows, reduce.RowRef{ResultIdx: index, RowIdx: unit.rowIndex})
+		}
 		if len(data.FieldsData) > 0 {
 			if len(unit.data.GetFieldsData()) != len(data.FieldsData) {
 				return nil, fmt.Errorf("Search Chunk field count %d does not match output field count %d", len(unit.data.GetFieldsData()), len(data.FieldsData))
@@ -760,6 +874,13 @@ func buildSearchChunk(
 			}
 			data.ElementIndices.Data = append(data.ElementIndices.Data, unit.data.GetElementIndices().GetData()[unit.rowIndex])
 		}
+	}
+	if err := reduce.WriteGroupByFieldValues(data, groupRows, groupSources, groupFieldIDs); err != nil {
+		return nil, merr.Wrap(err, "copy Search Chunk group-by fields")
+	}
+	if legacyGroupField {
+		data.GroupByFieldValue = data.GroupByFieldValues[0]
+		data.GroupByFieldValues = nil
 	}
 
 	return &internalpb.SearchResults{
@@ -798,9 +919,11 @@ func (s *OrderedReduceStream) closeChildren() error {
 	for i := range s.childBuffers {
 		s.childBuffers[i].units = nil
 		s.childBuffers[i].cursor = 0
+		s.childBuffers[i].groupKey = nil
 	}
 	s.metadata = nil
 	s.seenPKs = nil
+	s.groups = nil
 	return s.closeErr
 }
 

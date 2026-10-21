@@ -144,10 +144,8 @@ func (s *Server) SearchOnViewStream(stream viewpb.ViewQueryService_SearchOnViewS
 	legacyRequest := request.GetLegacyReq()
 	if legacyRequest == nil ||
 		legacyRequest.GetIsAdvanced() ||
-		len(legacyRequest.GetSubReqs()) > 0 ||
-		legacyRequest.GetGroupByFieldId() > 0 ||
-		len(legacyRequest.GetGroupByFieldIds()) > 0 {
-		return status.Error(codes.InvalidArgument, "SearchOnViewStream supports Plain ANN Search only")
+		len(legacyRequest.GetSubReqs()) > 0 {
+		return status.Error(codes.InvalidArgument, "SearchOnViewStream supports Plain ANN Search and Search Group By only")
 	}
 
 	response, err := s.SearchOnView(stream.Context(), request)
