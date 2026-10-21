@@ -38,8 +38,9 @@ func NewAckManager(
 	lastConfirmedTimeTick uint64,
 	lastConfirmedMessageID message.MessageID,
 	metrics *metricsutil.TimeTickMetrics,
+	recovered ...*AckDetail,
 ) *AckManager {
-	return &AckManager{
+	manager := &AckManager{
 		allocateMu:            sync.Mutex{},
 		mu:                    sync.Mutex{},
 		lastAllocatedTimeTick: 0,
@@ -48,6 +49,10 @@ func NewAckManager(
 		lastConfirmedManager:  newLastConfirmedManager(lastConfirmedMessageID),
 		metrics:               metrics,
 	}
+	// Rebuild the same confirmed-message heap used by live acknowledgements.
+	// These historical entries must not be republished through acknowledgedDetails.
+	manager.lastConfirmedManager.AddConfirmedDetails(recovered, lastConfirmedTimeTick)
+	return manager
 }
 
 // AllocateWithBarrier allocates a timestamp with a barrier.

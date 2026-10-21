@@ -21,7 +21,9 @@ type WALCheckpoint = utility.WALCheckpoint
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
 	// RecoveryBarrier is the final physical leg's barrier, after all startup switches.
-	RecoveryBarrier   message.ImmutableMessage
+	RecoveryBarrier message.ImmutableMessage
+	// TxnTombstones contains bounded successful Commit results observed in startup replay.
+	TxnTombstones     *utility.TxnTombstones
 	WritePathRecovery *moduleapi.WritePathRecoveryModuleSnapshot
 	// Checkpoint is the in-memory completed frontier after bounded startup
 	// replay. It fences write-path recovery, but is not catalog-published until

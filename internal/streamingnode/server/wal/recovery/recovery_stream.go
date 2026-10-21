@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -46,6 +47,8 @@ func (r *recoveryStorageImpl) runBoundedRecovery(
 			r.Logger().Warn(context.TODO(), "recovery from wal stream failed", mlog.Err(err))
 		}
 	}()
+	tombstones := utility.NewTxnTombstones()
+	tombstones.Advance(lastTimeTickMessage.TimeTick())
 L:
 	for {
 		select {
@@ -58,6 +61,9 @@ L:
 				}
 				return nil, merr.WrapErrServiceUnavailableMsg("recovery stream ended before the startup barrier")
 			}
+			// Result recovery also uses complete transactions in the replayed prefix,
+			// even when their data effects are already checkpointed.
+			tombstones.Observe(msg)
 			// LastConfirmedMessageID can replay an already completed prefix.
 			// Filter after scanner ordering and transaction assembly so older txn
 			// fragments can still contribute to a commit beyond the checkpoint.
@@ -106,6 +112,7 @@ L:
 	snapshot = r.buildInitialRecoverySnapshot()
 	snapshot.RecoveryBarrier = lastTimeTickMessage
 	snapshot.TxnBuffer = rs.TxnBuffer()
+	snapshot.TxnTombstones = tombstones
 	snapshot.SummaryRecovery, err = r.buildIdempotencySnapshots(ctx)
 	if err != nil {
 		return nil, err
