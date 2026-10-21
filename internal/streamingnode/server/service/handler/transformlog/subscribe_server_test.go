@@ -15,7 +15,7 @@ import (
 )
 
 func TestSubscribeServerCloseSubscriptionAck(t *testing.T) {
-	stream := newFakeSubscribeTransformServer(context.Background())
+	stream := newFakeSubscribeTransformServer(t.Context())
 	logStream := newFakeTransformLogStream()
 	server := &SubscribeServer{
 		logStream: logStream,
@@ -61,7 +61,7 @@ func TestSubscribeServerCloseSubscriptionAck(t *testing.T) {
 }
 
 func TestSubscribeServerClosesLogStreamOnCreateSendError(t *testing.T) {
-	stream := newFakeSubscribeTransformServer(context.Background())
+	stream := newFakeSubscribeTransformServer(t.Context())
 	stream.sendErr = io.ErrClosedPipe
 	logStream := newFakeTransformLogStream()
 	server := &SubscribeServer{
@@ -194,11 +194,15 @@ func (s *fakeSubscribeTransformServer) Send(resp *streamingpb.TransformResponse)
 }
 
 func (s *fakeSubscribeTransformServer) Recv() (*streamingpb.TransformRequest, error) {
-	req, ok := <-s.recvCh
-	if !ok {
-		return nil, io.EOF
+	select {
+	case req, ok := <-s.recvCh:
+		if !ok {
+			return nil, io.EOF
+		}
+		return req, nil
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
 	}
-	return req, nil
 }
 
 func (s *fakeSubscribeTransformServer) SetHeader(metadata.MD) error {

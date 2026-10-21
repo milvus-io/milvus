@@ -363,15 +363,14 @@ func TestChunkLoadSharedByIndependentStreams(t *testing.T) {
 		awaitChunkWaiters(t, &m.chunkIndex.cache, chunk, i+1)
 	}
 	require.NoError(t, streams[0].Close())
-	require.ErrorIs(t, nextTransformEvent(t, handlers[0]).Err, context.Canceled)
+	require.ErrorIs(t, streams[0].Error(), context.Canceled)
+	require.Empty(t, handlers[0].events)
 	close(resume)
 	for i, handler := range handlers[1:] {
 		event := nextTransformEvent(t, handler)
-		require.NoError(t, event.Err)
 		require.Equal(t, uint64(11+i), event.Entry.GetTimeTick())
 		require.Equal(t, []int64{42}, event.Entry.GetDelete().GetBlocks()[0].GetPrimaryKeys().GetIntId().GetData())
 		event = nextTransformEvent(t, handler)
-		require.NoError(t, event.Err)
 		require.Equal(t, uint64(12), event.SyncUp.TimeTick)
 		awaitChunkSignal(t, handler.done)
 		require.Empty(t, handler.events)

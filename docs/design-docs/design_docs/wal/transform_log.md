@@ -204,8 +204,8 @@ subscriptions to the same VChannel avoids decoding the same records repeatedly.
 
 Local and remote transports expose the same contract. After transport failure,
 the client reacquires the PChannel stream and resubscribes exclusively after the
-last position its handler successfully accepted. Entry and SyncUp advance that
-cursor; failed handler calls do not. The server applies its lower-bound policy
+last position delivered to its handler. Entry and SyncUp advance that
+cursor after Handle returns; Handle has no error return. The server applies its lower-bound policy
 again on reconnect.
 
 No durable consumer ACK or cross-process exactly-once guarantee is introduced.
@@ -250,19 +250,21 @@ reads recover or all waiters cancel. Download slots are released during backoff.
 Known corruption (`ErrStoreCorrupted`), data-integrity failures, raw
 `io.ErrUnexpectedEOF`, and permanent storage errors such as missing objects or
 permission failures terminate the shared load and fail every remaining waiter.
-Summary terminal-state errors and decoding failures also keep the terminal
-notification path. Remote storage maps an interrupted
+Summary terminal-state errors and decoding failures also end the underlying
+stream and publish its Done/Error; they are not handler events. Remote storage maps an interrupted
 object download to retryable `merr.ErrIoUnexpectEOF`; that transient transfer
 failure remains retryable. Bytes returned successfully still undergo framing,
 checksum and index validation, so a damaged object is a permanent failure.
 No error becomes an empty history or a successful SyncUp.
 
-Remote Provider integration must preserve this distinction: owner shutdown,
-migration and PChannel unavailability end the physical stream for PChannel-level
-reconnection; only explicit logical terminal failures become SubscriptionError.
-The resumable transport consumes these owner errors, including exact legacy
-UNKNOWN cancellation causes, and reacquires the assignment. Segment
-application failure handling is unchanged by read recovery.
+The resumable layer treats every underlying read, subscription or transport
+failure as the end of one physical attempt and recreates all subscriptions from
+their individual delivered cursors. It does not classify runtime failures or
+pass them to business handlers. A persistent corruption therefore remains
+observable in retry logs and blocks progress until repaired or the owner closes
+the logical stream; it never produces fabricated data or coverage. Local callers
+that use a Summary stream directly observe its Done/Error without resuming.
+Segment application failure handling is outside this transport contract.
 
 This retry policy does not alter the lower-bound compatibility rule above or
 implement reliable retention. It preserves delivery across transient failures
@@ -381,12 +383,13 @@ cursor and optional end timestamp. Owner loss after creation is handled by the
 existing resumable layer; its next factory call validates the owner again.
 The handshake does not change logical subscription lifetime or accepted cursors.
 
-The resumable layer checkpoints only Entries/SyncUp accepted by the handler.
-On owner cancellation, fencing or transport loss it closes that attempt and
-resubscribes from those cursors. Explicit Close ends the logical lifetime;
-canceling one Subscribe call does not own that lifetime. Unsupported older
-peers return Unimplemented without indefinite retry. A Send EOF must yield to
-Recv's final gRPC status. Other semantic subscription errors remain visible.
+The resumable layer checkpoints Entries/SyncUp after Handle returns. On any
+underlying failure it closes that attempt and resubscribes from those cursors,
+aligning with WAL Consumer. Explicit Close ends the logical lifetime; canceling
+one Subscribe call only removes that subscription. Factory cancellation or a
+closed HandlerClient also ends resuming. Other factory errors, including
+Unimplemented, use retry backoff. A Send EOF yields to Recv's final gRPC status
+for diagnostics. Invalid local Subscribe options are rejected synchronously.
 
 All client sends and CloseSend are serialized. Explicit stream close sends a
 CloseStream request and waits for acknowledgement, bounded by five seconds.
@@ -424,19 +427,15 @@ Existing Delete/L0 behavior and the retained-history lower-bound contract stay
 in force. Remote subscription progress alone is not a retention guarantee.
 
 A closing physical stream reports a typed shutdown so new subscriptions can
-reacquire an owner without receiving a false terminal EOF. Subscription errors
-remain visible to the consumer; the resumable layer retains the logical
-subscription for subsequent owner recovery until the consumer closes it.
-An error returned by the consumer's Handle rejects that delivery without
-advancing its checkpoint or itself permanently failing the logical subscription;
-later owner recovery resumes from the last accepted cursor.
-The resume loop closes failed connection attempts outside receive callbacks. Reconnect
-backoff resets after accepted Entry/SyncUp progress, not merely after opening a
-possibly failing gRPC stream. Context cancellation errors carried by a
-SubscriptionError response use the existing shutdown code; exact legacy UNKNOWN
-cancellation causes remain accepted by clients. This response is distinct from
-canceling the RPC. A completed RPC is observed through the physical stream's
-Done signal; explicit logical stream Close stops resuming.
+reacquire an owner. SubscriptionError responses end the physical attempt, just
+like an RPC failure; errors are never delivered through Handle. The resume loop
+closes failed attempts outside receive callbacks. Reconnect backoff resets after
+delivered Entry/SyncUp progress, not merely after opening a gRPC stream.
+The server's execution loop owns sends and handles their failures. Summary
+workers deliver data through a cancellable channel, and read failures wake the
+execution loop through the Summary stream's Done/Error, even with no incoming
+client requests. Explicit subscription Close releases delivery before joining
+the worker and does not fail sibling subscriptions.
 Subscription creation has a separate result from normal stream shutdown. Closing
 before creation completes returns a shutdown error to Subscribe, while Close
 itself can succeed. A successfully created subscription may subsequently close

@@ -20,7 +20,7 @@ type SubscribeServer struct {
 	walManager walmanager.Manager
 	logStream  wal.TransformLogStream
 	stream     streamingpb.StreamingNodeHandlerService_SubscribeTransformServer
-	sendMu     sync.Mutex
+	events     chan wal.TransformLogStreamEvent
 	subsMu     sync.Mutex
 	subs       map[int64]wal.TransformLogSubscription
 	pchannel   string
@@ -60,13 +60,45 @@ func CreateSubscribeServer(
 
 func (s *SubscribeServer) Execute() error {
 	defer s.closeAll()
-	for {
-		req, err := s.stream.Recv()
-		if errors.Is(err, io.EOF) {
-			return nil
+	s.events = make(chan wal.TransformLogStreamEvent)
+	ctx, cancel := context.WithCancel(s.stream.Context())
+	defer cancel()
+	requests := make(chan *streamingpb.TransformRequest)
+	recvErr := make(chan error, 1)
+	// Recv may block while a Summary read fails. Keep request reception separate
+	// so Done/Error can terminate the RPC without waiting for another request.
+	go func() {
+		for {
+			req, err := s.stream.Recv()
+			if err != nil {
+				recvErr <- err
+				return
+			}
+			select {
+			case requests <- req:
+			case <-ctx.Done():
+				return
+			}
 		}
-		if err != nil {
+	}()
+	for {
+		var req *streamingpb.TransformRequest
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.logStream.Done():
+			return s.logStream.Error()
+		case err := <-recvErr:
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
 			return err
+		case event := <-s.events:
+			if err := s.sendSubscriptionEvent(event); err != nil {
+				return err
+			}
+			continue
+		case req = <-requests:
 		}
 		switch req := req.GetRequest().(type) {
 		case *streamingpb.TransformRequest_Create:
@@ -99,8 +131,6 @@ func (s *SubscribeServer) Execute() error {
 }
 
 func (s *SubscribeServer) send(resp *streamingpb.TransformResponse) error {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
 	return s.stream.Send(resp)
 }
 
@@ -134,7 +164,7 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 	handler := newServerEventHandler(
 		req.GetSubscriptionId(),
 		req.GetVchannel(),
-		s.sendSubscriptionEvent,
+		s.events,
 	)
 	sub, err := s.logStream.Subscribe(s.stream.Context(), wal.TransformLogSubscriptionOption{
 		SubscriptionID:     req.GetSubscriptionId(),
@@ -188,11 +218,6 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 }
 
 func (s *SubscribeServer) sendSubscriptionError(subscriptionID int64, vchannel string, err error) error {
-	// Classify cancellation before the wire projection drops the cause chain.
-	// These errors end an owner attempt, not the logical subscription.
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		err = status.NewOnShutdownError("transform subscription owner stopped")
-	}
 	return s.send(&streamingpb.TransformResponse{
 		Response: &streamingpb.TransformResponse_SubscriptionError{
 			SubscriptionError: &streamingpb.TransformSubscriptionError{
@@ -205,15 +230,6 @@ func (s *SubscribeServer) sendSubscriptionError(subscriptionID int64, vchannel s
 }
 
 func (s *SubscribeServer) sendSubscriptionEvent(event wal.TransformLogStreamEvent) error {
-	if event.Err != nil {
-		mlog.Debug(s.stream.Context(), "streamingnode transform log subscription failed",
-			mlog.FieldPChannel(s.pchannel),
-			mlog.FieldVChannel(event.VChannel),
-			mlog.Int64("subscriptionID", event.SubscriptionID),
-			mlog.Err(event.Err),
-		)
-		return s.sendSubscriptionError(event.SubscriptionID, event.VChannel, event.Err)
-	}
 	if event.Entry != nil {
 		mlog.Debug(s.stream.Context(), "streamingnode transform log forward entry",
 			mlog.FieldPChannel(s.pchannel),
@@ -268,34 +284,33 @@ type serverEventHandler struct {
 	vchannel       string
 	ready          chan struct{}
 	closed         chan struct{}
-	send           func(wal.TransformLogStreamEvent) error
+	events         chan<- wal.TransformLogStreamEvent
 	readyOnce      sync.Once
 	closeOnce      sync.Once
 }
 
-func newServerEventHandler(subscriptionID int64, vchannel string, send func(wal.TransformLogStreamEvent) error) *serverEventHandler {
+func newServerEventHandler(subscriptionID int64, vchannel string, events chan<- wal.TransformLogStreamEvent) *serverEventHandler {
 	return &serverEventHandler{
 		subscriptionID: subscriptionID,
 		vchannel:       vchannel,
 		ready:          make(chan struct{}),
 		closed:         make(chan struct{}),
-		send:           send,
+		events:         events,
 	}
 }
 
-func (h *serverEventHandler) Handle(event wal.TransformLogStreamEvent) error {
+func (h *serverEventHandler) Handle(event wal.TransformLogStreamEvent) {
 	select {
 	case <-h.ready:
 	case <-h.closed:
-		return nil
+		return
 	}
-	// ready and closed can both be signaled; a closed handler must not send.
+	// Execute owns sends and transport errors. Closing the handler releases a
+	// worker blocked on delivery before Close joins that worker.
 	select {
 	case <-h.closed:
-		return nil
-	default:
+	case h.events <- event:
 	}
-	return h.send(event)
 }
 
 func (h *serverEventHandler) Close() {

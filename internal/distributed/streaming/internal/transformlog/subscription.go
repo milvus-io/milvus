@@ -1,15 +1,10 @@
 package transformlog
 
 import (
-	"context"
 	"sync"
-	"sync/atomic"
-
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 type resumableSubscription struct {
@@ -85,10 +80,6 @@ func (s *resumableSubscription) hasRemote() bool {
 	return s.remote != nil
 }
 
-func (s *resumableSubscription) handle(event wal.TransformLogStreamEvent) error {
-	return s.handler.Handle(event)
-}
-
 func (s *resumableSubscription) advance(timetick uint64) {
 	s.stream.mu.Lock()
 	defer s.stream.mu.Unlock()
@@ -134,22 +125,15 @@ type checkpointEventHandler struct {
 	inner  wal.TransformLogEventHandler
 }
 
-func (h *checkpointEventHandler) Handle(event wal.TransformLogStreamEvent) error {
+func (h *checkpointEventHandler) Handle(event wal.TransformLogStreamEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if err := h.sub.Error(); err != nil {
-		return err
-	}
 	if h.closed {
-		return status.NewOnShutdownError("transform subscription is closed")
+		return
 	}
 	event.SubscriptionID = h.sub.ID()
 	event.VChannel = h.sub.VChannel()
-	err := h.inner.Handle(event)
-	if err != nil {
-		// A rejected delivery must remain replayable after owner recovery.
-		return err
-	}
+	h.inner.Handle(event)
 	if event.Entry != nil {
 		h.sub.advance(event.Entry.GetTimeTick())
 	}
@@ -159,7 +143,6 @@ func (h *checkpointEventHandler) Handle(event wal.TransformLogStreamEvent) error
 	if event.Entry != nil || event.SyncUp != nil {
 		h.sub.stream.accepted.Store(true)
 	}
-	return nil
 }
 
 func (h *checkpointEventHandler) Close() {
@@ -169,50 +152,9 @@ func (h *checkpointEventHandler) Close() {
 	h.inner.Close()
 }
 
-type resumableEventHandler struct {
+// Keep the business handler alive across underlying stream attempts.
+type nopCloseHandler struct {
 	wal.TransformLogEventHandler
-	sub           *resumableSubscription
-	cancel        context.CancelFunc
-	errorReported atomic.Bool
 }
 
-func (h *resumableEventHandler) Handle(event wal.TransformLogStreamEvent) error {
-	h.sub.stream.mu.Lock()
-	active := h.sub.stream.subscriptions[h.sub.id] == h.sub
-	h.sub.stream.mu.Unlock()
-	if !active {
-		return nil
-	}
-	if err := h.sub.Error(); err != nil {
-		return err
-	}
-	if isRetryableSubscriptionError(event.Err) {
-		// Do not close the underlying stream inside its delivery callback:
-		// Close may wait for that callback. The resume loop owns cleanup.
-		h.cancel()
-		return nil
-	}
-	if event.Err != nil {
-		h.errorReported.Store(true)
-	}
-	return h.TransformLogEventHandler.Handle(event)
-}
-
-func (h *resumableEventHandler) Close() {}
-
-func isRetryableSubscriptionError(err error) bool {
-	if status.IsCanceled(err) {
-		return true
-	}
-	var se *status.StreamingError
-	if !errors.As(err, &se) {
-		return false
-	}
-	if se.IsOnShutdown() || se.IsWrongStreamingNode() || se.IsFenced() {
-		return true
-	}
-	// Existing SNs encode context cancellation as UNKNOWN, losing its type.
-	// Match only these exact legacy causes; other UNKNOWN errors remain fatal.
-	return se.Code == streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN &&
-		(se.Cause == context.Canceled.Error() || se.Cause == context.DeadlineExceeded.Error())
-}
+func (h *nopCloseHandler) Close() {}

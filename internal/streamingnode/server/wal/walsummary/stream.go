@@ -13,14 +13,14 @@ import (
 type Stream struct {
 	reader TransformReader
 	ctx    context.Context
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 	mu     sync.Mutex
 	closed bool
 	wg     sync.WaitGroup
 }
 
 func NewStream(reader TransformReader) *Stream {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	return &Stream{reader: reader, ctx: ctx, cancel: cancel}
 }
 
@@ -30,8 +30,8 @@ func (s *Stream) Subscribe(ctx context.Context, opt wal.TransformLogSubscription
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return nil, context.Canceled
+	if s.closed || s.ctx.Err() != nil {
+		return nil, context.Cause(s.ctx)
 	}
 	subctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(s.ctx, cancel)
@@ -43,8 +43,10 @@ func (s *Stream) Subscribe(ctx context.Context, opt wal.TransformLogSubscription
 		defer opt.Handler.Close()
 		defer stop()
 		defer cancel()
-		if err := s.read(subctx, opt); err != nil {
-			_ = opt.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionID: opt.SubscriptionID, VChannel: opt.VChannel, Err: err})
+		if err := s.read(subctx, opt); err != nil && subctx.Err() == nil {
+			// End the physical stream, allowing its owner to resume all subscriptions.
+			// Explicit subscription cancellation must not fail sibling subscriptions.
+			s.cancel(err)
 		}
 	}()
 	return sub, nil
@@ -70,18 +72,17 @@ func (s *Stream) read(ctx context.Context, opt wal.TransformLogSubscriptionOptio
 			return err
 		}
 		for _, entry := range batch.Entries {
-			if err := opt.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionID: opt.SubscriptionID, VChannel: opt.VChannel, Entry: entry}); err != nil {
+			if err := ctx.Err(); err != nil {
 				return err
 			}
+			opt.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionID: opt.SubscriptionID, VChannel: opt.VChannel, Entry: entry})
 		}
 		// Accept Summary's retained lower bound, including an entirely retired
 		// bounded interval. Never advance beyond the requested end.
 		after = max(batch.CoveredThrough, min(batch.FastForwardTimeTick, through))
 		if after >= through || after >= batch.ReadableThrough {
 			if opt.EndTimeTick == 0 || after >= through {
-				if err := opt.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionID: opt.SubscriptionID, VChannel: opt.VChannel, SyncUp: &wal.TransformLogSyncUp{TimeTick: after}}); err != nil {
-					return err
-				}
+				opt.Handler.Handle(wal.TransformLogStreamEvent{SubscriptionID: opt.SubscriptionID, VChannel: opt.VChannel, SyncUp: &wal.TransformLogSyncUp{TimeTick: after}})
 			}
 			if after >= through {
 				return nil
@@ -100,11 +101,11 @@ func (s *Stream) read(ctx context.Context, opt wal.TransformLogSubscriptionOptio
 }
 
 func (s *Stream) Done() <-chan struct{} { return s.ctx.Done() }
-func (s *Stream) Error() error          { return s.ctx.Err() }
+func (s *Stream) Error() error          { return context.Cause(s.ctx) }
 func (s *Stream) Close() error {
 	s.mu.Lock()
 	s.closed = true
-	s.cancel()
+	s.cancel(context.Canceled)
 	s.mu.Unlock()
 	s.wg.Wait()
 	return nil

@@ -66,8 +66,8 @@ func (s *eventSubscription) Close() error {
 	return s.Error()
 }
 
-func (s *eventSubscription) handle(event wal.TransformLogStreamEvent) error {
-	return s.handler.Handle(event)
+func (s *eventSubscription) handle(event wal.TransformLogStreamEvent) {
+	s.handler.Handle(event)
 }
 
 func (s *eventSubscription) markReady(err error) {

@@ -9,11 +9,9 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"google.golang.org/grpc/codes"
-	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -143,17 +141,16 @@ func (s *resumableStream) resumeLoop() {
 			finalErr = err
 			return
 		}
-		// A subscription can report owner shutdown before the transport closes.
-		// Cancel this attempt to resume all subscriptions without failing their handlers.
+		// Each attempt owns one physical stream and all of its subscriptions.
 		ctx, cancel := context.WithCancel(s.ctx)
 		underlying, err := s.factory(ctx, s.pchannel)
 		if err != nil {
 			cancel()
-			if isTerminalStreamError(err) {
+			if errors.IsAny(err, context.Canceled, handler.ErrClientClosed) {
 				finalErr = err
 				return
 			}
-			mlog.Debug(s.ctx, "resumable transform log stream create failed, retrying",
+			mlog.Warn(s.ctx, "resumable transform log stream create failed, retrying",
 				mlog.FieldPChannel(s.pchannel),
 				mlog.Err(err),
 			)
@@ -168,9 +165,9 @@ func (s *resumableStream) resumeLoop() {
 		)
 		s.accepted.Store(false)
 		s.setUnderlying(underlying)
-		err = s.subscribePending(ctx, cancel, underlying)
+		err = s.subscribePending(ctx, underlying)
 		if err == nil {
-			err = s.waitUntilUnavailable(ctx, cancel, underlying)
+			err = s.waitUntilUnavailable(ctx, underlying)
 		}
 		// Recv owns the final gRPC status; Send may only report EOF.
 		if streamErr := underlying.Error(); streamErr != nil {
@@ -182,11 +179,7 @@ func (s *resumableStream) resumeLoop() {
 		if s.accepted.Load() {
 			retryBackoff.Reset()
 		}
-		if isTerminalStreamError(err) {
-			finalErr = err
-			return
-		}
-		mlog.Debug(s.ctx, "resumable transform log stream underlying stream unavailable, retrying",
+		mlog.Warn(s.ctx, "resumable transform log stream underlying stream unavailable, retrying",
 			mlog.FieldPChannel(s.pchannel),
 			mlog.Err(err),
 		)
@@ -214,27 +207,14 @@ func (s *resumableStream) clearUnderlying(underlying wal.TransformLogStream) {
 	}
 }
 
-func (s *resumableStream) subscribePending(ctx context.Context, cancel context.CancelFunc, underlying wal.TransformLogStream) error {
+func (s *resumableStream) subscribePending(ctx context.Context, underlying wal.TransformLogStream) error {
 	for _, sub := range s.subscriptionSnapshot() {
 		if sub.hasRemote() {
 			continue
 		}
-		handler := &resumableEventHandler{TransformLogEventHandler: sub.handler, sub: sub, cancel: cancel}
+		handler := &nopCloseHandler{TransformLogEventHandler: sub.handler}
 		if err := s.subscribeRemote(ctx, underlying, sub, handler); err != nil {
-			if ctx.Err() != nil || underlying.Error() != nil || isRetryableSubscriptionError(err) {
-				return err
-			}
-			// The remote client reports subscription errors to the handler before
-			// returning them from Subscribe. Pure synchronous failures still need
-			// a notification here. This state belongs only to this create attempt.
-			if !handler.errorReported.Load() {
-				_ = sub.handle(wal.TransformLogStreamEvent{
-					SubscriptionID: sub.ID(),
-					VChannel:       sub.VChannel(),
-					Err:            err,
-				})
-			}
-			sub.markReady(nil)
+			return err
 		}
 	}
 	return nil
@@ -250,7 +230,7 @@ func (s *resumableStream) subscriptionSnapshot() []*resumableSubscription {
 	return subs
 }
 
-func (s *resumableStream) subscribeRemote(ctx context.Context, underlying wal.TransformLogStream, sub *resumableSubscription, handler *resumableEventHandler) error {
+func (s *resumableStream) subscribeRemote(ctx context.Context, underlying wal.TransformLogStream, sub *resumableSubscription, handler *nopCloseHandler) error {
 	opt := sub.option()
 	opt.Handler = handler
 	mlog.Debug(s.ctx, "resumable transform log stream subscribing vchannel",
@@ -282,13 +262,13 @@ func (s *resumableStream) subscribeRemote(ctx context.Context, underlying wal.Tr
 	return nil
 }
 
-func (s *resumableStream) waitUntilUnavailable(ctx context.Context, cancel context.CancelFunc, underlying wal.TransformLogStream) error {
+func (s *resumableStream) waitUntilUnavailable(ctx context.Context, underlying wal.TransformLogStream) error {
 	for {
 		select {
 		case <-underlying.Done():
 			return underlying.Error()
 		case <-s.wake:
-			if err := s.subscribePending(ctx, cancel, underlying); err != nil {
+			if err := s.subscribePending(ctx, underlying); err != nil {
 				return err
 			}
 		case <-ctx.Done():
@@ -350,26 +330,7 @@ func (s *resumableStream) finish(err error) {
 		close(s.done)
 		s.mu.Unlock()
 		for _, sub := range subscriptions {
-			if err != nil {
-				_ = sub.handle(wal.TransformLogStreamEvent{
-					SubscriptionID: sub.ID(),
-					VChannel:       sub.VChannel(),
-					Err:            err,
-				})
-			}
 			sub.finish(err)
 		}
 	})
-}
-
-// Unsupported older peers and explicit protocol failures cannot heal by reconnecting.
-func isTerminalStreamError(err error) bool {
-	if err == nil {
-		return false
-	}
-	switch grpcstatus.Code(err) {
-	case codes.Unimplemented, codes.InvalidArgument, codes.PermissionDenied, codes.Unauthenticated:
-		return true
-	}
-	return status.AsStreamingError(err).IsUnrecoverable()
 }

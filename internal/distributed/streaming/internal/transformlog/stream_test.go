@@ -15,96 +15,82 @@ import (
 )
 
 func TestResumableStreamResubscribesFromLastDeliveredTimeTick(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	for _, failure := range []error{
+		grpcstatus.Error(codes.Unavailable, "stream broken"),
+		grpcstatus.Error(codes.InvalidArgument, "runtime rejection"),
+		grpcstatus.Error(codes.PermissionDenied, "access temporarily denied"),
+		wal.ErrTransformLogVChannelUnavailable,
+	} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-	var mu sync.Mutex
-	streams := []*fakeTransformLogStream{newFakeTransformLogStream(), newFakeTransformLogStream()}
-	var acquired []string
-	stream := NewResumableStream(ctx, "pchannel", func(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		acquired = append(acquired, pchannel)
-		return streams[len(acquired)-1], nil
-	})
-	defer stream.Close()
+			var mu sync.Mutex
+			streams := []*fakeTransformLogStream{newFakeTransformLogStream(), newFakeTransformLogStream()}
+			var acquired []string
+			stream := NewResumableStream(ctx, "pchannel", func(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				acquired = append(acquired, pchannel)
+				return streams[len(acquired)-1], nil
+			})
+			defer stream.Close()
 
-	handler1 := newRecordingHandler()
-	sub1 := subscribeStreamForTest(t, ctx, stream, wal.TransformLogSubscriptionOption{
-		VChannel:           "pchannel_100v0",
-		StartAfterTimeTick: 10,
-		Handler:            handler1,
-	})
-	handler2 := newRecordingHandler()
-	sub2 := subscribeStreamForTest(t, ctx, stream, wal.TransformLogSubscriptionOption{
-		VChannel:           "pchannel_200v0",
-		StartAfterTimeTick: 20,
-		Handler:            handler2,
-	})
+			handler1 := newRecordingHandler()
+			sub1 := subscribeStreamForTest(t, ctx, stream, wal.TransformLogSubscriptionOption{
+				VChannel:           "pchannel_100v0",
+				StartAfterTimeTick: 10,
+				Handler:            handler1,
+			})
+			handler2 := newRecordingHandler()
+			sub2 := subscribeStreamForTest(t, ctx, stream, wal.TransformLogSubscriptionOption{
+				VChannel:           "pchannel_200v0",
+				StartAfterTimeTick: 20,
+				Handler:            handler2,
+			})
 
-	first := streams[0]
-	first.emit(wal.TransformLogStreamEvent{
-		SubscriptionID: first.subscriptionID("pchannel_100v0"),
-		VChannel:       "pchannel_100v0",
-		Entry:          &streamingpb.TransformLogEntry{TimeTick: 11},
-	})
-	event := recvStreamEvent(t, handler1.events)
-	require.Equal(t, sub1.ID(), event.SubscriptionID)
-	require.Equal(t, uint64(11), event.Entry.GetTimeTick())
+			first := streams[0]
+			first.emit(wal.TransformLogStreamEvent{
+				SubscriptionID: first.subscriptionID("pchannel_100v0"),
+				VChannel:       "pchannel_100v0",
+				Entry:          &streamingpb.TransformLogEntry{TimeTick: 11},
+			})
+			event := recvStreamEvent(t, handler1.events)
+			require.Equal(t, sub1.ID(), event.SubscriptionID)
+			require.Equal(t, uint64(11), event.Entry.GetTimeTick())
 
-	first.emit(wal.TransformLogStreamEvent{
-		SubscriptionID: first.subscriptionID("pchannel_200v0"),
-		VChannel:       "pchannel_200v0",
-		Entry:          &streamingpb.TransformLogEntry{TimeTick: 21},
-	})
-	event = recvStreamEvent(t, handler2.events)
-	require.Equal(t, sub2.ID(), event.SubscriptionID)
-	require.Equal(t, uint64(21), event.Entry.GetTimeTick())
+			first.emit(wal.TransformLogStreamEvent{
+				SubscriptionID: first.subscriptionID("pchannel_200v0"),
+				VChannel:       "pchannel_200v0",
+				Entry:          &streamingpb.TransformLogEntry{TimeTick: 21},
+			})
+			event = recvStreamEvent(t, handler2.events)
+			require.Equal(t, sub2.ID(), event.SubscriptionID)
+			require.Equal(t, uint64(21), event.Entry.GetTimeTick())
 
-	first.finish(grpcstatus.Error(codes.Unavailable, "stream broken"))
+			first.finish(failure)
 
-	require.Eventually(t, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return len(acquired) == 2
-	}, time.Second, 10*time.Millisecond)
-	second := streams[1]
-	require.Eventually(t, func() bool {
-		return second.startAfter("pchannel_100v0") == 11 &&
-			second.startAfter("pchannel_200v0") == 21
-	}, time.Second, 10*time.Millisecond)
+			require.Eventually(t, func() bool {
+				mu.Lock()
+				defer mu.Unlock()
+				return len(acquired) == 2
+			}, time.Second, 10*time.Millisecond)
+			second := streams[1]
+			require.Eventually(t, func() bool {
+				return second.startAfter("pchannel_100v0") == 11 &&
+					second.startAfter("pchannel_200v0") == 21
+			}, time.Second, 10*time.Millisecond)
 
-	second.emit(wal.TransformLogStreamEvent{
-		SubscriptionID: second.subscriptionID("pchannel_100v0"),
-		VChannel:       "pchannel_100v0",
-		Entry:          &streamingpb.TransformLogEntry{TimeTick: 12},
-	})
-	event = recvStreamEvent(t, handler1.events)
-	require.Equal(t, sub1.ID(), event.SubscriptionID)
-	require.Equal(t, uint64(12), event.Entry.GetTimeTick())
-}
-
-func TestResumableStreamKeepsSubscriptionOnSubscribeError(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	underlying := newFakeTransformLogStream()
-	underlying.subscribeErrByVChan["pchannel_100v0"] = wal.ErrTransformLogStartPointTruncated
-	stream := NewResumableStream(ctx, "pchannel", func(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
-		return underlying, nil
-	})
-	defer stream.Close()
-
-	handler := newRecordingHandler()
-	sub := subscribeStreamForTest(t, ctx, stream, wal.TransformLogSubscriptionOption{
-		VChannel:           "pchannel_100v0",
-		StartAfterTimeTick: 10,
-		Handler:            handler,
-	})
-	event := recvStreamEvent(t, handler.events)
-	require.Equal(t, sub.ID(), event.SubscriptionID)
-	require.Equal(t, "pchannel_100v0", event.VChannel)
-	require.ErrorIs(t, event.Err, wal.ErrTransformLogStartPointTruncated)
+			second.emit(wal.TransformLogStreamEvent{
+				SubscriptionID: second.subscriptionID("pchannel_100v0"),
+				VChannel:       "pchannel_100v0",
+				Entry:          &streamingpb.TransformLogEntry{TimeTick: 12},
+			})
+			event = recvStreamEvent(t, handler1.events)
+			require.Equal(t, sub1.ID(), event.SubscriptionID)
+			require.Equal(t, uint64(12), event.Entry.GetTimeTick())
+		})
+	}
 }
 
 func subscribeStreamForTest(t *testing.T, ctx context.Context, stream wal.TransformLogStream, opt wal.TransformLogSubscriptionOption) wal.TransformLogSubscription {
@@ -177,7 +163,7 @@ func (s *fakeTransformLogStream) emit(event wal.TransformLogStreamEvent) {
 	s.mu.Lock()
 	opt := s.optsByID[event.SubscriptionID]
 	s.mu.Unlock()
-	_ = opt.Handler.Handle(event)
+	opt.Handler.Handle(event)
 }
 
 func (s *fakeTransformLogStream) finish(err error) {
@@ -227,9 +213,8 @@ func newRecordingHandler() *recordingHandler {
 	return &recordingHandler{events: make(chan wal.TransformLogStreamEvent, 16)}
 }
 
-func (h *recordingHandler) Handle(event wal.TransformLogStreamEvent) error {
+func (h *recordingHandler) Handle(event wal.TransformLogStreamEvent) {
 	h.events <- event
-	return nil
 }
 
 func (h *recordingHandler) Close() {}

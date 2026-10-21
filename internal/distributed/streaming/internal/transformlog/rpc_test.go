@@ -10,9 +10,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -26,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
-	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -107,7 +104,7 @@ func TestTransformRPCResumesAcceptedEntryAndSyncUp(t *testing.T) {
 	defer sub.Close()
 	require.EqualValues(t, 11, recvStreamEvent(t, h.events).Entry.GetTimeTick())
 	require.EqualValues(t, 20, recvStreamEvent(t, h.events).SyncUp.TimeTick)
-	// Closing the owner sends cancellation before the RPC itself ends.
+	// Closing the owner ends the RPC and triggers recovery.
 	first := <-acquired
 	require.NoError(t, first.Close())
 	select {
@@ -139,7 +136,7 @@ func TestTransformRPCResumesAcceptedEntryAndSyncUp(t *testing.T) {
 	require.NoError(t, direct.Close())
 }
 
-func TestTransformRPCUnsupportedPeerIsTerminal(t *testing.T) {
+func TestTransformRPCUnsupportedPeerRetriesUntilCanceled(t *testing.T) {
 	client := rpcClient(t, &streamingpb.UnimplementedStreamingNodeHandlerServiceServer{})
 	var attempts atomic.Int32
 	stream := resumable.NewResumableStream(t.Context(), "p", func(ctx context.Context, _ string) (wal.TransformLogStream, error) {
@@ -149,10 +146,16 @@ func TestTransformRPCUnsupportedPeerIsTerminal(t *testing.T) {
 	defer stream.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	_, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", Handler: newRecordingHandler()})
-	require.Equal(t, codes.Unimplemented, grpcstatus.Code(err))
-	require.EqualValues(t, 1, attempts.Load())
-	require.NoError(t, ctx.Err())
+	result := make(chan error, 1)
+	go func() {
+		_, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", Handler: newRecordingHandler()})
+		result <- err
+	}()
+	require.Eventually(t, func() bool { return attempts.Load() >= 2 }, time.Second, time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-result, context.Canceled)
+	require.NoError(t, stream.Error())
+	require.NoError(t, stream.Close())
 }
 
 type recordingHandler struct {
@@ -163,16 +166,14 @@ func newRecordingHandler() *recordingHandler {
 	return &recordingHandler{events: make(chan wal.TransformLogStreamEvent, 16)}
 }
 
-func (h *recordingHandler) Handle(event wal.TransformLogStreamEvent) error {
+func (h *recordingHandler) Handle(event wal.TransformLogStreamEvent) {
 	h.events <- event
-	return nil
 }
 func (h *recordingHandler) Close() {}
 func recvStreamEvent(t *testing.T, events <-chan wal.TransformLogStreamEvent) wal.TransformLogStreamEvent {
 	t.Helper()
 	select {
 	case event := <-events:
-		require.NoError(t, event.Err)
 		return event
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for transform event")
@@ -234,60 +235,60 @@ func TestTransformRPCRejectsMalformedRequests(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestResumableFactoryTerminalErrorAndClosedStream(t *testing.T) {
-	stream := resumable.NewResumableStream(t.Context(), "p", func(context.Context, string) (wal.TransformLogStream, error) {
-		return nil, streamingstatus.NewInvalidArgument("invalid channel")
-	})
-	h := newRecordingHandler()
-	_, err := stream.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{Handler: h})
-	require.ErrorIs(t, err, wal.ErrTransformLogInvalidReadOption)
-	<-stream.Done()
-	_, err = stream.Subscribe(t.Context(), wal.TransformLogSubscriptionOption{VChannel: "p_1v0", Handler: h})
-	require.True(t, streamingstatus.AsStreamingError(err).IsInvalidArgument())
-	require.Error(t, stream.Close())
-}
-
 type terminalRPCHandler struct {
 	events chan wal.TransformLogStreamEvent
 	closed atomic.Int32
 }
 
-func (h *terminalRPCHandler) Handle(event wal.TransformLogStreamEvent) error {
+func (h *terminalRPCHandler) Handle(event wal.TransformLogStreamEvent) {
 	h.events <- event
-	return nil
 }
 func (h *terminalRPCHandler) Close() { h.closed.Add(1) }
 
-func TestTransformRPCResumesRejectedDelivery(t *testing.T) {
-	client, _, _ := summaryRPC(t)
-	var rejected atomic.Bool
-	var original func(*terminalRPCHandler, wal.TransformLogStreamEvent) error
-	patch := mockey.Mock((*terminalRPCHandler).Handle).Origin(&original).To(func(h *terminalRPCHandler, event wal.TransformLogStreamEvent) error {
-		if event.Entry != nil && event.Entry.GetTimeTick() == 11 && rejected.CompareAndSwap(false, true) {
-			return streamingstatus.NewUnknownError("consumer rejected entry")
-		}
-		return original(h, event)
-	}).Build()
-	defer patch.UnPatch()
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	var attempts atomic.Int32
-	stream := resumable.NewResumableStream(ctx, "p", func(ctx context.Context, _ string) (wal.TransformLogStream, error) {
-		attempts.Add(1)
-		return remote.CreateEventStream(ctx, rpcOptions(1), client)
-	})
-	defer stream.Close()
-	handler := &terminalRPCHandler{events: make(chan wal.TransformLogStreamEvent, 16)}
-	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", Handler: handler})
-	require.NoError(t, err)
-	defer sub.Close()
-	// The accepted first entry is not replayed; the rejected second entry is.
-	require.EqualValues(t, 10, recvStreamEvent(t, handler.events).Entry.GetTimeTick())
-	require.EqualValues(t, 11, recvStreamEvent(t, handler.events).Entry.GetTimeTick())
-	require.EqualValues(t, 20, recvStreamEvent(t, handler.events).SyncUp.TimeTick)
-	require.True(t, rejected.Load())
-	require.EqualValues(t, 2, attempts.Load())
-	require.Zero(t, handler.closed.Load(), "delivery rejection must not close the logical handler")
-	require.NoError(t, sub.Close())
-	require.EqualValues(t, 1, handler.closed.Load())
+// Both local reads and the real RPC path must recover without sending an error
+// to a business handler or replaying already delivered entries.
+func TestTransformReadFailureResumesAllSubscriptions(t *testing.T) {
+	for _, mode := range []string{"local", "remote"} {
+		t.Run(mode, func(t *testing.T) {
+			client, manager, _ := summaryRPC(t)
+			manager.ObserveQueryBarrier("p_2v0", 30)
+			var failNext atomic.Bool
+			// Conditional patching lets concurrent non-failing reads use the
+			// original method without Mockey Origin's shared argument adapter.
+			patch := mockey.Mock((*walsummary.Manager).ReadTransform).When(func(_ *walsummary.Manager, _ context.Context, v string, _, _ uint64, _ walsummary.ReadLimits) bool {
+				return v == "p_1v0" && failNext.CompareAndSwap(true, false)
+			}).Return(walsummary.TransformBatch{}, walsummary.ErrStoreCorrupted).Build()
+			defer patch.UnPatch()
+			var attempts atomic.Int32
+			stream := resumable.NewResumableStream(t.Context(), "p", func(ctx context.Context, _ string) (wal.TransformLogStream, error) {
+				attempts.Add(1)
+				if mode == "local" {
+					return walsummary.NewStream(manager), nil
+				}
+				return remote.CreateEventStream(ctx, rpcOptions(1), client)
+			})
+			defer stream.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			a := &terminalRPCHandler{events: make(chan wal.TransformLogStreamEvent, 16)}
+			b := &terminalRPCHandler{events: make(chan wal.TransformLogStreamEvent, 16)}
+			_, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", Handler: a})
+			require.NoError(t, err)
+			_, err = stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_2v0", Handler: b})
+			require.NoError(t, err)
+			require.EqualValues(t, 10, recvStreamEvent(t, a.events).Entry.GetTimeTick())
+			require.EqualValues(t, 11, recvStreamEvent(t, a.events).Entry.GetTimeTick())
+			require.EqualValues(t, 20, recvStreamEvent(t, a.events).SyncUp.TimeTick)
+			require.EqualValues(t, 30, recvStreamEvent(t, b.events).SyncUp.TimeTick)
+			failNext.Store(true)
+			manager.ObserveQueryBarrier("p_1v0", 21)
+			require.EqualValues(t, 21, recvStreamEvent(t, a.events).SyncUp.TimeTick)
+			require.EqualValues(t, 30, recvStreamEvent(t, b.events).SyncUp.TimeTick)
+			require.EqualValues(t, 2, attempts.Load())
+			require.Zero(t, a.closed.Load())
+			require.Zero(t, b.closed.Load())
+			require.NoError(t, stream.Close())
+			require.Eventually(t, func() bool { return a.closed.Load() == 1 && b.closed.Load() == 1 }, time.Second, time.Millisecond)
+		})
+	}
 }

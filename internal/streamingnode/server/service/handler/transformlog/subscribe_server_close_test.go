@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Exercise the real WALSummary worker and gRPC shutdown: a subscription fake
@@ -44,13 +43,13 @@ func TestSubscribeServerCreateFailureUnblocksCallbacks(t *testing.T) {
 			defer readPatch.UnPatch()
 
 			handlers := make(chan *serverEventHandler, 1)
-			var originalHandle func(*serverEventHandler, wal.TransformLogStreamEvent) error
-			handlePatch := mockey.Mock((*serverEventHandler).Handle).To(func(h *serverEventHandler, event wal.TransformLogStreamEvent) error {
+			var originalHandle func(*serverEventHandler, wal.TransformLogStreamEvent)
+			handlePatch := mockey.Mock((*serverEventHandler).Handle).To(func(h *serverEventHandler, event wal.TransformLogStreamEvent) {
 				callbackOnce.Do(func() {
 					handlers <- h
 					close(callbackStarted)
 				})
-				return originalHandle(h, event)
+				originalHandle(h, event)
 			}).Origin(&originalHandle).Build()
 			defer handlePatch.UnPatch()
 
@@ -60,7 +59,7 @@ func TestSubscribeServerCreateFailureUnblocksCallbacks(t *testing.T) {
 					return io.ErrClosedPipe
 				}
 				// Hold the create acknowledgement until the worker has started. In
-				// the cancellation case, Close itself triggers the error callback.
+				// the cancellation case, Close cancels the read without a callback.
 				started := callbackStarted
 				if pending == "cancellation" {
 					started = readStarted
@@ -106,15 +105,19 @@ func TestSubscribeServerCreateFailureUnblocksCallbacks(t *testing.T) {
 			}}))
 
 			var handler *serverEventHandler
-			select {
-			case handler = <-handlers:
-			case <-ctx.Done():
-				t.Fatal("subscription callback did not start")
+			if pending != "cancellation" {
+				select {
+				case handler = <-handlers:
+				case <-ctx.Done():
+					t.Fatal("worker did not enter Handle")
+				}
 			}
 			defer func() {
 				// Rescue the unfixed implementation after a failing assertion so
 				// no goroutine can outlive the runtime patches.
-				handler.Close()
+				if handler != nil {
+					handler.Close()
+				}
 				cancel()
 				_ = logStream.Close()
 				<-rpcReturned
@@ -140,16 +143,40 @@ func TestSubscribeServerCreateFailureUnblocksCallbacks(t *testing.T) {
 	}
 }
 
-func TestSubscribeServerEncodesWrappedCancellation(t *testing.T) {
-	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
-		wire := newFakeSubscribeTransformServer(t.Context())
-		server := &SubscribeServer{stream: wire}
-		require.NoError(t, server.sendSubscriptionError(1, "v", merr.Wrap(cause, "owner stopped")))
-		response := wire.sent(t).GetSubscriptionError()
-		require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, response.GetError().GetCode())
+func TestSubscribeServerDataSendFailureStopsWorker(t *testing.T) {
+	for _, kind := range []string{"entry", "sync_up"} {
+		t.Run(kind, func(t *testing.T) {
+			changed := make(chan struct{})
+			readPatch := mockey.Mock((*walsummary.Manager).ReadTransform).Return(walsummary.TransformBatch{
+				Entries:        []*streamingpb.TransformLogEntry{{TimeTick: 10}},
+				CoveredThrough: 10, ReadableThrough: 10, Changed: changed, TransformChanged: changed,
+			}, nil).Build()
+			defer readPatch.UnPatch()
+			var original func(*SubscribeServer, *streamingpb.TransformResponse) error
+			sendPatch := mockey.Mock((*SubscribeServer).send).Origin(&original).To(func(s *SubscribeServer, resp *streamingpb.TransformResponse) error {
+				if (kind == "entry" && resp.GetMessageBatch() != nil) || (kind == "sync_up" && resp.GetSyncUp() != nil) {
+					return io.ErrClosedPipe
+				}
+				return original(s, resp)
+			}).Build()
+			defer sendPatch.UnPatch()
+			wire := newFakeSubscribeTransformServer(t.Context())
+			defer close(wire.recvCh)
+			logStream := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
+			server := &SubscribeServer{stream: wire, logStream: logStream, subs: make(map[int64]wal.TransformLogSubscription)}
+			finished := make(chan error, 1)
+			go func() { finished <- server.Execute() }()
+			wire.recv(&streamingpb.TransformRequest{Request: &streamingpb.TransformRequest_Create{
+				Create: &streamingpb.CreateTransformSubscriptionRequest{SubscriptionId: 1, Vchannel: "v"},
+			}})
+			require.NotNil(t, wire.sent(t).GetCreate())
+			select {
+			case err := <-finished:
+				require.ErrorIs(t, err, io.ErrClosedPipe)
+			case <-time.After(time.Second):
+				t.Fatal("send failure did not release the worker and end Execute")
+			}
+			require.ErrorIs(t, logStream.Error(), context.Canceled)
+		})
 	}
-	wire := newFakeSubscribeTransformServer(t.Context())
-	server := &SubscribeServer{stream: wire}
-	require.NoError(t, server.sendSubscriptionError(1, "v", walsummary.ErrStoreCorrupted))
-	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN, wire.sent(t).GetSubscriptionError().GetError().GetCode())
 }

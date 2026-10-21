@@ -26,8 +26,8 @@ import (
 
 type assignmentTestHandler struct{ wal.TransformLogEventHandler }
 
-func (*assignmentTestHandler) Handle(wal.TransformLogStreamEvent) error { panic("unpatched") }
-func (*assignmentTestHandler) Close()                                   { panic("unpatched") }
+func (*assignmentTestHandler) Handle(wal.TransformLogStreamEvent) { panic("unpatched") }
+func (*assignmentTestHandler) Close()                             { panic("unpatched") }
 
 func TestTransformLogReportsRejectedOwnerBeforeRetry(t *testing.T) {
 	for _, failure := range []*status.StreamingError{
@@ -116,16 +116,14 @@ func TestTransformLogReportsRejectedOwnerBeforeRetry(t *testing.T) {
 				require.EqualValues(t, 1, reports.Load(), "owner rejection must use the existing assignment report path")
 				require.EqualValues(t, 2, checks.Load())
 				events := make(chan wal.TransformLogStreamEvent, 4)
-				mockey.Mock((*assignmentTestHandler).Handle).To(func(_ *assignmentTestHandler, event wal.TransformLogStreamEvent) error {
+				mockey.Mock((*assignmentTestHandler).Handle).To(func(_ *assignmentTestHandler, event wal.TransformLogStreamEvent) {
 					events <- event
-					return nil
 				}).Build()
 				mockey.Mock((*assignmentTestHandler).Close).Return().Build()
 				sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", Handler: &assignmentTestHandler{}})
 				require.NoError(t, err)
 				select {
 				case event := <-events:
-					require.NoError(t, event.Err)
 					require.NotNil(t, event.SyncUp)
 				case <-ctx.Done():
 					t.Fatal("corrected assignment did not deliver subscription progress")

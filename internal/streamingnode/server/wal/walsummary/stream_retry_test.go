@@ -96,12 +96,10 @@ func TestQueryStreamRetriesTransientReads(t *testing.T) {
 				}
 				for _, tt := range []uint64{20, 30} {
 					event := nextTransformEvent(t, handler)
-					require.NoError(t, event.Err)
 					require.Equal(t, tt, event.Entry.GetTimeTick())
 					require.Equal(t, []int64{int64(tt)}, event.Entry.GetDelete().GetBlocks()[0].GetPrimaryKeys().GetIntId().GetData())
 				}
 				event := nextTransformEvent(t, handler)
-				require.NoError(t, event.Err)
 				require.NotNil(t, event.SyncUp)
 				require.Equal(t, uint64(40), event.SyncUp.TimeTick)
 				require.Equal(t, int64(1), firstChunkReads.Load(), "retry must not reread earlier chunks, even within the same page")
@@ -172,7 +170,7 @@ func TestQueryStreamReadFailureCancellation(t *testing.T) {
 				case <-time.After(time.Second):
 					t.Fatal("cancellation did not interrupt the read/retry")
 				}
-				require.ErrorIs(t, nextTransformEvent(t, handler).Err, context.Canceled)
+				require.Empty(t, handler.events, "cancellation is not a data event")
 				require.Equal(t, int64(1), attempts.Load(), "canceled subscription must not retry")
 				require.True(t, m.readMu.TryLock(), "last subscriber must join the load before releasing its snapshot")
 				m.readMu.Unlock()
@@ -215,10 +213,12 @@ func TestQueryStreamTerminalReadFailures(t *testing.T) {
 			sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v1", EndTimeTick: 10, Handler: handler})
 			require.NoError(t, err)
 			defer sub.Close()
-			event := nextTransformEvent(t, handler)
-			require.ErrorIs(t, event.Err, want)
-			require.Nil(t, event.Entry)
-			require.Nil(t, event.SyncUp)
+			select {
+			case <-stream.Done():
+			case <-time.After(time.Second):
+				t.Fatal("read failure did not end the physical stream")
+			}
+			require.ErrorIs(t, stream.Error(), want)
 			select {
 			case <-handler.done:
 			case <-time.After(time.Second):
@@ -227,29 +227,4 @@ func TestQueryStreamTerminalReadFailures(t *testing.T) {
 			require.Empty(t, handler.events)
 		})
 	}
-}
-
-func TestQueryStreamDoesNotRetryHandlerFailure(t *testing.T) {
-	m := NewManager(ManagerConfig{})
-	m.ObserveMessage(context.Background(), newTestDeleteMessage(t, "v1", 10, 1, 10))
-	var calls atomic.Int64
-	var original func(*recordingTransformHandler, wal.TransformLogStreamEvent) error
-	patch := mockey.Mock((*recordingTransformHandler).Handle).Origin(&original).To(func(h *recordingTransformHandler, event wal.TransformLogStreamEvent) error {
-		if event.Entry != nil {
-			calls.Add(1)
-			return merr.ErrIoFailed
-		}
-		return original(h, event)
-	}).Build()
-	defer patch.UnPatch()
-	stream := NewStream(m)
-	defer stream.Close()
-	handler := newRecordingTransformHandler()
-	sub, err := stream.Subscribe(context.Background(), wal.TransformLogSubscriptionOption{VChannel: "v1", EndTimeTick: 10, Handler: handler})
-	require.NoError(t, err)
-	defer sub.Close()
-	require.ErrorIs(t, nextTransformEvent(t, handler).Err, merr.ErrIoFailed)
-	require.NoError(t, sub.Close())
-	require.Equal(t, int64(1), calls.Load())
-	require.Empty(t, handler.events, "failed delivery must not emit SyncUp")
 }

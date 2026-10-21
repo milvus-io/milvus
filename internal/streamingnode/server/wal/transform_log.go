@@ -48,11 +48,11 @@ type TransformLogSubscriptionOption struct {
 // Close methods synchronously from Handle. Remote subscriptions share a receive
 // loop: a blocked handler also delays other subscriptions on that RPC.
 // Close is a completion notification, not the mechanism for aborting Handle.
-// Subscription errors are delivered to the consumer. Resume checkpoints
-// advance only after Handle accepts Entry/SyncUp. A returned handler error
-// rejects delivery without itself permanently ending the logical subscription.
+// Handle receives only Entry/SyncUp and completes delivery before returning.
+// Failures are exposed by the underlying stream's Done/Error and handled by
+// resuming; they are never delivered as business events.
 type TransformLogEventHandler interface {
-	Handle(event TransformLogStreamEvent) error
+	Handle(event TransformLogStreamEvent)
 	Close()
 }
 
@@ -70,7 +70,6 @@ type TransformLogStreamEvent struct {
 	VChannel       string
 	Entry          *streamingpb.TransformLogEntry
 	SyncUp         *TransformLogSyncUp
-	Err            error
 }
 
 type transformLogErrorAccesser struct {

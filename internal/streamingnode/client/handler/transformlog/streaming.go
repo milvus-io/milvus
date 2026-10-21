@@ -117,8 +117,7 @@ func (s *EventStream) Subscribe(ctx context.Context, opt wal.TransformLogSubscri
 		},
 	}); err != nil {
 		// gRPC Send can report EOF before Recv obtains the peer's final status
-		// (for example an older peer returning Unimplemented). Do not replace
-		// that status with EOF and accidentally turn a terminal error into retry.
+		// so preserve the receive-side error for diagnostics.
 		if errors.Is(err, io.EOF) {
 			select {
 			case <-s.done:
@@ -297,7 +296,9 @@ func (s *EventStream) recvLoop() {
 		case *streamingpb.TransformResponse_SyncUp:
 			s.handleSyncUp(resp.SyncUp)
 		case *streamingpb.TransformResponse_SubscriptionError:
-			s.handleSubscriptionError(resp.SubscriptionError)
+			if err = s.handleSubscriptionError(resp.SubscriptionError); err != nil {
+				return
+			}
 		case *streamingpb.TransformResponse_CloseSubscription:
 			s.handleCloseSubscription(resp.CloseSubscription)
 		case *streamingpb.TransformResponse_CloseStream:
@@ -337,15 +338,11 @@ func (s *EventStream) handleMessageBatch(resp *streamingpb.TransformMessageBatch
 			mlog.Int64("subscriptionID", resp.GetSubscriptionId()),
 			mlog.Uint64("timeTick", entry.GetTimeTick()),
 		)
-		if err := sub.handle(wal.TransformLogStreamEvent{
+		sub.handle(wal.TransformLogStreamEvent{
 			SubscriptionID: resp.GetSubscriptionId(),
 			VChannel:       resp.GetVchannel(),
 			Entry:          entry,
-		}); err != nil {
-			s.removeSubscription(resp.GetSubscriptionId())
-			sub.finish(err)
-			return
-		}
+		})
 	}
 }
 
@@ -357,14 +354,11 @@ func (s *EventStream) handleSyncUp(resp *streamingpb.TransformSubscriptionSyncUp
 	if sub == nil {
 		return
 	}
-	if err := sub.handle(wal.TransformLogStreamEvent{
+	sub.handle(wal.TransformLogStreamEvent{
 		SubscriptionID: resp.GetSubscriptionId(),
 		VChannel:       resp.GetVchannel(),
 		SyncUp:         &wal.TransformLogSyncUp{TimeTick: resp.GetTimeTick()},
-	}); err != nil {
-		s.removeSubscription(resp.GetSubscriptionId())
-		sub.finish(err)
-	}
+	})
 	mlog.Debug(s.ctx, "handler transform log event stream received sync-up",
 		mlog.FieldPChannel(s.pchannel),
 		mlog.FieldVChannel(resp.GetVchannel()),
@@ -373,31 +367,16 @@ func (s *EventStream) handleSyncUp(resp *streamingpb.TransformSubscriptionSyncUp
 	)
 }
 
-func (s *EventStream) handleSubscriptionError(resp *streamingpb.TransformSubscriptionError) {
-	if resp == nil {
-		return
+// A failed subscription ends this physical attempt. Resuming recreates all
+// subscriptions from their last delivered cursors; handlers receive no errors.
+func (s *EventStream) handleSubscriptionError(resp *streamingpb.TransformSubscriptionError) error {
+	if resp == nil || s.getSubscription(resp.GetSubscriptionId()) == nil {
+		return nil
 	}
-	sub := s.getSubscription(resp.GetSubscriptionId())
-	if sub == nil {
-		return
-	}
-	err := status.NewUnknownError("transform subscription error")
 	if resp.GetError() != nil {
-		err = status.AsStreamingError((*status.StreamingError)(resp.GetError()))
+		return status.AsStreamingError((*status.StreamingError)(resp.GetError()))
 	}
-	s.removeSubscription(resp.GetSubscriptionId())
-	_ = sub.handle(wal.TransformLogStreamEvent{
-		SubscriptionID: resp.GetSubscriptionId(),
-		VChannel:       resp.GetVchannel(),
-		Err:            err,
-	})
-	sub.finish(err)
-	mlog.Debug(s.ctx, "handler transform log event stream received subscription error",
-		mlog.FieldPChannel(s.pchannel),
-		mlog.FieldVChannel(resp.GetVchannel()),
-		mlog.Int64("subscriptionID", resp.GetSubscriptionId()),
-		mlog.Err(err),
-	)
+	return status.NewUnknownError("transform subscription error")
 }
 
 func (s *EventStream) handleCloseSubscription(resp *streamingpb.CloseTransformSubscriptionResponse) {

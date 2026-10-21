@@ -93,7 +93,7 @@ func TestEventStreamReportsStreamErrorOnStreamOnly(t *testing.T) {
 	require.ErrorIs(t, sub.Close(), streamErr)
 }
 
-func TestEventStreamPublishesSubscriptionError(t *testing.T) {
+func TestEventStreamSubscriptionErrorEndsSharedStream(t *testing.T) {
 	ctx := context.Background()
 	fakeStream := newFakeSubscribeTransformClient(ctx)
 	handlerClient := streamingpb.NewStreamingNodeHandlerServiceClient(nil)
@@ -106,6 +106,8 @@ func TestEventStreamPublishesSubscriptionError(t *testing.T) {
 
 	handler := newRecordingHandler()
 	sub := subscribeEventForTest(t, ctx, stream, "v1", 10, handler, fakeStream)
+	siblingHandler := newRecordingHandler()
+	sibling := subscribeEventForTest(t, ctx, stream, "v2", 20, siblingHandler, fakeStream)
 	subErr := streamingstatus.NewIgnoreOperation("subscription failed")
 	fakeStream.recv(&streamingpb.TransformResponse{
 		Response: &streamingpb.TransformResponse_SubscriptionError{
@@ -117,10 +119,13 @@ func TestEventStreamPublishesSubscriptionError(t *testing.T) {
 		},
 	})
 
-	event := recvEvent(t, handler.events)
-	require.Equal(t, sub.ID(), event.SubscriptionID)
-	require.Equal(t, "v1", event.VChannel)
-	require.True(t, streamingstatus.AsStreamingError(event.Err).IsIgnoredOperation())
+	recvEvent(t, stream.Done())
+	require.True(t, streamingstatus.AsStreamingError(stream.Error()).IsIgnoredOperation())
+	require.Error(t, sub.Close())
+	require.Error(t, sibling.Close())
+	require.Empty(t, handler.events)
+	require.Empty(t, siblingHandler.events)
+	_ = fakeStream.CloseSend()
 }
 
 func subscribeEventForTest(
@@ -175,9 +180,8 @@ func newRecordingHandler() *recordingHandler {
 	return &recordingHandler{events: make(chan wal.TransformLogStreamEvent, 16)}
 }
 
-func (h *recordingHandler) Handle(event wal.TransformLogStreamEvent) error {
+func (h *recordingHandler) Handle(event wal.TransformLogStreamEvent) {
 	h.events <- event
-	return nil
 }
 
 func (h *recordingHandler) Close() {}
@@ -302,47 +306,6 @@ var (
 	_ grpc.ClientStream                                                = (*fakeSubscribeTransformClient)(nil)
 )
 
-func TestEventStreamHandlerFailureIsSubscriptionScoped(t *testing.T) {
-	for _, kind := range []string{"entry", "sync_up"} {
-		t.Run(kind, func(t *testing.T) {
-			transport := newFakeSubscribeTransformClient(t.Context())
-			client := streamingpb.NewStreamingNodeHandlerServiceClient(nil)
-			patch := mockey.Mock(mockey.GetMethod(client, "SubscribeTransform")).Return(transport, nil).Build()
-			defer patch.UnPatch()
-			stream, err := CreateEventStream(t.Context(), &EventStreamOptions{Assignment: testAssignment()}, client)
-			require.NoError(t, err)
-			defer stream.Close()
-			failed, healthy := newRecordingHandler(), newRecordingHandler()
-			sub := subscribeEventForTest(t, t.Context(), stream, "v1", 0, failed, transport)
-			other := subscribeEventForTest(t, t.Context(), stream, "v2", 0, healthy, transport)
-			failure := errors.New("consumer rejected transform")
-			var original func(*recordingHandler, wal.TransformLogStreamEvent) error
-			reject := mockey.Mock((*recordingHandler).Handle).Origin(&original).To(func(h *recordingHandler, event wal.TransformLogStreamEvent) error {
-				if h == failed {
-					return failure
-				}
-				return original(h, event)
-			}).Build()
-			defer reject.UnPatch()
-			entry := &streamingpb.TransformResponse{Response: &streamingpb.TransformResponse_MessageBatch{MessageBatch: &streamingpb.TransformMessageBatch{SubscriptionId: sub.ID(), Entries: []*streamingpb.TransformLogEntry{{TimeTick: 1}}}}}
-			syncUp := &streamingpb.TransformResponse{Response: &streamingpb.TransformResponse_SyncUp{SyncUp: &streamingpb.TransformSubscriptionSyncUp{SubscriptionId: sub.ID(), TimeTick: 1}}}
-			if kind == "entry" {
-				transport.recv(entry)
-			} else {
-				transport.recv(syncUp)
-			}
-			require.Eventually(t, func() bool { return stream.getSubscription(sub.ID()) == nil }, time.Second, time.Millisecond)
-			require.ErrorIs(t, sub.Close(), failure)
-			// Responses already in flight after local rejection must not poison peers.
-			transport.recv(entry)
-			transport.recv(syncUp)
-			transport.recv(&streamingpb.TransformResponse{Response: &streamingpb.TransformResponse_SyncUp{SyncUp: &streamingpb.TransformSubscriptionSyncUp{SubscriptionId: other.ID(), TimeTick: 2}}})
-			require.EqualValues(t, 2, recvEvent(t, healthy.events).SyncUp.TimeTick)
-			require.NoError(t, stream.Error())
-		})
-	}
-}
-
 func TestEventStreamCancelPendingSubscription(t *testing.T) {
 	transport := newFakeSubscribeTransformClient(t.Context())
 	client := streamingpb.NewStreamingNodeHandlerServiceClient(nil)
@@ -413,10 +376,9 @@ func TestEventSubscriptionAbortBeforeClose(t *testing.T) {
 	var abortOnce sync.Once
 	unblock := func() { abortOnce.Do(func() { close(abort) }) }
 	defer unblock()
-	handlePatch := mockey.Mock((*recordingHandler).Handle).To(func(_ *recordingHandler, _ wal.TransformLogStreamEvent) error {
+	handlePatch := mockey.Mock((*recordingHandler).Handle).To(func(_ *recordingHandler, _ wal.TransformLogStreamEvent) {
 		close(entered)
 		<-abort
-		return nil
 	}).Build()
 	defer handlePatch.UnPatch()
 	sub := subscribeEventForTest(t, ctx, stream, "v1", 0, handler, fake)
