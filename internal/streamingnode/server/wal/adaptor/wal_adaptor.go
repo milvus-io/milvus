@@ -385,6 +385,9 @@ func (w *walAdaptorImpl) appendOneWithRetry(ctx context.Context, msg message.Mut
 
 	// An append operation should be retried until it succeeds or some unrecoverable error occurs.
 	for i := 0; ; i++ {
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
+		}
 		appendCtx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAppendImpl)
 		message.OverwriteTraceContext(appendCtx, msg)
 		msgID, err := w.rwWALImpls.Append(appendCtx, msg)
@@ -400,8 +403,14 @@ func (w *walAdaptorImpl) appendOneWithRetry(ctx context.Context, msg message.Mut
 			}
 			return msgID, nil
 		}
-		if errors.IsAny(err, context.Canceled, context.DeadlineExceeded, walimpls.ErrFenced) {
+		// A backend may cancel or time out its own attempt while this WAL is
+		// still available. Only writer fencing or our lifecycle context ends
+		// the retry loop; a backend context error alone does not.
+		if errors.Is(err, walimpls.ErrFenced) {
 			return nil, err
+		}
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
 		}
 		w.writeMetrics.ObserveRetry()
 		nextInterval := backoff.NextBackOff()

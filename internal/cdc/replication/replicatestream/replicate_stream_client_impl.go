@@ -284,21 +284,16 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 }
 
 func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
-	// send txn begin message
 	if err = r.sendMessage(txnMsg.Begin()); err != nil {
 		return err
 	}
-
-	// send txn body messages
-	if err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
-		return r.sendMessage(msg)
-	}); err != nil {
+	// Preserve the assembled source order on every replay.
+	if err = txnMsg.RangeOver(r.sendMessage); err != nil {
 		return err
 	}
-
-	// send txn commit message
-	err = r.sendMessage(txnMsg.Commit())
-	return
+	// Preserve the source body count, including zero. Historical transactions
+	// intentionally skip count validation; CDC does not backfill it.
+	return r.sendMessage(txnMsg.Commit())
 }
 
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
