@@ -19,7 +19,7 @@ import (
 /*
 Info about scalar index
 TRIE: only support varchar
-STL_SORT: only support numeric (not include Array field)
+STL_SORT: numeric, varchar, timestamptz and supported ARRAY elements (ARRAY requires the software upgrade gate)
 INVERTED: all supported except Json
 Bitmap: all supported except Json, float, double. (If Array field, according to its ElementType)
 ScalarAutoIndex: {"int_*": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float/double": "HYBRID"}
@@ -474,7 +474,7 @@ func TestCreateTrieScalarIndex(t *testing.T) {
 	}
 }
 
-// Sort scalar index only supported on numeric field
+// SORT supports scalar fields and ARRAY fields after the software upgrade gate opens.
 func TestCreateSortedScalarIndex(t *testing.T) {
 	t.Parallel()
 
@@ -490,12 +490,11 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 
-	// create Trie scalar index on varchar field
+	// create SORT indexes on supported scalar and ARRAY fields
 	idx := index.NewSortedIndex()
 	for _, field := range schema.Fields {
 		if hp.SupportScalarIndexFieldType(field.DataType) {
-			if field.DataType == entity.FieldTypeBool ||
-				field.DataType == entity.FieldTypeJSON || field.DataType == entity.FieldTypeArray {
+			if field.DataType == entity.FieldTypeBool || field.DataType == entity.FieldTypeJSON {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
 				// STL_SORT on JSON is supported with a json_cast_type; without
 				// it the server rejects with a missing-cast-type error instead
@@ -507,6 +506,12 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 				}
 			} else {
 				idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
+				if field.DataType == entity.FieldTypeArray && err != nil {
+					// CI may run before the release gate opens. ARRAY is supported,
+					// but only this specific upgrade-gate rejection is expected.
+					require.ErrorContains(t, err, "ARRAY STL_SORT is disabled by the cluster software upgrade gate")
+					continue
+				}
 				common.CheckErr(t, err, true)
 				err = idxTask.Await(ctx)
 				common.CheckErr(t, err, true)
@@ -695,7 +700,6 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 

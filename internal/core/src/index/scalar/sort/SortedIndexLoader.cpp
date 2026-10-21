@@ -143,8 +143,9 @@ ParseRuntimeParams(const Config& params) {
         ThrowInfo(DataTypeInvalid,
                   "sorted loader requires a concrete value type");
     }
-    result.one_value_per_coordinate =
-        result.field_type != DataType::ARRAY || result.nested;
+    result.one_value_per_coordinate = (result.field_type != DataType::ARRAY &&
+                                       !IsJsonArrayProjection(params)) ||
+                                      result.nested;
     result.value_lookup = result.one_value_per_coordinate;
     return result;
 }

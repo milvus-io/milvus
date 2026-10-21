@@ -108,7 +108,9 @@ ParseRuntimeParams(const Config& params) {
     result.nullable =
         GetValueFromConfigOrFallback<bool>(params, "nullable", false);
     result.nested = ReadRequiredNestedParam(params, "bitmap loader");
-    result.value_lookup = result.field_type != DataType::ARRAY || result.nested;
+    result.value_lookup = (result.field_type != DataType::ARRAY &&
+                           !IsJsonArrayProjection(params)) ||
+                          result.nested;
     result.offset_cache =
         GetValueFromConfigOrFallback<bool>(params, ENABLE_OFFSET_CACHE, false);
     return result;

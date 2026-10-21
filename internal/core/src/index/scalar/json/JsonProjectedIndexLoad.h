@@ -100,6 +100,14 @@ FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
                               IIndexReaderBasePtr inner);
 
 /**
+ * @brief Whether a JSON path projects multiple values per parent row.
+ * @note Keep the outer JSON field type for projection decoration; families
+ * use this to disable scalar-only coordinate and reverse-lookup assumptions.
+ */
+bool
+IsJsonArrayProjection(const Config& params);
+
+/**
  * @brief Adjust inner capabilities using the verified completeness annotation.
  */
 ReaderCaps
