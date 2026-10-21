@@ -25,7 +25,51 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestShardReduceStreamElementCountReplacement(t *testing.T) {
+	for _, grows := range []bool{false, true} {
+		for _, chunkBytes := range []int{1, 1 << 20} {
+			t.Run(fmt.Sprintf("grows_%t/bytes_%d", grows, chunkBytes), func(t *testing.T) {
+				oldIndices, newIndices := []int32{0, 1, 2}, []int32{4}
+				if grows {
+					oldIndices, newIndices = newIndices, oldIndices
+				}
+				child := &queryTestStream{}
+				for _, input := range []*internalpb.RetrieveResults{
+					makeElementLevelResult([]int64{1}, []int64{10}, [][]int32{oldIndices}),
+					makeElementLevelResult([]int64{1}, []int64{20}, [][]int32{newIndices}),
+					makeElementLevelResult([]int64{2}, []int64{10}, [][]int32{{0}}),
+				} {
+					input.Status = merr.Success()
+					child.recv = append(child.recv, queryTestRecv{chunk: input})
+				}
+				stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{Limit: 2}, nil, []ReduceStream{child}, chunkBytes)
+				require.NoError(t, err)
+				var ids []int64
+				var indices []*internalpb.ElementIndices
+				for {
+					chunk, err := stream.Recv()
+					if err == io.EOF {
+						break
+					}
+					require.NoError(t, err)
+					require.True(t, chunk.GetElementLevel())
+					ids = append(ids, queryTestIDs(chunk)...)
+					indices = append(indices, chunk.GetElementIndices()...)
+				}
+				require.NoError(t, stream.Close())
+				require.Equal(t, newIndices, indices[0].GetIndices())
+				if grows {
+					require.Equal(t, []int64{1}, ids)
+				} else {
+					require.Equal(t, []int64{1, 2}, ids)
+				}
+			})
+		}
+	}
+}
 
 func TestShardReduceStreamResolvesTimestampsAcrossChunks(t *testing.T) {
 	for _, limit := range []int64{1, 2, 3} {

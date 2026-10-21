@@ -17,12 +17,14 @@
 package queryutil
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
@@ -95,6 +97,100 @@ func TestSplitRetrieveResultWithGroupedUnits(t *testing.T) {
 	require.Equal(t, int64(6), chunks[0].GetAllRetrieveCount())
 	require.Equal(t, []int64{3}, chunks[1].GetFieldsData()[0].GetScalars().GetLongData().GetData())
 	require.Zero(t, chunks[1].GetReqID())
+}
+
+func TestSplitRetrieveResultIncludesElementIndexBytes(t *testing.T) {
+	result := makeElementLevelResult([]int64{1, 2}, []int64{10, 20}, [][]int32{{0}, {1, 2, 3, 4, 5, 6, 7, 8}})
+	first, err := buildRetrieveChunk([]retrieveUnit{{result: result, rowIndex: 0}})
+	require.NoError(t, err)
+	expectedBytes := proto.Size(&internalpb.RetrieveResults{
+		Ids: first.GetIds(), FieldsData: first.GetFieldsData(), ElementIndices: first.GetElementIndices(),
+	})
+	require.Equal(t, expectedBytes, queryChunkBytes(t, result, 1))
+	chunks, err := SplitRetrieveResult(result, expectedBytes+1)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	for i, chunk := range chunks {
+		require.True(t, chunk.GetElementLevel())
+		require.Equal(t, []int64{int64(i + 1)}, queryTestIDs(chunk))
+		require.Equal(t, result.GetElementIndices()[i], chunk.GetElementIndices()[0])
+	}
+}
+
+func TestOrderedReduceStreamElementFilter(t *testing.T) {
+	for _, chunkBytes := range []int{1, 1 << 20} {
+		left := makeElementLevelResult([]int64{1, 3}, []int64{10, 10}, [][]int32{{0, 2, 4}, {1}})
+		right := makeElementLevelResult([]int64{2, 4}, []int64{10, 10}, [][]int32{{1, 3}, {0}})
+		children := make([]ReduceStream, 0, 2)
+		for _, input := range []*internalpb.RetrieveResults{left, right} {
+			input.Status = merr.Success()
+			chunks, err := SplitRetrieveResult(input, 1)
+			require.NoError(t, err)
+			child := &queryTestStream{}
+			for _, chunk := range chunks {
+				child.recv = append(child.recv, queryTestRecv{chunk: chunk})
+			}
+			children = append(children, child)
+		}
+		stream, err := NewReduceStream(&internalpb.RetrieveRequest{Limit: 4}, nil, children, chunkBytes)
+		require.NoError(t, err)
+		var results []*internalpb.RetrieveResults
+		for {
+			chunk, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			require.NoError(t, err)
+			require.True(t, chunk.GetElementLevel())
+			results = append(results, chunk)
+		}
+		require.NoError(t, stream.Close())
+		var ids []int64
+		for _, chunk := range results {
+			ids = append(ids, queryTestIDs(chunk)...)
+		}
+		require.Equal(t, []int64{1, 2}, ids)
+		got, err := NewSortAndCheckPKPageOperator(0, nil, 3, 1).Run(context.Background(), nil, results)
+		require.NoError(t, err)
+		batch, err := NewSortAndCheckPKPageOperator(0, nil, 3, 1).Run(context.Background(), nil, []*internalpb.RetrieveResults{left, right})
+		require.NoError(t, err)
+		require.True(t, proto.Equal(batch[0].(*internalpb.RetrieveResults), got[0].(*internalpb.RetrieveResults)))
+	}
+}
+
+func TestOrderedReduceStreamValidatesElementChunks(t *testing.T) {
+	for _, inconsistent := range []bool{false, true} {
+		chunk := makeElementLevelResult([]int64{1}, []int64{10}, [][]int32{{0}})
+		chunk.Status = merr.Success()
+		children := []ReduceStream{&queryTestStream{recv: []queryTestRecv{{chunk: chunk}}}}
+		if inconsistent {
+			children = append(children, &queryTestStream{recv: []queryTestRecv{{chunk: newQueryTestChunk([]int64{2}, []int64{20})}}})
+		} else {
+			chunk.ElementIndices = nil
+		}
+		stream, err := NewReduceStream(&internalpb.RetrieveRequest{Limit: 10}, nil, children, 1)
+		require.NoError(t, err)
+		_, err = stream.Recv()
+		require.ErrorContains(t, err, "element")
+		require.NoError(t, stream.Close())
+	}
+}
+
+func TestOrderedReduceStreamEmptyElementResult(t *testing.T) {
+	input := makeElementLevelResult(nil, nil, nil)
+	input.Status, input.HasMoreResult = merr.Success(), true
+	stream, err := NewReduceStream(&internalpb.RetrieveRequest{Limit: 1}, nil, []ReduceStream{
+		&queryTestStream{recv: []queryTestRecv{{chunk: input}}},
+	}, 1)
+	require.NoError(t, err)
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.True(t, chunk.GetElementLevel())
+	require.True(t, chunk.GetHasMoreResult())
+	require.Empty(t, queryTestIDs(chunk))
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
 }
 
 func TestOrderedReduceStreamMergesChildChunks(t *testing.T) {

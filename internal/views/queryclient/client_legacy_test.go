@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -12,6 +13,7 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -20,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestLegacyClientPlainSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
@@ -445,6 +448,69 @@ func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
 	require.Equal(t, []int64{3}, second.GetIds().GetIntId().GetData())
 }
 
+func TestLegacyClientElementFilterQueryStreamingParity(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 102, Name: "items", Fields: []*schemapb.FieldSchema{{
+				FieldID: 103, Name: "items[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+			}},
+		}},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	plan, err := planparserv2.CreateRetrievePlan(helper, "element_filter(items, $[score] > 10)", nil)
+	require.NoError(t, err)
+	planBytes, err := proto.Marshal(plan)
+	require.NoError(t, err)
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+	for _, streaming := range []bool{false, true} {
+		for _, iterator := range []bool{false, true} {
+			left, right := newTestQueryChunk([]int64{1, 3}), newTestQueryChunk([]int64{2, 4})
+			left.ElementLevel, right.ElementLevel = true, true
+			left.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{0, 2, 4}}, {Indices: []int32{1}}}
+			right.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{1, 3}}, {Indices: []int32{0}}}
+			client := NewLegacyViewQueryClient(
+				ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: streaming, ReduceStreamChunkBytes: 1},
+				&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+					shardA.VChannel: legacyQueryPlan(shardA, qviews.NewQueryNode(11)),
+					shardB.VChannel: legacyQueryPlan(shardB, qviews.NewQueryNode(12)),
+				}},
+				&legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{shardA.VChannel: left, shardB.VChannel: right}},
+				&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
+			)
+			request := &internalpb.RetrieveRequest{CollectionID: 100, Limit: 4, IsIterator: iterator, SerializedExprPlan: planBytes}
+			require.True(t, SupportsQueryStream(request))
+			result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+				Req: request, Schema: schema, AllowStreaming: SupportsQueryStream(request),
+			})
+			require.NoError(t, err)
+			results := result.Results
+			if streaming {
+				require.NotNil(t, result.Stream)
+				for {
+					chunk, err := result.Stream.Recv()
+					if err == io.EOF {
+						break
+					}
+					require.NoError(t, err)
+					results = append(results, chunk)
+				}
+				require.NoError(t, result.Stream.Close())
+			} else {
+				require.Nil(t, result.Stream)
+			}
+			op := queryutil.NewSortAndCheckPKPageOperator(0, nil, 3, 1)
+			got, err := op.Run(context.Background(), nil, results)
+			require.NoError(t, err)
+			batch, err := op.Run(context.Background(), nil, []*internalpb.RetrieveResults{left, right})
+			require.NoError(t, err)
+			require.True(t, proto.Equal(batch[0].(*internalpb.RetrieveResults), got[0].(*internalpb.RetrieveResults)))
+		}
+	}
+}
+
 func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
@@ -673,6 +739,7 @@ type legacyServiceClient struct {
 	searchOnViewStream func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error)
 	queryResults       map[string]*internalpb.RetrieveResults
 	queryOnViewStream  func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error)
+	queryMu            sync.Mutex
 	queryCallCount     int
 }
 
@@ -693,7 +760,9 @@ func (c *legacyServiceClient) SearchOnViewStream(ctx context.Context, node qview
 }
 
 func (c *legacyServiceClient) QueryOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+	c.queryMu.Lock()
 	c.queryCallCount++
+	c.queryMu.Unlock()
 	return &viewpb.QueryOnViewResponse{
 		LegacyResults: c.queryResults[req.GetShardId().GetVchannel()],
 	}, nil
