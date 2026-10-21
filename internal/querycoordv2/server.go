@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -319,6 +320,9 @@ func (s *Server) initQueryCoord() error {
 	// Init meta
 	s.nodeMgr = session.NewNodeManager()
 	s.nodeMgr.Start(s.ctx)
+	// List QueryViews while the meta below recovers. Their only writer is the
+	// flush scheduler that registry recovery creates after consuming the list.
+	queryViewCatalog := newPrefetchedQueryViewCatalog(s.ctx, queryview.NewQueryViewCatalog(s.kv, "coord"))
 	err = s.initMeta()
 	if err != nil {
 		return err
@@ -386,17 +390,18 @@ func (s *Server) initQueryCoord() error {
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
-	if err := s.initQViewsRuntime(); err != nil {
+	if err := s.initQViewsRuntime(queryViewCatalog); err != nil {
 		return err
 	}
 	mlog.Info(s.ctx, "init querycoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 	return err
 }
 
-func (s *Server) initQViewsRuntime() error {
+func (s *Server) initQViewsRuntime(queryViewCatalog queryview.QueryViewCatalog) error {
 	mlog.Info(s.ctx, "init query view runtime")
 	deps := newDefaultQViewsRuntimeDependencies(
 		s.kv,
+		queryViewCatalog,
 		s.etcdCli,
 		s.meta.ResourceManager,
 		s.mixCoord,
