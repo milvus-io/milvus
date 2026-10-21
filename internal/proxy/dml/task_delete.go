@@ -257,7 +257,6 @@ func repackDeleteMsgByHash(
 type DeleteRunner struct {
 	req       *milvuspb.DeleteRequest
 	result    *milvuspb.MutationResult
-	node      taskmodel.TaskNode
 	metaCache Cache
 
 	// channel
@@ -291,13 +290,10 @@ type DeleteRunner struct {
 	scannedTotalBytes  atomic.Int64
 }
 
-// NewDeleteRunner constructs a delete runner. Its dependencies are passed in
-// explicitly because most of them (queue, limiter, allocators) are not part of
-// the taskmodel.TaskNode contract.
-func NewDeleteRunner(node taskmodel.TaskNode, request *milvuspb.DeleteRequest, metaCache Cache, idAllocator allocator.Interface, tsoAllocatorIns tsoAllocator, chMgr channelmgr.ChannelsMgr, queue *scheduler.DmTaskQueue, lb shardclient.LBPolicy, limiter types.Limiter) *DeleteRunner {
+// NewDeleteRunner constructs a delete runner with explicit dependencies.
+func NewDeleteRunner(request *milvuspb.DeleteRequest, metaCache Cache, idAllocator allocator.Interface, tsoAllocatorIns tsoAllocator, chMgr channelmgr.ChannelsMgr, queue *scheduler.DmTaskQueue, lb shardclient.LBPolicy, limiter types.Limiter) *DeleteRunner {
 	return &DeleteRunner{
 		req:             request,
-		node:            node,
 		metaCache:       metaCache,
 		idAllocator:     idAllocator,
 		tsoAllocatorIns: tsoAllocatorIns,

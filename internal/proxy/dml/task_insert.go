@@ -30,7 +30,6 @@ type InsertTask struct {
 	baseTask
 	// req *milvuspb.InsertRequest
 	Condition
-	node      taskmodel.TaskNode
 	insertMsg *BaseInsertTask
 	ctx       context.Context
 
@@ -54,7 +53,6 @@ func NewInsertTask(ctx context.Context, node taskmodel.TaskNode, request *milvus
 		baseTask: baseTask{
 			MetaCache: node.GetMetaCache(),
 		},
-		node:      node,
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		insertMsg: &msgstream.InsertMsg{
