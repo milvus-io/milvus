@@ -21,6 +21,7 @@
 #include <string_view>
 
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/contracts/query/INullReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
 
 namespace milvus::index::test {
@@ -70,6 +71,50 @@ TEST(InvertedIndexReaderTest, AdvertisesVarcharPatternPolicy) {
         EXPECT_EQ(backend.PatternPolicy(PatternOp::RegexMatch),
                   PatternQueryPolicy::DeclineButRun);
     }
+}
+
+TEST(InvertedIndexReaderTest, BorrowedValidityWhileReaderIsPinned) {
+    ScalarTestData<int64_t> data(std::vector<int64_t>(130, 7));
+    data.validity.reset(1);
+    data.validity.reset(65);
+    data.validity.reset(129);
+    ScalarTestInput<int64_t> input(data);
+    const auto& backend = ScalarReaderBackends().Get<int64_t>("InvertedInt64");
+    auto reader = backend.Create(input.View());
+    // Model the expression's retained index pin. Views do not retain this owner.
+    std::shared_ptr<IIndexReaderBase> pin(std::move(reader));
+    const auto* nulls = dynamic_cast<const INullReader*>(pin.get());
+    ASSERT_NE(nulls, nullptr);
+    std::vector<BitsetView> leaves;
+    for (int i = 0; i < 32; ++i) {
+        auto validity = nulls->GetValidityView();
+        ASSERT_TRUE(validity.has_value());
+        ASSERT_EQ(validity->size(), 130);
+        leaves.emplace_back(*validity);
+        EXPECT_EQ(leaves.front().data(), leaves.back().data());
+    }
+    auto mutable_full = nulls->IsNotNull();
+    mutable_full.flip();
+    EXPECT_FALSE(leaves[0].test(1));
+    EXPECT_TRUE(leaves[0].test(2));
+    EXPECT_FALSE(leaves[2].test(129));
+    EXPECT_TRUE(leaves[2].test(128));
+    leaves.clear();
+    pin.reset();  // No borrowed view is read after the reader is released.
+}
+
+TEST(InvertedIndexReaderTest, AllValidViewHasNoFullBitmap) {
+    ScalarTestData<int64_t> data(std::vector<int64_t>(130, 7));
+    data.validity_present = false;
+    ScalarTestInput<int64_t> input(data);
+    const auto& backend =
+        ScalarReaderBackends().Get<int64_t>("InvertedInt64NonNull");
+    auto reader = backend.Create(input.View());
+    auto view = dynamic_cast<const INullReader&>(*reader).GetValidityView();
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->size(), 0);
+    EXPECT_EQ(view->data(), nullptr);
+    EXPECT_EQ(reader->Count(), 130);
 }
 
 }  // namespace

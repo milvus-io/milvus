@@ -118,7 +118,8 @@ PhyElementFilterBitsNode::GetOutput() {
 
     // Step 2: Prepare doc bitset
     auto col_input = GetColumnVector(input_);
-    TargetBitmapView doc_bitset(col_input->GetRawData(), col_input->size());
+    TargetBitmap doc_bits(col_input->GetBitmap());
+    auto doc_bitset = doc_bits.write_view();
     TargetBitmapView doc_bitset_valid(col_input->GetValidRawData(),
                                       col_input->size());
     doc_bitset.flip();

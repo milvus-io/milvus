@@ -381,6 +381,16 @@ InvertedIndexReader<T>::IsNotNull() const {
     return valid_bitmap_.clone();
 }
 
+template <typename T>
+std::optional<BitsetView>
+InvertedIndexReader<T>::GetValidityView() const {
+    if (all_valid_) {
+        return BitsetView{};
+    }
+    return BitsetView(reinterpret_cast<const uint8_t*>(valid_bitmap_.data()),
+                      valid_bitmap_.size());
+}
+
 #define INSTANTIATE_INVERTED_READER(T) template class InvertedIndexReader<T>;
 INSTANTIATE_INVERTED_READER(bool)
 INSTANTIATE_INVERTED_READER(int8_t)

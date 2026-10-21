@@ -149,7 +149,7 @@ class PhyColumnExpr : public Expr {
     GatherFromValueReader(const int64_t* offsets,
                           int64_t count,
                           T* values,
-                          TargetBitmapView valid);
+                          TargetBitmapWriteView valid);
 
     std::string
     ToString() const override {

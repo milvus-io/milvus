@@ -38,16 +38,9 @@ PhyAlwaysTrueExpr::Eval(EvalCtx& context, VectorPtr& result) {
         return;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+    result =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, true),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
-    res.set();
-    valid_res.set();
-
-    result = res_vec;
     current_pos_ += real_batch_size;
 }
 

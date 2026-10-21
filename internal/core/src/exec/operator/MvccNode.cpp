@@ -85,35 +85,37 @@ PhyMvccNode::GetOutput() {
     if (is_source_node_ && segment_->type() == SegmentType::Sealed &&
         collection_ttl_timestamp_ == 0 &&
         query_timestamp_ >= segment_->get_max_timestamp()) {
-        auto col_input = std::make_shared<ColumnVector>(
-            TargetBitmap(active_count_), TargetBitmap(active_count_));
-        TargetBitmapView data(col_input->GetRawData(), col_input->size());
+        TargetBitmap mask(active_count_);
+        auto data = mask.write_view();
         segment_->mask_with_delete(data, active_count_, query_timestamp_);
 
-        if (data.none()) {
+        if (mask.read_view().none()) {
             query_context->set_all_rows_visible(true);
         }
 
         is_finished_ = true;
-        return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
+        auto output = std::make_shared<ColumnVector>(
+            std::move(mask), TargetBitmap(active_count_));
+        return std::make_shared<RowVector>(std::vector<VectorPtr>{output});
     }
 
-    // Default path (has filter / growing / TTL)
-    // the first vector is filtering result and second bitset is a valid bitset
-    // if valid_bitset[i]==false, means result[i] is null
-    auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
-                                           TargetBitmap(active_count_),
-                                           TargetBitmap(active_count_))
-                                     : GetColumnVector(input_);
-
-    TargetBitmapView data(col_input->GetRawData(), col_input->size());
+    // MVCC owns the writable query mask. Published filter inputs are read-only.
+    TargetBitmap mask(active_count_);
+    TargetBitmap validity(active_count_);
+    auto data = mask.write_view();
+    if (!is_source_node_) {
+        const auto predicate = GetColumnVector(input_);
+        data.inplace_or(predicate->GetBitmap(), active_count_);
+        validity = TargetBitmap(predicate->GetValidBitmap());
+    }
     segment_->mask_with_timestamps(
         data, query_timestamp_, collection_ttl_timestamp_);
     segment_->mask_with_delete(data, active_count_, query_timestamp_);
     is_finished_ = true;
 
-    // input_ have already been updated
-    return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
+    auto output =
+        std::make_shared<ColumnVector>(std::move(mask), std::move(validity));
+    return std::make_shared<RowVector>(std::vector<VectorPtr>{output});
 }
 
 bool

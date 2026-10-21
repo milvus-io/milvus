@@ -169,7 +169,7 @@ DiskSlotFile::Get(const std::string& signature,
 
     out_result = TargetBitmap(row_count_);
     bytes_read = ::pread(fd_,
-                         reinterpret_cast<char*>(out_result.data()),
+                         out_result.data(),
                          bitset_bytes_,
                          offset + static_cast<off_t>(kSlotHeaderSize));
     if (bytes_read != static_cast<ssize_t>(bitset_bytes_)) {
@@ -182,7 +182,7 @@ DiskSlotFile::Get(const std::string& signature,
     out_valid = TargetBitmap(row_count_);
     bytes_read =
         ::pread(fd_,
-                reinterpret_cast<char*>(out_valid.data()),
+                out_valid.data(),
                 bitset_bytes_,
                 offset + static_cast<off_t>(kSlotHeaderSize + bitset_bytes_));
     if (bytes_read != static_cast<ssize_t>(bitset_bytes_)) {
@@ -198,8 +198,13 @@ DiskSlotFile::Get(const std::string& signature,
 void
 DiskSlotFile::Put(const std::string& signature,
                   int64_t active_count,
-                  const TargetBitmap& result,
-                  const TargetBitmap& valid) {
+                  const TargetBitmapView& result,
+                  const TargetBitmapView& valid) {
+    if (result.offset() != 0 || valid.offset() != 0) {
+        const TargetBitmap packed_result(result), packed_valid(valid);
+        Put(signature, active_count, packed_result.view(), packed_valid.view());
+        return;
+    }
     uint64_t sig_hash = XXH64(signature.data(), signature.size(), 0);
 
     std::unique_lock lock(mutex_);

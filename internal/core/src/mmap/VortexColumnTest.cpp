@@ -762,7 +762,7 @@ CheckApplyValidDataInChunk(VortexColumn& column) {
     constexpr int64_t offset = 3;
     constexpr int64_t size = 9;
     TargetBitmap valid(size, true);
-    TargetBitmapView valid_view(valid);
+    auto valid_view = valid.write_view();
 
     column.ApplyValidDataInChunk(nullptr, 0, offset, size, valid_view);
 

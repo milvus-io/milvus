@@ -221,12 +221,12 @@ TEST(VectorReaderContractTest, ValidityIntersectionsPreserveBitmapWindows) {
     const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
     ASSERT_NE(vectors, nullptr);
     BitsetType range(24, true);
-    vectors->ApplyValidDataByRange(-2, 14, range.view(3, 14));
+    vectors->ApplyValidDataByRange(-2, 14, range.write_view(3, 14));
     EXPECT_EQ(range.data()[0] & 0xffffff, 0xfe35a7);
     const int64_t ids[] = {-1, 8, 1, 2, 2, 10, 9, 0};
     BitsetType output(8, false);
     output.data()[0] = 0x55;
-    vectors->ApplyValidDataByOffsets(ids, 8, output.view());
+    vectors->ApplyValidDataByOffsets(ids, 8, output.write_view());
     EXPECT_EQ(output.data()[0], 0x10);
     EXPECT_FALSE(vectors->IsRowValid(-1));
     EXPECT_FALSE(vectors->IsRowValid(10));
@@ -265,11 +265,11 @@ TEST(VectorReaderContractTest, ValidityKeepsFrozenGrowingPrefixAfterAppend) {
     EXPECT_TRUE(frozen.IsRowValid(2));
     EXPECT_FALSE(frozen.IsRowValid(3));
     BitsetType range(8, true);
-    frozen.ApplyValidDataByRange(0, 5, range.view(0, 5));
+    frozen.ApplyValidDataByRange(0, 5, range.write_view(0, 5));
     EXPECT_EQ(range.data()[0] & 0xff, 0xe5);
     const int64_t ids[] = {3, 2, -1, 0, 4};
     BitsetType offsets(8, true);
-    frozen.ApplyValidDataByOffsets(ids, 5, offsets.view(0, 5));
+    frozen.ApplyValidDataByOffsets(ids, 5, offsets.write_view(0, 5));
     EXPECT_EQ(offsets.data()[0] & 0xff, 0xea);
 }
 

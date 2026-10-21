@@ -124,7 +124,7 @@ struct UnaryElementFuncForMatch {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res) {
+               TargetBitmapWriteView res) {
         static_assert(
             filter_type == FilterType::sequential,
             "this override operator() of UnaryElementFuncForMatch does "
@@ -151,8 +151,8 @@ struct UnaryElementFuncForMatch {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
         if constexpr (std::is_same_v<T, std::string> ||
@@ -196,7 +196,7 @@ struct UnaryElementFuncForRegexMatch {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res) {
+               TargetBitmapWriteView res) {
         static_assert(
             filter_type == FilterType::sequential,
             "this override operator() of UnaryElementFuncForRegexMatch does "
@@ -231,8 +231,8 @@ struct UnaryElementFuncForRegexMatch {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
         if constexpr (std::is_same_v<T, std::string> ||
@@ -282,7 +282,7 @@ struct UnaryElementFunc {
     void
     operator()(const T* src,
                size_t size,
-               TargetBitmapView res,
+               TargetBitmapWriteView res,
                const IndexInnerType& val) {
         static_assert(filter_type == FilterType::sequential,
                       "this override operator() of UnaryElementFunc does not "
@@ -356,8 +356,8 @@ struct UnaryElementFunc {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -502,9 +502,9 @@ struct UnaryElementFuncForArray {
                size_t size,
                const ValueType& val,
                int index,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -669,7 +669,7 @@ BatchUnaryCompare(const T* src,
                   size_t size,
                   U& val,
                   proto::plan::OpType op_type,
-                  TargetBitmapView res) {
+                  TargetBitmapWriteView res) {
     if constexpr (std::is_integral_v<T> || std::is_floating_point_v<T>) {
         using milvus::bitset::CompareOpType;
         switch (op_type) {
@@ -779,8 +779,8 @@ class ShreddingExecutor {
     operator()(const GetType* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
         if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
             ThrowInfo(ErrorCode::UnexpectedError,
                       "need using ShreddingArrayBsonExecutor for array type in "
@@ -793,7 +793,9 @@ class ShreddingExecutor {
 
  private:
     void
-    ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
+    ExecuteOperation(const GetType* src,
+                     size_t size,
+                     TargetBitmapWriteView res) {
         if constexpr (std::is_same_v<InnerType, std::string>) {
             // Compile on the first evaluated batch, then reuse for this
             // executor's remaining windows. Empty/skipped scans do not
@@ -842,8 +844,8 @@ class ShreddingArrayBsonExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;

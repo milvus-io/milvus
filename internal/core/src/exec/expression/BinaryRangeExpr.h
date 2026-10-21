@@ -65,8 +65,8 @@ struct BinaryRangeElementFunc {
                const T& val2,
                const T* src,
                size_t n,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         if constexpr (filter_type == FilterType::random ||
@@ -163,9 +163,9 @@ struct BinaryRangeElementFuncForJson {
                const milvus::Json* src,
                ValidityView valid_data,
                size_t n,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -202,9 +202,9 @@ struct BinaryRangeElementFuncForArray {
                const milvus::ArrayView* src,
                ValidityView valid_data,
                size_t n,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();

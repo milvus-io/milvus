@@ -20,6 +20,7 @@
 
 #include <boost_ext/dynamic_bitset_ext.hpp>
 #include <deque>
+#include <optional>
 
 #include "bitset/detail/element_wise.h"
 #include "common/Types.h"
@@ -41,8 +42,17 @@ class BitsetView : public knowhere::BitsetView {
         : knowhere::BitsetView(data, num_bits) {  // NOLINT
     }
 
-    BitsetView(const BitsetType& bitset)  // NOLINT
-        : BitsetView((uint8_t*)(bitset.data()), bitset.size()) {
+    BitsetView(const BitsetTypeView& bitset)  // NOLINT
+        : knowhere::BitsetView(
+              bitset.empty() || bitset.offset() == 0
+                  ? reinterpret_cast<const uint8_t*>(bitset.data())
+                  : reinterpret_cast<const uint8_t*>(bitset.data()) +
+                        bitset.offset() / 8,
+              bitset.size()),
+          dense_source_(bitset) {
+        AssertInfo(bitset.empty() || (bitset.offset() & 7) == 0,
+                   "search bitset offset {} must be byte aligned",
+                   bitset.offset());
     }
 
     BitsetView(const BitsetTypePtr& bitset_ptr) {  // NOLINT
@@ -51,57 +61,70 @@ class BitsetView : public knowhere::BitsetView {
         }
     }
 
-    // Return whether all bits are set (vacuously true when empty).
+    // Predicates describe test(id) over the backend id domain. In particular,
+    // Knowhere empty() can mean a nonempty all-allowed bitmap.
     bool
     all() const {
-        if (empty()) {
+        if (size() == 0)
             return true;
+        if (!has_out_ids() && id_offset() == 0 && size() == num_bits()) {
+            if (dense_source_)
+                return dense_source_->all();
+            return bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_all(
+                data(), 0, size());
         }
-        if (has_out_ids()) {
-            for (size_t i = 0; i < size(); ++i) {
-                if (!test(i)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        return bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_all(
-            data(), 0, size());
+        for (size_t i = 0; i < size(); ++i)
+            if (!test(i))
+                return false;
+        return true;
     }
 
-    // Return whether no bit is set (vacuously true when empty).
     bool
     none() const {
-        if (empty()) {
+        if (size() == 0)
             return true;
+        if (!has_out_ids() && id_offset() == 0 && size() == num_bits()) {
+            if (dense_source_)
+                return dense_source_->none();
+            return bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_none(
+                data(), 0, size());
         }
-        if (has_out_ids()) {
-            for (size_t i = 0; i < size(); ++i) {
-                if (test(i)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        return bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_none(
-            data(), 0, size());
+        for (size_t i = 0; i < size(); ++i)
+            if (test(i))
+                return false;
+        return true;
     }
 
     BitsetView
-    subview(size_t offset, size_t size) const {
-        if (empty()) {
+    subview(size_t offset, size_t length) const {
+        AssertInfo(offset <= size() && length <= size() - offset,
+                   "index out of range, offset={}, size={}, bitset.size={}",
+                   offset,
+                   length,
+                   size());
+        if (num_bits() == 0)
             return {};
+        if (has_out_ids() || id_offset() != 0 || size() != num_bits()) {
+            // Preserve the public bitmap and translate the backend window.
+            // A prepared count from the parent is not the window's count.
+            BitsetView result(data(), num_bits());
+            result.dense_source_ = dense_source_;
+            if (has_out_ids())
+                result.set_out_ids(get_out_ids(), out_ids_count());
+            result.set_id_offset(id_offset() + offset);
+            result.set_vector_count(length);
+            return result;
         }
 
         AssertInfo(
-            (offset & 0x7) == 0, "offset {} is not divisible by 8", offset);
-        AssertInfo(offset + size <= this->size(),
-                   "index out of range, offset={}, size={}, bitset.size={}",
-                   offset,
-                   size,
-                   this->size());
-        return {data() + (offset >> 3), size};
+            (offset & 7) == 0, "offset {} is not divisible by 8", offset);
+        if (dense_source_)
+            return BitsetView(dense_source_->view(offset, length));
+        return {data() + (offset >> 3), length};
     }
+
+ private:
+    std::optional<BitsetTypeView> dense_source_;
 };
 
 }  // namespace milvus

@@ -894,7 +894,7 @@ TEST_F(SortBufferTest, StringSort) {
     ASSERT_EQ(out_col->size(), 5);
 
     // ASC: "", "apple", "banana", "cherry", "date"
-    auto* raw = reinterpret_cast<std::string*>(out_col->GetRawData());
+    auto* raw = reinterpret_cast<const std::string*>(out_col->GetRawData());
     EXPECT_EQ(raw[0], "");
     EXPECT_EQ(raw[1], "apple");
     EXPECT_EQ(raw[2], "banana");
@@ -921,7 +921,7 @@ TEST_F(SortBufferTest, StringSortDescending) {
     auto out_col = std::dynamic_pointer_cast<ColumnVector>(output[0]);
     ASSERT_EQ(out_col->size(), 3);
 
-    auto* raw = reinterpret_cast<std::string*>(out_col->GetRawData());
+    auto* raw = reinterpret_cast<const std::string*>(out_col->GetRawData());
     EXPECT_EQ(raw[0], "cherry");
     EXPECT_EQ(raw[1], "banana");
     EXPECT_EQ(raw[2], "apple");
@@ -956,7 +956,7 @@ TEST_F(SortBufferTest, StringWithNulls) {
     EXPECT_FALSE(out_col->ValidAt(2));
     EXPECT_FALSE(out_col->ValidAt(3));
 
-    auto* raw = reinterpret_cast<std::string*>(out_col->GetRawData());
+    auto* raw = reinterpret_cast<const std::string*>(out_col->GetRawData());
     EXPECT_EQ(raw[0], "apple");
     EXPECT_EQ(raw[1], "banana");
 }
@@ -1146,7 +1146,7 @@ TEST_F(SortBufferTest, NonSortColumnPreserved) {
     std::vector<int64_t> expected_int = {1, 2, 3};
     EXPECT_EQ(sorted_int, expected_int);
 
-    auto* raw = reinterpret_cast<std::string*>(out_str->GetRawData());
+    auto* raw = reinterpret_cast<const std::string*>(out_str->GetRawData());
     EXPECT_EQ(raw[0], "one");
     EXPECT_EQ(raw[1], "two");
     EXPECT_EQ(raw[2], "three");

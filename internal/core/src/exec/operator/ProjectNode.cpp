@@ -211,7 +211,7 @@ PhyProjectNode::GetOutput() {
                                                  segment_,
                                                  valid_map,
                                                  true);
-        auto null_count = selected_count - valid_map.count();
+        auto null_count = selected_count - valid_map.view().count();
         auto column_vector = std::make_shared<ColumnVector>(
             std::move(field_data), std::move(valid_map), null_count);
         column_vectors.emplace_back(std::move(column_vector));

@@ -115,8 +115,8 @@ TEST(Span, PackedValidityMasksBitmapsWithoutLosingOffsets) {
         result[result_offset + i] = (i % 3) != 0;
     }
     ApplyValidMask(validity,
-                   TargetBitmapView(result).view(result_offset),
-                   TargetBitmapView(valid_result).view(result_offset),
+                   result.write_view(result_offset, size),
+                   valid_result.write_view(result_offset, size),
                    size);
 
     for (int64_t i = 0; i < size; ++i) {

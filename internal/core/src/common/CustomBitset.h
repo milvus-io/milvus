@@ -35,14 +35,14 @@ using policy_type =
     milvus::bitset::detail::VectorizedElementWiseBitsetPolicy<uint64_t,
                                                               vectorized_type>;
 using container_type = folly::fbvector<uint8_t>;
-// temporary enable range check
-using bitset_type = milvus::bitset::Bitset<policy_type, container_type, true>;
-// temporary enable range check
-using bitset_view = milvus::bitset::BitsetView<policy_type, true>;
+using bitset_type = milvus::bitset::Bitset<policy_type, container_type>;
+using bitset_view = milvus::bitset::BitsetView<policy_type>;
+using bitset_write_view = milvus::bitset::BitsetWriteView<policy_type>;
 
 }  // namespace
 
 using CustomBitset = bitset_type;
 using CustomBitsetView = bitset_view;
+using CustomBitsetWriteView = bitset_write_view;
 
 }  // namespace milvus

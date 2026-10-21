@@ -50,7 +50,8 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
 }
 
 TargetBitmap
-PhyConjunctFilterExpr::BuildActiveBitmap(const ColumnVectorPtr& vec) {
+PhyConjunctFilterExpr::BuildActiveBitmap(TargetBitmapView data,
+                                         TargetBitmapView valid) {
     // Rows that still need the following expressions.
     //
     // For AND: TRUE or NULL rows still need evaluation; only definite FALSE
@@ -61,9 +62,7 @@ PhyConjunctFilterExpr::BuildActiveBitmap(const ColumnVectorPtr& vec) {
     // For OR: FALSE or NULL rows still need evaluation; only definite TRUE
     //   can stop. A NULL row can still become TRUE (NULL OR TRUE = TRUE),
     //   so null-rejection does not shrink the active set for OR.
-    const size_t size = vec->size();
-    TargetBitmapView data(vec->GetRawData(), size);
-    TargetBitmapView valid(vec->GetValidRawData(), size);
+    const size_t size = data.size();
     if (is_and_) {
         if (null_rejecting_) {
             TargetBitmap active_rows(data);
@@ -169,6 +168,14 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 
     bool has_result = false;
+    std::optional<TargetBitmap> accumulated_data;
+    std::optional<TargetBitmap> accumulated_valid;
+    auto publish = [&]() {
+        if (accumulated_data) {
+            result = std::make_shared<ColumnVector>(
+                std::move(*accumulated_data), std::move(*accumulated_valid));
+        }
+    };
     for (size_t i = 0; i < input_order_.size(); ++i) {
         size_t idx = input_order_[i];
 
@@ -188,12 +195,24 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         } else {
             auto input_flat_result = GetColumnVector(input_result);
             all_flat_result = GetColumnVector(result);
+            if (!accumulated_data) {
+                accumulated_data.emplace(all_flat_result->GetBitmap());
+                accumulated_valid.emplace(all_flat_result->GetValidBitmap());
+            }
             if (is_and_) {
-                common::ThreeValuedLogicOp::And(all_flat_result,
-                                                input_flat_result);
+                common::ThreeValuedLogicOp::And(
+                    accumulated_data->write_view(),
+                    accumulated_valid->write_view(),
+                    input_flat_result->GetBitmap(),
+                    input_flat_result->GetValidBitmap(),
+                    all_flat_result->size());
             } else {
-                common::ThreeValuedLogicOp::Or(all_flat_result,
-                                               input_flat_result);
+                common::ThreeValuedLogicOp::Or(
+                    accumulated_data->write_view(),
+                    accumulated_valid->write_view(),
+                    input_flat_result->GetBitmap(),
+                    input_flat_result->GetValidBitmap(),
+                    all_flat_result->size());
             }
         }
 
@@ -206,14 +225,21 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // Build the active-row bitmap once per input: it decides the
         // batch-level early exit, and the same bitmap becomes the row-level
         // input of the next expression.
-        auto active_rows = BuildActiveBitmap(all_flat_result);
-        if (active_rows.none()) {
+        auto active_rows =
+            accumulated_data
+                ? BuildActiveBitmap(accumulated_data->read_view(),
+                                    accumulated_valid->read_view())
+                : BuildActiveBitmap(all_flat_result->GetBitmap(),
+                                    all_flat_result->GetValidBitmap());
+        if (active_rows.view().none()) {
             SkipFollowingExprs(i + 1);
+            publish();
             ClearBitmapInput(context);
             return;
         }
         context.set_bitmap_input(std::move(active_rows));
     }
+    publish();
     ClearBitmapInput(context);
 }
 

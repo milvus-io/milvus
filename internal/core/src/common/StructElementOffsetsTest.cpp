@@ -764,7 +764,7 @@ CheckAnyReduce(const IStructElementOffsets& offsets,
                int64_t row_count) {
     TargetBitmap actual(row_count);
     offsets.ElementBitsetToRowBitsetAny(
-        elem_bitset.view(), elem_offset, row_start, actual.view());
+        elem_bitset.view(), elem_offset, row_start, actual);
     TargetBitmap expected = ReferenceAnyReduce(
         offsets, elem_bitset, elem_offset, row_start, row_count);
     ASSERT_EQ(actual.size(), expected.size());
@@ -786,8 +786,7 @@ TEST_F(StructElementOffsetsTest, SealedElementBitsetToRowBitsetAnyBasic) {
     elem_bitset[5] = true;  // row 3
 
     TargetBitmap row_bitset(4);
-    offsets.ElementBitsetToRowBitsetAny(
-        elem_bitset.view(), 0, 0, row_bitset.view());
+    offsets.ElementBitsetToRowBitsetAny(elem_bitset.view(), 0, 0, row_bitset);
     EXPECT_FALSE(row_bitset[0]);
     EXPECT_TRUE(row_bitset[1]);
     EXPECT_FALSE(row_bitset[2]);  // empty row never matches
@@ -796,8 +795,7 @@ TEST_F(StructElementOffsetsTest, SealedElementBitsetToRowBitsetAnyBasic) {
     // Never clears pre-set bits.
     TargetBitmap preset(4);
     preset[0] = true;
-    offsets.ElementBitsetToRowBitsetAny(
-        elem_bitset.view(), 0, 0, preset.view());
+    offsets.ElementBitsetToRowBitsetAny(elem_bitset.view(), 0, 0, preset);
     EXPECT_TRUE(preset[0]);
     EXPECT_TRUE(preset[1]);
     EXPECT_FALSE(preset[2]);
@@ -812,7 +810,7 @@ TEST_F(StructElementOffsetsTest, SealedElementBitsetToRowBitsetAnyEdgeCases) {
         TargetBitmap elem_bitset(6);
         TargetBitmap row_bitset(4);
         offsets.ElementBitsetToRowBitsetAny(
-            elem_bitset.view(), 0, 0, row_bitset.view());
+            elem_bitset.view(), 0, 0, row_bitset);
         EXPECT_EQ(row_bitset.count(), 0);
     }
     // All-one element bitmap -> all non-empty rows.
@@ -820,7 +818,7 @@ TEST_F(StructElementOffsetsTest, SealedElementBitsetToRowBitsetAnyEdgeCases) {
         TargetBitmap elem_bitset(6, true);
         TargetBitmap row_bitset(4);
         offsets.ElementBitsetToRowBitsetAny(
-            elem_bitset.view(), 0, 0, row_bitset.view());
+            elem_bitset.view(), 0, 0, row_bitset);
         EXPECT_TRUE(row_bitset[0]);
         EXPECT_TRUE(row_bitset[1]);
         EXPECT_FALSE(row_bitset[2]);
@@ -831,7 +829,7 @@ TEST_F(StructElementOffsetsTest, SealedElementBitsetToRowBitsetAnyEdgeCases) {
         TargetBitmap elem_bitset(6, true);
         TargetBitmap row_bitset(0);
         offsets.ElementBitsetToRowBitsetAny(
-            elem_bitset.view(), 0, 0, row_bitset.view());
+            elem_bitset.view(), 0, 0, row_bitset);
     }
     // Sub-range of rows with a batch-local bitmap (elem_offset != 0):
     // rows [1, 4) cover elements [2, 6).
@@ -843,7 +841,7 @@ TEST_F(StructElementOffsetsTest, SealedElementBitsetToRowBitsetAnyEdgeCases) {
         offsets.ElementBitsetToRowBitsetAny(elem_bitset.view(),
                                             /*elem_offset=*/2,
                                             /*row_start=*/1,
-                                            row_bitset.view());
+                                            row_bitset);
         EXPECT_TRUE(row_bitset[0]);
         EXPECT_FALSE(row_bitset[1]);
         EXPECT_TRUE(row_bitset[2]);
@@ -856,7 +854,7 @@ TEST_F(StructElementOffsetsTest, SealedElementBitsetToRowBitsetAnyEdgeCases) {
         elem_bitset[3] = true;  // row 1, inside
         TargetBitmap row_bitset(2);
         offsets.ElementBitsetToRowBitsetAny(
-            elem_bitset.view(), 0, /*row_start=*/1, row_bitset.view());
+            elem_bitset.view(), 0, /*row_start=*/1, row_bitset);
         EXPECT_TRUE(row_bitset[0]);   // row 1
         EXPECT_FALSE(row_bitset[1]);  // row 2 (empty)
     }
@@ -1196,7 +1194,7 @@ TEST_F(StructElementOffsetsTest, GrowingChunkBoundary) {
 
     TargetBitmap any_rows(row_count);
     offsets.ElementBitsetToRowBitsetAny(
-        element_bits.view(), expected[row_start], row_start, any_rows.view());
+        element_bits.view(), expected[row_start], row_start, any_rows);
     for (int64_t i = 0; i < row_count; ++i) {
         EXPECT_EQ(bool(any_rows[i]),
                   bool(row_bits[i]) && lens[row_start + i] > 0);
@@ -1446,7 +1444,7 @@ TEST_F(StructElementOffsetsTest, GrowingConcurrentWriterReaderStress) {
                 offsets.ElementBitsetToRowBitsetAny(element_bits.view(),
                                                     expected[row_start],
                                                     row_start,
-                                                    any_rows.view());
+                                                    any_rows);
                 for (int64_t i = 0; i < row_count; ++i) {
                     EXPECT_EQ(bool(any_rows[i]),
                               bool(row_bits[i]) && lens[row_start + i] > 0);

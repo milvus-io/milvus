@@ -187,11 +187,10 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             return nullptr;
         }
 
-        auto res_vec =
-            std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                           TargetBitmap(real_batch_size, true));
-        TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+        TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+        TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+        auto res = output_bits.write_view();
+        auto valid_res = output_validity.write_view();
 
         auto left_raw_data_chunk_count =
             segment_chunk_reader_.NumChunkData(expr_->left_field_id_);
@@ -277,7 +276,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             }
             processed_rows++;
         }
-        return res_vec;
+        return std::make_shared<ColumnVector>(std::move(output_bits),
+                                              std::move(output_validity));
     }
 
     // normal path
@@ -287,10 +287,10 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             return nullptr;
         }
 
-        auto res_vec = std::make_shared<ColumnVector>(
-            TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
-        TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+        TargetBitmap output_bits = TargetBitmap(real_batch_size);
+        TargetBitmap output_validity = TargetBitmap(real_batch_size);
+        auto res = output_bits.write_view();
+        auto valid_res = output_validity.write_view();
         valid_res.set();
 
         auto left = segment_chunk_reader_.GetMultipleChunkDataAccessor(
@@ -319,17 +319,18 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                                      left_value.value(),
                                      right_value.value());
         }
-        return res_vec;
+        return std::make_shared<ColumnVector>(std::move(output_bits),
+                                              std::move(output_validity));
     } else {
         auto real_batch_size = GetNextBatchSize();
         if (real_batch_size == 0) {
             return nullptr;
         }
 
-        auto res_vec = std::make_shared<ColumnVector>(
-            TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
-        TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+        TargetBitmap output_bits = TargetBitmap(real_batch_size);
+        TargetBitmap output_validity = TargetBitmap(real_batch_size);
+        auto res = output_bits.write_view();
+        auto valid_res = output_validity.write_view();
         valid_res.set();
 
         int64_t processed_rows = 0;
@@ -364,11 +365,13 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                 if (processed_rows >= batch_size_) {
                     current_chunk_id_ = chunk_id;
                     current_chunk_pos_ = i + 1;
-                    return res_vec;
+                    return std::make_shared<ColumnVector>(
+                        std::move(output_bits), std::move(output_validity));
                 }
             }
         }
-        return res_vec;
+        return std::make_shared<ColumnVector>(std::move(output_bits),
+                                              std::move(output_validity));
     }
 }
 
@@ -465,11 +468,10 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
         return accessor(chunk_offset);
     };
 
-    auto result =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView bits(result->GetRawData(), real_batch_size);
-    TargetBitmapView valid(result->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits(real_batch_size, false);
+    TargetBitmap output_validity(real_batch_size, true);
+    auto bits = output_bits.write_view();
+    auto valid = output_validity.write_view();
     for (int64_t i = 0; i < real_batch_size; ++i) {
         const auto offset = offsets[static_cast<size_t>(i)];
         segcore::data_access_type left_raw;
@@ -512,7 +514,8 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
     }
     // The sequential cursor (current_data_global_pos_) is advanced once per
     // Eval by the caller, so this path must not move it again.
-    return result;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 void
@@ -674,11 +677,10 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
     }
 
     const auto& bitmap_input = context.get_bitmap_input();
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     auto expr_type = expr_->op_type_;
     size_t processed_cursor = 0;
@@ -689,7 +691,7 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
             const U* right,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res) {
+            TargetBitmapWriteView res) {
         switch (expr_type) {
             case proto::plan::GreaterThan: {
                 CompareElementFunc<T, U, proto::plan::GreaterThan, filter_type>
@@ -819,7 +821,8 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 };
 
 }  //namespace exec

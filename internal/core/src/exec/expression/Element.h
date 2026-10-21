@@ -246,7 +246,9 @@ class SetElement : public MultiElement {
     // Looks up each data[i] directly in the hash set (zero-copy for strings
     // via transparent hash).
     void
-    FilterChunk(const T* data, const int size, TargetBitmapView res) const {
+    FilterChunk(const T* data,
+                const int size,
+                TargetBitmapWriteView res) const {
         for (int i = 0; i < size; ++i) {
             if constexpr (std::is_same_v<T, std::string>) {
                 // Use string_view to avoid copying into the hash function
@@ -267,7 +269,7 @@ class SetElement : public MultiElement {
     void
     FilterChunk(const std::string_view* data,
                 const int size,
-                TargetBitmapView res) const {
+                TargetBitmapWriteView res) const {
         for (int i = 0; i < size; ++i) {
             if (values_.find(data[i]) != values_.end()) {
                 res[i] = true;
@@ -413,7 +415,9 @@ class SimdBatchElement : public MultiElement {
 
     // Batch SIMD filter — delegates to runtime-dispatched simdFilterChunk().
     void
-    FilterChunk(const T* data, const int size, TargetBitmapView res) const {
+    FilterChunk(const T* data,
+                const int size,
+                TargetBitmapWriteView res) const {
         if (vals_.empty() || size <= 0) {
             return;
         }

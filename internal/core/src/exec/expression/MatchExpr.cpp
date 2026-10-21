@@ -145,7 +145,7 @@ ProcessContiguousRows(int64_t row_count,
                       const IStructElementOffsets* struct_element_offsets,
                       const TargetBitmapView& match_bitset,
                       const TargetBitmapView& valid_bitset,
-                      TargetBitmapView& result_bitset,
+                      TargetBitmapWriteView result_bitset,
                       int64_t threshold) {
     if constexpr (match_type == MatchType::MatchAny && all_valid) {
         // Fast path: ANY-semantics reduction over contiguous rows. The match
@@ -185,7 +185,7 @@ ProcessOffsetRows(const OffsetVector* row_offsets,
                   const IStructElementOffsets* struct_element_offsets,
                   const TargetBitmapView& match_bitset,
                   const TargetBitmapView& valid_bitset,
-                  TargetBitmapView& result_bitset,
+                  TargetBitmapWriteView result_bitset,
                   int64_t threshold) {
     // ONE batched virtual call for all requested rows instead of one
     // ElementIDRangeOfRow per row (one lock-free snapshot on growing).
@@ -219,7 +219,7 @@ DispatchMatchProcessing(bool use_offset_input,
                         const IStructElementOffsets* struct_element_offsets,
                         const TargetBitmapView& match_bitset,
                         const TargetBitmapView& valid_bitset,
-                        TargetBitmapView& result_bitset,
+                        TargetBitmapWriteView result_bitset,
                         int64_t threshold) {
     if (use_offset_input) {
         ProcessOffsetRows<match_type, all_valid>(row_offsets,
@@ -286,11 +286,9 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         return;
     }
 
-    result = std::make_shared<ColumnVector>(TargetBitmap(batch_rows, false),
-                                            TargetBitmap(batch_rows, true));
-
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
-    TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
+    TargetBitmap output_bits(batch_rows, false);
+    TargetBitmap output_validity(batch_rows, true);
+    auto bitset_view = output_bits.write_view();
 
     auto match_type = expr_->get_match_type();
     int64_t threshold = expr_->get_count();
@@ -310,8 +308,13 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         if (MatchEmptyElements(match_type, threshold)) {
             bitset_view.set();
         }
-        ApplyStructRowValidity(
-            col_vec.get(), field_meta.get_id(), input, batch_rows);
+        ApplyStructRowValidity(output_bits.write_view(),
+                               output_validity.write_view(),
+                               field_meta.get_id(),
+                               input,
+                               batch_rows);
+        result = std::make_shared<ColumnVector>(std::move(output_bits),
+                                                std::move(output_validity));
         if (!has_offset_input_) {
             current_pos_ += batch_rows;
         }
@@ -414,20 +417,24 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         dispatch.template operator()<false>();
     }
 
-    ApplyStructRowValidity(
-        col_vec.get(), field_meta.get_id(), input, batch_rows);
+    ApplyStructRowValidity(output_bits.write_view(),
+                           output_validity.write_view(),
+                           field_meta.get_id(),
+                           input,
+                           batch_rows);
+    result = std::make_shared<ColumnVector>(std::move(output_bits),
+                                            std::move(output_validity));
     if (!has_offset_input_) {
         current_pos_ += batch_rows;
     }
 }
 
 void
-PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
+PhyMatchFilterExpr::ApplyStructRowValidity(TargetBitmapWriteView value_view,
+                                           TargetBitmapWriteView valid_view,
                                            FieldId field_id,
                                            const OffsetVector* input,
                                            int64_t batch_rows) {
-    TargetBitmapView value_view(col_vec->GetRawData(), col_vec->size());
-    TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
     if (input != nullptr) {
         AssertInfo(static_cast<int64_t>(input->size()) == batch_rows,
                    "offset input size {} does not match batch row count {}",
@@ -454,12 +461,13 @@ PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
                        "field {}",
                        row_offset,
                        field_id.get());
-            segment_chunk_reader_.ApplyFieldValidData(op_ctx_,
-                                                      field_id,
-                                                      chunk_id,
-                                                      offset_in_chunk,
-                                                      count,
-                                                      valid_view + processed);
+            segment_chunk_reader_.ApplyFieldValidData(
+                op_ctx_,
+                field_id,
+                chunk_id,
+                offset_in_chunk,
+                count,
+                valid_view.write_view(processed, count));
             processed += count;
             row_offset += count;
         }

@@ -531,8 +531,8 @@ class FixedBitmapExpr : public exec::Expr {
 bool
 MatchSingleRowReference(int64_t bitset_start,
                         int64_t row_elem_count,
-                        const TargetBitmap& match_bitmap,
-                        const TargetBitmap& valid_bitmap,
+                        const TargetBitmapView& match_bitmap,
+                        const TargetBitmapView& valid_bitmap,
                         expr::MatchType match_type,
                         int64_t threshold) {
     int64_t hit_count = 0;

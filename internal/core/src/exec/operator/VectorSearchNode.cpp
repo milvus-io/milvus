@@ -184,8 +184,7 @@ PhyVectorSearchNode::GetOutput() {
         }
 
         // TODO: uniform knowhere BitsetView and milvus BitsetView
-        search_view = milvus::BitsetView((uint8_t*)col_input->GetRawData(),
-                                         col_input->size());
+        search_view = milvus::BitsetView(view);
         data_cnt = search_view.size();
     }
 

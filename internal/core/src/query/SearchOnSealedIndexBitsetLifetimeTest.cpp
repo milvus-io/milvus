@@ -94,13 +94,12 @@ template <typename IsValid>
 void
 AssertSearchUsesCombinedLogicalFilter(SearchResult& search_result,
                                       const std::vector<uint8_t>& base_filter,
-                                      const TargetBitmap& additional_filter,
+                                      const TargetBitmapView& additional_filter,
                                       IsValid&& is_valid) {
     // Exercise ordinary Search through each real provider (sealed index,
     // nullable raw chunks, growing). Quotas differ from the phase-one topK.
     ASSERT_TRUE(search_result.CanSearchFilteredVectors());
-    auto shared_filter =
-        std::make_shared<TargetBitmap>(additional_filter.clone());
+    auto shared_filter = std::make_shared<TargetBitmap>(additional_filter);
     for (int64_t remaining : {1, 2, 4}) {
         auto searched =
             search_result.SearchFilteredVectors(shared_filter, remaining);

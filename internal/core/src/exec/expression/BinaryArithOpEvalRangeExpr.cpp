@@ -215,11 +215,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     if (!arg_inited_) {
         value_arg_.SetValue<ValueType>(expr_->value_);
@@ -323,8 +322,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             ValueType val,
             ValueType right_operand,
             const std::string& pointer) {
@@ -761,7 +760,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename ValueType>
@@ -785,11 +785,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -838,8 +837,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             ValueType val,
             ValueType right_operand,
             int index) {
@@ -1251,7 +1250,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename ArrayType, typename ValueType, bool ElementLevel>
@@ -1292,11 +1292,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
         }
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     auto op_type = expr_->op_type_;
     auto value = value_arg_.GetValue<ValueType>();
@@ -1330,8 +1329,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
         if (data == nullptr) {
             return;
         }
@@ -1373,7 +1372,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 bool
@@ -1403,11 +1403,10 @@ template <typename ValueType>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecArrayLengthFromChunks(
     OffsetVector* input, int64_t real_batch_size) {
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits(real_batch_size, false);
+    TargetBitmap output_validity(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
     const auto value = value_arg_.GetValue<ValueType>();
     const auto& column = *array_length_column_;
 
@@ -1479,7 +1478,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLengthFromChunks(
                 j - i);
             i = j;
         }
-        return res_vec;
+        return std::make_shared<ColumnVector>(std::move(output_bits),
+                                              std::move(output_validity));
     }
 
     // Sequential batch starting at the data cursor; one chunk at a time.
@@ -1504,7 +1504,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLengthFromChunks(
         done += count;
     }
     MoveCursorForData();
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename T>
@@ -2454,11 +2455,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         return res;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     if (!arg_inited_) {
         value_arg_.SetValue<HighPrecisionType>(expr_->value_);
@@ -2478,8 +2478,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             HighPrecisionType value,
             HighPrecisionType right_operand) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -3167,7 +3167,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template VectorPtr

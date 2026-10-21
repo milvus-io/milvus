@@ -103,6 +103,9 @@ class InvertedIndexReader final
     TargetBitmap
     IsNotNull() const override;
 
+    std::optional<BitsetView>
+    GetValidityView() const override;
+
  private:
     template <typename Derived, typename U, bool DelegateShouldUseForOp>
     friend class PatternMatchReaderAdapter;

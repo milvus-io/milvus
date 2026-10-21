@@ -116,12 +116,12 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     void
     ApplyValidDataByRange(int64_t logical_offset,
                           int64_t count,
-                          TargetBitmapView valid_result) const override;
+                          TargetBitmapWriteView valid_result) const override;
 
     void
     ApplyValidDataByOffsets(const int64_t* offsets,
                             int64_t count,
-                            TargetBitmapView valid_result) const override;
+                            TargetBitmapWriteView valid_result) const override;
 
     knowhere::expected<knowhere::DataSetPtr>
     CalcDistByIDs(const knowhere::DataSetPtr& query_dataset,

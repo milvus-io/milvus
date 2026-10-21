@@ -19,18 +19,19 @@ namespace common {
 class ThreeValuedLogicOp {
  public:
     // apply not operation to the left column vector
-    // and store the result in the left column vector
-    static void
-    Not(const ColumnVectorPtr& left) {
-        TargetBitmapView data(left->GetRawData(), left->size());
-        TargetBitmapView valid_data(left->GetValidRawData(), left->size());
-
+    // and return an independent, read-only result.
+    static ColumnVectorPtr
+    Not(const ColumnVectorPtr& input) {
+        TargetBitmap data(input->GetBitmap());
+        TargetBitmap valid(input->GetValidBitmap());
         data.flip();
-        data.inplace_and(valid_data, left->size());
+        data.inplace_and(valid, input->size());
+        return std::make_shared<ColumnVector>(std::move(data),
+                                              std::move(valid));
     }
 
     // apply and operation to the left and right column vectors
-    // and store the result in the left column vector (right is not modified)
+    // and return an independent, read-only result.
     //
     // Three-valued logic AND truth table:
     // | A     | B     | A AND B |
@@ -51,14 +52,25 @@ class ThreeValuedLogicOp {
     // =>
     // result_valid = left_valid & (right_valid | ~left_data) |
     //                right_valid & ~right_data
-    static void
+    static ColumnVectorPtr
     And(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
-        const size_t size = left->size();
-        TargetBitmapView left_data(left->GetRawData(), size);
-        TargetBitmapView left_valid(left->GetValidRawData(), size);
-        TargetBitmapView right_data(right->GetRawData(), size);
-        TargetBitmapView right_valid(right->GetValidRawData(), size);
+        TargetBitmap data(left->GetBitmap());
+        TargetBitmap valid(left->GetValidBitmap());
+        And(data.write_view(),
+            valid.write_view(),
+            right->GetBitmap(),
+            right->GetValidBitmap(),
+            left->size());
+        return std::make_shared<ColumnVector>(std::move(data),
+                                              std::move(valid));
+    }
 
+    static void
+    And(TargetBitmapWriteView left_data,
+        TargetBitmapWriteView left_valid,
+        TargetBitmapView right_data,
+        TargetBitmapView right_valid,
+        size_t size) {
         // tmp = ~left_data | right_valid
         TargetBitmap tmp(size, true);
         tmp.inplace_xor(left_data, size);
@@ -80,7 +92,7 @@ class ThreeValuedLogicOp {
     }
 
     // apply or operation to the left and right column vectors
-    // and store the result in the left column vector (right is not modified)
+    // and return an independent, read-only result.
     //
     // Three-valued logic OR truth table:
     // | A     | B     | A OR B |
@@ -101,14 +113,25 @@ class ThreeValuedLogicOp {
     // =>
     // result_valid = left_valid & (right_valid | left_data) |
     //                right_valid & right_data
-    static void
+    static ColumnVectorPtr
     Or(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
-        const size_t size = left->size();
-        TargetBitmapView left_data(left->GetRawData(), size);
-        TargetBitmapView left_valid(left->GetValidRawData(), size);
-        TargetBitmapView right_data(right->GetRawData(), size);
-        TargetBitmapView right_valid(right->GetValidRawData(), size);
+        TargetBitmap data(left->GetBitmap());
+        TargetBitmap valid(left->GetValidBitmap());
+        Or(data.write_view(),
+           valid.write_view(),
+           right->GetBitmap(),
+           right->GetValidBitmap(),
+           left->size());
+        return std::make_shared<ColumnVector>(std::move(data),
+                                              std::move(valid));
+    }
 
+    static void
+    Or(TargetBitmapWriteView left_data,
+       TargetBitmapWriteView left_valid,
+       TargetBitmapView right_data,
+       TargetBitmapView right_valid,
+       size_t size) {
         // tmp = left_data | right_valid
         TargetBitmap tmp(size);
         tmp.inplace_or(left_data, size);

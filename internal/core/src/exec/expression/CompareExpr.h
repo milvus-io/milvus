@@ -95,8 +95,8 @@ struct CompareElementFunc {
     operator()(const T* left,
                const U* right,
                size_t size,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         // This is the original code, kept here for the documentation purposes
@@ -326,8 +326,8 @@ class PhyCompareFilterExpr : public Expr {
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunks(FUNC func,
-                          TargetBitmapView res,
-                          TargetBitmapView valid_res,
+                          TargetBitmapWriteView res,
+                          TargetBitmapWriteView valid_res,
                           const ValTypes&... values) {
         if (segment_chunk_reader_.segment_->is_chunked()) {
             return ProcessBothDataChunksForMultipleChunk<T,
@@ -346,8 +346,8 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     ProcessBothDataByOffsetsByTake(FUNC func,
                                    OffsetVector* input,
-                                   TargetBitmapView res,
-                                   TargetBitmapView valid_res,
+                                   TargetBitmapWriteView res,
+                                   TargetBitmapWriteView valid_res,
                                    const ValTypes&... values) {
         auto left_column = CaptureDataColumn(left_field_);
         auto right_column = CaptureDataColumn(right_field_);
@@ -432,8 +432,8 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     ProcessBothDataByOffsetsByChunkFallback(FUNC func,
                                             OffsetVector* input,
-                                            TargetBitmapView res,
-                                            TargetBitmapView valid_res,
+                                            TargetBitmapWriteView res,
+                                            TargetBitmapWriteView valid_res,
                                             const ValTypes&... values) {
         int64_t size = input->size();
         int64_t processed_size = 0;
@@ -559,8 +559,8 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     ProcessBothDataByOffsets(FUNC func,
                              OffsetVector* input,
-                             TargetBitmapView res,
-                             TargetBitmapView valid_res,
+                             TargetBitmapWriteView res,
+                             TargetBitmapWriteView valid_res,
                              const ValTypes&... values) {
         const auto processed_size = ProcessBothDataByOffsetsByTake<T, U>(
             func, input, res, valid_res, values...);
@@ -589,8 +589,8 @@ class PhyCompareFilterExpr : public Expr {
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunksForSingleChunk(FUNC func,
-                                        TargetBitmapView res,
-                                        TargetBitmapView valid_res,
+                                        TargetBitmapWriteView res,
+                                        TargetBitmapWriteView valid_res,
                                         const ValTypes&... values) {
         int64_t processed_size = 0;
 
@@ -651,8 +651,8 @@ class PhyCompareFilterExpr : public Expr {
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunksForMultipleChunk(FUNC func,
-                                          TargetBitmapView res,
-                                          TargetBitmapView valid_res,
+                                          TargetBitmapWriteView res,
+                                          TargetBitmapWriteView valid_res,
                                           const ValTypes&... values) {
         int64_t processed_size = 0;
         // Left and right may publish different chunk layouts, so each side
@@ -744,8 +744,8 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     TryProcessBothDataByScan(FUNC func,
                              int64_t real_batch_size,
-                             TargetBitmapView res,
-                             TargetBitmapView valid_res,
+                             TargetBitmapWriteView res,
+                             TargetBitmapWriteView valid_res,
                              size_t& processed_cursor,
                              const ValTypes&... values) {
         if (!data_scan_initialized_) {

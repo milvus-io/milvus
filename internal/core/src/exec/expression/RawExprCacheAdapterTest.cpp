@@ -266,12 +266,10 @@ class RawExprCacheAdapterTest : public ::testing::Test {
             batch_sizes.push_back(size);
             processed += size;
             if (combined_data != nullptr) {
-                combined_data->append(
-                    TargetBitmapView(column->GetRawData(), size));
+                combined_data->append(column->GetBitmap());
             }
             if (combined_valid != nullptr) {
-                combined_valid->append(
-                    TargetBitmapView(column->GetValidRawData(), size));
+                combined_valid->append(column->GetValidBitmap());
             }
         }
         return batch_sizes;
@@ -678,7 +676,7 @@ TEST_F(RawExprCacheAdapterTest, CacheHitGathersOffsetsAndValidity) {
     ASSERT_NE(column, nullptr);
     ASSERT_EQ(column->size(), offsets.size());
     TargetBitmapView data(column->GetRawData(), column->size());
-    TargetBitmapView valid(column->GetValidRawData(), column->size());
+    const auto& valid = column->GetValidBitmap();
     for (size_t i = 0; i < offsets.size(); ++i) {
         EXPECT_EQ(data[i],
                   CountingRawExpr::IsValid(offsets[i]) &&
@@ -736,7 +734,7 @@ TEST_F(RawExprCacheAdapterTest, CacheHitReturnsLogicalValueDespiteWorkMask) {
     ASSERT_NE(column, nullptr);
     ASSERT_EQ(column->size(), kBatchSize);
     TargetBitmapView data(column->GetRawData(), column->size());
-    TargetBitmapView valid(column->GetValidRawData(), column->size());
+    const auto& valid = column->GetValidBitmap();
     for (int64_t row = 0; row < kBatchSize; ++row) {
         EXPECT_EQ(
             data[row],
@@ -996,7 +994,7 @@ TEST_F(RawExprCacheAdapterTest, GrowingAdmissionSkipsCaptureForNewSnapshots) {
             ASSERT_NE(column, nullptr);
             ASSERT_GT(column->size(), 0);
             TargetBitmapView data(column->GetRawData(), column->size());
-            TargetBitmapView valid(column->GetValidRawData(), column->size());
+            const auto& valid = column->GetValidBitmap();
             for (size_t i = 0; i < column->size(); ++i) {
                 EXPECT_EQ(valid[i], CountingRawExpr::IsValid(processed + i));
                 EXPECT_EQ(data[i],
@@ -1334,9 +1332,8 @@ TEST_P(RawExprCacheNullRejectionTest, SkippedNullsRemainUnknownUnderNot) {
             auto column = std::dynamic_pointer_cast<ColumnVector>(results[0]);
             ASSERT_NE(column, nullptr);
             ASSERT_GT(column->size(), 0);
-            data.append(TargetBitmapView(column->GetRawData(), column->size()));
-            valid.append(
-                TargetBitmapView(column->GetValidRawData(), column->size()));
+            data.append(column->GetBitmap());
+            valid.append(column->GetValidBitmap());
         }
         ASSERT_EQ(data.size(), kActiveCount);
         if (negate) {
@@ -1457,9 +1454,8 @@ TEST_F(RawExprCacheAdapterTest, UnaryAllSkipRawResultIsCapturedAndReused) {
             if (column == nullptr) {
                 break;
             }
-            data.append(TargetBitmapView(column->GetRawData(), column->size()));
-            valid.append(
-                TargetBitmapView(column->GetValidRawData(), column->size()));
+            data.append(column->GetBitmap());
+            valid.append(column->GetValidBitmap());
         }
         return std::pair{std::move(data), std::move(valid)};
     };

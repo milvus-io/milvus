@@ -37,7 +37,8 @@ PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto lflat = GetColumnVector(left);
     auto rflat = GetColumnVector(right);
     auto size = left->size();
-    TargetBitmapView lview(lflat->GetRawData(), size);
+    TargetBitmap data(lflat->GetBitmap());
+    auto lview = data.write_view();
     TargetBitmapView rview(rflat->GetRawData(), size);
     if (expr_->op_type_ == expr::LogicalBinaryExpr::OpType::And) {
         LogicalElementFunc<LogicalOpType::And> func;
@@ -50,11 +51,12 @@ PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
                   "unsupported logical operator: {}",
                   expr_->GetOpTypeString());
     }
-    TargetBitmapView lvalid_view(lflat->GetValidRawData(), size);
+    TargetBitmap valid(lflat->GetValidBitmap());
+    auto lvalid_view = valid.write_view();
     TargetBitmapView rvalid_view(rflat->GetValidRawData(), size);
     LogicalElementFunc<LogicalOpType::Or> func;
     func(lvalid_view, rvalid_view, size);
-    result = std::move(left);
+    result = std::make_shared<ColumnVector>(std::move(data), std::move(valid));
 }
 
 }  //namespace exec

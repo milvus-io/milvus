@@ -17,6 +17,7 @@
 #include "common/Schema.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
+#include "exec/operator/MvccNode.h"
 #include "expr/ITypeExpr.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
@@ -281,8 +282,8 @@ TEST_F(MvccFastPathTest, TimestampGuard_CurrentQueryTs_TakesFastPath) {
 
 // ---------------------------------------------------------------------------
 // Regression: sequential Level 1 queries must not share mutable bitmap state.
-// A downstream operator (e.g. ElementFilterBitsNode) may flip() the bitmap
-// in-place.  The second query must still see a clean all-zero bitmap.
+// A downstream operator can transform a private copy. Both the published
+// result and the second query must retain the original all-zero bitmap.
 // ---------------------------------------------------------------------------
 TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
     auto segment = CreateSealedSegment();
@@ -296,9 +297,10 @@ TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
     TargetBitmapView view1(col1->GetRawData(), col1->size());
     EXPECT_EQ(view1.count(), 0);
 
-    // Simulate downstream mutation (ElementFilterBitsNode does doc_bitset.flip)
-    view1.flip();
-    EXPECT_EQ(view1.count(), N_);
+    TargetBitmap downstream(view1);
+    downstream.flip();
+    EXPECT_EQ(downstream.count(), N_);
+    EXPECT_EQ(view1.count(), 0);
 
     // Second query on the same thread – must NOT see the flipped bits
     auto result2 = RunMvccPlan(segment.get());
@@ -309,4 +311,42 @@ TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
     TargetBitmapView view2(col2->GetRawData(), col2->size());
     EXPECT_EQ(view2.count(), 0)
         << "Second query must return clean bitmap, not polluted cache";
+}
+
+TEST_F(MvccFastPathTest, FilterInputRemainsReadOnlyAcrossQueries) {
+    auto segment = CreateSealedSegmentWithDeletes(10);
+    auto source = std::make_shared<plan::FilterBitsNode>(
+        "filter", std::make_shared<expr::AlwaysTrueExpr>());
+    auto plan_node = std::make_shared<plan::MvccNode>(
+        "mvcc", std::vector<plan::PlanNodePtr>{source});
+    auto context = std::make_shared<QueryContext>(
+        "immutable_filter", segment.get(), N_, MAX_TIMESTAMP);
+    auto task = Task::Create(
+        "immutable_filter", plan::PlanFragment(plan_node), 0, context);
+    DriverContext driver(task, 0, 0, 0, 0);
+    TargetBitmap excluded(N_);
+    excluded.set(3);
+    excluded.set(N_ - 1);
+    auto input_column = std::make_shared<ColumnVector>(std::move(excluded),
+                                                       TargetBitmap(N_, true));
+    const auto retained = input_column->GetBitmap();
+    ASSERT_EQ(retained.count(), 2);
+    for (int query = 0; query < 2; ++query) {
+        PhyMvccNode node(0, &driver, plan_node);
+        RowVectorPtr input =
+            std::make_shared<RowVector>(std::vector<VectorPtr>{input_column});
+        node.AddInput(input);
+        auto output = node.GetOutput();
+        ASSERT_NE(output, nullptr);
+        auto column = std::dynamic_pointer_cast<ColumnVector>(output->child(0));
+        ASSERT_NE(column, nullptr);
+        const auto result = column->GetBitmap();
+        EXPECT_EQ(result.count(), 11);
+        EXPECT_TRUE(result[0]);
+        EXPECT_TRUE(result[N_ - 1]);
+        EXPECT_NE(result.data(), retained.data());
+        EXPECT_EQ(retained.count(), 2);
+        EXPECT_FALSE(retained[0]);
+        EXPECT_EQ(input_column->GetValidBitmap().count(), N_);
+    }
 }

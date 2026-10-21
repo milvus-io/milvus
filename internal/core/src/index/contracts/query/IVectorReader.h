@@ -122,12 +122,12 @@ class IVectorReader {
     virtual void
     ApplyValidDataByRange(int64_t logical_offset,
                           int64_t count,
-                          TargetBitmapView valid_result) const = 0;
+                          TargetBitmapWriteView valid_result) const = 0;
 
     virtual void
     ApplyValidDataByOffsets(const int64_t* offsets,
                             int64_t count,
-                            TargetBitmapView valid_result) const = 0;
+                            TargetBitmapWriteView valid_result) const = 0;
 
     // Runtime/backend capability checks remain authoritative: exposing the
     // unified vector contract does not make every operation available for

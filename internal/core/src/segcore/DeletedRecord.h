@@ -67,8 +67,8 @@ struct DeleteSnapshot {
     DeleteSnapshot(Timestamp ts, BitsetType&& b)
         : max_ts(ts), bitset(std::move(b)) {
     }
-    DeleteSnapshot(Timestamp ts, const BitsetType& b)
-        : max_ts(ts), bitset(b.clone()) {
+    DeleteSnapshot(Timestamp ts, const BitsetTypeView& b)
+        : max_ts(ts), bitset(b) {
     }
 };
 
@@ -396,7 +396,7 @@ class DeletedRecord {
     }
 
     void
-    Query(BitsetTypeView& bitset,
+    Query(BitsetTypeWriteView bitset,
           int64_t insert_barrier,
           Timestamp query_timestamp) {
         Assert(bitset.size() == insert_barrier);

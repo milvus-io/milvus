@@ -266,19 +266,17 @@ PhyIterativeFilterNode::GetOutput() {
                     auto col_vec =
                         std::dynamic_pointer_cast<ColumnVector>(results[0]);
                     auto col_vec_size = col_vec->size();
-                    TargetBitmapView bitsetview(col_vec->GetRawData(),
-                                                col_vec_size);
+                    const auto bitsetview = col_vec->GetBitmap();
                     // Fold UNKNOWN into FALSE explicitly (data &= valid):
                     // rows are included below on the data bit alone.
                     TargetBitmapView validview(col_vec->GetValidRawData(),
                                                col_vec_size);
-                    bitsetview.inplace_and(validview, col_vec_size);
 
                     if (element_level) {
                         Assert(bitsetview.size() == doc_offsets.size());
                         for (size_t i = 0; i < doc_offsets.size(); ++i) {
                             doc_eval_cache[doc_offsets[i]] =
-                                (bitsetview[i] > 0);
+                                (bitsetview[i] && validview[i]);
                         }
 
                         for (size_t i = 0; i < offsets.size(); ++i) {
@@ -300,7 +298,7 @@ PhyIterativeFilterNode::GetOutput() {
                         Assert(bitsetview.size() <= batch_size);
                         Assert(bitsetview.size() == offsets.size());
                         for (auto i = 0; i < offsets.size(); ++i) {
-                            if (bitsetview[i]) {
+                            if (bitsetview[i] && validview[i]) {
                                 topk_binsert(search_result,
                                              nq_index * unity_topk,
                                              topk,
@@ -370,9 +368,10 @@ PhyIterativeFilterNode::GetOutput() {
         scalar_cost / 1000);
 
     if (!is_native_supported_) {
-        tracer::AddEvent(fmt::format("total_processed: {}, matched: {}",
-                                     need_process_rows_,
-                                     need_process_rows_ - bitset.count()));
+        tracer::AddEvent(
+            fmt::format("total_processed: {}, matched: {}",
+                        need_process_rows_,
+                        need_process_rows_ - bitset.view().count()));
     }
 
     return input_;

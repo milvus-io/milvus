@@ -142,14 +142,10 @@ void inline SetDocIdBits(TargetBitmap* bitmap,
                          uintptr_t n) {
     using word_t = TargetBitmap::data_type;
     constexpr uintptr_t kBitsPerWord = sizeof(word_t) * 8;
-    alignas(64) static constexpr auto kSingleBitMasks = [] {
-        std::array<word_t, kBitsPerWord> masks{};
-        for (uintptr_t i = 0; i < kBitsPerWord; ++i) {
-            masks[i] = word_t{1} << i;
-        }
-        return masks;
-    }();
 
+    if (n == 0) {
+        return;
+    }
     auto* words = bitmap->data();
     const auto bitmap_size = bitmap->size();
 
@@ -183,7 +179,7 @@ void inline SetDocIdBits(TargetBitmap* bitmap,
             } else if (id >= bitmap_size) {
                 continue;
             }
-            words[id / kBitsPerWord] |= kSingleBitMasks[id % kBitsPerWord];
+            words[id / kBitsPerWord] |= word_t{1} << (id % kBitsPerWord);
         }
     }
 }

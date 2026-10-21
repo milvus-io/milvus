@@ -36,7 +36,7 @@ bool
 PhyColumnExpr::GatherFromValueReader(const int64_t* offsets,
                                      int64_t count,
                                      T* values,
-                                     TargetBitmapView valid) {
+                                     TargetBitmapWriteView valid) {
     using ReaderValue =
         std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
     if (!value_lookup_.Covers(offsets, count)) {
@@ -152,8 +152,6 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         auto res_vec = std::make_shared<ColumnVector>(
             expr_->GetColumn().data_type_, real_batch_size);
         T* res_value = res_vec->RawAsValues<T>();
-        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-        valid_res.set();
 
         if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
             auto accessor = segment_chunk_reader_.GetDataAccessorByOffsets(
@@ -166,7 +164,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                     if (value.has_value()) {
                         res_value[i] = segcore::get_from_variant<T>(value);
                     } else {
-                        valid_res[i] = false;
+                        res_vec->nullAt(i);
                     }
                 }
                 return res_vec;
@@ -208,7 +206,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             }
             auto chunk_data_by_offset = cda(chunk_offset);
             if (!chunk_data_by_offset.has_value()) {
-                valid_res[processed_rows] = false;
+                res_vec->nullAt(processed_rows);
             } else {
                 res_value[processed_rows] =
                     segcore::get_from_variant<T>(chunk_data_by_offset);
@@ -228,8 +226,6 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         auto res_vec = std::make_shared<ColumnVector>(
             expr_->GetColumn().data_type_, real_batch_size);
         T* res_value = res_vec->RawAsValues<T>();
-        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-        valid_res.set();
         auto cda = segment_chunk_reader_.GetMultipleChunkDataAccessor(
             expr_->GetColumn().data_type_,
             expr_->GetColumn().field_id_,
@@ -240,7 +236,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         for (int i = 0; i < real_batch_size; ++i) {
             auto data = cda();
             if (!data.has_value()) {
-                valid_res[i] = false;
+                res_vec->nullAt(i);
                 continue;
             }
             res_value[i] = segcore::get_from_variant<T>(data);
@@ -255,8 +251,6 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         auto res_vec = std::make_shared<ColumnVector>(
             expr_->GetColumn().data_type_, real_batch_size);
         T* res_value = res_vec->RawAsValues<T>();
-        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-        valid_res.set();
 
         int64_t processed_rows = 0;
         for (int64_t chunk_id = current_chunk_id_; chunk_id < num_chunk_;
@@ -276,7 +270,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                  ++i) {
                 auto val = cda(i);
                 if (!val.has_value()) {
-                    valid_res[processed_rows] = false;
+                    res_vec->nullAt(processed_rows);
                 } else {
                     res_value[processed_rows] =
                         segcore::get_from_variant<T>(val);
@@ -316,11 +310,11 @@ PhyColumnExpr::DoEvalFromValueReader(OffsetVector* input) {
         }
     }
 
-    auto result = std::make_shared<ColumnVector>(expr_->GetColumn().data_type_,
-                                                 real_batch_size);
-    auto* values = result->RawAsValues<T>();
-    TargetBitmapView valid(result->GetValidRawData(), real_batch_size);
-    valid.set();
+    auto output_values = InitScalarFieldDataWithLength(
+        expr_->GetColumn().data_type_, real_batch_size);
+    auto* values = static_cast<T*>(output_values->Data());
+    TargetBitmap output_validity(real_batch_size, true);
+    auto valid = output_validity.write_view();
     if (!GatherFromValueReader(
             offsets.data(), real_batch_size, values, valid)) {
         const auto raw_chunk_count =
@@ -361,7 +355,9 @@ PhyColumnExpr::DoEvalFromValueReader(OffsetVector* input) {
     if (input == nullptr) {
         value_lookup_current_row_ += real_batch_size;
     }
-    return result;
+    const auto null_count = output_validity.size() - output_validity.count();
+    return std::make_shared<ColumnVector>(
+        std::move(output_values), std::move(output_validity), null_count);
 }
 
 }  //namespace exec

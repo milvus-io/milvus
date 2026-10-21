@@ -139,18 +139,20 @@ PhyRandomSampleNode::GetOutput() {
     RowVectorPtr result = nullptr;
     if (!is_source_node_) {
         auto input_col = GetColumnVector(input_);
-        TargetBitmapView input_data(input_col->GetRawData(), input_col->size());
+        TargetBitmap sampled_bits(input_col->size(), true);
+        auto input_data = sampled_bits.write_view();
+        const auto& input_view = input_col->GetBitmap();
         // note: false means the elemnt is hit
-        size_t input_false_count = input_data.size() - input_data.count();
+        size_t input_false_count = input_data.size() - input_view.count();
 
         if (input_false_count > 0) {
             FixedVector<uint32_t> pos{};
             pos.reserve(input_false_count);
-            auto value = input_data.find_first(false);
+            auto value = input_view.find_first(false);
             while (value.has_value()) {
                 auto offset = value.value();
                 pos.push_back(offset);
-                value = input_data.find_next(offset, false);
+                value = input_view.find_next(offset, false);
             }
             assert(pos.size() == input_false_count);
 
@@ -163,12 +165,12 @@ PhyRandomSampleNode::GetOutput() {
         }
 
         result = std::make_shared<RowVector>(
-            std::vector<VectorPtr>{std::move(input_col)});
+            std::vector<VectorPtr>{std::make_shared<ColumnVector>(
+                std::move(sampled_bits),
+                TargetBitmap(input_col->GetValidBitmap()))});
     } else {
-        auto sample_output = std::make_shared<ColumnVector>(
-            TargetBitmap(active_count_), TargetBitmap(active_count_));
-        TargetBitmapView data(sample_output->GetRawData(),
-                              sample_output->size());
+        TargetBitmap sample_bits(active_count_);
+        auto data = sample_bits.write_view();
         // true in TargetBitmap means we don't want this row, while for readability, we set the relevant row be true
         // if it's sampled. So we need to flip the bits at last.
         // However, if sample rate is larger than 0.5, we use 1-factor for sampling so that in some cases, the sampling
@@ -189,7 +191,8 @@ PhyRandomSampleNode::GetOutput() {
         }
 
         result = std::make_shared<RowVector>(
-            std::vector<VectorPtr>{std::move(sample_output)});
+            std::vector<VectorPtr>{std::make_shared<ColumnVector>(
+                std::move(sample_bits), TargetBitmap(active_count_))});
     }
 
     std::chrono::high_resolution_clock::time_point end =
