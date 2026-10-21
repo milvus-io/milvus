@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
@@ -88,7 +89,23 @@ type QueryTask struct {
 	preserveRawFields  bool
 	node               taskmodel.TaskNode
 
-	reQuery              bool
+	reQuery bool
+	// internalTask marks a queryTask the Proxy synthesizes for itself: the
+	// requery that fetches vectors after a search, the retrieval an upsert does
+	// to read the rows it replaces, and the retrieval a search-by-primary-key
+	// turns into. The feature usage counters describe what users ask for, so
+	// they are skipped for these; counting them would report one user request
+	// as two, and would move counters the user never set (the synthesized
+	// request pins its own consistency level and output fields).
+	internalTask bool
+	// features accumulates this request's counters during PreExecute and is
+	// flushed once when it returns, however it returns, so a request the Proxy
+	// rejects part-way is counted as completely as one it accepts -- the same
+	// rule as the search task. collectFeatures is decided once at the top of
+	// PreExecute; when it is false featureSink is nil and every hook returns
+	// on its first line.
+	features             featureusage.FeatureSet
+	collectFeatures      bool
 	allQueryCnt          int64
 	totalRelatedDataSize int64
 	mustUsePartitionKey  bool
@@ -127,6 +144,14 @@ func NewQueryTask(ctx context.Context, node taskmodel.TaskNode, request *milvusp
 // Result returns the query result after execution.
 func (t *QueryTask) Result() *milvuspb.QueryResults {
 	return t.result
+}
+
+// MarkInternal flags a query the Proxy synthesizes to serve another request
+// (a search requery, an upsert read-back, the PK-search conversion). Its
+// request options and expressions are not the user's, so the query-side
+// feature counters must not see them.
+func (t *QueryTask) MarkInternal() {
+	t.internalTask = true
 }
 
 // SetActualChannelsMvcc installs the output snapshot for internal partial-update
@@ -336,10 +361,14 @@ func getValidTargetList(groupByFields []string, _ []agg.AggregateBase) []string 
 // translateOrderByFields converts ORDER BY field specifications to planpb.OrderByField messages.
 // Delegates parsing to orderby.ParseOrderByFields to ensure consistent behavior
 // (direction validation, nullsFirst defaults) between C++ segcore and Go proxy pipeline.
-func translateOrderByFields(orderByFieldSpecs []string, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
+func translateOrderByFields(orderByFieldSpecs []string, groupByFieldIDs []int64, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
 	parsed, err := orderby.ParseOrderByFields(orderByFieldSpecs, schema)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
+	}
+	parsed, err = orderby.AppendGroupByTieBreakers(parsed, groupByFieldIDs, schema)
+	if err != nil {
+		return nil, err
 	}
 	if len(parsed) == 0 {
 		return nil, nil
@@ -645,11 +674,15 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 			return WrapPlanCreationError(err, "failed to create query plan")
 		}
+		collectExprTemplateFeatures(t.request.GetExprTemplateValues(), t.featureSink())
+		collectExecFeatureBits(t.plan, t.collectFeatures)
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	}
 	// parse output fields names
 	originalOuputFields := t.request.GetOutputFields()
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userAggregates, _, err = translateOutputFields(t.request.GetOutputFields(), t.schema, false)
+	collectOutputFieldFeatures(t.userDynamicFields, t.translatedOutputFields, t.schema, t.featureSink())
+	collectQueryAggregationFeatures(t.userAggregates, t.featureSink())
 	if err != nil {
 		return err
 	}
@@ -676,7 +709,7 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	}
 
 	// parse order by fields
-	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, groupByFieldsIDs, t.schema.CollectionSchema)
 	if err != nil {
 		return err
 	}
@@ -750,7 +783,21 @@ func (t *QueryTask) CanSkipAllocTimestamp() bool {
 	return consistencyLevel != commonpb.ConsistencyLevel_Strong
 }
 
+// featureSink is where this task's feature hooks mark, or nil when the task
+// does not count.
+func (t *QueryTask) featureSink() *featureusage.FeatureSet {
+	if !t.collectFeatures {
+		return nil
+	}
+	return &t.features
+}
+
 func (t *QueryTask) PreExecute(ctx context.Context) error {
+	t.collectFeatures = !t.internalTask && featureusage.Enabled()
+	if t.collectFeatures {
+		defer t.features.HitAll()
+	}
+	collectCommonRequestFeatures(t.request, t.featureSink())
 	t.Base.MsgType = commonpb.MsgType_Retrieve
 	t.Base.SourceID = paramtable.GetNodeID()
 
@@ -848,6 +895,8 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	collectQueryIteratorFeature(queryParams.isIterator, t.featureSink())
+	collectQueryParamKeyFeatures(t.request.GetQueryParams(), t.featureSink())
 	if queryParams.collectionID > 0 && queryParams.collectionID != t.GetCollectionID() {
 		return merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
 			"alias or database may have changed")
@@ -892,7 +941,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 	t.resolvedTimezoneStr = timezone
 
-	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr, OnParsedExpr: exprFeatureObserver(t.featureSink())}
 	if err := t.createPlanArgs(ctx, visitorArgs); err != nil {
 		return err
 	}
@@ -1104,6 +1153,7 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	t.allQueryCnt = 0
 	t.totalRelatedDataSize = 0
 	t.storageCost = segcore.StorageCost{}
+	var execBits uint64
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn(ctx, "proxy", mlog.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
@@ -1116,20 +1166,22 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 			t.storageCost.ScannedRemoteBytes += res.GetScannedRemoteBytes()
 			t.storageCost.ScannedTotalBytes += res.GetScannedTotalBytes()
 			t.totalRelatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
+			execBits |= res.GetFeatureBits()
 			log.Debug(ctx, "proxy receives one query result", mlog.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true
 		})
 	}
+	recordExecFeatures(!t.internalTask && t.plan.GetPlanOptions().GetCollectFeatureBits(), execBits, t.storageCost.ScannedRemoteBytes)
 
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
 
-	// Parse ORDER BY fields if present
+	// Use the same complete group ordering as segcore, QN, and Delegator.
 	var orderByFields []*orderby.OrderByField
-	if len(t.queryParams.orderByFields) > 0 {
-		orderByFields, err = orderby.ParseOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+	if len(t.OrderByFields) > 0 {
+		orderByFields, err = orderby.ConvertFromPlanOrderByFields(t.OrderByFields, t.schema.CollectionSchema)
 		if err != nil {
-			log.Warn(ctx, "fail to parse order by fields", mlog.Err(err))
+			log.Warn(ctx, "fail to convert order by fields", mlog.Err(err))
 			return err
 		}
 	}

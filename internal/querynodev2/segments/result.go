@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -131,6 +132,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	searchResults.IsRecallEvaluation = isRecallEvaluation
 	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
 	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
+	searchResults.FeatureBits = orFeatureBits(results)
 	return searchResults, nil
 }
 
@@ -185,7 +187,28 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	searchResults.IsTopkReduce = isTopkReduce
 	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
 	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
+	searchResults.FeatureBits = orFeatureBits(results)
 	return searchResults, nil
+}
+
+// orFeatureBits merges the execution feature bits of results that make up
+// one request: a feature any of them used, the request used.
+func orFeatureBits[T interface{ GetFeatureBits() uint64 }](results []T) uint64 {
+	var bits uint64
+	for _, r := range results {
+		bits |= r.GetFeatureBits()
+	}
+	return bits
+}
+
+// ColdReadFeatureBit is the execution feature bit for a request that read
+// data from remote storage, or 0.
+func ColdReadFeatureBit(scannedRemoteBytes int64) uint64 {
+	if scannedRemoteBytes <= 0 {
+		return 0
+	}
+	bit, _ := featureusage.ExecBit(featureusage.FeatureTieredStorageColdRead)
+	return bit
 }
 
 func SelectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffsets [][]int64, offsets []int64, qi int64) int {

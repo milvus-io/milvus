@@ -6,6 +6,7 @@ import (
 	context "context"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	featureusage "github.com/milvus-io/milvus/internal/featureusage"
 	model "github.com/milvus-io/milvus/internal/metastore/model"
 	rlsutil "github.com/milvus-io/milvus/internal/util/rlsutil"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -2123,6 +2124,52 @@ func (_c *IMetaTable_DropRole_Call) Return(_a0 error) *IMetaTable_DropRole_Call 
 }
 
 func (_c *IMetaTable_DropRole_Call) RunAndReturn(run func(context.Context, string, string) error) *IMetaTable_DropRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FeatureUsageSnapshot provides a mock function with given fields: ctx
+func (_m *IMetaTable) FeatureUsageSnapshot(ctx context.Context) featureusage.CollectionInput {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FeatureUsageSnapshot")
+	}
+
+	var r0 featureusage.CollectionInput
+	if rf, ok := ret.Get(0).(func(context.Context) featureusage.CollectionInput); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Get(0).(featureusage.CollectionInput)
+	}
+
+	return r0
+}
+
+// IMetaTable_FeatureUsageSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FeatureUsageSnapshot'
+type IMetaTable_FeatureUsageSnapshot_Call struct {
+	*mock.Call
+}
+
+// FeatureUsageSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) FeatureUsageSnapshot(ctx interface{}) *IMetaTable_FeatureUsageSnapshot_Call {
+	return &IMetaTable_FeatureUsageSnapshot_Call{Call: _e.mock.On("FeatureUsageSnapshot", ctx)}
+}
+
+func (_c *IMetaTable_FeatureUsageSnapshot_Call) Run(run func(ctx context.Context)) *IMetaTable_FeatureUsageSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_FeatureUsageSnapshot_Call) Return(_a0 featureusage.CollectionInput) *IMetaTable_FeatureUsageSnapshot_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_FeatureUsageSnapshot_Call) RunAndReturn(run func(context.Context) featureusage.CollectionInput) *IMetaTable_FeatureUsageSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

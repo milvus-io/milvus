@@ -191,8 +191,8 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 
 	t.Run("group by", func(t *testing.T) {
 		aggs := []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 500}}
-		// topK=2 means groupLimit=2: only 2 groups are kept, but existing groups
-		// must still accumulate correctly across all results.
+		// An intermediate reducer must keep every group so later reducers can
+		// assemble all partial aggregate values before the final limit.
 		pipeline, err := BuildQueryReducePipeline(
 			"groupby", schema, 2, reduce.IReduceNoOrder,
 			nil, []int64{200}, aggs, 0, nil, nil,
@@ -215,16 +215,39 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 		out := msg[PipelineOutput].(*internalpb.RetrieveResults)
 		colors := out.GetFieldsData()[0].GetScalars().GetStringData().GetData()
 		counts := out.GetFieldsData()[1].GetScalars().GetLongData().GetData()
-		// groupLimit=2: blue and red are kept (first 2 groups from res1), green is new and dropped.
-		// blue must accumulate across results: 1+3=4. red stays 2.
-		require.Len(t, colors, 2)
-		require.Len(t, counts, 2)
+		require.Len(t, colors, 3)
+		require.Len(t, counts, 3)
 		actual := map[string]int64{}
 		for i := range colors {
 			actual[colors[i]] = counts[i]
 		}
 		assert.Equal(t, int64(4), actual["blue"])
 		assert.Equal(t, int64(2), actual["red"])
+		assert.Equal(t, int64(4), actual["green"])
+	})
+
+	t.Run("group by without aggregates", func(t *testing.T) {
+		pipeline, err := BuildQueryReducePipeline(
+			"groupby-keys-only", schema, 2, reduce.IReduceNoOrder,
+			nil, []int64{200}, nil, 0, nil, nil,
+		)
+		require.NoError(t, err)
+
+		res1 := &internalpb.RetrieveResults{FieldsData: []*schemapb.FieldData{
+			makeStringField(200, "color", []string{"blue", "red"}),
+		}}
+		res2 := &internalpb.RetrieveResults{FieldsData: []*schemapb.FieldData{
+			makeStringField(200, "color", []string{"blue", "green"}),
+		}}
+
+		msg, err := pipeline.Run(ctx, nil, OpMsg{PipelineInput: []*internalpb.RetrieveResults{res1, res2}})
+		require.NoError(t, err)
+		colors := msg[PipelineOutput].(*internalpb.RetrieveResults).GetFieldsData()[0].GetScalars().GetStringData().GetData()
+		require.Len(t, colors, 2)
+		assert.NotEqual(t, colors[0], colors[1])
+		for _, color := range colors {
+			assert.Contains(t, []string{"blue", "red", "green"}, color)
+		}
 	})
 
 	t.Run("group by order by", func(t *testing.T) {
@@ -252,12 +275,15 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 		out := msg[PipelineOutput].(*internalpb.RetrieveResults)
 		colors := out.GetFieldsData()[0].GetScalars().GetStringData().GetData()
 		counts := out.GetFieldsData()[1].GetScalars().GetLongData().GetData()
-		// Aggregation: blue=1+3=4, red=5, green=2
-		// ORDER BY count DESC, topK=2 → red(5), blue(4)
-		require.Len(t, counts, 2)
+		// Aggregate ordering cannot use partial topK: later workers may change
+		// the counts, so all groups must reach the final reducer.
+		// Aggregation here: blue=1+3=4, red=5, green=2.
+		require.Len(t, counts, 3)
 		assert.Equal(t, "red", colors[0])
 		assert.Equal(t, int64(5), counts[0])
 		assert.Equal(t, "blue", colors[1])
 		assert.Equal(t, int64(4), counts[1])
+		assert.Equal(t, "green", colors[2])
+		assert.Equal(t, int64(2), counts[2])
 	})
 }

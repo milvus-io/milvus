@@ -3429,6 +3429,66 @@ func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
 }
 
 func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
+	t.Run("grant cleanup does not hold ddl lock", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil)
+
+		cleanupStarted := make(chan struct{})
+		cleanupRelease := make(chan struct{})
+		catalog.On("DeleteGrantByCollectionName",
+			mock.Anything, mock.Anything, "testdb", "collection",
+		).Run(func(mock.Arguments) {
+			close(cleanupStarted)
+			<-cleanupRelease
+		}).Return(nil)
+
+		meta := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "collection", DBID: 1, State: pb.CollectionState_CollectionCreated},
+			},
+			dbName2Meta: map[string]*model.Database{
+				"testdb": {ID: 1, Name: "testdb"},
+			},
+			fileResourceRefCnt: make(map[int64]int),
+		}
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
+		meta.names.insert("testdb", "collection", 100)
+
+		dropDone := make(chan error, 1)
+		go func() {
+			dropDone <- meta.DropCollection(context.Background(), 100, 9999)
+		}()
+
+		select {
+		case <-cleanupStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("grant cleanup did not start")
+		}
+
+		lockAcquired := make(chan struct{})
+		go func() {
+			meta.ddLock.Lock()
+			close(lockAcquired)
+			meta.ddLock.Unlock()
+		}()
+
+		select {
+		case <-lockAcquired:
+		case <-time.After(3 * time.Second):
+			close(cleanupRelease)
+			t.Fatal("ddl lock is held while grant cleanup is blocked")
+		}
+
+		close(cleanupRelease)
+		require.NoError(t, <-dropDone)
+	})
+
 	t.Run("grant cleanup on drop", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterCollection",
@@ -5332,4 +5392,60 @@ func TestMetaTableReloadNormalizesMaxFieldIDProperty(t *testing.T) {
 	require.NoError(t, err)
 	props := common.CloneKeyValuePairs(coll.Properties).ToMap()
 	require.Equal(t, "105", props[common.MaxFieldIDKey])
+}
+
+// TestMetaTable_FeatureUsageSnapshot pins that the feature usage report reads
+// the MetaTable in one pass: every database, the available collections across
+// all of them, and the alias total summed over databases, agreeing with what
+// per-collection ListAliasesByID calls would add up to.
+func TestMetaTable_FeatureUsageSnapshot(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		mt := &MetaTable{aliases: newNameDb(), dbName2Meta: map[string]*model.Database{}, collID2Meta: map[typeutil.UniqueID]*model.Collection{}}
+		snap := mt.FeatureUsageSnapshot(context.TODO())
+		assert.Empty(t, snap.Databases)
+		assert.Empty(t, snap.Collections)
+		assert.Equal(t, 0, snap.AliasCount)
+	})
+
+	t.Run("one pass over every database", func(t *testing.T) {
+		aliases := newNameDb()
+		aliases.insert("db1", "a1", 100)
+		aliases.insert("db1", "a2", 100)
+		aliases.insert("db1", "a3", 101)
+		aliases.insert("db2", "b1", 200)
+		// A database that exists in the alias index but holds no alias.
+		aliases.createDbIfNotExist("db3")
+		mt := &MetaTable{
+			aliases: aliases,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: {ID: util.DefaultDBID, Name: util.DefaultDBName},
+				"db1":              {ID: 1, Name: "db1"},
+				"db2":              {ID: 2, Name: "db2"},
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {CollectionID: 100, DBID: 1, State: pb.CollectionState_CollectionCreated},
+				101: {CollectionID: 101, DBID: 1, State: pb.CollectionState_CollectionCreated},
+				200: {CollectionID: 200, DBID: 2, State: pb.CollectionState_CollectionCreated},
+				// Not available: dropping. The report counts what users can use.
+				300: {CollectionID: 300, DBID: 2, State: pb.CollectionState_CollectionDropping},
+				// A collection from before databases existed belongs to default.
+				400: {CollectionID: 400, DBID: util.NonDBID, State: pb.CollectionState_CollectionCreated},
+			},
+		}
+
+		snap := mt.FeatureUsageSnapshot(context.TODO())
+		assert.Len(t, snap.Databases, 3)
+		ids := make([]typeutil.UniqueID, 0, len(snap.Collections))
+		for _, c := range snap.Collections {
+			ids = append(ids, c.CollectionID)
+		}
+		assert.ElementsMatch(t, []typeutil.UniqueID{100, 101, 200, 400}, ids)
+		assert.Equal(t, 4, snap.AliasCount)
+
+		perCollection := 0
+		for _, id := range []typeutil.UniqueID{100, 101, 200} {
+			perCollection += len(mt.ListAliasesByID(context.TODO(), id))
+		}
+		assert.Equal(t, perCollection, snap.AliasCount)
+	})
 }

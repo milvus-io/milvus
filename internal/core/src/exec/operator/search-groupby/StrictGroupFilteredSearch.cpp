@@ -626,6 +626,7 @@ TryStrictGroupFiltered(const std::shared_ptr<VectorIterator>& iterator,
                            result.seg_offsets_.size() <= remaining,
                        "invalid strict per-group Search result shape");
             stats.used = true;
+            context->search_result->strict_group_phase2_used_ = true;
             ++stats.batch_count;
             for (size_t j = 0; j < result.seg_offsets_.size(); ++j) {
                 auto offset = result.seg_offsets_[j];

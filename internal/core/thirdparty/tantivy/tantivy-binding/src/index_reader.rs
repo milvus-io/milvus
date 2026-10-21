@@ -7,7 +7,7 @@ use tantivy::fastfield::FastValue;
 use tantivy::query::{BooleanQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
-use tantivy::{Directory, HasLen, Index, IndexReader, ReloadPolicy, Term};
+use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
 use crate::bitset_wrapper::BitsetWrapper;
 use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
@@ -95,6 +95,8 @@ impl IndexReaderWrapper {
         index: Arc<Index>,
         set_bitset: SetBitsetFn,
     ) -> Result<IndexReaderWrapper> {
+        // TODO: Reuse unchanged SegmentReaders upstream by (segment_id, delete_opstamp)
+        // when creating a new snapshot, while keeping previously published snapshots fixed.
         IndexReaderWrapper::from_index_with_policy(index, set_bitset, ReloadPolicy::Manual)
     }
 
@@ -149,21 +151,14 @@ impl IndexReaderWrapper {
     }
 
     pub fn index_size_bytes(&self) -> Result<u64> {
-        let dir = self.index.directory();
-        let mut total: u64 = 0;
-        for path in dir.list_managed_files() {
-            match dir.open_read(&path) {
-                Ok(file_slice) => {
-                    total += file_slice.len() as u64;
-                }
-                Err(_e) => {
-                    // Some legacy/unsupported files may fail to open (e.g., old tantivy versions).
-                    // Skip unreadable files to provide a best-effort byte-size estimation instead of failing hard.
-                    continue;
-                }
-            }
-        }
-        Ok(total)
+        // Read only retained, committed component lengths. Managed paths can
+        // include unfinished merge outputs or disappear while an old reader lives.
+        let searcher = self.reader.searcher();
+        Ok(searcher
+            .segment_readers()
+            .iter()
+            .map(|segment| segment.num_bytes())
+            .sum())
     }
 
     pub(crate) fn search(&self, q: &dyn Query, bitset: *mut c_void) -> Result<()> {
@@ -941,6 +936,268 @@ mod test {
     use crate::util::set_bitset;
 
     use super::IndexReaderWrapper;
+
+    #[test]
+    fn test_index_size_bytes_ignores_incomplete_files() {
+        use std::{io::Write, path::Path};
+
+        use tantivy::{directory::TerminatingWrite, Directory};
+
+        use crate::{
+            array::{free_rust_result, Value},
+            index_reader_c::tantivy_index_size_bytes,
+            index_writer::IndexWriterWrapper,
+            TantivyIndexVersion,
+        };
+
+        for in_ram in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut writer = IndexWriterWrapper::create_text_writer(
+                "text",
+                directory.path().to_str().unwrap(),
+                "default",
+                "",
+                "",
+                1,
+                15_000_000,
+                in_ram,
+                false,
+                TantivyIndexVersion::V7,
+            )
+            .unwrap();
+            writer.add("committed text", Some(0)).unwrap();
+            writer.commit().unwrap();
+            let mut reader = writer.create_snapshot_reader(set_bitset).unwrap();
+            let expected = reader.index_size_bytes().unwrap();
+            assert!(expected > 0);
+
+            for size in [4, 5, 6, 7, 0, 1, 2, 3, 8] {
+                // ManagedDirectory registers the path before creating the file.
+                // Flushing without terminating exposes an unfinished merge output.
+                let path = format!("unfinished-{size}.idx");
+                let path = Path::new(&path);
+                let mut output = reader.index.directory().open_write(path).unwrap();
+                output.write_all(&vec![0; size]).unwrap();
+                output.flush().unwrap();
+                assert!(reader.index.directory().list_managed_files().contains(path));
+                assert_eq!(
+                    reader.index.directory().atomic_read(path).unwrap().len(),
+                    size
+                );
+
+                // Exercise the same C ABI used while publishing growing text readers.
+                let result = tantivy_index_size_bytes(&mut reader as *mut _ as *mut c_void);
+                assert!(result.success);
+                match result.value {
+                    Value::U64(bytes) => assert_eq!(bytes, expected),
+                    _ => panic!("expected a byte count"),
+                }
+                free_rust_result(result);
+
+                output.terminate().unwrap();
+                assert_eq!(reader.index_size_bytes().unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_index_size_bytes_pins_committed_segments() {
+        use tantivy::{merge_policy::NoMergePolicy, Directory};
+
+        for in_ram in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut schema = Schema::builder();
+            let field = schema.add_text_field("text", STRING | STORED);
+            let schema = schema.build();
+            let index = Arc::new(if in_ram {
+                Index::create_in_ram(schema)
+            } else {
+                Index::create_in_dir(directory.path(), schema).unwrap()
+            });
+            let mut writer = index.writer_with_num_threads(1, 15_000_000).unwrap();
+            writer.set_merge_policy(Box::new(NoMergePolicy));
+            let empty = IndexReaderWrapper::from_index_snapshot(index.clone(), set_bitset).unwrap();
+            assert_eq!(empty.index_size_bytes().unwrap(), 0);
+
+            writer.add_document(doc!(field => "first")).unwrap();
+            writer.commit().unwrap();
+            let first = IndexReaderWrapper::from_index_snapshot(index.clone(), set_bitset).unwrap();
+            let first_size = first.index_size_bytes().unwrap();
+            let first_path = std::path::PathBuf::from(format!(
+                "{}.term",
+                first.reader.searcher().segment_readers()[0]
+                    .segment_id()
+                    .uuid_string()
+            ));
+            assert!(first_size > 0);
+            assert_eq!(empty.index_size_bytes().unwrap(), 0);
+
+            writer.add_document(doc!(field => "second")).unwrap();
+            writer.commit().unwrap();
+            let second =
+                IndexReaderWrapper::from_index_snapshot(index.clone(), set_bitset).unwrap();
+            let second_size = second.index_size_bytes().unwrap();
+            assert!(second_size > first_size);
+            assert_eq!(first.index_size_bytes().unwrap(), first_size);
+
+            let ids = index.searchable_segment_ids().unwrap();
+            assert_eq!(ids.len(), 2);
+            writer.merge(&ids).wait().unwrap();
+            writer.garbage_collect_files().wait().unwrap();
+            assert!(!index.directory().exists(&first_path).unwrap());
+            let merged =
+                IndexReaderWrapper::from_index_snapshot(index.clone(), set_bitset).unwrap();
+            assert_eq!(merged.reader.searcher().segment_readers().len(), 1);
+            let merged_size = merged.index_size_bytes().unwrap();
+            assert!(merged_size > 0);
+            assert_eq!(first.count().unwrap(), 1);
+            assert_eq!(first.index_size_bytes().unwrap(), first_size);
+            assert_eq!(second.count().unwrap(), 2);
+            assert_eq!(second.index_size_bytes().unwrap(), second_size);
+
+            first.reload().unwrap();
+            assert_eq!(first.count().unwrap(), 2);
+            assert_eq!(first.index_size_bytes().unwrap(), merged_size);
+            drop(writer);
+            drop(index);
+            assert_eq!(second.index_size_bytes().unwrap(), second_size);
+            if !in_ram {
+                for mmap in [true, false] {
+                    let sealed = IndexReaderWrapper::load(
+                        directory.path().to_str().unwrap(),
+                        mmap,
+                        set_bitset,
+                    )
+                    .unwrap();
+                    assert_eq!(sealed.count().unwrap(), 2);
+                    assert_eq!(sealed.index_size_bytes().unwrap(), merged_size);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_index_size_bytes_pins_delete_generation() {
+        use tantivy::{merge_policy::NoMergePolicy, Directory, HasLen, Term};
+
+        let mut schema = Schema::builder();
+        let field = schema.add_text_field("text", STRING | STORED);
+        let index = Arc::new(Index::create_in_ram(schema.build()));
+        let mut writer = index.writer_with_num_threads(1, 15_000_000).unwrap();
+        writer.set_merge_policy(Box::new(NoMergePolicy));
+        for value in ["first", "second", "third"] {
+            writer.add_document(doc!(field => value)).unwrap();
+        }
+        writer.commit().unwrap();
+        let original = IndexReaderWrapper::from_index_snapshot(index.clone(), set_bitset).unwrap();
+        let original_size = original.index_size_bytes().unwrap();
+
+        let mut snapshots = Vec::new();
+        for value in ["first", "second"] {
+            writer.delete_term(Term::from_field_text(field, value));
+            writer.commit().unwrap();
+            let reader =
+                IndexReaderWrapper::from_index_snapshot(index.clone(), set_bitset).unwrap();
+            let meta = index.searchable_segment_metas().unwrap().pop().unwrap();
+            let path = meta.relative_path(tantivy::index::SegmentComponent::Delete);
+            let delete_size = index.directory().open_read(&path).unwrap().len() as u64;
+            assert_eq!(
+                reader.index_size_bytes().unwrap(),
+                original_size + delete_size
+            );
+            snapshots.push((reader, delete_size, path));
+        }
+        writer.garbage_collect_files().wait().unwrap();
+        assert_eq!(original.index_size_bytes().unwrap(), original_size);
+        assert!(!index.directory().exists(&snapshots[0].2).unwrap());
+        for (reader, delete_size, _) in snapshots {
+            assert_eq!(
+                reader.index_size_bytes().unwrap(),
+                original_size + delete_size
+            );
+        }
+    }
+
+    #[test]
+    fn test_index_size_bytes_sealed_payloads_and_truncated_files() {
+        use tantivy::{Directory, HasLen};
+
+        use crate::{
+            array::free_rust_result, data_type::TantivyDataType,
+            index_reader_c::tantivy_load_index, index_writer::IndexWriterWrapper,
+            TantivyIndexVersion,
+        };
+
+        for (version, data_type) in [
+            (TantivyIndexVersion::V5, TantivyDataType::I64),
+            (TantivyIndexVersion::V7, TantivyDataType::I64),
+            (TantivyIndexVersion::V7, TantivyDataType::JSON),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().to_str().unwrap();
+            let is_json = matches!(data_type, TantivyDataType::JSON);
+            let mut writer = IndexWriterWrapper::new(
+                "value",
+                data_type,
+                path.to_owned(),
+                1,
+                50_000_000,
+                version,
+                false,
+                false,
+            )
+            .unwrap();
+            for row in 0..3 {
+                if is_json {
+                    writer
+                        .add_json(
+                            &format!(r#"{{"nested":{{"value":{row}}},"text":"sample"}}"#),
+                            Some(row),
+                        )
+                        .unwrap();
+                } else {
+                    writer.add(row, Some(row)).unwrap();
+                }
+            }
+            writer.finish().unwrap();
+            let (expected, terms_path) = {
+                let index = Index::open_in_dir(path).unwrap();
+                // Independently measure all completed component payloads before
+                // introducing corruption, including dynamic JSON fast fields.
+                let expected = index
+                    .directory()
+                    .list_managed_files()
+                    .iter()
+                    .filter_map(|path| index.directory().open_read(path).ok())
+                    .map(|file| file.len() as u64)
+                    .sum::<u64>();
+                let meta = index.searchable_segment_metas().unwrap().pop().unwrap();
+                (
+                    expected,
+                    directory
+                        .path()
+                        .join(meta.relative_path(tantivy::index::SegmentComponent::Terms)),
+                )
+            };
+            assert!(expected > 0);
+            for mmap in [true, false] {
+                let reader = IndexReaderWrapper::load(path, mmap, set_bitset).unwrap();
+                assert_eq!(reader.count().unwrap(), 3);
+                assert_eq!(reader.index_size_bytes().unwrap(), expected);
+            }
+            let path = CString::new(path).unwrap();
+            for len in 0..=8 {
+                std::fs::write(&terms_path, vec![0; len]).unwrap();
+                for mmap in [true, false] {
+                    // Short persisted components must return an error across the
+                    // C ABI, including the 4..7-byte footer metadata boundary.
+                    let result = tantivy_load_index(path.as_ptr(), mmap, set_bitset);
+                    assert!(!result.success);
+                    free_rust_result(result);
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_float_queries_match_both_stored_zero_encodings() {

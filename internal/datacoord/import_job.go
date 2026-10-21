@@ -20,10 +20,12 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -49,6 +51,12 @@ func WithJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 			}
 		}
 		return false
+	}
+}
+
+func WithJobVersions(versions ...internalpb.ImportVersion) ImportJobFilter {
+	return func(job ImportJob) bool {
+		return lo.Contains(versions, job.GetVersion())
 	}
 }
 
@@ -90,6 +98,16 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 		}
 		job.(*importJob).State = state
 		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
+			// Credentials are needed through both phases and retries, but not
+			// after a terminal transition. This clears the retained job record;
+			// historical WAL entries remain subject to normal WAL retention.
+			options := make([]*commonpb.KeyValuePair, 0, len(job.GetOptions()))
+			for _, option := range job.GetOptions() {
+				if option.GetKey() != importutilv2.ExternalSpec && option.GetKey() != importutilv2.SnapshotSourceURI {
+					options = append(options, option)
+				}
+			}
+			job.(*importJob).Options = options
 			// releases requested disk resource
 			job.(*importJob).RequestedDiskSize = 0
 			// set cleanup ts
@@ -153,12 +171,15 @@ type ImportJob interface {
 	GetCreateTime() string
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
+	GetSnapshotL0Sources() []*internalpb.SnapshotImportL0Source
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
 	GetCommitByCoordinator() bool
 	GetRlsCheckPredicate() *planpb.Expr
 	GetTR() *timerecord.TimeRecorder
+	GetObjCleaned() bool
 	GetDataTs() uint64
+	GetVersion() internalpb.ImportVersion
 	Clone() ImportJob
 }
 
@@ -166,10 +187,36 @@ type importJob struct {
 	*datapb.ImportJob
 
 	tr *timerecord.TimeRecorder
+
+	// objCleaned records that this checker already removed the job's temporary
+	// import_v3 object prefix.
+	//
+	// It is not persisted: the delete is idempotent, so a restart simply repeats
+	// it once. It is also deliberately not copied by Clone: clones are taken
+	// under importMeta's lock, while the GC goroutine writes this flag without
+	// that lock, so copying it would make every clone read a lock-free
+	// GC-owned field. Losing the flag in a clone only costs one repeated,
+	// idempotent delete. The GC goroutine is its only reader and writer.
+	objCleaned bool
 }
 
 func (j *importJob) GetTR() *timerecord.TimeRecorder {
 	return j.tr
+}
+
+// GetObjCleaned reports whether this process already removed the job's
+// temporary import_v3 object prefix. Only the GC goroutine may call it: the
+// flag is written without importMeta's lock.
+func (j *importJob) GetObjCleaned() bool {
+	return j.objCleaned
+}
+
+// markObjCleaned records that the temporary object prefix is gone. Only the GC
+// goroutine calls it. The write needs no lock: no other field of a shared job
+// is mutated in place (updates clone and replace under importMeta's lock) and
+// no other goroutine reads this field.
+func (j *importJob) markObjCleaned() {
+	j.objCleaned = true
 }
 
 func (j *importJob) Clone() ImportJob {

@@ -287,7 +287,7 @@ TEST_F(SegmentLoadInfoTest,
                   INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
 }
 
-TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {
+TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareResourceEstimate) {
     proto::segcore::SegmentLoadInfo proto;
     proto.set_segmentid(100);
     proto.set_num_of_rows(1000);
@@ -330,7 +330,7 @@ TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {
 
     auto legacy_inverted_infos = segment_info.GetFieldIndexInfos(FieldId(110));
     ASSERT_EQ(legacy_inverted_infos.size(), 1);
-    EXPECT_TRUE(legacy_inverted_infos[0].load_resource_request.has_value());
+    EXPECT_FALSE(legacy_inverted_infos[0].load_resource_request.has_value());
 }
 
 TEST_F(SegmentLoadInfoTest, CompactRuntimeInfoForManifest) {

@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 
 FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
 
@@ -24,7 +24,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 RUN uv --no-cache python install 3.12.13 && \
-    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        --upgrade setuptools msgpack urllib3
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \

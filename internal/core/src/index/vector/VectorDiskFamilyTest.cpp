@@ -37,6 +37,8 @@
 #include "index/contracts/build/VectorBuildInput.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/KnowhereEngine.h"
+#include "index/vector/VectorDiskBuildFileManager.h"
+#include "index/vector/VectorDiskArtifact.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/FileManager.h"
@@ -248,6 +250,161 @@ RunOrdinaryDiskSearch(bool mmap) {
                 reader->GetVector(GenIdsDataset(ids.size(), ids.data()))));
         }
     }
+}
+
+TEST(VectorDiskFileManagerTest, PreparedInputsAreBorrowedReadOnly) {
+    auto inputs = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_inputs_XXXXXX", "prepared input test");
+    const auto raw = inputs->Path() + "/raw";
+    WriteRaw<float>(raw, {1.0f, 2.0f}, 1, 2);
+    auto output = storage::LocalDirectory::CreateOwned(
+        inputs->Path(), "outputs_XXXXXX", "prepared input test");
+    const auto output_dir = output->Path();
+    auto manager =
+        std::make_shared<VectorDiskBuildFileManager>(std::move(output));
+    manager->SetInputFiles({raw});
+    auto stream = manager->OpenInputStream(raw);
+    ASSERT_NE(stream, nullptr);
+    EXPECT_EQ(stream->Size(), 2 * sizeof(uint32_t) + 2 * sizeof(float));
+    std::array<uint32_t, 2> header;
+    EXPECT_EQ(stream->Read(header.data(), sizeof(header)), sizeof(header));
+    EXPECT_EQ(header, (std::array<uint32_t, 2>{1, 2}));
+    std::array<float, 2> values;
+    EXPECT_EQ(stream->Read(values.data(), sizeof(values)), sizeof(values));
+    EXPECT_EQ(values, (std::array<float, 2>{1.0f, 2.0f}));
+    EXPECT_TRUE(manager->Files().empty());
+    EXPECT_THROW(manager->OpenOutputStream(raw), SegcoreError);
+    EXPECT_FALSE(manager->AddFile(raw));
+    EXPECT_FALSE(manager->RemoveFile(raw));
+    EXPECT_TRUE(std::filesystem::exists(raw));
+    manager.reset();
+    EXPECT_TRUE(std::filesystem::exists(output_dir));
+    stream.reset();
+    EXPECT_FALSE(std::filesystem::exists(output_dir));
+    EXPECT_TRUE(std::filesystem::exists(raw));
+}
+
+TEST(VectorDiskFileManagerTest, InputFailuresKeepTheirOriginalCode) {
+    auto inputs = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_inputs_XXXXXX", "prepared input failure test");
+    const auto raw = inputs->Path() + "/raw";
+    WriteRaw<float>(raw, {1.0f}, 1, 1);
+    auto make_manager = [&] {
+        return std::make_shared<VectorDiskBuildFileManager>(
+            storage::LocalDirectory::CreateOwned(
+                inputs->Path(),
+                "outputs_XXXXXX",
+                "prepared input failure test"));
+    };
+    auto expect_code = [](auto&& operation, ErrorCode code) {
+        try {
+            operation();
+            FAIL() << "expected input failure";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), code);
+        }
+    };
+    auto undeclared = make_manager();
+    expect_code([&] { undeclared->OpenInputStream(raw); }, FileReadFailed);
+    auto missing = make_manager();
+    missing->SetInputFiles({raw + ".missing"});
+    expect_code([&] { missing->OpenInputStream(raw + ".missing"); },
+                FileOpenFailed);
+    expect_code([&] { missing->RethrowFirstFailure(); }, FileOpenFailed);
+    auto truncated = make_manager();
+    truncated->SetInputFiles({raw});
+    auto stream = truncated->OpenInputStream(raw);
+    std::filesystem::resize_file(raw, 0);
+    uint32_t value;
+    expect_code([&] { stream->Read(&value, sizeof(value)); }, FileReadFailed);
+    expect_code([&] { truncated->RethrowFirstFailure(); }, FileReadFailed);
+}
+
+TEST(VectorDiskFileManagerTest, MetadataBeforeOrAfterClosePublishesRawBytes) {
+    for (bool before_close : {true, false}) {
+        SCOPED_TRACE(before_close);
+        auto owner = storage::LocalDirectory::CreateOwned(
+            "/tmp", "vector_stream_XXXXXX", "stream metadata test");
+        auto manager = std::make_shared<VectorDiskBuildFileManager>(owner);
+        const auto path = owner->Path() + "/engine";
+        const std::array<uint8_t, 3> bytes{4, 5, 6};
+        auto output = manager->OpenOutputStream(path);
+        ASSERT_EQ(output->Write(bytes.data(), bytes.size()), bytes.size());
+        const milvus::FileMeta meta{path, bytes.size()};
+        if (before_close) {
+            ASSERT_TRUE(manager->AddFileMeta(meta));
+            EXPECT_THROW(manager->Files(), SegcoreError);
+        }
+        output->Close();
+        ASSERT_TRUE(manager->AddFileMeta(meta));
+        EXPECT_TRUE(manager->AddFileMeta(meta));
+        EXPECT_NO_THROW(manager->RethrowFirstFailure());
+        auto files = manager->Files();
+        ASSERT_EQ(files.size(), 1);
+        EXPECT_EQ(files[0].transport, VectorDiskFileTransport::RawUnsliced);
+        EXPECT_EQ(files[0].size, bytes.size());
+        VectorDiskArtifact artifact(owner, std::move(files));
+        storage::StorageConfig config;
+        config.storage_type = "local";
+        config.root_path = owner->Path() + "/objects/";
+        storage::FileManagerContext context(
+            {1, 2, 3, 100},
+            {3, 100, 6108, 1},
+            storage::CreateChunkManager(config),
+            storage::InitArrowFileSystem(config));
+        storage::V1DiskSink sink(context);
+        artifact.Serialize(sink);
+        const auto stats = sink.Finish();
+        ASSERT_EQ(stats.Files().size(), 1);
+        const auto& remote = stats.Files().front().file_name;
+        EXPECT_EQ(context.chunkManagerPtr->Size(remote), bytes.size());
+        std::array<uint8_t, 3> loaded;
+        context.chunkManagerPtr->Read(remote, loaded.data(), loaded.size());
+        EXPECT_EQ(loaded, bytes);
+        sink.ReleaseLocalStaging();
+    }
+}
+
+TEST(VectorDiskFileManagerTest, MetadataConflictKeepsOutputFailed) {
+    for (bool before_close : {true, false}) {
+        SCOPED_TRACE(before_close);
+        auto owner = storage::LocalDirectory::CreateOwned(
+            "/tmp", "vector_stream_XXXXXX", "stream metadata failure test");
+        auto manager = std::make_shared<VectorDiskBuildFileManager>(owner);
+        const auto path = owner->Path() + "/engine";
+        auto output = manager->OpenOutputStream(path);
+        const uint8_t byte = 4;
+        output->Write(&byte, 1);
+        if (before_close) {
+            ASSERT_TRUE(manager->AddFileMeta({path, 1}));
+            output->Write(&byte, 1);
+            EXPECT_THROW(output->Close(), SegcoreError);
+            EXPECT_THROW(manager->Files(), SegcoreError);
+        } else {
+            output->Close();
+            EXPECT_FALSE(manager->AddFileMeta({path, 2}));
+            EXPECT_TRUE(manager->AddFileMeta({path, 1}));
+        }
+        try {
+            manager->RethrowFirstFailure();
+            FAIL() << "expected metadata failure";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FileWriteFailed);
+        }
+    }
+}
+
+TEST(VectorDiskFileManagerTest, MetadataCannotConvertLegacyFilesToRaw) {
+    auto owner = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_stream_XXXXXX", "stream metadata transport test");
+    auto manager = std::make_shared<VectorDiskBuildFileManager>(owner);
+    const auto path = owner->Path() + "/engine";
+    WriteRaw<float>(path, {1.0f}, 1, 1);
+    ASSERT_TRUE(manager->AddFile(path));
+    EXPECT_FALSE(
+        manager->AddFileMeta({path, std::filesystem::file_size(path)}));
+    EXPECT_EQ(manager->Files().front().transport,
+              VectorDiskFileTransport::LegacySliced);
 }
 
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {

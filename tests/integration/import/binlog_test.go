@@ -58,7 +58,7 @@ type SourceCollectionInfo struct {
 	l1MaxTs uint64 // max timestamp from L1 segments' insert binlogs
 }
 
-func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
+func (s *importTestBase) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster
@@ -150,13 +150,29 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 			CollectionNames: []string{collectionName},
 		})
 		s.NoError(merr.CheckRPCCall(flushResp, err))
-		segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
-		ids := segmentIDs.GetData()
+		// The per-collection flush segment map is filled asynchronously by the
+		// flusher and can still be empty when the RPC returns. Discover the
+		// sealed L1 segments from meta instead of trusting the response body.
+		ids := flushResp.GetFlushCollSegIDs()[collectionName].GetData()
+		if len(ids) == 0 {
+			s.Require().Eventually(func() bool {
+				segments, err := c.ShowSegments(collectionName)
+				if err != nil {
+					return false
+				}
+				ids = ids[:0]
+				for _, segment := range segments {
+					if segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1 {
+						ids = append(ids, segment.GetID())
+					}
+				}
+				return len(ids) > 0
+			}, 60*time.Second, 200*time.Millisecond)
+		}
 		s.Require().NotEmpty(ids)
-		s.Require().True(has)
-		flushTs, has := flushResp.GetCollFlushTs()[collectionName]
-		s.True(has)
-		s.WaitForFlush(ctx, ids, flushTs, "", collectionName)
+		if flushTs, ok := flushResp.GetCollFlushTs()[collectionName]; ok && flushTs != 0 {
+			s.WaitForFlush(ctx, ids, flushTs, "", collectionName)
+		}
 		segments, err := c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
@@ -250,7 +266,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	}
 }
 
-func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
+func (s *importTestBase) runBinlogTest(dmlGroup *DMLGroup) {
 	const dim = 128
 
 	sourceCollectionInfo := s.PrepareSourceCollection(dim, dmlGroup)

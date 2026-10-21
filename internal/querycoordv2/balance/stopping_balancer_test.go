@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -71,8 +72,8 @@ func (suite *StoppingBalancerTestSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeManager = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeManager)
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeManager, metacache.NewMetaStore(nil))
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, metacache.NewMetaStore(nil))
 	suite.dist = meta.NewDistributionManager(suite.nodeManager)
 
 	// Create a mock assign policy for testing

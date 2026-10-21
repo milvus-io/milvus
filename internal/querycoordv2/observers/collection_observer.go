@@ -345,9 +345,17 @@ func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collecti
 }
 
 func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32, channelTargetNum, subChannelCount int) bool {
+	// Numerator and denominator must share one basis. Sizing the denominator by
+	// the target's ID set while counting the numerator over only what the store
+	// resolves lets the two disagree, and the percentage can then never reach
+	// 100 -- the partition stays "loading" forever instead of merely
+	// under-reporting. Resolve from the same ID set the denominator is sized
+	// by, so an unresolvable segment is counted as not-yet-loaded and clears as
+	// soon as it resolves.
+	segmentTargetIDs := ob.targetMgr.GetSealedSegmentIDsByPartition(ctx, partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
 	segmentTargets := ob.targetMgr.GetSealedSegmentsByPartition(ctx, partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
 
-	targetNum := len(segmentTargets) + channelTargetNum
+	targetNum := len(segmentTargetIDs) + channelTargetNum
 	if targetNum == 0 {
 		mlog.Info(ctx, "segments and channels in target are both empty, waiting for new target content")
 		return false
@@ -363,11 +371,23 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	loadedCount := subChannelCount
 	loadPercentage := int32(0)
 
-	for _, segment := range segmentTargets {
+	for segmentID := range segmentTargetIDs {
+		segment, ok := segmentTargets[segmentID]
+		if !ok {
+			// Owed by the target but not resolvable right now: it counts
+			// against the denominator and contributes nothing here, so load
+			// progress parks below 100% until the next target refresh drops
+			// the ID. That is recoverable but invisible, so say it out loud.
+			mlog.RatedWarn(ctx, 60, "segment in target cannot be resolved from the shared store, load progress will stall until the next target refresh",
+				mlog.FieldCollectionID(partition.GetCollectionID()),
+				mlog.FieldPartitionID(partition.GetPartitionID()),
+				mlog.FieldSegmentID(segmentID))
+			continue
+		}
 		delegatorList := ob.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(segment.GetInsertChannel()))
 		loadedSegmentNodes := make([]int64, 0)
 		for _, delegator := range delegatorList {
-			if delegator.View.Segments[segment.GetID()] != nil {
+			if delegator.View.Segments[segmentID] != nil {
 				loadedSegmentNodes = append(loadedSegmentNodes, delegator.Node)
 			}
 		}

@@ -145,6 +145,20 @@ func (t *SearchTask) PreExecute() error {
 }
 
 func (t *SearchTask) Execute() error {
+	return t.execute(nil)
+}
+
+// TODO(#40451): move selected-segment search and reduction into the shared
+// QueryView execution layer so SN no longer depends on the legacy QueryNode task.
+// Keep segment selection and handle ownership with the QueryView caller.
+func (t *SearchTask) ExecuteOnSegments(selected []segments.Segment) error {
+	if selected == nil {
+		selected = []segments.Segment{}
+	}
+	return t.execute(selected)
+}
+
+func (t *SearchTask) execute(selected []segments.Segment) error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
@@ -181,7 +195,10 @@ func (t *SearchTask) Execute() error {
 		results          []*segments.SearchResult
 		searchedSegments []segments.Segment
 	)
-	if req.GetScope() == querypb.DataScope_Historical {
+	if selected != nil {
+		searchedSegments = selected
+		results, err = segments.SearchSelectedSegments(t.ctx, searchReq, selected)
+	} else if req.GetScope() == querypb.DataScope_Historical {
 		results, searchedSegments, err = segments.SearchHistorical(
 			t.ctx,
 			t.segmentManager,
@@ -200,7 +217,9 @@ func (t *SearchTask) Execute() error {
 			req.GetSegmentIDs(),
 		)
 	}
-	defer t.segmentManager.Segment.Unpin(searchedSegments)
+	if selected == nil {
+		defer t.segmentManager.Segment.Unpin(searchedSegments)
+	}
 	defer segments.DeleteSearchResults(results)
 	if err != nil {
 		return err
@@ -222,12 +241,20 @@ func (t *SearchTask) Execute() error {
 		relatedDataSize := lo.Reduce(searchedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
 			return acc + segments.GetSegmentRelatedDataSize(seg)
 		}, 0)
+		// Features the filter stage used travel with its statistics: stage 2
+		// may serve the same filter from the cache, so what ran here is the
+		// only record of, say, the NGRAM index or of a cold read.
+		scannedRemoteBytes := lo.Reduce(results, func(acc int64, r *segments.SearchResult, _ int) int64 {
+			return acc + r.GetMetadata().StorageCost.ScannedRemoteBytes
+		}, 0)
+		featureBits := searchReq.FeatureBits() | segments.ColdReadFeatureBit(scannedRemoteBytes)
 		for i := range t.originNqs {
 			task := t.subTaskAt(i)
 			task.result = &internalpb.SearchResults{
 				Status:                   merr.Success(),
 				SealedSegmentIDsSearched: segmentIDs,
 				FilterValidCounts:        validCounts,
+				FeatureBits:              featureBits,
 				CostAggregation: &internalpb.CostAggregation{
 					ServiceTime:          tr.ElapseSpan().Milliseconds(),
 					TotalRelatedDataSize: relatedDataSize,
@@ -387,7 +414,7 @@ func (t *SearchTask) Execute() error {
 			}
 		}
 	}
-	t.attributeStorageCost(results)
+	t.attributeStorageCost(results, searchReq.FeatureBits())
 
 	// Reduce metric covers the full Go-reduce pipeline (Arrow export +
 	// heap merge + Late Materialization + proto marshal), aligned with the

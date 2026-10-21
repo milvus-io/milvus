@@ -16,8 +16,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
@@ -52,8 +52,6 @@ type DeleteTask struct {
 	req *milvuspb.DeleteRequest
 
 	// channel
-	chMgr     channelmgr.ChannelsMgr
-	pChannels []pChan
 	vChannels []vChan
 
 	idAllocator allocator.Interface
@@ -116,20 +114,13 @@ func (dt *DeleteTask) OnEnqueue() error {
 }
 
 func (dt *DeleteTask) SetChannels() error {
-	collID, err := dt.GetMetaCache().GetCollectionID(dt.ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
-	if err != nil {
-		return err
-	}
-	channels, err := dt.chMgr.GetChannels(collID)
-	if err != nil {
-		return err
-	}
-	dt.pChannels = channels
+	// delete task routes messages by the vchannels pinned in DeleteRunner.Init and
+	// nothing reads its pchannels, so we don't need to resolve channels here.
 	return nil
 }
 
 func (dt *DeleteTask) GetChannels() []pChan {
-	return dt.pChannels
+	return nil
 }
 
 func (dt *DeleteTask) PreExecute(ctx context.Context) error {
@@ -288,11 +279,13 @@ type DeleteRunner struct {
 	initRequestOnce sync.Once
 	req             *milvuspb.DeleteRequest
 	result          *milvuspb.MutationResult
-	node            taskmodel.TaskNode
-	metaCache       Cache
+	// userPlanIsSimple: the user's filter, before any row-level-security
+	// predicate, names primary keys only (delete by ids).
+	userPlanIsSimple bool
+	node             taskmodel.TaskNode
+	metaCache        Cache
 
 	// channel
-	chMgr     channelmgr.ChannelsMgr
 	vChannels []vChan
 
 	idAllocator     allocator.Interface
@@ -325,14 +318,13 @@ type DeleteRunner struct {
 // NewDeleteRunner constructs a delete runner. Its dependencies are passed in
 // explicitly because most of them (queue, limiter, allocators) are not part of
 // the taskmodel.TaskNode contract.
-func NewDeleteRunner(node taskmodel.TaskNode, request *milvuspb.DeleteRequest, metaCache Cache, idAllocator allocator.Interface, tsoAllocatorIns tsoAllocator, chMgr channelmgr.ChannelsMgr, queue *scheduler.DmTaskQueue, lb shardclient.LBPolicy, limiter types.Limiter) *DeleteRunner {
+func NewDeleteRunner(node taskmodel.TaskNode, request *milvuspb.DeleteRequest, metaCache Cache, idAllocator allocator.Interface, tsoAllocatorIns tsoAllocator, queue *scheduler.DmTaskQueue, lb shardclient.LBPolicy, limiter types.Limiter) *DeleteRunner {
 	return &DeleteRunner{
 		req:             request,
 		node:            node,
 		metaCache:       metaCache,
 		idAllocator:     idAllocator,
 		tsoAllocatorIns: tsoAllocatorIns,
-		chMgr:           chMgr,
 		queue:           queue,
 		lb:              lb,
 		limiter:         limiter,
@@ -424,7 +416,10 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	}
 
 	colTimezone := dql.GetColTimezone(colInfo)
-	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
+	// The user's own filter is counted: the parser reports it before the
+	// rewriter, and the row-level-security predicate is merged in afterwards.
+	var exprFeatures featureusage.FeatureSet
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone, OnParsedExpr: dql.ExprFeatureObserver(&exprFeatures)}
 
 	parseDeletePlan := func(expr string) (*planpb.PlanNode, error) {
 		start := time.Now()
@@ -441,10 +436,17 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	dql.RecordExprTemplateFeatures(&exprFeatures, dr.req.GetExprTemplateValues())
 	if planparserv2.IsAlwaysTruePlan(userPlan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
+	// The mode is the shape of the user's request. With row-level security
+	// the predicate merged below turns every delete into a filter delete,
+	// which is how the server runs it but not what the client asked for.
+	if featureusage.Enabled() {
+		dr.userPlanIsSimple = isSimpleDeletePlan(userPlan)
+	}
 
 	if enforceRLS {
 		predicate, err := rls.ResolveUsingPredicate(ctx, dr.collectionID, principalName, rlsutil.PolicyActionDelete, dr.schema.SchemaHelper)
@@ -512,12 +514,8 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 		dr.partitionIDs = []UniqueID{partID} // only one partID
 	}
 
-	// set vchannels
-	channelNames, err := dr.chMgr.GetVChannels(dr.collectionID)
-	if err != nil {
-		return ErrWithLog(log, "Failed to get vchannels from collection", err)
-	}
-	dr.vChannels = channelNames
+	// set vchannels from the collection info pinned above
+	dr.vChannels = colInfo.VChannels
 
 	dr.result = &milvuspb.MutationResult{
 		Status: merr.Success(),
@@ -530,6 +528,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 
 func (dr *DeleteRunner) Run(ctx context.Context) error {
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, dr.plan)
+	recordDeleteMode(dr.userPlanIsSimple)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
 		err := dr.simpleDelete(ctx, pk, numRow)
@@ -565,7 +564,6 @@ func (dr *DeleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, 
 		Condition:    NewTaskCondition(ctx),
 		req:          dr.req,
 		idAllocator:  dr.idAllocator,
-		chMgr:        dr.chMgr,
 		schema:       dr.schema,
 		collectionID: dr.collectionID,
 		partitionID:  partitionID,
@@ -792,6 +790,24 @@ func (dr *DeleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 		dr.result.Timestamp = task.sessionTS
 	}
 	return err
+}
+
+// isSimpleDeletePlan reports whether getPrimaryKeysFromPlan would take the
+// simple-delete path for plan, from the plan shape alone, without copying
+// the primary keys out.
+func isSimpleDeletePlan(plan *planpb.PlanNode) bool {
+	isPKType := func(t schemapb.DataType) bool {
+		return t == schemapb.DataType_Int64 || t == schemapb.DataType_VarChar
+	}
+	switch expr := plan.GetQuery().GetPredicates().GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		info := expr.TermExpr.GetColumnInfo()
+		return info.GetIsPrimaryKey() && isPKType(info.GetDataType())
+	case *planpb.Expr_UnaryRangeExpr:
+		info := expr.UnaryRangeExpr.GetColumnInfo()
+		return expr.UnaryRangeExpr.GetOp() == planpb.OpType_Equal && info.GetIsPrimaryKey() && isPKType(info.GetDataType())
+	}
+	return false
 }
 
 func getPrimaryKeysFromPlan(schema *schemapb.CollectionSchema, plan *planpb.PlanNode) (isSimpleDelete bool, pks *schemapb.IDs, pkCount int64) {

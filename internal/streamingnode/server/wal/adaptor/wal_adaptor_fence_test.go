@@ -159,6 +159,56 @@ func TestOversizedAppendWithSNChunkingDisabledUsesLegacySingleRecordPath(t *test
 	assert.Equal(t, int32(1), persisted.Load())
 }
 
+// The WAL detaches an append from its caller: client cancellation must not
+// reach the interceptor chain, while the WAL becoming unavailable, which WAL
+// close and fence both end in, must cancel it. Waits inside the chain, such as
+// a write waiting for partial-update row locks, rely on both halves to end only
+// with the WAL.
+func TestAppendContextEndsWithWALNotClient(t *testing.T) {
+	gate := &contextTestGateInterceptor{entered: make(chan struct{})}
+	walImpls := newFirstTimeTickWALImpls(func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+		return finishFenceTestAppend(ctx, 1), nil
+	})
+	w := newFenceTestWAL(t, walImpls, gate)
+
+	clientCtx, cancelClient := context.WithCancel(context.Background())
+	appendErr := make(chan error, 1)
+	go func() {
+		_, err := w.Append(clientCtx, message.CreateTestEmptyInsertMesage(1, nil))
+		appendErr <- err
+	}()
+	waitFenceTestSignal(t, gate.entered)
+	cancelClient()
+	select {
+	case err := <-appendErr:
+		t.Fatalf("client cancellation reached the interceptor chain: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Close and fence cancel availableCtx through forceCancelAfterGracefulTimeout.
+	w.availableCancel()
+	require.ErrorIs(t, waitFenceTestError(t, appendErr), context.Canceled)
+}
+
+type contextTestGateInterceptor struct {
+	entered chan struct{}
+}
+
+func (i *contextTestGateInterceptor) DoAppend(
+	ctx context.Context,
+	msg message.MutableMessage,
+	append interceptors.Append,
+) (message.MessageID, error) {
+	if msg.MessageType() != message.MessageTypeInsert {
+		return append(ctx, msg)
+	}
+	close(i.entered)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (i *contextTestGateInterceptor) Close() {}
+
 type countingAppendInterceptor struct {
 	calls atomic.Int32
 }

@@ -1136,6 +1136,10 @@ func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 	return s.mixCoord.GetQuotaMetrics(ctx, req)
 }
 
+func (s *Server) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error) {
+	return s.mixCoord.GetFeatureUsage(ctx, req)
+}
+
 func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
 	return s.mixCoord.ListLoadedSegments(ctx, req)
 }
@@ -1253,4 +1257,12 @@ func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteCl
 // ListClientCommands lists the commands currently held for clients
 func (s *Server) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
 	return s.mixCoord.ListClientCommands(ctx, req)
+}
+
+func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return s.mixCoord.GetQueryViewLoadInfo(ctx, req)
+}
+
+func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return s.mixCoord.GetStreamingNodeQueryViewResources(ctx, req)
 }

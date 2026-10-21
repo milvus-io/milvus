@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -42,7 +43,7 @@ func newSyncFixture(t *testing.T, saves int, replicaNumber int32, userSpecified 
 	t.Helper()
 	catalog := catalogmocks.NewQueryCoordCatalog(t)
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(saves)
-	mgr := NewCollectionManager(catalog)
+	mgr := NewCollectionManager(catalog, metacache.NewMetaStore(nil))
 	require.NoError(t, mgr.PutCollection(context.Background(),
 		&Collection{CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID: syncCollection, ReplicaNumber: replicaNumber, UserSpecifiedReplicaMode: userSpecified,
@@ -109,7 +110,7 @@ func TestSyncReplicaNumberWritesNothingWhenNothingChanges(t *testing.T) {
 }
 
 func TestSyncReplicaNumberOfAMissingCollection(t *testing.T) {
-	mgr := NewCollectionManager(catalogmocks.NewQueryCoordCatalog(t))
+	mgr := NewCollectionManager(catalogmocks.NewQueryCoordCatalog(t), metacache.NewMetaStore(nil))
 
 	_, err := mgr.SyncReplicaNumber(context.Background(), syncCollection, func() int32 {
 		t.Error("there is nothing to count replicas for")
@@ -122,7 +123,7 @@ func TestSyncReplicaNumberLeavesTheNumberAloneWhenTheCatalogRefuses(t *testing.T
 	ctx := context.Background()
 	catalog := catalogmocks.NewQueryCoordCatalog(t)
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Once()
-	mgr := NewCollectionManager(catalog)
+	mgr := NewCollectionManager(catalog, metacache.NewMetaStore(nil))
 	require.NoError(t, mgr.PutCollection(ctx, &Collection{CollectionLoadInfo: &querypb.CollectionLoadInfo{
 		CollectionID: syncCollection, ReplicaNumber: 3,
 	}}))

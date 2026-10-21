@@ -182,6 +182,9 @@ type WALAccesser interface {
 	// AnalyzerClient returns the analyzer domain client backed by streaming discovery.
 	AnalyzerClient() AnalyzerClient
 
+	// SchemaClient returns schema access backed by streaming discovery.
+	SchemaClient() SchemaClient
+
 	// ForwardService returns the forward service of the wal.
 	ForwardService() ForwardService
 

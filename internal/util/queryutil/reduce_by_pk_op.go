@@ -67,17 +67,7 @@ func (op *ReduceByPKOperator) Run(ctx context.Context, span trace.Span, inputs .
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
 
-	// Filter out empty results and collect valid ones
-	validResults := make([]*internalpb.RetrieveResults, 0, len(results))
-	hasMoreResult := false
-	for _, r := range results {
-		if r == nil || len(r.GetFieldsData()) == 0 || typeutil.GetSizeOfIDs(r.GetIds()) == 0 {
-			continue
-		}
-		validResults = append(validResults, r)
-		hasMoreResult = hasMoreResult || r.GetHasMoreResult()
-	}
-
+	validResults, hasMoreResult := filterPKResults(results)
 	if len(validResults) == 0 {
 		return []any{&internalpb.RetrieveResults{}}, nil
 	}
@@ -96,8 +86,41 @@ func (op *ReduceByPKOperator) Run(ctx context.Context, span trace.Span, inputs .
 	return []any{merged}, nil
 }
 
+// filterPKResults preserves the proxy reducer's definition of a usable input.
+func filterPKResults(results []*internalpb.RetrieveResults) ([]*internalpb.RetrieveResults, bool) {
+	validResults := make([]*internalpb.RetrieveResults, 0, len(results))
+	hasMoreResult := false
+	for _, r := range results {
+		if r == nil || len(r.GetFieldsData()) == 0 || typeutil.GetSizeOfIDs(r.GetIds()) == 0 {
+			continue
+		}
+		validResults = append(validResults, r)
+		hasMoreResult = hasMoreResult || r.GetHasMoreResult()
+	}
+	return validResults, hasMoreResult
+}
+
 // mergeByPK performs k-way merge by PK order with deduplication.
 func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, hasMoreResult bool) (*internalpb.RetrieveResults, error) {
+	selectedRows, err := op.selectRowsByPK(results)
+	if err != nil {
+		return nil, err
+	}
+	if len(selectedRows) == 0 {
+		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
+	}
+
+	merged, err := buildMergedRetrieveResults(results, selectedRows, op.schema)
+	if err != nil {
+		return nil, err
+	}
+	merged.HasMoreResult = hasMoreResult
+	return merged, nil
+}
+
+// selectRowsByPK completes PK validation before any page is materialized.
+// In particular, duplicate PKs outside the requested page must still fail.
+func (op *ReduceByPKOperator) selectRowsByPK(results []*internalpb.RetrieveResults) ([]rowRef, error) {
 	// Calculate total row count for capacity hint
 	totalRows := 0
 	for _, r := range results {
@@ -129,20 +152,7 @@ func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, h
 		cursors[sel]++
 	}
 
-	if len(selectedRows) == 0 {
-		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
-	}
-
-	// Build merged result
-	merged, err := buildMergedRetrieveResults(results, selectedRows, op.schema)
-	if err != nil {
-		return nil, err
-	}
-
-	// Propagate HasMoreResult flag
-	merged.HasMoreResult = hasMoreResult
-
-	return merged, nil
+	return selectedRows, nil
 }
 
 // ReduceByPKWithTimestampOperator merges results with timestamp-based deduplication.

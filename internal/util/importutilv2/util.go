@@ -26,16 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type FileType int
-
 const (
-	Invalid   FileType = 0
-	JSON      FileType = 1
-	Numpy     FileType = 2
-	Parquet   FileType = 3
-	CSV       FileType = 4
-	JSONLines FileType = 5
-
 	JSONFileExt    = ".json"
 	JSONLFileExt   = ".jsonl"
 	NDJSONFileExt  = ".ndjson"
@@ -44,17 +35,38 @@ const (
 	CSVFileExt     = ".csv"
 )
 
-var FileTypeName = map[int]string{
-	0: "Invalid",
-	1: "JSON",
-	2: "Numpy",
-	3: "Parquet",
-	4: "CSV",
-	5: "JSONLines",
-}
+// FileType is the reader format of an import file, derived from its path suffix
+// by GetFileType. It is a Go enum, not a wire type: DataCoord and the DataNode
+// both derive it from the file path, so it never travels in a plan.
+type FileType int
 
-func (f FileType) String() string {
-	return FileTypeName[int(f)]
+const (
+	FileTypeUnspecified FileType = iota
+	FileTypeJSON
+	FileTypeJSONLines
+	FileTypeNumpy
+	FileTypeParquet
+	FileTypeCsv
+	FileTypeBackupBinlog
+)
+
+func (t FileType) String() string {
+	switch t {
+	case FileTypeJSON:
+		return "Json"
+	case FileTypeJSONLines:
+		return "JsonLines"
+	case FileTypeNumpy:
+		return "Numpy"
+	case FileTypeParquet:
+		return "Parquet"
+	case FileTypeCsv:
+		return "Csv"
+	case FileTypeBackupBinlog:
+		return "BackupBinlog"
+	default:
+		return "Unspecified"
+	}
 }
 
 func isJSONLinesType(ft string) bool {
@@ -63,7 +75,7 @@ func isJSONLinesType(ft string) bool {
 
 func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 	if len(file.GetPaths()) == 0 {
-		return Invalid, merr.WrapErrImportFailed("no file to import")
+		return FileTypeUnspecified, merr.WrapErrImportFailed("no file to import")
 	}
 	exts := lo.Map(file.GetPaths(), func(path string, _ int) string {
 		return filepath.Ext(path)
@@ -76,7 +88,7 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 			continue
 		}
 		if exts[i] != ext {
-			return Invalid, merr.WrapErrImportFailed(
+			return FileTypeUnspecified, merr.WrapErrImportFailed(
 				fmt.Sprintf("inconsistency in file types, (%s) vs (%s)",
 					file.GetPaths()[0], file.GetPaths()[i]))
 		}
@@ -85,25 +97,25 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 	switch ext {
 	case JSONFileExt, JSONLFileExt, NDJSONFileExt:
 		if len(file.GetPaths()) != 1 {
-			return Invalid, merr.WrapErrImportFailed("for JSON import, accepts only one file")
+			return FileTypeUnspecified, merr.WrapErrImportFailed("for JSON import, accepts only one file")
 		}
 		if isJSONLinesType(ext) {
-			return JSONLines, nil
+			return FileTypeJSONLines, nil
 		} else {
-			return JSON, nil
+			return FileTypeJSON, nil
 		}
 	case NumpyFileExt:
-		return Numpy, nil
+		return FileTypeNumpy, nil
 	case ParquetFileExt:
 		if len(file.GetPaths()) != 1 {
-			return Invalid, merr.WrapErrImportFailed("for Parquet import, accepts only one file")
+			return FileTypeUnspecified, merr.WrapErrImportFailed("for Parquet import, accepts only one file")
 		}
-		return Parquet, nil
+		return FileTypeParquet, nil
 	case CSVFileExt:
 		if len(file.GetPaths()) != 1 {
-			return Invalid, merr.WrapErrImportFailed("for CSV import, accepts only one file")
+			return FileTypeUnspecified, merr.WrapErrImportFailed("for CSV import, accepts only one file")
 		}
-		return CSV, nil
+		return FileTypeCsv, nil
 	}
-	return Invalid, merr.WrapErrImportFailedMsg("unexpected file type, files=%v", file.GetPaths())
+	return FileTypeUnspecified, merr.WrapErrImportFailedMsg("unexpected file type, files=%v", file.GetPaths())
 }
