@@ -15,10 +15,12 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <numeric>
 
 #include "arrow/api.h"
 #include "arrow/array/builder_base.h"
 #include "arrow/array/builder_binary.h"
+#include "arrow/array/builder_nested.h"
 #include "common/Array.h"
 #include "common/Chunk.h"
 #include "common/ChunkWriter.h"
@@ -42,7 +44,9 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     bool use_mmap,
     bool mmap_populate,
     const std::string& warmup_policy,
-    MmapChunkWritebackMode writeback_mode)
+    MmapChunkWritebackMode writeback_mode,
+    std::shared_ptr<const IStructElementOffsets> struct_offsets,
+    std::shared_ptr<const ChunkedColumnInterface> struct_provider)
     : total_rows_(field_data_info.row_count),
       segment_id_(segment_id),
       key_(
@@ -52,6 +56,7 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
       writeback_mode_(writeback_mode),
       mmap_dir_path_(field_data_info.mmap_dir_path),
       field_meta_(field_meta),
+      struct_offsets_(std::move(struct_offsets)),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
             // For default-value fields, one logical chunk per caching cell.
@@ -99,6 +104,28 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                          meta_.vcid_to_cid_arr_);
 
     field_id_ = field_data_info.field_id;
+    if (struct_offsets_) {
+        struct_row_validity_.resize(
+            total_rows_, !field_meta_.is_nullable());
+        if (struct_provider) {
+            milvus::OpContext op_ctx;
+            constexpr int64_t kValidityBatchRows = 4096;
+            for (int64_t begin = 0; begin < total_rows_;
+                 begin += kValidityBatchRows) {
+                const auto count =
+                    std::min(kValidityBatchRows, total_rows_ - begin);
+                std::vector<int64_t> row_ids(count);
+                std::iota(row_ids.begin(), row_ids.end(), begin);
+                struct_provider->BulkIsValid(
+                    &op_ctx,
+                    [&](bool valid, size_t index) {
+                        struct_row_validity_[begin + index] = valid;
+                    },
+                    row_ids.data(),
+                    count);
+            }
+        }
+    }
 
     // Buffer sharing is only safe for non-nullable fixed-width types, where
     // there is no null bitmap and data_start_ == data_ regardless of row count.
@@ -108,20 +135,21 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     // For variable-length types, buffer layout (offsets position) also depends
     // on exact row count.
     can_share_buffer_ = !IsVariableDataType(field_meta_.get_data_type()) &&
-                        !field_meta_.is_nullable();
+                        !field_meta_.is_nullable() && !struct_offsets_;
 
     // Pre-build primary buffer for all primary cells
-    if (primary_cell_rows_ > 0) {
-        primary_buffer_ = build_buffer_for_rows(primary_cell_rows_, "");
+    if (primary_cell_rows_ > 0 && !struct_offsets_) {
+        primary_buffer_ = build_buffer_for_rows(0, primary_cell_rows_, "");
     }
 
     // For variable-length types, check if tail cell has different row count
-    if (!can_share_buffer_ && num_cells() > 1) {
+    if (!struct_offsets_ && !can_share_buffer_ && num_cells() > 1) {
         auto last_cid = num_cells() - 1;
         auto tail_rows = meta_.num_rows_until_chunk_[last_cid + 1] -
                          meta_.num_rows_until_chunk_[last_cid];
         if (tail_rows != primary_cell_rows_) {
-            tail_buffer_ = build_buffer_for_rows(tail_rows, "_tail");
+            tail_buffer_ = build_buffer_for_rows(
+                meta_.num_rows_until_chunk_[last_cid], tail_rows, "_tail");
             tail_cell_rows_ = tail_rows;
         }
     }
@@ -189,7 +217,7 @@ DefaultValueChunkTranslator::value_size() const {
             value_size = sizeof(Array);
             break;
         case milvus::DataType::VECTOR_ARRAY:
-            AssertInfo(field_meta_.is_nullable(),
+            AssertInfo(field_meta_.is_nullable() || struct_offsets_,
                        "only nullable vector array fields can be "
                        "dynamically added");
             value_size = 0;
@@ -223,6 +251,15 @@ DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
     auto rows = rows_end - rows_begin;
     auto cell_bytes = value_size * rows;
+    if (struct_offsets_) {
+        std::vector<int32_t> starts(rows + 1);
+        struct_offsets_->CopyRowElementStarts(
+            rows_begin, rows, starts.data());
+        auto elements = starts.back() - starts.front();
+        cell_bytes = (rows + elements + 1) * sizeof(int64_t) +
+                     (rows + elements + 7) / 8 +
+                     elements * std::max<int64_t>(1, value_size);
+    }
     if (use_mmap_) {
         return {{0, cell_bytes}, {0, 0}};
     } else {
@@ -237,10 +274,44 @@ DefaultValueChunkTranslator::key() const {
 
 milvus::ChunkBuffer
 DefaultValueChunkTranslator::build_buffer_for_rows(
-    int64_t num_rows, const std::string& suffix) const {
+    int64_t row_begin, int64_t num_rows, const std::string& suffix) const {
     auto data_type = field_meta_.get_data_type();
     arrow::ArrayVector array_vec;
-    if (field_meta_.is_native_list_array()) {
+    if (struct_offsets_) {
+        auto builder = milvus::storage::CreateArrowBuilder(field_meta_);
+        auto* lists = dynamic_cast<arrow::ListBuilder*>(builder.get());
+        AssertInfo(lists != nullptr,
+                   "struct sub-field {} requires Arrow list builder",
+                   field_id_);
+        std::vector<int32_t> starts(num_rows + 1);
+        struct_offsets_->CopyRowElementStarts(
+            row_begin, num_rows, starts.data());
+        for (int64_t i = 0; i < num_rows; ++i) {
+            const bool valid = struct_row_validity_[row_begin + i] != 0;
+            auto elements = starts[i + 1] - starts[i];
+            AssertInfo(valid || elements == 0,
+                       "null struct row {} has {} elements",
+                       row_begin + i,
+                       elements);
+            auto status = valid ? lists->Append() : lists->AppendNull();
+            if (status.ok() && valid) {
+                status = lists->value_builder()->AppendNulls(elements);
+            }
+            if (!status.ok()) {
+                ThrowInfo(storage::ArrowStatusToErrorCode(status),
+                          "failed to build struct default row {}: {}",
+                          row_begin + i,
+                          status.ToString());
+            }
+        }
+        auto result = builder->Finish();
+        if (!result.ok()) {
+            ThrowInfo(storage::ArrowStatusToErrorCode(result.status()),
+                      "failed to finish struct default cell: {}",
+                      result.status().ToString());
+        }
+        array_vec.emplace_back(result.ValueUnsafe());
+    } else if (field_meta_.is_native_list_array()) {
         AssertInfo(field_meta_.is_nullable(),
                    "only nullable native-list array fields can be "
                    "dynamically added");
@@ -341,7 +412,11 @@ DefaultValueChunkTranslator::get_cells(
         auto num_rows = rows_end - rows_begin;
 
         std::unique_ptr<milvus::Chunk> chunk;
-        if (can_share_buffer_) {
+        if (struct_offsets_) {
+            auto buffer = build_buffer_for_rows(
+                rows_begin, num_rows, fmt::format("_cell_{}", cid));
+            chunk = milvus::make_chunk_from_buffer(field_meta_, buffer, 0);
+        } else if (can_share_buffer_) {
             // Fixed-width types: share the pre-built buffer, override row count
             AssertInfo(primary_buffer_.has_value(),
                        "primary buffer is not initialized");

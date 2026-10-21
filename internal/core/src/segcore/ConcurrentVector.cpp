@@ -204,21 +204,54 @@ ConcurrentVector<ArrayValue>::set_data_raw(ssize_t element_offset,
             field_meta.get_array_type_schema());
     });
 
-    if (!is_mmap()) {
+    if (!is_mmap() && array_data.size() == element_count) {
         std::vector<ArrayValue> data_raw;
         data_raw.reserve(element_count);
         for (ssize_t i = 0; i < element_count; ++i) {
-            const auto& row = array_data.Get(static_cast<int>(i));
-            data_raw.emplace_back(ArrayValue(row, array_type_));
+            data_raw.emplace_back(ArrayValue(
+                array_data.Get(static_cast<int>(i)), array_type_));
         }
         return Base::set_data_raw(
             element_offset, data_raw.data(), element_count);
     }
 
+    const auto& validity = GetFieldDataRowValidData(*data);
+    const bool has_validity = validity.size() == element_count;
+    ssize_t valid_count = 0;
+    if (has_validity) {
+        for (ssize_t i = 0; i < element_count; ++i) {
+            valid_count += validity.Get(i);
+        }
+    }
+    const bool compact = has_validity && array_data.size() == valid_count &&
+                         array_data.size() != element_count;
+    AssertInfo(array_data.size() == element_count || compact,
+               "native list payload has {} rows, expected {} dense or {} "
+               "compact rows",
+               array_data.size(),
+               element_count,
+               valid_count);
+    ScalarFieldProto null_row;
     std::vector<const ScalarFieldProto*> rows;
     rows.reserve(element_count);
+    ssize_t physical = 0;
     for (ssize_t i = 0; i < element_count; ++i) {
-        rows.push_back(&array_data.Get(static_cast<int>(i)));
+        if (compact && !validity.Get(i)) {
+            rows.push_back(&null_row);
+        } else {
+            rows.push_back(&array_data.Get(
+                static_cast<int>(compact ? physical++ : i)));
+        }
+    }
+
+    if (!is_mmap()) {
+        std::vector<ArrayValue> data_raw;
+        data_raw.reserve(element_count);
+        for (ssize_t i = 0; i < element_count; ++i) {
+            data_raw.emplace_back(ArrayValue(*rows[i], array_type_));
+        }
+        return Base::set_data_raw(
+            element_offset, data_raw.data(), element_count);
     }
 
     set_mmap_proto_rows(

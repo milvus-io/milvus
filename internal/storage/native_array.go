@@ -5,11 +5,95 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// pickStructSibling selects a stored child whose physical representation gives
+// the struct's per-row element counts. List columns avoid decoding legacy rows.
+func pickStructSibling(structSchema *schemapb.StructArrayFieldSchema, present func(int64) bool) *schemapb.FieldSchema {
+	var legacy *schemapb.FieldSchema
+	for _, child := range structSchema.GetFields() {
+		if !present(child.GetFieldID()) {
+			continue
+		}
+		if child.GetDataType() == schemapb.DataType_ArrayOfVector || typeutil.IsNativeListArrayField(child) {
+			return child
+		}
+		if legacy == nil && child.GetDataType() == schemapb.DataType_Array {
+			legacy = child
+		}
+	}
+	return legacy
+}
+
+// GenerateNullElementsArrayFromSibling backfills a newly added struct child.
+// A null struct row has no child elements; a valid row inherits the sibling's
+// logical element count, with each new element null.
+func GenerateNullElementsArrayFromSibling(field *schemapb.FieldSchema, sibling arrow.Array, siblingSchema *schemapb.FieldSchema, numRows int) (arrow.Array, error) {
+	if sibling == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sibling for %s is missing", field.GetName())
+	}
+	if sibling.Len() != numRows {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sibling for %s has %d rows, expected %d", field.GetName(), sibling.Len(), numRows)
+	}
+	arrowType, err := ArrowTypeForField(field)
+	if err != nil {
+		return nil, err
+	}
+	baseBuilder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+	defer baseBuilder.Release()
+	builder, ok := baseBuilder.(*array.ListBuilder)
+	if !ok {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sub-field %s is not an Arrow list", field.GetName())
+	}
+	for i := 0; i < numRows; i++ {
+		if sibling.IsNull(i) {
+			if !field.GetNullable() {
+				return nil, merr.WrapErrDataIntegrityMsg("non-nullable struct sub-field %s has null sibling row %d", field.GetName(), i)
+			}
+			builder.AppendNull()
+			continue
+		}
+		var n int
+		switch source := sibling.(type) {
+		case *array.List:
+			start, end := source.ValueOffsets(i)
+			n = int(end - start)
+		case *array.Binary:
+			if siblingSchema == nil || siblingSchema.GetDataType() != schemapb.DataType_Array {
+				return nil, merr.WrapErrDataIntegrityMsg("binary struct sibling has no Array schema")
+			}
+			row := &schemapb.ScalarField{}
+			if err := proto.Unmarshal(source.Value(i), row); err != nil {
+				return nil, merr.WrapErrDataIntegrity(err, "decode struct sibling %s row %d", siblingSchema.GetName(), i)
+			}
+			if typeutil.IsNestedArrayTypeSchema(siblingSchema.GetTypeSchema()) && row.GetArrayData() == nil {
+				return nil, merr.WrapErrDataIntegrityMsg("nested struct sibling %s row %d has no ArrayData", siblingSchema.GetName(), i)
+			}
+			if siblingSchema.GetElementNullable() {
+				n = len(typeutil.GetArrayElementValidData(row))
+			} else if typeutil.IsNestedArrayTypeSchema(siblingSchema.GetTypeSchema()) {
+				n = len(row.GetArrayData().GetData())
+			} else {
+				var err error
+				n, err = nativeArrayLength(row, siblingSchema.GetElementType())
+				if err != nil {
+					return nil, err
+				}
+			}
+		default:
+			return nil, merr.WrapErrDataIntegrityMsg("unsupported struct sibling Arrow type %T", sibling)
+		}
+		builder.Append(true)
+		builder.ValueBuilder().AppendNulls(n)
+	}
+	return builder.NewArray(), nil
+}
 
 // nativeArrayLeaf returns the leaf type and leaf nullability of a native-list
 // scalar Array column and whether it has two list levels. Storage writes at
@@ -142,6 +226,15 @@ func appendNativeLeaf(b array.Builder, row *schemapb.ScalarField, leaf schemapb.
 		return err
 	}
 	valid := row.GetValidData()
+	if nullable && n == 0 && len(valid) > 0 {
+		for _, isValid := range valid {
+			if isValid {
+				return merr.WrapErrDataIntegrityMsg("compact native Array row has a valid element without payload")
+			}
+		}
+		b.AppendNulls(len(valid))
+		return nil
+	}
 	if nullable && len(valid) != n || !nullable && len(valid) != 0 {
 		return merr.WrapErrDataIntegrityMsg("native Array validity length %d does not match payload length %d and nullable=%t", len(valid), n, nullable)
 	}

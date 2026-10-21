@@ -361,9 +361,8 @@ func compactionReadSchema(schema *schemapb.CollectionSchema, existingFields map[
 	}
 	readSchema.Fields = fields
 
-	// StructArray fields are physically indivisible. Keep every child in the
-	// read schema so a partially-present struct cannot be hidden by projection;
-	// schema-bump preflight rejects that state before the reader is opened.
+	// Keep all struct children in the logical read schema. The storage reader
+	// projects the present subset and fills eligible missing children from it.
 	return readSchema
 }
 
@@ -384,8 +383,8 @@ func compactionFieldReadable(field *schemapb.FieldSchema, existingFields map[int
 // represented both by FunctionSchema.OutputFieldIds and
 // FieldSchema.IsFunctionOutput, so the two representations must agree and each
 // output field must have exactly one owning function.
-// StructArray fields are physically all-or-nothing and cannot contain function
-// outputs, which are top-level fields by schema contract.
+// Missing children in a partially present struct must be element-nullable.
+// Function outputs are top-level fields by schema contract.
 func validateSchemaBumpIntegrity(schema *schemapb.CollectionSchema, existingFields map[int64]struct{}) (map[int64]struct{}, error) {
 	declaredFunctionOutputs := make(map[int64]struct{})
 	outputOwners := make(map[int64]int)
@@ -439,6 +438,7 @@ func validateSchemaBumpIntegrity(schema *schemapb.CollectionSchema, existingFiel
 
 	for _, structField := range schema.GetStructArrayFields() {
 		presentChildren := 0
+		missingRequired := false
 		for _, childField := range structField.GetFields() {
 			if childField.GetIsFunctionOutput() {
 				return nil, merr.WrapErrDataIntegrityMsg(
@@ -447,9 +447,11 @@ func validateSchemaBumpIntegrity(schema *schemapb.CollectionSchema, existingFiel
 			}
 			if _, present := existingFields[childField.GetFieldID()]; present {
 				presentChildren++
+			} else if !childField.GetElementNullable() {
+				missingRequired = true
 			}
 		}
-		if presentChildren != 0 && presentChildren != len(structField.GetFields()) {
+		if presentChildren != 0 && missingRequired {
 			return nil, merr.WrapErrDataIntegrityMsg(
 				"struct array field %d is partially present: %d of %d children exist",
 				structField.GetFieldID(), presentChildren, len(structField.GetFields()))

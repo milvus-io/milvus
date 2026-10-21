@@ -20,9 +20,55 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
+
+func TestParseAlterSchemaAddStructSubField(t *testing.T) {
+	request := func(path string) *milvuspb.AlterCollectionSchemaRequest_AddRequest {
+		return &milvuspb.AlterCollectionSchemaRequest_AddRequest{FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{
+			StructPath:  path,
+			FieldSchema: &schemapb.FieldSchema{Name: "b", DataType: schemapb.DataType_Array},
+		}}}
+	}
+
+	plan, err := ParseAlterSchemaAddRequest(request("s"))
+	require.NoError(t, err)
+	assert.Equal(t, AlterSchemaAddStructSubField, plan.Kind)
+	assert.Equal(t, "s", plan.StructPath)
+	assert.Equal(t, "b", plan.Field.GetName())
+	assert.NoError(t, ValidateAlterSchemaAddFunctionPlan(plan))
+	assert.NoError(t, CheckNoFunctionCascade(nil, plan.Function))
+
+	for _, path := range []string{"", "s[b]", "s[", "s[]"} {
+		if path == "" {
+			assert.ErrorContains(t, ValidateStructPath(path), "nested struct is not supported")
+			continue
+		}
+		_, err := ParseAlterSchemaAddRequest(request(path))
+		assert.ErrorContains(t, err, "nested struct is not supported")
+	}
+	_, err = ParseAlterSchemaAddRequest(request("s.name"))
+	assert.ErrorContains(t, err, "invalid struct_path")
+
+	withFunction := request("s")
+	withFunction.FuncSchema = []*schemapb.FunctionSchema{{Name: "f"}}
+	_, err = ParseAlterSchemaAddRequest(withFunction)
+	assert.ErrorContains(t, err, "struct_path cannot be combined with a function")
+
+	withIndex := request("s")
+	withIndex.FieldInfos[0].IndexName = "idx"
+	_, err = ParseAlterSchemaAddRequest(withIndex)
+	assert.ErrorContains(t, err, "binding an index while adding a struct sub-field is not supported yet")
+
+	withParams := request("s")
+	withParams.FieldInfos[0].ExtraParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: "AUTOINDEX"}}
+	_, err = ParseAlterSchemaAddRequest(withParams)
+	assert.ErrorContains(t, err, "binding an index while adding a struct sub-field is not supported yet")
+}
 
 func TestValidateAlterSchemaAddFunctionPlan_StandaloneAddRejected(t *testing.T) {
 	plan := &AlterSchemaAddPlan{

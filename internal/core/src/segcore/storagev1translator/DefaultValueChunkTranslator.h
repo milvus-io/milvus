@@ -23,10 +23,12 @@
 #include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
 #include "common/ChunkWriter.h"
+#include "common/StructElementOffsets.h"
 #include "common/Types.h"
 #include "common/FieldMeta.h"
 #include "common/OpContext.h"
 #include "mmap/Types.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -35,13 +37,17 @@ namespace milvus::segcore::storagev1translator {
 class DefaultValueChunkTranslator
     : public milvus::cachinglayer::Translator<milvus::Chunk> {
  public:
-    DefaultValueChunkTranslator(int64_t segment_id,
-                                FieldMeta field_meta,
-                                FieldDataInfo field_data_info,
-                                bool use_mmap,
-                                bool mmap_populate,
-                                const std::string& warmup_policy,
-                                MmapChunkWritebackMode writeback_mode);
+    DefaultValueChunkTranslator(
+        int64_t segment_id,
+        FieldMeta field_meta,
+        FieldDataInfo field_data_info,
+        bool use_mmap,
+        bool mmap_populate,
+        const std::string& warmup_policy,
+        MmapChunkWritebackMode writeback_mode,
+        std::shared_ptr<const IStructElementOffsets> struct_offsets = nullptr,
+        std::shared_ptr<const ChunkedColumnInterface> struct_provider =
+            nullptr);
     ~DefaultValueChunkTranslator() override;
     size_t
     num_cells() const override;
@@ -77,7 +83,9 @@ class DefaultValueChunkTranslator
  private:
     // Build a ChunkBuffer for the given number of rows
     milvus::ChunkBuffer
-    build_buffer_for_rows(int64_t num_rows, const std::string& suffix) const;
+    build_buffer_for_rows(int64_t row_begin,
+                          int64_t num_rows,
+                          const std::string& suffix) const;
 
     // total rows of this field in the segment
     int64_t total_rows_{0};
@@ -108,6 +116,8 @@ class DefaultValueChunkTranslator
     std::string mmap_dir_path_;
     CTMeta meta_;
     milvus::FieldMeta field_meta_;
+    std::shared_ptr<const IStructElementOffsets> struct_offsets_;
+    std::vector<uint8_t> struct_row_validity_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

@@ -49,6 +49,8 @@ struct ElementRowInfo {
 // belongs to each struct and is shared by all of its sibling sub-fields;
 // element IDs are contiguous across the entire segment.
 //
+// The mapping counts logical elements for every chunk type: VectorArrayChunk
+// uses logical array lengths, while ColumnarArrayChunk uses its root offsets.
 // Offsets for inner nested arrays stay in each column's own chunk. When nested
 // Array of Struct layers are supported, each layer needs its own mapping from
 // that layer's elements to its parent layer.
