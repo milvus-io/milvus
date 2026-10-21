@@ -27,9 +27,11 @@
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "test_utils/Constants.h"
+#include "test_utils/CountedFileSystem.h"
 #include "test_utils/DataGen.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/Utils.h"
+#include "storage/KeyRetriever.h"
 #include "mmap/ChunkedColumnGroup.h"
 
 #include <memory>
@@ -162,28 +164,59 @@ TEST(GroupChunkLoadingUsageTest, EmptyBatchUsesNoResources) {
 TEST_P(GroupChunkTranslatorTest, FooterReuseScopedToLoadOperation) {
     // The translator must not retain the parsed parquet footer for the column
     // group lifetime: it takes fs + file paths and re-prepares (and releases)
-    // the shared footer context per get_cells call.
+    // the shared footer context per get_cells call. Count footer reads to make
+    // the scoping observable: each get_cells call re-opens every file exactly
+    // once (footer parsed once per file, no matter how many batches), a second
+    // call re-reads the footers again, and no handles stay open afterwards.
+    auto counts = std::make_shared<ReadCounts>();
+    auto counted_fs = std::make_shared<CountedFileSystem>(fs_, counts);
+
+    // Measure how many footer reads a single PreparedParquetFile::Open issues
+    // so the per-call delta can be asserted exactly.
+    auto probe_result = milvus_storage::PreparedParquetFile::Open(
+        counted_fs, paths_[0], storage::GetReaderProperties());
+    ASSERT_TRUE(probe_result.ok()) << probe_result.status();
+    const int start_footer_reads = counts->footer_reads;
+    const int per_file_open_reads = counts->footer_reads - start_footer_reads;
+    probe_result.ValueOrDie().reset();
+    EXPECT_EQ(counts->handles, 0);
+    ASSERT_GT(per_file_open_reads, 0);
+
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
         GroupChunkType::DEFAULT,
         schema_->get_fields(),
         FieldDataInfo(0, 3000, TestLocalPath),
-        fs_,
+        counted_fs,
         paths_,
         GetParam(),
         true,
         schema_->get_field_ids().size(),
         milvus::proto::common::LoadPriority::LOW,
         "disable");
+    // Construction opens every file once to build row_group_meta_list_.
+    EXPECT_EQ(counts->footer_reads,
+              start_footer_reads + per_file_open_reads * paths_.size());
+    EXPECT_EQ(counts->handles, 0);
 
-    // Load every cell once; this must succeed without the caller providing
-    // PreparedParquetFile contexts.
     std::vector<cachinglayer::cid_t> cids;
     for (size_t i = 0; i < translator->num_cells(); ++i) {
         cids.push_back(i);
     }
+
+    // First call: exactly one footer read per file, shared across batches.
     auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), cids.size());
+    EXPECT_EQ(counts->footer_reads,
+              start_footer_reads + per_file_open_reads * 2 * paths_.size());
+    EXPECT_EQ(counts->handles, 0);
+
+    // Second call: footers are re-read (not cached across calls).
+    cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), cids.size());
+    EXPECT_EQ(counts->footer_reads,
+              start_footer_reads + per_file_open_reads * 3 * paths_.size());
+    EXPECT_EQ(counts->handles, 0);
 }
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
