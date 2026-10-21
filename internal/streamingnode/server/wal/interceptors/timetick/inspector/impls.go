@@ -67,7 +67,7 @@ func (s *timeTickSyncInspectorImpl) RegisterSyncOperator(operator TimeTickSyncOp
 		s.barriers = make(map[types.PChannelInfo]*barrierState)
 	}
 	ctx, cancel := context.WithCancel(s.taskNotifier.Context()) //nolint:gosec // Ownership transfers to barrierState; Unregister cancels it, Close cancels the parent.
-	s.barriers[operator.Channel()] = &barrierState{ctx: ctx, cancel: cancel, sent: make(map[string]uint64), waiters: make(map[*barrierWaiter]struct{})}
+	s.barriers[operator.Channel()] = &barrierState{ctx: ctx, cancel: cancel, waiters: make(map[*barrierWaiter]struct{})}
 }
 
 // UnregisterSyncOperator unregisters a sync operator.

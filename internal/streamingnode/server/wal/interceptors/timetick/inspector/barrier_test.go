@@ -75,14 +75,12 @@ func TestInspectorBarrierPublication(t *testing.T) {
 			t.Fatal("busy sync lost newer target")
 		}
 		patch.UnPatch()
-		syncPatch := mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).SyncWithQueryBarriers).To(func(_ *mock_inspector.MockTimeTickSyncOperator, _ context.Context, _ bool, targets map[string]uint64) (map[string]uint64, error) {
+		mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).SyncWithQueryBarriers).To(func(_ *mock_inspector.MockTimeTickSyncOperator, _ context.Context, _ bool, targets map[string]uint64) (map[string]uint64, error) {
 			return targets, nil
 		}).Build()
 		require.True(t, i.asyncSync("p", false))
 		require.NoError(t, receive(second))
 		waitIdle()
-		require.NoError(t, i.EnsureBarrier(ctx, channel, "v", 150))
-		require.Equal(t, 1, syncPatch.Times(), "covered request must not trigger another sync")
 		require.Empty(t, i.syncNotifier.Get())
 
 		// An unrelated shard is not covered by the pchannel's last confirmation.
@@ -90,22 +88,22 @@ func TestInspectorBarrierPublication(t *testing.T) {
 		i.barrierMu.Lock()
 		targets, _ := i.barriers[channel].targets()
 		i.barrierMu.Unlock()
-		require.Equal(t, map[string]uint64{"v": 200, "other": 50}, targets)
+		require.Equal(t, map[string]uint64{"other": 50}, targets)
 		require.True(t, i.asyncSync("p", true))
 		require.NoError(t, receive(other))
 		waitIdle()
-		// Scheduled syncs retain prior volatile frontiers for late readers/catchup.
+		// Published scopes are retained by WAB, not repeated by scheduled syncs.
 		i.barrierMu.Lock()
 		targets, _ = i.barriers[channel].targets()
 		i.barrierMu.Unlock()
-		require.Equal(t, map[string]uint64{"v": 200, "other": 50}, targets)
+		require.Empty(t, targets)
 
 		pending := request("v", 300)
 		i.UnregisterSyncOperator(operator)
 		require.True(t, status.AsStreamingError(receive(pending)).IsOnShutdown())
 		i.RegisterSyncOperator(operator)
 		i.barrierMu.Lock()
-		require.Empty(t, i.barriers[channel].sent)
+		require.Empty(t, i.barriers[channel].waiters)
 		i.barrierMu.Unlock()
 		i.UnregisterSyncOperator(operator)
 	})
@@ -117,7 +115,7 @@ func TestInspectorBarrierRetriesAndCancellation(t *testing.T) {
 	channel := types.PChannelInfo{Name: "p", Term: 1}
 	ownerCtx, ownerCancel := context.WithCancel(ctx)
 	defer ownerCancel()
-	state := &barrierState{ctx: ownerCtx, cancel: ownerCancel, sent: map[string]uint64{}, waiters: map[*barrierWaiter]struct{}{}}
+	state := &barrierState{ctx: ownerCtx, cancel: ownerCancel, waiters: map[*barrierWaiter]struct{}{}}
 	i := &timeTickSyncInspectorImpl{barriers: map[types.PChannelInfo]*barrierState{channel: state}, syncNotifier: newSyncNotifier()}
 	waiter := &barrierWaiter{vchannel: "v", timetick: 100, done: make(chan struct{})}
 	state.waiters[waiter] = struct{}{}

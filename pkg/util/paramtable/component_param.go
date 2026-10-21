@@ -9276,8 +9276,10 @@ type streamingConfig struct {
 	WALRateLimitNodeMemoryRejectThreshold        ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemoryRecoverThreshold       ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemoryAdaptiveRateLimit      AdaptiveRateLimitConfig
-	WALRateLimitFlusherAdaptiveRateLimit         AdaptiveRateLimitConfig
 	WALRateLimitRecoveryStorageAdaptiveRateLimit AdaptiveRateLimitConfig
+	WALRateLimitWABSlowdownThreshold             ParamItem `refreshable:"true"`
+	WALRateLimitWABSlowdownRate                  ParamItem `refreshable:"true"`
+	WALRateLimitWABRejectRatio                   ParamItem `refreshable:"true"`
 	WALRateLimitAppendRateEnabled                ParamItem `refreshable:"true"`
 	WALRateLimitAppendRateSlowdownThreshold      ParamItem `refreshable:"true"`
 	WALRateLimitAppendRateRecoverThreshold       ParamItem `refreshable:"true"`
@@ -9591,7 +9593,7 @@ limits; requests that carry no key are accepted at any value.`,
 	p.WALWriteAheadBufferCapacity = ParamItem{
 		Key:          "streaming.walWriteAheadBuffer.capacity",
 		Version:      "2.6.0",
-		Doc:          "The capacity of write ahead buffer of each wal, 64M by default",
+		Doc:          "Legacy WAB cache capacity, retained for compatibility and capacity metrics. Consumption controls retention; walRateLimit.writeAheadBuffer controls backpressure.",
 		DefaultValue: "64m",
 		Export:       true,
 	}
@@ -9599,7 +9601,7 @@ limits; requests that carry no key are accepted at any value.`,
 	p.WALWriteAheadBufferKeepalive = ParamItem{
 		Key:          "streaming.walWriteAheadBuffer.keepalive",
 		Version:      "2.6.0",
-		Doc:          "The keepalive duration for entries in write ahead buffer of each wal, 30s by default",
+		Doc:          "Deprecated compatibility setting; RecoveryStorage consumption controls write ahead buffer retention.",
 		DefaultValue: "30s",
 		Export:       true,
 	}
@@ -9954,20 +9956,31 @@ so we set 1 second here as a threshold.`,
 		Export:                       false,
 	})
 
-	p.WALRateLimitFlusherAdaptiveRateLimit.init(base, "streaming.walRateLimit.flusher.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
-		SlowdownStartupDelayInterval: "10s",
-		SlowdownHWM:                  "16mb",
-		SlowdownLWM:                  "2mb",
-		SlowdownDecreaseInterval:     "30s",
-		SlowdownDecreaseRatio:        "0.8",
-		SlowdownRejectDelayInterval:  "2m",
-		RecoveryHWM:                  "64mb",
-		RecoveryLWM:                  "16mb",
-		RecoveryNormalDelayInterval:  "5s",
-		RecoveryIncremental:          "5mb",
-		RecoveryIncreaseInterval:     "1s",
-		Export:                       false,
-	})
+	p.WALRateLimitWABSlowdownThreshold = ParamItem{
+		Key:     "streaming.walRateLimit.writeAheadBuffer.slowdownThreshold",
+		Version: "3.0.0", DefaultValue: "64m", Export: true,
+		Doc: "Pending WAB byte threshold for proportional producer slowdown, independent of cache capacity. Takes effect immediately; invalid/nonpositive values use the default.",
+	}
+	p.WALRateLimitWABSlowdownThreshold.Init(base.mgr)
+	p.WALRateLimitWABSlowdownRate = ParamItem{
+		Key:     "streaming.walRateLimit.writeAheadBuffer.slowdownRate",
+		Version: "3.0.0", DefaultValue: "32m", Export: true,
+		Doc: "Producer byte rate per second at the WAB slowdown threshold. Takes effect immediately; invalid/nonpositive values use the default.",
+	}
+	p.WALRateLimitWABSlowdownRate.Init(base.mgr)
+	p.WALRateLimitWABRejectRatio = ParamItem{
+		Key:     "streaming.walRateLimit.writeAheadBuffer.rejectRatio",
+		Version: "3.0.0", DefaultValue: "2", Export: true,
+		Doc: "Reject new DML when WAB bytes reach this multiple of slowdownThreshold. Takes effect immediately. Must be finite and greater than 1; invalid values use 2.",
+		Formatter: func(v string) string {
+			ratio, err := strconv.ParseFloat(v, 64)
+			if err != nil || ratio <= 1 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+				return "2"
+			}
+			return v
+		},
+	}
+	p.WALRateLimitWABRejectRatio.Init(base.mgr)
 
 	p.WALRateLimitAppendRateEnabled = ParamItem{
 		Key:          "streaming.walRateLimit.appendRate.enabled",

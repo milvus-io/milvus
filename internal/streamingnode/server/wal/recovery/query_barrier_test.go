@@ -26,7 +26,17 @@ func TestMVCCBarrierConsumptionIsPassiveAndScoped(t *testing.T) {
 		}).Build()
 		r := &recoveryStorageImpl{vchannelManager: &vchannel.PChannelRecoveryManager{}, summaryManager: walsummary.NewManager(walsummary.ManagerConfig{}), dirtyCounter: 7}
 		msg := message.NewMVCCBarrierMessageBuilderV2().WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v", "v2"}}).WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(110).WithLastConfirmed(walimplstest.NewTestMessageID(1)).IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		released := false
+		r.consumedThrough = func(tick uint64) {
+			require.EqualValues(t, 110, tick)
+			require.Equal(t, 2, observed.Times(), "resource events precede WAB release")
+			batch, err := r.summaryManager.ReadTransform(t.Context(), "v", 0, tick, walsummary.ReadLimits{})
+			require.NoError(t, err)
+			require.Equal(t, tick, batch.CoveredThrough, "scoped Summary coverage precedes WAB release")
+			released = true
+		}
 		r.observeMessage(t.Context(), msg)
+		require.True(t, released)
 		require.Equal(t, 7, r.dirtyCounter)
 		require.Equal(t, 2, observed.Times())
 		batch, err := r.summaryManager.ReadTransform(t.Context(), "v", 0, 100, walsummary.ReadLimits{})

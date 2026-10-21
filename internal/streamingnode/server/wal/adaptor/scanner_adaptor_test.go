@@ -226,14 +226,13 @@ func TestRecoveryBarrierConfirmsBufferedMessages(t *testing.T) {
 		readOption: wal.ReadOption{
 			IgnorePauseConsumption: true,
 		},
-		filterFunc:      func(message.ImmutableMessage) bool { return true },
-		reorderBuffer:   utility.NewReOrderBuffer(),
-		pendingQueue:    utility.NewPendingQueue(),
-		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
-		cleanup:         func() {},
-		ScannerHelper:   helper.NewScannerHelper("test"),
-		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
-		readRateCounter: utility.NewAverageRateCounter(time.Second),
+		filterFunc:    func(message.ImmutableMessage) bool { return true },
+		reorderBuffer: utility.NewReOrderBuffer(),
+		pendingQueue:  utility.NewPendingQueue(),
+		txnBuffer:     utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		cleanup:       func() {},
+		ScannerHelper: helper.NewScannerHelper("test"),
+		metrics:       metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
 	}
 	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, true)
 	barrier := newScannerTestMessage(t, 20, "", message.MessageTypeRecoveryBarrier, true)
@@ -257,14 +256,13 @@ func TestTimeTickPreservesLegacyDeliverySemantics(t *testing.T) {
 		readOption: wal.ReadOption{
 			IgnorePauseConsumption: true,
 		},
-		filterFunc:      func(message.ImmutableMessage) bool { return true },
-		reorderBuffer:   utility.NewReOrderBuffer(),
-		pendingQueue:    utility.NewPendingQueue(),
-		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
-		cleanup:         func() {},
-		ScannerHelper:   helper.NewScannerHelper("test"),
-		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
-		readRateCounter: utility.NewAverageRateCounter(time.Second),
+		filterFunc:    func(message.ImmutableMessage) bool { return true },
+		reorderBuffer: utility.NewReOrderBuffer(),
+		pendingQueue:  utility.NewPendingQueue(),
+		txnBuffer:     utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		cleanup:       func() {},
+		ScannerHelper: helper.NewScannerHelper("test"),
+		metrics:       metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
 	}
 	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, true)
 	timeTick := newScannerTestMessage(t, 20, "", message.MessageTypeTimeTick, true)
@@ -328,14 +326,13 @@ func TestMVCCBarrierConfirmsBufferedMessages(t *testing.T) {
 		readOption: wal.ReadOption{
 			IgnorePauseConsumption: true,
 		},
-		filterFunc:      func(message.ImmutableMessage) bool { return true },
-		reorderBuffer:   utility.NewReOrderBuffer(),
-		pendingQueue:    utility.NewPendingQueue(),
-		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
-		cleanup:         func() {},
-		ScannerHelper:   helper.NewScannerHelper("test"),
-		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
-		readRateCounter: utility.NewAverageRateCounter(time.Second),
+		filterFunc:    func(message.ImmutableMessage) bool { return true },
+		reorderBuffer: utility.NewReOrderBuffer(),
+		pendingQueue:  utility.NewPendingQueue(),
+		txnBuffer:     utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		cleanup:       func() {},
+		ScannerHelper: helper.NewScannerHelper("test"),
+		metrics:       metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
 	}
 	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, true)
 	barrier := message.NewMVCCBarrierMessageBuilderV2().WithAllVChannel().WithNotPersisted().

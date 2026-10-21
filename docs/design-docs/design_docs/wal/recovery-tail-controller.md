@@ -13,6 +13,18 @@ does not solve object fragmentation.
 handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
 is retained for future QueryView wiring; the two implementations are not run together.
 
+WAB backlog is a separate pressure source: it measures records not yet fully
+observed by RecoveryStorage, including volatile MVCCBarriers. It has independent live threshold, rate and rejection-ratio
+settings under `streaming.walRateLimit.writeAheadBuffer`, with a rate determined
+directly by the current excess percentage (see [WAB delivery](../../../agent_guides/streaming-system/wal/timetick_and_txn.md#wab-delivery-and-producer-backpressure)).
+It does not use this controller's timed slowdown/recovery ramp or its
+`recoveryStorage.adaptiveRateLimit` settings; those settings still control the
+observed-to-published recovery tail. The unused `flusher.adaptiveRateLimit`
+settings and scanner catchup/tailing rate-control wiring have been removed. Both sources
+publish through the existing multi-source WAL limiter; clearing one source
+cannot clear the other's pressure. WAB's consumed-through boundary authorizes
+in-memory release only and never advances any durable frontier below.
+
 ## 1. Byte Frontiers
 
 RecoveryStorage tracks three runtime byte offsets:

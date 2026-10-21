@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -104,6 +105,11 @@ func WithNodeScheduler(scheduler nodescheduler.Scheduler) RecoveryStorageOption 
 	}
 }
 
+// WithConsumedThrough releases WAB messages after complete ordered observation.
+func WithConsumedThrough(release func(uint64)) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) { r.consumedThrough = release }
+}
+
 func WithRecoveryTailRateLimiter(rateLimiter RecoveryTailRateLimiter) RecoveryStorageOption {
 	return func(r *recoveryStorageImpl) {
 		r.recoveryTailRateLimiter = rateLimiter
@@ -165,6 +171,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 // recoveryStorageImpl is a component that manages the recovery info for the streaming service.
 // It will consume the message from the wal, consume the message in wal, and update the checkpoint for it.
 type recoveryStorageImpl struct {
+	consumedThrough func(uint64)
 	mlog.Binder
 	backgroundTaskNotifier  *syncutil.AsyncTaskNotifier[struct{}]
 	cfg                     *config
@@ -534,7 +541,12 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 	defer r.mu.Unlock()
 	// Scoped query progress follows the ordered prefix. Only persisted
 	// confirmations enter the recovery tracker and dirty a snapshot.
-	defer r.observeQueryBarriers(ctx, msg)
+	defer func() {
+		r.observeQueryBarriers(ctx, msg)
+		if r.consumedThrough != nil && messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
+			r.consumedThrough(msg.TimeTick())
+		}
+	}()
 	if !msg.IsPersisted() {
 		return
 	}

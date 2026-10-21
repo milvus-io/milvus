@@ -209,7 +209,8 @@ func TestWriteAheadBufferEviction(t *testing.T) {
 	wb.Append(msgs, createTimeTickMessage(199, true))
 	time.Sleep(60 * time.Millisecond)
 	wb.Append(nil, createTimeTickMessage(200, false))
-	// wait for expiration.
+	// A different consumer may lag behind RecoveryStorage and use WAL catchup.
+	wb.ReleaseThrough(199)
 
 	lastTimeTick := uint64(0)
 	for {

@@ -2,7 +2,6 @@ package wab
 
 import (
 	"io"
-	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -17,34 +16,31 @@ var (
 
 // messageWithOffset is a message with an offset as a unique continuous identifier.
 type messageWithOffset struct {
-	Message  message.ImmutableMessage
-	Offset   int
-	Eviction time.Time
+	Message message.ImmutableMessage
+	Offset  int
 }
 
 // newPendingQueue creates a new pendingQueue with given configuration
-func newPendingQueue(capacity int, keepAlive time.Duration, lastConfirmedMessage message.ImmutableMessage) *pendingQueue {
+func newPendingQueue(lastConfirmedMessage message.ImmutableMessage) *pendingQueue {
 	pq := &pendingQueue{
-		lastTimeTick: 0,
-		latestOffset: -1,
-		buf:          make([]messageWithOffset, 0, 10),
-		size:         0,
-		capacity:     capacity,
-		keepAlive:    keepAlive,
+		lastTimeTick:  0,
+		readableAfter: lastConfirmedMessage.TimeTick(),
+		latestOffset:  -1,
+		buf:           make([]messageWithOffset, 0, 10),
+		size:          0,
 	}
 	pq.Push([]message.ImmutableMessage{lastConfirmedMessage})
 	return pq
 }
 
 // pendingQueue is a buffer that stores messages in order of time tick.
-// pendingQueue only keep the persisted messages in the buffer.
+// It retains data and scoped confirmations until RecoveryStorage consumes them.
 type pendingQueue struct {
-	lastTimeTick uint64
-	latestOffset int
-	buf          []messageWithOffset
-	size         int
-	capacity     int
-	keepAlive    time.Duration
+	readableAfter uint64 // All messages strictly after this boundary remain readable.
+	lastTimeTick  uint64
+	latestOffset  int
+	buf           []messageWithOffset
+	size          int
 }
 
 // Len returns the length of the buffer.
@@ -67,9 +63,8 @@ func (q *pendingQueue) EarliestTimeTick() uint64 {
 
 // Push adds messages to the buffer.
 func (q *pendingQueue) Push(msgs []message.ImmutableMessage) {
-	now := time.Now()
 	for _, msg := range msgs {
-		q.pushOne(msg, now)
+		q.pushOne(msg)
 	}
 }
 
@@ -78,28 +73,22 @@ func (q *pendingQueue) LastTimeTick() uint64 {
 	return q.lastTimeTick
 }
 
-// Evict removes messages that have been in the buffer for longer than the keepAlive duration.
-func (q *pendingQueue) Evict() {
-	q.evict(time.Now())
-}
-
 // CurrentOffset returns the next offset of the buffer.
 func (q *pendingQueue) CurrentOffset() int {
 	return q.latestOffset
 }
 
 // push adds a message to the buffer.
-func (q *pendingQueue) pushOne(msg message.ImmutableMessage, now time.Time) {
+func (q *pendingQueue) pushOne(msg message.ImmutableMessage) {
 	isSync := msg.MessageType() == message.MessageTypeTimeTick || msg.MessageType() == message.MessageTypeMVCCBarrier
 	if (isSync && msg.TimeTick() < q.lastTimeTick) || (!isSync && msg.TimeTick() <= q.lastTimeTick) {
-		// only timetick message can be repeated with the last time tick.
+		// Confirmations may share the last data message's TimeTick.
 		panic("message time tick is not in ascending order")
 	}
 	q.latestOffset++
 	q.buf = append(q.buf, messageWithOffset{
-		Offset:   q.latestOffset,
-		Message:  msg,
-		Eviction: now.Add(q.keepAlive),
+		Offset:  q.latestOffset,
+		Message: msg,
 	})
 	q.size += msg.EstimateSize()
 	q.lastTimeTick = msg.TimeTick()
@@ -128,17 +117,15 @@ func (q *pendingQueue) CreateSnapshotFromOffset(offset int) ([]messageWithOffset
 }
 
 // CreateSnapshotFromExclusiveTimeTick creates a snapshot of the buffer from the given timetick.
-// The coutinous slice of messages after (timeTick, ...] will be returned.
+// The continuous slice of messages after (timeTick, ...] will be returned.
 func (q *pendingQueue) CreateSnapshotFromExclusiveTimeTick(timeTick uint64) ([]messageWithOffset, error) {
+	if timeTick < q.readableAfter {
+		return nil, ErrEvicted
+	}
 	if timeTick >= q.lastTimeTick {
 		// If the given timetick is a timetick that has not been generated yet, we reach the end of the buffer.
 		// Return io.EOF to perform a block operation.
 		return nil, io.EOF
-	}
-	if len(q.buf) == 0 || timeTick < q.buf[0].Message.TimeTick() {
-		// The expected timetick is out of range, the expected messages may evict.
-		// So return ErrEvicted to indicate a unrecoverable operation.
-		return nil, ErrEvicted
 	}
 
 	// Find the offset of the expected timetick in the buffer.
@@ -153,35 +140,22 @@ func (q *pendingQueue) makeSnapshot(idx int) []messageWithOffset {
 	return snapshot
 }
 
-// evict removes messages that have been in the buffer for longer than the keepAlive duration.
-func (q *pendingQueue) evict(now time.Time) {
-	releaseUntilIdx := -1
-	needRelease := 0
-	if q.size > q.capacity {
-		needRelease = q.size - q.capacity
+// ReleaseThrough releases only the prefix acknowledged by RecoveryStorage.
+// Neither queue size nor elapsed time permits dropping unconsumed messages.
+func (q *pendingQueue) ReleaseThrough(tick uint64) {
+	if tick < q.readableAfter {
+		return
 	}
-
-	// !!! NOTE: the evict operation should never release the last message, so i < len(q.buf)-1 here.
-	// we need to keep the last one wal-persisted message in write ahead buffer
-	// to make the catchup scanner works on underlying wal to catch up the write ahead buffer.
-	// so the catchup scanner can transform into tailing scanner to see the non-persisted timetick from write ahead buffer.
-	for i := 0; i < len(q.buf)-1; i++ {
-		if q.buf[i].Eviction.Before(now) || needRelease > 0 {
-			releaseUntilIdx = i
-			needRelease -= q.buf[i].Message.EstimateSize()
-		} else {
-			break
-		}
+	q.readableAfter = tick
+	n := 0
+	for n < len(q.buf) && q.buf[n].Message.TimeTick() <= tick {
+		q.size -= q.buf[n].Message.EstimateSize()
+		q.buf[n] = messageWithOffset{}
+		n++
 	}
-
-	preservedIdx := releaseUntilIdx + 1
-	if preservedIdx > 0 {
-		for i := 0; i < preservedIdx; i++ {
-			// reset the message as zero to release the resource.
-			q.size -= q.buf[i].Message.EstimateSize()
-			q.buf[i] = messageWithOffset{}
-		}
-		q.buf = q.buf[preservedIdx:]
+	q.buf = q.buf[n:]
+	if len(q.buf) == 0 {
+		q.buf = nil
 	}
 }
 

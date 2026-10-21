@@ -12,7 +12,7 @@ import (
 )
 
 func TestPendingQueue(t *testing.T) {
-	pq := newPendingQueue(100, 5*time.Second, newImmutableTimeTickMessage(t, 99))
+	pq := newPendingQueue(newImmutableTimeTickMessage(t, 99))
 	snapshot, err := pq.CreateSnapshotFromOffset(0)
 	assert.NoError(t, err)
 	assert.Len(t, snapshot, 1)
@@ -27,7 +27,6 @@ func TestPendingQueue(t *testing.T) {
 		newImmutableMessage(t, 103, 30),
 		newImmutableMessage(t, 104, 40),
 	})
-	pq.Evict()
 	assert.Equal(t, pq.CurrentOffset(), 4)
 	assert.Len(t, pq.buf, 5)
 
@@ -76,14 +75,14 @@ func TestPendingQueue(t *testing.T) {
 	assert.ErrorIs(t, err, io.EOF)
 	assert.Nil(t, snapshot)
 
-	// push a new item will trigger eviction
+	// Only the consumed prefix may be released.
 	snapshot, err = pq.CreateSnapshotFromOffset(1)
 	assert.NoError(t, err, io.EOF)
 	assert.Len(t, snapshot, 4)
 	pq.Push([]message.ImmutableMessage{
 		newImmutableMessage(t, 105, 60),
 	})
-	pq.Evict()
+	pq.ReleaseThrough(103)
 	assert.Equal(t, pq.CurrentOffset(), 5)
 	assert.Len(t, pq.buf, 2)
 
@@ -105,18 +104,18 @@ func TestPendingQueue(t *testing.T) {
 	assert.Equal(t, snapshot[0].Message.TimeTick(), uint64(104))
 	assert.Equal(t, snapshot[1].Message.TimeTick(), uint64(105))
 
-	// Test time based eviction
-	pq = newPendingQueue(100, 10*time.Millisecond, newImmutableTimeTickMessage(t, 99))
+	// Elapsed time cannot release unconsumed messages.
+	pq = newPendingQueue(newImmutableTimeTickMessage(t, 99))
 	pq.Push([]message.ImmutableMessage{
 		newImmutableMessage(t, 100, 10),
 	})
-	pq.Evict()
 	assert.Equal(t, pq.CurrentOffset(), 1)
 	assert.Len(t, pq.buf, 2)
 	time.Sleep(20 * time.Millisecond)
-	pq.Evict()
-	// the last message should never be evicted.
-	assert.Len(t, pq.buf, 1)
+	assert.Len(t, pq.buf, 2)
+	pq.ReleaseThrough(100)
+	assert.Empty(t, pq.buf)
+	assert.Zero(t, pq.Size())
 
 	assert.Panics(t, func() {
 		pq.Push([]message.ImmutableMessage{newImmutableMessage(t, 99, 10)})

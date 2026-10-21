@@ -155,11 +155,17 @@ when it contains no later messages: creating the reader needs no additional
 persisted TimeTick. Startup does not wait for TimeTickInspector registration.
 The barrier is delivered once, and no second logical scanner is opened.
 
-If the handoff position has been evicted, the scanner continues durable catchup.
-If a tailing reader is evicted later, it resumes durable reads from the last
-consumed message's safe physical LastConfirmedMessageID and filters out already
-consumed TimeTicks. Both paths preserve the upper scanner's transaction and
-ordering state. Cancellation releases the scanner while reading durable WAL,
+WAB protects the live suffix from construction onward. RecoveryStorage releases
+only the complete prefix it has observed and dispatched, after each confirmation.
+This includes volatile scoped MVCCBarriers, which remain pending until consumed
+and cannot be replaced by ordinary TimeTicks. Capacity/keepalive do not evict
+unconsumed records, so startup handoff and live recovery tailing cannot lose
+this suffix. Current WAB occupancy drives producer backpressure directly.
+
+Other readers may lag behind the released prefix. The shared scanner still
+supports durable catchup from the last consumed message's safe physical
+LastConfirmedMessageID, filtering already consumed TimeTicks and preserving its
+transaction and ordering state. Cancellation releases the scanner while reading durable WAL,
 paused at the startup boundary, or waiting on an empty WAB. Open failure,
 AlterWAL early return, and normal close all release the retained stream.
 

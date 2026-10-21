@@ -2,7 +2,6 @@ package inspector
 
 import (
 	"context"
-	"maps"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -10,11 +9,11 @@ import (
 )
 
 // All state is guarded by inspector.barrierMu. A state belongs to one WAL
-// registration; neither sent watermarks nor waiters survive a change of owner.
+// registration; waiters do not survive a change of owner. WAB retains published
+// volatile progress until consumed, so Inspector need not carry old scopes.
 type barrierState struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
-	sent     map[string]uint64
 	waiters  map[*barrierWaiter]struct{}
 	revision uint64
 }
@@ -34,10 +33,6 @@ func (s *timeTickSyncInspectorImpl) EnsureBarrier(ctx context.Context, channel t
 	if state == nil || state.ctx.Err() != nil {
 		s.barrierMu.Unlock()
 		return status.NewOnShutdownError("query barrier WAL is unavailable: %s", channel.Name)
-	}
-	if state.sent[vchannel] >= timetick {
-		s.barrierMu.Unlock()
-		return nil
 	}
 	waiter := &barrierWaiter{vchannel: vchannel, timetick: timetick, done: make(chan struct{})}
 	state.waiters[waiter] = struct{}{}
@@ -63,9 +58,9 @@ func (s *barrierState) targets() (map[string]uint64, uint64) {
 	if s == nil {
 		return nil, 0
 	}
-	// Carry already published frontiers on later sync messages as well. A
-	// coalesced idle confirmation or durable catchup must preserve them.
-	targets := maps.Clone(s.sent)
+	// Only pending requests participate in the next publication. Idle syncs
+	// must not copy or serialize every scope ever queried on this owner.
+	targets := make(map[string]uint64, len(s.waiters))
 	for waiter := range s.waiters {
 		targets[waiter.vchannel] = max(targets[waiter.vchannel], waiter.timetick)
 	}
@@ -86,11 +81,8 @@ func (s *timeTickSyncInspectorImpl) completeBarriers(state *barrierState, publis
 		// by the inspector's existing heartbeat. Callers own no retry timers.
 		return
 	}
-	for vchannel, tick := range published {
-		state.sent[vchannel] = max(state.sent[vchannel], tick)
-	}
 	for waiter := range state.waiters {
-		if state.sent[waiter.vchannel] >= waiter.timetick {
+		if published[waiter.vchannel] >= waiter.timetick {
 			close(waiter.done)
 			delete(state.waiters, waiter)
 		}

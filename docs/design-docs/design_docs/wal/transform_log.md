@@ -411,11 +411,38 @@ MVCCBarrier after the acknowledged prefix reaches the requested timestamp.
 The barrier carries target VChannels and traverses the same ordered WAB/scanner
 path as confirmations. Durable barriers confirm the full WAL prefix; volatile
 barriers advance only scoped query visibility and Summary read coverage.
-RecoveryStorage observes preceding records before publishing barrier progress.
+WAB queues each scoped barrier, including volatile barriers, as an ordinary
+ordered pending record; later TimeTicks cannot replace it. RecoveryStorage
+observes preceding records before publishing barrier progress.
 It does not use volatile barriers to advance durable checkpoints, seal chunks,
 acknowledge handles or authorize GC. Scoped Summary notifications wake readers,
 which deliver retained Entries before SyncUp. GrowingRuntime consumes the same
 ordered query barrier to advance its observed query frontier.
+
+After a confirmation has been observed by Summary and dispatched to the ordered
+VChannel resource path, RecoveryStorage reports its consumed-through TimeTick
+to WAB. WAB can release that complete prefix, including the confirmation itself.
+It must retain all later records regardless of capacity or keepalive. The
+inspector therefore only needs pending scoped requests, not continuous replay
+of all previously published scopes. Multi-scope barriers use their existing
+batched header; no additional per-VChannel retention map is maintained in WAB.
+
+WAB pressure is configured independently of cache capacity under
+`streaming.walRateLimit.writeAheadBuffer`: `slowdownThreshold` C (64MB),
+`slowdownRate` R (32MB/s), and `rejectRatio` Q (2). For queued bytes B, admission
+is normal through C; rate is `max(1, floor(R*(Q-B/C)/(Q-1)))` between C and Q*C;
+new DML is rejected at Q*C. Append, consumption and live config updates all
+re-evaluate the same curve immediately, even if the queue has no traffic.
+There is no time-based ramp or additional control goroutine. The existing
+multi-source WAL limiter combines WAB pressure with independent persistence-tail
+pressure. Capacity never blocks WAB publication or evicts unconsumed barriers.
+
+This guarantee is local to the WAL owner. A volatile barrier is not persisted;
+owner recovery reconstructs progress through RecoveryBarrier. The consumed
+boundary is neither an AckTracker completion point nor a durable checkpoint.
+Startup retains the live suffix while recovery reads the durable prefix, then
+the same scanner tails WAB. Other readers that lag behind a released prefix
+can still use durable catchup.
 
 A query waits for the requested timestamp, not a later publication timestamp.
 Before registering a scoped sync, planning waits for the TSO allocator to reach
