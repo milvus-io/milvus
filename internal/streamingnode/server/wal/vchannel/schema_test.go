@@ -8,7 +8,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestExactSchemaVersionAfterRecovery(t *testing.T) {
@@ -72,6 +74,27 @@ func TestExactSchemaVersionBeforeRecovery(t *testing.T) {
 	require.False(t, status.AsStreamingError(err).IsUnrecoverable())
 }
 
+func TestSchemaRemovalUsesObservedBusinessChannelBoundary(t *testing.T) {
+	for _, boundary := range []uint64{100, 130} {
+		meta := restoreSchemaTestMeta()
+		old := meta.CollectionInfo.Schemas[0]
+		old.Schema.Fields = append(old.Schema.Fields, &schemapb.FieldSchema{FieldID: 101, Name: "removed", DataType: schemapb.DataType_Int64})
+		next := meta.CollectionInfo.Schemas[1]
+		next.CheckpointTimeTick = boundary
+		next.Schema = proto.Clone(old.Schema).(*schemapb.CollectionSchema)
+		next.Schema.Version = 1
+		next.Schema.Fields = next.Schema.Fields[:len(next.Schema.Fields)-1]
+		module := &VChannelRecoveryModule{vchannelView: NewVChannelViewFromMeta(meta), queryObservedTimeTick: boundary + 10}
+		require.NoError(t, module.ValidateSchemaFields(1, 0, boundary-1, []int64{101}))
+		require.ErrorIs(t, module.ValidateSchemaFields(1, 0, boundary, []int64{101}), merr.ErrFieldNotFound)
+		require.ErrorIs(t, module.ValidateSchemaFields(1, 0, boundary+1, []int64{101}), merr.ErrFieldNotFound)
+		require.NoError(t, module.ValidateSchemaFields(1, 0, boundary+1, []int64{100}), "unrelated fields remain queryable")
+		module.queryObservedTimeTick = boundary - 1
+		err := module.ValidateSchemaFields(1, 0, boundary, []int64{100})
+		require.True(t, viewerror.AsViewError(err).IsRetryable(), "write MVCC cannot substitute for ordered schema observation")
+	}
+}
+
 func TestLegacyRepeatedSchemaVersionHasOneReadIdentity(t *testing.T) {
 	meta := restoreSchemaTestMeta()
 	first := meta.CollectionInfo.Schemas[0]
@@ -88,4 +111,5 @@ func TestLegacyRepeatedSchemaVersionHasOneReadIdentity(t *testing.T) {
 	read, err := view.GetSchemaVersion(1, 0)
 	require.NoError(t, err)
 	require.Equal(t, second.Schema.Description, read.Schema.Description)
+	require.NoError(t, view.validateSchemaFields(1, 0, 20, []int64{101}), "validation must use the same canonical payload as exact lookup")
 }

@@ -83,6 +83,7 @@ message QueryViewMeta {
     QueryViewState state = 5;
     uint64 load_info_version = 6;
     uint64 transform_start_after_timetick = 7;
+    int32 schema_version = 8; // Exact logical schema required by this view.
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
@@ -201,6 +202,18 @@ message QueryPlanMVCC {
     // Latest timetick of the transforming stream. StreamingNode and QueryNode
     // wait for transform visibility up to this timetick before execution.
     uint64 transforming_timetick = 2;
+    // Installed by Phase 1 after validating schema history through the fixed MVCC.
+    QuerySchemaBinding schema_binding = 3;
+    // Complete WAL prefix certified together with these executor frontiers.
+    // Used for partial-update CAS, not as an executor wait/read timestamp.
+    uint64 read_proof_timetick = 4;
+}
+
+message QuerySchemaBinding {
+    int32 schema_version = 1;
+    uint64 growing_timetick = 2;
+    uint64 transforming_timetick = 3;
+    repeated int64 field_ids = 4;
 }
 
 // QueryPlanService generates shard-level query plans.
@@ -219,6 +232,11 @@ service QueryPlanService {
 }
 
 message GetQueryPlanRequest {
+    // Request a complete WAL read certificate at or after this timestamp.
+    // Only valid with consistency-based MVCC, not explicit snapshot modes.
+    uint64 read_proof_after = 9;
+    // Dependencies of later requery/render stages; validation only, not projection.
+    repeated int64 required_field_ids = 10;
     int64 collection_id = 1;
     ShardID shard_id = 2;
     // Mutually exclusive MVCC source:
@@ -271,6 +289,10 @@ message QueryPlan {
         internal.SearchRequest legacy_search_request = 5;
         internal.RetrieveRequest legacy_retrieve_request = 6;
     }
+    // Unchanged large payloads are omitted from request and borrowed from the
+    // original Phase 1 request by Proxy. All other optimized parameters remain
+    // explicit, including empty payloads when the optimizer clears a field.
+    QueryPayloadReuse reused_payloads = 7;
 }
 
 //
@@ -327,4 +349,11 @@ message RequeryOnViewRequest {
 message RequeryOnViewResponse {
     // TODO: replace with native view result types once legacy internal protos are removed.
     internal.RetrieveResults legacy_results = 1;
+}
+
+message QueryPayloadReuse {
+    bool placeholder_group = 1;
+    bool serialized_expr_plan = 2;
+    // Positional, parallel to SearchRequest.sub_reqs.
+    repeated QueryPayloadReuse sub_requests = 3;
 }

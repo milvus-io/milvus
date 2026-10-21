@@ -26,10 +26,13 @@ StreamingNode would become a compute-intensive and IO-intensive global bottlenec
 ## 3. Two-Phase Query Process
 
 The following end-to-end flow describes the target architecture. The current
-extraction implements the SN server side; it does not wire the new Proxy client,
-complete Coord scheduling, or QN query execution/remote Delete subscriptions.
+components include SN execution and an injectable
+[query client](query/query_client.md). They do not switch production Proxy
+routing or activate the new Coordinator runtime. QN execution/resource preparation
+and scoped WAL barrier production are separate dependencies; this extraction
+only supplies their query contracts.
 
-1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest version QueryView:
+1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest Up QueryView matching the request schema:
    - Includes MVCC
    - Query optimization (BM25, Segment filtering, etc.)
    - Query view version
@@ -40,7 +43,8 @@ complete Coord scheduling, or QN query execution/remote Delete subscriptions.
 
 ### Current SN implementation
 
-- **Phase 1:** `GetQueryPlan` acquires the highest available Up view, resolves
+- **Phase 1:** `GetQueryPlan` acquires the highest available Up view at the exact request
+  SchemaVersion, resolves
   query MVCC, performs request/BM25 optimization and selects the plan's workers.
   `GetMVCCTimestamp` exposes primary-WAL query frontiers. See the
   [consistency-level discussion](#13-consistency-implementation-consistency-level)
@@ -62,8 +66,9 @@ complete Coord scheduling, or QN query execution/remote Delete subscriptions.
   Boost scorers follow the same ownership rule: SN adapters borrow the pinned
   CSegments through asynchronous scoring, while LocalSegments keep their local
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
-- **Scope:** `RequeryOnView` returns Unimplemented. The Proxy orchestration and
-  complete SN/QN end-to-end flow above remain integration work.
+- **Scope:** retained requery uses `QueryOnView` with the original View/MVCC.
+  The existing `RequeryOnView` wire method is retained. Production Proxy wiring
+  remains integration work. See [plan/schema/read-proof contracts](query/query_plan.md).
 
 Key source paths: `internal/streamingnode/server/queryplan/server.go`,
 `internal/streamingnode/server/wal/adaptor/query_plan.go`,
@@ -402,30 +407,17 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 
 ## 13. Consistency Implementation (Consistency Level)
 
-### TODO: Consistency Levels — Pending Discussion
+### Current primary routing
 
-The table below records the proposed target behavior, not a completed capability
-matrix or a finalized replica-routing policy. Replica-SN MVCC selection and the
-mapping of consistency levels to primary/replica routing remain pending discussion.
+The query client always targets the primary SN by vchannel. Strong and Session
+are sent as Strong; Bounded and Eventually preserve the requested enum.
+`wal/adaptor/query_plan.go` samples local query frontiers on the RW WAL for all
+consistency levels and rejects non-RW WALs with NotPrimary. `GetMVCCTimestamp`
+also requires RW access. Secondary replica selection remains future work.
 
-| Level | MvccTimestamp Generation Logic |
-|---|---|
-| **Strong** | Proxy requests a query plan from the primary SN. SN obtains the maximum ts of messages written to the current WAL VChannel as MvccTimestamp (if ts has not yet triggered timeticksync, trigger it proactively) |
-| **Bounded** | Proxy requests from any SN. Primary SN → same as Strong; Replica SN → obtains the maximum ts of the current WAL subscription stream VChannel |
-| **Session** | Same as Strong |
-| **Eventual** | Same as Bounded |
-
-**Current implementation:** `wal/adaptor/query_plan.go` handles every
-`ConsistencyLevel` request through the RW WAL's local query MVCC and rejects
-non-RW WALs with NotPrimary; it does not branch on the level's enum value.
-`GetMVCCTimestamp` also requires RW access. A request carrying an explicit
-`QueryPlanMVCC` follows a separate path and does not demonstrate that replica
-selection or the table's consistency-level routing has been implemented.
-
-The follow-up discussion must settle which node supplies each level's MVCC,
-what freshness/visibility it guarantees, and how the client routes or retries
-when only a non-primary node is available. No routing or MVCC behavior changes
-are part of this documentation update.
+Explicit executor MVCC, scalar BarrierMVCC and a published-prefix CAS read proof
+have distinct contracts; see [Query plan](query/query_plan.md). They must not be
+collapsed into one timestamp or inferred from the consistency enum.
 
 Target changes:
 - GuaranteeTS assignment logic is moved down to StreamingNode, obtained from the WAL system.

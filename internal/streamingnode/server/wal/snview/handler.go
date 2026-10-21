@@ -2,6 +2,7 @@ package snview
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"sync"
 	"time"
@@ -245,38 +246,52 @@ type QueryViewLease struct {
 }
 
 func (h *SNQueryViewHandler) AcquireLatestUpView(ctx context.Context, shardID qviews.ShardID) (*QueryViewLease, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-	h.mu.Lock()
-	shard := h.shards[shardID]
-	if shard != nil {
-		h.mu.Unlock()
-		return shard.acquireLatestUpView(ctx)
-	}
-	if shardID.ReplicaID != qviews.UnknownReplicaID {
-		h.mu.Unlock()
-		return nil, viewerror.NewViewNotFound("query view %s is not found", shardID.String())
-	}
-	var candidates []*snShardView
-	for id, candidate := range h.shards {
-		if id.VChannel == shardID.VChannel {
-			candidates = append(candidates, candidate)
-		}
-	}
-	h.mu.Unlock()
-	// A matching replica may be preparing or tearing down. Acquire an Up lease
-	// before choosing it. Never nest shard locks under h.mu: onEmpty takes h.mu.
-	for _, candidate := range candidates {
-		lease, err := candidate.acquireLatestUpView(ctx)
-		if err == nil {
-			return lease, nil
-		}
-		if !viewerror.AsViewError(err).IsViewNotFound() {
+	return h.acquireUpViewForSchema(ctx, shardID, nil)
+}
+
+// AcquireUpViewAtSchema selects the newest Up view of one exact read schema.
+// Version zero is an exact version, not a latest selector.
+func (h *SNQueryViewHandler) AcquireUpViewAtSchema(ctx context.Context, shardID qviews.ShardID, schema int32) (*QueryViewLease, error) {
+	return h.acquireUpViewForSchema(ctx, shardID, &schema)
+}
+
+func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID qviews.ShardID, schema *int32) (*QueryViewLease, error) {
+	for {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		h.mu.Lock()
+		var candidates []*snShardView
+		if shard := h.shards[shardID]; shard != nil {
+			candidates = append(candidates, shard)
+		} else if shardID.ReplicaID == qviews.UnknownReplicaID {
+			for id, candidate := range h.shards {
+				if id.VChannel == shardID.VChannel {
+					candidates = append(candidates, candidate)
+				}
+			}
+		}
+		h.mu.Unlock()
+		// Check every replica before waiting: a recovering replica must not
+		// hide an already servable one. Never nest shard locks under h.mu.
+		waits := []reflect.SelectCase{{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())}}
+		for _, candidate := range candidates {
+			lease, changed, err := candidate.tryAcquireUpViewForSchema(ctx, schema)
+			if lease != nil {
+				return lease, nil
+			}
+			if changed != nil {
+				waits = append(waits, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(changed)})
+			} else if !viewerror.AsViewError(err).IsViewNotFound() {
+				return nil, err
+			}
+		}
+		if len(waits) == 1 {
+			return nil, viewerror.NewViewNotFound("latest up query view %s is not found", shardID.String())
+		}
+		// Wake on any replica's progress, without polling or waiter goroutines.
+		if chosen, _, _ := reflect.Select(waits); chosen == 0 {
+			return nil, ctx.Err()
+		}
 	}
-	return nil, viewerror.NewViewNotFound("latest up query view %s is not found", shardID.String())
 }

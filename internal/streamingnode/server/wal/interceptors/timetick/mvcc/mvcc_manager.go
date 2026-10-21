@@ -12,6 +12,7 @@ import (
 func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 	return &MVCCManager{
 		query:                  NewQueryMVCCManager(lastConfirmedTimeTick),
+		readProof:              newReadProofManager(),
 		pchannelMVCCTimestamp:  lastConfirmedTimeTick,
 		recoveryTimeTick:       lastConfirmedTimeTick,
 		vchannelMVCCTimestamps: make(map[string]uint64),
@@ -23,6 +24,7 @@ func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 // relevant persisted write. VChannel entries survive confirmation and are freed
 // on DropCollection, so the map size is bounded by the number of live VChannels.
 type MVCCManager struct {
+	readProof              *readProofManager
 	query                  *QueryMVCCManager
 	mu                     sync.Mutex
 	retiredTimeTick        uint64            // shared fence for retired/unknown identities, without per-shard tombstones.
@@ -129,4 +131,5 @@ func (cm *MVCCManager) ApplyRecoveryBarrier(vchannel string, timetick uint64) {
 	cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], timetick)
 	cm.mu.Unlock()
 	cm.query.ApplyRecoveryBarrier(vchannel, timetick)
+	cm.readProof.applyRecoveryBarrier(vchannel, timetick)
 }

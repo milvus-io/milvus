@@ -1050,6 +1050,9 @@ message StreamingFieldAnalyzer {
     reserved "schema_version";
     repeated string analyzer_names = 5;
     PChannelInfo pchannel = 6;
+    // Internal rendering binds the search schema, including version zero.
+    // Omitted for standalone analyzer requests, which use the WAL write schema.
+    optional int32 read_schema_version = 7;
 }
 message StreamingNodeRunAnalyzerResponse {
     repeated milvus.AnalyzerResult results = 1;
