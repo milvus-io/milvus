@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/featureusage"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -96,7 +97,7 @@ func TestServer_FeatureUsageEntries(t *testing.T) {
 }
 
 func TestServer_FeatureUsageEntries_Segments(t *testing.T) {
-	m := &meta{segments: NewSegmentsInfo()}
+	m := &meta{segments: NewSegmentsInfo(metacache.NewMetaStore(nil))}
 	m.segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, State: commonpb.SegmentState_Flushed, StorageVersion: 2, IsSorted: true}})
 	m.segments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, State: commonpb.SegmentState_Dropped, StorageVersion: 7}})
 	s := &Server{meta: m}

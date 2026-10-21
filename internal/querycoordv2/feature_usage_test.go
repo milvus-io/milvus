@@ -41,11 +41,9 @@ func (suite *ServiceSuite) TestFeatureUsageEntries() {
 	suite.Require().Contains(got, featureusage.GroupLoaded+"/"+featureusage.LoadedCollections)
 	suite.EqualValues(0, got[featureusage.GroupLoaded+"/"+featureusage.LoadedCollections].Value)
 
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102}}}
 	// Fully loaded, 2 replicas, default resource group only.
 	suite.Require().NoError(suite.meta.PutCollection(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 1000, ReplicaNumber: 2, Status: querypb.LoadStatus_Loaded, LoadFields: []int64{100, 101, 102}},
-		Schema:             schema,
 	}))
 	suite.Require().NoError(suite.meta.Put(ctx,
 		meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 1000, ResourceGroup: meta.DefaultResourceGroupName}),
@@ -54,13 +52,13 @@ func (suite *ServiceSuite) TestFeatureUsageEntries() {
 	// Partial load, 1 replica in a custom resource group.
 	suite.Require().NoError(suite.meta.PutCollection(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 1001, ReplicaNumber: 1, Status: querypb.LoadStatus_Loaded, LoadFields: []int64{100}},
-		Schema:             schema,
 	}))
 	suite.Require().NoError(suite.meta.Put(ctx,
 		meta.NewReplica(&querypb.Replica{ID: 3, CollectionID: 1001, ResourceGroup: "rg_custom"}),
 	))
 
-	entries := server.FeatureUsageEntries(ctx, featureusage.CollectionContext{})
+	cc := featureusage.CollectionContext{FieldCount: map[int64]int{1000: 3, 1001: 3}}
+	entries := server.FeatureUsageEntries(ctx, cc)
 	got = indexFeatureEntries(entries)
 	suite.EqualValues(2, got[featureusage.GroupLoaded+"/"+featureusage.LoadedCollections].Value)
 	suite.EqualValues(1, got[featureusage.GroupLoaded+"/"+featureusage.LoadedFieldsSubset].Value)
