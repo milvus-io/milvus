@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -260,6 +261,97 @@ func TestUnOrderedReduceStreamMergesGroupedChunks(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 	require.Equal(t, 1, childA.closeCount())
 	require.Equal(t, 1, childB.closeCount())
+}
+
+func TestUnOrderedReduceStreamEmptyChildren(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		emptyShard  bool
+		emptyWorker bool
+		withData    bool
+	}{
+		{name: "empty_shard", emptyShard: true, withData: true},
+		{name: "empty_worker", emptyWorker: true, withData: true},
+		{name: "all_empty_shards", emptyShard: true},
+		{name: "all_empty_worker_and_shard", emptyShard: true, emptyWorker: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+			}}
+			request := &internalpb.RetrieveRequest{
+				GroupByFieldIds: []int64{100},
+				Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 101}},
+			}
+			children := make([]ReduceStream, 0, 3)
+			if test.emptyShard {
+				for range 2 {
+					shard, err := NewReduceStream(request, schema, nil, 1)
+					require.NoError(t, err)
+					children = append(children, shard)
+				}
+			}
+			var expectedCount, expectedBytes, expectedCost, expectedMVCC int64
+			if test.emptyWorker {
+				empty, err := agg.NewGroupAggReducer(request.GroupByFieldIds, request.Aggregates, -1, schema).EmptyAggResult()
+				require.NoError(t, err)
+				payload := agg.AggResult2internalResult(empty)
+				payload.Status = merr.Success()
+				payload.AllRetrieveCount = 3
+				payload.ScannedTotalBytes = 11
+				payload.CostAggregation = &internalpb.CostAggregation{TotalRelatedDataSize: 101}
+				payload.HasMoreResult = true
+				payload.MvccTimestamp = 20
+				chunks, err := SplitRetrieveResult(payload, 1)
+				require.NoError(t, err)
+				require.Len(t, chunks, 1)
+				worker := &queryTestStream{recv: []queryTestRecv{{chunk: chunks[0]}}}
+				shard, err := NewReduceStream(request, schema, []ReduceStream{worker}, 1)
+				require.NoError(t, err)
+				children = append(children, shard)
+				expectedCount, expectedBytes, expectedCost, expectedMVCC = 3, 11, 101, 20
+			}
+			if test.withData {
+				payload := newGroupQueryTestChunk([]int64{7}, []int64{2})
+				payload.AllRetrieveCount = 2
+				payload.ScannedTotalBytes = 13
+				payload.CostAggregation = &internalpb.CostAggregation{TotalRelatedDataSize: 202}
+				payload.MvccTimestamp = 30
+				worker := &queryTestStream{recv: []queryTestRecv{{chunk: payload}}}
+				shard, err := NewReduceStream(request, schema, []ReduceStream{worker}, 1)
+				require.NoError(t, err)
+				children = append(children, shard)
+				expectedCount += 2
+				expectedBytes += 13
+				expectedCost += 202
+				expectedMVCC = 30
+			}
+			root, err := NewReduceStream(request, schema, children, 1)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, root.Close()) })
+			result, err := root.Recv()
+			require.NoError(t, err)
+			require.Len(t, result.GetFieldsData(), 2)
+			groups := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+			counts := result.GetFieldsData()[1].GetScalars().GetLongData().GetData()
+			if test.withData {
+				require.Equal(t, []int64{7}, groups)
+				require.Equal(t, []int64{2}, counts)
+			} else {
+				require.Empty(t, groups)
+				require.Empty(t, counts)
+			}
+			require.Equal(t, expectedCount, result.GetAllRetrieveCount())
+			require.Equal(t, expectedBytes, result.GetScannedTotalBytes())
+			require.Equal(t, expectedCost, result.GetCostAggregation().GetTotalRelatedDataSize())
+			require.Equal(t, uint64(expectedMVCC), result.GetMvccTimestamp())
+			require.Equal(t, test.emptyWorker, result.GetHasMoreResult())
+			result, err = root.Recv()
+			require.Nil(t, result)
+			require.ErrorIs(t, err, io.EOF)
+		})
+	}
 }
 
 func newQueryTestChunk(ids, values []int64) *internalpb.RetrieveResults {
