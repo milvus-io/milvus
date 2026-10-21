@@ -4452,6 +4452,16 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		cm.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(len(jsonBytes)), nil).Maybe()
 		cm.EXPECT().Read(mock.Anything, mock.Anything).Return(jsonBytes, nil).Maybe()
 		m.chunkManager = cm
+		if b == nil {
+			// CommitBackfillResult describes the collection before classification;
+			// a nil broker stands in for tests that do not exercise the broker.
+			mockBroker := broker.NewMockBroker(t)
+			mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+				Return(&milvuspb.DescribeCollectionResponse{
+					Status: merr.Success(), DbName: "default", CollectionName: "c",
+				}, nil).Maybe()
+			b = mockBroker
+		}
 		s := &Server{
 			meta:   m,
 			broker: b,
@@ -6134,10 +6144,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, newPath)
 
-		// The broker is consulted after classification: interleave the late build
-		// (create + finish build 500 against the still-current old column) there,
-		// so the commit runs against a record that was absent from the removal
-		// snapshot and must still be caught by the under-lock re-enumeration.
+		// The broker describe runs before classification, which reads no index
+		// state: interleave the late build (create + finish build 500 against
+		// the still-current old column) there, so the commit's under-lock
+		// re-enumeration must retract a record that classification could never
+		// have snapshotted.
 		created := false
 		mockBroker := broker.NewMockBroker(t)
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
@@ -6219,10 +6230,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, newPath)
 
-		// The broker is consulted after classification: create the index
-		// definition AND finish a build against the still-current old column
-		// there, so the commit resolves the removal set against a definition
-		// that did not exist at classify time.
+		// The broker describe runs before classification, which reads no index
+		// state: create the index definition AND finish a build against the
+		// still-current old column there, so the commit resolves the removal
+		// set under the manifest lock against a definition that did not exist
+		// when the result was classified.
 		created := false
 		mockBroker := broker.NewMockBroker(t)
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
@@ -6257,6 +6269,218 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, groups, 1)
 		require.Equal(t, newPath, groups[0].Files[0].Path)
+	})
+
+	// A producer must target field IDs that are live user fields: a field NAME
+	// (columns are keyed by ID) would make DropColumns a no-op and land a
+	// phantom column group while the real field stays untouched, and a replace
+	// on the primary key / a system field / a function output must not go
+	// through. The handler describes the collection and validates every op
+	// column against its schema before any manifest read.
+	t.Run("v3_delta_op_columns_validated_against_schema", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		for _, id := range []int64{701, 702, 703, 704, 705, 706} {
+			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("/seg/"+strconv.FormatInt(id, 10), 1),
+			}})
+		}
+		// field 100 is a backfillable user field; 101 is the primary key; 102 is
+		// a function output; 0 is the row-ID system field; 999 is not in the
+		// schema; "f100" is a field NAME written where an ID belongs.
+		cases := []struct {
+			segID   int64
+			column  string
+			wantErr bool
+		}{
+			{segID: 701, column: "100", wantErr: false},
+			{segID: 702, column: "999", wantErr: true},
+			{segID: 703, column: "f100", wantErr: true},
+			{segID: 704, column: "101", wantErr: true},
+			{segID: 705, column: "102", wantErr: true},
+			{segID: 706, column: "0", wantErr: true},
+		}
+		var b strings.Builder
+		b.WriteString(`{"success": true, "collectionId": 100, "segments": {`)
+		for i, c := range cases {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			fmt.Fprintf(&b, `"%d": {"rowCount": 5, "outputPath": "x", "ops": [{"type": "add", "columns": ["%s"], "format": "parquet", "rowCount": 5, "files": [{"path": "/seg/%d/_data/100.parquet", "startIndex": 0, "endIndex": 5}]}]}`, c.segID, c.column, c.segID)
+		}
+		b.WriteString(`}}`)
+
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
+						{FieldID: 101, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+						{FieldID: 102, Name: "fn_out", IsFunctionOutput: true, DataType: schemapb.DataType_FloatVector},
+					},
+				},
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
+
+		captured, unpatch := captureManifestCommits(t)
+		defer unpatch()
+		unpatchReadCGs := emptyManifestColumnGroups(t)
+		defer unpatchReadCGs()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+		assert.Equal(t, int32(5), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 6)
+		for _, st := range resp.GetSegmentStatuses() {
+			if st.GetSegmentId() == 701 {
+				assert.True(t, st.GetOk())
+				continue
+			}
+			assert.False(t, st.GetOk())
+			if st.GetSegmentId() == 703 {
+				assert.Contains(t, st.GetReason(), "is not a field ID")
+			} else {
+				assert.Contains(t, st.GetReason(), "not a backfillable field")
+			}
+		}
+		require.Len(t, *captured, 1)
+		assert.Equal(t, int64(701), (*captured)[0].SegmentID)
+	})
+
+	// V2 column-group field IDs get the same schema validation: a valid integer
+	// that is not a live user field would still register a phantom column
+	// group.
+	t.Run("v2_group_field_ids_validated_against_schema", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		for _, id := range []int64{201, 202} {
+			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV2,
+			}})
+		}
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "201": {
+              "version": -1, "rowCount": 100, "outputPath": "s3a://bkt/seg/201",
+              "manifestPaths": ["s3a://bkt/seg/201/100/7"], "storage_version": 2,
+              "column_groups": [{"field_ids":[100], "binlog_files":["s3a://bkt/seg/201/100/7"], "row_count": 100}]
+            },
+            "202": {
+              "version": -1, "rowCount": 100, "outputPath": "s3a://bkt/seg/202",
+              "manifestPaths": ["s3a://bkt/seg/202/100/7"], "storage_version": 2,
+              "column_groups": [{"field_ids":[999], "binlog_files":["s3a://bkt/seg/202/100/7"], "row_count": 100}]
+            }
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "f100", DataType: schemapb.DataType_Int64}},
+				},
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bucket/result.json",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 2)
+		for _, st := range resp.GetSegmentStatuses() {
+			if st.GetSegmentId() == 201 {
+				assert.True(t, st.GetOk())
+			} else {
+				assert.False(t, st.GetOk())
+				assert.Contains(t, st.GetReason(), "not a backfillable field")
+			}
+		}
+	})
+
+	// A replace on a VARCHAR field with full-text (or a JSON field with key
+	// stats) must retire the stale TextStatsLogs / JsonKeyStats entries
+	// atomically with the manifest pointer: needDoTextIndex /
+	// needDoJSONKeyIndex only check entry existence, so without the retire the
+	// next stats pass would never rebuild and text-match / JSON filters would
+	// keep answering from the old column values.
+	t.Run("v3_delta_replace_clears_stale_text_stats", func(t *testing.T) {
+		ctx := context.Background()
+		localRoot := t.TempDir()
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
+		paramtable.Get().Save(Params.LocalStorageCfg.Path.Key, localRoot)
+		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
+		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
+
+		cfg := createStorageConfig()
+		basePath := path.Join("files", "backfill_replace_text_stats", "seg815")
+		oldPath := path.Join(basePath, "_data", "100_old.parquet")
+		_, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+			ColumnGroups: []packed.ColumnGroupEntry{{
+				Columns: []string{"100"}, Format: "parquet",
+				Files: []packed.ColumnGroupFileEntry{{Path: oldPath, StartIndex: 0, EndIndex: 5}},
+			}},
+		})
+		require.NoError(t, err)
+
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 815, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				100: {FieldID: 100, BuildID: 11, Files: []string{"text_100.parquet"}},
+			},
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				100: {FieldID: 100, BuildID: 12, Files: []string{"json_100.parquet"}},
+			},
+		}})
+
+		newPath := path.Join(basePath, "_data", "100_new.parquet")
+		jsonStr := fmt.Sprintf(`{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "815": {
+              "rowCount": 5, "outputPath": "x",
+              "ops": [
+                {"type": "replace", "columns": ["100"], "format": "parquet", "rowCount": 5,
+                 "files": [{"path": "%s", "startIndex": 0, "endIndex": 5}]}
+              ]
+            }
+          }
+        }`, newPath)
+
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+
+		// The stale stats for the replaced field are retired with the pointer;
+		// the next stats pass rebuilds them from the replacement data.
+		updated := m.GetSegment(ctx, 815)
+		require.NotNil(t, updated)
+		require.Nil(t, updated.GetTextStatsLogs()[100])
+		require.Nil(t, updated.GetJsonKeyStats()[100])
 	})
 
 	// An already-applied add omitted by the unlocked replay pre-check must not be
