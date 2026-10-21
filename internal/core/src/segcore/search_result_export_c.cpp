@@ -1060,7 +1060,7 @@ MaterializeOrderedFields(
 
     if (segment_fields.size() > 1) {
         auto& pool = milvus::ThreadPools::GetThreadPool(
-            milvus::ThreadPoolPriority::MIDDLE);
+            milvus::ThreadPoolPriority::SEARCH_FANOUT);
         std::vector<std::future<void>> futures;
         futures.reserve(segment_fields.size());
         auto futures_guard = folly::makeGuard([&futures]() {

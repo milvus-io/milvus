@@ -205,9 +205,9 @@ ReduceHelper::FillPrimaryKey() {
                           tracer::GetRootSpan());
     // Second pass: fill primary keys
     if (num_segments_ > 1) {
-        // Parallel execution using MIDDLE thread pool for multiple segments
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        // Isolate search fanout from background field and index loading.
+        auto& pool = ThreadPools::GetThreadPool(
+            milvus::ThreadPoolPriority::SEARCH_FANOUT);
         std::vector<std::future<void>> futures;
         futures.reserve(num_segments_);
         for (auto& search_result : search_results_) {
@@ -454,8 +454,8 @@ ReduceHelper::RefineDistances() {
     auto dense_blob = static_cast<const char*>(placeholder.get_blob());
 
     if (num_segments_ > 1) {
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        auto& pool = ThreadPools::GetThreadPool(
+            milvus::ThreadPoolPriority::SEARCH_FANOUT);
         std::vector<std::future<void>> futures;
         futures.reserve(num_segments_);
         for (auto& search_result : search_results_) {
