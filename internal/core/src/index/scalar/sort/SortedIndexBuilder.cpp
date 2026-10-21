@@ -327,7 +327,6 @@ SortedIndexBuilder<T>::Build(const ScalarBuildInput<T>& input) && {
                                                  std::move(offsets),
                                                  total_num_rows_,
                                                  params_.nested);
-    std::vector<IndexStructure<T>>().swap(data_);
     return artifact;
 }
 
