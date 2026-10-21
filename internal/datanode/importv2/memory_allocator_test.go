@@ -553,3 +553,62 @@ func TestMemoryAllocatorCancelWhileWaiting(t *testing.T) {
 	ma.Release(3, 1)
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 }
+
+// TestMemoryAllocatorPreCanceledRequest tests that a request whose ctx is
+// already canceled returns ctx.Err() without charging memory, even when the
+// allocator is idle or has spare capacity.
+func TestMemoryAllocatorPreCanceledRequest(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Idle allocator.
+	err := ma.BlockingAllocate(ctx, 1, 1)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory, "pre-canceled request must not be charged")
+
+	// Spare capacity.
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 2, 1))
+	err = ma.BlockingAllocate(ctx, 3, 1)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int64(1), ma.(*memoryAllocator).usedMemory, "pre-canceled request must not be charged")
+	ma.Release(2, 1)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorCancelRacesRelease tests that a waiter whose ctx is
+// canceled while memory becomes available, before it reacquires the mutex,
+// still returns ctx.Err() without charging memory.
+func TestMemoryAllocatorCancelRacesRelease(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024).(*memoryAllocator)
+	memoryLimit := int64(float64(ma.systemTotalMemory) *
+		paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat() / 100.0)
+
+	// Task 1 fills the budget, task 2 parks in Cond.Wait.
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 1, memoryLimit))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- ma.BlockingAllocate(ctx, 2, 1) }()
+	select {
+	case err := <-errCh:
+		t.Fatalf("allocation returned before cancel: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Hold the mutex so the waiter observes the cancellation and the freed
+	// budget in the same wakeup, whichever broadcast reaches it first.
+	ma.mutex.Lock()
+	cancel()
+	ma.usedMemory = 0
+	ma.cond.Broadcast()
+	ma.mutex.Unlock()
+
+	select {
+	case err := <-errCh:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled waiter did not return")
+	}
+	assert.Equal(t, int64(0), ma.usedMemory, "canceled waiter must not be charged")
+}
