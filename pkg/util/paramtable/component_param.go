@@ -9958,7 +9958,7 @@ so we set 1 second here as a threshold.`,
 
 	p.WALRateLimitWABSlowdownRatio = ParamItem{
 		Key:     "streaming.walRateLimit.writeAheadBuffer.slowdownRatio",
-		Version: "3.0.0", DefaultValue: "1", Export: true,
+		Version: "3.1.0", DefaultValue: "1.5", Export: false,
 		Doc: "Start proportional slowdown above this multiple of the WAB instance's cache capacity. Takes effect immediately; values below 1 are clamped to 1, invalid/non-finite values use 1.",
 		Formatter: func(v string) string {
 			ratio, err := strconv.ParseFloat(v, 64)
@@ -9971,13 +9971,13 @@ so we set 1 second here as a threshold.`,
 	p.WALRateLimitWABSlowdownRatio.Init(base.mgr)
 	p.WALRateLimitWABSlowdownRate = ParamItem{
 		Key:     "streaming.walRateLimit.writeAheadBuffer.slowdownRate",
-		Version: "3.0.0", DefaultValue: "32m", Export: true,
+		Version: "3.1.0", DefaultValue: "32m", Export: false,
 		Doc: "Producer byte rate per second at the WAB slowdown threshold. Takes effect immediately; invalid/nonpositive values use the default.",
 	}
 	p.WALRateLimitWABSlowdownRate.Init(base.mgr)
 	p.WALRateLimitWABRejectRatio = ParamItem{
 		Key:     "streaming.walRateLimit.writeAheadBuffer.rejectRatio",
-		Version: "3.0.0", DefaultValue: "2", Export: true,
+		Version: "3.1.0", DefaultValue: "2", Export: false,
 		Doc: "Reject new DML when WAB bytes reach this multiple of the slowdown threshold (capacity * slowdownRatio). Takes effect immediately. Must be finite and greater than 1; invalid values use 2.",
 		Formatter: func(v string) string {
 			ratio, err := strconv.ParseFloat(v, 64)

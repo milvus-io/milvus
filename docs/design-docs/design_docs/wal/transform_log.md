@@ -431,7 +431,7 @@ of all previously published scopes. Multi-scope barriers use their existing
 batched header; no additional per-VChannel retention map is maintained in WAB.
 
 WAB pressure is configured under `streaming.walRateLimit.writeAheadBuffer`:
-`slowdownRatio` S (default 1, minimum 1) gives threshold C = instance capacity * S,
+`slowdownRatio` S (default 1.5, minimum 1) gives threshold C = instance capacity * S,
 `slowdownRate` R (32MB/s), and `rejectRatio` Q (2). For queued bytes B, admission
 is normal through C; rate is `max(1, floor(R*(Q-B/C)/(Q-1)))` between C and Q*C;
 new DML is rejected at Q*C. B includes all retained cache bytes.

@@ -66,9 +66,12 @@ not a hard limit on unconsumed records.
 WAB pressure has independent live configuration under
 `streaming.walRateLimit.writeAheadBuffer`:
 
+These parameters are not exported to the generated `milvus.yaml`; explicit
+configuration overrides and live updates remain supported.
+
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `slowdownRatio` | `1` | Multiple S of the WAB instance capacity; finite and at least 1 |
+| `slowdownRatio` | `1.5` | Multiple S of the WAB instance capacity; finite and at least 1 |
 | `slowdownRate` | `32m` | Initial slowdown rate R in bytes/second |
 | `rejectRatio` | `2` | Rejection multiple Q of C; finite and greater than 1 |
 
