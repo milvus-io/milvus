@@ -37,6 +37,7 @@ const (
 	FormatLanceTable   = specutil.FormatLanceTable
 	FormatVortex       = specutil.FormatVortex
 	FormatIcebergTable = specutil.FormatIcebergTable
+	FormatPaimonTable  = specutil.FormatPaimonTable
 	FormatMilvusTable  = specutil.FormatMilvusTable
 )
 

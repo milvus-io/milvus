@@ -218,6 +218,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	baselineSegmentIDs []int64,
 	keptSegmentIDs []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	sourceConfirmedEmpty bool,
 	logFields ...mlog.Field,
 ) error {
 	if mt == nil {
@@ -295,9 +296,8 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 		mlog.Int("upsertSegments", len(upsertSegmentMap)),
 		mlog.Int("finalSegmentCount", finalSegmentCount))
 
-	// Safety check: reject if dropping all segments without adding new ones
-	// This prevents accidental data loss from malformed worker responses
-	if baselineSegmentCount > 0 && finalSegmentCount == 0 {
+	// Reject empty worker results unless the coordinator verified an empty source.
+	if baselineSegmentCount > 0 && finalSegmentCount == 0 && !sourceConfirmedEmpty {
 		mlog.Error(ctx, "safety check failed: refusing to drop all segments without replacement",
 			mlog.Int("baselineSegmentCount", baselineSegmentCount),
 			mlog.Int("keptSegments", len(keptSegmentMap)),

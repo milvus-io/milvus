@@ -62,7 +62,7 @@ func TestManifestIndexLegacyBaseRoundTrip(t *testing.T) {
 			segment := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2}
 			version := packed.ManifestEarliest
 			for _, buildID := range []int64{100, 200} {
-				manifest, err := packed.CommitManifestUpdates(base, version, cfg, &packed.ManifestUpdates{
+				manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, version), cfg, &packed.ManifestUpdates{
 					Indexes: []packed.ManifestIndexInfo{{
 						ColumnName: "vector", IndexName: "index", IndexType: "HNSW",
 						Path: fmt.Sprintf("%d/1", buildID), IndexID: buildID, BuildID: buildID,
