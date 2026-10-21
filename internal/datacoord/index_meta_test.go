@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -2781,6 +2782,134 @@ func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
 			}))
 			require.NoError(t, m.BuildIndex(6200))
 			require.NoError(t, m.UpdateIndexState(6200, commonpb.IndexState_Failed, "failed"))
+		})
+	}
+}
+
+func TestIndexMeta_AllDenseWithDiskIndex(t *testing.T) {
+	const collectionID = int64(100)
+	newIndex := func(indexID, fieldID int64, indexType string) *model.Index {
+		return &model.Index{
+			CollectionID: collectionID,
+			FieldID:      fieldID,
+			IndexID:      indexID,
+			IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexType}},
+		}
+	}
+	newIndexMeta := func(indexes ...*model.Index) *indexMeta {
+		m := &indexMeta{indexes: map[UniqueID]map[UniqueID]*model.Index{collectionID: {}}}
+		for _, index := range indexes {
+			m.indexes[collectionID][index.IndexID] = index
+		}
+		return m
+	}
+	dimParams := []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}
+	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	scalar := &schemapb.FieldSchema{FieldID: 101, Name: "scalar", DataType: schemapb.DataType_VarChar}
+	topVector := &schemapb.FieldSchema{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: dimParams}
+	sparseVector := &schemapb.FieldSchema{FieldID: 103, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}
+	subVector := &schemapb.FieldSchema{
+		FieldID:     202,
+		Name:        "items[vec]",
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		TypeParams:  dimParams,
+	}
+	subScalar := &schemapb.FieldSchema{
+		FieldID:     201,
+		Name:        "items[tag]",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	}
+	structField := &schemapb.StructArrayFieldSchema{FieldID: 200, Name: "items", Fields: []*schemapb.FieldSchema{subScalar, subVector}}
+	newSchema := func(withStruct bool, fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
+		schema := &schemapb.CollectionSchema{Fields: append([]*schemapb.FieldSchema{pk}, fields...)}
+		if withStruct {
+			schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{structField}
+		}
+		return schema
+	}
+
+	tests := []struct {
+		name    string
+		schema  *schemapb.CollectionSchema
+		indexes []*model.Index
+		want    bool
+	}{
+		{
+			name:   "no vector field",
+			schema: newSchema(false, scalar),
+			want:   true,
+		},
+		{
+			name:    "top-level DISKANN",
+			schema:  newSchema(false, topVector),
+			indexes: []*model.Index{newIndex(1, topVector.FieldID, "DISKANN")},
+			want:    true,
+		},
+		{
+			name:    "top-level HNSW",
+			schema:  newSchema(false, topVector),
+			indexes: []*model.Index{newIndex(1, topVector.FieldID, "HNSW")},
+			want:    false,
+		},
+		{
+			name:   "top-level vector without index",
+			schema: newSchema(false, topVector),
+			want:   false,
+		},
+		{
+			name:    "sparse vector is ignored",
+			schema:  newSchema(false, topVector, sparseVector),
+			indexes: []*model.Index{newIndex(1, topVector.FieldID, "DISKANN"), newIndex(2, sparseVector.FieldID, "SPARSE_INVERTED_INDEX")},
+			want:    true,
+		},
+		{
+			name:    "only sparse vector",
+			schema:  newSchema(false, sparseVector),
+			indexes: []*model.Index{newIndex(2, sparseVector.FieldID, "SPARSE_INVERTED_INDEX")},
+			want:    true,
+		},
+		{
+			name:    "only struct vector sub-field with DISKANN",
+			schema:  newSchema(true),
+			indexes: []*model.Index{newIndex(3, subVector.FieldID, "DISKANN")},
+			want:    true,
+		},
+		{
+			name:    "only struct vector sub-field with HNSW",
+			schema:  newSchema(true),
+			indexes: []*model.Index{newIndex(3, subVector.FieldID, "HNSW")},
+			want:    false,
+		},
+		{
+			name:   "only struct vector sub-field without index",
+			schema: newSchema(true),
+			want:   false,
+		},
+		{
+			name:    "top-level DISKANN and struct vector sub-field HNSW",
+			schema:  newSchema(true, topVector),
+			indexes: []*model.Index{newIndex(1, topVector.FieldID, "DISKANN"), newIndex(3, subVector.FieldID, "HNSW")},
+			want:    false,
+		},
+		{
+			name:    "top-level HNSW and struct vector sub-field DISKANN",
+			schema:  newSchema(true, topVector),
+			indexes: []*model.Index{newIndex(1, topVector.FieldID, "HNSW"), newIndex(3, subVector.FieldID, "DISKANN")},
+			want:    false,
+		},
+		{
+			name:    "top-level and struct vector sub-field both DISKANN",
+			schema:  newSchema(true, topVector),
+			indexes: []*model.Index{newIndex(1, topVector.FieldID, "DISKANN"), newIndex(3, subVector.FieldID, "DISKANN")},
+			want:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newIndexMeta(tt.indexes...)
+			assert.Equal(t, tt.want, m.AllDenseWithDiskIndex(collectionID, tt.schema))
 		})
 	}
 }
