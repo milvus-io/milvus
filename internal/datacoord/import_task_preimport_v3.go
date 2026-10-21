@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -135,6 +136,16 @@ func (p *preImportV3Task) setState(state datapb.ImportTaskStateV2) {
 	p.task.Load().State = state
 }
 
+// fail marks the task Failed with its reason. The state machine's
+// preImportingHandler propagates it to the job on the next tick, keeping the
+// reason visible without the task wrapper writing the job state.
+func (p *preImportV3Task) fail(reason string) {
+	if err := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
+		UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason)); err != nil {
+		mlog.Warn(context.TODO(), "failed to mark preimport v3 task failed", WrapTaskLog(p, mlog.Err(err))...)
+	}
+}
+
 func (p *preImportV3Task) setReason(reason string) {
 	p.task.Load().Reason = reason
 }
@@ -168,6 +179,12 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot())
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport v3 failed", WrapTaskLog(p, mlog.Err(err))...)
+		// Raw transport errors are not terminal and retry; a deterministic
+		// rejection fails the task.
+		if importcommon.IsTerminalImportV3Err(err) {
+			p.fail(err.Error())
+			return
+		}
 		p.retryTimes++
 		return
 	}
@@ -207,11 +224,7 @@ func (p *preImportV3Task) QueryTaskOnWorker(cluster session.Cluster) {
 		// Only mark the TASK failed with its reason. The job is failed by the
 		// state machine on the checker's next tick (preImportingHandler), so the
 		// reason stays visible without the task wrapper writing the job state.
-		updateErr := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed),
-			UpdateReason(resp.GetReason()))
-		if updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to mark preimport v3 task failed", WrapTaskLog(p, mlog.Err(updateErr))...)
-		}
+		p.fail(resp.GetReason())
 		mlog.Warn(context.TODO(), "preimport v3 failed", WrapTaskLog(p, mlog.String("reason", resp.GetReason()))...)
 		return
 	}
