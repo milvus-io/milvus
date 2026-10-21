@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"google.golang.org/protobuf/proto"
 
@@ -33,8 +34,8 @@ import (
 )
 
 // ReduceStream is the common parent-side contract for reduced streams and
-// transport-backed child streams. Exactly one caller must drive Recv, Close,
-// and Interrupt serially.
+// transport-backed child streams. Recv calls must be serial; Close may run
+// concurrently with Recv to cancel it.
 type ReduceStream interface {
 	Recv() (*internalpb.SearchResults, error)
 	Close() error
@@ -296,6 +297,7 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*int
 
 // OrderedReduceStream merges Plain ANN Search child Chunks by score.
 type OrderedReduceStream struct {
+	recvMu       sync.Mutex
 	childStreams *reduce.ChildStreams[*internalpb.SearchResults]
 	childBuffers []orderedChildBuffer
 
@@ -362,6 +364,9 @@ func NewShardReduceStream(request *internalpb.SearchRequest, childStreams []Redu
 
 // Recv returns the next ordered Search Chunk.
 func (s *OrderedReduceStream) Recv() (*internalpb.SearchResults, error) {
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+
 	if s.finished {
 		return nil, io.EOF
 	}
@@ -771,26 +776,31 @@ func buildSearchChunk(
 }
 
 func (s *OrderedReduceStream) fail(err error) error {
-	return errors.Join(err, s.Close())
+	return errors.Join(err, s.closeChildren())
 }
 
 // Close idempotently closes every child stream and releases retained Chunks.
 func (s *OrderedReduceStream) Close() error {
+	// Wake a Recv waiting for child input before acquiring its state lock.
+	s.childStreams.Cancel()
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+	return s.closeChildren()
+}
+
+// closeChildren runs with recvMu held, including on the Recv error path.
+func (s *OrderedReduceStream) closeChildren() error {
 	if s.closed {
 		return s.closeErr
 	}
 	s.closed = true
-	return s.closeChildren()
-}
-
-func (s *OrderedReduceStream) closeChildren() error {
+	s.closeErr = s.childStreams.Close()
 	for i := range s.childBuffers {
 		s.childBuffers[i].units = nil
 		s.childBuffers[i].cursor = 0
 	}
 	s.metadata = nil
 	s.seenPKs = nil
-	s.closeErr = s.childStreams.Close()
 	return s.closeErr
 }
 
