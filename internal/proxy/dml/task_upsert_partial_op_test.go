@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package dml
 
 import (
 	"context"
@@ -1341,7 +1341,7 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 	}
 	schema := mustNewSchemaInfo(collectionSchema)
 
-	newTask := func() *upsertTask {
+	newTask := func() *UpsertTask {
 		requestFields := []*schemapb.FieldData{
 			idField(2, 1),
 			arrayLongFieldData("scores", [][]int64{{200}, {100}}),
@@ -1360,7 +1360,7 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 		}
 		plans, _, err := resolveFieldPartialUpdateOps(request, collectionSchema)
 		require.NoError(t, err)
-		return &upsertTask{
+		return &UpsertTask{
 			ctx:                     context.Background(),
 			schema:                  schema,
 			req:                     request,
@@ -1372,7 +1372,7 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 				NumRows:        uint64(request.GetNumRows()),
 				Version:        msgpb.InsertDataVersion_ColumnBased,
 			}}},
-			node: &Proxy{},
+			node: &mockTaskNode{},
 		}
 	}
 

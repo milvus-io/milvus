@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package dml
 
 import (
 	"context"
@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -106,7 +107,7 @@ func TestPartialUpsertOmittedTimestamptz(t *testing.T) {
 					oldWAL := streaming.WAL()
 					streaming.SetWALForTest(fakeWAL)
 					defer streaming.SetWALForTest(oldWAL)
-					read := mockey.Mock(retrieveByPKs).To(func(ctx context.Context, task *upsertTask, ids *schemapb.IDs, fields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+					read := mockey.Mock(retrieveByPKs).To(func(ctx context.Context, task *UpsertTask, ids *schemapb.IDs, fields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 						require.Equal(t, requestIDs, ids.GetIntId().GetData())
 						require.Equal(t, []string{"*"}, fields)
 						for _, proof := range task.partialUpdateCASGroups {
@@ -131,7 +132,7 @@ func TestPartialUpsertOmittedTimestamptz(t *testing.T) {
 						// Ordinary queries format before returning. RLS USING needs raw
 						// timestamps first; queryPreExecute formats them after authorization.
 						if !withRLS {
-							require.NoError(t, FormatTimestamptzFields(result.FieldsData, task.schema.SchemaHelper.GetTimezone()))
+							require.NoError(t, dql.FormatTimestamptzFields(result.FieldsData, task.schema.SchemaHelper.GetTimezone()))
 						}
 						return result, segcore.StorageCost{}, nil
 					}).Build()
