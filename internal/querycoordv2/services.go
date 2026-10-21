@@ -505,7 +505,7 @@ func (s *Server) refreshCollection(ctx context.Context, collectionID int64) erro
 	}
 
 	// Pull the latest target.
-	readyCh, err := s.targetObserver.UpdateNextTarget(collectionID)
+	readyCh, err := s.targetObserver.UpdateNextTarget(ctx, collectionID)
 	if err != nil {
 		// On failure, close the placeholder channel so IsRefreshed() returns true
 		close(placeholderCh)

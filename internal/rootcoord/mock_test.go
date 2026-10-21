@@ -928,6 +928,9 @@ func newValidMockBroker() *mockBroker {
 	broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 		return nil
 	}
+	broker.SyncNewCreatedPartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
+		return nil
+	}
 	return broker
 }
 

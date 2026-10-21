@@ -114,9 +114,10 @@ func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID
 	log := log.Ctx(ctx).With(zap.Int64("collection", collectionID), zap.Int64("partitionID", partitionID))
 	log.Info("begin to sync new partition")
 	resp, err := b.s.mixCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
-		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
-		CollectionID: collectionID,
-		PartitionID:  partitionID,
+		Base:          commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition)),
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		SkipWaitReady: true,
 	})
 	if err != nil {
 		return err

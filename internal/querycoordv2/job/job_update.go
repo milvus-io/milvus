@@ -192,7 +192,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	}
 
 	// 8. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
-	_, err = job.targetObserver.UpdateNextTarget(job.collectionID)
+	_, err = job.targetObserver.UpdateNextTarget(job.ctx, job.collectionID)
 	if err != nil {
 		msg := "failed to update next target"
 		log.Warn(msg, zap.Error(err))

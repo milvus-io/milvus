@@ -1254,7 +1254,7 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 		err := server.refreshCollection(ctx, id)
 		suite.NoError(err)
 
-		readyCh, err := server.targetObserver.UpdateNextTarget(id)
+		readyCh, err := server.targetObserver.UpdateNextTarget(ctx, id)
 		suite.NoError(err)
 		<-readyCh
 
