@@ -26,10 +26,12 @@
 #include "pb/schema.pb.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentLoadInfo.h"
+#include "segcore/default_fs.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 
@@ -699,6 +701,66 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
                 }
             }
         }
+    }
+}
+
+void
+SegmentLoadInfo::ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known) {
+    if (GetStorageVersion() != STORAGE_V2 || HasManifestPath()) {
+        return;
+    }
+    auto same_files = [](const proto::segcore::FieldBinlog& a,
+                         const proto::segcore::FieldBinlog& b) {
+        if (a.binlogs_size() != b.binlogs_size()) {
+            return false;
+        }
+        for (int j = 0; j < a.binlogs_size(); j++) {
+            if (a.binlogs(j).log_path() != b.binlogs(j).log_path()) {
+                return false;
+            }
+        }
+        return true;
+    };
+    milvus_storage::ArrowFileSystemPtr fs;
+    std::shared_ptr<arrow::Schema> arrow_schema;
+    bool changed = false;
+    for (int i = 0; i < info_.binlog_paths_size(); i++) {
+        auto* binlog = info_.mutable_binlog_paths(i);
+        // A group id at or above START_USER_FIELDID is the id of its only
+        // field, as the loader assumes.
+        if (binlog->child_fields_size() > 0 ||
+            binlog->fieldid() >= START_USER_FIELDID ||
+            binlog->binlogs_size() == 0) {
+            continue;
+        }
+        const auto* resolved =
+            known != nullptr ? known->GetFieldBinlog(FieldId(binlog->fieldid()))
+                             : nullptr;
+        if (resolved != nullptr && resolved->child_fields_size() > 0 &&
+            same_files(*resolved, *binlog)) {
+            *binlog->mutable_child_fields() = resolved->child_fields();
+            changed = true;
+            continue;
+        }
+        if (fs == nullptr) {
+            fs = milvus::segcore::GetDefaultArrowFileSystem();
+            arrow_schema = schema_->ConvertToArrowSchema();
+        }
+        // The loader reads the group's field ids from its first file.
+        std::vector<std::string> files;
+        for (const auto& log : binlog->binlogs()) {
+            files.push_back(log.log_path());
+        }
+        storage::SortByPath(files);
+        auto field_ids = storage::GetFieldIDList(
+            FieldId(binlog->fieldid()), files[0], arrow_schema, fs);
+        for (size_t k = 0; k < field_ids.size(); k++) {
+            binlog->add_child_fields(field_ids.Get(k));
+        }
+        changed = true;
+    }
+    if (changed) {
+        BuildFieldBinlogCache();
     }
 }
 

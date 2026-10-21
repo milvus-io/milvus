@@ -259,3 +259,52 @@ func (pr *PackedReader) Close() error {
 	pr.cPackedReader = nil
 	return nil
 }
+
+// GetPackedFileFieldIDs returns, for each packed file, the field IDs of the
+// columns it stores, taken from the PARQUET:field_id metadata in its footer.
+// Only the footers are read, once per file; the filesystem is resolved as
+// NewPackedReader does. A failed read keeps the storage error code the C++
+// side attached (transient storage errors stay retriable).
+func GetPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) ([][]int64, error) {
+	if len(filePaths) == 0 {
+		return nil, nil
+	}
+	cFilePaths := make([]*C.char, len(filePaths))
+	for i, path := range filePaths {
+		cFilePaths[i] = C.CString(path)
+		defer C.free(unsafe.Pointer(cFilePaths[i]))
+	}
+
+	var cStorageConfigPtr *C.CStorageConfig
+	if storageConfig != nil {
+		cStorageConfig, release := newCStorageConfig(storageConfig)
+		defer release()
+		cStorageConfigPtr = &cStorageConfig
+	}
+	cPluginContext, releasePluginContext := newCPluginContext(storagePluginContext)
+	defer releasePluginContext()
+
+	var cFieldIDs *C.int64_t
+	var cFieldCounts *C.int64_t
+	status := C.GetPackedFileFieldIDs((**C.char)(unsafe.Pointer(&cFilePaths[0])), C.int64_t(len(filePaths)),
+		cStorageConfigPtr, cPluginContext, &cFieldIDs, &cFieldCounts)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
+	defer C.free(unsafe.Pointer(cFieldIDs))
+	defer C.free(unsafe.Pointer(cFieldCounts))
+
+	counts := unsafe.Slice((*int64)(unsafe.Pointer(cFieldCounts)), len(filePaths))
+	total := int64(0)
+	for _, count := range counts {
+		total += count
+	}
+	ids := unsafe.Slice((*int64)(unsafe.Pointer(cFieldIDs)), total)
+	result := make([][]int64, len(filePaths))
+	offset := int64(0)
+	for i, count := range counts {
+		result[i] = append([]int64(nil), ids[offset:offset+count]...)
+		offset += count
+	}
+	return result, nil
+}
