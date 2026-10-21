@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -213,6 +214,13 @@ func (m *meta) closeManifestCommitExecutor() {
 		m.manifestCommitExecutor.close()
 	}
 }
+
+// collectionCacheRecoveryConcurrency bounds the collections looked up at once
+// while the collection cache is rebuilt. The lookups are in-process RootCoord
+// tasks that RootCoord partly serializes (each one takes a collection-level
+// KeyLock), so the speedup levels off after a few workers; the bound leaves
+// headroom above that point.
+const collectionCacheRecoveryConcurrency = 16
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, metaStore metacache.MetaStore, broker broker.Broker) (*meta, error) {
@@ -421,34 +429,81 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 	if err != nil {
 		return err
 	}
+	var collectionIDs []int64
 	for _, dbName := range resp.GetDbNames() {
 		collectionsResp, err := broker.ShowCollections(ctx, dbName)
 		if err != nil {
 			return err
 		}
-		for _, collectionID := range collectionsResp.GetCollectionIds() {
-			descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
-			if err != nil {
-				return err
-			}
-			partitionIDs, err := broker.ShowPartitionsInternal(ctx, collectionID)
-			if err != nil {
-				return err
-			}
-			m.AddCollection(&collectionInfo{
-				ID:             collectionID,
-				Schema:         descResp.GetSchema(),
-				Partitions:     partitionIDs,
-				StartPositions: descResp.GetStartPositions(),
-				Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
-				CreatedAt:      descResp.GetCreatedTimestamp(),
-				DatabaseName:   descResp.GetDbName(),
-				DatabaseID:     descResp.GetDbId(),
-				VChannelNames:  descResp.GetVirtualChannelNames(),
-			})
+		collectionIDs = append(collectionIDs, collectionsResp.GetCollectionIds()...)
+	}
+
+	var (
+		failed atomic.Bool
+
+		mu          sync.Mutex // guards the fields below
+		failedIndex = -1       // the lowest index of a failed lookup
+		failure     error
+	)
+	infos := make([]*collectionInfo, len(collectionIDs))
+	var g errgroup.Group
+	g.SetLimit(collectionCacheRecoveryConcurrency)
+	for index, collectionID := range collectionIDs {
+		// Start no lookups after a failure; the running ones finish.
+		if failed.Load() {
+			break
 		}
+		g.Go(func() error {
+			info, err := lookupCollectionForCache(ctx, broker, collectionID)
+			if err != nil {
+				mu.Lock()
+				defer mu.Unlock()
+				if failedIndex < 0 || index < failedIndex {
+					failedIndex, failure = index, err
+				}
+				failed.Store(true)
+				return err
+			}
+			infos[index] = info
+			return nil
+		})
+	}
+	if g.Wait() != nil {
+		// Return the first failure in list order, not the earliest in time:
+		// every collection listed before it was dispatched before it and has
+		// finished, so the outcome does not depend on scheduling.
+		return failure
+	}
+	// Install in list order once every lookup succeeded; a failed attempt
+	// installs nothing. AddCollection would log twice per collection.
+	for _, info := range infos {
+		m.metaStore.PutCollection(info)
 	}
 	return nil
+}
+
+// lookupCollectionForCache describes a collection and lists its partitions
+// through RootCoord, building its collection cache entry.
+func lookupCollectionForCache(ctx context.Context, broker broker.Broker, collectionID int64) (*collectionInfo, error) {
+	descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	partitionIDs, err := broker.ShowPartitionsInternal(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	return &collectionInfo{
+		ID:             collectionID,
+		Schema:         descResp.GetSchema(),
+		Partitions:     partitionIDs,
+		StartPositions: descResp.GetStartPositions(),
+		Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
+		CreatedAt:      descResp.GetCreatedTimestamp(),
+		DatabaseName:   descResp.GetDbName(),
+		DatabaseID:     descResp.GetDbId(),
+		VChannelNames:  descResp.GetVirtualChannelNames(),
+	}, nil
 }
 
 // AddCollection adds a collection into MetaStore.

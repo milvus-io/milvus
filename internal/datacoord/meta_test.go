@@ -6067,6 +6067,167 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 	})
 }
 
+// expectCollectionList makes b list ids as the collections of dbName.
+func expectCollectionList(b *broker.MockBroker, dbName string, ids []int64) *broker.MockBroker_ShowCollections_Call {
+	return b.EXPECT().ShowCollections(mock.Anything, dbName).Return(&milvuspb.ShowCollectionsResponse{CollectionIds: ids}, nil)
+}
+
+func TestMeta_ReloadCollectionsFromRootcoordConcurrently(t *testing.T) {
+	ids := lo.RangeFrom[int64](1, 2000)
+	responses := make(map[int64]*milvuspb.DescribeCollectionResponse, len(ids))
+	for _, id := range ids {
+		responses[id] = &milvuspb.DescribeCollectionResponse{
+			CollectionID:        id,
+			Schema:              &schemapb.CollectionSchema{Name: fmt.Sprint(id)},
+			StartPositions:      []*commonpb.KeyDataPair{{Key: fmt.Sprint(id)}},
+			Properties:          []*commonpb.KeyValuePair{{Key: "k", Value: fmt.Sprint(id)}},
+			CreatedTimestamp:    uint64(id),
+			DbName:              fmt.Sprint("db", id%3),
+			DbId:                id % 3,
+			VirtualChannelNames: []string{fmt.Sprint("ch", id)},
+		}
+	}
+	b := broker.NewMockBroker(t)
+	b.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"default"}}, nil).Once()
+	expectCollectionList(b, "default", ids).Once()
+
+	// The first collectionCacheRecoveryConcurrency lookups wait for one
+	// another, so they can only finish by running at once.
+	var (
+		mu                    sync.Mutex
+		inFlight, maxInFlight int
+		started               atomic.Int64
+	)
+	allStarted := make(chan struct{})
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) (*milvuspb.DescribeCollectionResponse, error) {
+			mu.Lock()
+			inFlight++
+			maxInFlight = max(maxInFlight, inFlight)
+			mu.Unlock()
+			defer func() {
+				mu.Lock()
+				inFlight--
+				mu.Unlock()
+			}()
+			if s := started.Add(1); s <= collectionCacheRecoveryConcurrency {
+				if s == collectionCacheRecoveryConcurrency {
+					close(allStarted)
+				}
+				select {
+				case <-allStarted:
+				case <-time.After(10 * time.Second):
+					return nil, merr.WrapErrServiceInternalMsg("the collection lookups did not run concurrently")
+				}
+			}
+			return responses[id], nil
+		}).Times(len(ids))
+	b.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) ([]int64, error) {
+			return []int64{id * 10}, nil
+		}).Times(len(ids))
+
+	m := &meta{metaStore: metacache.NewMetaStore(nil)}
+	require.NoError(t, m.reloadCollectionsFromRootcoord(t.Context(), b))
+
+	assert.Equal(t, collectionCacheRecoveryConcurrency, maxInFlight,
+		"the lookups run concurrently, never more than the bound at once")
+	require.Len(t, m.GetCollections(), len(ids))
+	for _, id := range ids {
+		resp := responses[id]
+		require.Equal(t, &collectionInfo{
+			ID:             id,
+			Schema:         resp.GetSchema(),
+			Partitions:     []int64{id * 10},
+			StartPositions: resp.GetStartPositions(),
+			Properties:     map[string]string{"k": fmt.Sprint(id)},
+			CreatedAt:      uint64(id),
+			DatabaseName:   resp.GetDbName(),
+			DatabaseID:     resp.GetDbId(),
+			VChannelNames:  resp.GetVirtualChannelNames(),
+		}, m.GetCollection(id))
+	}
+}
+
+// A collection dropped after it was listed fails its lookup with
+// ErrCollectionNotFound, which fails the attempt instead of skipping the
+// collection. The attempt installs nothing and the error stays a SystemError,
+// which initMeta's retry.Do runs again on a fresh list.
+func TestMeta_ReloadCollectionsFromRootcoordDroppedCollection(t *testing.T) {
+	ids := lo.RangeFrom[int64](1, 2000)
+	dropped := ids[1000]
+	remaining := lo.Without(ids, dropped)
+	// As coordinatorBroker returns it: through the RootCoord status.
+	notFound := merr.Error(merr.Status(merr.WrapErrCollectionNotFound(dropped)))
+	b := broker.NewMockBroker(t)
+	b.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"default"}}, nil).Times(2)
+	expectCollectionList(b, "default", ids).Once()
+	expectCollectionList(b, "default", remaining).Once()
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) (*milvuspb.DescribeCollectionResponse, error) {
+			if id == dropped {
+				return nil, notFound
+			}
+			return &milvuspb.DescribeCollectionResponse{CollectionID: id}, nil
+		})
+	b.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) ([]int64, error) {
+			assert.NotEqual(t, dropped, id, "a failed describe skips the partition listing")
+			return []int64{id * 10}, nil
+		})
+
+	m := &meta{metaStore: metacache.NewMetaStore(nil)}
+	err := m.reloadCollectionsFromRootcoord(t.Context(), b)
+	require.Equal(t, notFound, err)
+	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+	assert.Empty(t, m.GetCollections(), "a failed attempt installs nothing")
+
+	require.NoError(t, m.reloadCollectionsFromRootcoord(t.Context(), b))
+	assert.Len(t, m.GetCollections(), len(remaining))
+	assert.Nil(t, m.GetCollection(dropped))
+}
+
+// A failed lookup aborts the attempt. When several fail, the attempt returns
+// the failure of the first failed collection in list order, even when a later
+// collection failed first.
+func TestMeta_ReloadCollectionsFromRootcoordReturnsFirstFailureInListOrder(t *testing.T) {
+	ids := lo.RangeFrom[int64](1, 5000)
+	early, late := ids[100], ids[200]
+	earlyErr := merr.WrapErrServiceUnavailable("injected show partitions failure")
+	lateFailed := make(chan struct{})
+	var describeCalls atomic.Int64
+	b := broker.NewMockBroker(t)
+	b.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"default"}}, nil).Once()
+	expectCollectionList(b, "default", ids).Once()
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) (*milvuspb.DescribeCollectionResponse, error) {
+			describeCalls.Add(1)
+			if id == late {
+				close(lateFailed)
+				return nil, merr.WrapErrServiceInternalMsg("injected describe failure")
+			}
+			return &milvuspb.DescribeCollectionResponse{CollectionID: id}, nil
+		})
+	b.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) ([]int64, error) {
+			if id == early {
+				select {
+				case <-lateFailed:
+				case <-time.After(10 * time.Second):
+					t.Error("the later collection was never looked up")
+				}
+				return nil, earlyErr
+			}
+			return []int64{id * 10}, nil
+		})
+
+	m := &meta{metaStore: metacache.NewMetaStore(nil)}
+	err := m.reloadCollectionsFromRootcoord(t.Context(), b)
+	require.Equal(t, earlyErr, err)
+	assert.Empty(t, m.GetCollections())
+	assert.Less(t, describeCalls.Load(), int64(len(ids)), "no lookups start after a failure")
+}
+
 func TestMeta_GetSegmentsJSON(t *testing.T) {
 	ms := metacache.NewMetaStore(nil)
 	// Create a mock meta object
