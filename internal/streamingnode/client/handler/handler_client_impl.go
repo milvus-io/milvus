@@ -36,6 +36,7 @@ var (
 
 type handlerClientImpl struct {
 	queryViewSyncClient        QueryViewSyncClient
+	queryViewClient            QueryViewClient
 	newTransformLogEventStream func(context.Context, *transformlogclient.EventStreamOptions, streamingpb.StreamingNodeHandlerServiceClient) (*transformlogclient.EventStream, error)
 	lifetime                   *typeutil.Lifetime
 	service                    lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]

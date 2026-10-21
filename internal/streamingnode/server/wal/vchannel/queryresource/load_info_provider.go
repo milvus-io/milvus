@@ -38,9 +38,11 @@ func (p *futureLoadInfoProvider) QueryViewLoadInfo(ctx context.Context, collecti
 		return QueryViewLoadInfo{}, merr.WrapErrServiceInternalMsg("query view load info collection mismatch: expected %d, got %d", collectionID, resp.GetCollectionID())
 	}
 	return QueryViewLoadInfo{
-		PartitionIDs: append([]int64(nil), resp.GetPartitionIDs()...),
-		LoadFields:   nonNilLoadFields(resp.GetLoadFields()),
-		IndexInfos:   nonNilIndexInfos(resp.GetIndexInfoList()),
+		PartitionIDs:         append([]int64(nil), resp.GetPartitionIDs()...),
+		LoadFields:           nonNilLoadFields(resp.GetLoadFields()),
+		RequiredFields:       nonNilLoadFields(resp.GetRequiredFields()),
+		SkipLoadDynamicField: resp.GetSkipLoadDynamicField(),
+		IndexInfos:           nonNilIndexInfos(resp.GetIndexInfoList()),
 	}, nil
 }
 

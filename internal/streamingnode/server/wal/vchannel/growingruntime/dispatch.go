@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -72,6 +73,17 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 		return nil
 	}
 	switch msg.MessageType() {
+	case message.MessageTypeAlterCollection:
+		if !applyGrowing {
+			return nil
+		}
+		altered := message.MustAsImmutableAlterCollectionMessageV2(msg)
+		if !messageutil.IsSchemaChange(altered.Header()) {
+			return nil
+		}
+		// WAL dispatch serializes this transition with insert conversion and write.
+		// The native collection lazily reopens existing segments on the next access.
+		return r.collection.UpdateSchema(altered.MustBody().GetUpdates().GetSchema(), msg.TimeTick())
 	case message.MessageTypeCreateSegment:
 		if !applyGrowing {
 			return nil

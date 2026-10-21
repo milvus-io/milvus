@@ -121,6 +121,8 @@ type HandlerClient interface {
 
 	// QueryViewSyncClient returns the QueryView sync domain client.
 	QueryViewSyncClient() QueryViewSyncClient
+	// QueryViewClient returns the QueryView domain client.
+	QueryViewClient() QueryViewClient
 
 	// Close closes the handler client.
 	// It will only stop the underlying service discovery, but don't stop the producer and consumer created by it.
@@ -154,6 +156,7 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 		newTransformLogEventStream: transformlogclient.CreateEventStream,
 	}
 	hc.queryViewSyncClient = newQueryViewSyncClient(hc, conn)
+	hc.queryViewClient = newQueryViewClient(hc, conn)
 	return hc
 }
 
@@ -171,6 +174,8 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 			{
 				"name": []map[string]string{
 					{"service": "milvus.proto.streaming.StreamingNodeHandlerService"},
+					{"service": "milvus.proto.view.QueryPlanService"},
+					{"service": "milvus.proto.view.ViewQueryService"},
 				},
 				"waitForReady": true,
 				"retryPolicy":  retryPolicy,

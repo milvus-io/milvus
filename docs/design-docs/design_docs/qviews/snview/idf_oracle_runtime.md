@@ -2,9 +2,11 @@
 
 ## Contract
 
-A loaded vchannel owns one current BM25 aggregate, shared by all QueryViews and
-all request DataVersions. Statistics are the newest DataView baseline successfully prepared locally for
-a received QueryView, plus applied live growing events. "Newest" is local to SN;
+A loaded vchannel retains BM25 oracles by
+`ReadSchemaKey{SchemaVersion, LoadInfoVersion}`. Views with the same read identity
+share one current aggregate across request DataVersions. Statistics are the
+newest DataView baseline successfully prepared for that oracle, plus applied
+live growing events. "Newest" is local to SN;
 it does not mean the coordinator's globally latest DataVersion. They are not historical
 MVCC snapshots. Segment selection, MVCC visibility and Up serving leases remain
 versioned independently. A query plan fixes its IDF vectors and average document
@@ -18,14 +20,15 @@ implement a missing-object/GC full-rebuild fallback.
 
 ## Retained state
 
-- One aggregate per loaded BM25 field: document frequencies, row and token counts.
+- Per read identity, one aggregate per loaded BM25 field: document frequencies, row and token counts.
 - One mutable BM25Stats per contributing growing segment, with flush/seal metadata.
 - Sealed resource descriptors (segment, partition, exact stats paths/manifest),
   without per-segment sealed statistics, memory cache or local disk cache.
 - Current DataVersion, serialized preparation and at most one shared lazy materialization.
 - Growing contribution membership (segment IDs only), without duplicate statistics.
 
-There is no DataVersion-to-statistics map or duplicate growing contribution map.
+There is no DataVersion-to-statistics map within an oracle. Distinct read
+identities may retain separate growing statistics and aggregates.
 Same-ID resource changes replace the old descriptor and contribution. Zero
 frequency keys are removed; map capacity can be compacted after substantial
 shrinkage.
@@ -75,7 +78,7 @@ open/read retry configuration.
 
 A received QueryView prepares its explicit DataVersion before reporting Ready.
 Preparation first passes the owner final-commit check and applied-event barrier,
-then advances the single materialized aggregate. The old aggregate remains usable
+then advances that read identity's materialized aggregate. The old aggregate remains usable
 while I/O proceeds. An unmaterialized lazy runtime only updates its target; it
 performs no sealed I/O until the first BM25 query. Once materialized, all later
 preparation is synchronous. There is no independent background advancement task
@@ -142,6 +145,22 @@ the remaining view watermark; closing the last runtime instead cancels/drains
 refresh work and releases all statistics. No scheduled worker waits for another
 queued task on the same scheduler.
 
+## Read-schema preparation
+
+`PrepareSchema` captures an exact read-schema WAL snapshot and buffers the
+concurrent live tail with a bounded queue. It installs the new oracle only after
+snapshot preparation and buffered events complete, while previous oracles stay
+available. Snapshot-covered events are filtered to avoid duplicate contribution.
+Live events subsequently reach every retained oracle. `PrepareSchemaDataVersion`
+advances the requested identity, and `BuildIDFBatchForSchema` selects it for a
+plan without borrowing the latest schema's aggregate. A new identity's initial
+capture does not roll behind the current oracle's prepared DataVersion.
+
+The read identity map remains until runtime close. Early reclamation is deferred;
+these are current aggregates for distinct schemas/load scopes, not historical
+MVCC statistics. Planning batches remain internally consistent under one
+selected oracle's lock.
+
 ## Query behavior
 
 BuildIDF/BuildIDFBatch accept a query context for lazy initialization and do not
@@ -158,8 +177,10 @@ incorrectly suppressing old-view candidates.
 
 ## Cost and validation
 
-With global vocabulary U, growing statistics G and sealed metadata M, steady
-memory is O(U + G + M), independent of concurrent DataVersion count. Refresh
+For one read identity, with vocabulary U, growing statistics G and sealed
+metadata M, steady memory is O(U + G + M), independent of concurrent DataVersion
+count. Total memory sums over retained read identities; it is not independent
+of SchemaVersion/LoadInfoVersion count. Refresh
 adds positive/negative delta memory plus at most C decoded segment statistics and
 C read buffers, where C is the process-wide concurrency limit. Large compactions
 may approach corpus size. The read limit bounds task count, not bytes; a very large
@@ -170,7 +191,7 @@ file cache. Eviction trades an additional old-stats S3 read for lower memory.
 
 Validate flush/compaction and same-ID replacement, concurrent inserts, delayed
 seal notification, failure/retry/cancellation atomicity, release ordering, multiple
-old/new views using one aggregate, hybrid-query consistency, empty latest corpus
+old/new views with the same read identity using one aggregate, hybrid-query consistency, empty latest corpus
 with nonempty old-view candidates, and stable memory/read counts across many
 versions. Use real BM25 RPC validation as well as deterministic tests.
 
