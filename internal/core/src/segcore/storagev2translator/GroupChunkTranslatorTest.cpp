@@ -172,12 +172,16 @@ TEST_P(GroupChunkTranslatorTest, FooterReuseScopedToLoadOperation) {
 
     // Write a dedicated file with enough row groups to produce at least three
     // cells, so non-adjacent cell ids force two batch tasks on the same file.
-    // (The SetUp fixture has a single row group, which would only ever produce
-    // one batch and could not distinguish shared vs per-batch footer opens.)
+    // (The SetUp fixture writes only the {0..15} scalar/array columns, whose
+    // rows are small enough that the whole file stays one row group, so it
+    // could only ever produce one batch and could not distinguish shared vs
+    // per-batch footer opens.)
     std::string multi_rg_path = path_ + "/footer_reuse_multi_rg.parquet";
     std::vector<std::string> write_paths{multi_rg_path};
+    // Include the 128-dim vector column (field 16) so each row is large and
+    // the writer splits the file into many row groups.
     auto column_groups = std::vector<std::vector<int>>{
-        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
+        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}};
     auto writer_memory = 16 * 1024 * 1024;
     auto storage_config = milvus_storage::StorageConfig();
     auto writer_result = milvus_storage::PackedRecordBatchWriter::Make(
@@ -191,7 +195,7 @@ TEST_P(GroupChunkTranslatorTest, FooterReuseScopedToLoadOperation) {
     ASSERT_TRUE(writer_result.ok());
     auto writer = writer_result.ValueOrDie();
     int64_t total_rows = 0;
-    for (int64_t i = 0; i < 12; ++i) {
+    for (int64_t i = 0; i < 60; ++i) {
         auto dataset = DataGen(schema_, 1000);
         auto record_batch =
             ConvertToArrowRecordBatch(dataset, 128, arrow_schema_);
@@ -199,6 +203,18 @@ TEST_P(GroupChunkTranslatorTest, FooterReuseScopedToLoadOperation) {
         ASSERT_TRUE(writer->Write(record_batch).ok());
     }
     ASSERT_TRUE(writer->Close().ok());
+
+    // Verify the file really has enough row groups for at least three cells,
+    // so the non-adjacent-cell scenario below exercises multiple batches.
+    auto rg_result =
+        milvus_storage::FileRowGroupReader::Make(fs_, multi_rg_path);
+    ASSERT_TRUE(rg_result.ok()) << rg_result.status();
+    auto row_group_count = rg_result.ValueOrDie()
+                               ->file_metadata()
+                               ->GetRowGroupMetadataVector()
+                               .size();
+    ASSERT_GE(row_group_count, 3 * kRowGroupsPerCell - (kRowGroupsPerCell - 1));
+    ASSERT_TRUE(rg_result.ValueOrDie()->Close().ok());
 
     auto counts = std::make_shared<ReadCounts>();
     auto counted_fs = std::make_shared<CountedFileSystem>(fs_, counts);
