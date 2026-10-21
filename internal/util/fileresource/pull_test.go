@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/bytedance/mockey"
@@ -20,17 +21,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
-
-type flightWaitContext struct {
-	context.Context
-	waiting chan struct{}
-	once    sync.Once
-}
-
-func (c *flightWaitContext) Done() <-chan struct{} {
-	c.once.Do(func() { close(c.waiting) })
-	return c.Context.Done()
-}
 
 func receiveFlightResult[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
@@ -78,19 +68,6 @@ func setupBatchResourceLoader(t *testing.T, fetch ResourceFetcher) *AnalyzerReso
 	loader.lease = 0
 	t.Cleanup(func() { SetResourceFetcher(nil, nil) })
 	return loader
-}
-
-// Signal inside acquire, after metadata fetching and before waiting in Do.
-// The second call's Done is evaluated only after its flight wait is registered.
-func signalSecondAcquire(joined chan struct{}) {
-	var calls atomic.Int32
-	var original func(*AnalyzerResourceManager, context.Context, int64, *internalpb.FileResourceInfo) (*resourceEntry, error)
-	mockey.Mock((*AnalyzerResourceManager).acquire).Origin(&original).To(func(l *AnalyzerResourceManager, ctx context.Context, id int64, info *internalpb.FileResourceInfo) (*resourceEntry, error) {
-		if calls.Add(1) == 2 {
-			ctx = &flightWaitContext{Context: ctx, waiting: joined}
-		}
-		return original(l, ctx, id, info)
-	}).Build()
 }
 
 func dictionaryInfo(id int64) *internalpb.FileResourceInfo {
@@ -150,52 +127,53 @@ func TestAcquireSharesDownloadAcrossMetadataRequests(t *testing.T) {
 				calls.Add(1)
 				return dictionaryInfo(id), nil
 			}, nil)
-			entered := make(chan context.Context, 1)
-			stopped, release := make(chan struct{}), make(chan struct{})
-			var once sync.Once
-			unblock := func() { once.Do(func() { close(release) }) }
-			defer unblock()
-			download := mockey.Mock((*BaseManager).downloadFile).To(func(_ *BaseManager, ctx context.Context, _ storage.ChunkManager, _ *internalpb.FileResourceInfo, _ string, _ time.Duration) error {
-				defer close(stopped)
-				entered <- ctx
-				select {
-				case <-release:
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
+			synctest.Test(t, func(t *testing.T) {
+				entered := make(chan context.Context, 1)
+				stopped, release := make(chan struct{}), make(chan struct{})
+				var once sync.Once
+				unblock := func() { once.Do(func() { close(release) }) }
+				defer unblock()
+				download := mockey.Mock((*BaseManager).downloadFile).To(func(_ *BaseManager, ctx context.Context, _ storage.ChunkManager, _ *internalpb.FileResourceInfo, _ string, _ time.Duration) error {
+					defer close(stopped)
+					entered <- ctx
+					select {
+					case <-release:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}).Build()
+				type result struct {
+					resources *Resources
+					err       error
 				}
-			}).Build()
-			type result struct {
-				resources *Resources
-				err       error
-			}
-			first, second := make(chan result, 1), make(chan result, 1)
-			joined := make(chan struct{})
-			signalSecondAcquire(joined)
-			firstCtx, firstCancel := context.WithCancel(t.Context())
-			defer firstCancel()
-			secondCtx, secondCancel := context.WithCancel(t.Context())
-			defer secondCancel()
-			go func() { r, err := Acquire(firstCtx, []int64{7}, remoteDictionaryParams); first <- result{r, err} }()
-			workerCtx := receiveFlightResult(t, entered)
-			go func() { r, err := Acquire(secondCtx, []int64{7}, remoteDictionaryParams); second <- result{r, err} }()
-			receiveFlightResult(t, joined)
-			firstCancel()
-			require.ErrorIs(t, receiveFlightResult(t, first).err, context.Canceled)
-			require.NoError(t, workerCtx.Err())
-			if cancelAll {
-				secondCancel()
-				require.ErrorIs(t, receiveFlightResult(t, second).err, context.Canceled)
-				receiveFlightResult(t, stopped)
-				require.ErrorIs(t, workerCtx.Err(), context.Canceled)
-			} else {
-				unblock()
-				remaining := receiveFlightResult(t, second)
-				require.NoError(t, remaining.err)
-				remaining.resources.Close()
-			}
-			require.EqualValues(t, 2, calls.Load(), "each RPC owns its metadata query")
-			require.Equal(t, 1, download.Times())
+				first, second := make(chan result, 1), make(chan result, 1)
+				firstCtx, firstCancel := context.WithCancel(t.Context())
+				defer firstCancel()
+				secondCtx, secondCancel := context.WithCancel(t.Context())
+				defer secondCancel()
+				go func() { r, err := Acquire(firstCtx, []int64{7}, remoteDictionaryParams); first <- result{r, err} }()
+				workerCtx := receiveFlightResult(t, entered)
+				go func() { r, err := Acquire(secondCtx, []int64{7}, remoteDictionaryParams); second <- result{r, err} }()
+				// Both callers are now waiting on the same unfinished download.
+				synctest.Wait()
+				firstCancel()
+				require.ErrorIs(t, receiveFlightResult(t, first).err, context.Canceled)
+				require.NoError(t, workerCtx.Err())
+				if cancelAll {
+					secondCancel()
+					require.ErrorIs(t, receiveFlightResult(t, second).err, context.Canceled)
+					receiveFlightResult(t, stopped)
+					require.ErrorIs(t, workerCtx.Err(), context.Canceled)
+				} else {
+					unblock()
+					remaining := receiveFlightResult(t, second)
+					require.NoError(t, remaining.err)
+					remaining.resources.Close()
+				}
+				require.EqualValues(t, 2, calls.Load(), "each RPC owns its metadata query")
+				require.Equal(t, 1, download.Times())
+			})
 		})
 	}
 }
@@ -472,58 +450,52 @@ func TestOverlappingResourceBatchesCancelIndependently(t *testing.T) {
 			}
 			return infos, nil
 		})
-		entered := map[int64]chan context.Context{7: make(chan context.Context, 2), 8: make(chan context.Context, 2), 9: make(chan context.Context, 2)}
-		release := make(chan struct{})
-		var once sync.Once
-		unblock := func() { once.Do(func() { close(release) }) }
-		defer unblock()
-		download := mockey.Mock((*BaseManager).downloadFile).To(func(_ *BaseManager, ctx context.Context, _ storage.ChunkManager, info *internalpb.FileResourceInfo, _ string, _ time.Duration) error {
-			entered[info.GetId()] <- ctx
-			select {
-			case <-release:
-				return nil
-			case <-ctx.Done():
-				return ctx.Err()
+		synctest.Test(t, func(t *testing.T) {
+			entered := map[int64]chan context.Context{7: make(chan context.Context, 2), 8: make(chan context.Context, 2), 9: make(chan context.Context, 2)}
+			release := make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			download := mockey.Mock((*BaseManager).downloadFile).To(func(_ *BaseManager, ctx context.Context, _ storage.ChunkManager, info *internalpb.FileResourceInfo, _ string, _ time.Duration) error {
+				entered[info.GetId()] <- ctx
+				select {
+				case <-release:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}).Build()
+			firstCtx, cancelFirst := context.WithCancel(t.Context())
+			defer cancelFirst()
+			first := make(chan error, 1)
+			go func() { _, err := Acquire(firstCtx, []int64{7, 8}, remoteDictionaryParams); first <- err }()
+			aCtx := receiveFlightResult(t, entered[7])
+			bCtx := receiveFlightResult(t, entered[8])
+			type result struct {
+				resources *Resources
+				err       error
 			}
-		}).Build()
-		joinedB := make(chan struct{})
-		var bWaiters atomic.Int32
-		var original func(*AnalyzerResourceManager, context.Context, int64, *internalpb.FileResourceInfo) (*resourceEntry, error)
-		mockey.Mock((*AnalyzerResourceManager).acquire).Origin(&original).To(func(l *AnalyzerResourceManager, ctx context.Context, id int64, info *internalpb.FileResourceInfo) (*resourceEntry, error) {
-			if id == 8 && bWaiters.Add(1) == 2 {
-				ctx = &flightWaitContext{Context: ctx, waiting: joinedB}
-			}
-			return original(l, ctx, id, info)
-		}).Build()
-		firstCtx, cancelFirst := context.WithCancel(t.Context())
-		defer cancelFirst()
-		first := make(chan error, 1)
-		go func() { _, err := Acquire(firstCtx, []int64{7, 8}, remoteDictionaryParams); first <- err }()
-		aCtx := receiveFlightResult(t, entered[7])
-		bCtx := receiveFlightResult(t, entered[8])
-		type result struct {
-			resources *Resources
-			err       error
-		}
-		second := make(chan result, 1)
-		go func() {
-			r, err := Acquire(t.Context(), []int64{8, 9}, remoteDictionaryParams)
-			second <- result{r, err}
-		}()
-		receiveFlightResult(t, joinedB)
-		cCtx := receiveFlightResult(t, entered[9])
-		cancelFirst()
-		require.ErrorIs(t, receiveFlightResult(t, first), context.Canceled)
-		receiveFlightResult(t, aCtx.Done())
-		require.NoError(t, bCtx.Err(), "the surviving caller still owns B")
-		require.NoError(t, cCtx.Err())
-		unblock()
-		remaining := receiveFlightResult(t, second)
-		require.NoError(t, remaining.err)
-		remaining.resources.Close()
-		require.Equal(t, 3, download.Times(), "B downloads only once despite overlapping metadata requests")
-		batchesMu.Lock()
-		require.Equal(t, [][]int64{{7, 8}, {8, 9}}, batches)
-		batchesMu.Unlock()
+			second := make(chan result, 1)
+			go func() {
+				r, err := Acquire(t.Context(), []int64{8, 9}, remoteDictionaryParams)
+				second <- result{r, err}
+			}()
+			cCtx := receiveFlightResult(t, entered[9])
+			// Wait until both batches have registered every resource wait.
+			synctest.Wait()
+			cancelFirst()
+			require.ErrorIs(t, receiveFlightResult(t, first), context.Canceled)
+			receiveFlightResult(t, aCtx.Done())
+			require.NoError(t, bCtx.Err(), "the surviving caller still owns B")
+			require.NoError(t, cCtx.Err())
+			unblock()
+			remaining := receiveFlightResult(t, second)
+			require.NoError(t, remaining.err)
+			remaining.resources.Close()
+			require.Equal(t, 3, download.Times(), "B downloads only once despite overlapping metadata requests")
+			batchesMu.Lock()
+			require.Equal(t, [][]int64{{7, 8}, {8, 9}}, batches)
+			batchesMu.Unlock()
+		})
 	})
 }

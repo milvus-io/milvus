@@ -55,6 +55,7 @@ func TestMaterializationDefersPreparation(t *testing.T) {
 		{"native construction", nil, 1},
 	} {
 		mockey.PatchConvey(tc.name, t, func() {
+			mockey.Mock(fileresource.IsPullEnabled).Return(true).Build()
 			acquire := mockey.Mock(fileresource.Acquire).To(func(context.Context, []int64, ...string) (*fileresource.Resources, error) {
 				return &fileresource.Resources{}, tc.prepareErr
 			}).Build()
