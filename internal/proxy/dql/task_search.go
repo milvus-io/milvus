@@ -1657,10 +1657,12 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 func (t *SearchTask) supportsStreamingReduce() bool {
 	req := t.SearchRequest
 	if req == nil ||
-		t.aggCtx != nil ||
 		req.GetIsAdvanced() ||
 		len(req.GetSubReqs()) > 0 {
 		return false
+	}
+	if t.aggCtx != nil {
+		return len(req.GetGroupByFieldIds()) > 0 && !req.GetIsIterator()
 	}
 	if req.GetGroupByFieldId() > 0 || len(req.GetGroupByFieldIds()) > 0 {
 		return !req.GetIsIterator()
@@ -1786,6 +1788,22 @@ func appendFinalSearchChunk(
 				appendedSize += typeutil.AppendFieldData(output.FieldsData, chunk.GetFieldsData(), rowIndex, fieldIndexes...)
 			}
 			if groupIndexComputer != nil {
+				// A Chunk with no nulls may omit validity; keep it aligned across Chunks.
+				for i, field := range chunkGroups {
+					dst := output.GroupByFieldValues[i]
+					valid := typeutil.GetFieldDataValidData(dst)
+					if len(typeutil.GetFieldDataValidData(field)) == 0 {
+						if len(valid) > 0 {
+							typeutil.SetFieldDataValidData(dst, append(valid, true))
+						}
+					} else if len(valid) == 0 {
+						valid = make([]bool, typeutil.GetSizeOfIDs(output.Ids))
+						for j := range valid {
+							valid[j] = true
+						}
+						typeutil.SetFieldDataValidData(dst, valid)
+					}
+				}
 				fieldIndexes := groupIndexComputer.Compute(rowIndex)
 				appendedSize += typeutil.AppendFieldData(output.GroupByFieldValues, chunkGroups, rowIndex, fieldIndexes...)
 			}
@@ -1889,7 +1907,8 @@ func (t *SearchTask) consumeResultStream(
 	if len(data.GetTopks()) > 0 {
 		data.TopK = data.GetTopks()[len(data.GetTopks())-1]
 	}
-	if len(groupByFieldIDs) > 0 {
+	// Composite-key aggregation preserves Batch's accepted-hit walk order.
+	if len(groupByFieldIDs) > 0 && (t.aggCtx == nil || len(groupByFieldIDs) == 1) {
 		var err error
 		data, err = regroupFinalSearchResult(data, groupByFieldIDs)
 		if err != nil {
