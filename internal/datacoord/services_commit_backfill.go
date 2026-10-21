@@ -421,8 +421,17 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 	g.SetLimit(backfillClassifyConcurrency)
 	for i, segIDStr := range segIDs {
 		g.Go(func() error {
-			res := s.classifyOneBackfillSegment(gCtx, bucket, result, segIDStr)
-			res.segIDStr = segIDStr
+			// errgroup.SetLimit never skips a slot (g.Go blocks instead), so
+			// every closure runs. A canceled/timed-out request must not keep
+			// reading every remaining manifest: short-circuit segments that
+			// have not started yet and record them as failed below.
+			res := classifySegmentResult{segIDStr: segIDStr}
+			if gCtx.Err() == nil {
+				res = s.classifyOneBackfillSegment(gCtx, bucket, result, segIDStr)
+				res.segIDStr = segIDStr
+			} else {
+				res.err = gCtx.Err()
+			}
 			results[i] = res
 			return nil
 		})
@@ -447,15 +456,6 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 			})
 			continue
 		}
-		if res.segIDStr == "" {
-			// The errgroup never scheduled this segment (cancellation before its
-			// slot). Account for it as failed so the per-segment contract is not
-			// under-reported.
-			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: 0, Ok: false, Kind: "", Reason: "classification canceled before scheduling",
-			})
-			continue
-		}
 		if res.unit != nil {
 			units = append(units, *res.unit)
 		}
@@ -472,10 +472,11 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 const backfillClassifyConcurrency = 32
 
 // classifySegmentResult is the outcome of classifying one backfill segment.
-// Exactly one of unit / status / err is set: a commit unit, a per-segment
-// failure status recorded during pre-validation, or a context cancellation.
-// segIDStr is always the source key, retained so a canceled slot can still be
-// reported as failed.
+// At most one of unit / status / err is set: a commit unit, a per-segment
+// failure status recorded during pre-validation, or a context cancellation
+// (segments not yet started when the request was torn down). segIDStr is
+// always the source key, retained so a canceled segment can still be reported
+// as failed.
 type classifySegmentResult struct {
 	segIDStr string
 	unit     *backfillCommitUnit

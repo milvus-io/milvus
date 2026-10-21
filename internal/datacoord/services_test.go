@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -6021,6 +6022,62 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// maxBackfillCommitBatch = 2 calls.
 		assert.Equal(t, 2, commitCalls)
 		assert.Len(t, committed, len(segIDs))
+	})
+
+	// A canceled/timed-out request must not keep reading every remaining
+	// manifest. errgroup.SetLimit never skips a slot (g.Go blocks instead),
+	// so every closure runs; the ones that have not started yet when the
+	// request is torn down record the cancellation as a per-segment failure
+	// instead of classifying, and the per-segment contract still accounts for
+	// every segment.
+	t.Run("classification_canceled_accounts_all_segments", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		// Twice the classification concurrency, so more than a full worker
+		// generation of closures can only run after the short-circuit check;
+		// with the request already canceled, none of them reads a manifest.
+		const n = backfillClassifyConcurrency * 2
+		var b strings.Builder
+		b.WriteString(`{"success": true, "collectionId": 100, "segments": {`)
+		for i := 0; i < n; i++ {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			id := 1100 + i
+			fmt.Fprintf(&b, `"%d": {"rowCount": 5, "outputPath": "x", "ops": [{"type": "add", "columns": ["100"], "format": "parquet", "rowCount": 5, "files": [{"path": "/seg/%d/_data/100.parquet", "startIndex": 0, "endIndex": 5}]}]}`, id, id)
+		}
+		b.WriteString(`}}`)
+
+		server := newServerForCommit(t, m, nil, []byte(b.String()))
+
+		var cgReads atomic.Int32
+		patch := mockey.Mock(packed.ReadManifestColumnGroups).To(
+			func(_ string, _ *indexpb.StorageConfig) ([]packed.ColumnGroupEntry, error) {
+				cgReads.Add(1)
+				return nil, nil
+			}).Build()
+		defer patch.UnPatch()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bucket/result.json",
+		})
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(n), resp.GetTotalSegments())
+		assert.Equal(t, int32(n), resp.GetFailedSegments())
+		assert.Equal(t, int32(0), resp.GetCommittedSegments())
+		// No manifest read may happen after the request is torn down.
+		assert.Equal(t, int32(0), cgReads.Load())
+		require.Len(t, resp.GetSegmentStatuses(), n)
+		for _, st := range resp.GetSegmentStatuses() {
+			assert.False(t, st.GetOk())
+			assert.Equal(t, "v3", st.GetKind())
+			assert.Contains(t, st.GetReason(), "classification canceled")
+		}
 	})
 
 	// A build created after classification (the removal snapshot) but before the
