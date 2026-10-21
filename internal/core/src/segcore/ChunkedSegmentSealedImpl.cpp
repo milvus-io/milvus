@@ -2971,7 +2971,6 @@ AccumulateWarmupPolicyForGroup(const std::string& policy,
 }
 
 struct FileMetadataLoadResult {
-    std::shared_ptr<milvus_storage::PreparedParquetFile> prepared_file;
     milvus_storage::RowGroupMetadataVector row_group_meta;
     // per field_id → one deep-owning skip metric per row group (positional; a
     // row group with no usable statistics carries a NoneFieldChunkMetrics that
@@ -3050,39 +3049,26 @@ LoadGroupChunkMetadata(
                                        file,
                                        &fields_for_stats,
                                        &debug_key]() {
-            auto result = milvus_storage::PreparedParquetFile::Open(
-                fs, file, storage::GetReaderProperties());
+            auto result = milvus_storage::FileRowGroupReader::Make(
+                fs,
+                file,
+                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                storage::GetReaderProperties(),
+                storage::GetArrowReaderProperties());
             if (!result.ok()) {
                 ThrowInfo(
                     milvus::storage::ArrowStatusToErrorCode(result.status()),
-                    "[StorageV2] metadata loader {} failed to prepare {}: {}",
-                    debug_key,
-                    file,
-                    result.status().ToString());
+                    "[StorageV2] Failed to create file row group reader: " +
+                        result.status().ToString());
             }
 
+            auto reader = result.ValueOrDie();
             FileMetadataLoadResult load_result;
-            load_result.prepared_file = std::move(result).ValueOrDie();
+            auto file_metadata = reader->file_metadata();
             load_result.row_group_meta =
-                load_result.prepared_file->row_group_metadata();
+                file_metadata->GetRowGroupMetadataVector();
 
             if (!fields_for_stats.empty()) {
-                auto reader_result = load_result.prepared_file->MakeReader(
-                    nullptr,
-                    milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                    storage::GetArrowReaderProperties());
-                if (!reader_result.ok()) {
-                    ThrowInfo(milvus::storage::ArrowStatusToErrorCode(
-                                  reader_result.status()),
-                              "[StorageV2] Failed to create statistics reader "
-                              "for {}: {}",
-                              file,
-                              reader_result.status().ToString());
-                }
-                auto reader = std::move(reader_result).ValueOrDie();
-                auto close_guard =
-                    folly::makeGuard([&reader]() { (void)reader->Close(); });
-                auto file_metadata = reader->file_metadata();
                 auto field_id_mapping = file_metadata->GetFieldIDMapping();
                 auto parquet_metadata = file_metadata->GetParquetMetadata();
                 auto num_row_groups = parquet_metadata->num_row_groups();
@@ -3132,6 +3118,15 @@ LoadGroupChunkMetadata(
                 }
             }
 
+            auto status = reader->Close();
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "[StorageV2] metadata loader {} failed to close "
+                          "file reader for {} with error {}",
+                          debug_key,
+                          file,
+                          status.ToString());
+            }
             return load_result;
         }));
     }
@@ -3148,12 +3143,10 @@ LoadGroupChunkMetadata(
     });
 
     LoadedGroupChunkMetadata metadata;
-    metadata.prepared_files.reserve(insert_files.size());
     metadata.row_group_meta_list.reserve(insert_files.size());
 
     for (auto& future : futures) {
         auto load_result = future.get();
-        metadata.prepared_files.push_back(std::move(load_result.prepared_file));
         metadata.row_group_meta_list.push_back(
             std::move(load_result.row_group_meta));
         // Keep the metrics positional: one entry per row group in file order,
@@ -3183,7 +3176,6 @@ namespace {
 // constructing a GroupChunkTranslator. Kept in one place so the force-packing
 // rationale cannot drift between the two otherwise identical call sites.
 struct GroupChunkPackingPlan {
-    PreparedParquetFiles prepared_files;
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
     storagev2translator::SkipMetricsByField skip_metrics_by_field;
     // The startup flag alone controls packing, independently of whether
@@ -3202,7 +3194,6 @@ PlanGroupChunkPacking(const std::vector<FieldId>& milvus_field_ids,
         insert_files, selection.fields_for_stats, debug_key);
 
     GroupChunkPackingPlan plan;
-    plan.prepared_files = std::move(metadata.prepared_files);
     plan.force_one_row_group_per_cell = selection.skip_index_enabled;
     plan.row_group_meta_list = std::move(metadata.row_group_meta_list);
     plan.skip_metrics_by_field = std::move(metadata.skip_metrics_by_field);
@@ -3330,7 +3321,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
-                std::move(packing.prepared_files),
+                fs,
+                std::move(insert_files),
                 std::move(packing.row_group_meta_list),
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),
@@ -3469,7 +3461,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
-                std::move(packing.prepared_files),
+                fs,
+                std::move(insert_files),
                 std::move(packing.row_group_meta_list),
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),

@@ -65,7 +65,6 @@
 #include "segcore/indexing/IndexInventory.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/common/metadata.h"
-#include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -2839,8 +2838,6 @@ CreateSealedSegment(
 }
 
 struct LoadedGroupChunkMetadata {
-    std::vector<std::shared_ptr<milvus_storage::PreparedParquetFile>>
-        prepared_files;
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
     storagev2translator::SkipMetricsByField skip_metrics_by_field;
 };
