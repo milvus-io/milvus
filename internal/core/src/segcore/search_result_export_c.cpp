@@ -1063,12 +1063,30 @@ MaterializeOrderedFields(
         segment_fields.size() > 1 &&
         (milvus::cachinglayer::Manager::GetInstance().isEvictionEnabled() ||
          total_rows >= milvus::segcore::kSearchFanoutMinRows ||
-         std::any_of(field_ids.begin(), field_ids.end(), [&](auto field_id) {
-             const auto type =
-                 plan->schema_->operator[](field_id).get_data_type();
-             return milvus::IsVectorDataType(type) ||
-                    !milvus::IsFixedSizeType(type);
-         }));
+         std::any_of(
+             field_ids.begin(),
+             field_ids.end(),
+             [&](auto field_id) {
+                 const auto type =
+                     plan->schema_->operator[](field_id).get_data_type();
+                 return milvus::IsVectorDataType(type) ||
+                        !milvus::IsFixedSizeType(type);
+             }) ||
+         // Mmap pages can fault even when cache eviction is disabled.
+         std::any_of(segment_fields.begin(),
+                     segment_fields.end(),
+                     [&field_ids](const auto& entry) {
+                         const auto* segment = static_cast<
+                             const milvus::segcore::SegmentInternalInterface*>(
+                             entry.second.search_result->segment_);
+                         return segment != nullptr &&
+                                std::any_of(
+                                    field_ids.begin(),
+                                    field_ids.end(),
+                                    [segment](auto field_id) {
+                                        return segment->is_mmap_field(field_id);
+                                    });
+                     }));
     if (fanout) {
         auto& pool = milvus::ThreadPools::GetThreadPool(
             milvus::ThreadPoolPriority::SEARCH_FANOUT);
