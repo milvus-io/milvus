@@ -32,7 +32,8 @@ import (
 // caller mutating the result cannot corrupt the segment's previous state.
 //
 // Only the additive fields participate: insert_binlog_size,
-// insert_binlog_count, stats_binlog_size, and a union over null_counts.
+// insert_binlog_count, stats_binlog_size, and a union over null_counts and
+// valid_element_counts.
 // Everything else — delta_*, timestamp_from/to, delta_timestamp_from/to,
 // timestamp_quantiles — is carried over from base untouched, so a malformed
 // increment cannot overwrite aggregates it has no business changing.
@@ -62,6 +63,23 @@ func addStatsDelta(ctx context.Context, segmentID int64, base, delta *datapb.Sta
 		out.InsertBinlogCount+delta.GetInsertBinlogCount())
 	out.StatsBinlogSize = clampStatsField(ctx, segmentID, "stats_binlog_size",
 		out.StatsBinlogSize+delta.GetStatsBinlogSize())
+
+	// valid_element_counts: an increment's columns are new to the segment, so
+	// its count is the whole count. A field that already has data but no
+	// count stays unknown; adding the increment would publish a partial sum.
+	if vc := delta.GetValidElementCounts(); len(vc) > 0 {
+		for f, n := range vc {
+			_, counted := out.GetValidElementCounts()[f]
+			_, hasData := base.GetNullCounts()[f]
+			if !counted && hasData {
+				continue
+			}
+			if out.ValidElementCounts == nil {
+				out.ValidElementCounts = make(map[int64]int64, len(vc))
+			}
+			out.ValidElementCounts[f] = clampStatsField(ctx, segmentID, "valid_element_counts", out.ValidElementCounts[f]+n)
+		}
+	}
 
 	if nc := delta.GetNullCounts(); len(nc) > 0 {
 		if out.NullCounts == nil {

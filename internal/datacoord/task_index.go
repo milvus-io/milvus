@@ -334,7 +334,14 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 					}
 					isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
 					isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
-					if isVectorArrayIndex {
+					validElements, exact := exactVectorArrayValidElementCount(segment, f)
+					if exact {
+						estimatedVectorArrayVectors = validElements
+						log.Info(ctx, "vector array valid element count from segment statistics",
+							mlog.Int64("fieldID", f.GetFieldID()),
+							mlog.Int64("validElements", validElements))
+					}
+					if isVectorArrayIndex && !exact {
 						estimate, err := estimateVectorArrayElementCountForIndexBuild(segment.SegmentInfo, collectionInfo.Schema, f)
 						if err != nil {
 							failReason := "failed to estimate vector array element count, count is unknown: " + err.Error()
@@ -463,6 +470,19 @@ func isEmbeddingListMetric(indexParams []*commonpb.KeyValuePair) bool {
 	default:
 		return false
 	}
+}
+
+// exactVectorArrayValidElementCount returns the valid element count of an
+// element-nullable VectorArray field recorded in the segment Statistics. The
+// byte-size estimate counts the offset/validity overhead of null elements as
+// vectors, so the recorded count replaces it whenever it exists. Segments
+// written before the count was recorded have no entry and keep the estimate.
+func exactVectorArrayValidElementCount(segment *SegmentInfo, field *schemapb.FieldSchema) (int64, bool) {
+	if segment == nil || !typeutil.IsVectorArrayType(field.GetDataType()) || !field.GetElementNullable() {
+		return 0, false
+	}
+	count, ok := segment.EnsureStats().GetValidElementCounts()[field.GetFieldID()]
+	return count, ok
 }
 
 type vectorArrayElementCountEstimate struct {
