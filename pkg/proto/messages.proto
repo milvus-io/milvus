@@ -173,19 +173,6 @@ message RecoveryBarrierMessageHeader {}
 // RecoveryBarrierMessageBody just nothing.
 message RecoveryBarrierMessageBody {}
 
-message AddFileResourceMessageHeader {}
-
-message AddFileResourceMessageBody {
-    internal.FileResourceInfo resource = 1;
-}
-
-message RemoveFileResourceMessageHeader {}
-
-message RemoveFileResourceMessageBody {
-    int64 resource_id = 1;
-    string name = 2;
-}
-
 // InsertMessageHeader is the header of insert message.
 message InsertMessageHeader {
     int64 collection_id                            = 1;
@@ -1012,4 +999,17 @@ message DropRLSMetadataMessageBody {
         string policy_name = 1;
         string principal_name = 2;
     }
+}
+
+message AddFileResourceMessageHeader {}
+
+message AddFileResourceMessageBody {
+    internal.FileResourceInfo resource = 1;
+}
+
+message RemoveFileResourceMessageHeader {}
+
+message RemoveFileResourceMessageBody {
+    int64 resource_id = 1;
+    string name = 2;
 }
