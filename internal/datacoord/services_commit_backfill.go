@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -30,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"golang.org/x/sync/errgroup"
 )
 
 // CommitBackfillResult fetches the Spark-produced BackfillResult JSON from
@@ -432,7 +433,7 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 	statuses := make([]*datapb.CommitBackfillResultSegmentStatus, 0)
 	for _, res := range results {
 		if res.err != nil {
-			// Context cancelled during classification: the request is being
+			// Context canceled during classification: the request is being
 			// torn down, but the per-segment contract still accounts for the
 			// segment — surface it as failed rather than silently dropping it
 			// and under-reporting the total.
@@ -442,7 +443,7 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 			}
 			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
 				SegmentId: segID, Ok: false, Kind: inferKindFromSegIDStr(result, res.segIDStr),
-				Reason: "classification cancelled: " + res.err.Error(),
+				Reason: "classification canceled: " + res.err.Error(),
 			})
 			continue
 		}
@@ -451,7 +452,7 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 			// slot). Account for it as failed so the per-segment contract is not
 			// under-reported.
 			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-				SegmentId: 0, Ok: false, Kind: "", Reason: "classification cancelled before scheduling",
+				SegmentId: 0, Ok: false, Kind: "", Reason: "classification canceled before scheduling",
 			})
 			continue
 		}
@@ -473,7 +474,7 @@ const backfillClassifyConcurrency = 32
 // classifySegmentResult is the outcome of classifying one backfill segment.
 // Exactly one of unit / status / err is set: a commit unit, a per-segment
 // failure status recorded during pre-validation, or a context cancellation.
-// segIDStr is always the source key, retained so a cancelled slot can still be
+// segIDStr is always the source key, retained so a canceled slot can still be
 // reported as failed.
 type classifySegmentResult struct {
 	segIDStr string
