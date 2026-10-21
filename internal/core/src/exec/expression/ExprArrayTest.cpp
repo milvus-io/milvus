@@ -6747,6 +6747,149 @@ BuildElementLevelCases(const ElementLevelFixture& f) {
          [](const ElemValue& e) { return TvBool(e.b.has_value()); },
          true},
     };
+
+    // LIKE and regex share the element-level path and validity handling of
+    // the comparisons above: a null element is UNKNOWN for every pattern,
+    // including one that matches the "" payload a null slot carries.
+    auto name_tv = [](auto pred) {
+        return [pred](const ElemValue& e) { return TvOf(e.name, pred); };
+    };
+    auto ends_with = [](const std::string& s, const std::string& suffix) {
+        return s.size() >= suffix.size() &&
+               s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+    auto has_b = [](const std::string& s) {
+        return s.find('b') != std::string::npos;
+    };
+    std::vector<ElementLevelCase> pattern_cases = {
+        // LIKE through the generic matcher (OpType::Match), the operator the
+        // parser keeps for patterns it cannot rewrite.
+        {"$[name] like \"%b\"",
+         E::Unary(name, OpType::Match, E::Str("%b")),
+         name_tv(
+             [ends_with](const std::string& s) { return ends_with(s, "b"); })},
+        {"$[name] like \"%b%\"",
+         E::Unary(name, OpType::Match, E::Str("%b%")),
+         name_tv(has_b)},
+        {"$[name] like \"a%\"",
+         E::Unary(name, OpType::Match, E::Str("a%")),
+         name_tv([](const std::string& s) { return s.rfind("a", 0) == 0; })},
+        {"$[name] like \"a%c\"",
+         E::Unary(name, OpType::Match, E::Str("a%c")),
+         name_tv([ends_with](const std::string& s) {
+             return s.rfind("a", 0) == 0 && ends_with(s, "c");
+         })},
+        {"$[name] like \"_b\"",
+         E::Unary(name, OpType::Match, E::Str("_b")),
+         name_tv([](const std::string& s) {
+             return s.size() == 2 && s[1] == 'b';
+         })},
+        {"$[name] like \"__\"",
+         E::Unary(name, OpType::Match, E::Str("__")),
+         name_tv([](const std::string& s) { return s.size() == 2; })},
+        {"$[name] like \"_\"",
+         E::Unary(name, OpType::Match, E::Str("_")),
+         name_tv([](const std::string& s) { return s.size() == 1; })},
+        {"$[name] like \"%a_\"",
+         E::Unary(name, OpType::Match, E::Str("%a_")),
+         name_tv([](const std::string& s) {
+             return s.size() >= 2 && s[s.size() - 2] == 'a';
+         })},
+        {"$[name] like \"\"",
+         E::Unary(name, OpType::Match, E::Str("")),
+         name_tv([](const std::string& s) { return s.empty(); })},
+        {"$[name] like \"zz%\"",
+         E::Unary(name, OpType::Match, E::Str("zz%")),
+         name_tv([](const std::string&) { return false; })},
+        {"$[name] postfix \"\"",
+         E::Unary(name, OpType::PostfixMatch, E::Str("")),
+         name_tv([](const std::string&) { return true; })},
+        // Regex is a partial (unanchored) match.
+        {"$[name] =~ \"b\"",
+         E::Unary(name, OpType::RegexMatch, E::Str("b")),
+         name_tv(has_b)},
+        {"$[name] =~ \"a$\"",
+         E::Unary(name, OpType::RegexMatch, E::Str("a$")),
+         name_tv(
+             [ends_with](const std::string& s) { return ends_with(s, "a"); })},
+        {"$[name] =~ \"^(aa|b)$\"",
+         E::Unary(name, OpType::RegexMatch, E::Str("^(aa|b)$")),
+         name_tv([](const std::string& s) { return s == "aa" || s == "b"; })},
+        {"$[name] =~ \"^[ab]{3}\"",
+         E::Unary(name, OpType::RegexMatch, E::Str("^[ab]{3}")),
+         name_tv([](const std::string& s) {
+             return s.size() >= 3 &&
+                    std::all_of(s.begin(), s.begin() + 3, [](char c) {
+                        return c == 'a' || c == 'b';
+                    });
+         })},
+        {"$[name] =~ \".*\"",
+         E::Unary(name, OpType::RegexMatch, E::Str(".*")),
+         name_tv([](const std::string&) { return true; })},
+        // Two sub-fields with different null layouts in one element.
+        {"$[name] like \"a%\" && $[b] == 1",
+         E::And(E::Unary(name, OpType::PrefixMatch, E::Str("a")),
+                E::Unary(b, OpType::Equal, E::Int(1))),
+         [b_is](const ElemValue& e) {
+             return TvAnd(TvOf(e.name,
+                               [](const std::string& s) {
+                                   return s.rfind("a", 0) == 0;
+                               }),
+                          b_is(1)(e));
+         }},
+        {"$[name] like \"a_\" && $[b] == 1",
+         E::And(E::Unary(name, OpType::Match, E::Str("a_")),
+                E::Unary(b, OpType::Equal, E::Int(1))),
+         [b_is](const ElemValue& e) {
+             return TvAnd(TvOf(e.name,
+                               [](const std::string& s) {
+                                   return s.size() == 2 && s[0] == 'a';
+                               }),
+                          b_is(1)(e));
+         }},
+        {"$[name] like \"%b%\" || $[b] == 1",
+         E::Or(E::Unary(name, OpType::Match, E::Str("%b%")),
+               E::Unary(b, OpType::Equal, E::Int(1))),
+         [b_is, has_b](const ElemValue& e) {
+             return TvOr(TvOf(e.name, has_b), b_is(1)(e));
+         }},
+        {"!($[name] =~ \"b\") && $[i8] > 0",
+         E::And(E::Not(E::Unary(name, OpType::RegexMatch, E::Str("b"))),
+                E::Unary(i8, OpType::GreaterThan, E::Int(0))),
+         [has_b](const ElemValue& e) {
+             return TvAnd(TvNot(TvOf(e.name, has_b)),
+                          TvOf(e.i8, [](int64_t x) { return x > 0; }));
+         }},
+        {"$[name] =~ \"c$\" || $[name] IS NULL",
+         E::Or(E::Unary(name, OpType::RegexMatch, E::Str("c$")),
+               E::IsNull(name)),
+         [ends_with](const ElemValue& e) {
+             return TvOr(TvOf(e.name,
+                              [ends_with](const std::string& s) {
+                                  return ends_with(s, "c");
+                              }),
+                         TvBool(!e.name.has_value()));
+         }},
+        // Patterns on a sub-field added after the rows were written.
+        {"$[lang] like \"e_\"",
+         E::Unary(lang, OpType::Match, E::Str("e_")),
+         unknown,
+         true},
+        {"$[lang] like \"%\"",
+         E::Unary(lang, OpType::Match, E::Str("%")),
+         unknown,
+         true},
+        {"$[lang] =~ \"en\"",
+         E::Unary(lang, OpType::RegexMatch, E::Str("en")),
+         unknown,
+         true},
+        {"$[a] == 1 && $[lang] like \"%n\"",
+         E::And(E::Unary(a, OpType::Equal, E::Int(1)),
+                E::Unary(lang, OpType::Match, E::Str("%n"))),
+         [](const ElemValue& e) { return e.a == 1 ? kTvUnknown : kTvFalse; },
+         true},
+    };
+    cases.insert(cases.end(), pattern_cases.begin(), pattern_cases.end());
     return cases;
 }
 
@@ -6997,6 +7140,9 @@ BuildParsedElementLevelCases() {
     auto b_is_null = [](const ElemValue& e) {
         return TvBool(!e.b.has_value());
     };
+    auto name_tv = [](auto pred) {
+        return [pred](const ElemValue& e) { return TvOf(e.name, pred); };
+    };
     auto contains_leaf = [](const ElemValue& e, int64_t v) {
         for (const auto& leaf : *e.tags) {
             if (leaf.has_value() && *leaf == v) {
@@ -7090,6 +7236,55 @@ BuildParsedElementLevelCases() {
         {"$[ltags] IS NULL", [](const ElemValue&) { return kTvTrue; }, true},
         {"$[a] == 1 && $[lang] == \"en\"",
          [](const ElemValue& e) { return e.a == 1 ? kTvUnknown : kTvFalse; },
+         true},
+        // LIKE and regex: the parser rewrites simple LIKE patterns to
+        // prefix / postfix / inner matches and keeps the rest as Match.
+        {"$[name] like \"%b\"", name_tv([](const std::string& s) {
+             return !s.empty() && s.back() == 'b';
+         })},
+        {"$[name] like \"%b%\"", name_tv([](const std::string& s) {
+             return s.find('b') != std::string::npos;
+         })},
+        {"$[name] like \"a_\"", name_tv([](const std::string& s) {
+             return s.size() == 2 && s[0] == 'a';
+         })},
+        {"$[name] like \"_b%\"", name_tv([](const std::string& s) {
+             return s.size() >= 2 && s[1] == 'b';
+         })},
+        {"not ($[name] like \"a%\")",
+         name_tv([](const std::string& s) { return s.rfind("a", 0) != 0; })},
+        {"$[name] =~ \"b\"", name_tv([](const std::string& s) {
+             return s.find('b') != std::string::npos;
+         })},
+        {"$[name] =~ \"^a.$\"", name_tv([](const std::string& s) {
+             return s.size() == 2 && s[0] == 'a';
+         })},
+        {"$[name] =~ \"^a\"",
+         name_tv([](const std::string& s) { return s.rfind("a", 0) == 0; })},
+        {"$[name] !~ \"b\"", name_tv([](const std::string& s) {
+             return s.find('b') == std::string::npos;
+         })},
+        {"$[name] like \"a%\" && $[b] == 1",
+         [](const ElemValue& e) {
+             return TvAnd(TvOf(e.name,
+                               [](const std::string& s) {
+                                   return s.rfind("a", 0) == 0;
+                               }),
+                          TvOf(e.b, [](int64_t x) { return x == 1; }));
+         }},
+        {"$[name] =~ \"c$\" || $[b] IS NULL",
+         [](const ElemValue& e) {
+             return TvOr(TvOf(e.name,
+                              [](const std::string& s) {
+                                  return !s.empty() && s.back() == 'c';
+                              }),
+                         TvBool(!e.b.has_value()));
+         }},
+        {"$[lang] like \"e%\"",
+         [](const ElemValue&) { return kTvUnknown; },
+         true},
+        {"$[lang] =~ \"en\"",
+         [](const ElemValue&) { return kTvUnknown; },
          true},
     };
 }
