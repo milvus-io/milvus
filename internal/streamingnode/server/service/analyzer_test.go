@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func inlineAnalyzerRequest(params string) *streamingpb.StreamingNodeRunAnalyzerRequest {
@@ -350,7 +351,8 @@ func TestValidateAnalyzerFetchesMissingNames(t *testing.T) {
 			require.Empty(t, ids)
 			require.Equal(t, []string{"missing_validation_dictionary"}, names)
 			lookups++
-			return nil, merr.WrapErrParameterInvalidMsg("file resource missing_validation_dictionary not found")
+			// Match the non-retriable Fetch response wrapper used by the server.
+			return nil, retry.Unrecoverable(merr.WrapErrParameterInvalidMsg("file resource missing_validation_dictionary not found"))
 		})
 		defer fileresource.SetResourceFetcher(nil, nil)
 		listener := bufconn.Listen(1024 * 1024)
@@ -371,6 +373,7 @@ func TestValidateAnalyzerFetchesMissingNames(t *testing.T) {
 			resp, err := client.ValidateAnalyzer(ctx, req)
 			require.NoError(t, err)
 			require.Error(t, merr.Error(resp.GetStatus()))
+			require.Equal(t, merr.Code(merr.ErrParameterInvalid), resp.GetStatus().GetCode())
 			require.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(resp.GetStatus())))
 		}
 		require.Equal(t, 2, lookups, "each validation resolves its names freshly")
@@ -425,7 +428,7 @@ func TestRunDefaultInlineAnalyzerSkipsPreparation(t *testing.T) {
 }
 
 func TestValidateAnalyzerPreparationStatusTransport(t *testing.T) {
-	mockey.PatchConvey("terminal preparation errors retain their status across streaming interceptors", t, func() {
+	mockey.PatchConvey("terminal fetch errors retain their status across preparation and streaming interceptors", t, func() {
 		listener := bufconn.Listen(1024 * 1024)
 		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
 		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
@@ -435,14 +438,37 @@ func TestValidateAnalyzerPreparationStatusTransport(t *testing.T) {
 		require.NoError(t, err)
 		defer conn.Close()
 		var failure error
-		mockey.Mock(fileresource.Acquire).To(func(context.Context, []int64, ...string) (*fileresource.Resources, error) { return nil, failure }).Build()
+		lookups := 0
+		fileresource.SetResourceFetcher(nil, func(_ context.Context, ids []int64, names []string) ([]*internalpb.FileResourceInfo, error) {
+			require.Empty(t, ids)
+			require.Equal(t, []string{"dictionary"}, names)
+			lookups++
+			// The Fetch RPC reconstructs a business error from Status and marks
+			// non-retriable responses before returning to the resource manager.
+			return nil, retry.Unrecoverable(merr.Error(merr.Status(failure)))
+		})
+		defer fileresource.SetResourceFetcher(nil, nil)
+		params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"dictionary","file_name":"stop.txt"}}]}`
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
 		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
-		for _, cause := range []error{merr.WrapErrIoKeyNotFound("dictionary"), merr.ErrIoBucketNotFound, merr.ErrIoPermissionDenied} {
+		for _, cause := range []error{
+			merr.WrapErrParameterInvalidMsg("file resource dictionary not found"),
+			merr.ErrServiceInternal,
+			merr.WrapErrIoKeyNotFound("dictionary"),
+			merr.ErrIoBucketNotFound,
+			merr.ErrIoPermissionDenied,
+		} {
 			failure = cause
-			resp, err := client.ValidateAnalyzer(t.Context(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			before := lookups
+			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: params}}})
 			require.NoError(t, err)
 			want := merr.Status(merr.Wrap(cause, "acquire analyzer file resources"))
 			require.True(t, proto.Equal(want, resp.GetStatus()))
+			runResp, err := client.RunAnalyzer(ctx, inlineAnalyzerRequest(params))
+			require.NoError(t, err)
+			require.True(t, proto.Equal(want, runResp.GetStatus()))
+			require.Equal(t, before+2, lookups, "terminal fetch errors must not retry")
 		}
 	})
 }
