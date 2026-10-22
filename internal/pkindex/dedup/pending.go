@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package dedup
 
 // pendingTxn collects the primary keys written by the bodies of a transaction
 // that has not been committed yet. The CommitTxn decides on them, because the

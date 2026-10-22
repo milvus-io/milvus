@@ -14,9 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package dedup
 
-// Batch collects changes in memory. Nothing reaches the engine before Authority.Write.
+// Batch collects changes in memory. Nothing reaches the engine before Store.Write.
 // Changes are applied in the order of the Put and Delete calls that collected them.
 type Batch struct {
 	muts []Mutation

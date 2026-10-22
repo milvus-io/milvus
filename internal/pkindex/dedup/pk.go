@@ -14,23 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package dedup
 
 import (
 	"encoding/binary"
 )
-
-// PK is one primary key, either an int64 or a varchar.
-// All keys of one vchannel have the same type, so the encoding carries no type tag.
-type PK struct {
-	varchar bool
-	i       int64
-	s       string
-}
-
-func Int64PK(v int64) PK { return PK{i: v} }
-
-func VarCharPK(v string) PK { return PK{varchar: true, s: v} }
 
 func (p PK) IsVarChar() bool { return p.varchar }
 

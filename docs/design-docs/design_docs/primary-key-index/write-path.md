@@ -111,19 +111,20 @@ in `docs/agent_guides/streaming-system/wal/timetick_and_txn.md`.
 
 ```
 internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin shell)
-        │ translates WAL messages into requests, appends what the decider asks for
+        │ translates WAL messages into DecideRequests, appends what the Decider asks for
         ▼
-internal/streamingnode/server/pkindex                    the index of the streaming node
+internal/pkindex/dedup                                   the write path decision
         │ Decider: in-flight set (also the key lock), probe, pending writes of transactions
-        │ Authority: the index of one vchannel, key-value semantics
-        │            (Get, MultiGet, NewBatch, Write)
+        │ WriteIntent: the decision until Committed, Aborted or InDoubt
+        │ Store: the index of one vchannel, key-value semantics
+        │        (Get, MultiGet, NewBatch, Write)
         ▼
 Engine                                                   the storage behind it
                                                          (in-memory in this step)
 ```
 
-The package `internal/streamingnode/server/pkindex` holds the index logic and
-does not depend on the WAL. The interceptor is the only place that knows both
+The package `internal/pkindex/dedup` holds the index logic and does not depend
+on the WAL. The interceptor is the only place that knows both
 sides.
 
 The primary key payload of a message is read by `wal/utility/primarykey`. It
@@ -149,7 +150,7 @@ wal.Append(Insert pk=1,2)
        │    ├ Insert (copy) → timetick → shard → …                       tt=101
        │    ├ Delete(1)     → timetick → shard → …                       tt=102
        │    └ CommitTxn     → timetick → …                               tt=103
-       └ Apply: fill in tt=103 in the entry. Later writes of 1 and 2 stop waiting.
+       └ Committed: fill in tt=103 in the entry. Later writes of 1 and 2 stop waiting.
 client ◀ MessageID and TimeTick of the CommitTxn (tt=103)
 consumer: one Txn message at tt=103 with Insert and Delete. The row of key 1 is masked.
 observe: writes 1 and 2 into the engine at tt=103, then removes the entry.
@@ -199,7 +200,7 @@ result is used for the metrics only.
 ```
 Decide ✓ (entry registered ●) → BeginTxn ✓ → Insert ✓ → Delete ✗
 → the helper appends RollbackTxn
-→ Discard: the transaction can not have committed, so the entry is removed ○
+→ Aborted: the transaction can not have committed, so the entry is removed ○
 → client ◀ the error
 ```
 
@@ -354,10 +355,10 @@ calls it yet.
 
 ### Contract of the interceptor
 
-The interceptor calls `Decide`, the WAL append, then exactly one of `Apply`,
-`Discard` and `DiscardUncertain`. A panic in between ends the process, like
-every panic on the append path, so no decision is left unresolved in a live
-node.
+The interceptor calls `Decide`, the WAL append, then exactly one of
+`Committed`, `Aborted` and `InDoubt` on the returned `WriteIntent`. A panic in
+between ends the process, like every panic on the append path, so no decision
+is left unresolved in a live node.
 
 ## Configuration
 
@@ -435,7 +436,7 @@ insert, so WAL record and byte counts under-report such an append.
 
 ## Test plan
 
-- Unit tests of the helper, the authority, the decider and the interceptor,
+- Unit tests of the helper, the Store, the Decider and the interceptor,
   with a fake append operation.
 - Tests on the real interceptor chain (`wal/adaptor`): the consumer sees one
   transaction with the insert and the companion delete at the TimeTick of the
