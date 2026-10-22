@@ -2,9 +2,10 @@
 
 This master-based extraction implements the StreamingNode query path and an
 injectable [query client](query_client.md). QueryNode service/resource/native
-implementation, scoped WAL barrier production and production Proxy switching
-remain separate work. The plan's QN workers use the existing ViewQueryService
-protocol through the client's injected ViewQueryServiceClient.
+implementation and production Proxy switching remain separate work. Scoped WAL
+barrier production and ordered delivery are provided by master. The plan's QN
+workers use the existing ViewQueryService protocol through the client's injected
+ViewQueryServiceClient.
 
 ## StreamingNode task acquisition
 
@@ -22,14 +23,19 @@ schema. A query error releases every acquired handle. Successful tasks own them
 through execution, reduction and result conversion; QueryView replacement cannot
 revoke resources from a task already acquired.
 
-The complete parent also updates the CCollection Go schema cache/native revision
-on ALTER and restores legacy repeated-version segment schemas using their
-allocation time. Those prerequisite implementations are not copied here:
-master's existing CCollection and recovery interfaces are retained. The ALTER
-component test verifies the schema/timestamp forwarded to that interface and
-preservation of existing segment encoding; it does not claim dynamic-schema
-integration or legacy repeated-version recovery works before those prerequisites
-land.
+CCollection serializes schema updates and publishes its Go schema cache only
+after a successful native update. The native ordering token is a WAL timestamp,
+separate from the logical SchemaVersion. The growing runtime reports the logical
+schema version applied on the ordered write path through `WriteSchemaVersion`;
+exact read resources are prepared by
+`ReadSchemaKey` and do not impose a global read-schema watermark. Preparing an
+older read schema cannot invalidate a newer View's readiness.
+
+The ALTER component test exercises the native update, preservation of existing
+segment encoding and the schema selected for new segments. The complete parent's
+native initialization and legacy repeated-version recovery changes remain
+separate prerequisites; these component checks do not establish full dynamic-schema
+integration or legacy repeated-version recovery.
 
 The existing SN scheduler executes `SearchTask` / `QueryTask.ExecuteOnSegments`
 with segment adapters. It does not use the old QueryNode scheduler or delegate
@@ -42,9 +48,10 @@ This PR does not copy QN loaders, ReadState management or native implementation.
   QueryPlanMVCC, schema binding, optimized request and work nodes.
 - Phase 2: ViewQueryService accepts SearchOnView / QueryOnView with those same
   identities. QN implementation must wait and execute on the bound resources.
-- Fixed-snapshot coverage: QueryBarrierInspector.EnsureBarrier certifies an
-  ordered complete WAL prefix. Absence of this optional capability is an explicit
-  not-ready error when existing frontiers cannot serve the snapshot.
+- Fixed-snapshot coverage: TimeTickSyncInspector.EnsureBarrier certifies
+  publication of an ordered complete WAL prefix after request-scoped TSO
+  admission. The query runtime must then apply the fixed Growing/Transform
+  frontiers. WAL-owner cancellation allows replanning on the replacement owner.
 - Load scope: GetQueryViewLoadInfoResponse carries required_fields and
   skip_load_dynamic_field alongside the existing scope and indexes. Producers
   are supplied by the separate control-plane implementation.
@@ -63,8 +70,9 @@ their existing meaning.
 
 The [plan contract](query_plan.md) describes field dependencies, exact schema
 validation, fixed snapshots, CAS certificates and payload reuse. Component tests
-inject query workers and the optional barrier provider; they do not prove that
-the separate QN or WAL implementation has been integrated.
+inject query workers and exercise barrier cancellation and fixed-snapshot
+planning. Scoped barrier production and delivery have their own WAL tests; these
+checks do not prove production Proxy/QN integration or cluster-level recovery.
 
 Key source paths:
 `internal/streamingnode/server/wal/snview/{query_lease,query_task_provider}.go`,

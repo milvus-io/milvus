@@ -28,10 +28,13 @@ The lease is renewed just before a successful plan return.
 
 Explicit MVCC and BarrierMVCC are mutually exclusive. A barrier is useful for
 Iterator snapshot continuation; an ACK published later than B does not change
-the query's snapshot. The client consumes the `QueryBarrierInspector` capability; scoped barrier
-production and its TransformLog integration remain separate work. If the WAL
-frontiers do not already cover B and the inspector lacks that capability,
-planning returns ServiceNotReady. It never treats missing coverage as success.
+the query's snapshot. Master supplies scoped barrier production and its ordered
+TransformLog/query-resource delivery. If existing frontiers do not cover B,
+planning first waits for `TSOAllocator.BarrierUntil` under the caller and WAL-owner
+contexts, then calls `TimeTickSyncInspector.EnsureBarrier`. An unallocated future
+timestamp cannot occupy shared TimeTick sync work. The inspector certifies
+publication; planning separately waits for the selected runtime to apply the
+required frontiers before executing.
 This extraction does not enable the Proxy Iterator path or extend historical
 retention.
 
@@ -87,9 +90,10 @@ The added fields are `QueryPlanMVCC.read_proof_timetick`,
 `QueryPlan.reused_payloads`, and `StreamingFieldAnalyzer.read_schema_version`.
 This master-based extraction also synchronizes the query-facing schema contracts:
 `QueryViewMeta.schema_version`, Search/RetrieveRequest.schema_version,
-QuerySchemaBinding, the BarrierMVCC input, and required_fields /
+QuerySchemaBinding and required_fields /
 skip_load_dynamic_field in GetQueryViewLoadInfoResponse. It does not add their
-Coordinator or QN/native implementations. The unused, unimplemented
+Coordinator or QN/native implementations. The BarrierMVCC input and scoped WAL
+barrier implementation are already provided by master. The unused, unimplemented
 RequeryOnView RPC and its messages are removed; retained requery uses QueryOnView.
 DataView fields are preserved.
 Optional fields do not prove that an older peer enforces the new semantics:
