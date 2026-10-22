@@ -114,36 +114,49 @@ ExpectPackedLoadError(milvus::ErrorCode expected, F&& load) {
 }  // namespace
 
 TEST(ScalarIndexV3AsyncTest, HeapAndMmapPreserveValuesAndNulls) {
-    for (const auto* name : {"BitmapVarchar",
-                             "BitmapVarcharMmap",
-                             "SortedVarchar",
-                             "SortedVarcharMmap",
-                             "InvertedVarchar",
-                             "InvertedVarcharMmap",
-                             "MarisaVarchar",
-                             "MarisaVarcharMmap",
-                             "FmIndexVarchar",
-                             "FmIndexVarcharMmap"}) {
-        SCOPED_TRACE(name);
-        const auto& backend =
-            ScalarReaderBackends().Get<std::string_view>(name);
-        ScalarTestData<std::string_view> data(
-            {"alpha", "beta", "beta", "null"});
-        data.validity.reset(3);
-        const ScalarTestInput<std::string_view> input(data);
-        auto artifact = backend.Build(input.View(), {.row_count = 4});
-        auto reader =
-            OpenV3(backend, SerializeV3(*artifact), {.row_count = 4}, true);
-        const auto* pattern =
-            dynamic_cast<const IPatternMatchReader*>(reader.get());
-        ASSERT_NE(pattern, nullptr);
-        ExpectHits(
-            pattern->PatternMatch("beta", PatternOp::PrefixMatch), 4, {1, 2});
-        ExpectHits(
-            pattern->PatternMatch("null", PatternOp::PrefixMatch), 4, {});
-        const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
-        ASSERT_NE(nulls, nullptr);
-        ExpectHits(nulls->IsNull(), 4, {3});
+    const auto previous_mode = storage::FileWriter::GetMode();
+    auto restore_mode =
+        folly::makeGuard([&] { storage::FileWriter::SetMode(previous_mode); });
+    storage::FileWriter::SetMode(storage::FileWriter::WriteMode::DIRECT);
+    milvus::OpContext context;
+    context.runtime_load_priority = 1;
+    for (bool use_async : {false, true}) {
+        SCOPED_TRACE(use_async);
+        for (const auto* name : {"BitmapVarchar",
+                                 "BitmapVarcharMmap",
+                                 "SortedVarchar",
+                                 "SortedVarcharMmap",
+                                 "InvertedVarchar",
+                                 "InvertedVarcharMmap",
+                                 "MarisaVarchar",
+                                 "MarisaVarcharMmap",
+                                 "FmIndexVarchar",
+                                 "FmIndexVarcharMmap"}) {
+            SCOPED_TRACE(name);
+            const auto& backend =
+                ScalarReaderBackends().Get<std::string_view>(name);
+            ScalarTestData<std::string_view> data(
+                {"alpha", "beta", "beta", "null"});
+            data.validity.reset(3);
+            const ScalarTestInput<std::string_view> input(data);
+            auto artifact = backend.Build(input.View(), {.row_count = 4});
+            auto reader = OpenV3(backend,
+                                 SerializeV3(*artifact),
+                                 {.row_count = 4},
+                                 use_async,
+                                 &context);
+            const auto* pattern =
+                dynamic_cast<const IPatternMatchReader*>(reader.get());
+            ASSERT_NE(pattern, nullptr);
+            ExpectHits(pattern->PatternMatch("beta", PatternOp::PrefixMatch),
+                       4,
+                       {1, 2});
+            ExpectHits(
+                pattern->PatternMatch("null", PatternOp::PrefixMatch), 4, {});
+            const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+            ASSERT_NE(nulls, nullptr);
+            ExpectHits(nulls->IsNull(), 4, {3});
+        }
     }
 }
 
