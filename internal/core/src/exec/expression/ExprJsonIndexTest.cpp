@@ -332,8 +332,8 @@ TEST(JsonIndexTest, JsonSortLikeUsesIndexWithoutRawJson) {
                                                            unary_expr);
         auto result = milvus::test::gen_filter_res(
             plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
 
         std::vector<bool> expected(json_strs.size(), false);
         for (auto row : matched_rows) {
@@ -635,8 +635,8 @@ TEST(JsonIndexTest, EmptyJsonInIsDeterministicForEveryRow) {
                                                            filter_expr);
         auto result = milvus::test::gen_filter_res(
             plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
         for (size_t i = 0; i < result->size(); ++i) {
             EXPECT_TRUE(valid_view[i]) << "row " << i;
             EXPECT_EQ(result_view[i], expected_result) << "row " << i;
@@ -695,8 +695,8 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         value,
         std::vector<proto::plan::GenericValue>());
     auto result = evaluate(equal_expr);
-    TargetBitmapView result_view(result->GetRawData(), result->size());
-    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    auto result_view = result->GetBitmap();
+    auto valid_view = result->GetValidBitmap();
     for (size_t i = 0; i < result->size(); ++i) {
         EXPECT_TRUE(valid_view[i]);
     }
@@ -709,8 +709,8 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         std::vector<proto::plan::GenericValue>{value},
         false);
     result = evaluate(term_expr);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_FALSE(result_view[0]);
     EXPECT_TRUE(result_view[1]);
     EXPECT_FALSE(result_view[2]);
@@ -721,8 +721,8 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         value,
         std::vector<proto::plan::GenericValue>());
     result = evaluate(greater_expr);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_FALSE(result_view[0]);
     EXPECT_FALSE(result_view[1]);
     EXPECT_TRUE(result_view[2]);
@@ -734,8 +734,8 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         true,
         true);
     result = evaluate(between_expr);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_FALSE(result_view[0]);
     EXPECT_TRUE(result_view[1]);
     EXPECT_FALSE(result_view[2]);
@@ -782,8 +782,8 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
     auto check = [](const ColumnVectorPtr& result,
                     const std::vector<bool>& expected_result,
                     const std::vector<bool>& expected_valid) {
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
         for (size_t i = 0; i < result->size(); ++i) {
             EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
             if (expected_valid[i]) {

@@ -444,9 +444,8 @@ class RawExprCacheExtendedTest : public ::testing::TestWithParam<Backend> {
             }
             EXPECT_EQ(column->size(),
                       std::min<int64_t>(kBatch, rows - data.size()));
-            data.append(TargetBitmapView(column->GetRawData(), column->size()));
-            valid.append(
-                TargetBitmapView(column->GetValidRawData(), column->size()));
+            data.append(column->GetBitmap());
+            valid.append(column->GetValidBitmap());
         }
         EXPECT_EQ(data.size(), rows);
         return {std::move(data), std::move(valid)};

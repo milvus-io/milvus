@@ -2408,7 +2408,7 @@ VortexColumn::ApplyValidDataInChunk(milvus::OpContext* op_ctx,
                                     int64_t chunk_id,
                                     int64_t offset,
                                     int64_t size,
-                                    TargetBitmapView valid_result) const {
+                                    TargetBitmapWriteView valid_result) const {
     if (!IsNullable() || size == 0) {
         return;
     }

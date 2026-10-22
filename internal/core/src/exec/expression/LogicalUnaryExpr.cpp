@@ -34,7 +34,7 @@ PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     inputs_[0]->Eval(context, result);
     if (expr_->op_type_ == milvus::expr::LogicalUnaryExpr::OpType::LogicalNot) {
-        common::ThreeValuedLogicOp::Not(GetColumnVector(result));
+        result = common::ThreeValuedLogicOp::Not(GetColumnVector(result));
     }
 }
 

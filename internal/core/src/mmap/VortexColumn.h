@@ -179,7 +179,7 @@ class VortexColumn final : public ChunkedColumnInterface {
                           int64_t chunk_id,
                           int64_t offset,
                           int64_t size,
-                          TargetBitmapView valid_result) const override;
+                          TargetBitmapWriteView valid_result) const override;
 
     int64_t
     GetNumRowsUntilChunk(int64_t chunk_id) const override;

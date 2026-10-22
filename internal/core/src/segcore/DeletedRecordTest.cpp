@@ -91,11 +91,11 @@ TEST(DeleteMVCC, common_case) {
 
     {
         BitsetType bitsets(c);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         auto insert_barrier = c;
         // query at ts (10)
         Timestamp query_timestamp = 10;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 0, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
             ASSERT_EQ(bitsets_view[i], expected[i]);
@@ -103,13 +103,13 @@ TEST(DeleteMVCC, common_case) {
     }
     {
         BitsetType bitsets(c);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         auto insert_barrier = c;
         // query at ts (11)
         Timestamp query_timestamp = 11;
         // query at ts (11)
         query_timestamp = 11;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 0, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
             ASSERT_EQ(bitsets_view[i], expected[i]);
@@ -124,11 +124,11 @@ TEST(DeleteMVCC, common_case) {
 
     {
         BitsetType bitsets(c);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         auto insert_barrier = c;
         // query at ts (12)
         Timestamp query_timestamp = 12;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 1, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
             ASSERT_EQ(bitsets_view[i], expected[i]);
@@ -144,12 +144,12 @@ TEST(DeleteMVCC, common_case) {
 
     {
         BitsetType bitsets(c);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         auto insert_barrier = c;
         // query at ts (14)
         Timestamp query_timestamp = 14;
 
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 1, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
             ASSERT_EQ(bitsets_view[i], expected[i]);
@@ -166,11 +166,11 @@ TEST(DeleteMVCC, common_case) {
 
     {
         BitsetType bitsets(c);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         auto insert_barrier = c;
         // query at ts (14)
         Timestamp query_timestamp = 14;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 1, 0, 0, 0, 1, 0, 0, 0, 0};
         for (int i = 0; i < c; i++) {
             ASSERT_EQ(bitsets_view[i], expected[i]);
@@ -273,11 +273,11 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
 
     {
         BitsetType bitsets(N);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         int64_t insert_barrier = N;
         // query at ts (10)
         Timestamp query_timestamp = 10;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 0, 0, 1, 1, 0, 0, 0, 0, 0};
         // two pk 2  at ts(3, 4) was deleted
         for (int i = 0; i < N; i++) {
@@ -293,11 +293,11 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
 
     {
         BitsetType bitsets(N);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         int64_t insert_barrier = N;
         // query at ts (10)
         Timestamp query_timestamp = 10;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 0, 0, 1, 1, 1, 0, 0, 0, 0};
         // one pk 3 in ts(5) was deleted
         for (int i = 0; i < N; i++) {
@@ -313,11 +313,11 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
 
     {
         BitsetType bitsets(N);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         int64_t insert_barrier = N;
         // query at ts (10)
         Timestamp query_timestamp = 10;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 0, 0, 1, 1, 1, 0, 1, 0, 0};
         //  pk 3 in ts(7) was deleted
         for (int i = 0; i < N; i++) {
@@ -333,11 +333,11 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
 
     {
         BitsetType bitsets(N);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         int64_t insert_barrier = N;
         // query at ts (10)
         Timestamp query_timestamp = 10;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         std::vector<bool> expected = {0, 0, 0, 1, 1, 1, 0, 1, 1, 0};
         //  pk 2 in ts(8) was deleted
         for (int i = 0; i < N; i++) {
@@ -464,10 +464,10 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     // Query at N+1 ts
     {
         BitsetType bitsets(N);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         int64_t insert_barrier = N;
         Timestamp query_timestamp = N + 1;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         for (auto i = 0; i < DN; i++) {
             ASSERT_EQ(bitsets_view[i], true) << i;
         }
@@ -494,10 +494,10 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     // Query at N + AN + 1 ts
     {
         BitsetType bitsets(N + AN);
-        BitsetTypeView bitsets_view(bitsets);
+        auto bitsets_view = bitsets.write_view();
         int64_t insert_barrier = N + AN;
         Timestamp query_timestamp = N + AN + 1;
-        delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+        delete_record.Query(bitsets, insert_barrier, query_timestamp);
         for (auto i = 0; i < DN; i++) {
             ASSERT_EQ(bitsets_view[i], true);
         }
@@ -569,9 +569,9 @@ TEST(DeleteMVCC, perform) {
     auto query_timestamp = delete_ts[DN - 1];
     auto insert_barrier = get_barrier(insert_record, query_timestamp);
     BitsetType res_bitmap(insert_barrier);
-    BitsetTypeView res_view(res_bitmap);
+    auto res_view = res_bitmap.write_view();
     start = std::chrono::steady_clock::now();
-    delete_record.Query(res_view, insert_barrier, query_timestamp);
+    delete_record.Query(res_bitmap, insert_barrier, query_timestamp);
     end = std::chrono::steady_clock::now();
     std::cout << "query cost:"
               << std::chrono::duration_cast<std::chrono::microseconds>(end -
@@ -640,14 +640,21 @@ TEST(DeleteMVCC, QueryTimestampLowerThanFirstSnapshot) {
     // Query at ts smaller than first snapshot ts, expect only first deletion visible
     Timestamp query_timestamp = 1;
     BitsetType bitsets(N);
-    BitsetTypeView bitsets_view(bitsets);
+    auto bitsets_view = bitsets.write_view();
     int64_t insert_barrier = N;
-    delete_record.Query(bitsets_view, insert_barrier, query_timestamp);
+    ASSERT_EQ(bitsets_view.count(), 0);
+    ASSERT_TRUE(bitsets_view.none());
+    delete_record.Query(bitsets, insert_barrier, query_timestamp);
+    EXPECT_EQ(bitsets_view.count(), 1);
+    EXPECT_FALSE(bitsets_view.none());
 
     for (int i = 0; i < N; i++) {
         bool expected = (i == 0);
         ASSERT_EQ(bitsets_view[i], expected) << i;
     }
+    bitsets.reset(0);
+    EXPECT_EQ(bitsets_view.count(), 0);
+    EXPECT_TRUE(bitsets_view.none());
 }
 
 TEST(DeleteMVCC, LatestSnapshotOptimizationBenchmark) {
@@ -739,12 +746,12 @@ TEST(DeleteMVCC, LatestSnapshotOptimizationBenchmark) {
 
     // ============ Verify correctness ============
     BitsetType ref_bitmap(insert_barrier);
-    BitsetTypeView ref_view(ref_bitmap);
-    delete_record_off.Query(ref_view, insert_barrier, query_timestamp);
+    auto ref_view = ref_bitmap.write_view();
+    delete_record_off.Query(ref_bitmap, insert_barrier, query_timestamp);
 
     BitsetType fast_bitmap(insert_barrier);
-    BitsetTypeView fast_view(fast_bitmap);
-    delete_record_on.Query(fast_view, insert_barrier, query_timestamp);
+    auto fast_view = fast_bitmap.write_view();
+    delete_record_on.Query(fast_bitmap, insert_barrier, query_timestamp);
 
     // Verify both produce same result
     for (int i = 0; i < DN; ++i) {
@@ -765,8 +772,8 @@ TEST(DeleteMVCC, LatestSnapshotOptimizationBenchmark) {
     auto start_off = std::chrono::steady_clock::now();
     for (int i = 0; i < QUERY_COUNT; ++i) {
         res_bitmap.reset();
-        BitsetTypeView res_view(res_bitmap);
-        delete_record_off.Query(res_view, insert_barrier, query_timestamp);
+        auto res_view = res_bitmap.write_view();
+        delete_record_off.Query(res_bitmap, insert_barrier, query_timestamp);
     }
     auto end_off = std::chrono::steady_clock::now();
     auto duration_off = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -779,8 +786,8 @@ TEST(DeleteMVCC, LatestSnapshotOptimizationBenchmark) {
     auto start_on = std::chrono::steady_clock::now();
     for (int i = 0; i < QUERY_COUNT; ++i) {
         res_bitmap.reset();
-        BitsetTypeView res_view(res_bitmap);
-        delete_record_on.Query(res_view, insert_barrier, query_timestamp);
+        auto res_view = res_bitmap.write_view();
+        delete_record_on.Query(res_bitmap, insert_barrier, query_timestamp);
     }
     auto end_on = std::chrono::steady_clock::now();
     auto duration_on =
@@ -973,7 +980,7 @@ QueryDeletedRows(DeletedRecord<is_sealed>& record,
                  int64_t row_count,
                  Timestamp query_ts) {
     BitsetType bitset(row_count);
-    BitsetTypeView view(bitset);
+    auto view = bitset.write_view();
     record.Query(view, row_count, query_ts);
     std::vector<bool> deleted(row_count);
     for (int64_t i = 0; i < row_count; ++i) {
@@ -1233,7 +1240,7 @@ TEST(DeleteMVCC, SealedSegmentLoadKeepsEarliestDeleteTimestamp) {
 
     auto deleted_rows_at = [&](Timestamp ts) {
         BitsetType bitset(N, false);
-        BitsetTypeView view(bitset);
+        auto view = bitset.write_view();
         segment->mask_with_delete(view, N, ts);
         std::vector<int64_t> rows;
         for (int64_t i = 0; i < N; ++i) {
@@ -1297,7 +1304,7 @@ TEST(DeleteMVCC, SealedSegmentUnsortedBatchKeepsEarliestDeletePerVersion) {
             EXPECT_EQ(segment->get_deleted_count(), 3);
             for (Timestamp ts : {19, 20, 35, 60}) {
                 BitsetType bitset(N, false);
-                BitsetTypeView view(bitset);
+                auto view = bitset.write_view();
                 segment->mask_with_delete(view, N, ts);
                 EXPECT_EQ(bitset.count(), ts >= 20 ? 3 : 0) << "at ts " << ts;
                 for (auto row : versions) {
@@ -1469,7 +1476,7 @@ TEST(DeleteMVCC, GrowingSegmentOutOfOrderDeleteKeepsRowCount) {
 
     EXPECT_EQ(segment->get_deleted_count(), 1);
     BitsetType bitset(N, false);
-    BitsetTypeView view(bitset);
+    auto view = bitset.write_view();
     segment->mask_with_delete(view, N, 150);
     EXPECT_TRUE(view[1]);
     EXPECT_EQ(bitset.count(), 1);
@@ -1490,7 +1497,7 @@ TEST(DeleteMVCC, GrowingSegmentOutOfOrderDeleteKeepsRowCount) {
     fresh->LoadDeletedRecord(info);
     for (Timestamp ts : {19, 20}) {
         BitsetType fresh_bitset(N, false);
-        BitsetTypeView fresh_view(fresh_bitset);
+        auto fresh_view = fresh_bitset.write_view();
         fresh->mask_with_delete(fresh_view, N, ts);
         EXPECT_EQ(bool(fresh_view[2]), ts >= 20) << "at ts " << ts;
     }

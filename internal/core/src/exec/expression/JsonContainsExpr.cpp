@@ -378,11 +378,10 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
     AssertInfo(expr_->column_.nested_path_.size() == 0,
                "[ExecArrayContains]nested path must be null");
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     if (!arg_inited_) {
         auto elements = std::make_shared<TypedSet>();
@@ -403,8 +402,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const TypedSet& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
@@ -473,7 +472,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename ExprValueType>
@@ -504,11 +504,10 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
@@ -524,8 +523,8 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer,
             const std::shared_ptr<MultiElement>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -607,7 +606,8 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename ExprValueType>
@@ -647,8 +647,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_);
-        TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        auto& res_view = *cached_index_chunk_res_;
+        auto& valid_res_view = *cached_index_chunk_valid_res_;
         // process shredding data for ARRAY type (non-shared)
         {
             milvus::ScopedTimer timer(
@@ -658,9 +658,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
                 TargetBitmap target_res(active_count_, false);
-                TargetBitmapView target_res_view(target_res);
+                auto& target_res_view = target_res;
                 TargetBitmap target_valid(active_count_, true);
-                TargetBitmapView target_valid_view(target_valid);
+                auto& target_valid_view = target_valid;
                 ShreddingArrayBsonContainsAnyExecutor<GetType> executor(
                     arg_set_);
 
@@ -751,11 +751,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
@@ -778,8 +777,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::Array>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -859,7 +858,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 VectorPtr
@@ -894,8 +894,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_);
-        TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        auto& res_view = *cached_index_chunk_res_;
+        auto& valid_res_view = *cached_index_chunk_valid_res_;
 
         // process shredding data for ARRAY type (non-shared)
         {
@@ -906,9 +906,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
                 TargetBitmap target_res(active_count_, false);
-                TargetBitmapView target_res_view(target_res);
+                auto& target_res_view = target_res;
                 TargetBitmap target_valid(active_count_, true);
-                TargetBitmapView target_valid_view(target_valid);
+                auto& target_valid_view = target_valid;
                 ShreddingArrayBsonContainsArrayExecutor executor(elements);
                 index->ExecutorForShreddingData<std::string_view>(
                     op_ctx_,
@@ -1006,11 +1006,10 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                expr_->column_.element_level_,
                ElementLevel);
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     if (!arg_inited_) {
         auto elements = std::make_shared<std::set<GetType>>();
@@ -1034,8 +1033,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::set<GetType>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
@@ -1121,7 +1120,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename ExprValueType>
@@ -1152,11 +1152,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
@@ -1181,8 +1180,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer,
             const std::set<GetType>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -1297,7 +1296,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename ExprValueType>
@@ -1343,8 +1343,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_);
-        TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        auto& res_view = *cached_index_chunk_res_;
+        auto& valid_res_view = *cached_index_chunk_valid_res_;
         // process shredding data for ARRAY type (non-shared)
         {
             milvus::ScopedTimer timer(
@@ -1354,9 +1354,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
                 TargetBitmap target_res(active_count_, false);
-                TargetBitmapView target_res_view(target_res);
+                auto& target_res_view = target_res;
                 TargetBitmap target_valid(active_count_, true);
-                TargetBitmapView target_valid_view(target_valid);
+                auto& target_valid_view = target_valid;
                 ShreddingArrayBsonContainsAllExecutor<GetType> executor(
                     *elements);
 
@@ -1483,11 +1483,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -1505,8 +1504,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements,
             const std::unordered_set<int>& elements_index) {
@@ -1647,7 +1646,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 VectorPtr
@@ -1682,8 +1682,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_);
-        TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        auto& res_view = *cached_index_chunk_res_;
+        auto& valid_res_view = *cached_index_chunk_valid_res_;
 
         // process shredding data for ARRAY type (non-shared)
         {
@@ -1694,9 +1694,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
                 TargetBitmap target_res(active_count_, false);
-                TargetBitmapView target_res_view(target_res);
+                auto& target_res_view = target_res;
                 TargetBitmap target_valid(active_count_, true);
-                TargetBitmapView target_valid_view(target_valid);
+                auto& target_valid_view = target_valid;
                 ShreddingArrayBsonContainsAllWithDiffTypeExecutor executor(
                     elements, elements_index);
                 index->ExecutorForShreddingData<std::string_view>(
@@ -1841,11 +1841,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -1863,8 +1862,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::Array>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -1950,7 +1949,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 VectorPtr
@@ -1985,8 +1985,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_);
-        TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        auto& res_view = *cached_index_chunk_res_;
+        auto& valid_res_view = *cached_index_chunk_valid_res_;
 
         // process shredding data for ARRAY type (non-shared)
         {
@@ -1997,9 +1997,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
                 TargetBitmap target_res(active_count_, false);
-                TargetBitmapView target_res_view(target_res);
+                auto& target_res_view = target_res;
                 TargetBitmap target_valid(active_count_, true);
-                TargetBitmapView target_valid_view(target_valid);
+                auto& target_valid_view = target_valid;
                 ShreddingArrayBsonContainsAllArrayExecutor executor(elements);
                 index->ExecutorForShreddingData<std::string_view>(
                     op_ctx_,
@@ -2088,11 +2088,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -2106,8 +2105,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -2237,7 +2236,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 VectorPtr
@@ -2268,8 +2268,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_);
-        TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        auto& res_view = *cached_index_chunk_res_;
+        auto& valid_res_view = *cached_index_chunk_valid_res_;
 
         // process shredding data for ARRAY type (non-shared)
         {
@@ -2280,9 +2280,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
                 TargetBitmap target_res(active_count_, false);
-                TargetBitmapView target_res_view(target_res);
+                auto& target_res_view = target_res;
                 TargetBitmap target_valid(active_count_, true);
-                TargetBitmapView target_valid_view(target_valid);
+                auto& target_valid_view = target_valid;
                 ShreddingArrayBsonContainsAnyWithDiffTypeExecutor executor(
                     elements);
                 index->ExecutorForShreddingData<std::string_view>(

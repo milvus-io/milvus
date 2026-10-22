@@ -1404,7 +1404,7 @@ makeInt64Input(const std::vector<int64_t>& values) {
     auto column = std::make_shared<milvus::ColumnVector>(
         milvus::DataType::INT64,
         static_cast<milvus::vector_size_t>(values.size()));
-    auto* data = reinterpret_cast<int64_t*>(column->GetRawData());
+    auto* data = column->RawAsValues<int64_t>();
     for (size_t i = 0; i < values.size(); ++i) {
         data[i] = values[i];
     }
@@ -1478,7 +1478,7 @@ createAndInsertGroups(int64_t numGroups,
         int64_t thisCount = std::min((int64_t)batchSize, numGroups - inserted);
         auto col = std::make_shared<milvus::ColumnVector>(
             milvus::DataType::INT64, thisCount);
-        auto* data = reinterpret_cast<int64_t*>(col->GetRawData());
+        auto* data = col->RawAsValues<int64_t>();
         for (int64_t i = 0; i < thisCount; i++) {
             data[i] = inserted + i;
         }
@@ -1696,7 +1696,7 @@ TEST(HashTableRehashTest, TestHashTableRehashCorrectness) {
     // Insert numGroups distinct values
     auto col = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
                                                       numGroups);
-    auto* data = reinterpret_cast<int64_t*>(col->GetRawData());
+    auto* data = col->RawAsValues<int64_t>();
     for (int64_t i = 0; i < numGroups; i++) {
         data[i] = i;
     }
@@ -1713,7 +1713,7 @@ TEST(HashTableRehashTest, TestHashTableRehashCorrectness) {
     // Re-probe with the same keys — should get the same row pointers
     auto col2 = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
                                                        numGroups);
-    auto* data2 = reinterpret_cast<int64_t*>(col2->GetRawData());
+    auto* data2 = col2->RawAsValues<int64_t>();
     for (int64_t i = 0; i < numGroups; i++) {
         data2[i] = i;
     }
@@ -1765,7 +1765,7 @@ TEST(HashTableRehashTest, TestHashTableRehashMultipleRounds) {
     // Verify we can look up all groups
     auto col = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
                                                       numGroups);
-    auto* data = reinterpret_cast<int64_t*>(col->GetRawData());
+    auto* data = col->RawAsValues<int64_t>();
     for (int64_t i = 0; i < numGroups; i++) {
         data[i] = i;
     }

@@ -83,10 +83,8 @@ EvalExprInBatches(const expr::TypedExprPtr& logical_expr,
             processed_rows,
             active_count);
         evaluation.batch_sizes.push_back(batch_size);
-        combined_result.append(
-            TargetBitmapView(column->GetRawData(), batch_size));
-        combined_validity.append(
-            TargetBitmapView(column->GetValidRawData(), batch_size));
+        combined_result.append(column->GetBitmap());
+        combined_validity.append(column->GetValidBitmap());
         processed_rows += batch_size;
     }
     evaluation.result = std::make_shared<ColumnVector>(

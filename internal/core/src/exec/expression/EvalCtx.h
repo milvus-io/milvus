@@ -61,15 +61,17 @@ class EvalCtx {
     inline void
     set_bitmap_input(TargetBitmap&& bitmap_input) {
         bitmap_input_ = std::move(bitmap_input);
+        bitmap_input_view_ = bitmap_input_.view();
     }
 
-    inline const TargetBitmap&
+    inline const TargetBitmapView&
     get_bitmap_input() const {
-        return bitmap_input_;
+        return bitmap_input_view_;
     }
 
     void
     clear_bitmap_input() {
+        bitmap_input_view_ = {};
         bitmap_input_.clear();
     }
 
@@ -80,6 +82,7 @@ class EvalCtx {
 
     // used for expr pre filter, that avoid unnecessary execution on filtered data
     TargetBitmap bitmap_input_;
+    TargetBitmapView bitmap_input_view_;
 };
 
 }  // namespace exec

@@ -585,8 +585,7 @@ TEST_P(SegmentChunkReaderStringTest, ApplyFieldValidDataUsesBoundSnapshot) {
     // chunk 0 spans rows [0, 8192); row 16 is NULL, rows 0 and 17 are valid.
     const int64_t size = 8192;
     TargetBitmap valid(size, true);
-    reader.ApplyFieldValidData(
-        nullptr, field_, 0, 0, size, TargetBitmapView(valid));
+    reader.ApplyFieldValidData(nullptr, field_, 0, 0, size, valid);
 
     EXPECT_FALSE(valid[16]);
     EXPECT_TRUE(valid[0]);

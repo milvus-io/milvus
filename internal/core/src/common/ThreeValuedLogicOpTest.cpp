@@ -81,7 +81,7 @@ ExtractResults(const ColumnVectorPtr& vec,
 TEST(ThreeValuedLogicOpTest, NotTrueReturnsFalse) {
     // NOT TRUE = FALSE
     auto vec = CreateColumnVector({true}, {true});
-    ThreeValuedLogicOp::Not(vec);
+    vec = ThreeValuedLogicOp::Not(vec);
 
     std::vector<bool> data, valid;
     ExtractResults(vec, data, valid);
@@ -93,7 +93,7 @@ TEST(ThreeValuedLogicOpTest, NotTrueReturnsFalse) {
 TEST(ThreeValuedLogicOpTest, NotFalseReturnsTrue) {
     // NOT FALSE = TRUE
     auto vec = CreateColumnVector({false}, {true});
-    ThreeValuedLogicOp::Not(vec);
+    vec = ThreeValuedLogicOp::Not(vec);
 
     std::vector<bool> data, valid;
     ExtractResults(vec, data, valid);
@@ -105,7 +105,7 @@ TEST(ThreeValuedLogicOpTest, NotFalseReturnsTrue) {
 TEST(ThreeValuedLogicOpTest, NotNullReturnsNull) {
     // NOT NULL = NULL
     auto vec = CreateColumnVector({false}, {false});
-    ThreeValuedLogicOp::Not(vec);
+    vec = ThreeValuedLogicOp::Not(vec);
 
     std::vector<bool> data, valid;
     ExtractResults(vec, data, valid);
@@ -119,7 +119,7 @@ TEST(ThreeValuedLogicOpTest, NotMultipleValues) {
     // Input:  [T,    F,    NULL]
     // Output: [F,    T,    NULL]
     auto vec = CreateColumnVector({true, false, false}, {true, true, false});
-    ThreeValuedLogicOp::Not(vec);
+    vec = ThreeValuedLogicOp::Not(vec);
 
     std::vector<bool> data, valid;
     ExtractResults(vec, data, valid);
@@ -152,7 +152,7 @@ TEST(ThreeValuedLogicOpTest, NotMultipleValues) {
 TEST(ThreeValuedLogicOpTest, AndTrueTrue) {
     auto left = CreateColumnVector({true}, {true});
     auto right = CreateColumnVector({true}, {true});
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -164,7 +164,7 @@ TEST(ThreeValuedLogicOpTest, AndTrueTrue) {
 TEST(ThreeValuedLogicOpTest, AndTrueFalse) {
     auto left = CreateColumnVector({true}, {true});
     auto right = CreateColumnVector({false}, {true});
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -176,7 +176,7 @@ TEST(ThreeValuedLogicOpTest, AndTrueFalse) {
 TEST(ThreeValuedLogicOpTest, AndTrueNull) {
     auto left = CreateColumnVector({true}, {true});
     auto right = CreateColumnVector({false}, {false});  // NULL
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -188,7 +188,7 @@ TEST(ThreeValuedLogicOpTest, AndTrueNull) {
 TEST(ThreeValuedLogicOpTest, AndFalseTrue) {
     auto left = CreateColumnVector({false}, {true});
     auto right = CreateColumnVector({true}, {true});
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -200,7 +200,7 @@ TEST(ThreeValuedLogicOpTest, AndFalseTrue) {
 TEST(ThreeValuedLogicOpTest, AndFalseFalse) {
     auto left = CreateColumnVector({false}, {true});
     auto right = CreateColumnVector({false}, {true});
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -213,7 +213,7 @@ TEST(ThreeValuedLogicOpTest, AndFalseNull) {
     // Key test: F AND NULL = F (determined, not NULL!)
     auto left = CreateColumnVector({false}, {true});
     auto right = CreateColumnVector({false}, {false});  // NULL
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -225,7 +225,7 @@ TEST(ThreeValuedLogicOpTest, AndFalseNull) {
 TEST(ThreeValuedLogicOpTest, AndNullTrue) {
     auto left = CreateColumnVector({false}, {false});  // NULL
     auto right = CreateColumnVector({true}, {true});
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -238,7 +238,7 @@ TEST(ThreeValuedLogicOpTest, AndNullFalse) {
     // Key test: NULL AND F = F (determined, not NULL!)
     auto left = CreateColumnVector({false}, {false});  // NULL
     auto right = CreateColumnVector({false}, {true});
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -250,7 +250,7 @@ TEST(ThreeValuedLogicOpTest, AndNullFalse) {
 TEST(ThreeValuedLogicOpTest, AndNullNull) {
     auto left = CreateColumnVector({false}, {false});   // NULL
     auto right = CreateColumnVector({false}, {false});  // NULL
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -270,7 +270,7 @@ TEST(ThreeValuedLogicOpTest, AndMultipleValues) {
     auto right = CreateColumnVector(
         {true, false, false, true, false, false, true, false, false},
         {true, true, false, true, true, false, true, true, false});
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -312,7 +312,7 @@ TEST(ThreeValuedLogicOpTest, AndDoesNotModifyRight) {
     std::vector<bool> orig_right_data, orig_right_valid;
     ExtractResults(right, orig_right_data, orig_right_valid);
 
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     // Verify right was not modified
     std::vector<bool> new_right_data, new_right_valid;
@@ -342,7 +342,7 @@ TEST(ThreeValuedLogicOpTest, AndDoesNotModifyRight) {
 TEST(ThreeValuedLogicOpTest, OrTrueTrue) {
     auto left = CreateColumnVector({true}, {true});
     auto right = CreateColumnVector({true}, {true});
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -354,7 +354,7 @@ TEST(ThreeValuedLogicOpTest, OrTrueTrue) {
 TEST(ThreeValuedLogicOpTest, OrTrueFalse) {
     auto left = CreateColumnVector({true}, {true});
     auto right = CreateColumnVector({false}, {true});
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -367,7 +367,7 @@ TEST(ThreeValuedLogicOpTest, OrTrueNull) {
     // Key test: T OR NULL = T (determined, not NULL!)
     auto left = CreateColumnVector({true}, {true});
     auto right = CreateColumnVector({false}, {false});  // NULL
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -379,7 +379,7 @@ TEST(ThreeValuedLogicOpTest, OrTrueNull) {
 TEST(ThreeValuedLogicOpTest, OrFalseTrue) {
     auto left = CreateColumnVector({false}, {true});
     auto right = CreateColumnVector({true}, {true});
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -391,7 +391,7 @@ TEST(ThreeValuedLogicOpTest, OrFalseTrue) {
 TEST(ThreeValuedLogicOpTest, OrFalseFalse) {
     auto left = CreateColumnVector({false}, {true});
     auto right = CreateColumnVector({false}, {true});
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -403,7 +403,7 @@ TEST(ThreeValuedLogicOpTest, OrFalseFalse) {
 TEST(ThreeValuedLogicOpTest, OrFalseNull) {
     auto left = CreateColumnVector({false}, {true});
     auto right = CreateColumnVector({false}, {false});  // NULL
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -416,7 +416,7 @@ TEST(ThreeValuedLogicOpTest, OrNullTrue) {
     // Key test: NULL OR T = T (determined, not NULL!)
     auto left = CreateColumnVector({false}, {false});  // NULL
     auto right = CreateColumnVector({true}, {true});
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -428,7 +428,7 @@ TEST(ThreeValuedLogicOpTest, OrNullTrue) {
 TEST(ThreeValuedLogicOpTest, OrNullFalse) {
     auto left = CreateColumnVector({false}, {false});  // NULL
     auto right = CreateColumnVector({false}, {true});
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -440,7 +440,7 @@ TEST(ThreeValuedLogicOpTest, OrNullFalse) {
 TEST(ThreeValuedLogicOpTest, OrNullNull) {
     auto left = CreateColumnVector({false}, {false});   // NULL
     auto right = CreateColumnVector({false}, {false});  // NULL
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -460,7 +460,7 @@ TEST(ThreeValuedLogicOpTest, OrMultipleValues) {
     auto right = CreateColumnVector(
         {true, false, false, true, false, false, true, false, false},
         {true, true, false, true, true, false, true, true, false});
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> data, valid;
     ExtractResults(left, data, valid);
@@ -502,7 +502,7 @@ TEST(ThreeValuedLogicOpTest, OrDoesNotModifyRight) {
     std::vector<bool> orig_right_data, orig_right_valid;
     ExtractResults(right, orig_right_data, orig_right_valid);
 
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     // Verify right was not modified
     std::vector<bool> new_right_data, new_right_valid;
@@ -536,15 +536,15 @@ TEST(ThreeValuedLogicOpTest, DeMorganOrToAnd) {
     // Method 1: NOT (A OR B)
     auto left1 = CreateColumnVector(a_data, a_valid);
     auto right1 = CreateColumnVector(b_data, b_valid);
-    ThreeValuedLogicOp::Or(left1, right1);
-    ThreeValuedLogicOp::Not(left1);
+    left1 = ThreeValuedLogicOp::Or(left1, right1);
+    left1 = ThreeValuedLogicOp::Not(left1);
 
     // Method 2: NOT A AND NOT B
     auto left2 = CreateColumnVector(a_data, a_valid);
     auto right2 = CreateColumnVector(b_data, b_valid);
-    ThreeValuedLogicOp::Not(left2);
-    ThreeValuedLogicOp::Not(right2);
-    ThreeValuedLogicOp::And(left2, right2);
+    left2 = ThreeValuedLogicOp::Not(left2);
+    right2 = ThreeValuedLogicOp::Not(right2);
+    left2 = ThreeValuedLogicOp::And(left2, right2);
 
     std::vector<bool> result1_data, result1_valid;
     std::vector<bool> result2_data, result2_valid;
@@ -572,15 +572,15 @@ TEST(ThreeValuedLogicOpTest, DeMorganAndToOr) {
     // Method 1: NOT (A AND B)
     auto left1 = CreateColumnVector(a_data, a_valid);
     auto right1 = CreateColumnVector(b_data, b_valid);
-    ThreeValuedLogicOp::And(left1, right1);
-    ThreeValuedLogicOp::Not(left1);
+    left1 = ThreeValuedLogicOp::And(left1, right1);
+    left1 = ThreeValuedLogicOp::Not(left1);
 
     // Method 2: NOT A OR NOT B
     auto left2 = CreateColumnVector(a_data, a_valid);
     auto right2 = CreateColumnVector(b_data, b_valid);
-    ThreeValuedLogicOp::Not(left2);
-    ThreeValuedLogicOp::Not(right2);
-    ThreeValuedLogicOp::Or(left2, right2);
+    left2 = ThreeValuedLogicOp::Not(left2);
+    right2 = ThreeValuedLogicOp::Not(right2);
+    left2 = ThreeValuedLogicOp::Or(left2, right2);
 
     std::vector<bool> result1_data, result1_valid;
     std::vector<bool> result2_data, result2_valid;
@@ -611,7 +611,7 @@ TEST(ThreeValuedLogicOpTest, LargeScaleAnd) {
 
     auto left = CreateColumnVector(left_data, left_valid);
     auto right = CreateColumnVector(right_data, right_valid);
-    ThreeValuedLogicOp::And(left, right);
+    left = ThreeValuedLogicOp::And(left, right);
 
     std::vector<bool> result_data, result_valid;
     ExtractResults(left, result_data, result_valid);
@@ -655,7 +655,7 @@ TEST(ThreeValuedLogicOpTest, LargeScaleOr) {
 
     auto left = CreateColumnVector(left_data, left_valid);
     auto right = CreateColumnVector(right_data, right_valid);
-    ThreeValuedLogicOp::Or(left, right);
+    left = ThreeValuedLogicOp::Or(left, right);
 
     std::vector<bool> result_data, result_valid;
     ExtractResults(left, result_data, result_valid);
@@ -682,4 +682,35 @@ TEST(ThreeValuedLogicOpTest, LargeScaleOr) {
         EXPECT_EQ(result_valid[i], exp_valid)
             << "Valid mismatch at index " << i;
     }
+}
+
+TEST(ThreeValuedLogicOpTest, PublishedInputsRemainReusable) {
+    auto left = CreateColumnVector({true, false, true, false},
+                                   {true, true, false, false});
+    auto right = CreateColumnVector({false, true, true, false},
+                                    {true, false, true, false});
+    const auto retained_left = left;
+    const auto retained_right = right;
+    const auto left_data = left->GetBitmap();
+    const auto left_valid = left->GetValidBitmap();
+    const auto right_data = right->GetBitmap();
+    const auto right_valid = right->GetValidBitmap();
+    ASSERT_EQ(left_data.count(), 2);
+    ASSERT_EQ(left_valid.count(), 2);
+    auto conjunction = ThreeValuedLogicOp::And(left, right);
+    auto disjunction = ThreeValuedLogicOp::Or(left, right);
+    auto negation = ThreeValuedLogicOp::Not(left);
+    EXPECT_NE(conjunction->GetBitmap().data(), left_data.data());
+    EXPECT_NE(disjunction->GetBitmap().data(), left_data.data());
+    EXPECT_NE(negation->GetBitmap().data(), left_data.data());
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(retained_left->GetBitmap()[i], i == 0 || i == 2);
+        EXPECT_EQ(retained_left->GetValidBitmap()[i], i < 2);
+        EXPECT_EQ(retained_right->GetBitmap()[i], i == 1 || i == 2);
+        EXPECT_EQ(retained_right->GetValidBitmap()[i], i == 0 || i == 2);
+    }
+    EXPECT_EQ(left_data.count(), 2);
+    EXPECT_EQ(left_valid.count(), 2);
+    EXPECT_EQ(right_data.count(), 2);
+    EXPECT_EQ(right_valid.count(), 2);
 }

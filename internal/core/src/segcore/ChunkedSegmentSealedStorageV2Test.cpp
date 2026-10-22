@@ -1444,7 +1444,7 @@ TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
         BitsetType timestamp_mask(kNumRows);
         BitsetTypeView timestamp_mask_view(timestamp_mask);
         static_cast<SegmentInternalInterface*>(manifest_segment.get())
-            ->mask_with_timestamps(timestamp_mask_view, 31, 0);
+            ->mask_with_timestamps(timestamp_mask, 31, 0);
         for (int64_t i = 0; i < kNumRows; ++i) {
             EXPECT_EQ(timestamp_mask[i], i >= kNumRows / 2);
         }
@@ -1472,7 +1472,7 @@ TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
         BitsetType delete_mask(kNumRows);
         BitsetTypeView delete_mask_view(delete_mask);
         segment_internal->mask_with_delete(
-            delete_mask_view, kNumRows, MAX_TIMESTAMP);
+            delete_mask, kNumRows, MAX_TIMESTAMP);
         EXPECT_EQ(delete_mask.count(), 1);
         EXPECT_TRUE(delete_mask[0]);
         EXPECT_GT(pk_column->DataByteSize(), 0);
@@ -1571,7 +1571,7 @@ TEST_P(TestLazyManifest, LazyManifestPkTasksUseRegularLoad) {
         ASSERT_NE(internal, nullptr);
         BitsetType delete_mask(kNumRows);
         BitsetTypeView delete_mask_view(delete_mask);
-        internal->mask_with_delete(delete_mask_view, kNumRows, MAX_TIMESTAMP);
+        internal->mask_with_delete(delete_mask, kNumRows, MAX_TIMESTAMP);
         EXPECT_EQ(delete_mask.count(), 1);
         EXPECT_TRUE(delete_mask[0]);
     }
@@ -2815,19 +2815,19 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnUnsortedSegment) {
 
     BitsetType timestamp_mask(chunk_num * test_data_count);
     BitsetTypeView timestamp_mask_view(timestamp_mask);
-    segment_internal->mask_with_timestamps(timestamp_mask_view, 41, 0);
+    segment_internal->mask_with_timestamps(timestamp_mask, 41, 0);
     ASSERT_FALSE(timestamp_mask[41]);
     ASSERT_TRUE(timestamp_mask[42]);
 
     timestamp_mask.reset();
-    segment_internal->mask_with_timestamps(timestamp_mask_view, 42, 0);
+    segment_internal->mask_with_timestamps(timestamp_mask, 42, 0);
     ASSERT_FALSE(timestamp_mask[42]);
     ASSERT_TRUE(timestamp_mask[43]);
 
     BitsetType delete_mask(chunk_num * test_data_count);
     BitsetTypeView delete_mask_view(delete_mask);
     segment_internal->mask_with_delete(
-        delete_mask_view, chunk_num * test_data_count, MAX_TIMESTAMP);
+        delete_mask, chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(1, delete_mask.count());
     ASSERT_EQ(1, unsorted_segment->get_deleted_count());
     ASSERT_EQ(chunk_num * test_data_count - 1,
@@ -2889,19 +2889,19 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnSortedSegment) {
 
     BitsetType timestamp_mask(chunk_num * test_data_count);
     BitsetTypeView timestamp_mask_view(timestamp_mask);
-    segment_internal->mask_with_timestamps(timestamp_mask_view, 41, 0);
+    segment_internal->mask_with_timestamps(timestamp_mask, 41, 0);
     ASSERT_FALSE(timestamp_mask[41]);
     ASSERT_TRUE(timestamp_mask[42]);
 
     timestamp_mask.reset();
-    segment_internal->mask_with_timestamps(timestamp_mask_view, 42, 0);
+    segment_internal->mask_with_timestamps(timestamp_mask, 42, 0);
     ASSERT_FALSE(timestamp_mask[42]);
     ASSERT_TRUE(timestamp_mask[43]);
 
     BitsetType delete_mask(chunk_num * test_data_count);
     BitsetTypeView delete_mask_view(delete_mask);
     segment_internal->mask_with_delete(
-        delete_mask_view, chunk_num * test_data_count, MAX_TIMESTAMP);
+        delete_mask, chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(1, delete_mask.count());
     ASSERT_EQ(1, sorted_segment->get_deleted_count());
     ASSERT_EQ(chunk_num * test_data_count - 1,

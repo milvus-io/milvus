@@ -36,7 +36,7 @@ class SimpleNumericAggregate : public exec::Aggregate {
                    "input vector for extracting aggregation must be of Type "
                    "ColumnVector");
         result_column->resize(numGroups);
-        TData* rawValues = static_cast<TData*>(result_column->GetRawData());
+        TData* rawValues = result_column->RawAsValues<TData>();
         for (auto i = 0; i < numGroups; i++) {
             char* group = groups[i];
             if (isNull(group)) {

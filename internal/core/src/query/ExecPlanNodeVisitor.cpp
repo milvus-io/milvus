@@ -112,7 +112,7 @@ ExecPlanNodeVisitor::ExecuteTask(
 
 template <typename S, typename T>
 void
-fillTypedDataArray(void* src_raw_data, int64_t count, T* dst) {
+fillTypedDataArray(const void* src_raw_data, int64_t count, T* dst) {
     static_assert(IsScalar<T>);
     const S* src_data = static_cast<const S*>(src_raw_data);
     for (auto i = 0; i < count; i++) {
@@ -122,7 +122,7 @@ fillTypedDataArray(void* src_raw_data, int64_t count, T* dst) {
 
 template <typename S, typename T>
 void
-fillTypedDataPtrArray(void* src_raw_data,
+fillTypedDataPtrArray(const void* src_raw_data,
                       int64_t count,
                       google::protobuf::RepeatedPtrField<T>* dst) {
     static_assert(IsScalar<T>);
@@ -142,10 +142,10 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
     // ColumnVector always tracks validity via valid_values_, so we should
     // always propagate it to ensure correctness for nullable fields
     auto valid_data = MutableFieldDataRowValidData(&data_array);
-    const uint8_t* src_bitmap =
-        static_cast<const uint8_t*>(column_vector->GetValidRawData());
+    const uint8_t* src_bitmap = reinterpret_cast<const uint8_t*>(
+        column_vector->GetValidBitmap().data());
     AssertInfo(src_bitmap,
-               "GetValidRawData() returned null, ColumnVector validity data "
+               "valid bitmap data is null, ColumnVector validity data "
                "should always be initialized");
     // Process 8 bits at a time for better performance
     size_t full_bytes = column_data_size / 8;

@@ -71,12 +71,13 @@ class StaticScorer : public Scorer {
     }
 
     void
-    batch_score(milvus::OpContext* op_ctx,
-                const segcore::SegmentInternalInterface* segment,
-                const proto::plan::FunctionMode& mode,
-                const FixedVector<int32_t>& offsets,
-                const TargetBitmap& bitmap,
-                std::vector<std::optional<float>>& boost_scores) override {
+    batch_score_by_offsets(
+        milvus::OpContext* op_ctx,
+        const segcore::SegmentInternalInterface* segment,
+        const proto::plan::FunctionMode& mode,
+        const FixedVector<int32_t>& offsets,
+        const TargetBitmapView& bitmap,
+        std::vector<std::optional<float>>& boost_scores) override {
         for (auto i = 0; i < offsets.size(); ++i) {
             auto offset = offsets[i];
             if (offset >= 0 && static_cast<size_t>(offset) < bitmap.size() &&
@@ -135,7 +136,8 @@ TEST_F(WeightScorerTest, BatchScoreTargetBitmapValidOffsets) {
 
     proto::plan::FunctionMode mode = proto::plan::FunctionMode::FunctionModeSum;
 
-    scorer_->batch_score(nullptr, nullptr, mode, offsets, bitmap, boost_scores);
+    scorer_->batch_score_by_offsets(
+        nullptr, nullptr, mode, offsets, bitmap.view(), boost_scores);
 
     // Positions 10, 50, 90 should have scores (they are set in bitmap)
     EXPECT_TRUE(boost_scores[0].has_value());
@@ -160,8 +162,8 @@ TEST_F(WeightScorerTest, BatchScoreTargetBitmapOutOfBoundsOffsets) {
     proto::plan::FunctionMode mode = proto::plan::FunctionMode::FunctionModeSum;
 
     // Should NOT crash! Out-of-bounds offsets should be safely skipped
-    ASSERT_NO_THROW(scorer_->batch_score(
-        nullptr, nullptr, mode, offsets, bitmap, boost_scores));
+    ASSERT_NO_THROW(scorer_->batch_score_by_offsets(
+        nullptr, nullptr, mode, offsets, bitmap.view(), boost_scores));
 
     // In-bounds offsets should be scored correctly
     EXPECT_TRUE(boost_scores[0].has_value());
@@ -285,12 +287,12 @@ TEST(RandomScorerTest, BatchScoreTargetBitmapOutOfBoundsOffsets) {
     std::vector<std::optional<float>> boost_scores(offsets.size(),
                                                    std::nullopt);
 
-    ASSERT_NO_THROW(scorer.batch_score(nullptr,
-                                       segment.get(),
-                                       proto::plan::FunctionModeSum,
-                                       offsets,
-                                       bitmap,
-                                       boost_scores));
+    ASSERT_NO_THROW(scorer.batch_score_by_offsets(nullptr,
+                                                  segment.get(),
+                                                  proto::plan::FunctionModeSum,
+                                                  offsets,
+                                                  bitmap,
+                                                  boost_scores));
 
     // In-bounds matched offsets should be scored.
     EXPECT_TRUE(boost_scores[0].has_value());
@@ -620,6 +622,8 @@ TEST(BoostScoreRunnerTest, PrecomputedFilterBitsetScoresChunksConsistently) {
     EXPECT_TRUE((*filter_bitset)[9000]);
     EXPECT_FALSE((*filter_bitset)[9001]);
 
+    const auto filter_view = filter_bitset->view();
+
     // Chunk 1 through the optional<float> overload.
     FixedVector<int32_t> chunk1 = {0, 1};
     std::vector<std::optional<float>> scores1(chunk1.size(), std::nullopt);
@@ -629,7 +633,7 @@ TEST(BoostScoreRunnerTest, PrecomputedFilterBitsetScoresChunksConsistently) {
                         scorer,
                         chunk1,
                         scores1,
-                        &filter_bitset.value());
+                        &filter_view);
     ASSERT_TRUE(scores1[0].has_value());
     EXPECT_FLOAT_EQ(scores1[0].value(), 2.0F);
     EXPECT_FALSE(scores1[1].has_value());
@@ -646,7 +650,7 @@ TEST(BoostScoreRunnerTest, PrecomputedFilterBitsetScoresChunksConsistently) {
                         chunk2,
                         scores2.data(),
                         has_scores2.get(),
-                        &filter_bitset.value());
+                        &filter_view);
     EXPECT_TRUE(has_scores2[0]);
     EXPECT_FLOAT_EQ(scores2[0], 2.0F);
     EXPECT_FALSE(has_scores2[1]);

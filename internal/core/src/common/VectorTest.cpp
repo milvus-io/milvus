@@ -223,3 +223,83 @@ TEST(ColumnVectorTest, AllMethodsOnNonBitmapThrows) {
     // Calling AllFalse on non-bitmap should throw
     EXPECT_THROW(non_bitmap_vec->AllFalse(), std::runtime_error);
 }
+
+TEST(ColumnVectorTest, PublishedBitmapIsReadOnly) {
+    static_assert(std::is_same_v<
+                  decltype(std::declval<const ColumnVector&>().GetRawData()),
+                  const void*>);
+    static_assert(std::is_same_v<decltype(std::declval<const ColumnVector&>()
+                                              .GetValidRawData()),
+                                 const void*>);
+    auto vec = CreateBitmapColumnVector({true, true, true}, {true, true, true});
+    const auto data = vec->GetBitmap();
+    const auto valid = vec->GetValidBitmap();
+    EXPECT_EQ(data.count(), 3);
+    EXPECT_EQ(valid.count(), 3);
+    TargetBitmap output(data);
+    output.reset(1);
+    EXPECT_EQ(output.count(), 2);
+    EXPECT_EQ(data.count(), 3);
+    EXPECT_TRUE(vec->AllTrue());
+    EXPECT_ANY_THROW(vec->nullAt(1));
+    EXPECT_ANY_THROW(vec->clearNullAt(1));
+    EXPECT_ANY_THROW(vec->append(*vec));
+    EXPECT_ANY_THROW(vec->resize(4));
+    EXPECT_ANY_THROW(vec->RawAsValues<uint8_t>());
+}
+
+TEST(ColumnVectorTest, ValidityViewsRefreshAfterResize) {
+    ColumnVector vec(DataType::INT32, 3, std::nullopt);
+    vec.nullAt(1);
+    EXPECT_EQ(vec.nullCount(), 1);
+    vec.resize(65, false);
+    EXPECT_EQ(vec.GetValidBitmap().size(), 65);
+    EXPECT_EQ(vec.nullCount(), 63);
+    vec.resize(2);
+    EXPECT_EQ(vec.nullCount(), 1);
+    vec.resize(4, true);
+    EXPECT_EQ(vec.nullCount(), 1);
+}
+
+TEST(ColumnVectorTest, ValidityViewsRefreshAfterAppend) {
+    ColumnVector vec(InitScalarFieldDataWithLength(DataType::INT32, 4),
+                     TargetBitmap(4, true),
+                     0);
+    vec.SetValueAt<int32_t>(3, 40);
+    vec.nullAt(1);
+    auto view = vec.GetValidBitmap();
+    EXPECT_EQ(vec.nullCount(), 1);
+    view = vec.GetValidBitmap();
+    EXPECT_EQ(view.count(), 3);
+
+    ColumnVector other(InitScalarFieldDataWithLength(DataType::INT32, 3),
+                       TargetBitmap(3, true),
+                       0);
+    other.nullAt(2);
+    EXPECT_EQ(other.nullCount(), 1);
+    vec.append(other);
+    EXPECT_EQ(vec.size(), 7);
+    view = vec.GetValidBitmap();
+    EXPECT_EQ(view.size(), 7);
+    EXPECT_EQ(view.count(), 5);
+    EXPECT_EQ(vec.nullCount(), 2);
+    EXPECT_FALSE(vec.ValidAt(1));
+    EXPECT_FALSE(vec.ValidAt(6));
+    EXPECT_TRUE(vec.ValidAt(4));
+    EXPECT_EQ(vec.ValueAt<int32_t>(3), 40);
+    EXPECT_EQ(vec.ValueAt<int32_t>(4), 0);
+}
+
+TEST(ColumnVectorTest, ReservingBitmapStorageKeepsLogicalSize) {
+    FieldBitsetImpl<uint8_t> field(DataType::INT8, TargetBitmap(5, true));
+    const auto& view = field.GetBitmap();
+    EXPECT_EQ(view.count(), 5);
+    field.Reserve(128);
+    const auto after_reserve = field.GetBitmap();
+    EXPECT_EQ(after_reserve.size(), 5);
+    EXPECT_EQ(after_reserve.count(), 5);
+    TargetBitmap copied(field.GetBitmap());
+    copied.reset(4);
+    EXPECT_EQ(copied.count(), 4);
+    EXPECT_EQ(field.GetBitmap().count(), 5);
+}

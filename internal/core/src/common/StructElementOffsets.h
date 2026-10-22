@@ -150,7 +150,7 @@ class IStructElementOffsets {
     ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
                                 int64_t elem_offset,
                                 int64_t row_start,
-                                TargetBitmapView row_result) const = 0;
+                                TargetBitmapWriteView row_result) const = 0;
 };
 
 class StructElementOffsetsSealed : public IStructElementOffsets {
@@ -235,10 +235,11 @@ class StructElementOffsetsSealed : public IStructElementOffsets {
                            int64_t row_count) const override;
 
     void
-    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
-                                int64_t elem_offset,
-                                int64_t row_start,
-                                TargetBitmapView row_result) const override;
+    ElementBitsetToRowBitsetAny(
+        const TargetBitmapView& elem_bitset,
+        int64_t elem_offset,
+        int64_t row_start,
+        TargetBitmapWriteView row_result) const override;
 
     static std::shared_ptr<StructElementOffsetsSealed>
     BuildFromColumn(const ChunkedColumnInterface& column,
@@ -335,10 +336,11 @@ class StructElementOffsetsGrowing : public IStructElementOffsets {
                            int64_t row_count) const override;
 
     void
-    ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
-                                int64_t elem_offset,
-                                int64_t row_start,
-                                TargetBitmapView row_result) const override;
+    ElementBitsetToRowBitsetAny(
+        const TargetBitmapView& elem_bitset,
+        int64_t elem_offset,
+        int64_t row_start,
+        TargetBitmapWriteView row_result) const override;
 
  private:
     struct PendingRow {

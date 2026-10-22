@@ -97,7 +97,7 @@ FillRegularSearchResult(const DatasetPtr& native_result,
 }
 
 knowhere::MutableBitmapView
-ValidityTarget(TargetBitmapView view) {
+ValidityTarget(TargetBitmapWriteView view) {
     if (view.size() == 0) {
         return {};
     }
@@ -421,9 +421,10 @@ VectorIndexReader::IsRowValid(int64_t logical_offset) const {
 }
 
 void
-VectorIndexReader::ApplyValidDataByRange(int64_t logical_offset,
-                                         int64_t count,
-                                         TargetBitmapView valid_result) const {
+VectorIndexReader::ApplyValidDataByRange(
+    int64_t logical_offset,
+    int64_t count,
+    TargetBitmapWriteView valid_result) const {
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity range result size mismatch");
     const auto status =
@@ -450,7 +451,7 @@ void
 VectorIndexReader::ApplyValidDataByOffsets(
     const int64_t* offsets,
     int64_t count,
-    TargetBitmapView valid_result) const {
+    TargetBitmapWriteView valid_result) const {
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity offset result size mismatch");
     const auto status = engine_.native_index.IntersectValidityAt(

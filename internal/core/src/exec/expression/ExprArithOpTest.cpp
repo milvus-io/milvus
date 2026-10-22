@@ -2002,7 +2002,7 @@ TEST_P(ExprTest, TestJsonBinaryArithMissingPathIsUnknown) {
                                                         std::move(offset_bits));
     };
 
-    auto expect_bits = [](const BitsetType& final,
+    auto expect_bits = [](const BitsetTypeView& final,
                           const std::vector<bool>& offset,
                           const std::vector<bool>& expected) {
         ASSERT_EQ(final.size(), expected.size());

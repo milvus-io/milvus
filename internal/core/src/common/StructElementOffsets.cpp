@@ -128,7 +128,7 @@ ElementBitsetAnyReduce(const Starts& starts,
                        int64_t elem_offset,
                        int64_t row_start,
                        int64_t row_count,
-                       TargetBitmapView row_result) {
+                       TargetBitmapWriteView row_result) {
     using word_t = TargetBitmapView::policy_type::data_type;
     constexpr int64_t kWordBits = static_cast<int64_t>(8 * sizeof(word_t));
 
@@ -360,7 +360,7 @@ StructElementOffsetsSealed::ElementBitsetToRowBitsetAny(
     const TargetBitmapView& elem_bitset,
     int64_t elem_offset,
     int64_t row_start,
-    TargetBitmapView row_result) const {
+    TargetBitmapWriteView row_result) const {
     const int64_t row_count = row_result.size();
     AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
                "row range out of bounds: row_start={}, row_count={}, "
@@ -733,7 +733,7 @@ StructElementOffsetsGrowing::ElementBitsetToRowBitsetAny(
     const TargetBitmapView& elem_bitset,
     int64_t elem_offset,
     int64_t row_start,
-    TargetBitmapView row_result) const {
+    TargetBitmapWriteView row_result) const {
     const int64_t committed =
         committed_row_count_.load(std::memory_order_acquire);
     const int64_t row_count = row_result.size();

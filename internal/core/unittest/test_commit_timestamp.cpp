@@ -87,7 +87,7 @@ TEST(CommitTimestamp, MVCC_RowsInvisibleBeforeCommitTs) {
     {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
-        seg->mask_with_timestamps(view, T_before, /*collection_ttl=*/0);
+        seg->mask_with_timestamps(bs, T_before, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), static_cast<size_t>(N))
             << "query_ts=" << T_before << " < commit_ts=" << T_commit
             << ": all rows must be invisible";
@@ -97,7 +97,7 @@ TEST(CommitTimestamp, MVCC_RowsInvisibleBeforeCommitTs) {
     {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
-        seg->mask_with_timestamps(view, T_after, /*collection_ttl=*/0);
+        seg->mask_with_timestamps(bs, T_after, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), 0UL)
             << "query_ts=" << T_after << " >= commit_ts=" << T_commit
             << ": all rows must be visible";
@@ -129,7 +129,7 @@ TEST(CommitTimestamp, TTL_RowsNotExpiredWhenCommitTsAboveTtl) {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
         // Pass large MVCC ts so TTL logic is the only filter.
-        seg->mask_with_timestamps(view, T_commit + 1000, TTL_THRESHOLD);
+        seg->mask_with_timestamps(bs, T_commit + 1000, TTL_THRESHOLD);
         EXPECT_EQ(bs.count(), 0UL)
             << "Import segment with commit_ts=" << T_commit
             << " must NOT be TTL-expired at threshold=" << TTL_THRESHOLD;
@@ -141,7 +141,7 @@ TEST(CommitTimestamp, TTL_RowsNotExpiredWhenCommitTsAboveTtl) {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
         // MVCC ts large so only TTL filters; T_old=100 <= TTL_THRESHOLD=3000 -> expired.
-        seg_ctrl->mask_with_timestamps(view, T_old + 10000, TTL_THRESHOLD);
+        seg_ctrl->mask_with_timestamps(bs, T_old + 10000, TTL_THRESHOLD);
         EXPECT_EQ(bs.count(), static_cast<size_t>(N))
             << "Without overwrite, row.ts=" << T_old
             << " <= ttl=" << TTL_THRESHOLD
@@ -182,7 +182,7 @@ TEST(CommitTimestamp, Delete_PreCommitDeleteNotApplied) {
     {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
-        seg->mask_with_timestamps(view, T_query_hidden, /*collection_ttl=*/0);
+        seg->mask_with_timestamps(bs, T_query_hidden, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), static_cast<size_t>(N))
             << "At query_ts=" << T_query_hidden << " < T_commit=" << T_commit
             << ", all rows must be MVCC-invisible";
@@ -193,7 +193,7 @@ TEST(CommitTimestamp, Delete_PreCommitDeleteNotApplied) {
         BitsetType bs_mvcc(N, false);
         BitsetTypeView view_mvcc(bs_mvcc);
         seg->mask_with_timestamps(
-            view_mvcc, T_query_visible, /*collection_ttl=*/0);
+            bs_mvcc, T_query_visible, /*collection_ttl=*/0);
         EXPECT_EQ(bs_mvcc.count(), 0UL)
             << "MVCC must not mask any row at query_ts=" << T_query_visible;
 
@@ -201,7 +201,7 @@ TEST(CommitTimestamp, Delete_PreCommitDeleteNotApplied) {
         // because the row did not exist at T_delete.
         BitsetType bs_del(N, false);
         BitsetTypeView view_del(bs_del);
-        seg->mask_with_delete(view_del, N, T_query_visible);
+        seg->mask_with_delete(bs_del, N, T_query_visible);
         EXPECT_EQ(bs_del.count(), 0UL)
             << "Delete at ts=" << T_delete << " < commit_ts=" << T_commit
             << " must NOT apply — row did not exist at delete time";
@@ -230,7 +230,7 @@ TEST(CommitTimestamp, Boundary_CommitEqualsMaxRowTs) {
     {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
-        seg->mask_with_timestamps(view, T_commit - 1, /*collection_ttl=*/0);
+        seg->mask_with_timestamps(bs, T_commit - 1, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), static_cast<size_t>(N))
             << "query_ts=" << (T_commit - 1) << " < commit_ts=" << T_commit
             << ": all rows must be invisible";
@@ -240,7 +240,7 @@ TEST(CommitTimestamp, Boundary_CommitEqualsMaxRowTs) {
     {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
-        seg->mask_with_timestamps(view, T_commit, /*collection_ttl=*/0);
+        seg->mask_with_timestamps(bs, T_commit, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), 0UL)
             << "query_ts=" << T_commit << " == commit_ts: all rows visible";
     }
@@ -372,7 +372,7 @@ TEST(CommitTimestamp, V2_MVCC_RowsInvisibleBeforeCommitTs) {
     {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
-        seg->mask_with_timestamps(view, T_before, /*collection_ttl=*/0);
+        seg->mask_with_timestamps(bs, T_before, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), static_cast<size_t>(N))
             << "v2: query_ts=" << T_before << " < commit_ts=" << T_commit
             << ": all rows must be invisible";
@@ -380,7 +380,7 @@ TEST(CommitTimestamp, V2_MVCC_RowsInvisibleBeforeCommitTs) {
     {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
-        seg->mask_with_timestamps(view, T_after, /*collection_ttl=*/0);
+        seg->mask_with_timestamps(bs, T_after, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), 0UL)
             << "v2: query_ts=" << T_after << " >= commit_ts=" << T_commit
             << ": all rows must be visible";
@@ -409,7 +409,7 @@ TEST(CommitTimestamp, V2_TTL_RowsNotExpiredWhenCommitTsAboveTtl) {
 
     BitsetType bs(N, false);
     BitsetTypeView view(bs);
-    seg->mask_with_timestamps(view, T_commit + 1000, TTL_THRESHOLD);
+    seg->mask_with_timestamps(bs, T_commit + 1000, TTL_THRESHOLD);
     EXPECT_EQ(bs.count(), 0UL)
         << "v2: import segment with commit_ts=" << T_commit
         << " must NOT be TTL-expired at threshold=" << TTL_THRESHOLD
@@ -444,7 +444,7 @@ TEST(CommitTimestamp, V2_Delete_PreCommitDeleteNotApplied) {
 
     BitsetType bs_del(N, false);
     BitsetTypeView view_del(bs_del);
-    seg->mask_with_delete(view_del, N, T_query_visible);
+    seg->mask_with_delete(bs_del, N, T_query_visible);
     EXPECT_EQ(bs_del.count(), 0UL)
         << "v2: delete at ts=" << T_delete << " < commit_ts=" << T_commit
         << " must NOT apply on a column-group import segment";
@@ -505,7 +505,7 @@ TEST(CommitTimestamp, NormalSegment_BehaviorUnchanged) {
     {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
-        seg->mask_with_timestamps(view, 500, /*collection_ttl=*/0);
+        seg->mask_with_timestamps(bs, 500, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), static_cast<size_t>(N))
             << "query_ts=500 < row_ts_min=" << ROW_TS_MIN
             << ": all rows invisible";
@@ -514,8 +514,7 @@ TEST(CommitTimestamp, NormalSegment_BehaviorUnchanged) {
     {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
-        seg->mask_with_timestamps(
-            view, ROW_TS_MAX + 1000, /*collection_ttl=*/0);
+        seg->mask_with_timestamps(bs, ROW_TS_MAX + 1000, /*collection_ttl=*/0);
         EXPECT_EQ(bs.count(), 0UL)
             << "query_ts > row_ts_max=" << ROW_TS_MAX << ": all rows visible";
     }
@@ -524,7 +523,7 @@ TEST(CommitTimestamp, NormalSegment_BehaviorUnchanged) {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
         seg->mask_with_timestamps(
-            view, ROW_TS_MAX + 1000, /*collection_ttl=*/500);
+            bs, ROW_TS_MAX + 1000, /*collection_ttl=*/500);
         EXPECT_EQ(bs.count(), 0UL)
             << "ttl=500 < row_ts_min=" << ROW_TS_MIN << ": no TTL expiry";
     }
@@ -533,7 +532,7 @@ TEST(CommitTimestamp, NormalSegment_BehaviorUnchanged) {
         BitsetType bs(N, false);
         BitsetTypeView view(bs);
         seg->mask_with_timestamps(
-            view, ROW_TS_MAX + 1000, /*collection_ttl=*/ROW_TS_MAX + 1);
+            bs, ROW_TS_MAX + 1000, /*collection_ttl=*/ROW_TS_MAX + 1);
         EXPECT_EQ(bs.count(), static_cast<size_t>(N))
             << "ttl=" << (ROW_TS_MAX + 1) << " > row_ts_max=" << ROW_TS_MAX
             << ": all rows TTL-expired";

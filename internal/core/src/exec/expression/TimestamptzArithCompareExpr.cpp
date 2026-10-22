@@ -271,12 +271,11 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
 
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
     auto exec_sub_batch =
         [ arith_op,
           compare_op ]<FilterType filter_type = FilterType::sequential>(
@@ -284,8 +283,8 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             T compare_value,
             proto::plan::Interval interval) {
         if (data == nullptr) {
@@ -330,7 +329,8 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                processed_size,
                real_batch_size);
 
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 }  // namespace exec

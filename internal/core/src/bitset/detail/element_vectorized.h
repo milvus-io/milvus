@@ -18,15 +18,245 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <type_traits>
 
 #include "proxy.h"
 #include "element_wise.h"
 
+#if defined(__aarch64__) && defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+#if defined(__aarch64__) && defined(__linux__) && __has_include(<arm_sve.h>)
+#include <arm_sve.h>
+#include <sys/auxv.h>
+#define BITSET_HAS_SVE_COUNT 1
+#endif
+
 namespace milvus {
 namespace bitset {
 namespace detail {
+
+// Byte-addressed: supports both uint8_t and uint64_t policies, with no
+// extra alignment/padding requirement or type-punning scalar loads.
+// Builtin copies avoid fortified libc wrappers inheriting a caller TU's ISA.
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+__attribute__((target("arch=x86-64,no-avx,no-avx2,no-avx512f,no-popcnt")))
+#elif defined(__aarch64__) && defined(__clang__)
+__attribute__((target("no-sve,no-sve2")))
+#elif defined(__aarch64__) && defined(__GNUC__)
+__attribute__((target("arch=armv8-a")))
+#endif
+inline size_t
+CountBytesScalar(const uint8_t* data, size_t bytes) {
+    size_t count = 0;
+    size_t i = 0;
+    for (; i + sizeof(uint64_t) <= bytes; i += sizeof(uint64_t)) {
+        uint64_t word;
+        __builtin_memcpy(&word, data + i, sizeof(word));
+        count += __builtin_popcountll(word);
+    }
+    for (; i < bytes; ++i) {
+        count += __builtin_popcount(data[i]);
+    }
+    return count;
+}
+
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+__attribute__((target("arch=x86-64,popcnt,no-avx,no-avx2,no-avx512f"),
+               noinline)) inline size_t
+CountBytesPopcnt(const uint8_t* data, size_t bytes) {
+    size_t a = 0, b = 0, c = 0, d = 0;
+    size_t i = 0;
+    for (; i + 32 <= bytes; i += 32) {
+        uint64_t words[4];
+        __builtin_memcpy(words, data + i, sizeof(words));
+        a += __builtin_popcountll(words[0]);
+        b += __builtin_popcountll(words[1]);
+        c += __builtin_popcountll(words[2]);
+        d += __builtin_popcountll(words[3]);
+    }
+    for (; i + 8 <= bytes; i += 8) {
+        uint64_t word;
+        __builtin_memcpy(&word, data + i, sizeof(word));
+        a += __builtin_popcountll(word);
+    }
+    for (; i < bytes; ++i) a += __builtin_popcount(data[i]);
+    return a + b + c + d;
+}
+
+__attribute__((target("arch=x86-64,avx512f,avx512vl,avx512vpopcntdq,no-"
+                      "avx512bw,no-avx512dq,no-avx512cd"),
+               noinline)) inline size_t
+CountBytesVpopcnt256(const uint8_t* data, size_t bytes) {
+    size_t prefix = (32 - (reinterpret_cast<uintptr_t>(data) & 31)) & 31;
+    if (prefix > bytes)
+        prefix = bytes;
+    const size_t leading = CountBytesScalar(data, prefix);
+    data += prefix;
+    bytes -= prefix;
+    // Compiler builtins avoid intrinsic wrappers inheriting another TU's ISA.
+    using Vector = unsigned long long __attribute__((vector_size(32)));
+    using SignedVector = long long __attribute__((vector_size(32)));
+    Vector sums[4] = {};
+    size_t i = 0;
+    for (; i + 128 <= bytes; i += 128) {
+        for (size_t lane = 0; lane < 4; ++lane) {
+            Vector words;
+            __builtin_memcpy(&words, data + i + lane * 32, sizeof(words));
+#if defined(__clang__)
+            sums[lane] +=
+                Vector(__builtin_ia32_vpopcntq_256(SignedVector(words)));
+#else
+            sums[lane] +=
+                Vector(__builtin_ia32_vpopcountq_v4di(SignedVector(words)));
+#endif
+        }
+    }
+    Vector total = sums[0] + sums[1] + sums[2] + sums[3];
+    for (; i + 32 <= bytes; i += 32) {
+        Vector words;
+        __builtin_memcpy(&words, data + i, sizeof(words));
+#if defined(__clang__)
+        total += Vector(__builtin_ia32_vpopcntq_256(SignedVector(words)));
+#else
+        total += Vector(__builtin_ia32_vpopcountq_v4di(SignedVector(words)));
+#endif
+    }
+    return leading + total[0] + total[1] + total[2] + total[3] +
+           CountBytesScalar(data + i, bytes - i);
+}
+#endif
+
+#if defined(BITSET_HAS_SVE_COUNT)
+// Function-level targeting keeps SVE instructions out of the baseline path.
+#if defined(__clang__)
+__attribute__((target("sve"), noinline))
+#else
+__attribute__((target("arch=armv8-a+sve"), noinline))
+#endif
+inline size_t
+CountBytesSve(const uint8_t* data, size_t bytes) {
+    const size_t width = svcntb();
+    const auto pg8 = svptrue_b8();
+    const auto pg64 = svptrue_b64();
+    auto a = svdup_u64(0);
+    auto b = a;
+    auto c = a;
+    auto d = a;
+    size_t i = 0;
+    for (; bytes - i >= 4 * width; i += 4 * width) {
+        a = svadd_u64_x(
+            pg64,
+            a,
+            svcnt_u64_x(pg64, svreinterpret_u64_u8(svld1_u8(pg8, data + i))));
+        b = svadd_u64_x(
+            pg64,
+            b,
+            svcnt_u64_x(pg64,
+                        svreinterpret_u64_u8(svld1_u8(pg8, data + i + width))));
+        c = svadd_u64_x(pg64,
+                        c,
+                        svcnt_u64_x(pg64,
+                                    svreinterpret_u64_u8(
+                                        svld1_u8(pg8, data + i + 2 * width))));
+        d = svadd_u64_x(pg64,
+                        d,
+                        svcnt_u64_x(pg64,
+                                    svreinterpret_u64_u8(
+                                        svld1_u8(pg8, data + i + 3 * width))));
+    }
+    a = svadd_u64_x(pg64, svadd_u64_x(pg64, a, b), svadd_u64_x(pg64, c, d));
+    for (; i < bytes;) {
+        // Inactive bytes are zero-filled, including a partial uint64 lane.
+        const auto pg = svwhilelt_b8(uint64_t(i), uint64_t(bytes));
+        const auto words = svreinterpret_u64_u8(svld1_u8(pg, data + i));
+        a = svadd_u64_x(pg64, a, svcnt_u64_x(pg64, words));
+        if (bytes - i <= width) {
+            break;
+        }
+        i += width;
+    }
+    return svaddv_u64(pg64, a);
+}
+
+#endif
+
+// Isolate SIMD prologues and CPU dispatch from short range_count calls.
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+__attribute__((target("arch=x86-64,no-avx,no-avx2,no-avx512f,no-popcnt"),
+               noinline))
+#elif defined(__aarch64__) && defined(__clang__)
+__attribute__((target("no-sve,no-sve2"), noinline))
+#elif defined(__aarch64__) && defined(__GNUC__)
+__attribute__((target("arch=armv8-a"), noinline))
+#else
+__attribute__((noinline))
+#endif
+inline size_t
+CountBytesBulk(const uint8_t* data, size_t bytes) {
+#if defined(__aarch64__) && defined(__ARM_NEON)
+#if defined(BITSET_HAS_SVE_COUNT) && defined(HWCAP_SVE)
+    static const bool use_sve = (getauxval(AT_HWCAP) & HWCAP_SVE) != 0;
+    if (use_sve) {
+        return CountBytesSve(data, bytes);
+    }
+#endif
+    size_t prefix = (16 - (reinterpret_cast<uintptr_t>(data) & 15)) & 15;
+    if (prefix > bytes)
+        prefix = bytes;
+    size_t total = CountBytesScalar(data, prefix);
+    data += prefix;
+    bytes -= prefix;
+    size_t i = 0;
+    for (; i + 1024 <= bytes; i += 1024) {
+        auto a = vdupq_n_u16(0);
+        auto b = a;
+        auto c = a;
+        auto d = a;
+        for (size_t j = 0; j < 1024; j += 64) {
+            a = vpadalq_u8(a, vcntq_u8(vld1q_u8(data + i + j)));
+            b = vpadalq_u8(b, vcntq_u8(vld1q_u8(data + i + j + 16)));
+            c = vpadalq_u8(c, vcntq_u8(vld1q_u8(data + i + j + 32)));
+            d = vpadalq_u8(d, vcntq_u8(vld1q_u8(data + i + j + 48)));
+        }
+        // At most 1024 in any combined uint16 lane per 1 KiB chunk.
+        total += vaddlvq_u16(vaddq_u16(vaddq_u16(a, b), vaddq_u16(c, d)));
+    }
+    auto tail = vdupq_n_u16(0);
+    auto b = tail;
+    auto c = tail;
+    auto d = tail;
+    for (; i + 64 <= bytes; i += 64) {
+        tail = vpadalq_u8(tail, vcntq_u8(vld1q_u8(data + i)));
+        b = vpadalq_u8(b, vcntq_u8(vld1q_u8(data + i + 16)));
+        c = vpadalq_u8(c, vcntq_u8(vld1q_u8(data + i + 32)));
+        d = vpadalq_u8(d, vcntq_u8(vld1q_u8(data + i + 48)));
+    }
+    tail = vaddq_u16(vaddq_u16(tail, b), vaddq_u16(c, d));
+    for (; i + 16 <= bytes; i += 16) {
+        tail = vpadalq_u8(tail, vcntq_u8(vld1q_u8(data + i)));
+    }
+    return total + vaddlvq_u16(tail) + CountBytesScalar(data + i, bytes - i);
+#elif defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+    static const bool use_vpopcnt = [] {
+        __builtin_cpu_init();
+        return __builtin_cpu_supports("avx512f") &&
+               __builtin_cpu_supports("avx512vl") &&
+               __builtin_cpu_supports("avx512vpopcntdq");
+    }();
+    if (use_vpopcnt) {
+        return CountBytesVpopcnt256(data, bytes);
+    }
+    if (__builtin_cpu_supports("popcnt")) {
+        return CountBytesPopcnt(data, bytes);
+    }
+    return CountBytesScalar(data, bytes);
+#else
+    return CountBytesScalar(data, bytes);
+#endif
+}
 
 // SIMD applied on top of ElementWiseBitsetPolicy
 template <typename ElementT, typename VectorizedT>
@@ -89,6 +319,27 @@ struct VectorizedElementWiseBitsetPolicy {
             ElementWiseBitsetPolicy<ElementT>::op_and(
                 left, right, start_left, start_right, size);
         }
+    }
+
+    static inline void
+    op_and_flip(data_type* const left,
+                const data_type* const right,
+                const size_t start_left,
+                const size_t start_right,
+                const size_t size) {
+        using Scalar = ElementWiseBitsetPolicy<ElementT>;
+        if (size == 0) {
+            return;
+        }
+        if (Scalar::ranges_overlap(
+                left, start_left, right, start_right, size)) {
+            // Use this policy's AND so even overlapping views retain the
+            // traversal of the selected platform implementation.
+            op_and(left, right, start_left, start_right, size);
+            op_flip(left, start_left, size);
+            return;
+        }
+        Scalar::op_and_flip(left, right, start_left, start_right, size);
     }
 
     static inline void
@@ -168,7 +419,28 @@ struct VectorizedElementWiseBitsetPolicy {
     op_count(const data_type* const data,
              const size_t start,
              const size_t size) {
+        if (size >= 16384) {
+            return op_count_large(data, start, size);
+        }
         return ElementWiseBitsetPolicy<ElementT>::op_count(data, start, size);
+    }
+
+    static __attribute__((noinline)) size_t
+    op_count_large(const data_type* data, size_t start, size_t size) {
+        using Scalar = ElementWiseBitsetPolicy<ElementT>;
+        size_t count = 0;
+        const size_t shift = Scalar::get_shift(start);
+        if (shift != 0) {
+            const size_t prefix = data_bits - shift;
+            count = Scalar::op_count(data, start, prefix);
+            start += prefix;
+            size -= prefix;
+        }
+        const size_t middle = (size / data_bits) * data_bits;
+        count += CountBytesBulk(
+            reinterpret_cast<const uint8_t*>(data + Scalar::get_element(start)),
+            middle / 8);
+        return count + Scalar::op_count(data, start + middle, size - middle);
     }
 
     static inline bool
@@ -486,3 +758,7 @@ struct VectorizedElementWiseBitsetPolicy {
 }  // namespace detail
 }  // namespace bitset
 }  // namespace milvus
+
+#ifdef BITSET_HAS_SVE_COUNT
+#undef BITSET_HAS_SVE_COUNT
+#endif

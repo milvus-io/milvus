@@ -111,6 +111,16 @@ struct BitWiseBitsetPolicy {
     }
 
     static inline void
+    op_and_flip(data_type* const left,
+                const data_type* const right,
+                const size_t start_left,
+                const size_t start_right,
+                const size_t size) {
+        op_and(left, right, start_left, start_right, size);
+        op_flip(left, start_left, size);
+    }
+
+    static inline void
     op_and(data_type* const left,
            const data_type* const right,
            const size_t start_left,

@@ -41,8 +41,7 @@ using Entry = milvus::index::IndexStructure<int64_t>;
 // scalar policy/std::vector so this executable needs no Folly/SIMD runtime.
 using Bitmap = milvus::bitset::Bitset<
     milvus::bitset::detail::ElementWiseBitsetPolicy<uint64_t>,
-    std::vector<uint8_t>,
-    true>;
+    std::vector<uint8_t>>;
 
 Bitmap
 Lookup(const std::vector<Entry>& entries,

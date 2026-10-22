@@ -16,7 +16,10 @@
 
 #pragma once
 
+#include <optional>
+
 #include "common/Types.h"
+#include "common/BitsetView.h"
 
 // Null predicates, independent of point/range support. Scalar predicate and
 // candidate families provide this mixin even when they do not implement
@@ -35,6 +38,16 @@ class INullReader {
 
     virtual TargetBitmap
     IsNotNull() const = 0;
+
+    // Borrowed dense validity in this reader's coordinate domain. nullopt means
+    // unsupported; an engaged zero-size view means all Count() coordinates are
+    // valid. Otherwise size() equals Count(), with no ID mapping. The view must
+    // never outlive the pinned reader and its storage must remain immutable.
+    // Mutable/path-specific readers keep the owned IsNotNull() fallback.
+    virtual std::optional<BitsetView>
+    GetValidityView() const {
+        return std::nullopt;
+    }
 };
 
 }  // namespace milvus::index

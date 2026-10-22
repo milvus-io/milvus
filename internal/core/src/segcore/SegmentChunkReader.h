@@ -256,7 +256,7 @@ class SegmentChunkReader {
                         int64_t chunk_id,
                         int64_t offset,
                         int64_t size,
-                        TargetBitmapView valid_result) const {
+                        TargetBitmapWriteView valid_result) const {
         if (size == 0) {
             return;
         }
@@ -280,7 +280,7 @@ class SegmentChunkReader {
                                  FieldId field_id,
                                  const int64_t* offsets,
                                  int64_t count,
-                                 TargetBitmapView valid_result) const {
+                                 TargetBitmapWriteView valid_result) const {
         if (count == 0) {
             return;
         }

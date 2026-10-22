@@ -304,11 +304,10 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
@@ -326,8 +325,8 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const ValueType& target_val) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
@@ -380,7 +379,8 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename ValueType>
@@ -398,11 +398,10 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -416,7 +415,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
     if (arg_set_->Empty()) {
         res.reset();
         MoveCursor();
-        return res_vec;
+        return std::make_shared<ColumnVector>(std::move(output_bits),
+                                              std::move(output_validity));
     }
 
     int processed_cursor = 0;
@@ -427,8 +427,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             int index,
             const std::shared_ptr<MultiElement>& term_set) {
         if (!term_set->Empty()) {
@@ -492,7 +492,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename ValueType>
@@ -509,11 +510,10 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
@@ -533,8 +533,8 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer,
             const ValueType& target_val) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -600,7 +600,8 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename ValueType>
@@ -637,8 +638,8 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_);
-        TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        auto& res_view = *cached_index_chunk_res_;
+        auto& valid_res_view = *cached_index_chunk_valid_res_;
 
         // process shredding data
         auto try_execute = [&](milvus::index::JSONType json_type,
@@ -647,14 +648,15 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             if (!target_field.empty()) {
                 using ColType = decltype(get_type);
                 TargetBitmap target_res(active_count_, false);
-                TargetBitmapView target_res_view(target_res);
+                TargetBitmapWriteView target_res_view(target_res);
                 TargetBitmap target_valid(active_count_, true);
-                TargetBitmapView target_valid_view(target_valid);
-                auto shredding_executor = [this](const ColType* src,
-                                                 ValidityView valid,
-                                                 size_t size,
-                                                 TargetBitmapView res,
-                                                 TargetBitmapView valid_res) {
+                TargetBitmapWriteView target_valid_view(target_valid);
+                auto shredding_executor = [this](
+                                              const ColType* src,
+                                              ValidityView valid,
+                                              size_t size,
+                                              TargetBitmapWriteView res,
+                                              TargetBitmapWriteView valid_res) {
                     for (size_t i = 0; i < size; ++i) {
                         if (valid && !valid[i]) {
                             res[i] = valid_res[i] = false;
@@ -682,7 +684,7 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                                                      active_count_);
                 LOG_DEBUG("using shredding data's field: {} count {}",
                           target_field,
-                          res_view.count());
+                          res_view.view().count());
             }
         };
 
@@ -800,11 +802,10 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
@@ -815,7 +816,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     if (arg_set_->Empty()) {
         res.reset();
         MoveCursor();
-        return res_vec;
+        return std::make_shared<ColumnVector>(std::move(output_bits),
+                                              std::move(output_validity));
     }
 
     int processed_cursor = 0;
@@ -826,8 +828,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer,
             const std::shared_ptr<MultiElement>& terms) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -913,7 +915,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 template <typename T>
@@ -1044,11 +1047,10 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         return res;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size, false);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size, true);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
 
     if (!arg_inited_) {
         std::vector<T> vals;
@@ -1109,7 +1111,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                     std::dynamic_pointer_cast<SimdBatchElement<T>>(arg_set_)) {
                 cached_filter_chunk_ = [simd_elem](const void* data,
                                                    int size,
-                                                   TargetBitmapView res) {
+                                                   TargetBitmapWriteView res) {
                     simd_elem->FilterChunk(
                         static_cast<const T*>(data), size, res);
                 };
@@ -1135,8 +1137,8 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::shared_ptr<MultiElement>& vals) {
         if (data == nullptr) {
             processed_cursor += size;
@@ -1239,7 +1241,8 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                "expect batch size {}",
                processed_size,
                real_batch_size);
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 void

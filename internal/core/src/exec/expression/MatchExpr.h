@@ -92,7 +92,8 @@ class PhyMatchFilterExpr : public Expr {
 
  private:
     void
-    ApplyStructRowValidity(ColumnVector* col_vec,
+    ApplyStructRowValidity(TargetBitmapWriteView value_view,
+                           TargetBitmapWriteView valid_view,
                            FieldId field_id,
                            const OffsetVector* input,
                            int64_t batch_rows);

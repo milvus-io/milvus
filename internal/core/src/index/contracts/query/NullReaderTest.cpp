@@ -38,6 +38,13 @@ ExpectNullMasks(const ScalarTestData<T>& data, const INullReader& reader) {
     ASSERT_EQ(not_nulls.size(), data.values.size());
 
     const auto expected_nulls = ExpectedNulls(data);
+    if (auto view = reader.GetValidityView()) {
+        ASSERT_TRUE(view->size() == 0 || view->size() == data.values.size());
+        for (size_t i = 0; i < data.values.size(); ++i) {
+            EXPECT_EQ(view->size() == 0 || view->test(i), not_nulls[i])
+                << "offset=" << i;
+        }
+    }
     for (size_t i = 0; i < data.values.size(); ++i) {
         EXPECT_EQ(nulls[i], !data.validity[i]) << "offset=" << i;
         EXPECT_EQ(not_nulls[i], data.validity[i]) << "offset=" << i;

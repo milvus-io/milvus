@@ -45,8 +45,8 @@ namespace exec {
                                     const int32_t* offsets,                      \
                                     const int32_t* segment_offsets,              \
                                     const int size,                              \
-                                    TargetBitmapView res,                        \
-                                    TargetBitmapView valid_res,                  \
+                                    TargetBitmapWriteView res,                   \
+                                    TargetBitmapWriteView valid_res,             \
                                     const Geometry& right_source) {              \
         AssertInfo(segment_offsets != nullptr,                                   \
                    "segment_offsets should not be nullptr");                     \
@@ -104,7 +104,8 @@ namespace exec {
                "expect batch size {}",                                           \
                processed_size,                                                   \
                real_batch_size);                                                 \
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),                \
+                                          std::move(output_validity));
 // Specialized macro for distance-based operations (ST_DWITHIN)
 #define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(_DataType, method)   \
     auto execute_sub_batch = [this](const _DataType* data,                       \
@@ -112,8 +113,8 @@ namespace exec {
                                     const int32_t* offsets,                      \
                                     const int32_t* segment_offsets,              \
                                     const int size,                              \
-                                    TargetBitmapView res,                        \
-                                    TargetBitmapView valid_res,                  \
+                                    TargetBitmapWriteView res,                   \
+                                    TargetBitmapWriteView valid_res,             \
                                     const Geometry& right_source) {              \
         AssertInfo(segment_offsets != nullptr,                                   \
                    "segment_offsets should not be nullptr");                     \
@@ -166,7 +167,8 @@ namespace exec {
                "expect batch size {}",                                           \
                processed_size,                                                   \
                real_batch_size);                                                 \
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),                \
+                                          std::move(output_validity));
 
 // Macro for unary operations (like IsValid) that don't need a right_source
 #define GEOMETRY_EXECUTE_SUB_BATCH_UNARY(_DataType, method)                      \
@@ -175,8 +177,8 @@ namespace exec {
                                     const int32_t* offsets,                      \
                                     const int32_t* segment_offsets,              \
                                     const int size,                              \
-                                    TargetBitmapView res,                        \
-                                    TargetBitmapView valid_res) {                \
+                                    TargetBitmapWriteView res,                   \
+                                    TargetBitmapWriteView valid_res) {           \
         AssertInfo(segment_offsets != nullptr,                                   \
                    "segment_offsets should not be nullptr");                     \
         auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
@@ -228,7 +230,8 @@ namespace exec {
                "expect batch size {}",                                           \
                processed_size,                                                   \
                real_batch_size);                                                 \
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),                \
+                                          std::move(output_validity));
 
 void
 PhyGISFunctionFilterExpr::DetermineExecPath() {
@@ -260,10 +263,10 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    TargetBitmap output_bits = TargetBitmap(real_batch_size);
+    TargetBitmap output_validity = TargetBitmap(real_batch_size);
+    auto res = output_bits.write_view();
+    auto valid_res = output_validity.write_view();
     valid_res.set();
 
     if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {
@@ -275,7 +278,8 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
         } else {
             GEOMETRY_EXECUTE_SUB_BATCH_UNARY(std::string_view, is_valid);
         }
-        return res_vec;
+        return std::make_shared<ColumnVector>(std::move(output_bits),
+                                              std::move(output_validity));
     }
 
     auto right_source =
@@ -385,7 +389,8 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
                       static_cast<int>(expr_->op_));
         }
     }
-    return res_vec;
+    return std::make_shared<ColumnVector>(std::move(output_bits),
+                                          std::move(output_validity));
 }
 
 // Helper function to calculate bounding box for range_within query optimization
@@ -587,7 +592,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         // Lambda: Collect hit offsets from coarse bitmap
         auto collect_hits = [&coarse]() -> std::vector<int64_t> {
             std::vector<int64_t> hit_offsets;
-            hit_offsets.reserve(coarse.count());
+            hit_offsets.reserve(coarse.view().count());
             for (size_t i = 0; i < coarse.size(); ++i) {
                 if (coarse[i]) {
                     hit_offsets.emplace_back(static_cast<int64_t>(i));

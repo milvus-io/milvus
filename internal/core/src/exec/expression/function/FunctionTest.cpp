@@ -130,8 +130,7 @@ InitStrsForStartWith(std::shared_ptr<milvus::ColumnVector> col1) {
     col1_data[0] = "123";
     col1_data[1] = "";
     col1_data[2] = "";
-    TargetBitmapView valid_bitmap_col1(col1->GetValidRawData(), col1->size());
-    valid_bitmap_col1[2] = false;
+    col1->nullAt(2);
     col1_data[3] = "aaabbbaaa";
     col1_data[4] = "aaabbbaaa";
     col1_data[5] = "xx";
@@ -167,8 +166,7 @@ TEST_F(FunctionTest, StartsWithColumnVector) {
     col2_data[4] = "aaabbbaax";
     col2_data[5] = "";
     col2_data[6] = "";
-    TargetBitmapView valid_bitmap_col2(col2->GetValidRawData(), col2->size());
-    valid_bitmap_col2[6] = false;
+    col2->nullAt(6);
     col2_data[7] = "124";
     arg_vec.push_back(col2);
 

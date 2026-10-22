@@ -533,14 +533,14 @@ ReadJsonStatsInt64Equal(JsonKeyStats& stats,
                         size_t size) {
     TargetBitmap res(size);
     TargetBitmap valid_res(size);
-    TargetBitmapView res_view(res);
-    TargetBitmapView valid_res_view(valid_res);
+    auto res_view = res.write_view();
+    auto valid_res_view = valid_res.write_view();
 
     auto func = [expected](const int64_t* data,
                            ValidityView valid_data,
                            const int chunk_size,
-                           TargetBitmapView res,
-                           TargetBitmapView valid_res) {
+                           TargetBitmapWriteView res,
+                           TargetBitmapWriteView valid_res) {
         for (int i = 0; i < chunk_size; ++i) {
             valid_res[i] = valid_data[i];
             res[i] = valid_data[i] && data[i] == expected;
