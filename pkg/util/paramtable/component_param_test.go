@@ -1473,7 +1473,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.LoggingAppendSlowThreshold.GetAsDurationByParse())
 		assert.Equal(t, int64(640000000), params.StreamingCfg.PartialUpdateVersionIndexMaxBytes.GetAsSize())
 		assert.False(t, params.StreamingCfg.PKIndexEnabled.GetAsBool())
-		assert.Equal(t, 256, params.StreamingCfg.PKIndexLockStripes.GetAsInt())
 		params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
 		assert.True(t, params.StreamingCfg.PKIndexEnabled.GetAsBool())
 		params.Reset(params.StreamingCfg.PKIndexEnabled.Key)

@@ -57,7 +57,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		return passthroughInterceptor{}
 	}
 
-	reg := newRegistry(paramtable.Get().StreamingCfg.PKIndexLockStripes.GetAsInt())
+	reg := newRegistry()
 	if lister, ok := param.ShardManager.(collectionSchemaLister); ok {
 		for collectionID, info := range lister.GetAllCollectionSchemaInfos() {
 			// A collection that exists can not have a schema the index rejects, and

@@ -24,6 +24,7 @@ import (
 
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
@@ -162,12 +163,12 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 
 	companionPKs := intent.Decision().CompanionDeletePKs
 	if len(companionPKs) == 0 {
-		id, err := appendOp(ctx, msg)
+		id, tt, err := utility.AppendAndGetTimeTick(ctx, appendOp, msg)
 		if err != nil {
-			intent.Discard(ctx, err)
+			discard(ctx, intent, err, tt)
 			return id, err
 		}
-		i.applyInsert(ctx, intent, msg.IntoImmutableMessage(id), msg.TimeTick())
+		intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
 		return id, nil
 	}
 
@@ -176,26 +177,20 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 		intent.Discard(ctx, err)
 		return nil, status.NewInner("build the companion delete of the primary key index: %v", err)
 	}
+	// TODO: confirm with a test that the messages of the upgraded transaction go
+	// down the chain through appendOp and never enter the lock interceptor again.
+	// TestAppendInTxnContractConcurrentWithExclusive only shows that no deadlock
+	// occurs with an exclusive DDL.
 	result, err := txn.AppendInTxn(ctx, appendOp, msg, []message.MutableMessage{companion})
 	if err != nil {
 		// A redo runs the whole chain again and makes the decision anew.
-		intent.Discard(ctx, err)
+		discard(ctx, intent, err, txn.AllocatedTimeTick(err))
 		return nil, err
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
-	i.applyInsert(ctx, intent, result.Main, result.Commit.TimeTick())
+	// The insert and the companion delete take effect at the time tick of the CommitTxn.
+	intent.Apply(ctx, snpkindex.Applied{TimeTick: result.Commit.TimeTick()})
 	return result.Commit.MessageID(), nil
-}
-
-// applyInsert reads the assigned segment back from the appended insert. The shard
-// interceptor rewrites the header downstream, so it must be decoded again here.
-func (i *appendInterceptor) applyInsert(ctx context.Context, intent *snpkindex.Intent, appended message.ImmutableMessage, timeTick uint64) {
-	header := message.MustAsImmutableInsertMessageV1(appended).Header()
-	var segmentID int64
-	if partitions := header.GetPartitions(); len(partitions) > 0 {
-		segmentID = partitions[0].GetSegmentAssignment().GetSegmentId()
-	}
-	intent.Apply(ctx, snpkindex.Applied{SegmentID: segmentID, TimeTick: timeTick})
 }
 
 func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
@@ -228,11 +223,11 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	// removes one: it is a subset of the data, because rows written by bulk import or
 	// while the switch was off are not in it, and because it starts empty on every WAL
 	// open. A key that the index does not know may still exist in the data.
-	// The decision (PresentPKs) is used for the index update and the metrics only.
+	// The decision (PresentPKs) is used for the metrics only.
 	// TODO: narrow or skip a delete once the index is proven complete for the collection.
-	id, err := appendOp(ctx, msg)
+	id, tt, err := utility.AppendAndGetTimeTick(ctx, appendOp, msg)
 	if err != nil {
-		intent.Discard(ctx, err)
+		discard(ctx, intent, err, tt)
 		return id, err
 	}
 	intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
@@ -268,7 +263,7 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 	}
 	result, err := txn.AppendInTxn(ctx, appendOp, msg, extras)
 	if err != nil {
-		intent.Discard(ctx, err)
+		discard(ctx, intent, err, txn.AllocatedTimeTick(err))
 		return nil, err
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
@@ -288,11 +283,28 @@ func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg m
 
 	id, err := appendOp(ctx, msg)
 	if err != nil {
+		// A rollback registers no key, so there is nothing to keep.
 		intent.Discard(ctx, err)
 		return id, err
 	}
 	intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
 	return id, nil
+}
+
+// discard ends intent after a failed append. tt is the largest time tick that
+// the failed append assigned, 0 when it assigned none. A write that is known not
+// to be in the WAL leaves the in-flight set. Any other failed write may be in
+// the WAL at a time tick up to tt, for example when the backend persisted it and
+// then returned an error, so its keys stay present until observe passes tt.
+func discard(ctx context.Context, intent *snpkindex.Intent, err error, tt uint64) {
+	// Without a time tick nothing reached the timetick interceptor, so nothing
+	// was written. The shard interceptor returns ErrRedo before anything is
+	// written, and AppendInTxn reports when its transaction can not have committed.
+	if tt == 0 || errors.Is(err, redo.ErrRedo) || txn.NotCommitted(err) {
+		intent.Discard(ctx, err)
+		return
+	}
+	intent.DiscardUncertain(ctx, err, tt)
 }
 
 // decide calls the decider and classifies its error for the WAL.

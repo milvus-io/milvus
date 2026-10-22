@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -157,6 +158,9 @@ type fakeAppender struct {
 	nextTxnID int64
 	failAt    int // fail the n-th call (0-based), -1 never
 	failErr   error
+	// failAfterTimeTick makes the failed call assign a time tick first, as the
+	// timetick interceptor does when the chain below it fails.
+	failAfterTimeTick bool
 }
 
 func newFakeAppender() *fakeAppender {
@@ -167,12 +171,16 @@ func (f *fakeAppender) append(ctx context.Context, msg message.MutableMessage) (
 	idx := len(f.types)
 	f.types = append(f.types, msg.MessageType())
 	f.appended = append(f.appended, msg)
-	if idx == f.failAt {
+	if idx == f.failAt && !f.failAfterTimeTick {
 		f.ids = append(f.ids, nil)
 		return nil, f.failErr
 	}
 	f.nextTT++
 	msg.WithTimeTick(f.nextTT).WithLastConfirmedUseMessageID()
+	if idx == f.failAt {
+		f.ids = append(f.ids, nil)
+		return nil, f.failErr
+	}
 	if msg.MessageType() == message.MessageTypeBeginTxn {
 		msg.WithTxnContext(message.TxnContext{TxnID: message.TxnID(f.nextTxnID), Keepalive: time.Hour})
 	}
@@ -382,7 +390,7 @@ func newTestInterceptor(t *testing.T, sessions txnSessions) (*appendInterceptor,
 func newTestInterceptorOfSchema(t *testing.T, sessions txnSessions, schema *schemapb.CollectionSchema) (*appendInterceptor, *testEngines) {
 	engines := newTestEngines(t)
 	i := &appendInterceptor{
-		registry: newRegistry(16),
+		registry: newRegistry(),
 		sessions: sessions,
 		metrics:  newMetrics(),
 	}
@@ -394,8 +402,9 @@ func newTestInterceptorOfSchema(t *testing.T, sessions txnSessions, schema *sche
 }
 
 // requireDoAppendReturns fails when DoAppend does not return within five
-// seconds. A decision that kept its stripes blocks every later write of the
-// same keys forever, and this is what that looks like from the outside.
+// seconds. A decision whose registration was never filled in or removed blocks
+// every later write of the same keys forever, and this is what that looks like
+// from the outside.
 func requireDoAppendReturns(t *testing.T, i *appendInterceptor, msg message.MutableMessage, appendOp interceptors.Append) error {
 	t.Helper()
 	done := make(chan error, 1)
@@ -407,7 +416,7 @@ func requireDoAppendReturns(t *testing.T, i *appendInterceptor, msg message.Muta
 	case err := <-done:
 		return err
 	case <-time.After(5 * time.Second):
-		t.Fatal("the append did not return, the stripes of an earlier decision are still held")
+		t.Fatal("the append did not return, an earlier decision still holds its keys")
 		return nil
 	}
 }
@@ -421,6 +430,19 @@ func requireInner(t *testing.T, err error) {
 	t.Helper()
 	require.Error(t, err)
 	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INNER, status.AsStreamingError(err).Code)
+}
+
+// presentOf reports whether a key exists for the write path of testVChannel:
+// in the in-flight set or in the engine.
+func presentOf(t *testing.T, i *appendInterceptor, pk snpkindex.PK) bool {
+	t.Helper()
+	present, err := i.registry.get(testVChannel).decider.PresentForTest(context.Background(), pk)
+	require.NoError(t, err)
+	return present
+}
+
+func inflightLen(i *appendInterceptor) int {
+	return i.registry.get(testVChannel).decider.InflightLenForTest()
 }
 
 // ===== the switch =====
@@ -525,9 +547,11 @@ func TestInsertMiss(t *testing.T) {
 	require.Equal(t, f.lastID(), id)
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
 
-	segmentID, ok := engines.of(t, testVChannel).segmentOf(t, 1)
-	require.True(t, ok)
-	require.Equal(t, f.segmentID, segmentID)
+	// the shell does not write the engine, observe does. The key is present
+	// through the in-flight set.
+	_, ok := engines.of(t, testVChannel).segmentOf(t, 1)
+	require.False(t, ok)
+	require.True(t, presentOf(t, i, snpkindex.Int64PK(1)))
 }
 
 func TestInsertHit(t *testing.T) {
@@ -557,7 +581,8 @@ func TestInsertHit(t *testing.T) {
 
 	segmentID, ok := engine.segmentOf(t, 1)
 	require.True(t, ok)
-	require.Equal(t, f.segmentID, segmentID)
+	require.Equal(t, int64(100), segmentID, "the shell does not write the engine")
+	require.Equal(t, 1, inflightLen(i))
 }
 
 func TestInsertHitOfSomeKeys(t *testing.T) {
@@ -577,9 +602,7 @@ func TestInsertHitOfSomeKeys(t *testing.T) {
 	require.Equal(t, []int64{1}, f.deleteBodyAt(t, 2).GetPrimaryKeys().GetIntId().GetData())
 
 	for _, pk := range []int64{1, 2} {
-		segmentID, ok := engine.segmentOf(t, pk)
-		require.True(t, ok)
-		require.Equal(t, f.segmentID, segmentID)
+		require.True(t, presentOf(t, i, snpkindex.Int64PK(pk)))
 	}
 }
 
@@ -604,6 +627,7 @@ func TestInsertRedoIsRetriedFromScratch(t *testing.T) {
 	segmentID, ok := engine.segmentOf(t, 1)
 	require.True(t, ok)
 	require.Equal(t, int64(100), segmentID, "a failed append must not change the index")
+	require.Equal(t, 0, inflightLen(i), "a redo is known not to be in the WAL, its registration is removed")
 
 	// the redo interceptor runs the whole chain again with the same message.
 	f2 := newFakeAppender()
@@ -615,26 +639,67 @@ func TestInsertRedoIsRetriedFromScratch(t *testing.T) {
 		message.MessageTypeDelete,
 		message.MessageTypeCommitTxn,
 	}, f2.types)
-	segmentID, ok = engine.segmentOf(t, 1)
-	require.True(t, ok)
-	require.Equal(t, f2.segmentID, segmentID)
+	require.Equal(t, 1, inflightLen(i))
 }
 
-// TestPanicBetweenDecideAndApplyReleasesTheStripes checks the deferred guard of
-// the handlers. Without it the stripes of the decision stay locked and every
-// later write of the same key blocks for the life of the wal.
-func TestFailedInsertReleasesTheStripes(t *testing.T) {
+// A plain append that fails with an unknown outcome may be in the WAL at the time
+// tick it was assigned. Its key stays present until observe passes that time
+// tick, so the next insert of the key gets a companion delete, and it no longer
+// blocks that insert.
+func TestFailedInsertWithAnUnknownOutcomeKeepsItsKey(t *testing.T) {
 	i, _ := newTestInterceptor(t, nil)
 	f := newFakeAppender()
-	f.failAt, f.failErr = 0, errors.New("boom")
+	f.failAt, f.failErr, f.failAfterTimeTick = 0, errors.New("boom"), true
 
 	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
 	require.Error(t, err)
+	require.True(t, presentOf(t, i, snpkindex.Int64PK(1)))
 
-	require.NoError(t, requireDoAppendReturns(t, i, newInsert(testVChannel, 1), newFakeAppender().append))
+	f2 := newFakeAppender()
+	f2.nextTT = 200
+	require.NoError(t, requireDoAppendReturns(t, i, newInsert(testVChannel, 1), f2.append))
+	require.Equal(t, []message.MessageType{
+		message.MessageTypeBeginTxn,
+		message.MessageTypeInsert,
+		message.MessageTypeDelete,
+		message.MessageTypeCommitTxn,
+	}, f2.types)
+
+	// the failed insert got time tick 101 and was not in the WAL: observe passes
+	// 101 without meeting it, and only the second insert stays.
+	decider := i.registry.get(testVChannel).decider
+	require.Equal(t, 2, inflightLen(i))
+	decider.ObserveTimeTickForTest(100)
+	require.Equal(t, 2, inflightLen(i))
+	decider.ObserveTimeTickForTest(101)
+	require.Equal(t, 1, inflightLen(i))
 }
 
-func TestFailedCompanionDeleteReleasesTheStripes(t *testing.T) {
+// An append that fails before the timetick interceptor assigned a time tick
+// wrote nothing, so its registration is removed.
+func TestFailedInsertWithoutATimeTickRemovesItsKey(t *testing.T) {
+	i, _ := newTestInterceptor(t, nil)
+	f := newFakeAppender()
+	f.failAt, f.failErr = 0, errors.New("allocate timestamp failed")
+
+	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+	require.Error(t, err)
+	require.Equal(t, 0, inflightLen(i))
+	require.False(t, presentOf(t, i, snpkindex.Int64PK(1)))
+
+	// a redo or a retry passes the message again with the time tick of an earlier
+	// attempt still in it. That time tick does not count.
+	msg := newInsert(testVChannel, 2).WithTimeTick(50)
+	f2 := newFakeAppender()
+	f2.failAt, f2.failErr = 0, errors.New("allocate timestamp failed")
+	_, err = i.DoAppend(newTestAppendContext(), msg, f2.append)
+	require.Error(t, err)
+	require.Equal(t, 0, inflightLen(i))
+}
+
+// The transaction built for an insert hit is rolled back after a failed body,
+// so it is known not to be in the WAL and its registration is removed.
+func TestFailedCompanionDeleteRemovesTheRegistration(t *testing.T) {
 	i, engines := newTestInterceptor(t, nil)
 	engines.of(t, testVChannel).put(t, 1, 100)
 
@@ -649,6 +714,7 @@ func TestFailedCompanionDeleteReleasesTheStripes(t *testing.T) {
 		message.MessageTypeDelete,
 		message.MessageTypeRollbackTxn,
 	}, f.types)
+	require.Equal(t, 0, inflightLen(i))
 
 	require.NoError(t, requireDoAppendReturns(t, i, newInsert(testVChannel, 1), newFakeAppender().append))
 }
@@ -675,6 +741,30 @@ func TestFailedCommitOfAnInsertHitLeavesTheIndexUnchanged(t *testing.T) {
 	segmentID, ok := engine.segmentOf(t, 1)
 	require.True(t, ok)
 	require.Equal(t, int64(100), segmentID, "a failed commit must not change the index")
+	require.Equal(t, 0, inflightLen(i), "the persisted rollback proves the commit did not take effect")
+}
+
+// A failed CommitTxn whose rollback is rejected may have been persisted, so the
+// keys of the insert stay present.
+func TestFailedCommitOfAnInsertHitWithAnUnknownOutcomeKeepsItsKeys(t *testing.T) {
+	i, engines := newTestInterceptor(t, nil)
+	engines.of(t, testVChannel).put(t, 1, 100)
+
+	boom := errors.New("boom")
+	f := newFakeAppender()
+	appendOp := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		switch msg.MessageType() {
+		case message.MessageTypeCommitTxn:
+			return nil, boom
+		case message.MessageTypeRollbackTxn:
+			return nil, status.NewInvalidTransactionState("Rollback", message.TxnStateInFlight, message.TxnStateOnCommit)
+		}
+		return f.append(ctx, msg)
+	}
+	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1, 2), appendOp)
+	require.ErrorIs(t, err, boom)
+	require.Equal(t, 2, inflightLen(i))
+	require.True(t, presentOf(t, i, snpkindex.Int64PK(2)))
 }
 
 func TestInsertFailsWhenTheIndexIsUnavailable(t *testing.T) {
@@ -702,14 +792,16 @@ func TestDeleteOfPresentKeys(t *testing.T) {
 	require.Equal(t, []message.MessageType{message.MessageTypeDelete}, f.types)
 	require.Equal(t, []int64{1, 2}, f.deleteBodyAt(t, 0).GetPrimaryKeys().GetIntId().GetData())
 
+	// observe applies the delete. Until then the keys count as present.
 	for _, pk := range []int64{1, 2} {
 		_, ok := engine.segmentOf(t, pk)
-		require.False(t, ok)
+		require.True(t, ok)
 	}
+	require.Equal(t, 2, inflightLen(i))
 }
 
 // A key that the index does not know may still exist in the data, so the delete
-// reaches the WAL unchanged. Only the index update is narrowed to the known keys.
+// reaches the WAL unchanged.
 func TestDeleteOfSomePresentKeysIsAppendedUnchanged(t *testing.T) {
 	i, engines := newTestInterceptor(t, nil)
 	engine := engines.of(t, testVChannel)
@@ -726,9 +818,6 @@ func TestDeleteOfSomePresentKeysIsAppendedUnchanged(t *testing.T) {
 	require.Equal(t, int64(2), body.GetNumRows())
 	require.Len(t, body.GetTimestamps(), 2)
 	require.Equal(t, uint64(2), message.MustAsMutableDeleteMessageV1(msg).Header().GetRows())
-
-	_, ok := engine.segmentOf(t, 1)
-	require.False(t, ok)
 }
 
 func TestDeleteOfAbsentKeysIsStillAppended(t *testing.T) {
@@ -760,8 +849,6 @@ func TestFailedDeleteLeavesTheIndexUnchanged(t *testing.T) {
 	require.Equal(t, int64(100), segmentID, "a failed delete must not change the index")
 
 	require.NoError(t, requireDoAppendReturns(t, i, newDelete(testVChannel, 1), newFakeAppender().append))
-	_, ok = engine.segmentOf(t, 1)
-	require.False(t, ok)
 }
 
 // ===== varchar primary keys =====
@@ -774,9 +861,9 @@ func TestVarCharInsertMiss(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
 
-	segmentID, ok := engines.of(t, testVChannel).segmentOfPK(t, snpkindex.VarCharPK("a"))
-	require.True(t, ok)
-	require.Equal(t, f.segmentID, segmentID)
+	require.True(t, presentOf(t, i, snpkindex.VarCharPK("a")))
+	_, ok := engines.of(t, testVChannel).segmentOfPK(t, snpkindex.VarCharPK("a"))
+	require.False(t, ok)
 }
 
 func TestVarCharInsertHit(t *testing.T) {
@@ -798,10 +885,7 @@ func TestVarCharInsertHit(t *testing.T) {
 	require.Equal(t, []string{"a"}, body.GetPrimaryKeys().GetStrId().GetData())
 	require.Nil(t, body.GetPrimaryKeys().GetIntId())
 	require.Equal(t, int64(1), body.GetNumRows())
-
-	segmentID, ok := engine.segmentOfPK(t, snpkindex.VarCharPK("a"))
-	require.True(t, ok)
-	require.Equal(t, f.segmentID, segmentID)
+	require.True(t, presentOf(t, i, snpkindex.VarCharPK("a")))
 }
 
 func TestVarCharDeleteOfPresentKeys(t *testing.T) {
@@ -817,8 +901,7 @@ func TestVarCharDeleteOfPresentKeys(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, f.deleteBodyAt(t, 0).GetPrimaryKeys().GetStrId().GetData())
 
 	for _, pk := range []string{"a", "b"} {
-		_, ok := engine.segmentOfPK(t, snpkindex.VarCharPK(pk))
-		require.False(t, ok)
+		require.True(t, presentOf(t, i, snpkindex.VarCharPK(pk)))
 	}
 }
 
@@ -845,9 +928,7 @@ func TestTxnCommitHit(t *testing.T) {
 	_, err := i.DoAppend(newTestAppendContext(), body, f.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
-	segmentID, ok := engine.segmentOf(t, 1)
-	require.True(t, ok)
-	require.Equal(t, int64(100), segmentID, "a transaction body must not change the index")
+	require.Equal(t, 0, inflightLen(i), "a transaction body registers nothing")
 
 	f2 := newFakeAppender()
 	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f2.append)
@@ -855,15 +936,11 @@ func TestTxnCommitHit(t *testing.T) {
 	require.Equal(t, []message.MessageType{message.MessageTypeDelete, message.MessageTypeCommitTxn}, f2.types)
 	require.Equal(t, []int64{1}, f2.deleteBodyAt(t, 0).GetPrimaryKeys().GetIntId().GetData())
 	require.Equal(t, txnCtx.TxnID, f2.appended[0].TxnContext().TxnID)
-
-	segmentID, ok = engine.segmentOf(t, 1)
-	require.True(t, ok)
-	require.Equal(t, f.segmentID, segmentID)
+	require.Equal(t, 1, inflightLen(i))
 }
 
 func TestTxnCommitMiss(t *testing.T) {
-	i, engines := newTestInterceptor(t, nil)
-	engine := engines.of(t, testVChannel)
+	i, _ := newTestInterceptor(t, nil)
 	txnCtx := message.TxnContext{TxnID: 43, Keepalive: time.Hour}
 
 	f := newFakeAppender()
@@ -874,15 +951,11 @@ func TestTxnCommitMiss(t *testing.T) {
 	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f2.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, f2.types)
-
-	segmentID, ok := engine.segmentOf(t, 5)
-	require.True(t, ok)
-	require.Equal(t, f.segmentID, segmentID)
+	require.True(t, presentOf(t, i, snpkindex.Int64PK(5)))
 }
 
 func TestTxnRollbackDropsThePendingWrites(t *testing.T) {
-	i, engines := newTestInterceptor(t, nil)
-	engine := engines.of(t, testVChannel)
+	i, _ := newTestInterceptor(t, nil)
 	txnCtx := message.TxnContext{TxnID: 44, Keepalive: time.Hour}
 
 	f := newFakeAppender()
@@ -893,21 +966,20 @@ func TestTxnRollbackDropsThePendingWrites(t *testing.T) {
 	_, err = i.DoAppend(newTestAppendContext(), newRollback(testVChannel, txnCtx), f2.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeRollbackTxn}, f2.types)
-	_, ok := engine.segmentOf(t, 6)
-	require.False(t, ok)
+	require.False(t, presentOf(t, i, snpkindex.Int64PK(6)))
 
 	// a commit of the same transaction finds nothing left to apply.
 	f3 := newFakeAppender()
 	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f3.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, f3.types)
-	_, ok = engine.segmentOf(t, 6)
-	require.False(t, ok)
+	require.False(t, presentOf(t, i, snpkindex.Int64PK(6)))
 }
 
+// A failed CommitTxn of a client transaction may have been persisted, so its keys
+// stay present. The pending writes are kept for a retried commit.
 func TestFailedCommitKeepsThePendingWrites(t *testing.T) {
-	i, engines := newTestInterceptor(t, nil)
-	engine := engines.of(t, testVChannel)
+	i, _ := newTestInterceptor(t, nil)
 	txnCtx := message.TxnContext{TxnID: 45, Keepalive: time.Hour}
 
 	f := newFakeAppender()
@@ -916,24 +988,21 @@ func TestFailedCommitKeepsThePendingWrites(t *testing.T) {
 
 	boom := errors.New("boom")
 	f2 := newFakeAppender()
-	f2.failAt, f2.failErr = 0, boom
+	f2.failAt, f2.failErr, f2.failAfterTimeTick = 0, boom, true
 	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f2.append)
 	require.ErrorIs(t, err, boom)
-	_, ok := engine.segmentOf(t, 9)
-	require.False(t, ok, "a failed commit must not change the index")
+	require.True(t, presentOf(t, i, snpkindex.Int64PK(9)), "the commit may be in the WAL")
 
-	// the pending writes survive the failure, so the retried commit still applies
-	// them, and it returns because the failed decision released its stripes.
+	// the pending writes survive the failure, so the retried commit decides on
+	// them again, and it returns because the failed decision no longer holds its
+	// keys. The first commit may have taken effect, so the retry deletes the key.
 	f3 := newFakeAppender()
 	require.NoError(t, requireDoAppendReturns(t, i, newCommit(testVChannel, txnCtx), f3.append))
-	segmentID, ok := engine.segmentOf(t, 9)
-	require.True(t, ok)
-	require.Equal(t, f.segmentID, segmentID)
+	require.Equal(t, []message.MessageType{message.MessageTypeDelete, message.MessageTypeCommitTxn}, f3.types)
 }
 
 func TestFailedRollbackKeepsThePendingWrites(t *testing.T) {
-	i, engines := newTestInterceptor(t, nil)
-	engine := engines.of(t, testVChannel)
+	i, _ := newTestInterceptor(t, nil)
 	txnCtx := message.TxnContext{TxnID: 46, Keepalive: time.Hour}
 
 	f := newFakeAppender()
@@ -945,14 +1014,11 @@ func TestFailedRollbackKeepsThePendingWrites(t *testing.T) {
 	f2.failAt, f2.failErr = 0, boom
 	_, err = i.DoAppend(newTestAppendContext(), newRollback(testVChannel, txnCtx), f2.append)
 	require.ErrorIs(t, err, boom)
-	_, ok := engine.segmentOf(t, 10)
-	require.False(t, ok, "a failed rollback must not change the index")
+	require.False(t, presentOf(t, i, snpkindex.Int64PK(10)), "a failed rollback must not change the index")
 
 	f3 := newFakeAppender()
 	require.NoError(t, requireDoAppendReturns(t, i, newCommit(testVChannel, txnCtx), f3.append))
-	segmentID, ok := engine.segmentOf(t, 10)
-	require.True(t, ok, "a failed rollback must not drop the pending writes")
-	require.Equal(t, f.segmentID, segmentID)
+	require.True(t, presentOf(t, i, snpkindex.Int64PK(10)), "a failed rollback must not drop the pending writes")
 }
 
 func TestCommitFailsWhenTheIndexIsUnavailable(t *testing.T) {
@@ -1009,8 +1075,7 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 	txnCtx := session.TxnContext()
 	txnID := int64(txnCtx.TxnID)
 
-	i, engines := newTestInterceptor(t, manager)
-	engine := engines.of(t, testVChannel)
+	i, _ := newTestInterceptor(t, manager)
 	target := i.registry.get(testVChannel)
 
 	for _, pk := range []int64{7, 8} {
@@ -1041,8 +1106,7 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, f2.types)
 	for _, pk := range []int64{7, 8} {
-		_, ok := engine.segmentOf(t, pk)
-		require.False(t, ok, "the pending writes of an ended transaction must not reach the index")
+		require.False(t, presentOf(t, i, snpkindex.Int64PK(pk)), "the pending writes of an ended transaction must not reach the index")
 	}
 }
 
@@ -1059,7 +1123,7 @@ func TestTimeTickWithoutSessionsIsPassthrough(t *testing.T) {
 // ===== passthrough =====
 
 func TestReplicatedMessagePassesThrough(t *testing.T) {
-	i, engines := newTestInterceptor(t, nil)
+	i, _ := newTestInterceptor(t, nil)
 	f := newFakeAppender()
 
 	msg := newInsert(testVChannel, 1).WithReplicateHeader(&message.ReplicateHeader{
@@ -1072,8 +1136,7 @@ func TestReplicatedMessagePassesThrough(t *testing.T) {
 	_, err := i.DoAppend(newTestAppendContext(), msg, f.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
-	_, ok := engines.of(t, testVChannel).segmentOf(t, 1)
-	require.False(t, ok)
+	require.False(t, presentOf(t, i, snpkindex.Int64PK(1)))
 }
 
 func TestVChannelWithoutTargetPassesThrough(t *testing.T) {
@@ -1088,8 +1151,8 @@ func TestVChannelWithoutTargetPassesThrough(t *testing.T) {
 // ===== collection lifecycle =====
 
 func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
-	engines := newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(16), sessions: nil, metrics: newMetrics()}
+	newTestEngines(t)
+	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
 	defer i.Close()
 	f := newFakeAppender()
 
@@ -1099,9 +1162,7 @@ func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
 
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
 	require.NoError(t, err)
-	segmentID, ok := engines.of(t, testVChannel).segmentOf(t, 1)
-	require.True(t, ok)
-	require.Equal(t, f.segmentID, segmentID)
+	require.True(t, presentOf(t, i, snpkindex.Int64PK(1)))
 
 	_, err = i.DoAppend(newTestAppendContext(), newDropCollection(testVChannel), f.append)
 	require.NoError(t, err)
@@ -1115,7 +1176,7 @@ func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
 
 func TestCreateCollectionAfterDropBuildsAFreshIndex(t *testing.T) {
 	newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(16), sessions: nil, metrics: newMetrics()}
+	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
 	defer i.Close()
 	f := newFakeAppender()
 
@@ -1140,7 +1201,7 @@ func TestCreateCollectionAfterDropBuildsAFreshIndex(t *testing.T) {
 
 func TestCreateCollectionOfAutoIDHasNoTarget(t *testing.T) {
 	newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(16), sessions: nil, metrics: newMetrics()}
+	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
 	defer i.Close()
 	f := newFakeAppender()
 
@@ -1154,7 +1215,7 @@ func TestCreateCollectionRejectedWhenTheIndexCanNotBeCreated(t *testing.T) {
 		return nil, errors.New("disk is full")
 	})
 	t.Cleanup(func() { snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine) })
-	i := &appendInterceptor{registry: newRegistry(16), sessions: nil, metrics: newMetrics()}
+	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
 	defer i.Close()
 	f := newFakeAppender()
 
@@ -1168,7 +1229,7 @@ func TestCreateCollectionRejectedWhenTheIndexCanNotBeCreated(t *testing.T) {
 
 func TestCreateCollectionAppendFailureRemovesTheTarget(t *testing.T) {
 	newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(16), sessions: nil, metrics: newMetrics()}
+	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
 	defer i.Close()
 
 	appendErr := errors.New("wal is closed")
@@ -1206,7 +1267,7 @@ func TestDuplicateCreateCollectionAppendFailureKeepsTheTarget(t *testing.T) {
 
 func TestRegistryAddRejectsAnUnusableSchema(t *testing.T) {
 	newTestEngines(t)
-	r := newRegistry(16)
+	r := newRegistry()
 	defer r.close(context.Background())
 
 	noPK := testSchema(false)
@@ -1223,7 +1284,7 @@ func TestRegistryAddRejectsAnUnusableSchema(t *testing.T) {
 
 func TestRegistryAddIsIdempotent(t *testing.T) {
 	engines := newTestEngines(t)
-	r := newRegistry(16)
+	r := newRegistry()
 	defer r.close(context.Background())
 
 	created, err := r.add(context.Background(), testVChannel, testCollectionID, testSchema(false))
@@ -1239,7 +1300,7 @@ func TestRegistryAddIsIdempotent(t *testing.T) {
 
 func TestCreateCollectionOnControlChannelHasNoTarget(t *testing.T) {
 	newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(16), sessions: nil, metrics: newMetrics()}
+	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
 	defer i.Close()
 	f := newFakeAppender()
 
@@ -1249,4 +1310,55 @@ func TestCreateCollectionOnControlChannelHasNoTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, i.registry.get(controlChannel))
 	require.Equal(t, []message.MessageType{message.MessageTypeCreateCollection}, f.types)
+}
+
+// BenchmarkDecodeKeysOf1000Rows measures the key decoding of the write path for
+// one insert of 1000 rows: the body decode, the primary key column and the
+// conversion to index keys. The vector case adds a 128-dim float vector column,
+// which the body decode must also read.
+func BenchmarkDecodeKeysOf1000Rows(b *testing.B) {
+	pks := make([]int64, 1000)
+	for i := range pks {
+		pks[i] = int64(i)
+	}
+	withVector := func(msg message.MutableMessage) message.MutableMessage {
+		insert := message.MustAsMutableInsertMessageV1(msg)
+		body := insert.MustBody()
+		const dim = 128
+		body.FieldsData = append(body.FieldsData, &schemapb.FieldData{
+			Type:    schemapb.DataType_FloatVector,
+			FieldId: testPKFieldID + 1,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  dim,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, dim*len(pks))}},
+			}},
+		})
+		insert.OverwriteBody(body)
+		return msg
+	}
+	for _, c := range []struct {
+		name string
+		msg  message.MutableMessage
+	}{
+		{"pk_only", newInsert(testVChannel, pks...)},
+		{"with_128d_vector", withVector(newInsert(testVChannel, pks...))},
+	} {
+		b.Run(c.name, func(b *testing.B) {
+			ctx := context.Background()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				body, err := utility.DecodeInsertBody(ctx, c.msg)
+				if err != nil {
+					b.Fatal(err)
+				}
+				keys, err := primarykey.KeysOfInsert(body, testPKFieldID, schemapb.DataType_Int64)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(toPKs(keys)) != len(pks) {
+					b.Fatal("wrong key count")
+				}
+			}
+		})
+	}
 }
