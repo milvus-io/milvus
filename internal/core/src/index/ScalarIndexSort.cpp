@@ -734,31 +734,23 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         std::filesystem::create_directories(
             std::filesystem::path(mmap_filepath_).parent_path());
 
-        size_t total_data_size = 0;
-        {
-            auto file_writer = storage::FileWriter(
-                mmap_filepath_,
-                storage::io::GetPriorityFromLoadPriority(load_priority));
-
-            reader.ReadEntryStream("index_data",
-                                   [&](const uint8_t* data, size_t len) {
-                                       file_writer.Write(data, len);
-                                       total_data_size += len;
-                                   });
-
-            auto aligned_size = ((total_data_size + SCALAR_SORT_ALIGNMENT - 1) /
-                                 SCALAR_SORT_ALIGNMENT) *
-                                SCALAR_SORT_ALIGNMENT;
-            if (aligned_size > total_data_size) {
-                std::vector<uint8_t> padding(aligned_size - total_data_size, 0);
-                file_writer.Write(padding.data(), padding.size());
-            }
-            std::vector<uint8_t> mmap_pad(SCALAR_SORT_MMAP_INDEX_PADDING, 0);
-            file_writer.Write(mmap_pad.data(), mmap_pad.size());
-            file_writer.Finish();
-
-            data_size_ = total_data_size;
-            mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
+        const auto total_data_size = reader.GetEntrySize("index_data");
+        reader.ReadEntryStreamToFile(
+            "index_data",
+            mmap_filepath_,
+            storage::io::GetPriorityFromLoadPriority(load_priority));
+        const auto aligned_size =
+            ((total_data_size + SCALAR_SORT_ALIGNMENT - 1) /
+             SCALAR_SORT_ALIGNMENT) *
+            SCALAR_SORT_ALIGNMENT;
+        data_size_ = total_data_size;
+        mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
+        if (::truncate(mmap_filepath_.c_str(), mmap_size_) != 0) {
+            const auto saved_errno = errno;
+            ::unlink(mmap_filepath_.c_str());
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "failed to extend scalar mmap file: {}",
+                      strerror(saved_errno));
         }
 
         auto file = File::Open(mmap_filepath_, O_RDONLY);
@@ -775,34 +767,37 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     } else {
         // Stream index_data entry to pre-allocated memory
         data_.resize(index_size);
-        size_t write_offset = 0;
-        reader.ReadEntryStream(
-            "index_data", [&](const uint8_t* data, size_t len) {
+        const auto entry_bytes = reader.GetEntrySize("index_data");
+        AssertInfo(entry_bytes == index_size * sizeof(IndexStructure<T>),
+                   "stream read size mismatch: got {}, expected {}",
+                   entry_bytes,
+                   index_size * sizeof(IndexStructure<T>));
+        reader.ReadEntryStreamAt(
+            "index_data", [&](size_t offset, const uint8_t* data, size_t len) {
                 milvus::fastmem::FastMemcpy(
-                    reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
+                    reinterpret_cast<uint8_t*>(data_.data()) + offset,
                     data,
                     len);
-                write_offset += len;
             });
-        AssertInfo(write_offset == index_size * sizeof(IndexStructure<T>),
-                   "stream read size mismatch: got {}, expected {}",
-                   write_offset,
-                   index_size * sizeof(IndexStructure<T>));
     }
 
     setup_data_pointers();
 
     auto load_valid_bitset = [&]() {
         valid_bitset_ = TargetBitmap(total_num_rows_, false);
-        auto bitset_entry = reader.ReadEntry("valid_bitset");
-        auto bitset_bytes = valid_bitset_.size_in_bytes();
-        AssertInfo(bitset_entry.data.size() >= bitset_bytes,
-                   "invalid valid_bitset size: expected at least {}, got {}",
-                   bitset_bytes,
-                   bitset_entry.data.size());
-        memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()),
-               bitset_entry.data.data(),
-               bitset_bytes);
+        const auto bitset_bytes = valid_bitset_.size_in_bytes();
+        AssertInfo(reader.GetEntrySize("valid_bitset") >= bitset_bytes,
+                   "invalid valid_bitset size");
+        reader.ReadEntryStreamAt(
+            "valid_bitset",
+            [&](size_t offset, const uint8_t* data, size_t len) {
+                if (offset < bitset_bytes) {
+                    memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()) +
+                               offset,
+                           data,
+                           std::min(len, bitset_bytes - offset));
+                }
+            });
     };
     auto get_idx_to_offsets_bytes = [&]() {
         auto offsets_bytes = reader.GetEntrySize("idx_to_offsets");
@@ -830,16 +825,10 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
 
         auto offsets_bytes = get_idx_to_offsets_bytes();
 
-        {
-            auto fw = storage::FileWriter(
-                mmap_meta_filepath_,
-                storage::io::GetPriorityFromLoadPriority(load_priority));
-
-            reader.ReadEntryStream(
-                "idx_to_offsets",
-                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
-            fw.Finish();
-        }
+        reader.ReadEntryStreamToFile(
+            "idx_to_offsets",
+            mmap_meta_filepath_,
+            storage::io::GetPriorityFromLoadPriority(load_priority));
 
         mmap_meta_size_ = offsets_bytes;
         auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
@@ -867,19 +856,19 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         // memory path: stream into vector
         auto offsets_bytes = get_idx_to_offsets_bytes();
         idx_to_offsets_.resize(total_num_rows_);
-        size_t wo = 0;
-        reader.ReadEntryStream(
-            "idx_to_offsets", [&](const uint8_t* d, size_t len) {
-                memcpy(reinterpret_cast<uint8_t*>(idx_to_offsets_.data()) + wo,
-                       d,
-                       len);
-                wo += len;
-            });
-        AssertInfo(wo == offsets_bytes,
+        const auto entry_bytes = reader.GetEntrySize("idx_to_offsets");
+        AssertInfo(entry_bytes == offsets_bytes,
                    "idx_to_offsets stream read size mismatch: got {}, "
                    "expected {}",
-                   wo,
+                   entry_bytes,
                    offsets_bytes);
+        reader.ReadEntryStreamAt(
+            "idx_to_offsets", [&](size_t offset, const uint8_t* d, size_t len) {
+                memcpy(
+                    reinterpret_cast<uint8_t*>(idx_to_offsets_.data()) + offset,
+                    d,
+                    len);
+            });
         idx_to_offsets_ptr_ = idx_to_offsets_.data();
         idx_to_offsets_size_ = idx_to_offsets_.size();
 
