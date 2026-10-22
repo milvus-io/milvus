@@ -1,4 +1,4 @@
-package proxy
+package ddl
 
 import (
 	"context"

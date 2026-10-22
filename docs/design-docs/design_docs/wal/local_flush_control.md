@@ -236,7 +236,7 @@ understand the durable local-flush abort boundary.
 
 ## Key Packages
 
-- `internal/proxy/task_flush_streaming.go` — per-VChannel local ManualFlush
+- `internal/proxy/ddl/task_flush_streaming.go` — per-VChannel local ManualFlush
 - `internal/streamingnode/server/service/release_manual_flush_preparer.go` — local release handoff
 - `internal/datacoord/` — FlushAll resource keys and persistence-state queries
 - `internal/cdc/replication/replicatestream/` — full transaction forwarding with the original Commit count
