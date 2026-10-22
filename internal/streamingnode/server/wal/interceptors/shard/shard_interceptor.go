@@ -196,10 +196,19 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// effective value.
 	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
 		if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
+			var preparation *function.PreparationRequiredError
+			if errors.As(err, &preparation) {
+				// Unwind to redo before waiting for initialization. No
+				// fields or segment assignments have changed on this path.
+				return nil, err
+			}
 			impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
 				mlog.Int64("collectionID", header.GetCollectionId()),
 				mlog.Int32("schemaVersion", schemaVersion),
 				mlog.Err(err))
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
 		}
 	}
@@ -270,11 +279,21 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 
 // handleManualFlushMessage handles the manual flush message.
 func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	maunalFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
-	header := maunalFlushMsg.Header()
+	manualFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
+	header := manualFlushMsg.Header()
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
-		return nil, status.NewUnrecoverableError(err.Error())
+		if !msg.IsUnreplicable() || msg.ReplicateHeader() != nil || !errors.Is(err, shards.ErrCollectionNotFound) {
+			return nil, status.NewUnrecoverableError(err.Error())
+		}
+		// DataCoord admits a local flush only for an existing collection, after
+		// CreateCollection's business-channel ACKs. Its ID is never reused, so a
+		// missing shard here means Drop overtook the flush (including on retry
+		// after WAL recovery). Append an empty best-effort flush for the dropped
+		// collection. It follows normal consuming ACK/resource-key ordering without
+		// an additional dependency on Drop completion. Never synthesize an ACK or
+		// apply this exception to historical/replicated flushes or other errors.
+		segmentIDs = nil
 	}
 
 	// Modify the extra response for manual flush message.
@@ -282,7 +301,7 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 		return &messagespb.ManualFlushExtraResponse{SegmentIds: segmentIDs}
 	})
 	header.SegmentIds = segmentIDs
-	maunalFlushMsg.OverwriteHeader(header)
+	manualFlushMsg.OverwriteHeader(header)
 
 	return appendOp(ctx, msg)
 }

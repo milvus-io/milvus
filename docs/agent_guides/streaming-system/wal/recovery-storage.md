@@ -35,6 +35,16 @@ values and provide deduplication. The preliminary legacy-format rewind keeps its
 original seek timestamp so an interrupted migration can still rebuild component
 baselines; only the final V2 global TimeTick is reset.
 
+WAL append cancellation ends the writer lifecycle and requires this recovery flow
+before writes resume. It does not prove that the interrupted record was absent.
+A durable Commit is replayed as a completed transaction; an incomplete receiving
+prefix reconstructs both TxnManager and ReplicatesManager from the same TxnBuffer;
+a durable exclusive operation (including ManualFlush/FlushAll) removes the aborted
+prefix in its scope, regardless of replication origin or the `_ur` marker.
+Explicitly ignored topology records have no abort effect. The old session is not reset
+for another Commit attempt on the cancelled writer. See
+[Append retry and writer lifetime](../walbackend/walbackend.md#append-retry-and-writer-lifetime).
+
 The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
 Size, buffer age, explicit Flush and recovery-tail requests trigger output.
 Earlier L1 segments must be registered in DataCoord, but need not be flushed.

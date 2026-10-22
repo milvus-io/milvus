@@ -162,14 +162,13 @@ func reshardPlan(job ImportJob, p *datapb.ReshardTask, cfg importV3Config) (*imp
 		return nil, err
 	}
 	return &importv3pb.ReshardTaskPlan{
-		CollectionId:      job.GetCollectionID(),
-		CollectionSchema:  job.GetSchema(),
-		Vchannels:         append([]string(nil), job.GetVchannels()...),
-		PartitionIds:      append([]int64(nil), job.GetPartitionIDs()...),
-		Files:             append([]*internalpb.ImportFile(nil), files...),
-		Options:           append([]*commonpb.KeyValuePair(nil), job.GetOptions()...),
-		FragmentSize:      fragmentSize,
-		RlsCheckPredicate: job.GetRlsCheckPredicate(),
+		CollectionId:     job.GetCollectionID(),
+		CollectionSchema: job.GetSchema(),
+		Vchannels:        append([]string(nil), job.GetVchannels()...),
+		PartitionIds:     append([]int64(nil), job.GetPartitionIDs()...),
+		Files:            append([]*internalpb.ImportFile(nil), files...),
+		Options:          append([]*commonpb.KeyValuePair(nil), job.GetOptions()...),
+		FragmentSize:     fragmentSize,
 	}, nil
 }
 

@@ -19,13 +19,11 @@ import (
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -279,8 +277,7 @@ type DeleteRunner struct {
 	initRequestOnce sync.Once
 	req             *milvuspb.DeleteRequest
 	result          *milvuspb.MutationResult
-	// userPlanIsSimple: the user's filter, before any row-level-security
-	// predicate, names primary keys only (delete by ids).
+	// userPlanIsSimple: the user's filter names primary keys only (delete by ids).
 	userPlanIsSimple bool
 	node             taskmodel.TaskNode
 	metaCache        Cache
@@ -386,22 +383,6 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
-	canonicalDBName := colInfo.DBName
-	if canonicalDBName == "" {
-		canonicalDBName = dr.req.GetDbName()
-	}
-	rlsEnabled := colInfo.RlsEnabled
-	if rlsEnabled && dr.req.GetSkipRls() {
-		rlsEnabled, err = dr.node.ResolveRLSEnforcement(ctx, dr.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
-			canonicalDBName, colInfo.Schema.GetName(), "delete")
-		if err != nil {
-			return err
-		}
-	}
-	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
-	if err != nil {
-		return err
-	}
 
 	dr.schema = colInfo.Schema
 	if err := dql.ValidateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
@@ -416,8 +397,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	}
 
 	colTimezone := dql.GetColTimezone(colInfo)
-	// The user's own filter is counted: the parser reports it before the
-	// rewriter, and the row-level-security predicate is merged in afterwards.
+	// Count the user's filter before the rewriter changes it.
 	var exprFeatures featureusage.FeatureSet
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone, OnParsedExpr: dql.ExprFeatureObserver(&exprFeatures)}
 
@@ -441,21 +421,8 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
-	// The mode is the shape of the user's request. With row-level security
-	// the predicate merged below turns every delete into a filter delete,
-	// which is how the server runs it but not what the client asked for.
 	if featureusage.Enabled() {
 		dr.userPlanIsSimple = isSimpleDeletePlan(userPlan)
-	}
-
-	if enforceRLS {
-		predicate, err := rls.ResolveUsingPredicate(ctx, dr.collectionID, principalName, rlsutil.PolicyActionDelete, dr.schema.SchemaHelper)
-		if err != nil {
-			return err
-		}
-		if err := rls.MergeNormalizedPredicateToPlan(dr.plan, predicate); err != nil {
-			return err
-		}
 	}
 
 	// Approximate membership_match filters carrying an MBF1 blob must not drive

@@ -55,7 +55,11 @@ AND no earlier unfinished task conflicts
 ```
 
 Conflicting tasks preserve WAL observation order. Independent tasks may Ack
-concurrently.
+concurrently. A local ManualFlush overtaken by DropCollection is an empty
+best-effort operation and uses the same ResourceKey ordering. It adds no VChannel
+dependency on Drop completion when a replicated rename makes their name keys
+differ. An unfinished Drop still blocks the global recovery checkpoint through
+its own retained handle.
 
 ## 4. Ack And Retry
 

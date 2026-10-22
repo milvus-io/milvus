@@ -3174,7 +3174,7 @@ class SegmentExpr : public Expr {
             if (use_index) {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
-                if (std::is_same_v<T, ArrayView>) {
+                if constexpr (std::is_same_v<T, ArrayView>) {
                     auto schema = segment_->get_schema_snapshot();
                     auto element_type = (*schema)[field_id_].get_element_type();
                     switch (element_type) {
@@ -3211,8 +3211,9 @@ class SegmentExpr : public Expr {
                                       "unsupported element type: {}",
                                       element_type);
                     }
+                } else {
+                    return ProcessIndexChunksForValid<T>();
                 }
-                return ProcessIndexChunksForValid<T>();
             } else {
                 return ProcessDataChunksForValid<T>();
             }
@@ -3241,7 +3242,7 @@ class SegmentExpr : public Expr {
             if (use_index) {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
-                if (std::is_same_v<T, ArrayView>) {
+                if constexpr (std::is_same_v<T, ArrayView>) {
                     auto schema = segment_->get_schema_snapshot();
                     auto element_type = (*schema)[field_id_].get_element_type();
                     switch (element_type) {
@@ -3283,13 +3284,14 @@ class SegmentExpr : public Expr {
                                       "unsupported element type: {}",
                                       element_type);
                     }
+                } else {
+                    const auto& res = GetCachedIndexValidBitmap();
+                    if (!cached_index_all_valid_) {
+                        for (auto i = 0; i < batch_size; ++i) {
+                            valid_result[i] = res[input[i]];
+                        }
+                    }  // else: valid_result is already all-set
                 }
-                const auto& res = GetCachedIndexValidBitmap();
-                if (!cached_index_all_valid_) {
-                    for (auto i = 0; i < batch_size; ++i) {
-                        valid_result[i] = res[input[i]];
-                    }
-                }  // else: valid_result is already all-set
             } else {
                 apply_field_valid_data();
             }

@@ -296,9 +296,8 @@ func legacyNormScoreEnabled(searchParams []*commonpb.KeyValuePair) bool {
 // marks the expression-language features of every expression one parse
 // produces: the user's filter and, on a search, each boost scorer's filter.
 // It sees the parser's output before the rewriter, so what is counted is the
-// operator the user wrote; the row-level-security predicate is merged in
-// afterwards and is never seen. Nil when the request is not counted, which
-// also spares the parser the call.
+// operator the user wrote. Nil when the request is not counted, which also
+// spares the parser the call.
 func exprFeatureObserver(set *featureusage.FeatureSet) func(*planpb.Expr) {
 	if set == nil {
 		return nil

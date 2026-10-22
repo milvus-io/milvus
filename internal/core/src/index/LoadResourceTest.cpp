@@ -1080,7 +1080,7 @@ TEST(ScalarIndexV3ResourceTest, EncryptedEstimatesRetainFullScratch) {
     }
 }
 
-TEST(ScalarIndexV3ResourceTest, StringValidityStagingPreventsSyncSharing) {
+TEST(ScalarIndexV3ResourceTest, StringValidityDestinationAllowsSyncSharing) {
     ResourceFixture fixture;
     constexpr size_t rows = 9;
     const auto path = fixture.WritePacked(
@@ -1097,7 +1097,7 @@ TEST(ScalarIndexV3ResourceTest, StringValidityStagingPreventsSyncSharing) {
                                         rows,
                                         {path},
                                         fixture.context);
-        EXPECT_EQ(resources.overhead.has_value(), async);
+        EXPECT_TRUE(resources.overhead.has_value());
     }
 }
 TEST(ScalarIndexV3ResourceTest,

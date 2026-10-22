@@ -362,6 +362,8 @@ message StreamingError {
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
     rpc GetCollectionSchema(StreamingNodeGetCollectionSchemaRequest) returns (StreamingNodeGetCollectionSchemaResponse) {};
+
+    rpc ValidateAnalyzer(StreamingNodeValidateAnalyzerRequest) returns (StreamingNodeValidateAnalyzerResponse) {};
     rpc RunAnalyzer(StreamingNodeRunAnalyzerRequest) returns (StreamingNodeRunAnalyzerResponse) {};
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
     // from the correct position, ensuring no duplicate or missing messages.
@@ -1049,4 +1051,21 @@ message StreamingNodeGetCollectionSchemaResponse {
     // Zero means the exact effective boundary is unknown for a legacy schema
     // baseline, not proof that the channel has crossed a schema boundary.
     uint64 effective_time_tick = 2;
+}
+
+// Analyzer validation is collection-independent. Business failures use Status;
+// successful responses identify the resources to reserve before DDL.
+message StreamingAnalyzerInfo {
+    string params = 1;
+    string field = 2;
+    string name = 3;
+}
+
+message StreamingNodeValidateAnalyzerRequest {
+    repeated StreamingAnalyzerInfo analyzer_infos = 1;
+}
+
+message StreamingNodeValidateAnalyzerResponse {
+    repeated int64 resource_ids = 1;
+    common.Status status = 2;
 }

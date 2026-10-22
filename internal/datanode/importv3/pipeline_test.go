@@ -34,7 +34,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1298,46 +1297,17 @@ func TestCleanImportV3PrefixesRemovesSpillOnly(t *testing.T) {
 	require.Equal(t, "durable", string(got))
 }
 
-// TestExecuteReshardPlanEnforcesRLSPredicate pins the Import V3 RLS contract
-// that mirrors Import V2: the job's write predicate is carried into the plan
-// and re-checked on every prepared source batch, so a row outside the
-// predicate fails the whole reshard run before any fragment is published. A
-// nil predicate (job skips RLS) is a no-op.
-func TestExecuteReshardPlanEnforcesRLSPredicate(t *testing.T) {
+func TestExecuteReshardPlanIgnoresRetiredRLSPredicate(t *testing.T) {
 	initReshardPipelineParams(t)
 	fix := newReshardPipelineFixture()
-	helper, err := typeutil.CreateSchemaHelper(fix.schema)
-	require.NoError(t, err)
-	predicate, err := planparserv2.ParseExpr(helper, "pk == 1", nil)
-	require.NoError(t, err)
-
-	runWith := func(t *testing.T, predicate *planpb.Expr, ids ...int64) (*reshardCallRecorder, error) {
-		t.Helper()
-		plan := fix.plan([]*internalpb.ImportFile{fix.source(1)}, 1)
-		plan.RlsCheckPredicate = predicate
-		readers := map[int64]reshardReaderBuilder{
-			1: staticReshardReader(&scriptReader{batches: []*storage.InsertData{fix.batch(ids...)}, size: 100}),
-		}
-		recorder := &reshardCallRecorder{}
-		mockReshardBoundaries(t, readers, recorder)
-		return recorder, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil)
+	plan := fix.plan([]*internalpb.ImportFile{fix.source(1)}, 1)
+	plan.RlsCheckPredicate = &planpb.Expr{}
+	readers := map[int64]reshardReaderBuilder{
+		1: staticReshardReader(&scriptReader{batches: []*storage.InsertData{fix.batch(1, 2)}, size: 100}),
 	}
-
-	t.Run("violating row fails the run without publishing", func(t *testing.T) {
-		recorder, err := runWith(t, predicate, 1, 2)
-		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		require.Zero(t, recorder.publishCalled.Load())
-	})
-
-	t.Run("conforming rows complete", func(t *testing.T) {
-		recorder, err := runWith(t, predicate, 1, 1)
-		require.NoError(t, err)
-		require.Equal(t, int64(1), recorder.publishCalled.Load())
-	})
-
-	t.Run("nil predicate is a no-op", func(t *testing.T) {
-		recorder, err := runWith(t, nil, 1, 2)
-		require.NoError(t, err)
-		require.Equal(t, int64(1), recorder.publishCalled.Load())
-	})
+	recorder := &reshardCallRecorder{}
+	mockReshardBoundaries(t, readers, recorder)
+	err := executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), recorder.publishCalled.Load())
 }

@@ -2562,6 +2562,7 @@ func TestServer_FlushAll(t *testing.T) {
 		// Mock broadcaster
 		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+			require.True(t, msg.IsUnreplicable())
 			require.True(t, msg.BroadcastHeader().AckSyncUp, "FlushAll must wait for consuming-side completion")
 			results := make(map[string]*message.AppendResult)
 			for _, vchannel := range msg.BroadcastHeader().VChannels {
@@ -2591,12 +2592,12 @@ func TestServer_FlushAll(t *testing.T) {
 
 		// Register mock broadcaster
 		mb := mock_broadcaster.NewMockBroadcaster(t)
-		mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil)
+		mb.EXPECT().WithUnreplicableResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil)
 		mb.EXPECT().Close().Return().Maybe()
 		broadcast.ResetBroadcaster()
 		broadcast.Register(mb)
 
-		// Register mock balancer for balance.GetWithContext in StartBroadcastWithResourceKeys
+		// Register mock balancer for balance.GetWithContext in StartUnreplicableBroadcastWithResourceKeys
 		b := mock_balancer.NewMockBalancer(t)
 		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil)
 		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {

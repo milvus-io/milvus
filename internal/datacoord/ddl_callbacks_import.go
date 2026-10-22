@@ -43,11 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
-const (
-	importRLSContextVersionProperty = "_irv"
-	importRLSContextVersion         = "1"
-)
-
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	// Call createImportJobFromAck directly instead of ImportV2
@@ -277,8 +272,6 @@ func (s *Server) broadcastImport(ctx context.Context,
 	jobID int64,
 	vchannels []string,
 	idempotencyKey string,
-	rlsPrincipal string,
-	skipRLS bool,
 	version internalpb.ImportVersion,
 ) (duplicatedJobID int64, duplicated bool, err error) {
 	if err := importutilv2.ValidateSnapshotSourceRequest(options); err != nil {
@@ -352,14 +345,6 @@ func (s *Server) broadcastImport(ctx context.Context,
 		}
 	})
 	msgOptions := funcutil.KeyValuePair2Map(options)
-	delete(msgOptions, importutilv2.RLSPrincipal)
-	delete(msgOptions, importutilv2.SkipRLS)
-	if rlsPrincipal != "" {
-		msgOptions[importutilv2.RLSPrincipal] = rlsPrincipal
-	}
-	if skipRLS {
-		msgOptions[importutilv2.SkipRLS] = "true"
-	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{CommitByCoordinator: true}).
@@ -378,7 +363,6 @@ func (s *Server) broadcastImport(ctx context.Context,
 			JobID:          jobID,
 			Version:        int64(version),
 		}).
-		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
 		// Scoped to the collection by ID, so the same client key stays a distinct
 		// operation against another collection, and a rename does not move the key off
 		// the collection it was bound to: a retry naming the renamed collection still
