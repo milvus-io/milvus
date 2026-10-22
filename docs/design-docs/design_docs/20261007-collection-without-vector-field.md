@@ -27,7 +27,7 @@ bulk import, compaction, load, release, and adding scalar fields. `search`,
 Most of the change is removing checks. Two things are more than that:
 
 - DataCoord asks "is this segment indexed" in two places with one filter,
-  and the filter waits for a vector index forever. It is split into two
+  and with no vector field that filter waits forever. It is split into two
   predicates (Section 3).
 - Without a vector, a 1 GB segment holds tens of millions of rows. Three
   things are done per segment on one thread and get slow at that size:
@@ -172,7 +172,10 @@ the same data (aarch64, details in Appendix B):
 | Apply a 10 % delete by expression (tsafe stall) | 28.6 s | 5.8 s |
 | Apply a 10 % delete by `varchar` pk list, 44 requests (tsafe stall) | 186 s | 14.5 s |
 | Build `INVERTED` on `int32` | 28.6 s | 8.5 s (parallel) |
-| Replay 6.34 M `varchar` deletes at load | 381 s | not measured |
+
+The third cost, replaying deletes when the segment is loaded, was measured
+on x86 only: loading the 44 M-row segment with 6.34 M deleted keys takes
+93 s with an `int64` key and 381 s with a `varchar` key.
 
 Query latency and memory do not depend on segment count (Appendix B).
 
@@ -188,7 +191,7 @@ lookup is about 25 cache misses: 6–13 µs per `int64` key and about 45 µs per
 
 PR #54543 sorts the delete batch by primary key and merges it against the
 sorted primary-key column in one pass, instead of one binary search per key.
-On the 44 M-row segment:
+On the 44 M-row segment (x86):
 
 | Delete | Before | After |
 |---|---:|---:|
@@ -196,15 +199,18 @@ On the 44 M-row segment:
 | 1.5 M `varchar` keys, apply time | 76.6 s | 1.1 s |
 | 4.4 M `int64` keys in 44 requests, tsafe stall | 43.6 s | 0.25 s |
 | 4.4 M `varchar` keys in 44 requests, tsafe stall | 209.8 s | 0.08 s |
-| Replay 6.34 M `varchar` deletes at load | 381 s | 11 s |
+| Load with 6.34 M `int64` deletes to replay | 93 s | 10 s |
+| Load with 6.34 M `varchar` deletes to replay | 381 s | 11 s |
 
 With this, a 44 M-row segment has no availability problem on delete, for any
 key type. PR #54543 ships before or with this phase.
 
 ### 4.3 A row-derived size target for the rest
 
-What remains per segment is latency, not availability: the scalar index
-build and the load-time replay above. For these, a new parameter
+What remains per segment after that fix is latency, not availability: the
+scalar index build (28.6 s on 44 M rows against 8.5 s for eight segments
+built in parallel) and the load-time replay (about 10 s for 6.34 M deletes
+on one segment). For these, a new parameter
 `dataCoord.segment.maxRows` (default 4,000,000; 0 disables it) caps the
 per-collection size target:
 
