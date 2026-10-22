@@ -102,7 +102,6 @@ func TestPartitionKey(t *testing.T) {
 	t.Run("Insert", func(t *testing.T) {
 		it := &InsertTask{
 			baseTask: baseTask{MetaCache: cache},
-			node:     &mockTaskNode{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
 				InsertRequest: &msgpb.InsertRequest{
@@ -281,7 +280,6 @@ func TestDefaultPartition(t *testing.T) {
 	t.Run("Insert", func(t *testing.T) {
 		it := &InsertTask{
 			baseTask: baseTask{MetaCache: cache},
-			node:     &mockTaskNode{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
 				InsertRequest: &msgpb.InsertRequest{
