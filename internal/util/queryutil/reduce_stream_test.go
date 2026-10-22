@@ -69,8 +69,15 @@ func TestSplitRetrieveResultAcceptsUnitThatCrossesThreshold(t *testing.T) {
 func TestSplitRetrieveResultEmitsOversizedUnitAlone(t *testing.T) {
 	largeID := int64(1 << 56)
 	result := newQueryTestChunk([]int64{1, largeID}, []int64{10, largeID})
-	firstUnitBytes := queryChunkBytes(t, newQueryTestChunk([]int64{1}, []int64{10}), 1)
-	largeUnitBytes := queryChunkBytes(t, newQueryTestChunk([]int64{largeID}, []int64{largeID}), 1)
+	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
+		Type: schemapb.DataType_VarChar, FieldId: 102,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "a much larger row"}}},
+		}},
+	})
+	firstUnitBytes := queryChunkBytes(t, result, 1)
+	largeUnitBytes, err := (retrieveUnit{result: result, rowIndex: 1}).reducibleByteSize()
+	require.NoError(t, err)
 	chunkBytes := firstUnitBytes + 1
 	require.Greater(t, largeUnitBytes, chunkBytes)
 
@@ -101,11 +108,7 @@ func TestSplitRetrieveResultWithGroupedUnits(t *testing.T) {
 
 func TestSplitRetrieveResultIncludesElementIndexBytes(t *testing.T) {
 	result := makeElementLevelResult([]int64{1, 2}, []int64{10, 20}, [][]int32{{0}, {1, 2, 3, 4, 5, 6, 7, 8}})
-	first, err := buildRetrieveChunk([]retrieveUnit{{result: result, rowIndex: 0}})
-	require.NoError(t, err)
-	expectedBytes := proto.Size(&internalpb.RetrieveResults{
-		Ids: first.GetIds(), FieldsData: first.GetFieldsData(), ElementIndices: first.GetElementIndices(),
-	})
+	expectedBytes := int(newRowSizeCalculator(result).rowSize(0)) + 8 + 4
 	require.Equal(t, expectedBytes, queryChunkBytes(t, result, 1))
 	chunks, err := SplitRetrieveResult(result, expectedBytes+1)
 	require.NoError(t, err)
@@ -274,9 +277,17 @@ func TestOrderedReduceStreamMergesByOrderByField(t *testing.T) {
 func TestOrderedReduceStreamDefersOversizedUnitToNextChunk(t *testing.T) {
 	largeID := int64(1 << 56)
 	result := newQueryTestChunk([]int64{1, largeID}, []int64{10, largeID})
+	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
+		Type: schemapb.DataType_VarChar, FieldId: 102,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "a much larger row"}}},
+		}},
+	})
 	child := &queryTestStream{recv: []queryTestRecv{{chunk: result}}}
-	chunkBytes := queryChunkBytes(t, newQueryTestChunk([]int64{1}, []int64{10}), 1) + 1
-	require.Greater(t, queryChunkBytes(t, newQueryTestChunk([]int64{largeID}, []int64{largeID}), 1), chunkBytes)
+	chunkBytes := queryChunkBytes(t, result, 1) + 1
+	largeUnitBytes, err := (retrieveUnit{result: result, rowIndex: 1}).reducibleByteSize()
+	require.NoError(t, err)
+	require.Greater(t, largeUnitBytes, chunkBytes)
 
 	stream, err := NewReduceStream(
 		&internalpb.RetrieveRequest{IsIterator: true, Limit: 2},

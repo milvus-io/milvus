@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -141,16 +142,24 @@ func TestShardReduceStreamRetainsFirstRowForEqualOrMissingTimestamp(t *testing.T
 func TestShardReduceStreamAccountsForReplacementBytes(t *testing.T) {
 	for _, grows := range []bool{false, true} {
 		t.Run(fmt.Sprintf("grows_%t", grows), func(t *testing.T) {
-			oldValue, newValue := int64(1<<56), int64(22)
+			oldValue, newValue := "abcdefgh", "a"
 			if grows {
 				oldValue, newValue = newValue, oldValue
 			}
-			first := newQueryTestChunk([]int64{1, 2}, []int64{11, oldValue})
+			first := newQueryTestChunk([]int64{1, 2}, []int64{11, 22})
 			first.FieldsData = append(first.FieldsData, makeTimestampField([]int64{10, 10}))
-			second := newQueryTestChunk([]int64{2}, []int64{newValue})
+			second := newQueryTestChunk([]int64{2}, []int64{22})
 			second.FieldsData = append(second.FieldsData, makeTimestampField([]int64{20}))
 			last := newQueryTestChunk([]int64{3}, []int64{33})
 			last.FieldsData = append(last.FieldsData, makeTimestampField([]int64{10}))
+			for i, result := range []*internalpb.RetrieveResults{first, second, last} {
+				result.FieldsData[0].Type = schemapb.DataType_VarChar
+				result.FieldsData[0].Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{
+						Data: [][]string{{"a", oldValue}, {newValue}, {"a"}}[i],
+					}},
+				}}
+			}
 			threshold := queryChunkBytes(t, first, 1) + 1
 			if !grows {
 				threshold = queryChunkBytes(t, first, 1)*2 + 1
@@ -164,14 +173,14 @@ func TestShardReduceStreamAccountsForReplacementBytes(t *testing.T) {
 			require.NoError(t, err)
 			if !grows {
 				require.Equal(t, []int64{1, 2, 3}, queryTestIDs(chunk))
-				require.Equal(t, []int64{11, newValue, 33}, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+				require.Equal(t, []string{"a", newValue, "a"}, chunk.GetFieldsData()[0].GetScalars().GetStringData().GetData())
 				return
 			}
 			require.Equal(t, []int64{1}, queryTestIDs(chunk))
 			chunk, err = stream.Recv()
 			require.NoError(t, err)
 			require.Equal(t, []int64{2}, queryTestIDs(chunk))
-			require.Equal(t, []int64{newValue}, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+			require.Equal(t, []string{newValue}, chunk.GetFieldsData()[0].GetScalars().GetStringData().GetData())
 			chunk, err = stream.Recv()
 			require.NoError(t, err)
 			require.Equal(t, []int64{3}, queryTestIDs(chunk))
