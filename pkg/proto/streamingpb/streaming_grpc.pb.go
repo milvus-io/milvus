@@ -481,9 +481,29 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingNodeHandlerServiceClient interface {
+	// GetCollectionSchema returns the current write schema or an exact historical
+	// schema version for a VChannel, together with its effective TimeTick.
+	// Requires the primary WAL owner and matching PChannel assignment; collection
+	// loading is not required. An unavailable historical version is not replaced
+	// with the current schema. Failures use streaming gRPC errors.
 	GetCollectionSchema(ctx context.Context, in *StreamingNodeGetCollectionSchemaRequest, opts ...grpc.CallOption) (*StreamingNodeGetCollectionSchemaResponse, error)
+	// ValidateAnalyzer prepares referenced file resources and validates analyzer
+	// configurations without requiring a collection or WAL assignment. On success,
+	// returns the resource IDs used by the analyzers for reservation before DDL.
+	// Validation and resource failures are reported in the response Status.
 	ValidateAnalyzer(ctx context.Context, in *StreamingNodeValidateAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeValidateAnalyzerResponse, error)
+	// SubscribeTransform multiplexes VChannel TransformLog subscriptions over one
+	// bidirectional stream to a PChannel owner. CreateTransformStreamRequest is
+	// supplied in RPC metadata; stream and subscription creation acknowledgements
+	// precede their events. Each subscription delivers ordered entries after its
+	// exclusive start cursor and SyncUp progress, optionally through an end tick.
+	// Closing one subscription leaves the others active; closing the stream
+	// releases all subscriptions. Reconnection and resubscription are client-owned.
 	SubscribeTransform(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_SubscribeTransformClient, error)
+	// RunAnalyzer analyzes text using inline parameters on any ready StreamingNode
+	// or a collection field's current analyzer on its PChannel owner. Neither mode
+	// requires loaded segments. Streaming failures use gRPC errors; analyzer and
+	// resource failures are reported in the response Status.
 	RunAnalyzer(ctx context.Context, in *StreamingNodeRunAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeRunAnalyzerResponse, error)
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
@@ -658,9 +678,29 @@ func (x *streamingNodeHandlerServiceConsumeClient) Recv() (*ConsumeResponse, err
 // All implementations should embed UnimplementedStreamingNodeHandlerServiceServer
 // for forward compatibility
 type StreamingNodeHandlerServiceServer interface {
+	// GetCollectionSchema returns the current write schema or an exact historical
+	// schema version for a VChannel, together with its effective TimeTick.
+	// Requires the primary WAL owner and matching PChannel assignment; collection
+	// loading is not required. An unavailable historical version is not replaced
+	// with the current schema. Failures use streaming gRPC errors.
 	GetCollectionSchema(context.Context, *StreamingNodeGetCollectionSchemaRequest) (*StreamingNodeGetCollectionSchemaResponse, error)
+	// ValidateAnalyzer prepares referenced file resources and validates analyzer
+	// configurations without requiring a collection or WAL assignment. On success,
+	// returns the resource IDs used by the analyzers for reservation before DDL.
+	// Validation and resource failures are reported in the response Status.
 	ValidateAnalyzer(context.Context, *StreamingNodeValidateAnalyzerRequest) (*StreamingNodeValidateAnalyzerResponse, error)
+	// SubscribeTransform multiplexes VChannel TransformLog subscriptions over one
+	// bidirectional stream to a PChannel owner. CreateTransformStreamRequest is
+	// supplied in RPC metadata; stream and subscription creation acknowledgements
+	// precede their events. Each subscription delivers ordered entries after its
+	// exclusive start cursor and SyncUp progress, optionally through an end tick.
+	// Closing one subscription leaves the others active; closing the stream
+	// releases all subscriptions. Reconnection and resubscription are client-owned.
 	SubscribeTransform(StreamingNodeHandlerService_SubscribeTransformServer) error
+	// RunAnalyzer analyzes text using inline parameters on any ready StreamingNode
+	// or a collection field's current analyzer on its PChannel owner. Neither mode
+	// requires loaded segments. Streaming failures use gRPC errors; analyzer and
+	// resource failures are reported in the response Status.
 	RunAnalyzer(context.Context, *StreamingNodeRunAnalyzerRequest) (*StreamingNodeRunAnalyzerResponse, error)
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
