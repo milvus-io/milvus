@@ -8,12 +8,13 @@ for its applied Transform MVCC before execution.
 
 ## Metadata supply and production boundary
 
-Remote TransformLog transport is a separate dependency. The QueryNode adapter
-uses a WAL entry that exposes `TransformLogStreamManager`; without that
-capability, it returns ServiceNotReady when acquiring a stream. This extraction
-does not add the remote subscription RPC or its streaming client. The node-local
-resource manager remains injectable for component validation and never bypasses
-replay or the concrete resource instance's MVCC wait.
+Remote TransformLog transport is supplied by the base branch through
+`streaming.WAL().TransformLogStreamManager()`. The QueryNode adapter returns
+ServiceNotReady before WAL initialization. The node-local resource manager remains
+injectable for component validation and never bypasses replay or the concrete
+resource instance's MVCC wait. Physical subscription failures resume inside the
+transport. Buffer observes the logical stream's Done/Error to propagate terminal
+failure to its retained VChannels; Handler receives only Entry/SyncUp.
 
 The accompanying metadata supply adds SegmentLoadInfo Watch and exact retained
 LoadInfo lookup. `coord/qv-load-info/<collection>/<version>` holds immutable scope

@@ -99,8 +99,6 @@ func (noopQNSegmentManager) WaitTransformVisible(context.Context, qviews.QueryVi
 	return nil
 }
 
-type queryViewWALWithoutTransport struct{ streaming.WALAccesser }
-
 type queryViewWALWithTransport struct{ streaming.WALAccesser }
 
 func (*queryViewWALWithTransport) TransformLogStreamManager() wal.TransformLogStreamManager {
@@ -108,23 +106,13 @@ func (*queryViewWALWithTransport) TransformLogStreamManager() wal.TransformLogSt
 }
 
 func TestQueryViewTransformTransportUnavailable(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		wal  streaming.WALAccesser
-	}{
-		{name: "WAL not initialized"},
-		{name: "remote transport not installed", wal: &queryViewWALWithoutTransport{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			patch := mockey.Mock(streaming.WAL).Return(tc.wal).Build()
-			defer patch.UnPatch()
-			manager := queryViewTransformLogStreamManager()
-			require.NotNil(t, manager)
-			stream, err := manager.AcquireStream(t.Context(), "pchannel")
-			require.Nil(t, stream)
-			require.ErrorIs(t, err, merr.ErrServiceNotReady)
-		})
-	}
+	patch := mockey.Mock(streaming.WAL).Return(nil).Build()
+	defer patch.UnPatch()
+	manager := queryViewTransformLogStreamManager()
+	require.NotNil(t, manager)
+	stream, err := manager.AcquireStream(t.Context(), "pchannel")
+	require.Nil(t, stream)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 }
 
 func TestQueryViewTransformTransportInstalled(t *testing.T) {

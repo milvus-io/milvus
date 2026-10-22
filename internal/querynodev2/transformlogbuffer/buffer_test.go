@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,7 +73,6 @@ type fakeStream struct {
 	subscribeRelease chan struct{}
 	subscribeErr     error
 	subscribeErrs    []error
-	subscribeEvent   *wal.TransformLogStreamEvent
 }
 
 func newFakeStream() *fakeStream {
@@ -104,13 +104,6 @@ func (s *fakeStream) Subscribe(_ context.Context, opt wal.TransformLogSubscripti
 	if subscribeErr != nil {
 		return nil, subscribeErr
 	}
-	if s.subscribeEvent != nil {
-		event := *s.subscribeEvent
-		if event.VChannel == "" {
-			event.VChannel = opt.VChannel
-		}
-		_ = opt.Handler.Handle(event)
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subscriptions = append(s.subscriptions, opt)
@@ -122,6 +115,8 @@ func (s *fakeStream) Done() <-chan struct{} {
 }
 
 func (s *fakeStream) Error() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.err
 }
 
@@ -129,16 +124,16 @@ func (s *fakeStream) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.done)
 	})
-	return s.err
+	return s.Error()
 }
 
-func (s *fakeStream) failSubscription(err error) {
-	s.mu.Lock()
-	subscriptions := append([]wal.TransformLogSubscriptionOption(nil), s.subscriptions...)
-	s.mu.Unlock()
-	for _, sub := range subscriptions {
-		_ = sub.Handler.Handle(wal.TransformLogStreamEvent{VChannel: sub.VChannel, Err: err})
-	}
+func (s *fakeStream) failStream(err error) {
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.err = err
+		s.mu.Unlock()
+		close(s.done)
+	})
 }
 
 func (s *fakeStream) emit(event wal.TransformLogStreamEvent) {
@@ -147,7 +142,7 @@ func (s *fakeStream) emit(event wal.TransformLogStreamEvent) {
 	s.mu.Unlock()
 	for _, sub := range subscriptions {
 		if sub.VChannel == event.VChannel {
-			_ = sub.Handler.Handle(event)
+			sub.Handler.Handle(event)
 			return
 		}
 	}
@@ -406,21 +401,26 @@ func TestBufferAcquireDoesNotPoisonBufferOnRecoverableSubscriptionError(t *testi
 	streams.streams["v1"] = stream
 	buffer := New(streams, 4)
 
-	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
-	require.Nil(t, guard)
-	require.ErrorContains(t, err, "transient stream failure")
-
-	guard, err = buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
+	guard, err := buffer.Bind(newTestQueryView("v1", 50))
 	require.NoError(t, err)
-	require.NotNil(t, guard)
 	defer guard.Release()
+	retryable, err := guard.Prepare(t.Context())
+	require.True(t, retryable)
+	require.ErrorContains(t, err, "transient stream failure")
+	_, err = guard.Prepare(t.Context())
+	require.NoError(t, err)
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
 }
 
-func TestBufferAcquireReturnsHandlerErrorBeforeSubscriptionReady(t *testing.T) {
+func TestBufferAcquireReturnsStreamErrorBeforeSubscriptionReady(t *testing.T) {
 	streams := newFakeStreamManager()
 	stream := newFakeStream()
-	stream.subscribeEvent = &wal.TransformLogStreamEvent{Err: errors.New("catchup failed")}
+	failure := errors.New("catchup failed")
+	patch := mockey.Mock((*fakeStream).Subscribe).To(func(s *fakeStream, _ context.Context, opt wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
+		s.failStream(failure)
+		return fakeSubscription{id: 1, vchannel: opt.VChannel}, nil
+	}).Build()
+	defer patch.UnPatch()
 	streams.streams["v1"] = stream
 	buffer := New(streams, 4)
 
@@ -701,7 +701,7 @@ func TestGuardWaitTransformVisibleReturnsScannerError(t *testing.T) {
 	stream := streams.stream("v1")
 	require.NotNil(t, stream)
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
-	stream.failSubscription(errors.New("transform log truncated"))
+	stream.failStream(errors.New("transform log truncated"))
 
 	require.ErrorContains(t, <-waitDone, "transform log truncated")
 }
@@ -715,7 +715,7 @@ func TestBufferRegisterSegmentFailsWhenScannerFailsBeforeSyncUp(t *testing.T) {
 	stream := streams.stream("v1")
 	require.NotNil(t, stream)
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
-	stream.failSubscription(errors.New("truncated"))
+	stream.failStream(errors.New("truncated"))
 
 	require.Eventually(t, func() bool {
 		_, err = buffer.RegisterSegment(context.Background(), &fakeSegment{id: 10, vchannel: "v1", startAfter: 50})

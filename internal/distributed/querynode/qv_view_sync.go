@@ -108,12 +108,8 @@ func (m *lazyQNSegmentManager) get() qnview.SegmentManager {
 }
 
 func queryViewTransformLogStreamManager() wal.TransformLogStreamManager {
-	// Remote TransformLog transport is supplied separately from the node-local
-	// QueryView subsystem. Until installed, resource preparation must stay
-	// not-ready rather than skipping replay or claiming a visible frontier.
-	if provider, ok := streaming.WAL().(interface {
-		TransformLogStreamManager() wal.TransformLogStreamManager
-	}); ok {
+	// The WAL entry can be absent before streaming initialization in tests.
+	if provider := streaming.WAL(); provider != nil {
 		return provider.TransformLogStreamManager()
 	}
 	return wal.NewTransformLogErrorAccesser(merr.WrapErrServiceNotReadyMsg("remote TransformLog transport is not available"))

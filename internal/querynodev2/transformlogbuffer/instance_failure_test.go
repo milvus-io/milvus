@@ -94,7 +94,7 @@ func TestTransformApplyFailureIsIsolatedToPhysicalInstance(t *testing.T) {
 
 				// Actual shared history failure still reaches every healthy consumer.
 				transportErr := merr.WrapErrServiceUnavailableMsg("history unavailable")
-				stream.failSubscription(transportErr)
+				stream.failStream(transportErr)
 				require.ErrorIs(t, b.WaitFailure(ctx), transportErr)
 				require.ErrorIs(t, c.WaitTransformVisible(ctx, 100), transportErr)
 				require.ErrorIs(t, guard.WaitTransformVisible(ctx, 100), transportErr)

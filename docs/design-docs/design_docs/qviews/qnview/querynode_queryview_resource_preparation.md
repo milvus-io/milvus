@@ -501,7 +501,11 @@ at every MVCC, including historical timestamps. Other registrations on the same
 VChannel continue applying the shared log. Replay and live application use the
 same failure boundary; releasing an instance still drains any in-flight Apply.
 A late failure cannot poison a replacement instance with the same SegmentID.
-Subscription/history failures retain their shared-buffer failure scope.
+Physical subscription/history failures resume inside the transport, preserving
+logical subscriptions and accepted cursors. A terminal logical-stream Done/Error
+fails every retained VChannel buffer using that stream, including references
+arriving after its termination. Handler events carry only Entry/SyncUp; closing
+one subscription does not fail siblings.
 This extraction does not preserve historical-query availability on a poisoned
 instance or add a Coordinator Poison state or an in-place recovery protocol.
 
