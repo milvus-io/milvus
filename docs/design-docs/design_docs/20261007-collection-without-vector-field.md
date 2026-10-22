@@ -29,9 +29,11 @@ Two parts are more than removing a check:
 
 - DataCoord's "is this segment indexed" filter is split into two predicates,
   one for handoff and one for compaction input (Section 3).
-- Segments of narrow-row collections get a row-derived size target, because
-  without a vector a 1 GB segment holds tens of millions of rows and delete
-  application inside one segment is serial (Section 4).
+- Without a vector a 1 GB segment holds tens of millions of rows, and the
+  per-segment serial paths are exposed. Delete application, the one that
+  affects availability, is fixed in segcore (PR #54543, a dependency of this
+  phase). Narrow-row collections additionally get a row-derived segment size
+  target that bounds index build and load replay per segment (Section 4).
 
 Phase 2, converting between zero and non-zero vector fields, is left until a
 use case needs it.
@@ -86,12 +88,16 @@ The code changes are small and listed in Appendix A. In short:
   fails only when a loaded vector field has no index, so a collection with no
   vector needs no index. QueryCoord already treats "no index" as an empty
   index list.
-- **Schema evolution.** `add_field` and `add_function_field` reject a vector
-  output when the current schema has no vector field. The check sits in
-  RootCoord, with the same check in the Proxy for an early error. Two Proxy
-  drop checks that compute `removed >= vectorCount` are always true when the
-  count is 0 and block every struct-field and function drop; they get the
-  `removed > 0` guard that RootCoord already has.
+- **Schema evolution.** RootCoord's single schema-evolution entry
+  (`prepareAlterSchemaAddField` and the function-add path) rejects any change
+  that turns `HasVectorField` from false to true: a vector field, a struct
+  array field with a vector sub-field, or a function with a vector output.
+  The Proxy repeats the check in `addCollectionFieldTask` and
+  `alterCollectionSchemaTask` for an early error, but RootCoord is
+  authoritative so that no entry can bypass it. Two Proxy drop checks that
+  compute `removed >= vectorCount` are always true when the count is 0 and
+  block every struct-field and function drop; they get the `removed > 0`
+  guard that RootCoord already has.
 - **Search.** `Search`, `HybridSearch`, `SearchIterator` and search by primary
   key return `collection %s has no vector field, search is not supported`
   before `anns_field` is resolved. Today four different messages cover this
@@ -139,6 +145,17 @@ keep serving until then. The upside is that a published segment never falls
 back to brute-force scalar filtering. Segments below
 `minSegmentNumRowsToEnableIndex` stay exempt.
 
+Two further consequences for vector collections, which are why
+`forceAllIndexReady` was opt-in, need the DataCoord owner's agreement:
+
+- A scalar index whose build fails terminally keeps the compaction output
+  invisible. Under the segment change staging design the group goes to
+  `FAILED` and the parents stay published; without staging the parents are
+  already retired and the rows are unavailable until the index build is
+  retried. Today only a failed vector index has this effect.
+- Creating a scalar index while compaction outputs are still being indexed
+  delays their publication by one more build.
+
 ## 4. Segment size target
 
 ### 4.1 Problem
@@ -179,6 +196,17 @@ A collection whose estimated row is at least 268 B (`maxSize / maxRows`) keeps
 its current target. That covers every float vector with dim > 61. For
 `int64 + int32` the target is 112 MB, about 4 M rows.
 
+The estimate over-states variable-length fields: a `varchar` counts as
+`min(max_length, 256)` (`common.estimate.varCharLengthAvg`) and JSON, Array,
+Text and Geometry count as 512 B (`common.estimate.dynamicFieldLengthAvg`).
+So the target binds only for schemas of fixed-width fields and `varchar`
+fields with a short declared `max_length`. A `varchar` primary key declared
+with `max_length ≥ 252`, or any JSON or Array field, puts the estimate above
+268 B and leaves the collection at `maxSize`, although its real rows may be
+40 B wide (a 16-byte key: 26 M rows per GB). This is why the delete path
+cannot rely on the target and is fixed in segcore instead (Section 4.3); the
+target is kept for what it does cover and for the per-segment costs below.
+
 The rule cannot cause repeated re-compaction: planner classification and the
 writer compare bytes against the same `expectedSize(c)`, so an output that the
 writer fills is "full" to the planner and is not selected again. A simulation
@@ -191,15 +219,24 @@ a write amplification of 70.
 Adding a scalar field raises `rowWidth`. Segments that were full under the old
 target are merged once, the same as when an operator raises `maxSize`.
 
-### 4.3 Relation to the delete-path fix
+### 4.3 Delete-path fix (PR #54543, dependency of this phase)
 
-The row cap is a guard, not the fix. The fix is in segcore: sort the delete
-keys and merge them against the sorted primary-key column, instead of running
-one binary search per key. A prototype cuts a 1.5 M-key delete on the 44 M-row
-segment from 18.2 s to 0.6 s (`int64`) and from 76.6 s to 1.1 s (`varchar`),
-and the load-time replay of 6.34 M deletes from 381 s to 11 s (`varchar`). It
-is submitted as a separate PR. Once it lands, `maxRows` can be raised or set
-to 0.
+The fix for delete application is in segcore: sort the delete batch by
+primary key and merge it against the sorted primary-key column, instead of
+running one binary search per key. On the 44 M-row segment a 1.5 M-key delete
+drops from 18.2 s to 0.6 s (`int64`) and from 76.6 s to 1.1 s (`varchar`), a
+4.4 M-key delete in 44 requests stalls tsafe for 0.25 s instead of 43.6 s
+(`int64`) and 0.08 s instead of 209.8 s (`varchar`), and the load-time replay
+of 6.34 M deletes drops from 381 s to 11 s (`varchar`). With it, a 44 M-row
+segment has no availability problem on delete, whatever the key type, and
+the schemas the size target does not cover (Section 4.2) are safe.
+
+PR #54543 therefore ships before or with this phase. What the size target
+still bounds afterwards is per-segment serial work that is latency, not
+availability: scalar index builds (`INVERTED` on one `int32` field, 28.6 s on
+44 M rows against 8.5 s wall for eight 5.5 M-row segments built in parallel;
+`BITMAP` 48.6 s against 8.5 s) and the load-time delete replay (about 10 s
+for 6 M deletes on one segment). `maxRows=0` turns the target off.
 
 ## 5. Compatibility
 
@@ -255,13 +292,13 @@ to 0.
   It produces the same plans as the size target in every simulated interval
   while changing knapsack, both planners, the writer, import and the proto.
   It remains the fallback if a hard row bound is ever needed.
-- **No row cap; rely on the delete-path fix.** Rejected for Phase 1. The fix
-  is a separate segcore change with its own review, and the cap is a
-  configuration-level guard that can be removed afterwards.
+- **No row target at all, since PR #54543 removes the availability problem.**
+  Not taken: scalar index build and load replay remain serial per segment,
+  and the target costs no code outside `getExpectedSegmentSize` and the seal
+  limitation. It can be disabled with `maxRows=0`.
 
 ## 8. Follow-ups
 
-- The segcore delete merge (Section 4.3).
 - Phase 2: adding a vector field to, or dropping the last vector field from,
   an existing collection.
 - The loader memory estimate is about 3× low for narrow fixed-width rows
@@ -281,7 +318,7 @@ evolution rows, which are from `3df0cbcdd68`.
 | `proxy/util.go:1048` `validateLoadFieldsList`, `metacache/meta_cache.go:298` | at least one vector must be loaded | only if the schema has vectors |
 | `proxy/task.go:3141`, `:3410` load collection / partitions | `ErrIndexNotFound` fails the load | fail only if a loaded vector field has no index |
 | `httpserver/utils.go:3061` `anyToColumns` | REST insert needs a vector or function | check removed |
-| `proxy/task.go:644` `addCollectionFieldTask`, `:1033` `alterCollectionSchemaTask`, RootCoord `prepareAlterSchemaAddField` | vector field or function may be added | rejected when the current schema has no vector |
+| RootCoord `prepareAlterSchemaAddField` and the function-add path; Proxy `task.go:644` `addCollectionFieldTask`, `:1033` `alterCollectionSchemaTask` | a vector field, struct vector sub-field or vector-output function may be added | rejected when `HasVectorField` would turn from false to true (RootCoord authoritative, Proxy early check) |
 | `proxy/task.go:1297`, `:1337` drop struct field / function | `removed >= count` is true at 0 | `removed > 0 &&` |
 | `datacoord/util.go:77` `FilterInIndexedSegments` | waits forever with no vector | split into `handoffReady` / `compactionInputReady` |
 | `datacoord/index_meta.go:1497` `AllDenseWithDiskIndex` | true at 0 dense fields | `len(dense) > 0 &&` |
@@ -327,4 +364,5 @@ against a 123 MB seal threshold. The wire size per row (26 B) is lower than `Mem
 ## References
 
 - Review comments on PR #53983 (xiaofan-luan, 2026-10-10) and review feedback from Li Liu (2026-10-21, phase split)
+- PR #54543 `enhance: merge sorted delete batches against the sorted primary-key column`
 - Druid `maxRowsPerSegment` (5 M), TiKV region (96 MB or 960 k keys), Elasticsearch shard guidance (≤ 200 M documents): comparable systems cap both bytes and rows per unit.
