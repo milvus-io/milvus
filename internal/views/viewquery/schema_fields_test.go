@@ -39,11 +39,13 @@ func TestSchemaBindingRejectsMVCCSchemaAndFieldChanges(t *testing.T) {
 	request := &internalpb.RetrieveRequest{SchemaVersion: 0, OutputFieldsId: []int64{100}}
 	original := &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{SchemaVersion: 0, GrowingTimetick: 100, TransformingTimetick: 99, FieldIds: []int64{100}}}
 	require.NoError(t, ValidateSchemaBinding(request, original, nil))
-	for _, change := range []string{"schema", "growing mvcc", "transform mvcc", "field"} {
+	for _, change := range []string{"missing binding", "schema", "growing mvcc", "transform mvcc", "field"} {
 		t.Run(change, func(t *testing.T) {
 			req := proto.Clone(request).(*internalpb.RetrieveRequest)
 			mvcc := proto.Clone(original).(*viewpb.QueryPlanMVCC)
 			switch change {
+			case "missing binding":
+				mvcc.SchemaBinding = nil
 			case "schema":
 				req.SchemaVersion = 1
 			case "growing mvcc":

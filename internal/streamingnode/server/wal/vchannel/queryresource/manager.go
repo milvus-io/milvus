@@ -472,7 +472,7 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 		if schemaErr != nil {
 			return schemaErr
 		}
-		if err := runtime.PrepareQueryView(ctx, key.QueryViewVersion.DataVersion, ref.meta); err != nil {
+		if err := runtime.PrepareQueryView(ctx, ref.meta); err != nil {
 			return err
 		}
 		if err := runtime.CheckSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {

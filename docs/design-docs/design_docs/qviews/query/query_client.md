@@ -54,8 +54,7 @@ requery. It does not resolve a new shard, schema, View or MVCC. It sends the new
 PK retrieve expression through `QueryOnView` to the original workers and retains
 the original schema binding. A retained-plan failure aborts the parent operation;
 replanning only the refill would mix snapshots with the original reduced search.
-The pre-existing `RequeryOnView` RPC is preserved for wire compatibility and is
-not used by this client.
+There is no separate requery RPC.
 
 Fields needed by output/render/rerank must be included in `RequiredFieldIDs`
 during the original search plan, even when they are fetched only by requery.

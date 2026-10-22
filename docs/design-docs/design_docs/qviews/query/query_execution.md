@@ -16,8 +16,8 @@ copying a topology it does not use.
 
 The handler validates the request's schema binding against the leased View,
 waits for the fixed Growing/Transform frontiers, resolves the View's partition
-scope and acquires growing segment handles. Handles expose the selected exact
-read-schema CCollection, while physical segments retain their own encoding
+scope through the required runtime interface and acquires growing segment handles.
+Handles expose the selected exact read-schema CCollection, while physical segments retain their own encoding
 schema. A query error releases every acquired handle. Successful tasks own them
 through execution, reduction and result conversion; QueryView replacement cannot
 revoke resources from a task already acquired.
@@ -50,15 +50,16 @@ This PR does not copy QN loaders, ReadState management or native implementation.
   are supplied by the separate control-plane implementation.
 
 Retained requery uses QueryOnView with the original plan, workers, Schema and
-MVCC. It does not select new resources through Phase 1. The existing RequeryOnView
-wire method stays available for compatibility and is not used by the new client.
+MVCC. It does not select new resources through Phase 1 or use a separate requery
+RPC.
 
 ## Error and validation boundary
 
 View lifecycle errors retain their ViewCode and retry semantics. The query RPC
 adapters attach common.Status details for business errors, preserving their
-Milvus code/classification for new clients while keeping the original ViewError
-detail readable. Caller cancellation and deadlines retain their existing meaning.
+Milvus code/classification. The ViewError detail also retains the cause rendered
+by the current client error formatter. Caller cancellation and deadlines retain
+their existing meaning.
 
 The [plan contract](query_plan.md) describes field dependencies, exact schema
 validation, fixed snapshots, CAS certificates and payload reuse. Component tests

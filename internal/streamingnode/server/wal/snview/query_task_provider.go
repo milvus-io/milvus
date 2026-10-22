@@ -49,14 +49,9 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	partitions := selectedPartitionIDs(req.GetPartitionIDs())
-	if scoped, ok := runtime.(interface {
-		ResolvePartitions(uint64, []int64) ([]int64, error)
-	}); ok {
-		partitions, err = scoped.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), partitions)
-		if err != nil {
-			return nil, err
-		}
+	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
+	if err != nil {
+		return nil, err
 	}
 	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
 	if err != nil {
@@ -67,7 +62,7 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		mlog.FieldVChannel(shardID.VChannel),
 		mlog.Int("segmentCount", len(handles)),
 	)
-	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
+	if len(handles) > 0 {
 		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Collection().Schema()); err != nil {
 			for _, handle := range handles {
 				handle.Release()
@@ -120,14 +115,9 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	partitions := selectedPartitionIDs(req.GetPartitionIDs())
-	if scoped, ok := runtime.(interface {
-		ResolvePartitions(uint64, []int64) ([]int64, error)
-	}); ok {
-		partitions, err = scoped.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), partitions)
-		if err != nil {
-			return nil, err
-		}
+	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
+	if err != nil {
+		return nil, err
 	}
 	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
 	if err != nil {
@@ -138,7 +128,7 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		mlog.FieldVChannel(shardID.VChannel),
 		mlog.Int("segmentCount", len(handles)),
 	)
-	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
+	if len(handles) > 0 {
 		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Collection().Schema()); err != nil {
 			for _, handle := range handles {
 				handle.Release()

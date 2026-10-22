@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -63,10 +64,13 @@ func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {
 		if valid {
 			req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: 1}}
 		}
-		_, err := w.GetQueryPlan(context.Background(), req)
+		plan, err := w.GetQueryPlan(context.Background(), req)
 		patch.UnPatch()
 		if valid {
 			require.NoError(t, err)
+			require.NotNil(t, plan.GetMvcc().GetSchemaBinding())
+			require.Empty(t, plan.GetWorkNodes())
+			require.NoError(t, viewquery.ValidateSchemaBinding(plan.GetLegacyRetrieveRequest(), plan.GetMvcc(), nil))
 		} else {
 			require.Error(t, err)
 		}

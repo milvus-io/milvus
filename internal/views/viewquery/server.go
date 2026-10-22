@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -128,8 +126,4 @@ func (s *Server) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest
 		return nil, toRPCError(err)
 	}
 	return &viewpb.QueryOnViewResponse{LegacyResults: result}, nil
-}
-
-func (s *Server) RequeryOnView(context.Context, *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "RequeryOnView is not implemented")
 }

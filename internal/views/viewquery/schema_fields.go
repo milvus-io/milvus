@@ -143,13 +143,12 @@ func requestSchemaVersion(request proto.Message) int32 {
 	}
 }
 
-// ValidateSchemaBinding checks a Phase 1 proof before executing any task. Legacy
-// plans without a binding keep their wire compatibility; new planners always
-// attach one, including for schema version zero and an empty worker list.
+// ValidateSchemaBinding requires a Phase 1 proof before executing any task,
+// including for schema version zero and an empty worker list.
 func ValidateSchemaBinding(request proto.Message, mvcc *viewpb.QueryPlanMVCC, schema *schemapb.CollectionSchema) error {
 	binding := mvcc.GetSchemaBinding()
 	if binding == nil {
-		return nil
+		return viewerror.NewViewInvalidated("query plan is missing its schema binding")
 	}
 	if binding.GetSchemaVersion() != requestSchemaVersion(request) ||
 		binding.GetTransformingTimetick() != mvcc.GetTransformingTimetick() ||

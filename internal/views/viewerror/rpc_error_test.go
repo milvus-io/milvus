@@ -19,8 +19,10 @@ func TestBusinessErrorDetailsPreserveCodeAndClassification(t *testing.T) {
 		require.Equal(t, merr.Code(source), merr.Code(decoded))
 		require.Equal(t, merr.GetErrorType(source), merr.GetErrorType(decoded))
 		require.Equal(t, merr.IsRetryableErr(source), merr.IsRetryableErr(decoded))
-		// Existing clients can still decode the original ViewError detail.
+		// The ViewError cause remains part of the current client error text.
 		require.NotNil(t, decoded.(*ViewClientStatus).TryIntoViewError())
+		require.Equal(t, source.Error(), AsViewError(decoded).Cause)
+		require.Contains(t, decoded.Error(), source.Error())
 	}
 	for _, source := range []*ViewError{NewViewInvalidated("replaced"), NewOnShutdownError("moving")} {
 		wire := NewGRPCStatusFromError(source)
