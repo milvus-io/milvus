@@ -64,6 +64,11 @@ Each concrete segment task contains:
 provider has already waited until local resources can serve that boundary before
 returning tasks.
 
+Every Phase 1 plan carries a `SchemaBinding` for its schema version, MVCC and
+validated field dependencies, including schema version zero and plans with no
+work nodes. Phase 2 rejects a missing binding before acquiring tasks; it does
+not accept an unbound legacy variant of the QueryView protocol.
+
 StreamingNode and QueryNode do not need a shared `SegmentHandle` interface. They
 have different resource models and execution adapters:
 

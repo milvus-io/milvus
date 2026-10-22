@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
@@ -201,12 +200,6 @@ func mockQueryViewSchemaClient(t *testing.T) *queryViewSchemaClient {
 func TestQueryViewCollectionRuntimeUsesExactStreamingSchema(t *testing.T) {
 	// A QueryView can prepare before public metadata is updated and can retain
 	// its old schema after publication advances. No DescribeCollection is needed.
-	patch := mockey.Mock((*fakeQVLoadMetadataProvider).DescribeCollection).To(
-		func(_ *fakeQVLoadMetadataProvider, _ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
-			t.Fatal("QueryView schema must come from streaming")
-			return nil, nil
-		}).Build()
-	defer patch.UnPatch()
 	for _, version := range []int32{0, 2, 1} {
 		t.Run(strconv.Itoa(int(version)), func(t *testing.T) {
 			schemas := mockQueryViewSchemaClient(t)
@@ -338,12 +331,12 @@ func TestQueryViewCollectionRuntimeFailedScopeUpdateReleasesReference(t *testing
 func TestQueryViewRequiredFieldsAreIndependentOfHints(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102, IsDynamic: true}}}
 	info := qnview.QueryViewLoadInfo{RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}}, SkipLoadDynamicField: true}
-	require.Equal(t, []int64{100, 101, 102}, loadInfoFieldIDs(info, schema))
+	require.Equal(t, []int64{100, 101, 102}, loadInfoFieldIDs(info))
 	require.Equal(t, []int64{100}, loadInfoHintIDs(info, schema))
 	info.LoadFields = nil
 	require.Equal(t, []int64{100, 101}, loadInfoHintIDs(info, schema))
-	info.RequiredFields = nil // Retained legacy snapshot binds to this View's schema.
-	require.Equal(t, []int64{100, 101, 102}, loadInfoFieldIDs(info, schema))
+	info.RequiredFields = nil
+	require.Empty(t, loadInfoFieldIDs(info), "missing requirements must not expand to all fields")
 }
 
 func TestCollectionRuntimeRejectsMismatchedLoadIdentity(t *testing.T) {
@@ -358,4 +351,32 @@ func TestCollectionRuntimeRejectsMismatchedLoadIdentity(t *testing.T) {
 			require.True(t, isRetryableCollectionRuntimeError(err))
 		})
 	}
+}
+
+func TestCollectionRuntimeRejectsMissingRequiredFields(t *testing.T) {
+	patch := mockey.Mock((*fakeQVLoadMetadataProvider).GetQueryViewLoadInfo).Return(qnview.QueryViewLoadInfo{
+		CollectionID: 1, Version: 7, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}},
+	}, nil).Build()
+	defer patch.UnPatch()
+	collection := &fakeQVCollectionManager{}
+	manager := newTestQueryViewCollectionRuntimeManager(&fakeQVLoadMetadataProvider{}, collection, mockQueryViewSchemaClient(t))
+	view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{CollectionId: 1, LoadInfoVersion: 7}, &viewpb.QueryViewOfQueryNode{}).(*qviews.QueryViewAtQueryNode)
+	guard, retryable, err := manager.Acquire(t.Context(), view)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.True(t, retryable)
+	require.Nil(t, guard)
+	require.Zero(t, collection.putCount)
+}
+
+func TestCollectionRuntimePreservesEmptySnapshotPartitions(t *testing.T) {
+	collection := &fakeQVCollectionManager{collection: segments.NewCollectionWithoutSegcoreForTest(1, &schemapb.CollectionSchema{})}
+	manager := newTestQueryViewCollectionRuntimeManager(&fakeQVLoadMetadataProvider{}, collection, mockQueryViewSchemaClient(t))
+	view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{CollectionId: 1, LoadInfoVersion: 7}, &viewpb.QueryViewOfQueryNode{
+		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1}}},
+	}).(*qviews.QueryViewAtQueryNode)
+	guard, retryable, err := manager.Acquire(t.Context(), view)
+	require.NoError(t, err)
+	require.False(t, retryable)
+	defer guard.Release()
+	require.Empty(t, guard.Collection().GetPartitions(), "the snapshot is authoritative; do not infer scope from a node's View")
 }

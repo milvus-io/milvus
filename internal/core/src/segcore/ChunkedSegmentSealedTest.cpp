@@ -1139,9 +1139,8 @@ TEST(test_chunk_segment, InitialSegmentsHavePrivateLoadScopes) {
     for (const auto& fields : {std::vector<int64_t>{pk.get(), left.get()},
                                std::vector<int64_t>{pk.get(), right.get()}}) {
         CSegmentInterface raw = nullptr;
-        auto status = NewSegmentWithLoadInfoAndLoadFields(
+        auto status = NewSealedSegmentWithCollection(
             &collection,
-            Sealed,
             1,
             &raw,
             false,

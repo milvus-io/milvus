@@ -2562,7 +2562,7 @@ ChunkedSegmentSealedImpl::LoadLazyColumnGroup(
         const auto& field_meta = field_metas.at(field_id);
         auto column = std::make_shared<ProxyChunkColumn>(
             lazy_group, field_id, field_meta);
-        generate_interim_index(field_id,
+        generate_interim_index(field_meta,
                                segment_load_info.GetNumOfRows(),
                                column,
                                op_ctx,
@@ -7657,17 +7657,18 @@ ChunkedSegmentSealedImpl::CanUseLazyManifestColumnGroup(
 
 bool
 ChunkedSegmentSealedImpl::generate_interim_index(
-    const FieldId field_id,
+    const FieldMeta& field_meta,
     int64_t num_rows,
     const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
     milvus::OpContext* op_ctx,
     StagedStateCommitter* committer) {
+    const auto field_id = field_meta.get_id();
     if (col_index_meta_ == nullptr || !col_index_meta_->HasField(field_id)) {
         return false;
     }
     auto snapshot = CapturePublishedState();
-    auto schema_snapshot = snapshot->fields;
-    auto& field_meta = schema_snapshot->operator[](field_id);
+    // Reopen may be preparing a field absent from the published layout. Its
+    // metadata belongs to the target state supplied by the loading operation.
     auto& field_index_meta = col_index_meta_->GetFieldIndexMeta(field_id);
     auto& index_params = field_index_meta.GetIndexParams();
 
@@ -7951,7 +7952,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                              op_ctx);
     }
 
-    generate_interim_index(field_id, num_rows, column, op_ctx, &committer);
+    generate_interim_index(
+        (*schema_snapshot)[field_id], num_rows, column, op_ctx, &committer);
 
     // Build the geometry cache OUTSIDE the publish lock (it decodes the whole
     // column), then stage it in the same immutable runtime snapshot as the

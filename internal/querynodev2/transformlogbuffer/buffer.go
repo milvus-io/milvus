@@ -276,8 +276,9 @@ func newVChannelBuffer(owner *Buffer, pchannel string, vchannel string, startFro
 }
 
 type subscribeAttempt struct {
-	done chan struct{}
-	err  error
+	done   chan struct{}
+	cancel context.CancelFunc
+	err    error
 }
 
 func (b *vchannelBuffer) ensureSubscribed(ctx context.Context, stream wal.TransformLogStream) error {
@@ -297,11 +298,14 @@ func (b *vchannelBuffer) ensureSubscribed(ctx context.Context, stream wal.Transf
 		return b.waitSubscribe(ctx, attempt)
 	}
 
-	attempt := &subscribeAttempt{done: make(chan struct{})}
+	// The VChannel's references own this work; each caller only owns its wait.
+	subscribeCtx, cancel := context.WithCancel(context.WithoutCancel(ctx)) //nolint:gosec // canceled on attempt completion or final guard release
+	attempt := &subscribeAttempt{done: make(chan struct{}), cancel: cancel}
 	b.subscribeAttempt = attempt
 	startAfter := b.retentionStart
 	b.mu.Unlock()
-	return b.subscribe(ctx, stream, attempt, startAfter)
+	go b.subscribe(subscribeCtx, stream, attempt, startAfter) //nolint:gosec // shared work must outlive individual request contexts
+	return b.waitSubscribe(ctx, attempt)
 }
 
 func (b *vchannelBuffer) waitSubscribe(ctx context.Context, attempt *subscribeAttempt) error {
@@ -313,7 +317,8 @@ func (b *vchannelBuffer) waitSubscribe(ctx context.Context, attempt *subscribeAt
 	}
 }
 
-func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogStream, attempt *subscribeAttempt, startAfter uint64) error {
+func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogStream, attempt *subscribeAttempt, startAfter uint64) {
+	defer attempt.cancel()
 	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{
 		VChannel:           b.vchannel,
 		StartAfterTimeTick: startAfter,
@@ -326,13 +331,17 @@ func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogS
 		b.mu.Lock()
 		b.completeSubscribeLocked(attempt, err)
 		b.mu.Unlock()
-		return err
+		return
 	}
 
 	closeSub := false
 	b.mu.Lock()
-	if b.err != nil {
-		err = b.err
+	err = b.err
+	if len(b.guards) == 0 {
+		// Subscribe can succeed concurrently with the final reference release.
+		err = context.Canceled
+	}
+	if err != nil {
 		closeSub = true
 		b.completeSubscribeLocked(attempt, err)
 	} else {
@@ -342,7 +351,7 @@ func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogS
 	b.mu.Unlock()
 	if closeSub {
 		_ = sub.Close()
-		return err
+		return
 	}
 	mlog.Debug(context.TODO(), "querynode transform log buffer subscribed vchannel",
 		mlog.FieldPChannel(b.pchannel),
@@ -350,7 +359,6 @@ func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogS
 		mlog.Uint64("startAfterTimeTick", startAfter),
 		mlog.Int64("subscriptionID", sub.ID()),
 	)
-	return nil
 }
 
 func (b *vchannelBuffer) completeSubscribeLocked(attempt *subscribeAttempt, err error) {
@@ -471,6 +479,7 @@ func (b *vchannelBuffer) nextCatchupBatch(reg *registration) ([]*streamingpb.Tra
 		}
 		delete(b.pending, reg)
 		b.live[reg] = reg
+		b.trimLocked()
 		reg.publishProgress(b.visibleTimeTick)
 		return nil, b.visibleTimeTick, true, nil, nil
 	}
@@ -543,6 +552,7 @@ func (b *vchannelBuffer) removeRegistration(reg *registration) {
 	if b.live[reg] == reg {
 		delete(b.live, reg)
 	}
+	b.trimLocked()
 }
 
 func (b *vchannelBuffer) releaseGuard(startFrom uint64) {
@@ -558,9 +568,13 @@ func (b *vchannelBuffer) releaseGuard(startFrom uint64) {
 	delete(b.guards, startFrom)
 	if len(b.guards) == 0 {
 		sub := b.sub
+		attempt := b.subscribeAttempt
 		stream := b.owner.removeLocked(b.vchannel, b)
 		b.mu.Unlock()
 		b.owner.mu.Unlock()
+		if attempt != nil {
+			attempt.cancel()
+		}
 		if sub != nil {
 			_ = sub.Close()
 		}
@@ -624,10 +638,9 @@ func (b *vchannelBuffer) onEntry(entry *streamingpb.TransformLogEntry) {
 			mlog.Uint64("timeTick", entry.GetTimeTick()),
 		)
 		if err := reg.apply(reg.ctx, entry); err != nil {
-			if reg.ctx.Err() == nil {
-				b.fail(err)
-				return
-			}
+			// Apply has failed this concrete registration, not the shared log.
+			// Other instances must still consume this entry and future entries.
+			b.removeRegistration(reg)
 		}
 	}
 
@@ -765,7 +778,7 @@ func (r *registration) Unregister() {
 
 func (r *registration) finish(err error) {
 	r.errMu.Lock()
-	if err != nil {
+	if err != nil && r.err == nil {
 		r.err = err
 		close(r.progressNotify)
 		r.progressNotify = make(chan struct{})
@@ -787,6 +800,10 @@ func (r *registration) setCatchupFrontier(tick uint64) {
 
 func (r *registration) publishProgress(tick uint64) {
 	r.errMu.Lock()
+	if r.err != nil {
+		r.errMu.Unlock()
+		return
+	}
 	if tick > r.drainedTo.Load() {
 		r.drainedTo.Store(tick)
 		close(r.progressNotify)
@@ -825,7 +842,20 @@ func (r *registration) apply(ctx context.Context, entry *streamingpb.TransformLo
 	if err := r.ctx.Err(); err != nil {
 		return err
 	}
+	r.errMu.Lock()
+	err := r.err
+	r.errMu.Unlock()
+	if err != nil {
+		return err
+	}
 	if err := r.segment.ApplyTransform(ctx, entry); err != nil {
+		// A partially applied entry cannot be retried on this physical base.
+		// Publish failure before shared delivery advances; instance MVCC waits
+		// then reject every timestamp, including previously applied history.
+		// Release cancellation only retires this registration.
+		if r.ctx.Err() == nil {
+			r.finish(err)
+		}
 		return err
 	}
 	r.publishProgress(entry.GetTimeTick())

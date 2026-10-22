@@ -6,10 +6,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -44,6 +47,10 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefAfterHandles(t *testin
 	mgr := newMockSegmentManager()
 	handles := []*mockSealedSegmentHandle{{id: 1000, partitionID: 10}}
 	mgr.queryHandles = []SealedSegmentHandle{handles[0]}
+	patch := mockey.Mock((*mockSealedSegmentHandle).Segment).Return(&fakeReadableTransformSegment{
+		collection: segments.NewCollectionWithoutSegcoreForTest(testCollectionID, &schemapb.CollectionSchema{}),
+	}).Build()
+	defer patch.UnPatch()
 	optimizer := &fakeLocalOptimizer{}
 	mgr.beforeQuery = func() {
 		assert.True(t, optimizer.queryCalled)
@@ -63,7 +70,7 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefAfterHandles(t *testin
 		context.Background(),
 		view.ShardID(),
 		key.QueryViewVersion,
-		&viewpb.QueryPlanMVCC{TransformingTimetick: 10},
+		&viewpb.QueryPlanMVCC{TransformingTimetick: 10, SchemaBinding: &viewpb.QuerySchemaBinding{TransformingTimetick: 10}},
 		&internalpb.RetrieveRequest{CollectionID: testCollectionID, PartitionIDs: []int64{10}},
 	)
 	require.NoError(t, err)
@@ -87,6 +94,10 @@ func TestQNHandler_AcquireSearchSegmentTasksReleasesViewRefAfterHandles(t *testi
 	mgr := newMockSegmentManager()
 	handles := []*mockSealedSegmentHandle{{id: 2000, partitionID: 20}}
 	mgr.queryHandles = []SealedSegmentHandle{handles[0]}
+	patch := mockey.Mock((*mockSealedSegmentHandle).Segment).Return(&fakeReadableTransformSegment{
+		collection: segments.NewCollectionWithoutSegcoreForTest(testCollectionID, &schemapb.CollectionSchema{}),
+	}).Build()
+	defer patch.UnPatch()
 	optimizer := &fakeLocalOptimizer{}
 	mgr.beforeQuery = func() {
 		assert.True(t, optimizer.searchCalled)
@@ -106,7 +117,7 @@ func TestQNHandler_AcquireSearchSegmentTasksReleasesViewRefAfterHandles(t *testi
 		context.Background(),
 		view.ShardID(),
 		key.QueryViewVersion,
-		&viewpb.QueryPlanMVCC{TransformingTimetick: 10},
+		&viewpb.QueryPlanMVCC{TransformingTimetick: 10, SchemaBinding: &viewpb.QuerySchemaBinding{TransformingTimetick: 10}},
 		&internalpb.SearchRequest{CollectionID: testCollectionID, PartitionIDs: []int64{20}},
 	)
 	require.NoError(t, err)
@@ -142,7 +153,7 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefOnHandleError(t *testi
 		context.Background(),
 		view.ShardID(),
 		key.QueryViewVersion,
-		&viewpb.QueryPlanMVCC{TransformingTimetick: 10},
+		&viewpb.QueryPlanMVCC{TransformingTimetick: 10, SchemaBinding: &viewpb.QuerySchemaBinding{TransformingTimetick: 10}},
 		&internalpb.RetrieveRequest{CollectionID: testCollectionID},
 	)
 	require.Error(t, err)
@@ -168,7 +179,7 @@ func TestQNHandler_AcquireSearchSegmentTasksReleasesViewRefOnOptimizerError(t *t
 		context.Background(),
 		view.ShardID(),
 		key.QueryViewVersion,
-		&viewpb.QueryPlanMVCC{TransformingTimetick: 10},
+		&viewpb.QueryPlanMVCC{TransformingTimetick: 10, SchemaBinding: &viewpb.QuerySchemaBinding{TransformingTimetick: 10}},
 		&internalpb.SearchRequest{CollectionID: testCollectionID},
 	)
 	require.ErrorIs(t, err, optimizerErr)
@@ -195,7 +206,7 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefOnTransformWaitError(t
 		context.Background(),
 		view.ShardID(),
 		key.QueryViewVersion,
-		&viewpb.QueryPlanMVCC{TransformingTimetick: 10},
+		&viewpb.QueryPlanMVCC{TransformingTimetick: 10, SchemaBinding: &viewpb.QuerySchemaBinding{TransformingTimetick: 10}},
 		&internalpb.RetrieveRequest{CollectionID: testCollectionID},
 	)
 	require.ErrorIs(t, err, waitErr)

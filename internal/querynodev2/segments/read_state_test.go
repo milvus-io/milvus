@@ -14,6 +14,71 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func (suite *SegmentSuite) TestLegacySchemaEvolutionFillsNullableColumn() {
+	ctx := suite.T().Context()
+	local := suite.sealed.(*LocalSegment)
+	oldRead, err := local.PinReadState()
+	suite.Require().NoError(err)
+	defer oldRead.ReleaseReadState()
+
+	schema := proto.Clone(suite.collection.Schema()).(*schemapb.CollectionSchema)
+	var addedField int64 = 100
+	for _, field := range schema.Fields {
+		addedField = max(addedField, field.GetFieldID()+1)
+	}
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID: addedField, Name: "added_nullable", DataType: schemapb.DataType_Int64, Nullable: true,
+	})
+	schema.Version++
+	owner := suite.collection.GetCCollection()
+	suite.Require().NoError(owner.UpdateSchema(schema, uint64(schema.Version)))
+	query, err := proto.Marshal(&planpb.PlanNode{
+		Node:           &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}},
+		OutputFieldIds: []int64{addedField},
+	})
+	suite.Require().NoError(err)
+	plan, err := segcore.NewRetrievePlan(owner, query, typeutil.MaxTimestamp, 100, 0, 0, 0)
+	suite.Require().NoError(err)
+	defer plan.Delete()
+	nativeResult, err := local.csegment.RetrieveByOffsets(ctx, &segcore.RetrievePlanWithOffsets{
+		RetrievePlan: plan, Offsets: []int64{0, 3},
+	})
+	suite.Require().NoError(err)
+	defer nativeResult.Release()
+	result, err := nativeResult.GetResult()
+	suite.Require().NoError(err)
+	suite.Require().Len(result.GetFieldsData(), 1)
+	suite.Equal(addedField, result.GetFieldsData()[0].GetFieldId())
+	suite.Equal([]bool{false, false}, typeutil.GetFieldDataValidData(result.GetFieldsData()[0]))
+	suite.True(local.csegment.HasFieldData(addedField))
+	suite.False(oldRead.(*sealedReadState).native.HasFieldData(addedField), "schema evolution must not mutate a pinned old state")
+}
+
+func (suite *SegmentSuite) TestLegacyLoadFieldsPreserveLazyColumns() {
+	ctx := suite.T().Context()
+	schema := proto.Clone(suite.collection.Schema()).(*schemapb.CollectionSchema)
+	schema.Version++
+	pk := GetPkField(schema).GetFieldID()
+	owner, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID: suite.collectionID, Schema: schema, LoadFieldList: []int64{pk},
+	})
+	suite.Require().NoError(err)
+	defer owner.Release()
+	binlogs, _, err := mock_segcore.SaveBinLog(ctx, suite.collectionID, suite.partitionID,
+		suite.segmentID, 100, schema, suite.chunkManager)
+	suite.Require().NoError(err)
+	info := proto.Clone(suite.sealed.(*LocalSegment).LoadInfo()).(*querypb.SegmentLoadInfo)
+	info.BinlogPaths = binlogs
+	physical, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
+		Collection: owner, SegmentID: suite.segmentID, SegmentType: segcore.SegmentTypeSealed,
+		LoadInfo: info, LoadFields: []int64{pk},
+	})
+	suite.Require().NoError(err)
+	defer physical.Release()
+	suite.Require().NoError(physical.Load(ctx))
+	suite.True(physical.HasFieldData(106), "legacy preload selection must retain other lazy columns")
+}
+
 func (suite *SegmentSuite) TestViewExplicitEmptyCreateLoadsOnlyDependencies() {
 	ctx := suite.T().Context()
 	local := suite.sealed.(*LocalSegment)
@@ -150,7 +215,7 @@ func (suite *SegmentSuite) TestViewReadStateLoadScopeReleasesBaseReferences() {
 		}
 	}
 	suite.Require().NoError(narrow.(*sealedReadState).native.Reopen(ctx, &segcore.ReopenRequest{
-		LoadInfo: local.LoadInfo(), Schema: suite.collection.Schema(), LoadFields: fields,
+		LoadInfo: local.LoadInfo(), Collection: suite.collection.GetCCollection(), LoadFields: fields,
 	}))
 	suite.False(narrow.(*sealedReadState).native.HasFieldData(fieldID))
 	suite.True(old.(*sealedReadState).native.HasFieldData(fieldID), "preparing a different load scope preserves an old query's column")

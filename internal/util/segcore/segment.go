@@ -91,7 +91,9 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		if req.ExplicitLoadScope && req.SegmentType == SegmentTypeSealed {
 			status = C.NewSealedSegmentWithCollection(req.Collection.rawPointer(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)), fields, C.int64_t(len(req.LoadFields)))
 		} else {
-			status = C.NewSegmentWithLoadInfoAndLoadFields(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)), fields, C.int64_t(len(req.LoadFields)))
+			// Legacy load fields control preloading; they are not an immutable
+			// QueryView field selection. Preserve lazy loading and schema evolution.
+			status = C.NewSegmentWithLoadInfo(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
 		}
 	} else {
 		status = C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted))
@@ -418,11 +420,10 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 		}
 		defer runtime.KeepAlive(schemaBlob)
 		future = cgo.Async(ctx, func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncReopenSegmentWithLoadFields(
+			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
 				traceCtx.ctx, s.ptr,
 				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)),
 				unsafe.Pointer(&schemaBlob[0]), C.int64_t(len(schemaBlob)), C.uint64_t(req.SchemaVersion),
-				loadFields, C.int64_t(len(req.LoadFields)),
 			))
 		}, cgo.WithName("segment-reopen"))
 	}

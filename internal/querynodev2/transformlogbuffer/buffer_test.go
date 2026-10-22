@@ -519,7 +519,8 @@ func TestBufferRegisterSegmentReturnsBeforeCatchupDrainCompletes(t *testing.T) {
 		applyStarted: applyStarted,
 		applyBlock:   applyBlock,
 	}
-	defer close(applyBlock)
+	var unblock sync.Once
+	defer unblock.Do(func() { close(applyBlock) })
 
 	type registerResult struct {
 		reg qnview.TransformRegistration
@@ -535,11 +536,17 @@ func TestBufferRegisterSegmentReturnsBeforeCatchupDrainCompletes(t *testing.T) {
 	case result := <-registerDone:
 		require.NoError(t, result.err)
 		require.NotNil(t, result.reg)
-		defer result.reg.Unregister()
-	case <-applyStarted:
-		t.Fatal("RegisterSegment blocked while draining transform log backlog")
+		defer func() {
+			unblock.Do(func() { close(applyBlock) })
+			result.reg.Unregister()
+		}()
 	case <-time.After(time.Second):
 		t.Fatal("RegisterSegment did not return")
+	}
+	select {
+	case <-applyStarted:
+	case <-time.After(time.Second):
+		t.Fatal("catch-up did not start")
 	}
 }
 

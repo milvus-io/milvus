@@ -7,8 +7,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -17,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -131,30 +128,6 @@ func (p *lazyQueryViewLoadMetadataProvider) client(ctx context.Context) (types.M
 		return nil, merr.WrapErrServiceUnavailable("mixcoord client is not initialized")
 	}
 	return p.mixCoord.GetWithContext(ctx)
-}
-
-func (p *lazyQueryViewLoadMetadataProvider) DescribeCollection(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-	var resp *milvuspb.DescribeCollectionResponse
-	err := queryViewMetadataRPC(ctx, func(rpcCtx context.Context) error {
-		client, err := p.client(rpcCtx)
-		if err != nil {
-			return merr.Wrapf(err, "describe collection %d for query view", collectionID)
-		}
-		var callErr error
-		resp, callErr = client.DescribeCollection(rpcCtx, &milvuspb.DescribeCollectionRequest{
-			Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
-			// Collection name alone is ambiguous after database support.
-			CollectionID: collectionID,
-		})
-		if err := merr.CheckRPCCall(resp, callErr); err != nil {
-			return merr.Wrapf(err, "describe collection %d for query view", collectionID)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
 }
 
 func (p *lazyQueryViewLoadMetadataProvider) GetQueryViewLoadInfo(ctx context.Context, collectionID int64, version qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {

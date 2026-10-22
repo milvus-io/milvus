@@ -92,7 +92,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	localCollection := collections.Get(meta.GetCollectionId())
 	var ccollection *segcore.CCollection
 	if localCollection != nil {
-		localCollection = localCollection.WithLoadScope(loadInfoPartitionIDs(loadInfo, view.ViewOfQueryNode()), loadInfoFieldIDs(loadInfo, collection.Schema), loadInfoHintIDs(loadInfo, collection.Schema))
+		localCollection = localCollection.WithLoadScope(loadInfo.PartitionIDs, loadInfoFieldIDs(loadInfo), loadInfoHintIDs(loadInfo, collection.Schema))
 		ccollection = localCollection.GetCCollection()
 		if shared {
 			if err := localCollection.UpdateIndexMeta(indexMeta); err != nil {
@@ -132,6 +132,9 @@ func (m *queryViewCollectionRuntimeManager) loadInfo(ctx context.Context, meta *
 	}
 	if info.CollectionID != meta.GetCollectionId() || uint64(info.Version) != meta.GetLoadInfoVersion() {
 		return qnview.QueryViewLoadInfo{}, merr.WrapErrServiceNotReadyMsg("requested load snapshot (%d, %d), received (%d, %d)", meta.GetCollectionId(), meta.GetLoadInfoVersion(), info.CollectionID, info.Version)
+	}
+	if len(info.RequiredFields) == 0 {
+		return qnview.QueryViewLoadInfo{}, merr.WrapErrServiceInternalMsg("query view load snapshot %d for collection %d has no required fields", info.Version, info.CollectionID)
 	}
 	return info, nil
 }
@@ -192,27 +195,12 @@ func (m *queryViewCollectionRuntimeManager) releaseLocked(key collectionRuntimeK
 	}
 }
 
-func loadInfoPartitionIDs(info qnview.QueryViewLoadInfo, fallback *viewpb.QueryViewOfQueryNode) []int64 {
-	if len(info.PartitionIDs) > 0 {
-		return append([]int64(nil), info.PartitionIDs...)
-	}
-	return qvViewPartitionIDs(fallback)
-}
-
-func loadInfoFieldIDs(info qnview.QueryViewLoadInfo, schema *schemapb.CollectionSchema) []int64 {
+func loadInfoFieldIDs(info qnview.QueryViewLoadInfo) []int64 {
 	fields := make([]int64, 0, len(info.RequiredFields))
-	for _, field := range qviews.ResolveRequiredFields(schema, info.RequiredFields) {
+	for _, field := range info.RequiredFields {
 		fields = append(fields, field.GetFieldId())
 	}
 	return fields
-}
-
-func qvViewPartitionIDs(view *viewpb.QueryViewOfQueryNode) []int64 {
-	partitions := make([]int64, 0, len(view.GetPartitions()))
-	for _, partition := range view.GetPartitions() {
-		partitions = append(partitions, partition.GetPartitionId())
-	}
-	return partitions
 }
 
 func loadInfoHintIDs(info qnview.QueryViewLoadInfo, schema *schemapb.CollectionSchema) []int64 {

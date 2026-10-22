@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -292,17 +291,10 @@ func (instantTransformGuard) Release() {}
 
 type fakeQueryViewLoadMetadataProvider struct {
 	mu             sync.Mutex
-	describeCalled bool
 	loadInfoCalled []int64
-	collection     *milvuspb.DescribeCollectionResponse
 	loadInfos      []*querypb.SegmentLoadInfo
 	loadIndexInfos []*indexpb.IndexInfo
 	err            error
-}
-
-func (p *fakeQueryViewLoadMetadataProvider) DescribeCollection(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
-	p.describeCalled = true
-	return p.collection, p.err
 }
 
 func (p *fakeQueryViewLoadMetadataProvider) GetQueryViewLoadInfo(context.Context, int64, QueryViewLoadInfoVersion) (QueryViewLoadInfo, error) {

@@ -56,14 +56,6 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 			return nil, err
 		}
 	}
-	if req.LoadFieldList != nil {
-		status = C.UpdateLoadFields(ptr, (*C.int64_t)(unsafe.Pointer(&req.LoadFieldList[0])),
-			C.int64_t(len(req.LoadFieldList)))
-		if err := ConsumeCStatusIntoError(&status); err != nil {
-			C.DeleteCollection(ptr)
-			return nil, err
-		}
-	}
 	collection := &CCollection{
 		collectionID: req.CollectionID,
 		ptr:          ptr,
@@ -76,6 +68,16 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 	if err := collection.UpdateSchema(req.Schema, uint64(req.Schema.GetVersion())); err != nil {
 		collection.Release()
 		return nil, err
+	}
+	// Schema initialization can rebuild the native load-field selection. Apply
+	// legacy preload hints afterwards so a nonzero version cannot erase them.
+	if req.LoadFieldList != nil {
+		status = C.UpdateLoadFields(ptr, (*C.int64_t)(unsafe.Pointer(&req.LoadFieldList[0])),
+			C.int64_t(len(req.LoadFieldList)))
+		if err := ConsumeCStatusIntoError(&status); err != nil {
+			collection.Release()
+			return nil, err
+		}
 	}
 	return collection, nil
 }

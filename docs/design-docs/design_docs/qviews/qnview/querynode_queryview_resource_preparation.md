@@ -265,6 +265,14 @@ This resource model applies to QueryNode and SealedSegment. It does not change
 StreamingNode/GrowingSegment ownership. Shared native entry points preserve
 those callers through explicit compatibility adapters.
 
+The legacy creation adapter must not infer a QueryView scope from a nonempty
+load-field list. Legacy preload choices retain schema-evolution default filling
+and lazy-column preparation; only an explicit View selection restricts physical
+field descriptions. Both initial loading and Reopen use the target operation's
+field metadata while preparing columns and interim indexes. A newly added field
+need not exist in the previously published ReadState, which remains unchanged
+until preparation succeeds and the new state is published.
+
 CCollection owns one immutable logical Schema per `(CollectionID, SchemaVersion)`.
 LoadInfoVersion and loaded fields are not part of that identity. Published schema
 content cannot change through another mutable alias. Equivalent derived caches
@@ -298,7 +306,10 @@ LoadScope is independent of Schema. It distinguishes the logical field set a Vie
 may access, supporting physical dependencies, and eager/lazy loading policy.
 Having a cached physical column does not authorize a View to access it. The
 internal `required_fields` list is explicit and nonempty; legacy input is
-normalized before publication. User `load_fields` is only a preload hint, with
+normalized before publication. QN rejects snapshots missing this list rather
+than deriving it from the bound schema. Snapshot partition IDs are authoritative,
+including an empty list; QN does not reconstruct them from its local View.
+User `load_fields` is only a preload hint, with
 empty hints following the bound target schema. Fields outside a nonempty hint
 remain accessible within required fields through prepared lazy-loading entries.
 ALTER adds columns to required fields but not to explicit hints. Neither hints
@@ -436,8 +447,9 @@ The View's shard cursor F protects the shared VChannel TransformLog range.
 The trim boundary is the minimum retained View F, conservatively extended by
 unfinished replay pins. Neither segment catch-up progress nor the set of segments
 currently placed on this node authorizes advancing it: future balance reuses this
-range. Trimming clears removed payload references in the backing-array tail as
-well as the logical slice.
+range. Catch-up completion and registration removal immediately reconsider this
+boundary, while preserving all remaining View and replay pins. Trimming clears
+removed payload references in the backing-array tail as well as the logical slice.
 Each Segment's cursor C belongs to its actual physical base and identifies
 its exclusive replay start. It is fetched atomically with Manifest/binlogs in
 SegmentLoadInfo, never inferred from DeltaPosition/StartPosition. QueryView does
@@ -451,7 +463,10 @@ independent remote subscription for the Segment.
 The buffer owner also owns the shared PChannel stream. Canceling a subscription
 attempt, including the last in-flight attempt, does not close that stream:
 pending View bindings can still need it. The owner closes the stream after its
-last buffer reference is released.
+last buffer reference is released. A shared subscription attempt belongs to the
+buffer references, not to its first caller: canceling one caller ends only that
+caller's wait. Final reference release cancels pending subscription work, and any
+late successful subscription is closed without affecting a replacement buffer.
 
 QueryView recovery uses TransformLog only, with no L0 loading fallback. Cursor
 production and retention obligations follow the
@@ -480,7 +495,15 @@ can continue after this finite frontier is completed, using the same ordered
 registration until it joins synchronous live application. Each registration
 maintains an applied watermark, including certified empty intervals. A terminal
 failure remains observable after the catch-up result and invalidates dependent
-Views through reconciliation.
+Views through reconciliation. Apply failure poisons only that concrete physical
+registration: it stops applying entries and rejects subsequent query acquisition
+at every MVCC, including historical timestamps. Other registrations on the same
+VChannel continue applying the shared log. Replay and live application use the
+same failure boundary; releasing an instance still drains any in-flight Apply.
+A late failure cannot poison a replacement instance with the same SegmentID.
+Subscription/history failures retain their shared-buffer failure scope.
+This extraction does not preserve historical-query availability on a poisoned
+instance or add a Coordinator Poison state or an in-place recovery protocol.
 
 Ready is a preparation boundary, not a promise of zero lag after future writes.
 Queries wait for their own Transform MVCC; that check must prove application

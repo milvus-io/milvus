@@ -119,15 +119,8 @@ std::unique_ptr<milvus::segcore::SegmentInterface>
 CreateSegment(milvus::segcore::Collection* col,
               SegmentType seg_type,
               int64_t segment_id,
-              bool is_sorted_by_pk,
-              const int64_t* load_fields = nullptr,
-              int64_t load_field_count = 0) {
+              bool is_sorted_by_pk) {
     auto schema = col->get_schema();
-    if (seg_type == Growing && load_field_count > 0) {
-        schema = std::make_shared<milvus::Schema>(*schema);
-        schema->UpdateLoadFields(
-            std::vector<int64_t>(load_fields, load_fields + load_field_count));
-    }
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
         case Growing: {
@@ -141,11 +134,7 @@ CreateSegment(milvus::segcore::Collection* col,
         }
         case Sealed:
         case Indexing: {
-            auto scope =
-                load_field_count > 0
-                    ? milvus::segcore::LoadScope(std::vector<int64_t>(
-                          load_fields, load_fields + load_field_count))
-                    : milvus::segcore::LoadScope::FromLegacySchema(*schema);
+            auto scope = milvus::segcore::LoadScope::FromLegacySchema(*schema);
             segment =
                 std::make_unique<milvus::segcore::ChunkedSegmentSealedImpl>(
                     std::make_shared<const milvus::segcore::SealedFieldLayout>(
@@ -191,27 +180,6 @@ NewSegmentWithLoadInfo(CCollection collection,
                        bool is_sorted_by_pk,
                        const uint8_t* load_info_blob,
                        const int64_t load_info_length) {
-    return NewSegmentWithLoadInfoAndLoadFields(collection,
-                                               seg_type,
-                                               segment_id,
-                                               newSegment,
-                                               is_sorted_by_pk,
-                                               load_info_blob,
-                                               load_info_length,
-                                               nullptr,
-                                               0);
-}
-
-CStatus
-NewSegmentWithLoadInfoAndLoadFields(CCollection collection,
-                                    SegmentType seg_type,
-                                    int64_t segment_id,
-                                    CSegmentInterface* newSegment,
-                                    bool is_sorted_by_pk,
-                                    const uint8_t* load_info_blob,
-                                    int64_t load_info_length,
-                                    const int64_t* load_fields,
-                                    int64_t load_field_count) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -222,12 +190,7 @@ NewSegmentWithLoadInfoAndLoadFields(CCollection collection,
 
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        auto segment = CreateSegment(col,
-                                     seg_type,
-                                     segment_id,
-                                     is_sorted_by_pk,
-                                     load_fields,
-                                     load_field_count);
+        auto segment = CreateSegment(col, seg_type, segment_id, is_sorted_by_pk);
         segment->SetLoadInfo(std::move(load_info));
         *newSegment = segment.release();
         return milvus::SuccessCStatus();
@@ -299,25 +262,6 @@ ParseFlushSchema(const void* schema_blob, const int64_t schema_length) {
 }
 
 CFuture*
-AsyncReopenSegment(CTraceContext c_trace,
-                   CSegmentInterface c_segment,
-                   const uint8_t* load_info_blob,
-                   const int64_t load_info_length,
-                   const void* schema_blob,
-                   const int64_t schema_length,
-                   const uint64_t schema_version) {
-    return AsyncReopenSegmentWithLoadFields(c_trace,
-                                            c_segment,
-                                            load_info_blob,
-                                            load_info_length,
-                                            schema_blob,
-                                            schema_length,
-                                            schema_version,
-                                            nullptr,
-                                            0);
-}
-
-CFuture*
 AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
                                        CSegmentInterface c_segment,
                                        CCollection c_collection,
@@ -383,15 +327,13 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
 }
 
 CFuture*
-AsyncReopenSegmentWithLoadFields(CTraceContext c_trace,
-                                 CSegmentInterface c_segment,
-                                 const uint8_t* load_info_blob,
-                                 const int64_t load_info_length,
-                                 const void* schema_blob,
-                                 const int64_t schema_length,
-                                 const uint64_t schema_version,
-                                 const int64_t* load_fields,
-                                 int64_t load_field_count) {
+AsyncReopenSegment(CTraceContext c_trace,
+                   CSegmentInterface c_segment,
+                   const uint8_t* load_info_blob,
+                   const int64_t load_info_length,
+                   const void* schema_blob,
+                   const int64_t schema_length,
+                   const uint64_t schema_version) {
     try {
         AssertInfo(load_info_blob, "load info is null");
         milvus::proto::segcore::SegmentLoadInfo load_info;
@@ -399,11 +341,6 @@ AsyncReopenSegmentWithLoadFields(CTraceContext c_trace,
         AssertInfo(suc, "unmarshal load info failed");
         auto schema =
             ParseReopenSchema(schema_blob, schema_length, schema_version);
-        if (load_field_count > 0) {
-            AssertInfo(load_fields != nullptr, "load fields are null");
-            schema->UpdateLoadFields(std::vector<int64_t>(
-                load_fields, load_fields + load_field_count));
-        }
 
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);

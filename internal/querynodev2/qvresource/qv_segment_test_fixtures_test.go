@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -107,14 +106,9 @@ func (r *fakeQVResourceReservation) Release() {
 }
 
 type fakeQVLoadMetadataProvider struct {
-	collection   *milvuspb.DescribeCollectionResponse
 	partitionIDs []int64
 	loadFields   []int64
 	err          error
-}
-
-func (p *fakeQVLoadMetadataProvider) DescribeCollection(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
-	return p.collection, p.err
 }
 
 func (p *fakeQVLoadMetadataProvider) GetQueryViewLoadInfo(_ context.Context, collectionID int64, version qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {
@@ -122,11 +116,15 @@ func (p *fakeQVLoadMetadataProvider) GetQueryViewLoadInfo(_ context.Context, col
 	for _, fieldID := range p.loadFields {
 		fields = append(fields, &messagespb.LoadFieldConfig{FieldId: fieldID})
 	}
+	requiredFields := fields
+	if len(requiredFields) == 0 {
+		requiredFields = []*messagespb.LoadFieldConfig{{FieldId: 100}}
+	}
 	return qnview.QueryViewLoadInfo{
 		CollectionID: collectionID, Version: version,
 		PartitionIDs:   append([]int64(nil), p.partitionIDs...),
 		LoadFields:     fields,
-		RequiredFields: fields,
+		RequiredFields: requiredFields,
 	}, p.err
 }
 

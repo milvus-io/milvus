@@ -1507,7 +1507,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     generate_interim_index(
-        const FieldId field_id,
+        const FieldMeta& field_meta,
         int64_t num_rows,
         const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
         milvus::OpContext* op_ctx,
@@ -2711,11 +2711,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                       &staged,
                       &committer);
         });
-        auto generated_interim = generate_interim_index(FieldId(info.field_id),
-                                                        num_rows,
-                                                        loaded_column,
-                                                        op_ctx,
-                                                        &committer);
+        auto generated_interim = generate_interim_index(
+            (*staged_state->fields)[FieldId(info.field_id)],
+            num_rows,
+            loaded_column,
+            op_ctx,
+            &committer);
         verifier(generated_interim);
         final_delta.runtime = ToConstRuntimeState(std::move(runtime));
         final_delta.published_index_ready_bitset =
@@ -2734,7 +2735,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
         milvus::OpContext* op_ctx = nullptr) {
         return generate_interim_index(
-            field_id, num_rows, loaded_column, op_ctx, nullptr);
+            (*CaptureFieldLayout())[field_id],
+            num_rows,
+            loaded_column,
+            op_ctx,
+            nullptr);
     }
 
     bool

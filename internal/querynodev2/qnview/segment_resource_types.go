@@ -3,7 +3,6 @@ package qnview
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -96,7 +95,6 @@ func UnwrapTransformSegment(segment TransformSegment) TransformSegment {
 }
 
 type QueryViewLoadMetadataProvider interface {
-	DescribeCollection(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
 	GetQueryViewLoadInfo(ctx context.Context, collectionID int64, version QueryViewLoadInfoVersion) (QueryViewLoadInfo, error)
 }
 

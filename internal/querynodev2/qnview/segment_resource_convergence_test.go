@@ -293,3 +293,74 @@ func TestSegmentResourceUsesFetchedCursorAcrossViewVersions(t *testing.T) {
 		require.EqualValues(t, 1, f.releases.Load())
 	})
 }
+
+func TestSegmentResourceFailureLeavesOtherInstancesQueryable(t *testing.T) {
+	mockey.PatchConvey("only Views referencing the failed base are invalidated", t, func() {
+		f := setupResourceTest(t, nil)
+		f.registerMock.UnPatch()
+		broken := make(chan struct{})
+		failedReg := &fakeTransformRegistration{waitCh: make(chan struct{})}
+		close(failedReg.waitCh)
+		failure := merr.WrapErrServiceInternalMsg("transform application failed")
+		var registered atomic.Int32
+		mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).To(func(_ *fakeTransformLogBuffer, _ context.Context, segment TransformSegment) (TransformRegistration, error) {
+			if segment.ID() == 1000 && registered.Add(1) == 1 {
+				return failedReg, nil
+			}
+			return instantTransformRegistration{}, nil
+		}).Build()
+		mockey.Mock((*fakeTransformRegistration).WaitFailure).To(func(_ *fakeTransformRegistration, ctx context.Context) error {
+			select {
+			case <-broken:
+				return failure
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}).Build()
+		mockey.Mock((*fakeTransformRegistration).WaitTransformVisible).To(func(_ *fakeTransformRegistration, _ context.Context, _ uint64) error {
+			select {
+			case <-broken:
+				return failure
+			default:
+				return nil
+			}
+		}).Build()
+		failed := make(chan struct{}, 1)
+		first := f.request(1, 1, 1)
+		first.OnUnrecoverable = func() { failed <- struct{}{} }
+		f.manager.Acquire(first)
+		f.await(t, 1)
+		healthy := f.request(2, 1, 1)
+		healthy.View.Partitions[0].SegmentIds = []int64{2000}
+		f.manager.Acquire(healthy)
+		f.await(t, 1)
+		// Existing query references still own the failed base until they release.
+		held, err := f.manager.AcquireSealedSegmentHandles(t.Context(), first.Key, first.View, 50)
+		require.NoError(t, err)
+		close(broken)
+		select {
+		case <-failed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("instance failure did not reach its View")
+		}
+		for _, tick := range []uint64{0, 50, 100} {
+			_, err = f.manager.AcquireSealedSegmentHandles(t.Context(), first.Key, first.View, tick)
+			require.Error(t, err)
+		}
+		query, err := f.manager.AcquireSealedSegmentHandles(t.Context(), healthy.Key, healthy.View, 100)
+		require.NoError(t, err)
+		query[0].Release()
+		f.drop(t, first)
+		require.Zero(t, f.releases.Load(), "failure cannot destroy a resource borrowed by an executing query")
+		held[0].Release()
+		require.Eventually(t, func() bool { return f.releases.Load() == 1 }, 5*time.Second, time.Millisecond)
+		// Reconstruction uses a fresh registration even for the same SegmentID.
+		replacement := f.acquire(3, 1, 1)
+		f.await(t, 1)
+		query, err = f.manager.AcquireSealedSegmentHandles(t.Context(), replacement.Key, replacement.View, 100)
+		require.NoError(t, err)
+		query[0].Release()
+		f.drop(t, replacement)
+		f.drop(t, healthy)
+	})
+}

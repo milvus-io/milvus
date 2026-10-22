@@ -40,7 +40,7 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err != nil {
 		return nil, err
 	}
-	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
+	if len(handles) > 0 {
 		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Segment().(ReadableSealedSegment).Collection().Schema()); err != nil {
 			for _, handle := range handles {
 				handle.Release()
@@ -87,7 +87,7 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 	if err != nil {
 		return nil, err
 	}
-	if mvcc.GetSchemaBinding() != nil && len(handles) > 0 {
+	if len(handles) > 0 {
 		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Segment().(ReadableSealedSegment).Collection().Schema()); err != nil {
 			for _, handle := range handles {
 				handle.Release()

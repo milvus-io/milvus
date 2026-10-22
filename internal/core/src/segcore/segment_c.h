@@ -62,17 +62,6 @@ NewSegmentWithLoadInfo(CCollection collection,
                        bool is_sorted_by_pk,
                        const uint8_t* load_info_blob,
                        const int64_t load_info_length);
-// Creates a segment with a private load scope while sharing collection schema.
-CStatus
-NewSegmentWithLoadInfoAndLoadFields(CCollection collection,
-                                    SegmentType seg_type,
-                                    int64_t segment_id,
-                                    CSegmentInterface* newSegment,
-                                    bool is_sorted_by_pk,
-                                    const uint8_t* load_info_blob,
-                                    int64_t load_info_length,
-                                    const int64_t* load_fields,
-                                    int64_t load_field_count);
 
 // Borrows CCollection for this call. The explicit empty scope loads no user
 // fields except required physical dependencies. Existing constructors retain
@@ -179,17 +168,6 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
                                        int64_t load_length,
                                        const int64_t* load_fields,
                                        int64_t load_field_count);
-
-CFuture*
-AsyncReopenSegmentWithLoadFields(CTraceContext c_trace,
-                                 CSegmentInterface c_segment,
-                                 const uint8_t* load_info_blob,
-                                 int64_t load_info_length,
-                                 const void* schema_blob,
-                                 int64_t schema_length,
-                                 uint64_t schema_version,
-                                 const int64_t* load_fields,
-                                 int64_t load_field_count);
 
 // Return a read-only sealed facade. Retain c_segment until deleting the facade.
 CStatus

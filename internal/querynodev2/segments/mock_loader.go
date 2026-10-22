@@ -396,11 +396,6 @@ func (_m *MockLoader) LoadSegment(ctx context.Context, segment Segment, loadInfo
 	panic("patch LoadSegment with mockey")
 }
 
-// LoadIndex is patched with mockey by QueryView tests.
-func (_m *MockLoader) LoadIndex(ctx context.Context, segment Segment, info *querypb.SegmentLoadInfo, version int64) error {
-	panic("patch LoadIndex with mockey")
-}
-
 // ReserveLoadResource is patched with mockey by QueryView tests.
 func (_m *MockLoader) ReserveLoadResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error) {
 	panic("patch ReserveLoadResource with mockey")
