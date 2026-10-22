@@ -262,6 +262,8 @@ func TestAppendInTxnAutocommitRollsBackOnFailure(t *testing.T) {
 			require.Nil(t, result)
 			require.ErrorIs(t, err, boom)
 			require.Equal(t, c.expected, f.types)
+			// the fake persists every rollback, so no failure leaves a commit behind.
+			require.True(t, NotCommitted(err))
 			require.Nil(t, main.TxnContext())
 			if last := len(f.types) - 1; f.types[last] == message.MessageTypeRollbackTxn {
 				require.Equal(t, fakeTxnID, f.txnIDs[last])
@@ -336,6 +338,74 @@ func TestAppendInTxnRollbackFailureKeepsOriginalError(t *testing.T) {
 	_, err := AppendInTxn(ctx, appendOp, message.CreateTestEmptyInsertMesage(1, nil), nil)
 	require.ErrorIs(t, err, boom)
 	require.Equal(t, 3, calls)
+	// the commit was never appended, so the failed rollback does not matter.
+	require.True(t, NotCommitted(err))
+}
+
+// A failed CommitTxn may have been persisted. Only a persisted rollback proves
+// that it was not.
+func TestAppendInTxnCommitFailureMayHaveCommitted(t *testing.T) {
+	boom := errors.New("boom")
+	for _, c := range []struct {
+		name         string
+		rollbackErr  error
+		notCommitted bool
+	}{
+		{"rollback persisted", nil, true},
+		{"rollback rejected because the session left the in-flight state", status.NewInvalidTransactionState("Rollback", message.TxnStateInFlight, message.TxnStateOnCommit), false},
+		{"rollback failed", errors.New("rollback failed"), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// every call is assigned a time tick before it fails, as the timetick
+			// interceptor does: begin 1, body 2, commit 3, rollback 4.
+			var tt uint64
+			appendOp := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+				tt++
+				msg.WithTimeTick(tt)
+				switch msg.MessageType() {
+				case message.MessageTypeBeginTxn:
+					msg.WithTxnContext(message.TxnContext{TxnID: fakeTxnID, Keepalive: time.Second})
+				case message.MessageTypeCommitTxn:
+					return nil, boom
+				case message.MessageTypeRollbackTxn:
+					if c.rollbackErr != nil {
+						return nil, c.rollbackErr
+					}
+				}
+				return walimplstest.NewTestMessageID(1), nil
+			}
+			ctx, _ := newTestAppendContext()
+			_, err := AppendInTxn(ctx, appendOp, message.CreateTestEmptyInsertMesage(1, nil), nil)
+			require.ErrorIs(t, err, boom)
+			require.Equal(t, c.notCommitted, NotCommitted(err))
+			require.Equal(t, uint64(4), AllocatedTimeTick(err))
+		})
+	}
+}
+
+// AllocatedTimeTick counts only the time ticks that the failed call assigned. A
+// CommitTxn of a client may carry the time tick of an earlier attempt, after a
+// redo for example.
+func TestAppendInTxnAllocatedTimeTick(t *testing.T) {
+	boom := errors.New("boom")
+	ctx, _ := newTestAppendContext()
+
+	f := newFakeAppender()
+	f.failAt, f.failErr = 0, boom
+	_, err := AppendInTxn(ctx, f.append, newTestCommit().WithTimeTick(50), nil)
+	require.ErrorIs(t, err, boom)
+	require.False(t, NotCommitted(err), "a failed CommitTxn of a client may have been persisted")
+	require.Zero(t, AllocatedTimeTick(err), "no time tick was assigned, so nothing was written")
+
+	assignThenFail := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		msg.WithTimeTick(60)
+		return nil, boom
+	}
+	_, err = AppendInTxn(ctx, assignThenFail, newTestCommit().WithTimeTick(50), nil)
+	require.ErrorIs(t, err, boom)
+	require.Equal(t, uint64(60), AllocatedTimeTick(err))
+
+	require.Zero(t, AllocatedTimeTick(boom))
 }
 
 func TestAppendInTxnCommit(t *testing.T) {
@@ -361,7 +431,9 @@ func TestAppendInTxnCommitExtraFailure(t *testing.T) {
 
 	_, err := AppendInTxn(ctx, f.append, newTestCommit(), []message.MutableMessage{newTestDelete()})
 	// the transaction belongs to the client, so it gets the original error.
-	require.Equal(t, expired, err)
+	require.ErrorIs(t, err, expired)
+	require.Equal(t, expired.Code, status.AsStreamingError(err).Code)
+	require.True(t, NotCommitted(err))
 	// neither the commit nor a rollback is written.
 	require.Equal(t, []message.MessageType{message.MessageTypeDelete}, f.types)
 }
@@ -392,6 +464,7 @@ func TestAppendInTxnRejectsInvalidInput(t *testing.T) {
 			f := newFakeAppender()
 			_, err := AppendInTxn(context.Background(), f.append, c.main, c.extras)
 			requireInner(t, err)
+			require.True(t, NotCommitted(err))
 			require.Empty(t, f.types, "nothing may be appended when the input is invalid")
 		})
 	}

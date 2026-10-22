@@ -198,6 +198,13 @@ share a TimeTick. A transaction is the only way.
   is reported as `STREAMING_CODE_INNER`. The client appended one autocommit
   message and knows nothing about the transaction, and it treats a transaction
   error as unrecoverable. Every other error is returned unchanged.
+- **Outcome of an error**: `txn.NotCommitted(err)` is true when the transaction
+  can not have committed: a failure before CommitTxn, a failed CommitTxn
+  followed by a persisted RollbackTxn, or a failed derived message of a client
+  transaction. For any other error the transaction may have committed, and
+  `txn.AllocatedTimeTick(err)` returns the largest TimeTick that the failed call
+  assigned, which bounds the commit TimeTick. A TimeTick that a message carried
+  from an earlier attempt does not count.
 - **Result**: the caller must return the MessageID of CommitTxn, so that the
   client of the original append observes the MessageID, TimeTick and
   LastConfirmedMessageID of CommitTxn. The TxnContext is removed from the append
