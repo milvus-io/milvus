@@ -43,8 +43,7 @@ estimate_timestamp_index_bytes(int64_t num_rows, int64_t num_chunks) {
 TimestampIndex
 build_timestamp_index(const Timestamp* data, size_t num_rows) {
     TimestampIndex index;
-    auto min_slice_length = num_rows < 4096 ? 1 : 4096;
-    auto meta = GenerateFakeSlices(data, num_rows, min_slice_length);
+    auto meta = GenerateFakeSlices(data, num_rows, 4096);
     index.set_length_meta(std::move(meta));
     index.build_with(data, num_rows);
     return index;
