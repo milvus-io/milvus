@@ -28,20 +28,22 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
 // hookAuthority runs beforeMultiGet before each engine probe, to place observe
 // between the in-flight set read and the engine read of a decision.
-type hookAuthority struct {
-	Store
+type hookEngine struct {
+	engine.RW
 	beforeMultiGet func()
 }
 
-func (a *hookAuthority) MultiGet(ctx context.Context, pks []PK) ([]*Entry, error) {
+func (a *hookEngine) MultiGet(ctx context.Context, keys [][]byte) ([][]byte, error) {
 	if a.beforeMultiGet != nil {
 		a.beforeMultiGet()
 	}
-	return a.Store.MultiGet(ctx, pks)
+	return a.RW.MultiGet(ctx, keys)
 }
 
 // Registration races with observe. A write of p was appended (filled in, tt 10)
@@ -58,10 +60,8 @@ func TestRegistrationRacesWithObserve(t *testing.T) {
 		{"observe between the set read and the engine read", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			a, err := NewStore("v1")
-			require.NoError(t, err)
-			hook := &hookAuthority{Store: a}
-			d := New(hook)
+			hook := &hookEngine{RW: NewMemoryEngine()}
+			d := New(hook, Config{})
 			defer d.Close()
 
 			first, _ := decideInsert(t, d, 1)
@@ -85,7 +85,7 @@ func TestRegistrationRacesWithObserve(t *testing.T) {
 // Observe then skips the entry (not filled in yet), and the fill-in removes it.
 func TestFillInRacesWithObserve(t *testing.T) {
 	ctx := context.Background()
-	d, a := newTestDecider(t)
+	d, a := newTestAuthority(t)
 
 	intent, _ := decideInsert(t, d, 1)
 	// the append was acknowledged with tt 10 and observe applied it.
@@ -174,7 +174,7 @@ func TestRegisterDeduplicatesKeys(t *testing.T) {
 // same value: the set sees only lock keys.
 func TestLockKeyCollisionOnlyAddsWork(t *testing.T) {
 	ctx := context.Background()
-	d, _ := newTestDecider(t)
+	d, _ := newTestAuthority(t)
 	a := VarCharPK("a")
 	twin := Int64PK(int64(a.lockKey()))
 
@@ -205,7 +205,7 @@ func TestLockKeyCollisionOnlyAddsWork(t *testing.T) {
 // key misses exactly once (its first insert), and no entry is left behind.
 func TestInflightStressWithObserve(t *testing.T) {
 	ctx := context.Background()
-	d, _ := newTestDecider(t)
+	d, _ := newTestAuthority(t)
 
 	type record struct {
 		tt  uint64
@@ -300,7 +300,7 @@ func TestInflightStressWithObserve(t *testing.T) {
 // and then sees the key.
 func TestTwoWritersOnTheSamePK(t *testing.T) {
 	ctx := context.Background()
-	d, _ := newTestDecider(t)
+	d, _ := newTestAuthority(t)
 
 	first, _ := decideInsert(t, d, 1)
 	second := make(chan []PK)
@@ -326,7 +326,7 @@ func TestTwoWritersOnTheSamePK(t *testing.T) {
 // Writes of other keys do not wait for each other.
 func TestWritersOnOtherPKsDoNotWait(t *testing.T) {
 	ctx := context.Background()
-	d, _ := newTestDecider(t)
+	d, _ := newTestAuthority(t)
 
 	first, _ := decideInsert(t, d, 1, 2)
 	second, companion := decideInsert(t, d, 3, 4)
@@ -340,7 +340,7 @@ func TestWritersOnOtherPKsDoNotWait(t *testing.T) {
 // while the first write is still pending.
 func TestCanceledWaiterKeepsItsPlace(t *testing.T) {
 	ctx := context.Background()
-	d, _ := newTestDecider(t)
+	d, _ := newTestAuthority(t)
 
 	first, _ := decideInsert(t, d, 1)
 
@@ -381,7 +381,7 @@ func TestCanceledWaiterKeepsItsPlace(t *testing.T) {
 // contexts canceled while waiting and some appends failing, all finish.
 func TestMultiKeyWritesDoNotDeadlock(t *testing.T) {
 	ctx := context.Background()
-	d, _ := newTestDecider(t)
+	d, _ := newTestAuthority(t)
 
 	const (
 		writers = 32
@@ -475,9 +475,7 @@ func BenchmarkInflightLock(b *testing.B) {
 	} {
 		b.Run(c.name, func(b *testing.B) {
 			ctx := context.Background()
-			a, err := NewStore("v1")
-			require.NoError(b, err)
-			d := New(a)
+			d := New(NewMemoryEngine(), Config{})
 			defer d.Close()
 
 			var next, tt atomic.Uint64
@@ -590,20 +588,17 @@ func BenchmarkWritePathOf1000Keys(b *testing.B) {
 		}
 	})
 	b.Run("probe", func(b *testing.B) {
-		a, err := NewStore("v1")
-		require.NoError(b, err)
-		defer a.Close()
+		eng := NewMemoryEngine()
+		defer eng.Close()
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			if _, err := a.MultiGet(context.Background(), batches[i%len(batches)]); err != nil {
+			if _, err := lookup(context.Background(), eng, batches[i%len(batches)]); err != nil {
 				b.Fatal(err)
 			}
 		}
 	})
 	b.Run("decision", func(b *testing.B) {
-		a, err := NewStore("v1")
-		require.NoError(b, err)
-		d := New(a)
+		d := New(NewMemoryEngine(), Config{})
 		defer d.Close()
 		ctx := context.Background()
 		b.ReportAllocs()

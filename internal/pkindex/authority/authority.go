@@ -15,9 +15,10 @@
 // limitations under the License.
 
 // Package authority is the write path decision of the primary key index of
-// one vchannel: the index of the vchannel (Store) and the decisions made with
-// it (Authority): which keys of an insert need a companion delete, which keys of a
-// delete exist, and how the writes of a transaction take effect at its commit.
+// one vchannel: which keys of an insert need a companion delete, which keys of
+// a delete exist, and how the writes of a transaction take effect at its
+// commit. It reads the engine of the vchannel and never writes it: the
+// observe of the WAL recovery writes it, through the Index that owns both.
 package authority
 
 import (
@@ -26,7 +27,24 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/cockroachdb/errors"
+
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
+
+// Config configures an Authority.
+type Config struct {
+	// Degraded reports whether the engine may miss records: the committed
+	// table set of the vchannel is not installed yet. While it returns true,
+	// a decision does not probe the engine and treats every key as present.
+	// An insert then gets a companion delete for every key, and a delete
+	// writes a tombstone for every key, so that a record that the install
+	// brings back later does not come back to life. Nil means never degraded.
+	// It never blocks a decision: a not-ready index is degraded, not closed.
+	Degraded func() bool
+}
 
 // WriteKind is the kind of write the caller is about to append.
 type WriteKind int
@@ -59,18 +77,23 @@ type Applied struct {
 	TimeTick uint64
 }
 
-// Authority makes the write path decisions of one vchannel on top of its Store.
+// Authority makes the write path decisions of one vchannel on top of its
+// engine.
 //
-// The decider never writes the engine. A decided write is kept in an in-flight
-// set from before its append until observe applied it to the engine. Observe is
-// the single writer of the engine, for the replay at WAL open and for the live
+// The Authority never writes the engine. A decided write is kept in an
+// in-flight set from before its append until the observe of the WAL recovery
+// applied it to the engine and reported that with Applied. The observe is the
+// single writer of the engine, for the replay at WAL open and for the live
 // messages alike.
 //
 // TODO: duplicate primary keys inside one insert are not detected.
-// TODO: observe does not apply the WAL to the engine yet, so a decided write stays
-// in the in-flight set for the life of the index. The recovery step adds observe.
+// TODO: the observe does not apply the WAL to the engine yet, so a decided
+// write stays in the in-flight set for the life of the index. The recovery
+// change adds the observe.
 type Authority struct {
-	store    Store
+	eng      engine.RW
+	degraded func() bool
+	closed   atomic.Bool
 	inflight inflightSet
 	// degradedUntil is the time tick before which this vchannel is degraded: while
 	// observe has not reached it, every key counts as present and the engine is
@@ -83,11 +106,13 @@ type Authority struct {
 	pending   map[int64]*pendingTxn
 }
 
-// New creates the Authority of a vchannel. It takes ownership of a.
-func New(a Store) *Authority {
+// New creates the Authority of a vchannel over its engine. It does not own
+// the engine: the caller closes it, after Close.
+func New(eng engine.RW, cfg Config) *Authority {
 	return &Authority{
-		store:   a,
-		pending: make(map[int64]*pendingTxn),
+		eng:      eng,
+		degraded: cfg.Degraded,
+		pending:  make(map[int64]*pendingTxn),
 	}
 }
 
@@ -97,7 +122,7 @@ func New(a Store) *Authority {
 // never blocks a write.
 //
 // It covers the events that the in-flight set can not cover, because writes that
-// took effect before them did not pass through this decider.
+// took effect before them did not pass through this Authority.
 //
 // TODO: call it when the index of a vchannel is enabled by CreateIndex, with the
 // time tick of that message.
@@ -113,8 +138,30 @@ func (d *Authority) DegradeUntil(tt uint64) {
 	}
 }
 
-func (d *Authority) degraded() bool {
+// isDegraded reports whether a decision treats every key as present: the
+// committed table set is not installed (Config.Degraded), or the observe has
+// not reached the time tick of DegradeUntil.
+func (d *Authority) isDegraded() bool {
+	if d.degraded != nil && d.degraded() {
+		return true
+	}
 	return d.inflight.observedTimeTick() < d.degradedUntil.Load()
+}
+
+// Applied tells the Authority that the observe of the WAL recovery wrote the
+// keys pks with time tick tt into the engine. It removes their filled-in
+// entries from the in-flight set (rule A: the engine first, then the set) and
+// raises the observed time tick.
+func (d *Authority) Applied(pks []PK, tt uint64) {
+	d.inflight.observe(tt, pks)
+}
+
+// ObserveTimeTick tells the Authority that the observe of the WAL recovery
+// applied every write up to tt. It raises the observed time tick and removes
+// the entries with an unknown outcome that it passed. The pchannel calls it
+// for every index when its driver wakes, so an idle vchannel sheds them too.
+func (d *Authority) ObserveTimeTick(tt uint64) {
+	d.inflight.observeTimeTick(tt)
 }
 
 // Decide makes the decision for req. For an autocommit write and for a CommitTxn
@@ -124,14 +171,23 @@ func (d *Authority) degraded() bool {
 // caller must call exactly one of Apply, Discard and DiscardUncertain, exactly
 // once, after the downstream append. A panic between Decide and that call ends
 // the process, like every panic on the append path.
+//
+// Decide never waits for the index to be ready: a not-ready index decides
+// degraded. It fails with an error that wraps engine.ErrClosed after Close.
 func (d *Authority) Decide(ctx context.Context, req DecideRequest) (*WriteGuard, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-d.store.Ready():
+	if d.closed.Load() {
+		return nil, errClosed(req.VChannel)
 	}
+	return d.decide(ctx, &WriteGuard{d: d, req: req})
+}
 
-	intent := &WriteGuard{d: d, req: req}
+// errClosed reports a Decide after Close.
+func errClosed(vchannel string) error {
+	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of vchannel %s is closed", vchannel), pkroot.ErrUnavailable)
+}
+
+func (d *Authority) decide(ctx context.Context, intent *WriteGuard) (*WriteGuard, error) {
+	req := intent.req
 	switch {
 	case req.Kind == KindRollbackTxn:
 		return intent, nil
@@ -194,7 +250,7 @@ func (d *Authority) present(ctx context.Context, w *inflightWrite, pks []PK) ([]
 	if len(pks) == 0 {
 		return nil, nil
 	}
-	if d.degraded() {
+	if d.isDegraded() {
 		return slices.Clone(pks), nil
 	}
 	inSet := d.inflight.presentBefore(w)
@@ -232,7 +288,7 @@ func (d *Authority) probe(ctx context.Context, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
-	entries, err := d.store.MultiGet(ctx, pks)
+	entries, err := lookup(ctx, d.eng, pks)
 	if err != nil {
 		return nil, err
 	}
@@ -263,9 +319,11 @@ func (d *Authority) DropTxn(txnID int64) {
 	delete(d.pending, txnID)
 }
 
-// Close closes the underlying Store.
-func (d *Authority) Close() error {
-	return d.store.Close()
+// Close stops the Authority: a later Decide fails. It does not wait for the
+// open guards, they end on their own, and it does not close the engine: the
+// caller does, and a probe on a closed engine fails with engine.ErrClosed.
+func (d *Authority) Close() {
+	d.closed.Store(true)
 }
 
 // register adds the keys of this write to the in-flight set and waits for the
