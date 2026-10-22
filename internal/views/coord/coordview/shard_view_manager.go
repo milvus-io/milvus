@@ -280,14 +280,19 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 }
 
 func viewPlacement(sm *CoordQueryViewStateMachine) *ViewPlacement {
-	p := &ViewPlacement{Assignments: make(map[int64]int64), Rows: make(map[int64]int64)}
+	p := &ViewPlacement{Assignments: make(map[int64]int64), PartitionRows: make(map[int64]map[int64]int64)}
 	for _, node := range sm.View().GetQueryNode() {
 		for _, part := range node.GetPartitions() {
+			rows := p.PartitionRows[part.GetPartitionId()]
+			if rows == nil {
+				rows = make(map[int64]int64)
+				p.PartitionRows[part.GetPartitionId()] = rows
+			}
 			for _, id := range part.GetSegmentIds() {
 				p.Assignments[id] = node.GetNodeId()
 				if sm.Ref() != nil {
 					if stats, ok := sm.Ref().Stats(id); ok {
-						p.Rows[node.GetNodeId()] += stats.RowNum
+						rows[node.GetNodeId()] += stats.RowNum
 						continue
 					}
 				}

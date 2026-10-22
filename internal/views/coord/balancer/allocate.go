@@ -33,8 +33,19 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 	if desired == nil || shard == nil {
 		return nil
 	}
-	entries := make([]*SegmentDataView, 0, shard.SegmentCount)
+	var entries []*SegmentDataView
+	collection := p.collectionForShard(shardID)
+	// Published-schema recovery must preserve its historical membership even
+	// when the current desired config has already released some partitions.
+	retained := p.recovery != nil && p.recovery.shardID == shardID
+	allPartitions := retained || collection.LoadsAllPartitions()
+	if allPartitions {
+		entries = make([]*SegmentDataView, 0, shard.SegmentCount)
+	}
 	for _, part := range shard.Partitions {
+		if !allPartitions && !collection.LoadsPartition(part.PartitionID) {
+			continue
+		}
 		entries = append(entries, part.Segments...)
 	}
 	sort.Slice(entries, func(i, j int) bool {

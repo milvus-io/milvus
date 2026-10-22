@@ -69,11 +69,14 @@ func withSegmentRows(stats *coordview.ShardStats, rows map[int64]int64) *coordvi
 		if view == nil {
 			continue
 		}
-		view.Rows = make(map[int64]int64)
+		view.PartitionRows = make(map[int64]map[int64]int64)
 		view.UnknownRows = nil
 		for id, node := range view.Assignments {
 			if segment := stats.Segments[id]; segment.HasRowNum {
-				view.Rows[node] += segment.RowNum
+				if view.PartitionRows[segment.PartitionID] == nil {
+					view.PartitionRows[segment.PartitionID] = make(map[int64]int64)
+				}
+				view.PartitionRows[segment.PartitionID][node] += segment.RowNum
 			} else {
 				view.UnknownRows = append(view.UnknownRows, id)
 			}

@@ -20,13 +20,13 @@ func TestTargetReplacementFailureAndResourceIndependence(t *testing.T) {
 	}
 	up := cacheStats(1000, 1, 100, coordview.SegmentStateUp, true)
 	up.UpNodes = []int64{1}
-	up.UpPlacement = &coordview.ViewPlacement{Assignments: map[int64]int64{1000: 1}, Rows: map[int64]int64{1: 100}}
+	up.UpPlacement = &coordview.ViewPlacement{Assignments: map[int64]int64{1000: 1}, PartitionRows: map[int64]map[int64]int64{1: {1: 100}}}
 	c.PublishShard(id, up)
 	old := c.GetNode(1)
 	require.Equal(t, int64(100), old.TargetRows())
 	preparing := *up
 	preparing.PreparingNodes = []int64{2}
-	preparing.PreparingPlacement = &coordview.ViewPlacement{Assignments: map[int64]int64{1000: 2}, Rows: map[int64]int64{2: 100}}
+	preparing.PreparingPlacement = &coordview.ViewPlacement{Assignments: map[int64]int64{1000: 2}, PartitionRows: map[int64]map[int64]int64{1: {2: 100}}}
 	preparing.Segments = map[int64]*coordview.SegmentStats{1000: {SegmentID: 1000, RowNum: 100, HasRowNum: true, Nodes: map[int64]coordview.SegmentState{1: coordview.SegmentStateUp, 2: coordview.SegmentStateReady}}}
 	resource := coordview.ResourceKey{SegmentID: 1000, PartitionID: 1, LoadInfoVersion: 1}
 	preparing.Resources = map[int64]map[coordview.ResourceKey]struct{}{2: {resource: {}}}

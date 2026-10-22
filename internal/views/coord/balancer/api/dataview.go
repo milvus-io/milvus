@@ -28,6 +28,7 @@ type ShardDataView struct {
 type PartitionDataView struct {
 	PartitionID int64
 	Segments    []*SegmentDataView
+	TotalRows   int64
 }
 
 // SegmentDataView carries the per-segment metadata the Balancer needs. RowNum
@@ -61,12 +62,14 @@ func PrepareCollectionDataView(coll *CollectionDataView) *CollectionDataView {
 			if partition == nil {
 				continue
 			}
+			partition.TotalRows = 0
 			for _, segment := range partition.Segments {
 				if segment == nil {
 					continue
 				}
 				segment.PartitionID = partition.PartitionID
 				coll.segments[segment.SegmentID] = segment
+				partition.TotalRows += segment.RowNum
 				shard.TotalRows += segment.RowNum
 				coll.TotalRows += segment.RowNum
 				shard.SegmentCount++

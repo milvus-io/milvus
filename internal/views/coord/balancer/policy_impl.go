@@ -211,12 +211,12 @@ func shardLess(a, b qviews.ShardID) bool {
 	return a.VChannel < b.VChannel
 }
 
-func shardTotalLoad(snap balanceInput, shardID qviews.ShardID) int64 {
-	shard := snap.DataViewForShard(shardID)
-	if shard == nil {
+func shardTotalLoad(snap *planningContext, shardID qviews.ShardID) int64 {
+	collection := snap.collectionForShard(shardID)
+	if collection == nil {
 		return 0
 	}
-	return shard.TotalRows
+	return collection.ShardLoadedRows(shardID.VChannel)
 }
 
 func flattenAssignments(view *viewpb.QueryViewOfShard) map[int64]int64 {

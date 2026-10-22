@@ -14,7 +14,7 @@ import (
 )
 
 func replicaCache(replicas, nodes int) *balancercache.Cache {
-	cfg := cfgFor(1, 10, nil, nil)
+	cfg := cfgFor(1, 10, []int64{1}, nil)
 	cfg.Replicas = nil
 	for i := 0; i < replicas; i++ {
 		cfg.Replicas = append(cfg.Replicas, &loadmgr.ReplicaAssignment{ReplicaID: int64(10 + i), ResourceGroup: "rg1"})

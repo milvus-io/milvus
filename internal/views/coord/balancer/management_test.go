@@ -22,7 +22,11 @@ func TestManualBalance(t *testing.T) {
 	publishTestData(c, 1, dv, map[int64]*SegmentDataView{
 		101: {SegmentID: 101, RowNum: 10, ManifestVersion: 8, TransformStartAfterTimetick: 55},
 		102: {SegmentID: 102, RowNum: 20, ManifestVersion: 9, TransformStartAfterTimetick: 56},
-	}, shardDataView(id.VChannel, 100, 101, 102))
+		201: {SegmentID: 201, RowNum: 1000, ManifestVersion: 10},
+	}, &viewpb.DataViewOfShard{Vchannel: id.VChannel, Partitions: []*viewpb.DataViewOfPartition{
+		{PartitionId: 100, SegmentIds: []int64{101, 102}},
+		{PartitionId: 200, SegmentIds: []int64{201}},
+	}})
 	publishTestNodes(c, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"}, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
 	stats := upStats(dv, placement(101, 100, 1, coordview.SegmentStateUp), placement(102, 100, 1, coordview.SegmentStateUp))
 	stats.UpSchemaVersion = 7
@@ -53,6 +57,7 @@ func TestManualBalance(t *testing.T) {
 		{"unknown destination", 1, []int64{99}, []int64{101}, merr.ErrNodeNotFound},
 		{"one missing segment rejects whole request", 1, []int64{2}, []int64{101, 999}, merr.ErrSegmentNotFound},
 		{"all missing segments", 1, []int64{2}, []int64{998, 999}, merr.ErrSegmentNotFound},
+		{"unloaded partition", 1, []int64{2}, []int64{201}, merr.ErrSegmentNotFound},
 		{"source only", 1, []int64{1}, []int64{101}, merr.ErrParameterInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
