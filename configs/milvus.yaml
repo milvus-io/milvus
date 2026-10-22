@@ -541,6 +541,11 @@ proxy:
     # The non-underscore /api/v1/* REST API has been removed regardless of this setting.
     # WebUI data and telemetry commands require these console APIs; disable proxy.http.enableWebUI too to hide the pages.
     enableV1: true
+    # Default REST v2 unknown request field policy: ignore (compatible default), warn (continue with an
+    # X-Milvus-Warning response header), or strict (reject before executing the handler). A request-level
+    # unknownFieldPolicy query parameter overrides this default. Only fixed API structures are checked;
+    # entity data and open parameter maps keep their existing validation. Requires restart.
+    v2UnknownFieldPolicy: ignore
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
