@@ -156,28 +156,12 @@ func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 			TypeParams:  MapKvPairs(field.TypeParams),
 			Nullable:    field.Nullable,
 		}
-		// max_capacity declared on the parent struct field must be carried onto each sub-field's
-		// type params — the server validates it per sub-field on insert.
-		parentMaxCap, hasParentMaxCap := field.TypeParams[TypeParamMaxCapacity]
+		// max_capacity declared on the parent struct field must be carried onto each sub-field —
+		// the server validates it per sub-field on insert.
+		parentMaxCap := structMaxCapacity(field)
 		if field.StructSchema != nil {
 			f.Fields = lo.Map(field.StructSchema.Fields, func(sub *Field, _ int) *schemapb.FieldSchema {
-				// translate to ArrayStruct
-				p := sub.ProtoMessage()
-				p.ElementType = p.DataType
-				if typeutil.IsVectorType(p.DataType) {
-					p.DataType = schemapb.DataType_ArrayOfVector
-				} else {
-					p.DataType = schemapb.DataType_Array
-				}
-				if hasParentMaxCap {
-					if _, ok := sub.TypeParams[TypeParamMaxCapacity]; !ok {
-						p.TypeParams = append(p.TypeParams, &commonpb.KeyValuePair{
-							Key:   TypeParamMaxCapacity,
-							Value: parentMaxCap,
-						})
-					}
-				}
-				return p
+				return StructSubFieldProto(sub, field.Nullable, parentMaxCap)
 			})
 		}
 		return f, true
@@ -217,25 +201,107 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 	return s
 }
 
+// StructSubFieldProto converts a struct sub-field, which describes one struct element, into the
+// wire FieldSchema of the struct column:
+//   - a scalar T becomes Array(T) and a vector V becomes ArrayOfVector(V); the sub-field's Nullable
+//     maps to element_nullable;
+//   - an Array<T> sub-field (DataType Array, ElementType T) becomes Array(Array) with a type_schema
+//     chain root -> inner array -> leaf T. The sub-field's Nullable maps to element_nullable and the
+//     inner node's nullable, ElementNullable maps to the leaf's nullable, and its own max_capacity /
+//     max_length describe the inner array / leaf, so they move into type_schema instead of
+//     staying in type_params, where max_capacity would be read as the struct capacity.
+//
+// The row-level nullable of every sub-field follows the struct. structMaxCapacity is the struct's
+// max_capacity; empty leaves it to the server (adding a sub-field inherits it from the siblings).
+func StructSubFieldProto(sub *Field, structNullable bool, structMaxCapacity string) *schemapb.FieldSchema {
+	p := sub.ProtoMessage()
+	p.Nullable = structNullable
+	p.ElementNullable = sub.Nullable
+
+	if sub.DataType == FieldTypeArray {
+		typeParams := make(map[string]string, len(sub.TypeParams))
+		for k, v := range sub.TypeParams {
+			typeParams[k] = v
+		}
+		leaf := &schemapb.TypeSchema{
+			Kind:     &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType(sub.ElementType)},
+			Nullable: sub.ElementNullable,
+		}
+		if maxLength, ok := typeParams[TypeParamMaxLength]; ok {
+			leaf.TypeParams = []*commonpb.KeyValuePair{{Key: TypeParamMaxLength, Value: maxLength}}
+			delete(typeParams, TypeParamMaxLength)
+		}
+		inner := &schemapb.TypeSchema{
+			Kind:     &schemapb.TypeSchema_ArrayElement{ArrayElement: leaf},
+			Nullable: sub.Nullable,
+		}
+		if innerCap, ok := typeParams[TypeParamMaxCapacity]; ok {
+			inner.TypeParams = []*commonpb.KeyValuePair{{Key: TypeParamMaxCapacity, Value: innerCap}}
+			delete(typeParams, TypeParamMaxCapacity)
+		}
+		root := &schemapb.TypeSchema{
+			Kind:     &schemapb.TypeSchema_ArrayElement{ArrayElement: inner},
+			Nullable: structNullable,
+		}
+		if structMaxCapacity != "" {
+			root.TypeParams = []*commonpb.KeyValuePair{{Key: TypeParamMaxCapacity, Value: structMaxCapacity}}
+		}
+		p.DataType = schemapb.DataType_Array
+		p.ElementType = schemapb.DataType_Array
+		p.TypeParams = MapKvPairs(typeParams)
+		p.TypeSchema = root
+		return p
+	}
+
+	p.ElementType = p.DataType
+	if typeutil.IsVectorType(p.DataType) {
+		p.DataType = schemapb.DataType_ArrayOfVector
+	} else {
+		p.DataType = schemapb.DataType_Array
+	}
+	if structMaxCapacity != "" {
+		if _, ok := sub.TypeParams[TypeParamMaxCapacity]; !ok {
+			p.TypeParams = append(p.TypeParams, &commonpb.KeyValuePair{
+				Key:   TypeParamMaxCapacity,
+				Value: structMaxCapacity,
+			})
+		}
+	}
+	return p
+}
+
+// structMaxCapacity returns the max_capacity of a struct field: the one declared on the struct, or
+// else the one declared on a scalar or vector sub-field, whose max_capacity is the struct's. An
+// Array<T> sub-field's own max_capacity describes its inner array and is not considered.
+func structMaxCapacity(field *Field) string {
+	if maxCapacity, ok := field.TypeParams[TypeParamMaxCapacity]; ok {
+		return maxCapacity
+	}
+	if field.StructSchema == nil {
+		return ""
+	}
+	for _, sub := range field.StructSchema.Fields {
+		if sub == nil || sub.DataType == FieldTypeArray {
+			continue
+		}
+		if maxCapacity, ok := sub.TypeParams[TypeParamMaxCapacity]; ok {
+			return maxCapacity
+		}
+	}
+	return ""
+}
+
 // structArrayFieldFromProto reverses the ProtoMessage transformation for struct array fields.
 // Server returns struct sub-fields with DataType_Array / DataType_ArrayOfVector and the original
-// element type carried in ElementType. We restore the user-facing Field where DataType is the
-// original (scalar or vector) type.
+// element type carried in ElementType (or, for Array<T> sub-fields, in type_schema). We restore
+// the user-facing Field that describes one struct element.
 func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 	structSchema := NewStructSchema()
 	typeParams := KvPairsMap(p.GetTypeParams())
 	for _, sf := range p.GetFields() {
-		field := NewField().ReadProto(sf)
-		// unwrap Array/ArrayOfVector wrapper added by ProtoMessage()
-		switch sf.GetDataType() {
-		case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector:
-			field.DataType = FieldType(sf.GetElementType())
-			field.ElementType = 0
-		}
-		if _, ok := typeParams[TypeParamMaxCapacity]; !ok {
-			if maxCapacity, has := field.TypeParams[TypeParamMaxCapacity]; has {
-				typeParams[TypeParamMaxCapacity] = maxCapacity
-			}
+		field, maxCapacity, hasMaxCapacity := structSubFieldFromProto(sf)
+		if _, ok := typeParams[TypeParamMaxCapacity]; !ok && hasMaxCapacity {
+			typeParams[TypeParamMaxCapacity] = maxCapacity
 		}
 		structSchema.WithField(field)
 	}
@@ -249,6 +315,45 @@ func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 		Nullable:     p.GetNullable(),
 		StructSchema: structSchema,
 	}
+}
+
+// structSubFieldFromProto restores the user-facing sub-field and returns the struct max_capacity
+// it carries.
+func structSubFieldFromProto(sf *schemapb.FieldSchema) (*Field, string, bool) {
+	field := NewField().ReadProto(sf)
+	// The row-level nullable of a sub-field mirrors the struct; the element nullable is what the
+	// user declared on the sub-field.
+	field.Nullable = sf.GetElementNullable()
+	field.ElementNullable = false
+
+	if root := sf.GetTypeSchema(); root.GetArrayElement().GetArrayElement() != nil {
+		inner := root.GetArrayElement()
+		leaf := inner.GetArrayElement()
+		field.DataType = FieldTypeArray
+		field.ElementType = FieldType(leaf.GetLeafType())
+		field.Nullable = inner.GetNullable()
+		field.ElementNullable = leaf.GetNullable()
+		// type_params may mirror the struct capacity; the sub-field's own max_capacity is the
+		// inner array's.
+		delete(field.TypeParams, TypeParamMaxCapacity)
+		for k, v := range KvPairsMap(inner.GetTypeParams()) {
+			field.TypeParams[k] = v
+		}
+		for k, v := range KvPairsMap(leaf.GetTypeParams()) {
+			field.TypeParams[k] = v
+		}
+		maxCapacity, ok := KvPairsMap(root.GetTypeParams())[TypeParamMaxCapacity]
+		return field, maxCapacity, ok
+	}
+
+	// unwrap Array/ArrayOfVector wrapper added by ProtoMessage()
+	switch sf.GetDataType() {
+	case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector:
+		field.DataType = FieldType(sf.GetElementType())
+		field.ElementType = 0
+	}
+	maxCapacity, ok := field.TypeParams[TypeParamMaxCapacity]
+	return field, maxCapacity, ok
 }
 
 // Validate performs client-side sanity checks on the schema. Currently enforces struct-array

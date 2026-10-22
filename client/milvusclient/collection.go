@@ -231,6 +231,23 @@ func (c *Client) AddCollectionField(ctx context.Context, opt AddCollectionFieldO
 		return err
 	}
 
+	// A struct sub-field "s[b]" can only be added through AlterCollectionSchema.
+	if subFieldOpt, ok := opt.(interface {
+		alterSchemaRequest() (*milvuspb.AlterCollectionSchemaRequest, bool, error)
+	}); ok {
+		alterReq, isSubField, err := subFieldOpt.alterSchemaRequest()
+		if err != nil {
+			return err
+		}
+		if isSubField {
+			err := c.alterCollectionSchemaRequest(ctx, alterReq, callOpts...)
+			if grpcstatus.Code(err) == codes.Unimplemented || errors.Is(err, merr.ErrServiceUnimplemented) {
+				return errors.Wrap(err, "server does not support adding a struct sub-field")
+			}
+			return err
+		}
+	}
+
 	req := opt.Request()
 	fieldSchema := &schemapb.FieldSchema{}
 	if err := proto.Unmarshal(req.GetSchema(), fieldSchema); err != nil {
