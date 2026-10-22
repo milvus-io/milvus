@@ -363,6 +363,12 @@ func TestExecuteOperatePrivilegeTaskStepsRevokeKeepsKeysOfOtherGrantors(t *testi
 		require.Len(t, refreshRequests, 1)
 		require.Equal(t, int32(typeutil.CacheRevokePrivilege), refreshRequests[0].GetOpType())
 		require.Equal(t, policyKey("Load"), refreshRequests[0].GetOpKey())
+		visibility := refreshRequests[0].GetCollectionVisibility()
+		require.EqualValues(t, 1, visibility.GetFormatVersion())
+		require.Len(t, visibility.GetRoles(), 1)
+		require.Equal(t, roleName, visibility.GetRoles()[0].GetRole())
+		require.Len(t, visibility.GetRoles()[0].GetRules(), 1)
+		require.Equal(t, objectName, visibility.GetRoles()[0].GetRules()[0].GetCollectionName(), "remaining group still grants visibility")
 	})
 
 	t.Run("other collection: both Query and Load are revoked", func(t *testing.T) {

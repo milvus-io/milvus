@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -60,6 +61,9 @@ type privilegeCache struct {
 	privilegeInfos map[string]struct{}            // privileges cache
 	userToRoles    map[string]map[string]struct{} // user to role cache
 
+	visibilityVersion uint32
+	visibility        rbacutil.CollectionVisibilityIndex
+
 	credMut sync.RWMutex
 	credMap map[string]*internalpb.CredentialInfo
 }
@@ -74,6 +78,9 @@ func InitPrivilegeCache(ctx context.Context, mixCoord types.MixCoordClient) erro
 		return err
 	}
 	privilegeCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
+	privilegeCache.mu.Lock()
+	privilegeCache.unsafeInitCollectionVisibility(resp.GetCollectionVisibility())
+	privilegeCache.mu.Unlock()
 	mlog.Info(ctx, "success to init privilege cache", mlog.Strings("policy_infos", resp.PolicyInfos))
 	return nil
 }
@@ -149,6 +156,7 @@ func (m *privilegeCache) InitPolicyInfo(info []string, userRoles []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.unsafeInitPolicyInfo(info, userRoles)
+	m.unsafeInitCollectionVisibility(nil)
 }
 
 func (m *privilegeCache) unsafeInitPolicyInfo(info []string, userRoles []string) {
@@ -180,7 +188,13 @@ func (m *privilegeCache) GetUserRole(user string) []string {
 	return util.StringList(m.userToRoles[user])
 }
 
-func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
+func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
+	return m.RefreshPolicyInfoWithVisibility(op, nil)
+}
+
+// RefreshPolicyInfoWithVisibility keeps role bindings and visibility replacements
+// under the existing cache lock. Cluster-wide revision ordering is a follow-up.
+func (m *privilegeCache) RefreshPolicyInfoWithVisibility(op typeutil.CacheOp, visibility *internalpb.CollectionVisibilitySnapshot) (err error) {
 	defer func() {
 		if err == nil {
 			le := GetEnforcer().LoadPolicy()
@@ -204,11 +218,13 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 		for _, key := range keys {
 			m.privilegeInfos[key] = struct{}{}
 		}
+		m.unsafeUpdateCollectionVisibility(visibility)
 	case typeutil.CacheRevokePrivilege:
 		keys := funcutil.PrivilegesForPolicy(op.OpKey)
 		for _, key := range keys {
 			delete(m.privilegeInfos, key)
 		}
+		m.unsafeUpdateCollectionVisibility(visibility)
 	case typeutil.CacheAddUserToRole:
 		user, role, err := funcutil.DecodeUserRoleCache(op.OpKey)
 		if err != nil {
@@ -229,6 +245,7 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 	case typeutil.CacheDeleteUser:
 		delete(m.userToRoles, op.OpKey)
 	case typeutil.CacheDropRole:
+		delete(m.visibility, op.OpKey)
 		for user := range m.userToRoles {
 			delete(m.userToRoles[user], op.OpKey)
 		}
@@ -257,8 +274,47 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 		m.userToRoles = make(map[string]map[string]struct{})
 		m.privilegeInfos = make(map[string]struct{})
 		m.unsafeInitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
+		m.unsafeInitCollectionVisibility(resp.GetCollectionVisibility())
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid opType, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
 	}
 	return nil
+}
+
+func (m *privilegeCache) unsafeInitCollectionVisibility(snapshot *internalpb.CollectionVisibilitySnapshot) {
+	m.visibilityVersion = snapshot.GetFormatVersion()
+	m.visibility = make(rbacutil.CollectionVisibilityIndex)
+	if m.visibilityVersion == rbacutil.CollectionVisibilityFormatVersion {
+		m.visibility.Replace(snapshot.GetRoles())
+	}
+}
+
+func (m *privilegeCache) unsafeUpdateCollectionVisibility(snapshot *internalpb.CollectionVisibilitySnapshot) {
+	if snapshot.GetFormatVersion() != rbacutil.CollectionVisibilityFormatVersion {
+		// A legacy delta cannot maintain raw-grant visibility. Do not infer it
+		// from action policies; fall back until the next complete snapshot.
+		m.unsafeInitCollectionVisibility(nil)
+		return
+	}
+	if m.visibilityVersion == rbacutil.CollectionVisibilityFormatVersion {
+		m.visibility.Replace(snapshot.GetRoles())
+	}
+}
+
+// CanSeeCollection returns known=false when the coordinator does not supply a
+// supported complete projection. Callers must retain the authoritative RC path.
+// Read bindings and rules together instead of collecting roles before this lock.
+func (m *privilegeCache) CanSeeCollection(username, database, collection string) (visible, known bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.visibilityVersion != rbacutil.CollectionVisibilityFormatVersion {
+		return false, false
+	}
+	return m.visibility.CanSee(util.StringList(m.userToRoles[username]), database, collection), true
+}
+
+func (m *privilegeCache) SupportsCollectionVisibility() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.visibilityVersion == rbacutil.CollectionVisibilityFormatVersion
 }
