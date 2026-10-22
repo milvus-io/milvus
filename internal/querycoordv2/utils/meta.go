@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -30,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -38,6 +41,34 @@ func GetPartitions(ctx context.Context, targetMgr meta.TargetManagerInterface, c
 	// fetch next target first, sync next target contains the wanted partition list
 	// if not found, current will be used instead for dist adjustment requests
 	return targetMgr.GetPartitions(ctx, collectionID, meta.NextTargetFirst)
+}
+
+var lastIndexInfoVersion atomic.Int64
+
+// ListIndexesWithVersion lists the indexes of a collection for QueryNodes,
+// together with the version of the list (see LoadMetaInfo.index_info_version).
+// The version is taken before the list is read, so a list with a larger version
+// includes every index change that finished before a list with a smaller
+// version was read.
+func ListIndexesWithVersion(ctx context.Context, broker meta.Broker, collectionID int64) ([]*indexpb.IndexInfo, int64, error) {
+	version := nextIndexInfoVersion()
+	indexInfos, err := broker.ListIndexes(ctx, collectionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return indexInfos, version, nil
+}
+
+// nextIndexInfoVersion returns the wall clock in nanoseconds, kept increasing
+// within this process if the clock steps back.
+func nextIndexInfoVersion() int64 {
+	for {
+		last := lastIndexInfoVersion.Load()
+		version := max(time.Now().UnixNano(), last+1)
+		if lastIndexInfoVersion.CompareAndSwap(last, version) {
+			return version
+		}
+	}
 }
 
 // GroupNodesByReplica groups nodes by replica,

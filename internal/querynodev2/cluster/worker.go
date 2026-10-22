@@ -46,6 +46,7 @@ type Worker interface {
 	QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error)
+	SyncIndexMeta(ctx context.Context, req *querypb.SyncIndexMetaRequest) (*commonpb.Status, error)
 	DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error
 
 	IsHealthy() bool
@@ -253,6 +254,11 @@ func (w *remoteWorker) GetStatistics(ctx context.Context, req *querypb.GetStatis
 func (w *remoteWorker) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
 	client := w.getClient()
 	return client.UpdateSchema(ctx, req)
+}
+
+func (w *remoteWorker) SyncIndexMeta(ctx context.Context, req *querypb.SyncIndexMetaRequest) (*commonpb.Status, error) {
+	client := w.getClient()
+	return client.SyncIndexMeta(ctx, req)
 }
 
 func (w *remoteWorker) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error {

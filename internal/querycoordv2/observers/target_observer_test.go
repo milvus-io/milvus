@@ -659,6 +659,7 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 			syncedNodes = append(syncedNodes, nodeID)
+			assert.Positive(t, req.GetLoadMeta().GetIndexInfoVersion())
 			return merr.Success(), nil
 		}).Maybe()
 

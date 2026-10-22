@@ -550,6 +550,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 	log.Debug("work loads segments done")
+	sd.forgetIndexMetaWorker(targetNodeID, req.GetIndexInfoList(), req.GetLoadMeta().GetIndexInfoVersion())
 
 	if req.GetLoadScope() == querypb.LoadScope_Index || req.GetLoadScope() == querypb.LoadScope_Reopen {
 		return nil

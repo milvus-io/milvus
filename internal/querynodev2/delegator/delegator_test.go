@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
@@ -1402,6 +1403,51 @@ func (s *DelegatorSuite) TestGetStats() {
 
 		s.Error(err)
 	})
+}
+
+func (s *DelegatorSuite) TestSyncIndexMeta() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	s.initSegments()
+	ctx := context.Background()
+
+	workers := map[int64]*cluster.MockWorker{}
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).RunAndReturn(func(_ context.Context, nodeID int64) (cluster.Worker, error) {
+		return workers[nodeID], nil
+	}).Maybe()
+	expectSync := func(nodeID int64, version int64, err error) {
+		worker := cluster.NewMockWorker(s.T())
+		worker.EXPECT().SyncIndexMeta(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *querypb.SyncIndexMetaRequest) (*commonpb.Status, error) {
+			s.Equal(s.collectionID, req.GetCollectionID())
+			s.Equal(version, req.GetIndexInfoVersion())
+			return merr.Status(err), nil
+		}).Once()
+		workers[nodeID] = worker
+	}
+	infos := []*indexpb.IndexInfo{{CollectionID: s.collectionID, FieldID: 101, IndexID: 1}}
+
+	// Node 1 serves the growing segments and node 1 and 2 the sealed ones.
+	expectSync(1, 10, nil)
+	expectSync(2, 10, nil)
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 10))
+
+	// An unchanged list, in any order, or an older list sends nothing.
+	workers = map[int64]*cluster.MockWorker{}
+	s.NoError(s.delegator.SyncIndexMeta(ctx, []*indexpb.IndexInfo{proto.Clone(infos[0]).(*indexpb.IndexInfo)}, 11))
+	s.NoError(s.delegator.SyncIndexMeta(ctx, nil, 9))
+
+	// A new index goes to every node; a node that fails gets it on the next sync.
+	infos = append(infos, &indexpb.IndexInfo{CollectionID: s.collectionID, FieldID: 102, IndexID: 2})
+	expectSync(1, 12, nil)
+	expectSync(2, 12, merr.WrapErrServiceUnavailableMsg("mocked"))
+	s.Error(s.delegator.SyncIndexMeta(ctx, infos, 12))
+	expectSync(2, 13, nil)
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 13))
+
+	// A load that applied an older list may have recreated the collection on node 2.
+	s.delegator.(*shardDelegator).forgetIndexMetaWorker(2, infos[:1], 5)
+	expectSync(2, 14, nil)
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 14))
 }
 
 func (s *DelegatorSuite) TestUpdateSchema() {

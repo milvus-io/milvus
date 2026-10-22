@@ -584,6 +584,27 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 	return merr.Status(err), nil
 }
 
+// SyncIndexMeta applies the collection index list a delegator publishes to its
+// workers. A stopping node still serves its remaining segments, so it accepts it.
+func (node *QueryNode) SyncIndexMeta(ctx context.Context, req *querypb.SyncIndexMetaRequest) (*commonpb.Status, error) {
+	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	collection := node.manager.Collection.Get(req.GetCollectionID())
+	if collection == nil {
+		return merr.Success(), nil
+	}
+	meta := node.composeIndexMeta(ctx, req.GetIndexInfoList(), collection.Schema())
+	err := node.manager.Collection.UpdateIndexMeta(req.GetCollectionID(), meta, req.GetIndexInfoVersion())
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to sync index meta", zap.Int64("collectionID", req.GetCollectionID()),
+			zap.Int64("indexInfoVersion", req.GetIndexInfoVersion()), zap.Error(err))
+	}
+	return merr.Status(err), nil
+}
+
 // ReleaseCollection clears all data related to this collection on the querynode
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
@@ -1509,6 +1530,15 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				}
 				return id, action.GetCheckpoint().Timestamp
 			})
+			// QueryCoord makes the new target readable once this call succeeds, so
+			// the workers must have the index list first: a search plan on a field
+			// missing from it fails. A request without a version carries no list.
+			if version := req.GetLoadMeta().GetIndexInfoVersion(); version > 0 {
+				if err := shardDelegator.SyncIndexMeta(ctx, req.GetIndexInfoList(), version); err != nil {
+					log.Warn("failed to sync index meta to workers", zap.Error(err))
+					return merr.Status(err), nil
+				}
+			}
 			shardDelegator.AddExcludedSegments(droppedInfos)
 			flushedInfo := lo.SliceToMap(action.GetSealedInTarget(), func(id int64) (int64, uint64) {
 				if action.GetCheckpoint() == nil {
