@@ -142,8 +142,12 @@ gain is that a published segment never falls back to brute-force scalar
 filtering. Segments below `minSegmentNumRowsToEnableIndex` are exempt as
 before.
 
-Two more consequences for vector collections need the DataCoord owner's
-agreement. They are the reason `forceAllIndexReady` was opt-in:
+This split follows xiaofan-luan's review of 2026-10-10, which asked for
+the impact on publication delay, small segments and index failures to be
+evaluated. The delay and the small-segment exemption are covered above.
+Two consequences for vector collections remain, and they are the reason
+`forceAllIndexReady` was opt-in. They are listed here for that review to
+confirm the trade-off:
 
 - A scalar index whose build fails for good keeps the compaction output
   invisible. With the segment change staging design, the group goes to
