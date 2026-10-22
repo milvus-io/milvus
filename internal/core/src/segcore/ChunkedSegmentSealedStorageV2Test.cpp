@@ -24,6 +24,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <folly/CancellationToken.h>
 #include <folly/ScopeGuard.h>
+#include <fmt/core.h>
 #include <gtest/gtest.h>
 #include <parquet/properties.h>
 #include <stdlib.h>
@@ -32,6 +33,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <functional>
 #include <future>
@@ -1740,6 +1742,8 @@ TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
         ASSERT_NE(snapshot->runtime->timestamp_index_slot, nullptr);
         EXPECT_NE(snapshot->runtime->timestamps, nullptr);
         EXPECT_NE(snapshot->runtime->timestamp_index, nullptr);
+        EXPECT_EQ(snapshot->runtime->timestamp_index->get_active_range(31),
+                  (std::pair<int64_t, int64_t>{0, kNumRows}));
         EXPECT_FALSE(snapshot->runtime->pk_index_slot->IsCached(0));
         EXPECT_TRUE(snapshot->runtime->timestamp_index_slot->IsCached(0));
 
@@ -1801,6 +1805,340 @@ TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
         EXPECT_GT(pk_column->DataByteSize(), 0);
         EXPECT_GT(timestamp_column->DataByteSize(), 0);
     }
+}
+
+namespace {
+class TimestampMaskChunkStorage {
+ public:
+    std::shared_ptr<TimestampData>
+    MakeTimestampData(const std::vector<Timestamp>& values,
+                      const std::vector<int64_t>& chunk_sizes) {
+        std::vector<cachinglayer::PinWrapper<Chunk*>> pins;
+        int64_t offset = 0;
+        for (auto chunk_size : chunk_sizes) {
+            auto byte_size = static_cast<uint64_t>(chunk_size) *
+                             static_cast<uint64_t>(sizeof(Timestamp));
+            auto buffer = std::make_unique<char[]>(byte_size);
+            std::memcpy(buffer.get(),
+                        values.data() + offset,
+                        static_cast<size_t>(byte_size));
+            auto chunk = std::make_unique<FixedWidthChunk>(
+                static_cast<int32_t>(chunk_size),
+                /*dim=*/1,
+                buffer.get(),
+                byte_size,
+                /*element_size=*/sizeof(Timestamp),
+                /*nullable=*/false,
+                /*chunk_mmap_guard=*/nullptr);
+            pins.emplace_back(static_cast<Chunk*>(chunk.get()));
+            buffers_.push_back(std::move(buffer));
+            chunks_.push_back(std::move(chunk));
+            offset += chunk_size;
+        }
+        EXPECT_EQ(offset, static_cast<int64_t>(values.size()));
+
+        auto data = std::make_shared<TimestampData>();
+        data->InitFromPinnedChunks(nullptr, std::move(pins));
+        return data;
+    }
+
+ private:
+    // FixedWidthChunk does not own its backing buffer. Keep chunks before
+    // buffers in destruction order and keep this storage alive after segment.
+    std::vector<std::unique_ptr<char[]>> buffers_;
+    std::vector<std::unique_ptr<FixedWidthChunk>> chunks_;
+};
+
+SchemaPtr
+MakeTimestampMaskTestSchema() {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    return schema;
+}
+
+std::shared_ptr<TimestampIndex>
+MakeTimestampMaskTestIndex(const std::vector<Timestamp>& values,
+                           std::vector<int64_t> slice_lengths) {
+    auto index = std::make_shared<TimestampIndex>();
+    index->set_length_meta(std::move(slice_lengths));
+    index->build_with(values.data(), values.size());
+    return index;
+}
+}  // namespace
+
+// Opt-in benchmark of the actual filter. Run the same test on the PR base and
+// candidate; do not substitute an index into a different filtering algorithm.
+// Timing includes output reset, snapshot capture, temporary bitmaps and OR, but
+// excludes loading, index construction, validation and publication.
+TEST(ChunkedSegmentSealedStorageV2, DISABLED_TimestampMaskBenchmark) {
+    auto schema = MakeTimestampMaskTestSchema();
+    for (int64_t rows : {4000, 4097, 16384}) {
+        auto fs = GetDefaultArrowFileSystem();
+        auto path = UniqueManifestTestPath("timestamp_mask_benchmark");
+        StorageV2TempDirGuard dir_guard(fs, path);
+        milvus::test::V3SegmentTestData data(
+            schema, 1, rows, 1, TestLocalPath, path);
+        auto segment = CreateSealedSegment(
+            schema, nullptr, 4096000, SegcoreConfig::default_config(), false);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        auto* internal = static_cast<SegmentInternalInterface*>(segment.get());
+        proto::segcore::SegmentLoadInfo load_info;
+        load_info.set_segmentid(4096000);
+        load_info.set_partitionid(1);
+        load_info.set_collectionid(1);
+        load_info.set_num_of_rows(rows);
+        load_info.set_storageversion(STORAGE_V3);
+        load_info.set_manifest_path(data.ManifestPathJson());
+        sealed->SetLoadInfo(std::move(load_info));
+        OpContext op_ctx;
+        tracer::TraceContext trace_ctx;
+        sealed->Load(trace_ctx, &op_ctx);
+        auto runtime = sealed->TestGetPublishedStateSnapshot()->runtime;
+        ASSERT_NE(runtime->timestamps, nullptr);
+        ASSERT_NE(runtime->timestamp_index, nullptr);
+        ASSERT_EQ(runtime->timestamps->size(), rows);
+        for (int64_t i = 0; i < rows; ++i) {
+            ASSERT_EQ((*runtime->timestamps)[i], i);
+        }
+        struct Case {
+            const char* name;
+            Timestamp query;
+            Timestamp ttl;
+        };
+        std::vector<Case> cases{{"history", Timestamp(rows / 2 - 1), 0}};
+        if (rows == 4000) {
+            cases.insert(cases.end(),
+                         {{"latest", MAX_TIMESTAMP, 0},
+                          {"ttl", MAX_TIMESTAMP, Timestamp(rows / 2 - 1)},
+                          {"history_and_ttl",
+                           Timestamp(rows * 3 / 4 - 1),
+                           Timestamp(rows / 4 - 1)},
+                          {"all_expired", MAX_TIMESTAMP, Timestamp(rows - 1)}});
+        }
+        BitsetType mask(rows);
+        BitsetTypeView view(mask);
+        for (const auto& c : cases) {
+            SCOPED_TRACE(fmt::format("rows={}, case={}", rows, c.name));
+            mask.reset();
+            mask[17] = true;
+            internal->mask_with_timestamps(view, c.query, c.ttl);
+            int64_t expected_count = 0;
+            for (int64_t i = 0; i < rows; ++i) {
+                bool excluded = Timestamp(i) > c.query ||
+                                (c.ttl > 0 && Timestamp(i) <= c.ttl);
+                ASSERT_EQ(mask[i], excluded || i == 17) << "row=" << i;
+                expected_count += excluded;
+            }
+            auto measure = [&](int iterations) {
+                for (int i = 0; i < 64; ++i) {
+                    mask.reset();
+                    internal->mask_with_timestamps(view, c.query, c.ttl);
+                }
+                auto start = std::chrono::steady_clock::now();
+                for (int i = 0; i < iterations; ++i) {
+                    mask.reset();
+                    internal->mask_with_timestamps(view, c.query, c.ttl);
+                }
+                auto ns = std::chrono::duration<double, std::nano>(
+                              std::chrono::steady_clock::now() - start)
+                              .count();
+                EXPECT_EQ(mask.count(), expected_count);
+                return ns / iterations;
+            };
+            int iterations = static_cast<int>(
+                std::clamp(20000000.0 / measure(128), 512.0, 1000000.0));
+            std::vector<double> samples;
+            for (int round = 0; round < 9; ++round) {
+                samples.push_back(measure(iterations));
+            }
+            auto sorted = samples;
+            std::sort(sorted.begin(), sorted.end());
+            auto range = runtime->timestamp_index->get_active_range(c.query);
+            auto ttl_range =
+                c.ttl > 0 ? runtime->timestamp_index->get_active_range(c.ttl)
+                          : std::pair<int64_t, int64_t>{0, 0};
+            fmt::print(
+                "timestamp_benchmark rows={} case={} chunks={} "
+                "index_bytes={} query_grey_rows={} ttl_grey_rows={} "
+                "iterations={} "
+                "median_ns={:.1f} min_ns={:.1f} max_ns={:.1f} samples_ns=",
+                rows,
+                c.name,
+                runtime->timestamps->num_chunks(),
+                runtime->timestamp_index->memory_size(),
+                range.second - range.first,
+                ttl_range.second - ttl_range.first,
+                iterations,
+                sorted[4],
+                sorted.front(),
+                sorted.back());
+            for (double ns : samples) {
+                fmt::print("{:.1f},", ns);
+            }
+            fmt::print("\n");
+        }
+    }
+}
+
+TEST(ChunkedSegmentSealedStorageV2,
+     TimestampMaskBatchScanAcrossChunksAndUnalignedRange) {
+    constexpr int64_t kRows = 137;
+    constexpr Timestamp kBase = (Timestamp{1} << 63) - 80;
+    TimestampMaskChunkStorage chunk_storage;
+    std::vector<Timestamp> values(kRows);
+    for (int64_t i = 0; i < kRows; ++i) {
+        values[i] = kBase + static_cast<Timestamp>(i);
+    }
+    // Keep slice boundaries ordered, with out-of-order rows across a chunk edge.
+    std::swap(values[67], values[68]);
+
+    auto schema = MakeTimestampMaskTestSchema();
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 4096001, SegcoreConfig::default_config(), false);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto* segment_internal =
+        static_cast<SegmentInternalInterface*>(segment.get());
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = kRows;
+    runtime->timestamps = chunk_storage.MakeTimestampData(values, {7, 61, 69});
+    runtime->timestamp_index = MakeTimestampMaskTestIndex(values, {3, 129, 5});
+    ASSERT_EQ(runtime->timestamps->num_chunks(), 3);
+    ASSERT_EQ(runtime->timestamp_index->get_active_range(kBase + 67),
+              (std::pair<int64_t, int64_t>{3, 132}));
+    ASSERT_EQ(runtime->timestamp_index->get_active_range(kBase + 99),
+              (std::pair<int64_t, int64_t>{3, 132}));
+    sealed->TestPublishRuntimeResourceState(runtime);
+
+    BitsetType mask(kRows);
+    BitsetTypeView view(mask);
+    for (auto [query, ttl] : std::vector<std::pair<Timestamp, Timestamp>>{
+             {kBase + 99, 0},
+             {MAX_TIMESTAMP, kBase + 67},
+             {kBase + 99, kBase + 67}}) {
+        SCOPED_TRACE(fmt::format("query={}, ttl={}", query, ttl));
+        mask.reset();
+        mask[85] = true;
+        segment_internal->mask_with_timestamps(view, query, ttl);
+        for (int64_t i = 0; i < kRows; ++i) {
+            EXPECT_EQ(
+                mask[i],
+                i == 85 || values[i] > query || (ttl != 0 && values[i] <= ttl))
+                << "row=" << i;
+        }
+    }
+    EXPECT_FALSE(mask[67]);
+    EXPECT_TRUE(mask[68]);  // TTL is inclusive, even across the chunk boundary.
+    EXPECT_FALSE(mask[99]);  // MVCC is strict: timestamp > query timestamp.
+    EXPECT_TRUE(mask[100]);
+}
+
+TEST(ChunkedSegmentSealedStorageV2,
+     TimestampMaskBatchScanConstantAndEmptyData) {
+    constexpr int64_t kRows = 70;
+    constexpr Timestamp kValue = 42;
+    auto schema = MakeTimestampMaskTestSchema();
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 4096002, SegcoreConfig::default_config(), false);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto* segment_internal =
+        static_cast<SegmentInternalInterface*>(segment.get());
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = kRows;
+    runtime->timestamps = std::make_shared<TimestampData>();
+    runtime->timestamps->InitConstant(kRows, kValue);
+    auto index_values = std::vector<Timestamp>(kRows, kValue);
+    runtime->timestamp_index =
+        MakeTimestampMaskTestIndex(index_values, {kRows});
+    sealed->TestPublishRuntimeResourceState(runtime);
+
+    BitsetType mask(kRows);
+    BitsetTypeView view(mask);
+
+    segment_internal->mask_with_timestamps(view, kValue, 0);
+    EXPECT_EQ(mask.count(), 0);
+
+    mask.reset();
+    segment_internal->mask_with_timestamps(view, kValue - 1, 0);
+    EXPECT_EQ(mask.count(), kRows);
+
+    mask.reset();
+    segment_internal->mask_with_timestamps(view, MAX_TIMESTAMP, kValue);
+    EXPECT_EQ(mask.count(), kRows);
+
+    mask.reset();
+    mask[13] = true;
+    segment_internal->mask_with_timestamps(view, MAX_TIMESTAMP, kValue - 1);
+    EXPECT_EQ(mask.count(), 1);
+    EXPECT_TRUE(mask[13]);
+
+    runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = 0;
+    runtime->timestamps = std::make_shared<TimestampData>();
+    runtime->timestamps->InitFromOwnedData({});
+    runtime->timestamp_index = std::make_shared<TimestampIndex>();
+    sealed->TestPublishRuntimeResourceState(runtime);
+    BitsetType empty_mask;
+    BitsetTypeView empty_view(empty_mask);
+    segment_internal->mask_with_timestamps(empty_view, MAX_TIMESTAMP, kValue);
+    EXPECT_EQ(empty_mask.count(), 0);
+
+    // A nonempty published segment must have timestamp data with its index.
+    runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = kRows;
+    runtime->timestamps.reset();
+    sealed->TestPublishRuntimeResourceState(runtime);
+    EXPECT_THROW(segment_internal->mask_with_timestamps(view, MAX_TIMESTAMP, 0),
+                 SegcoreError);
+}
+
+TEST(ChunkedSegmentSealedStorageV2, TimestampMaskBatchScanUsesCommitTimestamp) {
+    constexpr int64_t kRows = 70;
+    constexpr Timestamp kCommit = 1000;
+    auto schema = MakeTimestampMaskTestSchema();
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 4096003, SegcoreConfig::default_config(), false);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto* segment_internal =
+        static_cast<SegmentInternalInterface*>(segment.get());
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = kRows;
+    runtime->timestamps = std::make_shared<TimestampData>();
+    runtime->timestamps->InitFromOwnedData(
+        std::vector<Timestamp>(kRows, kCommit + 100));
+    auto index_values = std::vector<Timestamp>(kRows, kCommit + 100);
+    runtime->timestamp_index =
+        MakeTimestampMaskTestIndex(index_values, {kRows});
+    ASSERT_EQ(runtime->timestamp_index->get_active_range(kCommit),
+              (std::pair<int64_t, int64_t>{0, 0}));
+    sealed->TestPublishRuntimeResourceState(runtime);
+    // The override applies to all rows even when the existing index was built
+    // from different timestamps and would not select a grey zone.
+    sealed->SetCommitTimestamp(kCommit);
+
+    BitsetType mask(kRows);
+    BitsetTypeView view(mask);
+    mask[7] = true;
+    segment_internal->mask_with_timestamps(view, kCommit, 0);
+    EXPECT_EQ(mask.count(), 1);
+    EXPECT_TRUE(mask[7]);
+
+    mask.reset();
+    segment_internal->mask_with_timestamps(view, MAX_TIMESTAMP, kCommit);
+    EXPECT_EQ(mask.count(), kRows);
+
+    mask.reset();
+    segment_internal->mask_with_timestamps(view, kCommit - 1, 0);
+    EXPECT_EQ(mask.count(), kRows);
 }
 
 TEST_P(TestLazyManifest, LazyManifestPkTasksUseRegularLoad) {
