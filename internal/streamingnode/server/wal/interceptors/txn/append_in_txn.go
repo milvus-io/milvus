@@ -95,7 +95,8 @@ type InTxnResult struct {
 //     failed CommitTxn followed by a persisted RollbackTxn, is reported as
 //     NotCommitted.
 //   - main is a CommitTxn: extras are appended as bodies of that transaction, then
-//     main. If an extra fails, main is not appended and nothing is rolled back,
+//     main. A nonzero BodyCnt of main is raised by the number of extras on a copy,
+//     so main itself is not modified. If an extra fails, main is not appended and nothing is rolled back,
 //     because the transaction belongs to the client. That failure is reported as
 //     NotCommitted. A failure of main itself is not.
 //
@@ -270,12 +271,31 @@ func appendExtrasThenCommit(ctx context.Context, appendOp AppendOp, commit messa
 			return nil, markNotCommitted(err)
 		}
 	}
+	commit = withExtraBodies(commit, len(extras))
 	commitID, err := appendOp(ctx, commit)
 	if err != nil {
 		return nil, err
 	}
 	appended := commit.IntoImmutableMessage(commitID)
 	return &InTxnResult{Main: appended, Commit: appended}, nil
+}
+
+// withExtraBodies returns the CommitTxn to append after n extra bodies. The
+// client counted only its own bodies in BodyCnt, and the timetick interceptor
+// rejects a CommitTxn whose nonzero BodyCnt differs from the bodies appended in
+// the session. The count is raised on a copy, so that a redo of the original
+// CommitTxn counts the extras of its own attempt only. A BodyCnt of 0 turns the
+// check off and is kept.
+func withExtraBodies(commit message.MutableMessage, n int) message.MutableMessage {
+	if n == 0 || message.MustAsMutableCommitTxnMessageV2(commit).Header().GetBodyCnt() == 0 {
+		return commit
+	}
+	cloned := message.CloneMutableMessage(commit)
+	specialized := message.MustAsMutableCommitTxnMessageV2(cloned)
+	header := specialized.Header()
+	header.BodyCnt += uint64(n)
+	specialized.OverwriteHeader(header)
+	return cloned
 }
 
 // selfBuiltTxnError replaces an error that reports the refusal or the end of the

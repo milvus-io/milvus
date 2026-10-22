@@ -298,7 +298,8 @@ func TestPKIndexChainClientTxn(t *testing.T) {
 	require.NoError(t, err)
 	_, err = w.Append(ctx, newPKChainInsert([]int64{5}, nil).WithTxnContext(*begin.TxnCtx))
 	require.NoError(t, err)
-	commit, err := w.Append(ctx, newPKChainCommitTxn(*begin.TxnCtx))
+	// the client counts its one body. The companion delete is one more.
+	commit, err := w.Append(ctx, newPKChainCommitTxn(*begin.TxnCtx, 1))
 	require.NoError(t, err)
 
 	_, err = w.Append(ctx, newPKChainInsert([]int64{7}, pkChainLastMarker()))
@@ -329,7 +330,7 @@ func TestPKIndexChainUpsertLikeTxn(t *testing.T) {
 	require.NoError(t, err)
 	_, err = w.Append(ctx, newPKChainInsert([]int64{6}, nil).WithTxnContext(*begin.TxnCtx))
 	require.NoError(t, err)
-	commit, err := w.Append(ctx, newPKChainCommitTxn(*begin.TxnCtx))
+	commit, err := w.Append(ctx, newPKChainCommitTxn(*begin.TxnCtx, 2))
 	require.NoError(t, err)
 
 	_, err = w.Append(ctx, newPKChainInsert([]int64{7}, pkChainLastMarker()))
@@ -497,10 +498,13 @@ func newPKChainBeginTxn() message.MutableMessage {
 		MustBuildMutable()
 }
 
-func newPKChainCommitTxn(txnCtx message.TxnContext) message.MutableMessage {
+// newPKChainCommitTxn builds the CommitTxn of a client transaction with bodyCnt
+// bodies. The streaming producer sets the count, and the timetick interceptor
+// rejects a CommitTxn whose count differs from the appended bodies.
+func newPKChainCommitTxn(txnCtx message.TxnContext, bodyCnt uint64) message.MutableMessage {
 	return message.NewCommitTxnMessageBuilderV2().
 		WithVChannel(testVChannel).
-		WithHeader(&message.CommitTxnMessageHeader{}).
+		WithHeader(&message.CommitTxnMessageHeader{BodyCnt: bodyCnt}).
 		WithBody(&message.CommitTxnMessageBody{}).
 		MustBuildMutable().
 		WithTxnContext(txnCtx)

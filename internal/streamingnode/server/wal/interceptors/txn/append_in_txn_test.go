@@ -423,6 +423,36 @@ func TestAppendInTxnCommit(t *testing.T) {
 	require.NotNil(t, appendResult.TxnCtx)
 }
 
+// A client counts its own bodies in BodyCnt. The appended CommitTxn counts the
+// extras too, and the CommitTxn of the client is not modified, so a redo counts
+// the extras once again. A BodyCnt of 0 turns the check off and stays 0.
+func TestAppendInTxnCommitCountsTheExtras(t *testing.T) {
+	bodyCntOf := func(msg message.BasicMessage) uint64 {
+		return message.MustAsMutableCommitTxnMessageV2(msg.(message.MutableMessage)).Header().GetBodyCnt()
+	}
+	commit := newTestCommit()
+	header := message.MustAsMutableCommitTxnMessageV2(commit).Header()
+	header.BodyCnt = 3
+	message.MustAsMutableCommitTxnMessageV2(commit).OverwriteHeader(header)
+
+	for attempt := 0; attempt < 2; attempt++ {
+		f := newFakeAppender()
+		ctx, _ := newTestAppendContext()
+		_, err := AppendInTxn(ctx, f.append, commit, []message.MutableMessage{newTestDelete(), newTestDelete()})
+		require.NoError(t, err)
+		require.Equal(t, uint64(5), bodyCntOf(f.appended[2]))
+		require.Equal(t, uint64(3), bodyCntOf(commit))
+	}
+
+	f := newFakeAppender()
+	ctx, _ := newTestAppendContext()
+	legacy := newTestCommit()
+	_, err := AppendInTxn(ctx, f.append, legacy, []message.MutableMessage{newTestDelete()})
+	require.NoError(t, err)
+	require.Same(t, legacy, f.appended[1])
+	require.Zero(t, bodyCntOf(f.appended[1]))
+}
+
 func TestAppendInTxnCommitExtraFailure(t *testing.T) {
 	expired := status.NewTransactionExpired("x")
 	f := newFakeAppender()
