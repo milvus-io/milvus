@@ -298,6 +298,16 @@ func (mp *MilvusProcess) GetNodeID() int64 {
 	return mp.nodeID
 }
 
+// GetMetricsAddr returns the host:port of the process's metrics/HTTP server,
+// or "" when the process was not given a METRICS_PORT.
+func (mp *MilvusProcess) GetMetricsAddr() string {
+	port := mp.env["METRICS_PORT"]
+	if port == "" {
+		return ""
+	}
+	return "127.0.0.1:" + port
+}
+
 // IsWorking returns true if the Milvus process is working
 func (mp *MilvusProcess) IsWorking() bool {
 	return !mp.graceful.IsClosed()

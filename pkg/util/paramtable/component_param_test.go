@@ -431,6 +431,22 @@ func TestComponentParam_LazyColumnGroupEnabled(t *testing.T) {
 	assert.False(t, item.GetAsBool())
 }
 
+func TestComponentParam_MaterializeEnabled(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.ProxyCfg.MaterializeEnabled
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "proxy.materialize.enabled", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.False(t, item.Export)
+	assert.Nil(t, item.VersionGateSwitcher)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, params.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+}
+
 func TestComponentParam_IDFLazyLoadSealedStats(t *testing.T) {
 	Init()
 	params := Get()

@@ -42,6 +42,7 @@ type Worker interface {
 	DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error)
 	SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
 	QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
+	MaterializeSegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error)
 	QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error)
@@ -208,6 +209,10 @@ func (w *remoteWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	}
 
 	return ret, err
+}
+
+func (w *remoteWorker) MaterializeSegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	return w.getClient().MaterializeSegments(ctx, req)
 }
 
 func (w *remoteWorker) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {

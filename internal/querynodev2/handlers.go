@@ -159,50 +159,84 @@ func (node *QueryNode) reopenSegments(ctx context.Context, req *querypb.LoadSegm
 	return merr.Success()
 }
 
-func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryRequest, channel string) (*internalpb.RetrieveResults, error) {
+// delegatorRead is a delegator-side read of one channel (Query and
+// Materialize): the prologue and the metrics both share.
+type delegatorRead struct {
+	// ctx carries the query label; queryCtx, derived from it, is canceled
+	// when the read ends, canceling the in-flight worker calls.
+	ctx      context.Context
+	queryCtx context.Context
+	cancel   context.CancelFunc
+	log      *mlog.Logger
+	sd       delegator.ShardDelegator
+	tr       *timerecord.TimeRecorder
+
+	nodeID, queryLabel, collectionID string
+}
+
+// beginDelegatorRead starts a read of channel: it counts the request,
+// derives the contexts and finds the channel's delegator. rpc names the
+// read in logs. The caller must call end once the read is done, unless an error
+// is returned.
+func (node *QueryNode) beginDelegatorRead(ctx context.Context, req *querypb.QueryRequest, channel, rpc string) (*delegatorRead, error) {
 	queryLabel := req.GetReq().GetQueryLabel()
 	if queryLabel == "" {
 		queryLabel = metrics.QueryLabel
 	}
 	ctx = contextutil.WithQueryLabel(ctx, queryLabel)
-	msgID := req.Req.Base.GetMsgID()
-	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
-	log := mlog.With(
-		mlog.Int64("msgID", msgID),
-		mlog.FieldCollectionID(req.GetReq().GetCollectionID()),
-		mlog.String("channel", channel),
-		mlog.String("scope", req.GetScope().String()),
-		mlog.String("queryLabel", queryLabel),
-	)
-
-	var err error
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.TotalLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
-	defer func() {
-		if err != nil {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.FailLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
-		}
-		metrics.QueryNodePartialResultCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
-	}()
-
-	log.Debug(ctx, "start do query with channel",
-		mlog.Int64s("segmentIDs", req.GetSegmentIDs()),
-	)
-	// add cancel when error occurs
-	queryCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// From Proxy
-	tr := timerecord.NewTimeRecorder("queryDelegator")
-	// get delegator
+	r := &delegatorRead{
+		ctx:          ctx,
+		nodeID:       fmt.Sprint(node.GetNodeID()),
+		queryLabel:   queryLabel,
+		collectionID: fmt.Sprint(req.GetReq().GetCollectionID()),
+		log: mlog.With(
+			mlog.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+			mlog.FieldCollectionID(req.GetReq().GetCollectionID()),
+			mlog.String("channel", channel),
+			mlog.String("scope", req.GetScope().String()),
+			mlog.String("queryLabel", queryLabel),
+			mlog.String("rpc", rpc),
+		),
+	}
+	metrics.QueryNodeSQCount.WithLabelValues(r.nodeID, queryLabel, metrics.TotalLabel, metrics.Leader, r.collectionID).Inc()
+	r.log.Debug(ctx, "start do query with channel", mlog.Int64s("segmentIDs", req.GetSegmentIDs()))
+	r.queryCtx, r.cancel = context.WithCancel(ctx)
+	r.tr = timerecord.NewTimeRecorder("queryDelegator")
 	sd, ok := node.delegators.Get(channel)
 	if !ok {
 		err := merr.WrapErrChannelNotFound(channel)
-		log.Warn(ctx, "Query failed, failed to get shard delegator for query", mlog.Err(err))
+		r.log.Warn(ctx, "Query failed, failed to get shard delegator for query", mlog.Err(err))
+		r.end(err)
 		return nil, err
 	}
+	r.sd = sd
+	return r, nil
+}
+
+// end records the read's outcome: the fail count on err, else the latency
+// and the success count, and the partial result count either way.
+func (r *delegatorRead) end(err error) {
+	r.cancel()
+	if err != nil {
+		metrics.QueryNodeSQCount.WithLabelValues(r.nodeID, r.queryLabel, metrics.FailLabel, metrics.Leader, r.collectionID).Inc()
+	} else {
+		metrics.QueryNodeSQReqLatency.WithLabelValues(r.nodeID, r.queryLabel, metrics.Leader).Observe(float64(r.tr.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(r.nodeID, r.queryLabel, metrics.SuccessLabel, metrics.Leader, r.collectionID).Inc()
+	}
+	metrics.QueryNodePartialResultCount.WithLabelValues(r.nodeID, r.queryLabel, r.collectionID).Inc()
+}
+
+func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryRequest, channel string) (resp *internalpb.RetrieveResults, err error) {
+	r, err := node.beginDelegatorRead(ctx, req, channel, "Query")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { r.end(err) }()
+	ctx, log, tr := r.ctx, r.log, r.tr
+	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 
 	// do query
-	results, err := sd.Query(queryCtx, req)
+	results, err := r.sd.Query(r.queryCtx, req)
 	if err != nil {
 		log.Warn(ctx, "failed to query on delegator", mlog.Err(err))
 		return nil, err
@@ -225,45 +259,23 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
 	}()
 
-	resp, err := segments.RunDelegatorQueryPipeline(ctx, req, collection.Schema(), results)
+	resp, err = segments.RunDelegatorQueryPipeline(ctx, req, collection.Schema(), results)
 	if err != nil {
 		return nil, err
 	}
 	// The delegator fixed this snapshot before querying any segments. Reading
 	// tSafe again here could report a newer snapshot than the returned data.
 	resp.MvccTimestamp = req.GetReq().GetMvccTimestamp()
-	// aggregate cost
-	requestCosts := lo.FilterMap(results, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
-		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
-			return result.GetCostAggregation(), true
-		}
-
-		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
-			return result.GetCostAggregation(), true
-		}
-
-		return nil, false
-	})
-	resp.CostAggregation = segmentutil.MergeRequestCost(requestCosts)
-	if resp.CostAggregation == nil {
-		resp.CostAggregation = &internalpb.CostAggregation{}
-	}
-	relatedDataSize := lo.SumBy(results, func(t *internalpb.RetrieveResults) int64 {
-		cost := t.GetCostAggregation()
-		if cost == nil {
-			return 0
-		}
-		return cost.GetTotalRelatedDataSize()
-	})
-	resp.CostAggregation.TotalRelatedDataSize = relatedDataSize
+	resp.CostAggregation = segmentutil.AggregateWorkerCosts(results,
+		func(result *internalpb.RetrieveResults) (int64, *internalpb.CostAggregation) {
+			return result.GetBase().GetSourceID(), result.GetCostAggregation()
+		},
+		paramtable.GetNodeID(),
+		paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool())
 	tr.CtxElapse(ctx, fmt.Sprintf("do query with channel done , vChannel = %s, segmentIDs = %v",
 		channel,
 		req.GetSegmentIDs(),
 	))
-
-	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.SuccessLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 	resp.Status = merr.Success()
 	return resp, nil
 }

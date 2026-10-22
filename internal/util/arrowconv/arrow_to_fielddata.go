@@ -355,18 +355,24 @@ func resolveVectorDim(schema *schemapb.FieldSchema, arr *array.FixedSizeBinary) 
 	if err == nil {
 		return dim
 	}
+	return VectorDimFromByteWidth(schema.GetDataType(), arr.DataType().(*arrow.FixedSizeBinaryType).ByteWidth)
+}
 
-	byteWidth := arr.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
-	var fallback int64
-	switch schema.GetDataType() {
+// VectorDimFromByteWidth is the dim of a dense vector of type dt whose
+// values are byteWidth bytes each: the fallback when the field schema
+// carries no usable dim. 0 for a type it does not cover.
+func VectorDimFromByteWidth(dt schemapb.DataType, byteWidth int) int64 {
+	switch dt {
 	case schemapb.DataType_FloatVector:
-		fallback = int64(byteWidth / 4)
+		return int64(byteWidth / 4)
 	case schemapb.DataType_BinaryVector:
-		fallback = int64(byteWidth * 8)
+		return int64(byteWidth * 8)
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		fallback = int64(byteWidth / 2)
+		return int64(byteWidth / 2)
+	case schemapb.DataType_Int8Vector:
+		return int64(byteWidth)
 	}
-	return fallback
+	return 0
 }
 
 func bytesVectorFieldData(arr *array.FixedSizeBinary, schema *schemapb.FieldSchema, numRows int) *schemapb.FieldData_Vectors {
