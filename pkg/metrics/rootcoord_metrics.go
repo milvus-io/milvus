@@ -300,6 +300,12 @@ func CleanupRootCoordDBMetrics(dbName string) {
 	})
 }
 
+func CleanupRootCoordLoadedEntityMetrics() {
+	RootCoordNumEntities.DeletePartialMatch(prometheus.Labels{
+		statusLabelName: LoadedLabel,
+	})
+}
+
 func CleanupRootCoordCollectionMetrics(dbName string, collectionName string) {
 	RootCoordNumEntities.DeletePartialMatch(prometheus.Labels{
 		databaseLabelName: dbName,
