@@ -14,6 +14,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/OriginalCohereFixture.h"
 
 namespace milvus::exec {
 namespace {
@@ -35,14 +36,16 @@ class OriginalOffsetReaderTest : public testing::Test {
     void
     SetUp() override {
         const auto* path = std::getenv("MILVUS_LOOKUP_VIEWS_FIXTURE");
-        if (!path)
-            GTEST_SKIP() << "verified original-ID fixture not configured";
-        std::ifstream stream(path);
-        ASSERT_TRUE(stream.good());
-        for (std::string line; std::getline(stream, line);) {
-            ids.push_back(nlohmann::json::parse(line).at(0).get<int64_t>());
+        if (path) {
+            std::ifstream stream(path);
+            ASSERT_TRUE(stream.good());
+            for (std::string line; std::getline(stream, line);) {
+                ids.push_back(nlohmann::json::parse(line).at(0).get<int64_t>());
+            }
+        } else {
+            ids = LoadOriginalCohereIds();
         }
-        ASSERT_EQ(ids.size(), 65536);
+        ASSERT_GE(ids.size(), 1024);
         char directory[] = "/tmp/milvus-offset-reader-XXXXXX";
         ASSERT_NE(mkdtemp(directory), nullptr);
         storage::LocalChunkManagerSingleton::GetInstance().Init(directory);
@@ -73,7 +76,8 @@ class OriginalOffsetReaderTest : public testing::Test {
         for (size_t first = 0; first < ids.size();) {
             auto count = std::min(
                 ids.size() - first,
-                irregular ? size_t(997 + lengths.size() % 7) : size_t(1024));
+                irregular ? std::min<size_t>(997, ids.size() / 8) + lengths.size() % 7
+                          : std::min<size_t>(1024, ids.size() / 8));
             std::unordered_map<FieldId, std::shared_ptr<Chunk>> fields;
             fields.emplace(FieldId(100),
                            std::make_shared<FixedWidthChunk>(
@@ -120,11 +124,21 @@ class OriginalOffsetReaderTest : public testing::Test {
         }
         std::shared_ptr<const ChunkedColumnInterface>
         CaptureOffsetColumn(FieldId) const override {
+            if (fault == 1) {
+                throw std::runtime_error("injected original scalar read failure");
+            }
+            if (fault == 2) {
+                throw folly::FutureCancellation();
+            }
+            if (fault == 3) {
+                ThrowInfo(ExprInvalid, "injected classified scalar read failure");
+            }
             ++captures;
             return column;
         }
         std::shared_ptr<ProxyChunkColumn> column;
         mutable size_t captures{0};
+        int fault{0};
     };
 
     class Reader : public SegmentExpr {
@@ -137,7 +151,7 @@ class OriginalOffsetReaderTest : public testing::Test {
                           FieldId(100),
                           {},
                           DataType::INT64,
-                          65536,
+                          segment->column->NumRows(),
                           1024,
                           0) {
         }
@@ -160,6 +174,9 @@ class OriginalOffsetReaderTest : public testing::Test {
         bool raw{true}, indexed{false};
         bool
         HasFieldData(FieldId) const override {
+            if (fail_prepare) {
+                throw std::runtime_error("injected expression preparation failure");
+            }
             return raw;
         }
         bool
@@ -171,6 +188,20 @@ class OriginalOffsetReaderTest : public testing::Test {
             return raw ? column->num_chunks() : 0;
         }
         int64_t
+        num_chunk(FieldId) const override {
+            return column->num_chunks();
+        }
+        PinWrapper<SpanBase>
+        chunk_data_impl(milvus::OpContext* context, FieldId,
+                        int64_t chunk) const override {
+            return column->Span(context, chunk);
+        }
+        void
+        prefetch_chunks(milvus::OpContext* context, FieldId,
+                        const std::vector<int64_t>& chunks) const override {
+            column->PrefetchChunks(context, chunks);
+        }
+        int64_t
         chunk_size(FieldId, int64_t chunk) const override {
             return column->chunk_row_nums(chunk);
         }
@@ -178,6 +209,7 @@ class OriginalOffsetReaderTest : public testing::Test {
         num_rows_until_chunk(FieldId, int64_t chunk) const override {
             return column->GetNumRowsUntilChunk(chunk);
         }
+        bool fail_prepare{false};
     };
 
     static expr::TypedExprPtr
@@ -229,9 +261,9 @@ TEST_F(OriginalOffsetReaderTest, ActualSamplerSharedAndSeparateFieldGroups) {
     for (auto op : {expr::LogicalBinaryExpr::OpType::And,
                     expr::LogicalBinaryExpr::OpType::Or}) {
         auto same = std::make_shared<expr::LogicalBinaryExpr>(
-            op, Mod(), Range(ids[32768]));
+            op, Mod(), Range(ids[ids.size() / 2]));
         auto shared = std::make_shared<expr::LogicalBinaryExpr>(
-            op, Mod(), Range(ids[32768], FieldId(101)));
+            op, Mod(), Range(ids[ids.size() / 2], FieldId(101)));
         auto physical = CompileExpression(shared, &query, {}, true);
         ASSERT_NE(physical->OffsetSamplingColumn(), nullptr);
         const auto a = SampleOffsetFilterRatio(same, &exec);
@@ -249,7 +281,7 @@ TEST_F(OriginalOffsetReaderTest, ActualSamplerSharedAndSeparateFieldGroups) {
     for (auto op : {expr::LogicalBinaryExpr::OpType::And,
                     expr::LogicalBinaryExpr::OpType::Or}) {
         auto logical = std::make_shared<expr::LogicalBinaryExpr>(
-            op, Mod(), Range(ids[32768], FieldId(101)));
+            op, Mod(), Range(ids[ids.size() / 2], FieldId(101)));
         EXPECT_EQ(CompileExpression(logical, &query, {}, true)
                       ->OffsetSamplingColumn(),
                   nullptr);
@@ -266,7 +298,7 @@ TEST_F(OriginalOffsetReaderTest, ActualSamplerWholeExpressionOneCell) {
     for (bool irregular : {false, true}) {
         auto column = Column(irregular);
         SamplingSegment segment(schema, column);
-        for (const int active : {7, 65536}) {
+        for (const int active : {7, static_cast<int>(ids.size())}) {
             for (const int requested : {10, 20}) {
                 for (auto op : {Op::And, Op::Or}) {
                     for (uint64_t timestamp : {1, 17, 1001}) {
@@ -443,6 +475,94 @@ TEST_F(OriginalOffsetReaderTest, DiagnosticCallbackPreservesOriginalMasks) {
     }
 }
 
+TEST_F(OriginalOffsetReaderTest, CallbackPreservesReadAndCancellationExceptions) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("original_id", DataType::INT64);
+    using Status = knowhere::CandidateEvalStatus;
+    for (int fault : {1, 2, 3}) {
+        SamplingSegment segment(schema, Column(false));
+        QueryContext query("callback-original-failure", &segment, ids.size(), 17);
+        ExecContext exec(&query);
+        OffsetExpressionCallback callback(Mod(), &exec, ids.size());
+        const auto view = callback.view();
+        void* worker = nullptr;
+        ASSERT_EQ(view.create_worker(view.context, &worker), Status::Success);
+        segment.fault = fault;
+        const int32_t offset = 0;
+        uint64_t accepted = 0;
+        EXPECT_EQ(view.eval_batch(worker, &offset, 1, 1, &accepted), Status::Failed);
+        view.destroy_worker(worker);
+        if (fault == 2) {
+            EXPECT_THROW(callback.RethrowIfFailed(), folly::FutureCancellation);
+        } else if (fault == 3) {
+            try {
+                callback.RethrowIfFailed();
+                FAIL() << "lost original SegcoreError";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::ExprInvalid);
+                EXPECT_NE(std::string(error.what()).find("injected classified scalar read failure"), std::string::npos);
+            }
+        } else {
+            try {
+                callback.RethrowIfFailed();
+                FAIL() << "lost original read exception";
+            } catch (const std::runtime_error& error) {
+                EXPECT_STREQ(error.what(), "injected original scalar read failure");
+            }
+        }
+        // The next query owns a fresh failure state; no stale failure leaks.
+        segment.fault = 0;
+        OffsetExpressionCallback next(Mod(), &exec, ids.size());
+        const auto next_view = next.view();
+        ASSERT_EQ(next_view.create_worker(next_view.context, &worker), Status::Success);
+        EXPECT_EQ(next_view.eval_batch(worker, &offset, 1, 1, &accepted), Status::Success);
+        next_view.destroy_worker(worker);
+        EXPECT_NO_THROW(next.RethrowIfFailed());
+    }
+}
+
+TEST_F(OriginalOffsetReaderTest, UnsupportedEntryMaterializesNormalSequentialExpr) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("original_id", DataType::INT64);
+    SamplingSegment segment(schema, Column(true));
+    QueryContext query("deferred-baseline", &segment, ids.size(), 17);
+    ExecContext exec(&query);
+    // Use fresh state for the normal sequential path, not point-test loops or
+    // the cursor already consumed by a sampled/candidate evaluation.
+    auto expression=std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, Mod(), Range(ids[ids.size()/2]));
+    OffsetExpressionCallback callback(expression, &exec, ids.size());
+    const auto descriptor=callback.view();
+    void* worker=nullptr;
+    ASSERT_EQ(descriptor.create_worker(descriptor.context,&worker),
+              knowhere::CandidateEvalStatus::Success);
+    const int32_t offset=0;
+    uint64_t accepted=0;
+    ASSERT_EQ(descriptor.eval_batch(worker,&offset,1,1,&accepted),
+              knowhere::CandidateEvalStatus::Success);
+    descriptor.destroy_worker(worker);
+    const auto bitmap=callback.EvalBaseline();
+    ASSERT_EQ(bitmap.size(),ids.size());
+    for (size_t i=0;i<ids.size();++i)
+        EXPECT_EQ(bitmap[i],ids[i]%5<3 && ids[i]>=ids[ids.size()/2]);
+    EXPECT_NO_THROW(callback.RethrowIfFailed());
+}
+
+TEST_F(OriginalOffsetReaderTest, CallbackPreservesPreparationException) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("original_id", DataType::INT64);
+    SamplingSegment segment(schema, Column(false));
+    QueryContext query("callback-prepare-failure", &segment, ids.size(), 17);
+    ExecContext exec(&query);
+    OffsetExpressionCallback callback(Mod(), &exec, ids.size());
+    segment.fail_prepare = true;
+    const auto view = callback.view();
+    void* worker = nullptr;
+    EXPECT_EQ(view.create_worker(view.context, &worker), knowhere::CandidateEvalStatus::Failed);
+    EXPECT_EQ(worker, nullptr);
+    EXPECT_THROW(callback.RethrowIfFailed(), std::runtime_error);
+}
+
 TEST_F(OriginalOffsetReaderTest, DiagnosticReaderCountsActualSourcePath) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("original_id", DataType::INT64);
@@ -452,7 +572,9 @@ TEST_F(OriginalOffsetReaderTest, DiagnosticReaderCountsActualSourcePath) {
     ExecContext exec(&query);
     PreparedOffsetExpressionEvaluator prepared(Mod(), &exec, true);
     auto worker = prepared.CreateWorkspace();
-    OffsetVector offsets{0, 997, 2000, 65535};
+    OffsetVector offsets{0, static_cast<int32_t>(ids.size() / 3),
+                         static_cast<int32_t>(ids.size() / 2),
+                         static_cast<int32_t>(ids.size() - 1)};
     FilterDiagnostics stats;
     {
         FilterDiagnosticScope scope(&stats);
@@ -571,10 +693,11 @@ TEST_F(OriginalOffsetReaderTest, AllArithmeticOpsUseSharedReader) {
         };
         // Exercise both outcomes using predicate constants, never altered
         // scalar values. Values in the original source remain untouched.
-        check.template operator()<proto::plan::Add>(32768);
-        check.template operator()<proto::plan::Sub>(32768);
-        check.template operator()<proto::plan::Mul>(163840);
-        check.template operator()<proto::plan::Div>(6553);
+        const auto midpoint = ids[ids.size() / 2];
+        check.template operator()<proto::plan::Add>(midpoint + 5);
+        check.template operator()<proto::plan::Sub>(midpoint - 5);
+        check.template operator()<proto::plan::Mul>(midpoint * 5);
+        check.template operator()<proto::plan::Div>(midpoint / 5);
         check.template operator()<proto::plan::Mod>(3);
     }
 }

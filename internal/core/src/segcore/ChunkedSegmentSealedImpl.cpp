@@ -79,6 +79,7 @@
 #include "common/TypeTraits.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "common/DeferredFilter.h"
 #include "common/VectorArray.h"
 #include "common/resource_c.h"
 #include "common/type_c.h"
@@ -3683,9 +3684,11 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(
             get_bit(snapshot->field_data_ready_bitset, field_id),
             "Field Data is not loaded: " + std::to_string(field_id.get()));
-        AssertInfo(
-            bitset.candidate_evaluator() == nullptr,
-            "ann_fusing demo: loaded graph disappeared; BF is unsupported");
+        if (bitset.candidate_evaluator() != nullptr) {
+            // This is the actual runtime snapshot, not a guessed backend at
+            // planning time. No search has started: request baseline bitmap.
+            throw DeferredFilterUnsupported("raw-column search requires a materialized filter");
+        }
         auto row_count = runtime != nullptr ? runtime->row_count : 0;
         AssertInfo(row_count > 0, "Can't get row count value");
         auto vec_data = get_column(snapshot->runtime, field_id);

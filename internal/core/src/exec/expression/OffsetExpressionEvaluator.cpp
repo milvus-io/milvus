@@ -87,6 +87,13 @@ OffsetExpressionWorkspace::EvalOffsets(OffsetVector& row_ids) {
     return output;
 }
 
+TargetBitmap
+OffsetExpressionWorkspace::EvalAllRows(int64_t row_count) {
+    EvalCtx context(exec_context_);
+    return EvalExprSetOverAllBatches(expr_set_, context, row_count,
+                                    "DeferredFilterBaseline");
+}
+
 OffsetExpressionTruth
 OffsetExpressionWorkspace::EvalTruthBatch(const int32_t* row_ids,
                                           uint32_t count,

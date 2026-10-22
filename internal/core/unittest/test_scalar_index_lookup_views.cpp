@@ -21,6 +21,7 @@
 #include "exec/expression/ConjunctExpr.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "test_utils/OriginalCohereFixture.h"
 
 namespace milvus::index {
 namespace {
@@ -33,16 +34,39 @@ class ScalarIndexLookupViewsTest : public testing::Test {
     SetUp() override {
         const char* path = std::getenv("MILVUS_LOOKUP_VIEWS_FIXTURE");
         if (path == nullptr) {
-            GTEST_SKIP() << "verified original-data fixture not configured";
+            ids_ = LoadOriginalCohereIds();
+        } else {
+            std::ifstream input(path);
+            ASSERT_TRUE(input.good());
+            for (std::string line; std::getline(input, line);) {
+                auto row = nlohmann::json::parse(line);
+                ids_.push_back(row.at(0).get<int64_t>());
+                if (row.size() > 1) {
+                    strings_.push_back(row.at(1).get<std::string>());
+                }
+            }
         }
-        std::ifstream input(path);
-        ASSERT_TRUE(input.good());
-        for (std::string line; std::getline(input, line);) {
-            auto row = nlohmann::json::parse(line);
-            ids_.push_back(row.at(0).get<int64_t>());
-            strings_.push_back(row.at(1).get<std::string>());
+        // Independent native index fixtures, not a joined benchmark dataset:
+        // numeric values are original Cohere IDs; strings are original NQ.
+        if (strings_.empty()) {
+            const char* text_path = std::getenv("MILVUS_NQ_OFFSET_FIXTURE");
+            if (text_path) {
+                std::ifstream text_input(text_path);
+                ASSERT_TRUE(text_input.good());
+                for (std::string line; std::getline(text_input, line);) {
+                    strings_.push_back(
+                        nlohmann::json::parse(line).at("text").get<std::string>());
+                }
+            }
         }
-        ASSERT_EQ(ids_.size(), 65536);
+        ASSERT_GE(ids_.size(), 1024);
+        if (strings_.empty()) {
+            const auto name = std::string(testing::UnitTest::GetInstance()->current_test_info()->name());
+            if (name != "NumericNativeAndDefault" && name != "HybridDelegates") {
+                GTEST_SKIP() << "optional verified original-text fixture not configured; numeric coverage remains enabled";
+            }
+            return;
+        }
         ASSERT_EQ(strings_.size(), ids_.size());
     }
 
@@ -180,6 +204,9 @@ TEST_F(ScalarIndexLookupViewsTest, HybridDelegates) {
     HybridScalarIndex<int64_t> numbers(7);
     numbers.Build(ids_.size(), ids_.data());
     CheckBatch<int64_t>(numbers, ids_);
+    if (strings_.empty()) {
+        return;  // Original Cohere provides IDs, not manufactured text values.
+    }
     HybridScalarIndex<std::string> strings(7);
     strings.Build(strings_.size(), strings_.data());
     CheckBatch<std::string>(strings, strings_);

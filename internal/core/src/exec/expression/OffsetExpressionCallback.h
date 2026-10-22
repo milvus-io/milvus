@@ -2,6 +2,8 @@
 // license agreements. Licensed under the Apache License, Version 2.0.
 #pragma once
 
+#include <exception>
+#include <mutex>
 #include "exec/expression/OffsetExpressionEvaluator.h"
 #include "knowhere/candidate_evaluator.h"
 
@@ -19,8 +21,21 @@ class OffsetExpressionCallback final {
     knowhere::CandidateEvaluatorViewV1
     view() const;
 
+    // Call only after the synchronous search has joined all workers, including
+    // on backend failure. Original exceptions remain entirely inside Milvus.
+    void
+    RethrowIfFailed() const;
+
+    // Rare pre-search unsupported-entry fallback: the normal sequential Expr
+    // path, not N callback point tests and not a second predicate engine.
+    TargetBitmap
+    EvalBaseline() const;
+
  private:
     struct Worker;
+
+    void
+    CaptureException() const noexcept;
 
     static knowhere::CandidateEvalStatus
     CreateWorker(const void* context, void** output) noexcept;
@@ -40,6 +55,8 @@ class OffsetExpressionCallback final {
     bool debug_profile_{false};
     int64_t segment_id_{0};
     uint64_t query_timestamp_{0};
+    mutable std::mutex failure_mutex_;
+    mutable std::exception_ptr first_failure_;
 };
 
 }  // namespace milvus::exec

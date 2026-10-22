@@ -28,6 +28,7 @@
 #include "common/ArrayOffsets.h"
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
+#include "common/DeferredFilter.h"
 #include "common/QueryResult.h"
 #include "common/Tracer.h"
 #include "common/Utils.h"
@@ -227,14 +228,51 @@ PhyVectorSearchNode::GetOutput() {
     }
     milvus::SearchResult search_result;
     auto op_context = query_context_->get_op_context();
-    segment_->vector_search(search_info_,
+    try {
+        segment_->vector_search(search_info_,
                             src_data,
                             src_offsets,
                             num_queries,
                             query_timestamp_,
                             search_view,
                             op_context,
-                            search_result);
+                                search_result);
+    } catch (const DeferredFilterUnsupported&) {
+        const auto callback = query_context_->get_ann_fusing_callback();
+        AssertInfo(callback != nullptr, "bitmap fallback requires a deferred predicate");
+        callback->RethrowIfFailed();
+        auto baseline = callback->EvalBaseline();
+        baseline.flip();  // Expr TRUE bitmap -> search exclusion bitmap.
+        if (search_view.num_bits() != 0) {
+            AssertInfo(search_view.num_bits() == baseline.size(), "mandatory bitmap size mismatch");
+            TargetBitmapView mandatory(const_cast<uint8_t*>(search_view.mandatory_data()),
+                                        search_view.num_bits());
+            baseline.inplace_or(mandatory, baseline.size());
+        }
+        milvus::BitsetView baseline_view(
+            reinterpret_cast<const uint8_t*>(baseline.data()), baseline.size());
+        auto baseline_info = search_info_;
+        baseline_info.search_params_.erase("ann_fusing_filter_ratio");
+        // Only an explicit unsupported-before-search signal reaches here.
+        // The new runtime snapshot may differ; the exact bitmap is safe for
+        // either indexed or raw search. No index-type whitelist lives here.
+        segment_->vector_search(baseline_info, src_data, src_offsets,
+                                num_queries, query_timestamp_, baseline_view,
+                                op_context, search_result);
+        query_context_->set_ann_fusing_callback(nullptr);
+        LOG_DEBUG("ann_fusing fallback reason=entry_requires_bitmap");
+    } catch (...) {
+        // Backends join their task futures before returning either results or
+        // failure. Prefer the original Expr/storage/cancellation cause to a
+        // generic cross-ABI callback-failed status.
+        if (const auto& callback = query_context_->get_ann_fusing_callback()) {
+            callback->RethrowIfFailed();
+        }
+        throw;
+    }
+    if (const auto& callback = query_context_->get_ann_fusing_callback()) {
+        callback->RethrowIfFailed();
+    }
 
     search_result.total_data_cnt_ = data_cnt;
     search_result.element_level_ = ph.element_level_;

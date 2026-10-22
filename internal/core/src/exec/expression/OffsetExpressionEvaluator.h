@@ -53,6 +53,9 @@ class OffsetExpressionWorkspace final {
     std::shared_ptr<ColumnVector>
     EvalOffsets(OffsetVector& row_ids);
 
+    TargetBitmap
+    EvalAllRows(int64_t row_count);
+
     // Evaluate the active lanes in row_ids.  Inactive lanes are not read, so a
     // caller may leave their IDs unspecified.  count is limited to 64 to map
     // directly to the eventual callback ABI. This exact SQL truth entry is

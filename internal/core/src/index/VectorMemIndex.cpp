@@ -51,6 +51,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "common/DeferredFilter.h"
 #include "common/VectorArray.h"
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
@@ -815,6 +816,9 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             auto res = index_.Search(dataset, search_conf, bitset, op_context);
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
+                if (res.error() == knowhere::Status::deferred_filter_unsupported) {
+                    throw DeferredFilterUnsupported(res.what());
+                }
                 ThrowInfo(
                     ErrorCode::UnexpectedError,
                     // escape json brace in case of using message as format

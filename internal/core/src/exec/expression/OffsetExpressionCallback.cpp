@@ -15,6 +15,7 @@ namespace milvus::exec {
 using Status = knowhere::CandidateEvalStatus;
 
 struct OffsetExpressionCallback::Worker {
+    const OffsetExpressionCallback* owner;
     std::unique_ptr<OffsetExpressionWorkspace> workspace;
     int64_t row_count;
     bool debug_trace_offsets;
@@ -22,6 +23,33 @@ struct OffsetExpressionCallback::Worker {
     int64_t segment_id;
     uint64_t query_timestamp;
 };
+
+void
+OffsetExpressionCallback::CaptureException() const noexcept {
+    std::lock_guard<std::mutex> lock(failure_mutex_);
+    if (!first_failure_) {
+        first_failure_ = std::current_exception();
+    }
+}
+
+void
+OffsetExpressionCallback::RethrowIfFailed() const {
+    std::exception_ptr failure;
+    {
+        std::lock_guard<std::mutex> lock(failure_mutex_);
+        failure = first_failure_;
+    }
+    if (failure) {
+        std::rethrow_exception(failure);
+    }
+}
+
+TargetBitmap
+OffsetExpressionCallback::EvalBaseline() const {
+    RethrowIfFailed();
+    auto workspace = prepared_.CreateWorkspace();
+    return workspace->EvalAllRows(row_count_);
+}
 
 OffsetExpressionCallback::OffsetExpressionCallback(
     expr::TypedExprPtr expression, ExecContext* exec_context, int64_t row_count)
@@ -90,7 +118,8 @@ OffsetExpressionCallback::CreateWorker(const void* context,
             return Status::Failed;
         }
         prepare.Stop();
-        *output = new Worker{std::move(workspace),
+        *output = new Worker{&factory,
+                             std::move(workspace),
                              factory.row_count_,
                              factory.debug_trace_offsets_,
                              std::move(profile),
@@ -99,6 +128,7 @@ OffsetExpressionCallback::CreateWorker(const void* context,
         LOG_DEBUG("ann_fusing task workspace created");
         return Status::Success;
     } catch (...) {
+        factory.CaptureException();
         report_failure();
         return Status::Failed;
     }
@@ -226,6 +256,7 @@ OffsetExpressionCallback::EvalBatch(void* worker,
         }
         return Status::Success;
     } catch (...) {
+        state.owner->CaptureException();
         if (profile)
             ++profile->errors;
         return Status::Failed;

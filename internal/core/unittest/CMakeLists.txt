@@ -44,6 +44,9 @@ set(MILVUS_TEST_FILES
         test_timestamptz_arith_compare.cpp
         test_timestamptz_compare.cpp
         test_offsets_eval_correctness.cpp
+        test_offset_reader_original.cpp
+        test_ann_fusing_review.cpp
+        test_scalar_index_lookup_views.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
         test_search_group_by.cpp
@@ -150,6 +153,15 @@ endif()
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
         )
+
+# Original-data core regressions can be built/run without the unrelated broad
+# suite or private experiment fixture. Large backend sources are opt-in only.
+add_executable(ann_fusing_review_tests
+        test_offset_reader_original.cpp
+        test_scalar_index_lookup_views.cpp
+        test_ann_fusing_review.cpp)
+target_link_libraries(ann_fusing_review_tests PRIVATE
+        GTest::gtest GTest::gtest_main milvus_core milvus_conan_deps knowhere milvus-storage)
 
 target_link_libraries(all_tests
         GTest::gtest
