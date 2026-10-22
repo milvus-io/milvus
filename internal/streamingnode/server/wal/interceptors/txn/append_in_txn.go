@@ -19,6 +19,8 @@ package txn
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -29,6 +31,43 @@ import (
 // It has the same shape as interceptors.Append. The interceptors package imports
 // this package, so the type cannot be referenced from here.
 type AppendOp = func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
+
+// errNotCommitted marks an error of AppendInTxn after which the transaction is
+// known not to be committed. See NotCommitted.
+var errNotCommitted = errors.New("the transaction is not committed")
+
+// NotCommitted reports whether err, returned by AppendInTxn, guarantees that the
+// transaction did not commit, so that no message of the group takes effect.
+// For any other error of AppendInTxn the transaction may have committed.
+func NotCommitted(err error) bool {
+	return errors.Is(err, errNotCommitted)
+}
+
+func markNotCommitted(err error) error {
+	return errors.Mark(err, errNotCommitted)
+}
+
+// AllocatedTimeTick returns the largest time tick that a failed AppendInTxn call
+// assigned to one of its messages, or 0 when it assigned none. If the
+// transaction committed, it committed at a time tick up to that value.
+func AllocatedTimeTick(err error) uint64 {
+	var e *inTxnError
+	if errors.As(err, &e) {
+		return e.allocated
+	}
+	return 0
+}
+
+// inTxnError is an error of AppendInTxn that carries the largest time tick the
+// failed call assigned.
+type inTxnError struct {
+	err       error
+	allocated uint64
+}
+
+func (e *inTxnError) Error() string { return e.err.Error() }
+
+func (e *inTxnError) Unwrap() error { return e.err }
 
 // InTxnResult is the outcome of AppendInTxn.
 type InTxnResult struct {
@@ -51,10 +90,17 @@ type InTxnResult struct {
 //   - main is an autocommit DML message: BeginTxn, a copy of main, extras and
 //     CommitTxn are appended. main itself is never modified, so the caller can
 //     append it again after a redo. If any step after BeginTxn fails, a RollbackTxn
-//     is appended and the error is returned.
+//     is appended and the error is returned. Only this function appends the
+//     CommitTxn of that transaction, so a failure before the CommitTxn, or a
+//     failed CommitTxn followed by a persisted RollbackTxn, is reported as
+//     NotCommitted.
 //   - main is a CommitTxn: extras are appended as bodies of that transaction, then
 //     main. If an extra fails, main is not appended and nothing is rolled back,
-//     because the transaction belongs to the client.
+//     because the transaction belongs to the client. That failure is reported as
+//     NotCommitted. A failure of main itself is not.
+//
+// Any other error leaves the outcome unknown, and AllocatedTimeTick returns the
+// largest time tick at which the transaction may have committed.
 //
 // main must be the raw mutable message of the append chain and not a specialized
 // wrapper, because the copy of main is built from the raw message.
@@ -71,12 +117,25 @@ type InTxnResult struct {
 // TODO: when the client retries a CommitTxn, extras are appended again.
 func AppendInTxn(ctx context.Context, appendOp AppendOp, main message.MutableMessage, extras []message.MutableMessage) (*InTxnResult, error) {
 	if err := validateInTxnInput(main, extras); err != nil {
-		return nil, err
+		return nil, markNotCommitted(err)
 	}
+	var allocated uint64
+	recordingAppendOp := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		id, tt, err := utility.AppendAndGetTimeTick(ctx, appendOp, msg)
+		allocated = max(allocated, tt)
+		return id, err
+	}
+	var result *InTxnResult
+	var err error
 	if main.MessageType() == message.MessageTypeCommitTxn {
-		return appendExtrasThenCommit(ctx, appendOp, main, extras)
+		result, err = appendExtrasThenCommit(ctx, recordingAppendOp, main, extras)
+	} else {
+		result, err = appendAsNewTxn(ctx, recordingAppendOp, main, extras)
 	}
-	return appendAsNewTxn(ctx, appendOp, main, extras)
+	if err != nil && allocated > 0 {
+		return nil, &inTxnError{err: err, allocated: allocated}
+	}
+	return result, err
 }
 
 func validateInTxnInput(main message.MutableMessage, extras []message.MutableMessage) error {
@@ -143,7 +202,7 @@ func appendAsNewTxn(ctx context.Context, appendOp AppendOp, main message.Mutable
 			rollbackTxn(ctx, appendOp, main.VChannel(), *txnCtx)
 		}
 		// The txn manager refuses a new transaction with a transaction error while it closes.
-		return nil, selfBuiltTxnError(err)
+		return nil, markNotCommitted(selfBuiltTxnError(err))
 	}
 	// the timetick interceptor writes the allocated txn context into the begin message in place.
 	txnCtx := begin.TxnContext()
@@ -155,13 +214,13 @@ func appendAsNewTxn(ctx context.Context, appendOp AppendOp, main message.Mutable
 	mainID, err := appendOp(ctx, body)
 	if err != nil {
 		rollbackTxn(ctx, appendOp, main.VChannel(), *txnCtx)
-		return nil, selfBuiltTxnError(err)
+		return nil, markNotCommitted(selfBuiltTxnError(err))
 	}
 	for _, extra := range extras {
 		message.InjectTraceContext(ctx, extra)
 		if _, err := appendOp(ctx, extra.WithTxnContext(*txnCtx)); err != nil {
 			rollbackTxn(ctx, appendOp, main.VChannel(), *txnCtx)
-			return nil, selfBuiltTxnError(err)
+			return nil, markNotCommitted(selfBuiltTxnError(err))
 		}
 	}
 
@@ -184,8 +243,12 @@ func appendAsNewTxn(ctx context.Context, appendOp AppendOp, main message.Mutable
 		// still be in flight. A rollback selects the second case by itself, because
 		// it is only persisted while the session is in flight. Without it such a
 		// session holds the last confirmed message id of the pchannel for the whole
-		// keepalive.
-		rollbackTxn(ctx, appendOp, main.VChannel(), *txnCtx)
+		// keepalive. A persisted rollback also proves that the commit did not
+		// take effect, because the rollback is rejected once the session left the
+		// in-flight state.
+		if rollbackTxn(ctx, appendOp, main.VChannel(), *txnCtx) {
+			return nil, markNotCommitted(selfBuiltTxnError(err))
+		}
 		return nil, selfBuiltTxnError(err)
 	}
 	// the client of the original append asked for one autocommit message, so it must
@@ -204,7 +267,7 @@ func appendExtrasThenCommit(ctx context.Context, appendOp AppendOp, commit messa
 	for _, extra := range extras {
 		message.InjectTraceContext(ctx, extra)
 		if _, err := appendOp(ctx, extra.WithTxnContext(txnCtx)); err != nil {
-			return nil, err
+			return nil, markNotCommitted(err)
 		}
 	}
 	commitID, err := appendOp(ctx, commit)
@@ -226,9 +289,10 @@ func selfBuiltTxnError(err error) error {
 	return err
 }
 
-// rollbackTxn ends a transaction started by appendAsNewTxn. A failure is only
-// logged: the transaction then ends by keepalive expiration.
-func rollbackTxn(ctx context.Context, appendOp AppendOp, vchannel string, txnCtx message.TxnContext) {
+// rollbackTxn ends a transaction started by appendAsNewTxn and reports whether the
+// RollbackTxn was persisted. A failure is only logged: the transaction then ends
+// by keepalive expiration.
+func rollbackTxn(ctx context.Context, appendOp AppendOp, vchannel string, txnCtx message.TxnContext) bool {
 	rollback := message.NewRollbackTxnMessageBuilderV2().
 		WithVChannel(vchannel).
 		WithHeader(&message.RollbackTxnMessageHeader{}).
@@ -245,11 +309,13 @@ func rollbackTxn(ctx context.Context, appendOp AppendOp, vchannel string, txnCtx
 				mlog.FieldVChannel(vchannel),
 				mlog.Int64("txnID", int64(txnCtx.TxnID)),
 				mlog.Err(err))
-			return
+			return false
 		}
 		mlog.Warn(ctx, "failed to roll back the transaction started inside the wal, it will expire by keepalive",
 			mlog.FieldVChannel(vchannel),
 			mlog.Int64("txnID", int64(txnCtx.TxnID)),
 			mlog.Err(err))
+		return false
 	}
+	return true
 }
