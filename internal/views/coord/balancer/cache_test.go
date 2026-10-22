@@ -42,7 +42,7 @@ func cacheStats(segment, node, rows int64, state coordview.SegmentState, known b
 func TestPlanningPinsNodeContributionAlongsideTotal(t *testing.T) {
 	c := balancercache.New(nil)
 	shard := cacheShard(1, 10)
-	c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1)
+	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 1)
 	c.PublishDataView(1, cacheData(1, shard.VChannel, 100))
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	c.PublishShard(shard, cacheStats(1000, 1, 100, coordview.SegmentStateUp, true))
@@ -73,7 +73,7 @@ func TestPlanningPinsNodeContributionAlongsideTotal(t *testing.T) {
 func TestCacheNodeAndResourceGroupScopes(t *testing.T) {
 	c := balancercache.New(nil)
 	a, b := cacheShard(1, 10), cacheShard(2, 20)
-	cfgA, cfgB := cfgFor(1, 10, nil, nil), cfgFor(2, 20, nil, nil)
+	cfgA, cfgB := cfgFor(1, 10, []int64{1}, nil), cfgFor(2, 20, []int64{1}, nil)
 	cfgB.Replicas[0].ResourceGroup = "rg2"
 	c.PublishLoadConfig(1, cfgA, 1)
 	c.PublishLoadConfig(2, cfgB, 1)
@@ -105,7 +105,7 @@ func TestCacheControllerReadinessAndRetry(t *testing.T) {
 	c.MarkReady()
 	require.NoError(t, controller.Reconcile(t.Context()))
 	shard := cacheShard(1, 10)
-	c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1)
+	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 1)
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	// Active desired with missing DataView retries allocation once available.
 	controller.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shard}})
@@ -137,7 +137,7 @@ func BenchmarkCacheFullPlan(b *testing.B) {
 			}
 			for id := int64(1); id <= int64(scenario.collections); id++ {
 				shard := cacheShard(id, id*10)
-				c.PublishLoadConfig(id, cfgFor(id, id*10, nil, nil), 1)
+				c.PublishLoadConfig(id, cfgFor(id, id*10, []int64{1}, nil), 1)
 				c.PublishDataView(id, cacheData(id, shard.VChannel, rows...))
 			}
 			p := NewDefaultBalancePolicy()
@@ -157,7 +157,7 @@ func TestPlanningContextPinsAbsenceAndResolvesReplicaBinding(t *testing.T) {
 	shard := cacheShard(1, 10)
 	require.Nil(t, p.GetCollection(1))
 	require.Zero(t, p.ConfigVersion(1))
-	c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1)
+	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 1)
 	require.Nil(t, p.ConfigForShard(shard), "an absent collection is also pinned for this batch")
 	fresh := newPlanningContext(c)
 	require.Equal(t, uint64(1), fresh.ConfigVersion(1))

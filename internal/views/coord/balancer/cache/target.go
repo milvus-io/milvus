@@ -2,7 +2,6 @@ package cache
 
 import (
 	"encoding/binary"
-	"maps"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -50,7 +49,7 @@ func demandGroups(c *CollectionEntry) (map[string]int64, int64) {
 		for _, replica := range c.config.Replicas {
 			groups[replica.ResourceGroup]++
 		}
-		rows = c.data.TotalRows
+		rows = c.LoadedRows()
 	}
 	return groups, rows
 }
@@ -140,13 +139,18 @@ func (c *Cache) selectTarget(entry *CollectionEntry, id qviews.ShardID, stats *c
 	if target == nil {
 		return nil, nil
 	}
-	rows := maps.Clone(target.Rows)
-	if rows == nil {
-		rows = make(map[int64]int64)
+	rows := make(map[int64]int64)
+	for partition, byNode := range target.PartitionRows {
+		if !entry.LoadsPartition(partition) {
+			continue
+		}
+		for node, count := range byNode {
+			rows[node] += count
+		}
 	}
 	for _, segment := range target.UnknownRows {
 		node := target.Assignments[segment]
-		if eligible(node) {
+		if entry.LoadsPartition(stats.Segments[segment].PartitionID) && eligible(node) {
 			rows[node] += fallback[segment]
 		}
 	}

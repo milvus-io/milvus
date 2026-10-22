@@ -176,10 +176,10 @@ func (s *balanceSimulation) publish(id qviews.ShardID) {
 		if view == nil {
 			return nil
 		}
-		p := &coordview.ViewPlacement{Assignments: map[int64]int64{}, Rows: map[int64]int64{}}
+		p := &coordview.ViewPlacement{Assignments: map[int64]int64{}, PartitionRows: map[int64]map[int64]int64{1: {}}}
 		for seg, node := range view.assignments {
 			p.Assignments[seg] = node
-			p.Rows[node] += view.rows[seg]
+			p.PartitionRows[1][node] += view.rows[seg]
 			resident[node] = true
 			if stats.Segments[seg] == nil {
 				stats.Segments[seg] = &coordview.SegmentStats{SegmentID: seg, PartitionID: 1, RowNum: view.rows[seg], HasRowNum: true, Nodes: map[int64]coordview.SegmentState{}}
@@ -207,7 +207,7 @@ func (s *balanceSimulation) publish(id qviews.ShardID) {
 		version := v.up.version
 		stats.UpVersion = &version
 		stats.UpLoadInfoVersion = v.up.loadVersion
-		for node := range stats.UpPlacement.Rows {
+		for node := range stats.UpPlacement.PartitionRows[1] {
 			stats.UpNodes = append(stats.UpNodes, node)
 		}
 	}
@@ -215,7 +215,7 @@ func (s *balanceSimulation) publish(id qviews.ShardID) {
 	if v.preparing != nil {
 		version := v.preparing.version
 		stats.PreparingVersion = &version
-		for node := range stats.PreparingPlacement.Rows {
+		for node := range stats.PreparingPlacement.PartitionRows[1] {
 			stats.PreparingNodes = append(stats.PreparingNodes, node)
 		}
 	}

@@ -62,8 +62,10 @@ type ShardStats struct {
 // from the cache's retained footprint without confusing known zero with absent.
 type ViewPlacement struct {
 	Assignments map[int64]int64
-	Rows        map[int64]int64
-	UnknownRows []int64
+	// PartitionRows keeps exact per-view footprints by partition and node so
+	// a released partition can leave target accounting before view teardown.
+	PartitionRows map[int64]map[int64]int64
+	UnknownRows   []int64
 }
 
 // ResourceKey identifies a compatible loading requirement within a collection.

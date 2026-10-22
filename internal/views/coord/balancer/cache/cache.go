@@ -26,14 +26,18 @@ type Reader interface {
 
 // CollectionEntry shares independently published desired and actual children.
 type CollectionEntry struct {
-	id            int64
-	config        *loadmgr.LoadConfig
-	configVersion uint64
-	data          *api.CollectionDataView
-	shards        immutableIndex[*ShardEntry]
-	placements    immutableIndex[*PlacementNode]
-	suspended     immutableIndex[bool]
-	targetLoads   immutableIndex[targetLoad]
+	id                 int64
+	config             *loadmgr.LoadConfig
+	configVersion      uint64
+	data               *api.CollectionDataView
+	shards             immutableIndex[*ShardEntry]
+	placements         immutableIndex[*PlacementNode]
+	suspended          immutableIndex[bool]
+	targetLoads        immutableIndex[targetLoad]
+	loadedPartitions   map[int64]struct{}
+	loadsAllPartitions bool
+	loadedRows         int64
+	loadedShardRows    map[string]int64
 }
 
 func (c *CollectionEntry) ID() int64                         { return c.id }
@@ -359,6 +363,7 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 	}
 	c.mu.Unlock()
 	next.config, next.configVersion = cfg, version
+	next.refreshLoadRows()
 	c.replaceDemand(&previous, &next)
 	c.refreshTargets(&next, slot.rows)
 	slot.value.Store(&next)
@@ -404,6 +409,7 @@ func (c *Cache) PublishDataView(id int64, data *api.CollectionDataView) {
 		updated.rows = rows
 		next.shards = next.shards.set(shardKey(shardID), &updated)
 	}
+	next.refreshLoadRows()
 	c.replaceDemand(&previousEntry, &next)
 	c.refreshTargets(&next, slot.rows)
 	slot.value.Store(&next)

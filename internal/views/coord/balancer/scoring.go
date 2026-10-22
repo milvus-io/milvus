@@ -102,13 +102,16 @@ func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]
 		ctx.mean = float64(group.Demand(len(rgNodes))) / float64(len(rgNodes))
 	}
 	ctx.tolerance = math.Max(float64(cfg.AbsoluteToleranceRows), cfg.RelativeTolerance*ctx.mean)
-	shard := p.DataViewForShard(id)
-	ctx.fanout = preferredFanout(p.fanouts[id], len(nodes), len(entries), shard.TotalRows, cfg)
+	shardRows := c.ShardLoadedRows(id.VChannel)
+	if p.recovery != nil && p.recovery.shardID == id {
+		shardRows = p.recovery.shard.TotalRows
+	}
+	ctx.fanout = preferredFanout(p.fanouts[id], len(nodes), len(entries), shardRows, cfg)
 	p.fanouts[id] = ctx.fanout
 	if ctx.fanout > 0 {
-		ctx.shardLimit = (1 + cfg.LocalTolerance) * float64(shard.TotalRows) / float64(ctx.fanout)
+		ctx.shardLimit = (1 + cfg.LocalTolerance) * float64(shardRows) / float64(ctx.fanout)
 	}
-	collectionRows := float64(c.DataView().TotalRows)
+	collectionRows := float64(c.LoadedRows())
 	if len(nodes) > 0 {
 		ctx.collectionLimit = (1 + cfg.LocalTolerance) * math.Max(float64(cfg.TargetRowsPerShardNode), collectionRows/float64(len(nodes)))
 	}

@@ -345,7 +345,7 @@ func assignLayoutNodes(c *balancercache.CollectionEntry, layout *replicaLayout, 
 }
 
 func resourceRows(c *balancercache.CollectionEntry, key coordview.ResourceKey) int64 {
-	if c.DataView() == nil || c.DataView().DataVersion != key.DataVersion || c.ConfigVersion() != key.LoadInfoVersion {
+	if !c.LoadsPartition(key.PartitionID) || c.DataView() == nil || c.DataView().DataVersion != key.DataVersion || c.ConfigVersion() != key.LoadInfoVersion {
 		return -1
 	}
 	segment, _ := c.DataView().Segment(key.SegmentID)

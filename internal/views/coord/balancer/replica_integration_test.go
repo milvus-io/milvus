@@ -94,7 +94,7 @@ func TestReplicaControllerZeroCapacityHandoff(t *testing.T) {
 func TestReplicaControllerSuspensionAndRestoration(t *testing.T) {
 	for _, patch := range []*mockey.Mocker{
 		mockey.Mock((*querycoord.Catalog).GetCollections).Return([]*querypb.CollectionLoadInfo{{CollectionID: 1}}, nil).Build(),
-		mockey.Mock((*querycoord.Catalog).GetPartitions).Return(map[int64][]*querypb.PartitionLoadInfo{}, nil).Build(),
+		mockey.Mock((*querycoord.Catalog).GetPartitions).Return(map[int64][]*querypb.PartitionLoadInfo{1: {{CollectionID: 1, PartitionID: 1}}}, nil).Build(),
 		mockey.Mock((*querycoord.Catalog).GetReplicas).Return([]*querypb.Replica{{ID: 10, CollectionID: 1, ResourceGroup: "rg1"}, {ID: 11, CollectionID: 1, ResourceGroup: "rg1"}}, nil).Build(),
 	} {
 		t.Cleanup(func() { patch.UnPatch() })

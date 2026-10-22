@@ -240,5 +240,5 @@ func BenchmarkCacheRetainedVersions(b *testing.B) {
 }
 
 func cacheConfig(collection, replica int64) *loadmgr.LoadConfig {
-	return &loadmgr.LoadConfig{CollectionID: collection, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: replica, ResourceGroup: "rg1"}}}
+	return &loadmgr.LoadConfig{CollectionID: collection, PartitionIDs: []int64{1}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: replica, ResourceGroup: "rg1"}}}
 }

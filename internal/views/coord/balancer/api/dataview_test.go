@@ -14,6 +14,7 @@ func TestPublishedCollectionIndexesAndSummaries(t *testing.T) {
 	}})
 	shard := coll.Shard("v0")
 	require.Equal(t, int64(42), shard.TotalRows)
+	require.Equal(t, int64(42), shard.Partitions[1].TotalRows)
 	require.Equal(t, 2, shard.SegmentCount)
 	segment, ok := coll.Segment(100)
 	require.True(t, ok)

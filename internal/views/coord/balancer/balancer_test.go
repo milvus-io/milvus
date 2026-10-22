@@ -26,7 +26,7 @@ func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 	reg := emptyRegistry(t)
 	reg.Ensure(shardID)
 
-	cache := newTestCache(cfgFor(collID, replicaID, []int64{100}, nil))
+	cache := newTestCache(cfgFor(collID, replicaID, []int64{1}, nil))
 	cache.PublishDataView(collID, cacheData(collID, shardID.VChannel, 600, 200))
 	t.Cleanup(reg.RegisterPublicationListener(cache.PublishShard))
 	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
@@ -48,7 +48,7 @@ func TestBalancer_ReconcileDirtyCollectionCreatesDataViewShards(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
 
 	reg := emptyRegistry(t)
-	cache := newTestCache(cfgFor(collID, replicaID, []int64{100}, nil))
+	cache := newTestCache(cfgFor(collID, replicaID, []int64{1}, nil))
 	cache.PublishDataView(collID, cacheData(collID, shardID.VChannel, 100))
 	t.Cleanup(reg.RegisterPublicationListener(cache.PublishShard))
 	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
