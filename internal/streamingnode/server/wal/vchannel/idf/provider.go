@@ -117,9 +117,12 @@ type Runtime struct {
 	refresh         *schemaRefresh
 	schemaVersion   int32
 	loadInfoVersion uint64
-	view            walview.VChannelWALView
-	disabled        bool
-	closed          bool
+	// New read identities must not capture a DataView below this retention floor.
+	// prepareMu serializes schema preparation and DataView release transitions.
+	minDataVersion qviews.DataVersion
+	view           walview.VChannelWALView
+	disabled       bool
+	closed         bool
 }
 
 func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) error {
@@ -136,6 +139,7 @@ func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) 
 	r.view = walview.VChannelWALView{CaptureQueryView: walView.CaptureQueryView, RuntimeContext: walView.RuntimeContext, ResourceEventBarrier: walView.ResourceEventBarrier}
 	r.schemaVersion = walView.Schema.GetVersion()
 	r.loadInfoVersion = walView.LoadInfoVersion
+	r.minDataVersion = walView.SegmentSnapshot.DataVersion
 	r.oracles = make(map[queryresource.ReadSchemaKey]*oracleRuntime)
 	r.mu.Unlock()
 
@@ -255,8 +259,30 @@ func (r *Runtime) BeforeRelease(ctx context.Context, target qviews.DataVersion) 
 		return merr.WrapErrServiceNotReadyMsg("BM25 schema preparation is in progress")
 	}
 	defer r.prepareMu.Unlock()
-	if oracle := r.currentOracle(); oracle != nil {
-		return oracle.PrepareDataVersion(ctx, target)
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil
+	}
+	if target.GT(r.minDataVersion) {
+		r.minDataVersion = target
+	}
+	target = r.minDataVersion
+	oracles := make([]*oracleRuntime, 0, len(r.oracles))
+	for _, oracle := range r.oracles {
+		if oracle != nil {
+			oracles = append(oracles, oracle)
+		}
+	}
+	r.mu.Unlock()
+	// Every retained read identity can still subtract stats from the old files.
+	// The caller may report Dropped only once all of them have advanced. Holding
+	// prepareMu also prevents a new oracle from capturing below the floor while
+	// this release is in flight, including retries after a partial advance.
+	for _, oracle := range oracles {
+		if err := oracle.PrepareDataVersion(ctx, target); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -202,8 +202,8 @@ func (r *Runtime) releaseCollectionIfIdleLocked() *segcore.CCollection {
 	return collection
 }
 
-// SchemaVersion is the schema already applied on the serialized WAL path.
-func (r *Runtime) SchemaVersion() int32 {
+// WriteSchemaVersion is the schema already applied on the serialized WAL path.
+func (r *Runtime) WriteSchemaVersion() int32 {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.collection == nil {

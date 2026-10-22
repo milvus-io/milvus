@@ -28,6 +28,12 @@ type QueryRuntimePrepareModule interface {
 	PrepareSchemaDataVersion(context.Context, *viewpb.QueryViewMeta) error
 }
 
+// QueryRuntimeWriteSchemaModule reports progress on the ordered WAL write path.
+// Read resources instead prepare each view's exact schema and load identity.
+type QueryRuntimeWriteSchemaModule interface {
+	WriteSchemaVersion() int32
+}
+
 // QueryRuntimeIndexModule refreshes collection search metadata for a reused runtime.
 type QueryRuntimeIndexModule interface {
 	UpdateIndexMeta(context.Context, []*indexpb.IndexInfo) error

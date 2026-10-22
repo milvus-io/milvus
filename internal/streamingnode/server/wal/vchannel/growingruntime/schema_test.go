@@ -3,7 +3,6 @@ package growingruntime
 import (
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -31,21 +30,15 @@ func TestAlterSchemaPreservesSegmentEncodingAndUpdatesCollection(t *testing.T) {
 	updated.Version = 1
 	updated.Fields = append(updated.Fields, &schemapb.FieldSchema{FieldID: 200, Name: "added", DataType: schemapb.DataType_Int64, Nullable: true})
 	msg := message.NewAlterCollectionMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&messagespb.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}}}).WithBody(&messagespb.AlterCollectionMessageBody{Updates: &messagespb.AlterCollectionMessageUpdates{Schema: updated}}).MustBuildMutable().WithTimeTick(100).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(100))
-	// The collection schema-cache/native update implementation is a separate
-	// prerequisite. Verify the caller contract without importing that implementation.
-	mockey.PatchConvey("ALTER forwards the schema and keeps existing segment encoding", t, func() {
-		update := mockey.Mock((*segcore.CCollection).UpdateSchema).To(func(collection *segcore.CCollection, next *schemapb.CollectionSchema, tick uint64) error {
-			require.Same(t, c, collection)
-			require.True(t, proto.Equal(updated, next))
-			require.EqualValues(t, 100, tick)
-			return nil
-		}).Build()
-		r.ApplyLiveEvent(t.Context(), walview.VChannelResourceEvent{Message: msg})
-		require.Equal(t, 1, update.Times())
-		require.EqualValues(t, 0, oldSegment.encodingSchema.GetVersion())
-		require.True(t, proto.Equal(schema, oldSegment.collection.Schema()), "ALTER must preserve the segment encoding schema")
-		require.Equal(t, uint64(100), r.AppliedGrowingTimeTick())
-	})
+	r.ApplyLiveEvent(t.Context(), walview.VChannelResourceEvent{Message: msg})
+	require.EqualValues(t, 1, r.WriteSchemaVersion())
+	require.EqualValues(t, 0, oldSegment.encodingSchema.GetVersion())
+	require.True(t, proto.Equal(schema, oldSegment.collection.Schema()), "ALTER must preserve the segment encoding schema")
+	require.Equal(t, uint64(100), r.AppliedGrowingTimeTick())
+	newSegment := r.getOrCreateSegment(101, 1)
+	require.True(t, proto.Equal(updated, newSegment.encodingSchema))
+	require.NoError(t, newSegment.ensureCSegment(101))
+	require.True(t, proto.Equal(updated, newSegment.collection.Schema()))
 }
 
 func TestRecoveredGrowingSegmentUsesItsOwnSchema(t *testing.T) {

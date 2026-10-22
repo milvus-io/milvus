@@ -475,7 +475,7 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 		if err := runtime.PrepareQueryView(ctx, ref.meta); err != nil {
 			return err
 		}
-		if err := runtime.CheckSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {
+		if err := runtime.CheckWriteSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {
 			return err
 		}
 		return runtime.PrepareIndexMeta(ctx, ref.meta, m.loadInfoProvider)
