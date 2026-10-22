@@ -2664,6 +2664,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, int64(2), indexFiles[0].GetSegmentID())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
 
@@ -2677,6 +2678,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	indexFiles, err = uncompressIndexFiles(handler, segment)
 	require.NoError(t, err)
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, segment.GetID(), indexFiles[0].GetSegmentID())
 	assert.Equal(t, version, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"/data/legacy/insert_log/1/20/2/_index/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
 

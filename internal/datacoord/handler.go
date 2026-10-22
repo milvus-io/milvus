@@ -1073,7 +1073,7 @@ func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*ind
 			indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 
 			indexesFiles = append(indexesFiles, &indexpb.IndexFilePathInfo{
-				SegmentID:                 segID,
+				SegmentID:                 segment.GetID(),
 				FieldID:                   fieldID,
 				IndexID:                   segIdx.IndexID,
 				BuildID:                   segIdx.BuildID,
