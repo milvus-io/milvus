@@ -89,8 +89,6 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	suite.meta = testMeta
 	suite.balancer = NewRowCountBasedBalancer(suite.mockScheduler, nodeManager, distManager, testTarget)
 
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
-
 	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -656,7 +654,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 			collection := utils.CreateTestCollection(c.collectionID, int32(len(c.replicaWithNodes)))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				c.channels, c.segments, nil)
-			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)

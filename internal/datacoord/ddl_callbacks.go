@@ -69,12 +69,12 @@ func (c *DDLCallbacks) registerBatchUpdateManifestCallbacks() {
 
 // startBroadcastWithCollectionID starts a broadcast with collection name.
 func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := s.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
 		return nil, err
 	}
-	dbName := coll.GetDbName()
-	collectionName := coll.GetCollectionName()
+	dbName := coll.DatabaseName
+	collectionName := coll.Schema.GetName()
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewSharedDBNameResourceKey(dbName), message.NewExclusiveCollectionNameResourceKey(dbName, collectionName))
 	if err != nil {
 		return nil, err
@@ -86,13 +86,13 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 // Replicated Drop bypasses these locks; the WAL accepts the admitted local flush
 // as an empty flush if Drop removes its shard before it appends.
 func (s *Server) startLocalFlushBroadcast(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := s.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
 		return nil, err
 	}
 	return broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(coll.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
+		message.NewSharedDBNameResourceKey(coll.DatabaseName),
+		message.NewExclusiveCollectionNameResourceKey(coll.DatabaseName, coll.Schema.GetName()))
 }
 
 // startBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.
@@ -100,12 +100,12 @@ func (s *Server) startLocalFlushBroadcast(ctx context.Context, collectionID int6
 // without performing resource validation.
 // Use this when you need a broadcaster before all resources are created (e.g., for index restoration).
 func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := s.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
 		return nil, merr.Wrapf(err, "collection %d does not exist", collectionID)
 	}
-	dbName := coll.GetDbName()
-	collectionName := coll.GetCollectionName()
+	dbName := coll.DatabaseName
+	collectionName := coll.Schema.GetName()
 
 	b, err := broadcast.StartBroadcastWithResourceKeys(
 		ctx,
@@ -208,35 +208,24 @@ func (s *Server) validateRestoredCollectionResources(ctx context.Context, collec
 	logger := mlog.With(mlog.Int64("collectionID", collectionID))
 
 	// ========== Validate Collection Exists ==========
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := s.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
 		return merr.Wrapf(err, "collection %d does not exist", collectionID)
 	}
-	dbName := coll.GetDbName()
-	collectionName := coll.GetCollectionName()
+	dbName := coll.DatabaseName
+	collectionName := coll.Schema.GetName()
 	logger.Info(ctx, "collection validated",
 		mlog.FieldDbName(dbName),
 		mlog.FieldCollectionName(collectionName))
 
 	// ========== Validate Partitions Exist ==========
-	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
-	if err != nil {
-		return merr.Wrapf(err, "failed to get partitions for collection %d", collectionID)
-	}
-
-	// Build set of existing partition names
-	existingPartitions := make(map[string]bool)
-	for _, name := range partitionsResp.GetPartitionNames() {
-		existingPartitions[name] = true
-	}
-
 	// Check all snapshot partitions exist
 	for partName := range snapshotData.Collection.GetPartitions() {
-		if !existingPartitions[partName] {
+		if _, ok := coll.LivePartitionID(partName); !ok {
 			return merr.WrapErrPartitionNotFound(partName, fmt.Sprintf("partition does not exist in collection %d", collectionID))
 		}
 	}
-	logger.Info(ctx, "partitions validated", mlog.Int("count", len(existingPartitions)))
+	logger.Info(ctx, "partitions validated", mlog.Int("count", len(coll.Partitions)))
 
 	// ========== Validate Indexes Exist ==========
 	for _, indexInfo := range snapshotData.Indexes {

@@ -32,11 +32,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -77,27 +75,27 @@ func patchSnapshotImportWAL(t *testing.T) {
 
 func TestSnapshotPartitionTargetsValidation(t *testing.T) {
 	ctx := context.Background()
-	type mappingBroker struct{ broker.Broker }
-	s := &Server{broker: &mappingBroker{}}
+	s := seedCollections(&Server{})
 	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
 	require.NoError(t, s.validateSnapshotPartitionTargets(ctx, 1, nil, snapshotImportTestOptions()))
 	for _, tc := range []struct {
-		name      string
-		names     []string
-		ids, want []int64
-		readErr   error
-		wantErr   error
+		name    string
+		coll    *collectionInfo
+		want    []int64
+		wantErr error
 	}{
-		{"valid", []string{"Y", "X"}, []int64{100, 200}, []int64{200, 100}, nil, nil},
-		{"recreated", []string{"Y", "X"}, []int64{100, 201}, []int64{200, 100}, nil, merr.ErrServiceUnavailable},
-		{"dropped", []string{"Y"}, []int64{100}, []int64{200, 100}, nil, merr.ErrServiceUnavailable},
-		{"bad_metadata", []string{"Y"}, nil, []int64{200, 100}, nil, merr.ErrServiceInternal},
-		{"bad_count", []string{"Y", "X"}, []int64{100, 200}, []int64{200}, nil, merr.ErrServiceInternal},
-		{"metadata_error", nil, nil, nil, merr.ErrServiceNotReady, merr.ErrServiceNotReady},
+		{"valid", &collectionInfo{ID: 1, Partitions: []int64{100, 200}, PartitionIDsByName: map[string]int64{"Y": 100, "X": 200}}, []int64{200, 100}, nil},
+		{"recreated", &collectionInfo{ID: 1, Partitions: []int64{100, 201}, PartitionIDsByName: map[string]int64{"Y": 100, "X": 201}}, []int64{200, 100}, merr.ErrServiceUnavailable},
+		{"dropped", &collectionInfo{ID: 1, Partitions: []int64{100}, PartitionIDsByName: map[string]int64{"Y": 100}}, []int64{200, 100}, merr.ErrServiceUnavailable},
+		{"dropping", &collectionInfo{ID: 1, Partitions: []int64{100}, DroppingPartitions: []int64{200}, PartitionIDsByName: map[string]int64{"Y": 100, "X": 200}}, []int64{200, 100}, merr.ErrServiceUnavailable},
+		{"bad_count", &collectionInfo{ID: 1, Partitions: []int64{100, 200}, PartitionIDsByName: map[string]int64{"Y": 100, "X": 200}}, []int64{200}, merr.ErrServiceInternal},
+		{"collection_missing", nil, nil, merr.ErrCollectionNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			show := mockey.Mock((*mappingBroker).ShowPartitions).Return(&milvuspb.ShowPartitionsResponse{PartitionNames: tc.names, PartitionIDs: tc.ids}, tc.readErr).Build()
-			defer show.UnPatch()
+			s.meta.DropCollection(1)
+			if tc.coll != nil {
+				s.meta.AddCollection(tc.coll)
+			}
 			err := s.validateSnapshotPartitionTargets(ctx, 1, tc.want, opts)
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
@@ -134,21 +132,17 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 	defer fileValidation.UnPatch()
 	api := newMockBroadcastAPIImpl()
-	locked := false
+	// The target partitions appear only once the broadcast lock is held, so
+	// the import must revalidate them under the lock.
+	var s *Server
 	start := mockey.Mock((*Server).startBroadcastWithCollectionID).To(func(_ *Server, _ context.Context, _ int64) (broadcaster.BroadcastAPI, error) {
-		locked = true
+		s.meta.AddCollection(&collectionInfo{
+			ID: 100, DatabaseName: "default", Schema: snapshotImportTestSchema(),
+			Partitions: []int64{200, 100}, PartitionIDsByName: map[string]int64{"X": 200, "Y": 100},
+		})
 		return api, nil
 	}).Build()
 	defer start.UnPatch()
-	type mappingBroker struct{ broker.Broker }
-	fake := &mappingBroker{}
-	describe := mockey.Mock((*mappingBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
-	defer describe.UnPatch()
-	show := mockey.Mock((*mappingBroker).ShowPartitions).To(func(_ *mappingBroker, _ context.Context, _ int64) (*milvuspb.ShowPartitionsResponse, error) {
-		require.True(t, locked, "target IDs must be revalidated under the broadcast lock")
-		return &milvuspb.ShowPartitionsResponse{PartitionNames: []string{"X", "Y"}, PartitionIDs: []int64{200, 100}}, nil
-	}).Build()
-	defer show.UnPatch()
 	called := false
 	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		called = true
@@ -166,7 +160,8 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 		return &types.BroadcastAppendResult{}, nil
 	}).Build()
 	defer transport.UnPatch()
-	s := &Server{broker: fake, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
+	s = seedCollections(&Server{meta: &meta{chunkManager: storage.NewLocalChunkManager()}},
+		&collectionInfo{ID: 100, DatabaseName: "default", Schema: snapshotImportTestSchema()})
 	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
 	_, _, err := s.broadcastImport(ctx, 100, []int64{200, 100},
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "",
@@ -191,11 +186,6 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	api := newMockBroadcastAPIImpl()
 	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
 	defer start.UnPatch()
-	type testBroker struct{ broker.Broker }
-	fakeBroker := &testBroker{}
-	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
-		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
-	defer describe.UnPatch()
 	var received []int64
 	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
 		func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
@@ -205,7 +195,8 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 			return &types.BroadcastAppendResult{}, nil
 		}).Build()
 	defer transport.UnPatch()
-	server := &Server{broker: fakeBroker}
+	server := seedCollections(&Server{},
+		&collectionInfo{ID: 100, DatabaseName: "default", Schema: snapshotImportTestSchema()})
 	partitionIDs := []int64{20, 10}
 	_, duplicated, err := server.broadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
@@ -230,7 +221,6 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 }
 
 func TestBroadcastImportBoundaryFailures(t *testing.T) {
-	type boundaryBroker struct{ broker.Broker }
 	for _, stage := range []string{"public_options", "prepare", "replication", "partition_targets", "message_size", "auto_id"} {
 		t.Run(stage, func(t *testing.T) {
 			cause := merr.ErrServiceNotReady
@@ -265,9 +255,6 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			api := newMockBroadcastAPIImpl()
 			start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
 			defer start.UnPatch()
-			describe := mockey.Mock((*boundaryBroker).DescribeCollectionInternal).Return(
-				&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: schema}, nil).Build()
-			defer describe.UnPatch()
 			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
 				func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 					decoded := message.MustAsBroadcastImportMessageV1(msg)
@@ -284,7 +271,8 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 				opts = append(opts, &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/metadata"})
 			}
 			type boundaryAllocator struct{ allocator.Allocator }
-			s := &Server{meta: &meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
+			s := seedCollections(&Server{meta: &meta{}, allocator: &boundaryAllocator{}},
+				&collectionInfo{ID: 100, DatabaseName: "default", Schema: schema})
 			_, _, err := s.broadcastImport(context.Background(), 100, []int64{10}, files,
 				opts, 1, []string{"v1"}, "",
 				internalpb.ImportVersion_ImportVersionV2)
@@ -316,12 +304,8 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 	api := newMockBroadcastAPIImpl()
 	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
 	defer start.UnPatch()
-	type testBroker struct{ broker.Broker }
-	fakeBroker := &testBroker{}
-	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
-		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
-	defer describe.UnPatch()
-	server := &Server{broker: fakeBroker, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
+	server := seedCollections(&Server{meta: &meta{chunkManager: storage.NewLocalChunkManager()}},
+		&collectionInfo{ID: 100, DatabaseName: "default", Schema: snapshotImportTestSchema()})
 	for _, encrypted := range []bool{false, true} {
 		name, suppliedEZK := "plaintext", "not-base64"
 		if encrypted {
@@ -668,15 +652,11 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to fail (called in startBroadcastWithCollectionID)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(nil, errors.New("collection not found"))
-
-	server := &Server{
+	// Collection 100 is not in the view, so startBroadcastWithCollectionID fails.
+	server := seedCollections(&Server{
 		importMeta: &importMeta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	})
 
 	_, _, err := server.broadcastImport(
 		ctx,
@@ -717,13 +697,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return dbName (called in startBroadcastWithCollectionID)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
-
 	// Mock StartBroadcastWithResourceKeys to fail
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -731,11 +704,10 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &importMeta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, &collectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 	_, _, err := server.broadcastImport(
 		ctx,
@@ -753,7 +725,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	s.Contains(err.Error(), "failed to start broadcast with collection id")
 }
 
-func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFailsReturnsError() {
+func (s *ImportCallbacksSuite) TestBroadcastImport_CollectionDroppedUnderLockReturnsError() {
 	ctx := context.Background()
 
 	// Setup validation to pass
@@ -778,28 +750,19 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	// The collection is dropped while the broadcast lock is acquired.
+	var server *Server
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			server.meta.DropCollection(100)
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: first DescribeCollectionInternal succeeds (in startBroadcastWithCollectionID),
-	// second call returns error status (in broadcastImport after getting broadcaster)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil).Once()
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		Status: merr.Status(merr.ErrCollectionNotFound),
-	}, nil).Once()
-
-	server := &Server{
+	server = seedCollections(&Server{
 		importMeta: &importMeta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, &collectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 	_, _, err := server.broadcastImport(
 		ctx,
@@ -849,20 +812,10 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
-	}, nil).Times(2)
-
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &importMeta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, &collectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 	_, _, err := server.broadcastImport(
 		ctx,
@@ -911,27 +864,17 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "canonical_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:    "canonical_collection",
-			Version: 2,
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: int64(common.RowIDField), Name: common.RowIDFieldName},
-				{FieldID: common.StartOfUserFieldID, Name: "id"},
-			},
-		},
-	}, nil).Times(2)
-
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &importMeta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, &collectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:    "canonical_collection",
+		Version: 2,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: int64(common.RowIDField), Name: common.RowIDFieldName},
+			{FieldID: common.StartOfUserFieldID, Name: "id"},
+		},
+	}})
 
 	_, _, err := server.broadcastImport(
 		ctx,
@@ -1606,11 +1549,6 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 
 	// Import messages target the job's data vchannels; the broadcaster adds the
 	// control-channel copy that anchors the ack-callback order.
-	mockBroker := broker.NewMockBroker(t)
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
 
 	capture := &captureBroadcastAPI{}
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -1619,7 +1557,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{broker: mockBroker}
+	server := seedCollections(&Server{},
+		&collectionInfo{ID: 7, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:        7,
@@ -1997,12 +1936,6 @@ func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
-	mockBroker := broker.NewMockBroker(t)
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
-
 	capture := &captureBroadcastAPI{}
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -2015,7 +1948,8 @@ func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 		return 1000, 1000 + n, nil
 	})
 
-	server := &Server{broker: mockBroker, allocator: alloc}
+	server := seedCollections(&Server{allocator: alloc},
+		&collectionInfo{ID: 7, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:        9,

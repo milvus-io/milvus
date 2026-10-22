@@ -25,12 +25,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/mocks"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -105,12 +102,6 @@ func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
 							params = append(params, &commonpb.KeyValuePair{Key: common.JSONCastTypeKey, Value: cast},
 								&commonpb.KeyValuePair{Key: common.JSONPathKey, Value: `payload["a"]`})
 						}
-						coordinator := mocks.NewMixCoord(t)
-						coordinator.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(
-							&milvuspb.DescribeCollectionResponse{
-								Status: merr.Success(), CollectionName: "collection", DbName: "default",
-								Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}},
-							}, nil).Twice()
 						alloc := allocator.NewMockAllocator(t)
 						incompatible := !tc.enabled || tc.version < 3
 						blocked := incompatible && !auto
@@ -120,7 +111,10 @@ func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
 								merr.WrapErrServiceInternalMsg("passed JSON software gate")).Once()
 						}
 						server := &Server{
-							broker:                    broker.NewCoordinatorBroker(coordinator),
+							meta: newMetaWithCollections(&collectionInfo{
+								ID: 1, DatabaseName: "default",
+								Schema: &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{field}},
+							}),
 							allocator:                 alloc,
 							indexEngineVersionManager: jsonArrayVersionManager(t, tc.version),
 						}
@@ -224,12 +218,14 @@ func TestRestoreOrdinaryArraySortSoftwareGate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setJSONArrayIndexGate(t, tc.enabled)
 			tc.field.FieldID = 100
-			mockBroker := broker.NewMockBroker(t)
-			mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(
-				&milvuspb.DescribeCollectionResponse{DbName: "default", Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{tc.field}}}, nil).Once()
 			alloc := allocator.NewMockAllocator(t)
 			alloc.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
-			sm := &snapshotManager{broker: mockBroker, allocator: alloc, indexEngineVersionManager: jsonArrayVersionManager(t, tc.version)}
+			sm := &snapshotManager{
+				meta: newMetaWithCollections(&collectionInfo{
+					ID: 1, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{tc.field}},
+				}),
+				allocator: alloc, indexEngineVersionManager: jsonArrayVersionManager(t, tc.version),
+			}
 			broadcastStarted := false
 			err := sm.RestoreIndexes(context.Background(), &snapshotstorage.SnapshotData{Indexes: []*indexpb.IndexInfo{{
 				FieldID: 100, IndexName: "array_sort", IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT}},

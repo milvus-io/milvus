@@ -25,7 +25,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -63,7 +62,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	}
 	total := int32(len(result.Segments))
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, result.CollectionID)
+	coll, err := s.meta.getCollectionOrNotFound(result.CollectionID)
 	if err != nil {
 		log.Warn(ctx, "CommitBackfillResult failed to describe collection", mlog.Err(err), mlog.FieldCollectionID(result.CollectionID))
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
@@ -74,11 +73,11 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	// while the Spark job was in flight) must not be committed against the
 	// current segments. The fence is re-checked before each commit batch below
 	// to narrow the window between this read and the catalog writes.
-	if err := checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, coll); err != nil {
+	if err := checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, coll.Schema); err != nil {
 		log.Warn(ctx, "CommitBackfillResult rejected by schema version fence",
 			mlog.Err(err),
 			mlog.Int32("resultSchemaVersion", result.SchemaVersion),
-			mlog.Int32("collectionSchemaVersion", coll.GetSchema().GetVersion()))
+			mlog.Int32("collectionSchemaVersion", coll.Schema.GetVersion()))
 		return &datapb.CommitBackfillResultResponse{
 			Status:          merr.Status(err),
 			TotalSegments:   total,
@@ -407,9 +406,9 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 // callers can surface them even when a segment never reached a commit). coll is
 // the live collection description: op columns and V2 column-group field IDs
 // are validated against its schema (nil schema disables the check).
-func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult, coll *milvuspb.DescribeCollectionResponse) ([]backfillCommitUnit, []*datapb.CommitBackfillResultSegmentStatus) {
+func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult, coll *collectionInfo) ([]backfillCommitUnit, []*datapb.CommitBackfillResultSegmentStatus) {
 	bucket := bucketFromChunkManager(s.meta.chunkManager)
-	validFields := backfillOpColumnFieldIDs(coll.GetSchema())
+	validFields := backfillOpColumnFieldIDs(coll.Schema)
 
 	// Deterministic order so commit units & diagnostic output are stable.
 	segIDs := make([]string, 0, len(result.Segments))
@@ -936,14 +935,11 @@ func checkBackfillV2GroupFields(validFields map[int64]struct{}, entry *BackfillS
 // committed against the current segments. Results that carry no version (0 —
 // produced before Spark stamped the schema version it read) are exempt from
 // the fence for backward compatibility.
-func checkBackfillSchemaVersion(collectionID int64, expectedSchemaVersion int32, coll *milvuspb.DescribeCollectionResponse) error {
+func checkBackfillSchemaVersion(collectionID int64, expectedSchemaVersion int32, schema *schemapb.CollectionSchema) error {
 	if expectedSchemaVersion == 0 {
 		return nil
 	}
-	currentVersion := int32(0)
-	if coll.GetSchema() != nil {
-		currentVersion = coll.GetSchema().GetVersion()
-	}
+	currentVersion := schema.GetVersion()
 	if expectedSchemaVersion != currentVersion {
 		return merr.WrapErrCollectionSchemaMisMatch(
 			collectionID,
@@ -963,11 +959,11 @@ func (s *Server) recheckBackfillSchemaVersion(ctx context.Context, result *Backf
 	if result.SchemaVersion == 0 {
 		return nil
 	}
-	freshColl, err := s.broker.DescribeCollectionInternal(ctx, result.CollectionID)
+	freshColl, err := s.meta.getCollectionOrNotFound(result.CollectionID)
 	if err != nil {
 		return err
 	}
-	return checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, freshColl)
+	return checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, freshColl.Schema)
 }
 
 // allSegmentsFailed builds a per-segment failure status for every segment in

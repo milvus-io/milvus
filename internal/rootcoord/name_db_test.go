@@ -35,3 +35,22 @@ func TestNameDbRemoveIfMatched(t *testing.T) {
 	assert.Equal(t, map[string]UniqueID{"reused": 200}, names.listCollections("db"))
 	assert.Equal(t, map[string]UniqueID{"old": 300}, names.listCollections("other-db"))
 }
+
+// The collection view looks names up without ddLock while DDLs write them.
+func TestNameDb_GetConcurrentWithWrites(t *testing.T) {
+	n := newNameDb()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 1000; i++ {
+			n.get("db", "c")
+		}
+	}()
+	for i := 0; i < 1000; i++ {
+		n.insert("db", "c", int64(i))
+		n.removeIfMatched("db", "c", int64(i))
+		n.remove("db", "c")
+		n.dropDb("db")
+	}
+	<-done
+}

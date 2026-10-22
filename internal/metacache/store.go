@@ -25,7 +25,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 
@@ -37,6 +39,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -46,18 +50,61 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// CollectionInfo holds the collection-level metadata tracked by the
-// metacache.
+// CollectionInfo is an immutable snapshot of one collection, published by
+// the CollectionSource. It shares its slices and maps with RootCoord's
+// model, which RootCoord replaces rather than modifies: callers must not
+// modify any field, and copy one before handing it to code that may.
 type CollectionInfo struct {
-	ID             int64
-	Schema         *schemapb.CollectionSchema
-	Partitions     []int64
-	VChannelNames  []string
-	Properties     map[string]string
+	ID     int64
+	Schema *schemapb.CollectionSchema
+	// State is Created or Dropping. A Dropping collection stays visible
+	// until RootCoord removes it.
+	State etcdpb.CollectionState
+	// Partitions lists Created partitions only; DroppingPartitions lists
+	// the ones dropped but not yet removed.
+	Partitions         []int64
+	DroppingPartitions []int64
+	// PartitionIDsByName maps partition names to IDs over Partitions and
+	// DroppingPartitions, as RootCoord's internal ShowPartitions lists them.
+	// RootCoord frees a name once its partition starts dropping, so a live
+	// partition may share it with a Dropping one; the live one wins.
+	PartitionIDsByName map[string]int64
+	VChannelNames      []string
+	Properties         map[string]string
+	// PropertyPairs holds Properties in RootCoord's order, as describe
+	// reports them.
+	PropertyPairs  []*commonpb.KeyValuePair
 	DatabaseName   string
 	DatabaseID     int64
 	StartPositions []*commonpb.KeyDataPair
 	CreatedAt      uint64
+	// UpdateTimestamp is the time of the collection's last metadata change.
+	UpdateTimestamp  uint64
+	ShardsNum        int32
+	ConsistencyLevel commonpb.ConsistencyLevel
+}
+
+// DatabaseInfo is the database metadata RootCoord publishes alongside its
+// collections.
+type DatabaseInfo struct {
+	ID         int64
+	Name       string
+	Properties []*commonpb.KeyValuePair
+}
+
+// IsCreated reports whether the collection is live, i.e. not being dropped.
+func (c *CollectionInfo) IsCreated() bool {
+	return c != nil && c.State == etcdpb.CollectionState_CollectionCreated
+}
+
+// LivePartitionID returns the ID of the Created partition named name. It
+// does not return a Dropping partition, whose data is about to be removed.
+func (c *CollectionInfo) LivePartitionID(name string) (int64, bool) {
+	id, ok := c.PartitionIDsByName[name]
+	if !ok || !slices.Contains(c.Partitions, id) {
+		return 0, false
+	}
+	return id, true
 }
 
 // IsExternal returns true when the collection schema references an external source or spec.
@@ -82,6 +129,8 @@ type MetaView interface {
 	GetCollection(collectionID int64) (*CollectionInfo, bool)
 	GetCollections() []*CollectionInfo
 	GetCollectionIDs() []int64
+	GetCollectionByName(dbName, name string) (*CollectionInfo, bool)
+	GetDatabase(dbName string) (*DatabaseInfo, bool)
 }
 
 // MetaStore is the read-write metacache interface, used by components that
@@ -95,9 +144,26 @@ type MetaStore interface {
 	RemoveSegment(segmentID int64)
 	LoadSegments(segments []*datapb.SegmentInfo)
 
-	// Collections — write
+	// Collections — write. Only while the store's own Collections
+	// is current (standalone DataCoord, tests); once SetCollectionSource
+	// installs RootCoord's, RootCoord owns collections and these panic.
 	PutCollection(info *CollectionInfo)
 	RemoveCollection(collectionID int64)
+
+	// Collections are owned by the CollectionSource; the store forwards
+	// reads to it. SetCollectionSource switches reads and hook relays to
+	// source; it must be called before source changes any collection,
+	// since events source fires before then are not relayed. MixCoord
+	// installs RootCoord's MetaTable after RootCoord Init, before Start.
+	SetCollectionSource(source CollectionSource)
+	CollectionSource() CollectionSource
+	// OnCollectionAdded / OnCollectionRemoved / OnCollectionDropping /
+	// OnCollectionAltered register fn for the events of whichever source
+	// is current, so they survive SetCollectionSource.
+	OnCollectionAdded(fn func(collectionID int64))
+	OnCollectionRemoved(fn func(collectionID int64))
+	OnCollectionDropping(fn func(collectionID int64))
+	OnCollectionAltered(fn func(old, updated *CollectionInfo))
 
 	// Channel checkpoints (includes timestamp comparison, logging, metrics)
 	UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error
@@ -129,8 +195,10 @@ type metaStore struct {
 	segCollIdx map[int64]map[int64]struct{}
 	segChanIdx map[string]map[int64]struct{}
 
-	// Collection storage
-	collections map[int64]*CollectionInfo
+	// Collection reads forward to source, without holding mu.
+	source atomic.Pointer[collectionSourceBox]
+	// CollectionHooks relays the current source's collection events.
+	CollectionHooks
 
 	// Channel checkpoints
 	checkpoints map[string]*msgpb.MsgPosition
@@ -138,15 +206,23 @@ type metaStore struct {
 
 // NewMetaStore creates an empty, ready-to-use MetaStore that owns the
 // given catalog.
+// Its collections come from a Collections until
+// SetCollectionSource replaces it.
 func NewMetaStore(catalog metastore.DataCoordCatalog) MetaStore {
-	return &metaStore{
+	s := &metaStore{
 		catalog:     catalog,
 		segments:    make(map[int64]*datapb.SegmentInfo),
 		segCollIdx:  make(map[int64]map[int64]struct{}),
 		segChanIdx:  make(map[string]map[int64]struct{}),
-		collections: make(map[int64]*CollectionInfo),
 		checkpoints: make(map[string]*msgpb.MsgPosition),
 	}
+	s.SetCollectionSource(NewCollections())
+	return s
+}
+
+// collectionSourceBox lets an interface value sit in an atomic.Pointer.
+type collectionSourceBox struct {
+	CollectionSource
 }
 
 // InternalCatalog returns the catalog for sub-meta initialization.
@@ -355,60 +431,92 @@ func segMetricLabels(seg *datapb.SegmentInfo) [5]string {
 	}
 }
 
-// --- Collection read methods ---
+// --- Collection methods ---
 
-func (s *metaStore) GetCollection(collectionID int64) (*CollectionInfo, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	info, ok := s.collections[collectionID]
-	return info, ok
+func (s *metaStore) SetCollectionSource(source CollectionSource) {
+	box := &collectionSourceBox{source}
+	// A source cannot drop a callback, so a replaced source keeps calling
+	// these; they relay only while box is current.
+	source.OnCollectionAdded(func(collectionID int64) {
+		if s.source.Load() == box {
+			s.NotifyAdded(collectionID)
+		}
+	})
+	source.OnCollectionRemoved(func(collectionID int64) {
+		if s.source.Load() == box {
+			s.NotifyRemoved(collectionID)
+		}
+	})
+	source.OnCollectionDropping(func(collectionID int64) {
+		if s.source.Load() == box {
+			s.NotifyDropping(collectionID)
+		}
+	})
+	source.OnCollectionAltered(func(old, updated *CollectionInfo) {
+		if s.source.Load() == box {
+			s.NotifyAltered(old, updated)
+		}
+	})
+	s.source.Store(box)
 }
 
-func (s *metaStore) GetCollections() []*CollectionInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]*CollectionInfo, 0, len(s.collections))
-	for _, info := range s.collections {
-		result = append(result, info)
-	}
-	return result
-}
-
-func (s *metaStore) GetCollectionIDs() []int64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]int64, 0, len(s.collections))
-	for id := range s.collections {
-		result = append(result, id)
-	}
-	return result
-}
-
-// --- Collection write methods ---
-
-// PutCollection replaces the entry wholesale. It is in-memory only and takes no
-// ctx, like the other in-memory writers; its callers (meta.AddCollection /
-// meta.DropCollection) do the logging with a real ctx.
 func (s *metaStore) PutCollection(info *CollectionInfo) {
-	s.mu.Lock()
-	id := info.ID
-	s.collections[id] = info
-	// Set() under the lock: releasing first lets two concurrent writers commit
-	// their counts out of order and strand the gauge at a stale value.
-	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(s.collections)))
-	s.mu.Unlock()
+	s.collections().Put(info)
 }
 
 func (s *metaStore) RemoveCollection(collectionID int64) {
-	s.mu.Lock()
-	if _, ok := s.collections[collectionID]; ok {
-		delete(s.collections, collectionID)
-		metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(s.collections)))
+	s.collections().Remove(collectionID)
+}
+
+func (s *metaStore) collections() *Collections {
+	mem, ok := s.CollectionSource().(*Collections)
+	if !ok {
+		panic("metacache: collections are owned by the installed CollectionSource")
 	}
-	s.mu.Unlock()
-	// The collection metrics are emitted from segments rather than from this
-	// cache, so they are cleaned up even when the collection was never cached.
-	metrics.CleanupDataCoordWithCollectionID(collectionID)
+	return mem
+}
+
+func (s *metaStore) CollectionSource() CollectionSource {
+	return s.source.Load().CollectionSource
+}
+
+func (s *metaStore) GetCollection(collectionID int64) (*CollectionInfo, bool) {
+	return s.CollectionSource().GetCollection(collectionID)
+}
+
+func (s *metaStore) GetCollections() []*CollectionInfo {
+	return s.CollectionSource().GetCollections()
+}
+
+func (s *metaStore) GetCollectionIDs() []int64 {
+	return s.CollectionSource().GetCollectionIDs()
+}
+
+// GetCollectionByName and GetDatabase take an empty dbName as the default
+// database, as RootCoord's describes do.
+func (s *metaStore) GetCollectionByName(dbName, name string) (*CollectionInfo, bool) {
+	return s.CollectionSource().GetCollectionByName(defaultDBName(dbName), name)
+}
+
+func (s *metaStore) GetDatabase(dbName string) (*DatabaseInfo, bool) {
+	return s.CollectionSource().GetDatabase(defaultDBName(dbName))
+}
+
+func defaultDBName(dbName string) string {
+	if dbName == "" {
+		return util.DefaultDBName
+	}
+	return dbName
+}
+
+// GetDatabaseOrNotFound returns database dbName from view, with a miss
+// reported as ErrDatabaseNotFound.
+func GetDatabaseOrNotFound(view MetaView, dbName string) (*DatabaseInfo, error) {
+	db, ok := view.GetDatabase(dbName)
+	if !ok {
+		return nil, merr.WrapErrDatabaseNotFound(dbName)
+	}
+	return db, nil
 }
 
 // --- Channel checkpoint methods ---
@@ -601,7 +709,8 @@ func (s *metaStore) GcConfirm(ctx context.Context, collectionID, partitionID typ
 
 // SegmentNormalizer validates and rewrites a segment loaded from the catalog
 // before it enters the store. It returns the segment to install, which may be
-// the input itself.
+// the input itself. It runs concurrently across collections, so it must be
+// safe for concurrent use.
 type SegmentNormalizer func(segment *datapb.SegmentInfo) (*datapb.SegmentInfo, error)
 
 // LoadFromCatalog loads segments and channel checkpoints. A non-nil normalize
@@ -634,25 +743,19 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 			if err != nil {
 				return nil, err
 			}
+			if normalize != nil {
+				for j, segment := range segments {
+					if segments[j], err = normalize(segment); err != nil {
+						return nil, err
+					}
+				}
+			}
 			collectionSegments[i] = segments
 			return nil, nil
 		}))
 	}
 	if err := conc.AwaitAll(futures...); err != nil {
 		return err
-	}
-	if normalize != nil {
-		for i, segments := range collectionSegments {
-			normalized := make([]*datapb.SegmentInfo, 0, len(segments))
-			for _, segment := range segments {
-				seg, err := normalize(segment)
-				if err != nil {
-					return err
-				}
-				normalized = append(normalized, seg)
-			}
-			collectionSegments[i] = normalized
-		}
 	}
 	for _, segments := range collectionSegments {
 		s.LoadSegments(segments)

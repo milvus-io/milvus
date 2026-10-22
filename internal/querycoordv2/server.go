@@ -380,6 +380,12 @@ func (s *Server) initMeta() error {
 	record := timerecord.NewTimeRecorder("querycoord")
 
 	mlog.Info(s.ctx, "init meta")
+	// Targets and collection schemas resolve through the shared MetaView,
+	// which MixCoord injects via SetMetaView. Fail here rather than panic on
+	// the first resolution.
+	if s.metaView == nil {
+		return merr.WrapErrServiceInternal("querycoord meta view is not set")
+	}
 	s.store = querycoord.NewCatalog(s.kv)
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr, s.metaView)
 
@@ -388,7 +394,7 @@ func (s *Server) initMeta() error {
 	)
 
 	mlog.Info(s.ctx, "recover meta...")
-	err := s.meta.CollectionManager.Recover(s.ctx, s.broker)
+	err := s.meta.CollectionManager.Recover(s.ctx)
 	if err != nil {
 		mlog.Warn(s.ctx, "failed to recover collections", mlog.Err(err))
 		return err

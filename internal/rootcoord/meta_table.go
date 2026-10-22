@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/featureusage"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -174,7 +175,16 @@ type MetaTable struct {
 	tsoAllocator tso.Allocator
 
 	dbName2Meta map[string]*model.Database              // database name ->  db meta
+	dbID2Name   map[int64]string                        // database id -> name, kept by setDatabaseLocked
 	collID2Meta map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+
+	// collViews holds the CollectionInfo published for each collID2Meta
+	// entry. Writers update it under ddLock; CollectionSource reads it
+	// without ddLock.
+	collViews typeutil.ConcurrentMap[typeutil.UniqueID, *metacache.CollectionInfo]
+	collHooks metacache.CollectionHooks
+	// dbViews does the same for dbName2Meta.
+	dbViews typeutil.ConcurrentMap[string, *metacache.DatabaseInfo]
 
 	// partition name index: collectionID -> partitionName -> partitionID
 	partitionName2ID map[int64]map[string]int64
@@ -216,7 +226,14 @@ func (mt *MetaTable) reload() error {
 
 	record := timerecord.NewTimeRecorder("rootcoord")
 	mt.dbName2Meta = make(map[string]*model.Database)
+	mt.dbID2Name = make(map[int64]string)
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
+	for _, id := range mt.collViews.Keys() {
+		mt.collViews.Remove(id)
+	}
+	for _, name := range mt.dbViews.Keys() {
+		mt.dbViews.Remove(name)
+	}
 	mt.partitionName2ID = make(map[int64]map[string]int64)
 	mt.fileResourceRefCnt = make(map[int64]int)
 	mt.fileResourceRefHolds = make(map[int64]map[int64]int)
@@ -235,7 +252,7 @@ func (mt *MetaTable) reload() error {
 
 	mlog.Info(mt.ctx, "recover databases", mlog.Int("num of dbs", len(dbs)))
 	for _, db := range dbs {
-		mt.dbName2Meta[db.Name] = db
+		mt.setDatabaseLocked(db)
 	}
 	dbNames := maps.Keys(mt.dbName2Meta)
 	// create default database.
@@ -286,7 +303,7 @@ func (mt *MetaTable) reload() error {
 			}
 			collection.DBName = dbName // some collections may not have db name or its dbname is not correct, we should fix it here.
 			ensureCollectionMaxFieldIDProperty(collection)
-			mt.collID2Meta[collection.CollectionID] = collection
+			mt.setCollectionLocked(collection)
 			// Build partition name index
 			mt.partitionName2ID[collection.CollectionID] = make(map[string]int64)
 			for _, partition := range collection.Partitions {
@@ -361,7 +378,7 @@ func (mt *MetaTable) reloadWithNonDatabase(oldCollections []*model.Collection) e
 	partitionNum := int64(0)
 	for _, collection := range oldCollections {
 		ensureCollectionMaxFieldIDProperty(collection)
-		mt.collID2Meta[collection.CollectionID] = collection
+		mt.setCollectionLocked(collection)
 		if collection.Available() {
 			mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)
 			for _, fileResourceID := range collection.FileResourceIds {
@@ -457,7 +474,7 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 
 	mt.names.createDbIfNotExist(dbName)
 	mt.aliases.createDbIfNotExist(dbName)
-	mt.dbName2Meta[dbName] = db
+	mt.setDatabaseLocked(db)
 	if mt.availableCollectionCountByDB == nil {
 		mt.availableCollectionCountByDB = make(map[int64]int)
 	}
@@ -475,7 +492,7 @@ func (mt *MetaTable) AlterDatabase(ctx context.Context, newDB *model.Database, t
 	if err := mt.catalog.AlterDatabase(ctx1, newDB, ts); err != nil {
 		return err
 	}
-	mt.dbName2Meta[newDB.Name] = newDB
+	mt.setDatabaseLocked(newDB)
 	mlog.Info(ctx, "alter database finished", mlog.String("dbName", newDB.Name), mlog.Uint64("ts", ts))
 	return nil
 }
@@ -519,7 +536,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 
 	mt.names.dropDb(dbName)
 	mt.aliases.dropDb(dbName)
-	delete(mt.dbName2Meta, dbName)
+	mt.deleteDatabaseLocked(dbName)
 	delete(mt.availableCollectionCountByDB, db.ID)
 
 	metrics.RootCoordNumOfDatabases.Dec()
@@ -540,8 +557,15 @@ func (mt *MetaTable) GetDatabaseByID(ctx context.Context, dbID int64, ts Timesta
 	return mt.getDatabaseByIDInternal(ctx, dbID, ts)
 }
 
+// getDatabaseByIDInternal resolves dbID through dbID2Name, since it runs for
+// every collection view RootCoord builds. A miss falls back to a scan: the
+// database may be gone (a Dropping collection outliving DropDatabase), or
+// dbName2Meta may have been filled directly.
 func (mt *MetaTable) getDatabaseByIDInternal(ctx context.Context, dbID int64, ts Timestamp) (*model.Database, error) {
-	for _, db := range maps.Values(mt.dbName2Meta) {
+	if db, ok := mt.dbName2Meta[mt.dbID2Name[dbID]]; ok && db.ID == dbID {
+		return db, nil
+	}
+	for _, db := range mt.dbName2Meta {
 		if db.ID == dbID {
 			return db, nil
 		}
@@ -596,6 +620,13 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		return err
 	}
 
+	added := false
+	defer func() {
+		// After ddLock is released.
+		if added {
+			mt.collHooks.NotifyAdded(coll.CollectionID)
+		}
+	}()
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -606,7 +637,8 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		return nil
 	}
 
-	mt.collID2Meta[coll.CollectionID] = coll.Clone()
+	mt.setCollectionLocked(coll.Clone())
+	added = true
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
 	mt.increaseAvailableCollectionCountLocked(coll.DBID)
 	// Build partition name index for the new collection
@@ -637,6 +669,8 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	if err != nil || !dropped {
 		return err
 	}
+	// After ddLock is released.
+	mt.collHooks.NotifyDropping(collectionID)
 
 	// Grant cleanup scans the catalog by prefix and can be much slower than the
 	// metadata update above. Keep it synchronous so the caller's collection
@@ -670,7 +704,7 @@ func (mt *MetaTable) markCollectionDropping(ctx context.Context, collectionID Un
 	clone.State = pb.CollectionState_CollectionDropping
 	clone.UpdateTimestamp = ts
 
-	mt.collID2Meta[collectionID] = clone
+	mt.setCollectionLocked(clone)
 	for _, fileResourceID := range coll.FileResourceIds {
 		if mt.fileResourceRefCnt[fileResourceID] > 0 {
 			mt.fileResourceRefCnt[fileResourceID]--
@@ -747,8 +781,51 @@ func (mt *MetaTable) removeAllNamesIfMatchedInternal(ctx context.Context, dbName
 	}
 }
 
-func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectionID UniqueID) {
+// setCollectionLocked stores coll as the current model of its collection
+// and publishes its CollectionInfo view. Every write to collID2Meta goes
+// through this helper or deleteCollectionLocked, so the view always matches
+// the model once ddLock is released. The caller must hold ddLock for
+// writing.
+func (mt *MetaTable) setCollectionLocked(coll *model.Collection) {
+	mt.collID2Meta[coll.CollectionID] = coll
+	mt.collViews.Insert(coll.CollectionID, mt.buildCollectionViewLocked(coll))
+}
+
+// setDatabaseLocked stores db and publishes its DatabaseInfo view. Every
+// write to dbName2Meta goes through this helper or deleteDatabaseLocked.
+// The caller must hold ddLock for writing.
+func (mt *MetaTable) setDatabaseLocked(db *model.Database) {
+	mt.dbName2Meta[db.Name] = db
+	if mt.dbID2Name == nil {
+		mt.dbID2Name = make(map[int64]string)
+	}
+	mt.dbID2Name[db.ID] = db.Name
+	mt.dbViews.Insert(db.Name, &metacache.DatabaseInfo{
+		ID:         db.ID,
+		Name:       db.Name,
+		Properties: common.CloneKeyValuePairs(db.Properties),
+	})
+}
+
+// deleteDatabaseLocked removes a database's model and view. The caller must
+// hold ddLock for writing.
+func (mt *MetaTable) deleteDatabaseLocked(dbName string) {
+	if db, ok := mt.dbName2Meta[dbName]; ok {
+		delete(mt.dbID2Name, db.ID)
+	}
+	delete(mt.dbName2Meta, dbName)
+	mt.dbViews.Remove(dbName)
+}
+
+// deleteCollectionLocked removes a collection's model and view. The caller
+// must hold ddLock for writing.
+func (mt *MetaTable) deleteCollectionLocked(collectionID UniqueID) {
 	delete(mt.collID2Meta, collectionID)
+	mt.collViews.Remove(collectionID)
+}
+
+func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectionID UniqueID) {
+	mt.deleteCollectionLocked(collectionID)
 	delete(mt.partitionName2ID, collectionID)
 	mlog.Info(ctx, "delete from collID2Meta",
 		mlog.Int64("collectionID", collectionID),
@@ -756,6 +833,13 @@ func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectio
 }
 
 func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
+	removed := false
+	defer func() {
+		// After ddLock is released.
+		if removed {
+			mt.collHooks.NotifyRemoved(collectionID)
+		}
+	}()
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -800,6 +884,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	}
 	mt.removeAllNamesIfMatchedInternal(ctx, dbName, collectionID, allNames)
 	mt.removeCollectionByIDInternal(ctx, collectionID)
+	removed = true
 
 	mlog.Info(ctx, "remove collection",
 		mlog.Int64("dbID", coll.DBID),
@@ -969,15 +1054,6 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	return filterUnavailablePartition(coll), nil
 }
 
-// IsCollectionAvailable is a positive-only check of current resident metadata.
-// A miss does not prove absence: callers must use the normal lookup before GC.
-func (mt *MetaTable) IsCollectionAvailable(collectionID int64) bool {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	collection := mt.collID2Meta[collectionID]
-	return collection != nil && collection.Available()
-}
-
 func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
@@ -1115,6 +1191,13 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	header := result.Message.Header()
 	body := result.Message.MustBody()
 
+	var oldView, newView *metacache.CollectionInfo
+	defer func() {
+		// After ddLock is released.
+		if oldView.IsCreated() && newView.IsCreated() {
+			mt.collHooks.NotifyAltered(oldView, newView)
+		}
+	}()
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -1174,7 +1257,9 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	if dbChanged && oldColl.Available() && newColl.Available() {
 		mt.moveAvailableCollectionCountLocked(oldColl.DBID, newColl.DBID)
 	}
-	mt.collID2Meta[header.CollectionId] = newColl
+	oldView, _ = mt.collViews.Get(newColl.CollectionID)
+	mt.setCollectionLocked(newColl)
+	newView, _ = mt.collViews.Get(newColl.CollectionID)
 	mlog.Info(ctx, "alter collection finished",
 		mlog.String("oldDBName", oldColl.DBName),
 		mlog.String("newDBName", newColl.DBName),
@@ -1214,7 +1299,7 @@ func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID U
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
 		return err
 	}
-	mt.collID2Meta[coll.CollectionID] = newColl
+	mt.setCollectionLocked(newColl)
 	mlog.Info(ctx, "update collID2Meta for begin truncate collection",
 		mlog.Int64("collectionID", coll.CollectionID),
 	)
@@ -1245,7 +1330,7 @@ func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.Broa
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
 		return err
 	}
-	mt.collID2Meta[coll.CollectionID] = newColl
+	mt.setCollectionLocked(newColl)
 	mlog.Info(ctx, "update collID2Meta for truncate collection",
 		mlog.Int64("collectionID", coll.CollectionID),
 	)
@@ -1378,6 +1463,7 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	copy(newPartitions, oldPartitions)
 	newPartitions[len(oldPartitions)] = partition.Clone()
 	coll.Partitions = newPartitions
+	mt.setCollectionLocked(coll)
 
 	// Update partition name index
 	if mt.partitionName2ID[partition.CollectionID] == nil {
@@ -1434,7 +1520,8 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 			newPartitions := make([]*model.Partition, len(coll.Partitions))
 			copy(newPartitions, coll.Partitions)
 			newPartitions[idx] = clone
-			mt.collID2Meta[collectionID].Partitions = newPartitions
+			coll.Partitions = newPartitions
+			mt.setCollectionLocked(coll)
 
 			// Remove from partition name index when dropping
 			if mt.partitionName2ID[collectionID] != nil {
@@ -1489,6 +1576,7 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID,
 	copy(newPartitions[:loc], oldPartitions[:loc])
 	copy(newPartitions[loc:], oldPartitions[loc+1:])
 	coll.Partitions = newPartitions
+	mt.setCollectionLocked(coll)
 
 	// Remove from partition name index
 	if mt.partitionName2ID[collectionID] != nil {

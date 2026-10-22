@@ -454,15 +454,11 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		}
 		return merr.Wrap(err, "failed to alter collection")
 	}
-	// Refresh datacoord's cached collection schema BEFORE the bound index meta
-	// becomes visible: creating the index signals the index inspector, whose
-	// function-output-field guard reads that cached schema — on a stale view it
-	// would schedule doomed builds on segments that have no binlog for the new
-	// field yet. The schema push depends only on rootcoord meta (updated above),
-	// never on index meta, so this order is always safe.
-	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
-		return merr.Wrap(err, "failed to broadcast altered collection")
-	}
+	// AlterCollection above already published the new schema to DataCoord's
+	// collection view. It must stay ahead of the bound index meta: creating
+	// the index signals the index inspector, whose function-output-field
+	// guard reads that schema; on a stale schema it would schedule doomed
+	// builds on segments that have no binlog for the new field yet.
 	if err := c.applyBoundFieldIndexesInline(ctx, result); err != nil {
 		return err
 	}

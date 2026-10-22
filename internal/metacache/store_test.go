@@ -19,13 +19,11 @@ package metacache
 import (
 	"testing"
 
-	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -154,7 +152,7 @@ func TestStore_PutCollectionAndGet(t *testing.T) {
 		VChannelNames: []string{"ch-0", "ch-1"},
 		Properties:    map[string]string{"ttl": "3600"},
 	}
-	s.PutCollection(info)
+	collectionsOf(s).Put(info)
 
 	got, ok := s.GetCollection(100)
 	assert.True(t, ok)
@@ -166,27 +164,17 @@ func TestStore_PutCollectionAndGet(t *testing.T) {
 
 func TestStore_RemoveCollection(t *testing.T) {
 	s := NewMetaStore(nil)
-	s.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "c"}})
-	s.RemoveCollection(100)
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "c"}})
+	collectionsOf(s).Remove(100)
 
 	_, ok := s.GetCollection(100)
 	assert.False(t, ok)
 }
 
-func TestStore_RemoveCollectionCleansMetricsOfUncachedCollection(t *testing.T) {
-	// The collection metrics are emitted from segments, so a collection that
-	// was never cached can still have them.
-	metrics.DataCoordStoredIndexFilesSize.WithLabelValues("db", "c", "101").Set(1)
-	s := NewMetaStore(nil)
-	s.RemoveCollection(101)
-
-	assert.Zero(t, prometheustestutil.CollectAndCount(metrics.DataCoordStoredIndexFilesSize))
-}
-
 func TestStore_PutCollectionOverwrites(t *testing.T) {
 	s := NewMetaStore(nil)
-	s.PutCollection(&CollectionInfo{ID: 100, DatabaseID: 1, Schema: &schemapb.CollectionSchema{Name: "v1"}})
-	s.PutCollection(&CollectionInfo{ID: 100, DatabaseID: 1, Schema: &schemapb.CollectionSchema{Name: "v2"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, DatabaseID: 1, Schema: &schemapb.CollectionSchema{Name: "v1"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, DatabaseID: 1, Schema: &schemapb.CollectionSchema{Name: "v2"}})
 
 	got, ok := s.GetCollection(100)
 	assert.True(t, ok)
@@ -196,8 +184,8 @@ func TestStore_PutCollectionOverwrites(t *testing.T) {
 
 func TestStore_GetCollections(t *testing.T) {
 	s := NewMetaStore(nil)
-	s.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "a"}})
-	s.PutCollection(&CollectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{Name: "b"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "a"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{Name: "b"}})
 
 	result := s.GetCollections()
 	assert.Len(t, result, 2)
@@ -216,8 +204,8 @@ func TestStore_GetCollections_Empty(t *testing.T) {
 
 func TestStore_GetCollectionIDs(t *testing.T) {
 	s := NewMetaStore(nil)
-	s.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "a"}})
-	s.PutCollection(&CollectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{Name: "b"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "a"}})
+	collectionsOf(s).Put(&CollectionInfo{ID: 200, Schema: &schemapb.CollectionSchema{Name: "b"}})
 
 	ids := s.GetCollectionIDs()
 	assert.ElementsMatch(t, []int64{100, 200}, ids)

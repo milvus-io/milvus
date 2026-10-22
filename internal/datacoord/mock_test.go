@@ -99,7 +99,6 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, v
 func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	m, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	if m != nil {
 		t.Cleanup(m.closeManifestCommitExecutor)
@@ -112,7 +111,6 @@ func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
 	catalogKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	catalog := datacoord.NewCatalog(catalogKV, "", rootPath)
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	m, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	if m != nil {
 		t.Cleanup(m.closeManifestCommitExecutor)
