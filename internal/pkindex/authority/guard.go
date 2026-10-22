@@ -115,9 +115,10 @@ func (i *WriteGuard) DiscardUncertain(_ context.Context, _ error, tt uint64) {
 	}
 }
 
+// resolve ends the guard: it may be resolved once.
 func (i *WriteGuard) resolve() {
 	if i.resolved {
-		panic("primary key index intent is resolved more than once")
+		panic("primary key index write guard is resolved more than once")
 	}
 	i.resolved = true
 }

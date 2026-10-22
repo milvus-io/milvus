@@ -13,56 +13,64 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 //go:build test
 // +build test
 
 package authority
 
-import "context"
+import (
+	"context"
 
-// ObserveForTest stands in for observe until the recovery step adds it: it
-// applies one appended write with time tick tt to the engine, then removes its
-// entries from the in-flight set (rule A). For a transaction that this index
-// upgraded, puts are the keys of the insert and deletes the keys of the
-// companion delete. Deletes are applied first, because both take effect at the
-// same time tick and the insert survives the delete.
-func (d *Authority) ObserveForTest(ctx context.Context, tt uint64, segmentID int64, puts []PK, deletes []PK) error {
-	batch := d.store.NewBatch()
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
+)
+
+// ObserveForTest stands in for the observe of the WAL recovery: it applies one
+// appended write with time tick tt to the engine, then removes its entries
+// from the in-flight set (rule A). For a transaction that this index upgraded,
+// puts are the keys of the insert and deletes the keys of the companion
+// delete. Deletes are applied first, because both take effect at the same
+// time tick and the insert survives the delete.
+func (a *Authority) ObserveForTest(ctx context.Context, tt uint64, segmentID int64, puts []PK, deletes []PK) error {
+	muts := make([]engine.Mutation, 0, len(puts)+len(deletes))
 	for _, pk := range deletes {
-		batch.Delete(pk)
+		muts = append(muts, engine.Mutation{Key: pk.Encode(), Delete: true})
 	}
+	value := codec.EncodePKEntry(codec.PKEntry{SegmentID: segmentID})
 	for _, pk := range puts {
-		batch.Put(pk, Entry{SegmentID: segmentID})
+		muts = append(muts, engine.Mutation{Key: pk.Encode(), Value: value})
 	}
-	if err := d.store.Write(ctx, batch); err != nil {
-		return err
+	if len(muts) > 0 {
+		if err := a.eng.Write(ctx, muts); err != nil {
+			return err
+		}
 	}
-	d.inflight.observe(tt, append(append([]PK(nil), deletes...), puts...))
+	a.Applied(append(append([]PK(nil), deletes...), puts...), tt)
 	return nil
 }
 
-// ObserveTimeTickForTest stands in for observe of a message that writes no key
-// of this vchannel, a TimeTick for example.
-func (d *Authority) ObserveTimeTickForTest(tt uint64) {
-	d.inflight.observeTimeTick(tt)
+// ObserveTimeTickForTest is ObserveTimeTick, for the tests of other packages.
+func (a *Authority) ObserveTimeTickForTest(tt uint64) {
+	a.ObserveTimeTick(tt)
 }
 
-// InflightLenForTest returns the number of key entries in the in-flight set.
-func (d *Authority) InflightLenForTest() int {
-	return d.inflight.len()
+// InflightLenForTest returns the number of entries of the in-flight set.
+func (a *Authority) InflightLenForTest() int {
+	return a.inflight.len()
 }
 
-// PresentForTest reports whether pk exists for the write path: it has any write
-// in the in-flight set, or the engine holds it.
-func (d *Authority) PresentForTest(ctx context.Context, pk PK) (bool, error) {
+// PresentForTest reports whether pk is in the in-flight set or in the engine.
+func (a *Authority) PresentForTest(ctx context.Context, pk PK) (bool, error) {
 	key := pk.lockKey()
-	d.inflight.mu.Lock()
-	inSet := len(d.inflight.keys[key]) > 0
-	d.inflight.mu.Unlock()
+	a.inflight.mu.Lock()
+	inSet := len(a.inflight.keys[key]) > 0
+	a.inflight.mu.Unlock()
 	if inSet {
 		return true, nil
 	}
-	entry, err := d.store.Get(ctx, pk)
-	return entry != nil, err
+	entries, err := lookup(ctx, a.eng, []PK{pk})
+	if err != nil {
+		return false, err
+	}
+	return entries[0] != nil, nil
 }
