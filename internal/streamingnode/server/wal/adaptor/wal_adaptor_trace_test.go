@@ -93,7 +93,7 @@ func TestAppendWithOptionalChunkingUsesSuccessfulHeadIDOnDurableAssembly(t *test
 		return id, nil
 	})
 	walImpls := &chunkRetryTestWALImpls{firstTimeTickWALImpls: inner}
-	roWAL := adaptImplsToROWAL(walImpls, func() {})
+	roWAL := adaptImplsToROWAL(walImpls, func() {}, nil)
 	defer roWAL.Close()
 	writeMetrics := metricsutil.NewWriteMetrics(walImpls.Channel(), walImpls.WALName())
 	defer writeMetrics.Close()
