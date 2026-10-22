@@ -2294,7 +2294,7 @@ func (s *ConverterSuite) TestExportIDs_UnsupportedType() {
 	s.Contains(exportErr.Error(), "unsupported ID type")
 }
 
-func (s *ConverterSuite) TestExportIntFieldData_UnsupportedChunkType() {
+func (s *ConverterSuite) TestExportFieldData_UnsupportedIntegerLayout() {
 	// Create a DataFrame with a field typed as Int8 but with Float64 Arrow column
 	builder := NewDataFrameBuilder()
 	defer builder.Release()
@@ -2329,7 +2329,7 @@ func (s *ConverterSuite) TestExportIntFieldData_UnsupportedChunkType() {
 
 	_, exportErr := ToSearchResultData(df)
 	s.Error(exportErr)
-	s.Contains(exportErr.Error(), "type mismatch")
+	s.Contains(exportErr.Error(), "unsupported")
 }
 
 func (s *ConverterSuite) TestExportScores_TypeMismatch() {
