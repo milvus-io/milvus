@@ -375,13 +375,13 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
 		commitImport:        s.broadcastCommitImportMessage,
 		rollbackImport:      s.broadcastRollbackImportMessage,
 		assignImportIDRange: s.broadcastUpdateImportMessage,
 		getReplicationRole:  s.getReplicationRole,
 	})
-	s.importCheckerV3 = NewImportCheckerV3(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.cluster2, importCheckerHooks{
+	s.importCheckerV3 = NewImportCheckerV3(s.ctx, s.meta, s.allocator, s.importMeta, s.cluster2, importCheckerHooks{
 		commitImport:        s.broadcastCommitImportMessage,
 		rollbackImport:      s.broadcastRollbackImportMessage,
 		assignImportIDRange: s.broadcastUpdateImportMessage,
@@ -544,7 +544,6 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
 		cli:              cli,
-		broker:           s.broker,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
 		checkInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
@@ -723,14 +722,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.closeManifestCommitExecutor()
 		}
 	}()
-	// Retry each recovery phase independently: a later metadata error must
-	// not repeat newMeta's successful object-storage manifest scan.
-	if err := retry.Do(s.ctx, func() error {
-		return recoveredMeta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
-	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
-		return err
-	}
-
+	// Collections come from RootCoord's MetaTable through the shared
+	// CollectionSource. Recover DataViews for live collections only, as the
+	// ShowCollections walk this replaced did.
 	collections := recoveredMeta.GetCollections()
 	collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
 	collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
@@ -756,7 +750,63 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	recoveredMeta.dataViewManager = manager
 	s.meta = recoveredMeta
 	s.dataViewManager = manager
+	s.watchCollectionMetrics()
+	s.watchExternalSourceChanges()
 	return nil
+}
+
+// watchCollectionMetrics keeps DataCoordNumCollections, the number of
+// Created collections, in step with the shared collections and drops a
+// collection's DataCoord series once RootCoord removes it.
+func (s *Server) watchCollectionMetrics() {
+	// created holds the Created collection IDs. Each event is idempotent for
+	// its collection and RootCoord orders a collection's events, so updating
+	// the set per event keeps it exact without rescanning every collection.
+	// mu also holds back events until the seed below is in place. The set
+	// is seeded once: MixCoord installs RootCoord's source before DataCoord
+	// starts.
+	var mu sync.Mutex
+	created := typeutil.NewUniqueSet()
+	update := func(fn func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		fn()
+		metrics.DataCoordNumCollections.WithLabelValues().Set(float64(created.Len()))
+	}
+	mu.Lock()
+	s.metaStore.OnCollectionAdded(func(collectionID int64) {
+		update(func() {
+			if coll, _ := s.metaStore.GetCollection(collectionID); coll.IsCreated() {
+				created.Insert(collectionID)
+			}
+		})
+	})
+	s.metaStore.OnCollectionDropping(func(collectionID int64) {
+		update(func() { created.Remove(collectionID) })
+	})
+	s.metaStore.OnCollectionRemoved(func(collectionID int64) {
+		update(func() { created.Remove(collectionID) })
+		metrics.CleanupDataCoordWithCollectionID(collectionID)
+	})
+	for _, coll := range s.metaStore.GetCollections() {
+		if coll.IsCreated() {
+			created.Insert(coll.ID)
+		}
+	}
+	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(created.Len()))
+	mu.Unlock()
+}
+
+// watchExternalSourceChanges enqueues an external collection's index builds
+// once an alter publishes a new source/spec. A refresh applies its segments
+// before it publishes the source/spec they were read from, and an index build
+// reads the source/spec when it is dispatched.
+func (s *Server) watchExternalSourceChanges() {
+	s.metaStore.OnCollectionAltered(func(old, updated *collectionInfo) {
+		if externalSourceChanged(old.Schema, updated.Schema) {
+			notifyCollectionIndexBuild(s.notifyIndexChan, updated.ID)
+		}
+	})
 }
 
 func (s *Server) initAnalyzeInspector() {
@@ -1308,45 +1358,6 @@ func (s *Server) registerMetricsRequest() {
 			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
 		})
 	mlog.Info(s.ctx, "register metrics actions finished")
-}
-
-// loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
-// collection information will be added to server meta info.
-func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
-	has, err := s.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	if !has {
-		return merr.WrapErrCollectionNotFound(collectionID)
-	}
-
-	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	partitionIDs, err := s.broker.ShowPartitionsInternal(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-
-	properties := make(map[string]string)
-	for _, pair := range resp.Properties {
-		properties[pair.GetKey()] = pair.GetValue()
-	}
-
-	s.meta.AddCollection(&collectionInfo{
-		ID:             resp.CollectionID,
-		Schema:         resp.Schema,
-		Partitions:     partitionIDs,
-		StartPositions: resp.GetStartPositions(),
-		Properties:     properties,
-		CreatedAt:      resp.GetCreatedTimestamp(),
-		DatabaseName:   resp.GetDbName(),
-		DatabaseID:     resp.GetDbId(),
-		VChannelNames:  resp.GetVirtualChannelNames(),
-	})
-	return nil
 }
 
 func (s *Server) updateBalanceConfigLoop(ctx context.Context) {

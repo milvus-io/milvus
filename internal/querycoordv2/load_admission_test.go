@@ -25,10 +25,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -62,17 +62,30 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 
 	nodeMgr := session.NewNodeManager()
 	m := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(catalog, metacache.NewMetaStore(nil)),
+		CollectionManager: meta.NewCollectionManager(catalog, anyCollectionStore()),
 		ReplicaManager:    meta.NewReplicaManager(params.RandomIncrementIDAllocator(), catalog),
 		ResourceManager:   meta.NewResourceManager(catalog, nodeMgr),
 	}
-	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil
-		}).Maybe()
-	broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1}, nil).Maybe()
-	return &admissionFixture{meta: m, nodeMgr: nodeMgr, broker: broker}
+	return &admissionFixture{meta: m, nodeMgr: nodeMgr, broker: meta.NewMockBroker(t)}
+}
+
+// anyCollectionSource serves every collection ID as a Created collection
+// with partition 1.
+type anyCollectionSource struct{ metacache.CollectionSource }
+
+func (anyCollectionSource) GetCollection(collectionID int64) (*metacache.CollectionInfo, bool) {
+	return &metacache.CollectionInfo{ID: collectionID, Partitions: []int64{1}}, true
+}
+
+func anyCollectionStore() metacache.MetaStore {
+	store := metacache.NewMetaStore(nil)
+	store.SetCollectionSource(anyCollectionSource{metacache.NewCollections()})
+	return store
+}
+
+// newViewMeta returns a Meta whose collection view holds colls.
+func newViewMeta(colls ...*metacache.CollectionInfo) *meta.Meta {
+	return &meta.Meta{CollectionManager: meta.NewCollectionManager(nil, metacachetest.NewMetaStore(colls...))}
 }
 
 // putResourceGroup registers rgName holding exactly the given regular query

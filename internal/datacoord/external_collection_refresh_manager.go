@@ -653,7 +653,7 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 		// Nothing to deliver - the collection already describes this refresh.
 		// That is a delivered publish, so keep the key. The source/spec is already
 		// visible, so the applied segments can be indexed now; otherwise
-		// BroadcastAlteredCollection enqueues them when the publish lands.
+		// watchExternalSourceChanges enqueues them when the publish lands.
 		published = true
 		notifyCollectionIndexBuild(m.notifyIndexChan, job.GetCollectionId())
 		return
@@ -732,12 +732,10 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 		return jobID, nil
 	}
 
-	// Get collection info to validate it's an external collection.
-	// collectionGetter handles cache miss by lazy-loading from RootCoord,
-	// which covers the race condition where refresh is triggered before
-	// DataCoord syncs the newly created collection.
+	// Get collection info to validate it's an external collection. A
+	// Dropping collection gets no new refresh job.
 	collection, err := m.collectionGetter(ctx, collectionID)
-	if err != nil || collection == nil {
+	if err != nil || !collection.IsCreated() {
 		log.Warn(ctx, "collection not found", mlog.Err(err))
 		return 0, merr.WrapErrCollectionNotFound(collectionID)
 	}
@@ -1183,7 +1181,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	}
 
 	collInfo := m.mt.GetCollection(job.GetCollectionId())
-	if collInfo == nil {
+	if !collInfo.IsCreated() {
 		return nil, "", merr.WrapErrCollectionNotFound(job.GetCollectionId())
 	}
 	if spec.Format == externalspec.FormatMilvusTable {

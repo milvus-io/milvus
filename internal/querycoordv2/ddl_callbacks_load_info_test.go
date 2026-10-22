@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
@@ -316,6 +317,8 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadPartition() {
 	suite.meta.AddResourceGroup(ctx, "rg2", cfg)
 	suite.meta.AddResourceGroup(ctx, "rg3", cfg)
 
+	// An existing collection that is not loaded.
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: 999, Schema: &schemapb.CollectionSchema{}})
 	// test load 3 replica in 1 rg, should pass rg check
 	req := &querypb.LoadPartitionsRequest{
 		CollectionID:   999,

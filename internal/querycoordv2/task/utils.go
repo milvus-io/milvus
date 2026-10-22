@@ -25,9 +25,9 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -185,17 +185,17 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 	}
 }
 
-func packLoadMeta(loadType querypb.LoadType, collectionInfo *milvuspb.DescribeCollectionResponse, resourceGroup string, loadFields []int64, partitions ...int64) *querypb.LoadMetaInfo {
+func packLoadMeta(loadType querypb.LoadType, collectionInfo *metacache.CollectionInfo, resourceGroup string, loadFields []int64, partitions ...int64) *querypb.LoadMetaInfo {
 	return &querypb.LoadMetaInfo{
 		LoadType:      loadType,
-		CollectionID:  collectionInfo.GetCollectionID(),
+		CollectionID:  collectionInfo.ID,
 		PartitionIDs:  partitions,
-		DbName:        collectionInfo.GetDbName(),
+		DbName:        collectionInfo.DatabaseName,
 		ResourceGroup: resourceGroup,
 		LoadFields:    loadFields,
 		// The update timestamp is a load barrier, not the logical schema version.
 		// QueryNode uses it only to reject stale load results after schema changes.
-		SchemaBarrierTs: collectionInfo.GetUpdateTimestamp(),
+		SchemaBarrierTs: collectionInfo.UpdateTimestamp,
 	}
 }
 

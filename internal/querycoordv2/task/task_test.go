@@ -29,12 +29,12 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -47,7 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -76,14 +76,15 @@ type TaskSuite struct {
 	distributions   map[int64]*distribution
 
 	// Dependencies
-	kv      kv.MetaKv
-	store   metastore.QueryCoordCatalog
-	meta    *meta.Meta
-	dist    *meta.DistributionManager
-	target  *meta.TargetManager
-	broker  *meta.MockBroker
-	nodeMgr *session.NodeManager
-	cluster *session.MockCluster
+	viewStore metacache.MetaStore
+	kv        kv.MetaKv
+	store     metastore.QueryCoordCatalog
+	meta      *meta.Meta
+	dist      *meta.DistributionManager
+	target    *meta.TargetManager
+	broker    *meta.MockBroker
+	nodeMgr   *session.NodeManager
+	cluster   *session.MockCluster
 
 	// Test object
 	scheduler *taskScheduler
@@ -151,7 +152,9 @@ func (suite *TaskSuite) SetupTest() {
 
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.store = querycoord.NewCatalog(suite.kv)
-	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, session.NewNodeManager(), metacache.NewMetaStore(nil))
+	suite.viewStore = metacache.NewMetaStore(nil)
+	metacachetest.Collections(suite.viewStore).PutDatabase(&metacache.DatabaseInfo{ID: util.DefaultDBID, Name: util.DefaultDBName})
+	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, session.NewNodeManager(), suite.viewStore)
 	suite.meta.Put(suite.ctx, suite.replica)
 	suite.nodeMgr = session.NewNodeManager()
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
@@ -217,18 +220,12 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 	partitions := []int64{100, 101}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).
-		RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				Schema: &schemapb.CollectionSchema{
-					Name: "TestSubscribeChannelTask",
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-					},
-				},
-			}, nil
-		})
-	suite.broker.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil)
+	suite.putCollection(&schemapb.CollectionSchema{
+		Name: "TestSubscribeChannelTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	})
 	for channel, segment := range suite.growingSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).
 			Return([]*datapb.SegmentInfo{
@@ -432,15 +429,11 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestLoadSegmentTask",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				},
-			},
-		}, nil
+	suite.putCollection(&schemapb.CollectionSchema{
+		Name: "TestLoadSegmentTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	})
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
@@ -547,15 +540,11 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestLoadSegmentTaskNotIndex",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				},
-			},
-		}, nil
+	suite.putCollection(&schemapb.CollectionSchema{
+		Name: "TestLoadSegmentTaskNotIndex",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	})
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
@@ -651,15 +640,11 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestLoadSegmentTaskNotIndex",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				},
-			},
-		}, nil
+	suite.putCollection(&schemapb.CollectionSchema{
+		Name: "TestLoadSegmentTaskNotIndex",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	})
 	for _, segment := range suite.loadSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
@@ -845,15 +830,11 @@ func (suite *TaskSuite) TestSegmentTaskWaitsDistAfterLoadRPC() {
 		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestSegmentTaskWaitsDistAfterLoadRPC",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				},
-			},
-		}, nil
+	suite.putCollection(&schemapb.CollectionSchema{
+		Name: "TestSegmentTaskWaitsDistAfterLoadRPC",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	})
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{{CollectionID: suite.collection}}, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
@@ -1026,15 +1007,11 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestMoveSegmentTask",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				},
-			},
-		}, nil
+	suite.putCollection(&schemapb.CollectionSchema{
+		Name: "TestMoveSegmentTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	})
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
@@ -1160,15 +1137,11 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestSubscribeChannelTask",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				},
-			},
-		}, nil
+	suite.putCollection(&schemapb.CollectionSchema{
+		Name: "TestSubscribeChannelTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	})
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
@@ -1314,15 +1287,11 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 	}
 
 	// Expect
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestLoadSegmentTask",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				},
-			},
-		}, nil
+	suite.putCollection(&schemapb.CollectionSchema{
+		Name: "TestLoadSegmentTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	})
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
@@ -2528,15 +2497,11 @@ func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
 	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Schema: &schemapb.CollectionSchema{
-				Name: "TestMoveSegmentTask",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				},
-			},
-		}, nil
+	suite.putCollection(&schemapb.CollectionSchema{
+		Name: "TestMoveSegmentTask",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
 	})
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
@@ -3469,14 +3434,13 @@ func TestExecutorActivatesDeadlineOnlyAfterAdmission(t *testing.T) {
 	paramtable.Init()
 	nodeMgr := session.NewNodeManager()
 	broker := meta.NewMockBroker(t)
-	// Any error is fine here: the point is to let the background goroutine
-	// Execute() spawns on successful admission exit quickly via task.Fail,
-	// without touching the nil meta/dist/targetMgr/cluster this test doesn't
-	// otherwise set up.
-	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-		Return(nil, merr.WrapErrCollectionNotFound(int64(1))).Maybe()
+	// An empty collection view makes getMetaInfo fail with not-found, so the
+	// background goroutine Execute() spawns on successful admission exits
+	// quickly via task.Fail, without touching the nil dist/targetMgr/cluster
+	// this test doesn't otherwise set up.
+	emptyMeta := &meta.Meta{CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil))}
 
-	executor := NewExecutor(1, nil, nil, broker, nil, nil, nodeMgr)
+	executor := NewExecutor(1, emptyMeta, nil, broker, nil, nil, nodeMgr)
 
 	task, err := NewSegmentTask(
 		context.Background(),
@@ -3486,7 +3450,7 @@ func TestExecutorActivatesDeadlineOnlyAfterAdmission(t *testing.T) {
 		meta.NilReplica,
 		commonpb.LoadPriority_LOW,
 		// Grow routes to loadSegment, which fails gracefully through
-		// getMetaInfo -> getCollectionInfo -> the mocked broker error above.
+		// getMetaInfo -> GetCollectionInfo -> not found in the empty view.
 		// Reduce routes to releaseSegment, which needs a working dist/cluster
 		// this test doesn't set up and would nil-panic in the background
 		// goroutine instead.
@@ -3513,4 +3477,9 @@ func TestExecutorActivatesDeadlineOnlyAfterAdmission(t *testing.T) {
 	assert.True(t, admitted, "Execute must admit the task once the pool is clear")
 	_, ok = task.Context().Deadline()
 	assert.True(t, ok, "Execute must have armed the deadline on successful admission")
+}
+
+// putCollection publishes the suite's collection with schema in the view.
+func (suite *TaskSuite) putCollection(schema *schemapb.CollectionSchema) {
+	suite.viewStore.PutCollection(&metacache.CollectionInfo{ID: suite.collection, Schema: schema})
 }

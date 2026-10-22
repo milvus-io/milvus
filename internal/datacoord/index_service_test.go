@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
@@ -185,24 +184,16 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	b := mocks.NewMixCoord(t)
 
-	t.Run("get field name failed", func(t *testing.T) {
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+	t.Run("collection not found", func(t *testing.T) {
+		metaStore.RemoveCollection(collID)
 
 		s.broker = broker.NewCoordinatorBroker(b)
 		resp, err := s.CreateIndex(ctx, req)
-		assert.Error(t, merr.CheckRPCCall(resp, err))
-		assert.Equal(t, "mock error", resp.GetReason())
+		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrCollectionNotFound)
 	})
 
-	b.ExpectedCalls = nil
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-			Reason:    "",
-			Code:      0,
-			Retriable: false,
-			Detail:    "",
-		},
+	metaStore.PutCollection(&collectionInfo{
+		ID: collID,
 		Schema: &schemapb.CollectionSchema{
 			Name:        "test_index",
 			Description: "test index",
@@ -256,8 +247,7 @@ func TestServer_CreateIndex(t *testing.T) {
 			},
 			EnableDynamicField: false,
 		},
-		CollectionID: collID,
-	}, nil)
+	})
 
 	t.Run("success", func(t *testing.T) {
 		resp, err := s.CreateIndex(ctx, req)
@@ -793,11 +783,6 @@ func TestServer_AlterIndex(t *testing.T) {
 		}, nil).Once()
 	}
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:         merr.Status(nil),
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
 
 	s := &Server{
 		meta: &meta{
@@ -859,6 +844,7 @@ func TestServer_AlterIndex(t *testing.T) {
 		handler:         mockHandler,
 		broker:          b,
 	}
+	seedCollections(s, &collectionInfo{ID: collID, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 	RegisterDDLCallbacks(s)
 
 	t.Run("server not available", func(t *testing.T) {
@@ -1564,11 +1550,6 @@ func TestServer_DescribeIndex(t *testing.T) {
 	}
 
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:         merr.Status(nil),
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
 	s := &Server{
 		meta: &meta{
 			metaStore: metacache.NewMetaStore(catalog),
@@ -1672,6 +1653,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 		notifyIndexChan: make(chan UniqueID, 1),
 		broker:          b,
 	}
+	seedCollections(s, &collectionInfo{ID: collID, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx1.Insert(indexID, &model.SegmentIndex{
 		SegmentID:           segID,
@@ -2109,11 +2091,6 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 		},
 	}
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:         merr.Status(nil),
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
 	s := &Server{
 		meta: &meta{
 			metaStore: metacache.NewMetaStore(catalog),
@@ -2217,6 +2194,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 		notifyIndexChan: make(chan UniqueID, 1),
 		broker:          b,
 	}
+	seedCollections(s, &collectionInfo{ID: collID, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx1.Insert(indexID, &model.SegmentIndex{
 		SegmentID:           segID,
@@ -2383,11 +2361,6 @@ func TestServer_DropIndex(t *testing.T) {
 	mock0Allocator := newMockAllocator(t)
 
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:         merr.Status(nil),
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
 
 	s := &Server{
 		meta: &meta{
@@ -2477,6 +2450,7 @@ func TestServer_DropIndex(t *testing.T) {
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
+	seedCollections(s, &collectionInfo{ID: collID, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 	mixCoord := mocks.NewMixCoord(t)
 	mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
@@ -2581,19 +2555,6 @@ func TestServer_DropIndex_DroppedField(t *testing.T) {
 
 	// Broker returns a schema that does NOT contain fieldID=10 (simulating a dropped field)
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:         merr.Status(nil),
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name: "test_collection",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
-				// fieldID=10 is intentionally absent — it has been dropped
-			},
-		},
-	}, nil)
 
 	metaStore := metacache.NewMetaStore(nil)
 	s := &Server{
@@ -2628,6 +2589,14 @@ func TestServer_DropIndex_DroppedField(t *testing.T) {
 		allocator:       newMockAllocator(t),
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
+	seedCollections(s, &collectionInfo{ID: collID, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			// fieldID=10 is intentionally absent — it has been dropped
+		},
+	}})
 
 	// Collection is loaded
 	mixCoord := mocks.NewMixCoord(t)
@@ -2894,43 +2863,39 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 func TestJsonIndex(t *testing.T) {
 	initStreamingSystem(t)
 
-	collID := UniqueID(1)
+	// The requests below leave CollectionID unset.
+	collID := UniqueID(0)
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mock0Allocator := newMockAllocator(t)
 	indexMeta := newSegmentIndexMeta(catalog)
 	b := mocks.NewMixCoord(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-			Code:      0,
-		},
-		Schema: &schemapb.CollectionSchema{
-			Name: "test_index",
-			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:  0,
-					Name:     "json",
-					DataType: schemapb.DataType_JSON,
-				},
-				{
-					FieldID:  1,
-					Name:     "json2",
-					DataType: schemapb.DataType_JSON,
-				},
-				{
-					FieldID:   2,
-					Name:      "dynamic",
-					DataType:  schemapb.DataType_JSON,
-					IsDynamic: true,
-				},
+	jsonSchema := &schemapb.CollectionSchema{
+		Name: "test_index",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  0,
+				Name:     "json",
+				DataType: schemapb.DataType_JSON,
+			},
+			{
+				FieldID:  1,
+				Name:     "json2",
+				DataType: schemapb.DataType_JSON,
+			},
+			{
+				FieldID:   2,
+				Name:      "dynamic",
+				DataType:  schemapb.DataType_JSON,
+				IsDynamic: true,
 			},
 		},
-	}, nil)
+	}
 
 	metaStore := metacache.NewMetaStore(nil)
 	metaStore.PutCollection(&collectionInfo{
-		ID: collID,
+		ID:     collID,
+		Schema: jsonSchema,
 	})
 
 	s := &Server{

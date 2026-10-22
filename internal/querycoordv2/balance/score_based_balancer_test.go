@@ -434,7 +434,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				nil, c.collectionsSegments, nil)
-			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
@@ -534,7 +533,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestDelegatorPreserveMemory() {
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				nil, c.collectionsSegments, nil)
-			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
@@ -638,7 +636,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceWithExecutingTask() {
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				nil, c.collectionsSegments, nil)
-			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
@@ -882,7 +879,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestMultiReplicaBalance() {
 			collection := utils.CreateTestCollection(c.collectionID, int32(len(c.replicaWithNodes)))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				c.channels, c.segments, nil)
-			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
@@ -982,7 +978,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestQNMemoryCapacity() {
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				nil, c.collectionsSegments, nil)
-			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
@@ -1070,7 +1065,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	collection := utils.CreateTestCollection(collectionID, int32(replicaID))
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
 		nil, collectionsSegments, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 	collection.LoadPercentage = 100
 	collection.Status = querypb.LoadStatus_Loaded
 	suite.meta.PutCollection(ctx, collection)
@@ -1165,7 +1159,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnMultiCollections()
 		}
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
 			channels, nil, nil)
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 		balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 		balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 	}
@@ -1252,7 +1245,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnDifferentQN() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
 		channels, nil, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -1330,7 +1322,6 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnChannelExclusive()
 		}
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
 			channels, nil, nil)
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 		balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 		balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 	}

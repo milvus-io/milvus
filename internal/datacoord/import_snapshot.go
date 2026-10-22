@@ -498,23 +498,16 @@ func (s *Server) validateSnapshotPartitionTargets(ctx context.Context, collectio
 	if err != nil || mapping == nil {
 		return err
 	}
-	partitions, err := s.broker.ShowPartitions(ctx, collectionID)
+	coll, err := s.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
 		return err
-	}
-	if len(partitions.GetPartitionNames()) != len(partitions.GetPartitionIDs()) {
-		return merr.WrapErrServiceInternalMsg("partition metadata has mismatched names and IDs")
-	}
-	current := make(map[string]int64)
-	for i, name := range partitions.GetPartitionNames() {
-		current[name] = partitions.GetPartitionIDs()[i]
 	}
 	names := importutilv2.PartitionMappingTargets(mapping)
 	if len(names) != len(partitionIDs) {
 		return merr.WrapErrServiceInternalMsg("partition_mapping destination count changed")
 	}
 	for i, name := range names {
-		if current[name] != partitionIDs[i] {
+		if id, ok := coll.LivePartitionID(name); !ok || id != partitionIDs[i] {
 			return merr.WrapErrServiceUnavailableMsg("target partition %s changed while preparing snapshot import; retry the request", name)
 		}
 	}

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -45,6 +46,20 @@ func TestUpdateExternalSchemaViaWAL_CollectionNotFound(t *testing.T) {
 	err := server.updateExternalSchemaViaWAL(ctx, 999, "s3://bucket/new", `{"format":"parquet"}`)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrCollectionNotFound))
+}
+
+func TestUpdateExternalSchemaViaWAL_CollectionDropping(t *testing.T) {
+	mockGet := mockey.Mock((*meta).GetCollection).Return(&collectionInfo{
+		ID:     100,
+		State:  etcdpb.CollectionState_CollectionDropping,
+		Schema: &schemapb.CollectionSchema{Name: "test_collection"},
+	}).Build()
+	defer mockGet.UnPatch()
+
+	// No mixCoord: AlterCollection must not be called.
+	server := &Server{meta: &meta{}}
+	err := server.updateExternalSchemaViaWAL(context.Background(), 100, "s3://bucket/new", `{"format":"parquet"}`)
+	assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 }
 
 func TestUpdateExternalSchemaViaWAL_AlterCollectionRPCError(t *testing.T) {

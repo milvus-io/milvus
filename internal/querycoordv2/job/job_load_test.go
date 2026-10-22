@@ -26,9 +26,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -37,10 +37,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -81,60 +81,41 @@ func (suite *LoadCollectionJobSuite) buildBroadcastResult(collectionID int64, pa
 	}
 }
 
-// TestDescribeCollectionNotFound tests that Execute returns nil when the collection is not found.
-func (suite *LoadCollectionJobSuite) TestDescribeCollectionNotFound() {
-	ctx := context.Background()
+// collectionMeta returns a Meta whose collection view holds colls.
+func collectionMeta(colls ...*metacache.CollectionInfo) *meta.Meta {
+	return &meta.Meta{CollectionManager: meta.NewCollectionManager(nil, metacachetest.NewMetaStore(colls...))}
+}
+
+// TestCollectionNotFound tests that Execute returns nil when RootCoord has
+// no Created collection.
+func (suite *LoadCollectionJobSuite) TestCollectionNotFound() {
 	collectionID := int64(1000)
-
-	broker := meta.NewMockBroker(suite.T())
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(nil, merr.WrapErrCollectionNotFound(collectionID))
-
-	result := suite.buildBroadcastResult(collectionID, []int64{100, 101})
-	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil, nil)
-
-	err := job.Execute()
-	suite.NoError(err)
+	for name, colls := range map[string][]*metacache.CollectionInfo{
+		"missing":  nil,
+		"dropping": {{ID: collectionID, State: etcdpb.CollectionState_CollectionDropping}},
+	} {
+		suite.Run(name, func() {
+			result := suite.buildBroadcastResult(collectionID, []int64{100, 101})
+			job := NewLoadCollectionJob(context.Background(), result, nil, collectionMeta(colls...), nil, nil, nil, nil, nil, nil)
+			suite.NoError(job.Execute())
+		})
+	}
 }
 
-// TestDescribeCollectionOtherError tests that Execute returns the error when DescribeCollection fails.
-func (suite *LoadCollectionJobSuite) TestDescribeCollectionOtherError() {
-	ctx := context.Background()
-	collectionID := int64(1001)
-
-	expectedErr := errors.New("broker unavailable")
-	broker := meta.NewMockBroker(suite.T())
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(nil, expectedErr)
-
-	result := suite.buildBroadcastResult(collectionID, []int64{200, 201})
-	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil, nil)
-
-	err := job.Execute()
-	suite.Error(err)
-	suite.True(errors.Is(err, expectedErr))
-}
-
-// TestDescribeCollectionSuccess tests that Execute proceeds with VirtualChannelNames from DescribeCollection.
-func (suite *LoadCollectionJobSuite) TestDescribeCollectionSuccess() {
+// TestCollectionFound tests that Execute proceeds with the collection's
+// VChannelNames.
+func (suite *LoadCollectionJobSuite) TestCollectionFound() {
 	ctx := context.Background()
 	collectionID := int64(1002)
 	channels := []string{"ch1", "ch2"}
 
-	broker := meta.NewMockBroker(suite.T())
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID:        collectionID,
-			VirtualChannelNames: channels,
-		}, nil)
+	m := collectionMeta(&metacache.CollectionInfo{ID: collectionID, VChannelNames: channels})
 
 	result := suite.buildBroadcastResult(collectionID, []int64{300, 301})
-	// We pass nil for meta to test that DescribeCollection is called before SpawnReplicasWithReplicaConfig.
-	// SpawnReplicasWithReplicaConfig will panic on nil meta, proving that DescribeCollection was called first.
-	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil, nil)
+	job := NewLoadCollectionJob(ctx, result, nil, m, nil, nil, nil, nil, nil, nil)
 
-	// This should panic at SpawnReplicasWithReplicaConfig because meta is nil,
-	// but this proves DescribeCollection was called and returned successfully first.
+	// This should panic at SpawnReplicasWithReplicaConfig because the meta
+	// has no ReplicaManager, but this proves the collection was found first.
 	suite.Panics(func() {
 		job.Execute()
 	})
@@ -182,26 +163,18 @@ func (suite *LoadCollectionJobSuite) TestUseLocalReplicaConfigWithLocalConfigSet
 	ctx := context.Background()
 	collectionID := int64(2000)
 
-	broker := meta.NewMockBroker(suite.T())
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID:        collectionID,
-			VirtualChannelNames: []string{"ch1"},
-		}, nil)
-
 	// UseLocalReplicaConfig=true AND local config is set → should use local config (1 replica)
 	// Primary config has 3 replicas, but local overrides to 1
 	result := suite.buildBroadcastResultWithLocalReplicaConfig(collectionID, []int64{400}, true)
 
 	// Create meta with ResourceManager (has __default_resource_group) and ReplicaManager
-	m := &meta.Meta{
-		ReplicaManager:  meta.NewReplicaManager(func() (int64, error) { return 100, nil }, nil),
-		ResourceManager: meta.NewResourceManager(nil, nil),
-	}
+	m := collectionMeta(&metacache.CollectionInfo{ID: collectionID, VChannelNames: []string{"ch1"}})
+	m.ReplicaManager = meta.NewReplicaManager(func() (int64, error) { return 100, nil }, nil)
+	m.ResourceManager = meta.NewResourceManager(nil, nil)
 
 	// Will panic at SpawnReplicasWithReplicaConfig (nil catalog in ReplicaManager.SpawnWithReplicaConfig),
 	// proving that getLocalReplicaConfig was called and produced replicas.
-	job := NewLoadCollectionJob(ctx, result, nil, m, broker, nil, nil, nil, nil, nil, nil)
+	job := NewLoadCollectionJob(ctx, result, nil, m, nil, nil, nil, nil, nil, nil)
 	suite.Panics(func() {
 		job.Execute()
 	})
@@ -221,25 +194,17 @@ func (suite *LoadCollectionJobSuite) TestUseLocalReplicaConfigWithoutLocalConfig
 	ctx := context.Background()
 	collectionID := int64(2001)
 
-	broker := meta.NewMockBroker(suite.T())
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID:        collectionID,
-			VirtualChannelNames: []string{"ch1"},
-		}, nil)
-
 	// UseLocalReplicaConfig=true but local config not set → defaults to 1 replica in __default_resource_group
 	result := suite.buildBroadcastResultWithLocalReplicaConfig(collectionID, []int64{401}, true)
 
 	// Create meta with ResourceManager (has __default_resource_group) and ReplicaManager
-	m := &meta.Meta{
-		ReplicaManager:  meta.NewReplicaManager(func() (int64, error) { return 100, nil }, nil),
-		ResourceManager: meta.NewResourceManager(nil, nil),
-	}
+	m := collectionMeta(&metacache.CollectionInfo{ID: collectionID, VChannelNames: []string{"ch1"}})
+	m.ReplicaManager = meta.NewReplicaManager(func() (int64, error) { return 100, nil }, nil)
+	m.ResourceManager = meta.NewResourceManager(nil, nil)
 
 	// Will panic at SpawnReplicasWithReplicaConfig (nil catalog in ReplicaManager.SpawnWithReplicaConfig),
 	// proving that getLocalReplicaConfig was called and produced default replicas (1 replica in default RG).
-	job := NewLoadCollectionJob(ctx, result, nil, m, broker, nil, nil, nil, nil, nil, nil)
+	job := NewLoadCollectionJob(ctx, result, nil, m, nil, nil, nil, nil, nil, nil)
 	suite.Panics(func() {
 		job.Execute()
 	})
@@ -258,18 +223,12 @@ func (suite *LoadCollectionJobSuite) TestUseLocalReplicaConfigFlagFalse() {
 	ctx := context.Background()
 	collectionID := int64(2002)
 
-	broker := meta.NewMockBroker(suite.T())
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID:        collectionID,
-			VirtualChannelNames: []string{"ch1"},
-		}, nil)
-
 	// UseLocalReplicaConfig=false → should NOT read local config, use primary's 3 replicas directly
 	result := suite.buildBroadcastResultWithLocalReplicaConfig(collectionID, []int64{402}, false)
 
-	// Will panic at SpawnReplicasWithReplicaConfig with nil meta (using primary's replicas)
-	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil, nil)
+	// Will panic at SpawnReplicasWithReplicaConfig with no ReplicaManager (using primary's replicas)
+	m := collectionMeta(&metacache.CollectionInfo{ID: collectionID, VChannelNames: []string{"ch1"}})
+	job := NewLoadCollectionJob(ctx, result, nil, m, nil, nil, nil, nil, nil, nil)
 	suite.Panics(func() {
 		job.Execute()
 	})
@@ -459,7 +418,6 @@ type IncrementalExpansionSuite struct {
 	meta    *meta.Meta
 	dist    *meta.DistributionManager
 	nodeMgr *session.NodeManager
-	broker  *meta.MockBroker
 	nextID  int64
 }
 
@@ -503,18 +461,16 @@ func (suite *IncrementalExpansionSuite) SetupTest() {
 
 	suite.nextID = 9000
 	suite.nodeMgr = session.NewNodeManager()
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(&metacache.CollectionInfo{
+		ID:            expansionCollectionID,
+		VChannelNames: []string{expansionChannel},
+	})
 	suite.meta = meta.NewMeta(func() (int64, error) {
 		suite.nextID++
 		return suite.nextID, nil
-	}, suite.catalog, suite.nodeMgr, metacache.NewMetaStore(nil))
+	}, suite.catalog, suite.nodeMgr, store)
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
-
-	suite.broker = meta.NewMockBroker(suite.T())
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
-		Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID:        expansionCollectionID,
-			VirtualChannelNames: []string{expansionChannel},
-		}, nil).Maybe()
 }
 
 // seedLoadedCollection puts a collection that has finished loading into
@@ -624,7 +580,7 @@ func (suite *IncrementalExpansionSuite) runJob(result message.BroadcastResultAlt
 		}).Build()
 	defer targetMock.UnPatch()
 
-	job := NewLoadCollectionJob(suite.ctx, result, suite.dist, suite.meta, suite.broker,
+	job := NewLoadCollectionJob(suite.ctx, result, suite.dist, suite.meta,
 		nil, &observers.TargetObserver{}, &observers.CollectionObserver{}, nil, nil, nil)
 	err := job.Execute()
 	return putCollectionCalls, tasks, err
@@ -828,7 +784,7 @@ func (suite *IncrementalExpansionSuite) TestIncrementalExpansionRegistersNoTask(
 // newPredicateJob builds a job over the seeded meta without executing it, so
 // each leg of the predicate can be exercised on its own.
 func (suite *IncrementalExpansionSuite) newPredicateJob(result message.BroadcastResultAlterLoadConfigMessageV2) *LoadCollectionJob {
-	return NewLoadCollectionJob(suite.ctx, result, suite.dist, suite.meta, suite.broker,
+	return NewLoadCollectionJob(suite.ctx, result, suite.dist, suite.meta,
 		nil, &observers.TargetObserver{}, &observers.CollectionObserver{}, nil, nil, nil)
 }
 
@@ -1014,7 +970,7 @@ func (suite *IncrementalExpansionSuite) TestExpandedCollectionKeepsServingWhileN
 		targetObserver, &checkers.CheckerController{}, nil)
 
 	result := suite.buildExpansionRequest(replicaConfig(1, rgA), replicaConfig(2, rgB))
-	job := NewLoadCollectionJob(suite.ctx, result, suite.dist, suite.meta, suite.broker,
+	job := NewLoadCollectionJob(suite.ctx, result, suite.dist, suite.meta,
 		targetMgr, targetObserver, collectionObserver, nil, nil, nil)
 	suite.Require().NoError(job.Execute())
 

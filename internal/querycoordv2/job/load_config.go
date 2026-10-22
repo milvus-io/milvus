@@ -24,7 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -34,7 +34,7 @@ import (
 
 type AlterLoadConfigRequest struct {
 	Meta           *meta.Meta
-	CollectionInfo *milvuspb.DescribeCollectionResponse
+	CollectionInfo *metacache.CollectionInfo
 	Expected       ExpectedLoadConfig
 	Current        CurrentLoadConfig
 
@@ -186,8 +186,8 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 		return partitionIDs[i] < partitionIDs[j]
 	})
 	header := &messagespb.AlterLoadConfigMessageHeader{
-		DbId:                     req.CollectionInfo.DbId,
-		CollectionId:             req.CollectionInfo.CollectionID,
+		DbId:                     req.CollectionInfo.DatabaseID,
+		CollectionId:             req.CollectionInfo.ID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
 		Replicas:                 loadReplicaConfigs,

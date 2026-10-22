@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -540,13 +541,15 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 		return true
 	}
 
-	collectionInfo, err := ob.broker.DescribeCollection(ctx, collectionID)
+	collectionInfo, err := ob.meta.GetCollectionInfo(collectionID)
 	if err != nil {
-		mlog.Warn(ctx, "failed to describe collection", mlog.Err(err))
+		mlog.Warn(ctx, "failed to get collection", mlog.Err(err))
 		return false
 	}
-	schema := collectionInfo.GetSchema()
-	schemaBarrierTs := collectionInfo.GetUpdateTimestamp()
+	// The view's schema is shared, and an in-process QueryNode receives the
+	// sync requests as is.
+	schema := proto.Clone(collectionInfo.Schema).(*schemapb.CollectionSchema)
+	schemaBarrierTs := collectionInfo.UpdateTimestamp
 
 	partitions, err := utils.GetPartitions(ctx, ob.targetMgr, collectionID)
 	if err != nil {

@@ -51,9 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -184,30 +182,6 @@ type dbInfo struct {
 	Properties []*commonpb.KeyValuePair
 }
 
-// showCollectionIDs retrieves all collection IDs from RootCoord with retry on ErrServiceUnimplemented.
-func showCollectionIDs(ctx context.Context, broker broker.Broker) ([]int64, error) {
-	var (
-		err  error
-		resp *rootcoordpb.ShowCollectionIDsResponse
-	)
-	retryErr := retry.Handle(ctx, func() (bool, error) {
-		resp, err = broker.ShowCollectionIDs(ctx)
-		if errors.Is(err, merr.ErrServiceUnimplemented) {
-			return true, err
-		}
-		return false, err
-	})
-	if retryErr != nil {
-		return nil, retryErr
-	}
-
-	collectionIDs := make([]int64, 0, 4096)
-	for _, collections := range resp.GetDbCollections() {
-		collectionIDs = append(collectionIDs, collections.GetCollectionIDs()...)
-	}
-	return collectionIDs, nil
-}
-
 func (m *meta) closeManifestCommitExecutor() {
 	if m.manifestCommitExecutor != nil {
 		m.manifestCommitExecutor.close()
@@ -216,11 +190,10 @@ func (m *meta) closeManifestCommitExecutor() {
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, metaStore metacache.MetaStore, broker broker.Broker) (*meta, error) {
-	// Fetch collection IDs first so both MetaStore.LoadFromCatalog and indexMeta can use them for per-collection loading.
-	collectionIDs, err := showCollectionIDs(ctx, broker)
-	if err != nil {
-		return nil, err
-	}
+	// RootCoord has loaded the collection view before DataCoord starts, so
+	// its IDs (Dropping included) drive per-collection loading in both
+	// MetaStore.LoadFromCatalog and indexMeta.
+	collectionIDs := metaStore.GetCollectionIDs()
 
 	var (
 		im   *indexMeta
@@ -416,58 +389,9 @@ func (m *meta) segmentLoadNormalizer() metacache.SegmentNormalizer {
 	}
 }
 
-func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker.Broker) error {
-	resp, err := broker.ListDatabases(ctx)
-	if err != nil {
-		return err
-	}
-	for _, dbName := range resp.GetDbNames() {
-		collectionsResp, err := broker.ShowCollections(ctx, dbName)
-		if err != nil {
-			return err
-		}
-		for _, collectionID := range collectionsResp.GetCollectionIds() {
-			descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
-			if err != nil {
-				return err
-			}
-			partitionIDs, err := broker.ShowPartitionsInternal(ctx, collectionID)
-			if err != nil {
-				return err
-			}
-			m.AddCollection(&collectionInfo{
-				ID:             collectionID,
-				Schema:         descResp.GetSchema(),
-				Partitions:     partitionIDs,
-				StartPositions: descResp.GetStartPositions(),
-				Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
-				CreatedAt:      descResp.GetCreatedTimestamp(),
-				DatabaseName:   descResp.GetDbName(),
-				DatabaseID:     descResp.GetDbId(),
-				VChannelNames:  descResp.GetVirtualChannelNames(),
-			})
-		}
-	}
-	return nil
-}
-
-// AddCollection adds a collection into MetaStore.
-func (m *meta) AddCollection(collection *collectionInfo) {
-	mlog.Info(m.ctx, "meta update: add collection", mlog.Int64("collectionID", collection.ID))
-	// PutCollection emits the collection-count metric itself.
-	m.metaStore.PutCollection(collection)
-	mlog.Info(m.ctx, "meta update: add collection - complete", mlog.Int64("collectionID", collection.ID))
-}
-
-// DropCollection removes a collection from MetaStore.
-func (m *meta) DropCollection(collectionID int64) {
-	mlog.Info(m.ctx, "meta update: drop collection", mlog.Int64("collectionID", collectionID))
-	// RemoveCollection emits the collection metric cleanup itself.
-	m.metaStore.RemoveCollection(collectionID)
-	mlog.Info(m.ctx, "meta update: drop collection - complete", mlog.Int64("collectionID", collectionID))
-}
-
-// GetCollection returns collection info from MetaStore.
+// GetCollection returns the collection from the shared CollectionSource,
+// including a Dropping one (check IsCreated). nil means the source has no
+// such collection.
 func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 	coll, ok := m.metaStore.GetCollection(collectionID)
 	if !ok {
@@ -476,8 +400,36 @@ func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 	return coll
 }
 
-// GetCollections returns all collections from MetaStore.
+// GetCollectionByName resolves a collection name or alias in dbName.
+func (m *meta) GetCollectionByName(dbName, name string) *collectionInfo {
+	coll, ok := m.metaStore.GetCollectionByName(dbName, name)
+	if !ok {
+		return nil
+	}
+	return coll
+}
+
+// getCollectionOrNotFound is GetCollection with a miss reported as
+// ErrCollectionNotFound, as RootCoord's internal describe does. A Dropping
+// collection is returned with its State.
+func (m *meta) getCollectionOrNotFound(collectionID UniqueID) (*collectionInfo, error) {
+	coll := m.GetCollection(collectionID)
+	if coll == nil {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return coll, nil
+}
+
+// GetCollections returns the Created collections, the ones DataCoord serves.
 func (m *meta) GetCollections() []*collectionInfo {
+	return lo.Filter(m.metaStore.GetCollections(), func(c *collectionInfo, _ int) bool {
+		return c.IsCreated()
+	})
+}
+
+// GetAllCollections returns every published collection, Dropping ones
+// included until RootCoord removes them.
+func (m *meta) GetAllCollections() []*collectionInfo {
 	return m.metaStore.GetCollections()
 }
 

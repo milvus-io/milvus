@@ -76,7 +76,6 @@ func (s *ImportInspectorSuite) SetupTest() {
 
 	s.alloc = allocator.NewMockAllocator(s.T())
 	brk := broker.NewMockBroker(s.T())
-	brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), brk)
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{

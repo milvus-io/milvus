@@ -34,14 +34,15 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
@@ -82,7 +83,6 @@ func (s *ImportCheckerSuite) SetupTest() {
 	s.alloc = allocator.NewMockAllocator(s.T())
 
 	broker := broker2.NewMockBroker(s.T())
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)
@@ -100,7 +100,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 		}, nil
 	}).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, importCheckerHooks{}).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, s.alloc, importMeta, ci, handler, importCheckerHooks{}).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -821,7 +821,7 @@ func (s *ImportCheckerSuite) TestStateMachineProgressesWhileGCRollbackParked() {
 	// Teardown releases the parked rollback, letting the in-flight checkGC run to
 	// completion (RemoveJob, then checkCollection) while the loops shut down.
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.checker.broker.(*broker2.MockBroker).EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
+	s.checker.meta.metaStore.PutCollection(&collectionInfo{ID: 1})
 
 	rollbackEntered := make(chan struct{}, 1)
 	rollbackRelease := make(chan struct{})
@@ -902,31 +902,20 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// collection exist
-	broker := s.checker.broker.(*broker2.MockBroker)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
+	collections := metacachetest.Collections(s.checker.meta.metaStore)
+	collections.Put(&collectionInfo{ID: 1})
 	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
-	// HasCollection failed
-	s.checker.broker = broker2.NewMockBroker(s.T())
-	broker = s.checker.broker.(*broker2.MockBroker)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, mockErr)
-	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
-	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
-
-	// SaveImportJob failed
-	s.checker.broker = broker2.NewMockBroker(s.T())
-	broker = s.checker.broker.(*broker2.MockBroker)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
+	// SaveImportJob failed; a Dropping collection counts as dropped
+	collections.Put(&collectionInfo{ID: 1, State: etcdpb.CollectionState_CollectionDropping})
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(mockErr)
 	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// collection dropped
-	s.checker.broker = broker2.NewMockBroker(s.T())
-	broker = s.checker.broker.(*broker2.MockBroker)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
+	collections.Remove(1)
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
@@ -935,8 +924,6 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 
 func (s *ImportCheckerSuite) TestCheckCollectionDoesNotFailCommittingJob() {
 	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
-	broker := s.checker.broker.(*broker2.MockBroker)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
 
 	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 
@@ -978,7 +965,6 @@ func TestImportCheckerCompaction(t *testing.T) {
 	alloc := allocator.NewMockAllocator(t)
 
 	broker := broker2.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
@@ -989,7 +975,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	cim := NewMockCompactionInspector(t)
 	handler := NewNMockHandler(t)
 
-	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, importCheckerHooks{
+	checker := NewImportChecker(context.TODO(), meta, alloc, importMeta, cim, handler, importCheckerHooks{
 		getReplicationRole: func(context.Context) (replicateutil.Role, bool, error) {
 			return replicateutil.RolePrimary, false, nil
 		},

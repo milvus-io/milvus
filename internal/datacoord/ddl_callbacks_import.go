@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -293,8 +294,8 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// No per-file ID range is frozen here: the two-phase flow allocates exact ranges
 	// after preimport (Import V2 via PreImportTask, Import V3 via PreImportV3) and
 	// ships them in the UpdateImport WAL message.
-	// Get database name from collection metadata via broker
-	// This is safer than extracting from schema which may be stale
+	// The lock keys use the database name from the collection view, which is
+	// safer than extracting it from a schema that may be stale.
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
@@ -314,14 +315,15 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, err
 	}
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-	if err := merr.CheckRPCCall(coll, err); err != nil {
+	coll, err := s.meta.getCollectionOrNotFound(collectionID)
+	if err != nil {
 		return 0, false, err
 	}
-	schema := coll.GetSchema()
-	if schema == nil || schema.GetName() == "" {
+	if coll.Schema.GetName() == "" {
 		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
 	}
+	// The schema is shared with the collection view; filter a copy.
+	schema := proto.Clone(coll.Schema).(*schemapb.CollectionSchema)
 	schema.Fields = lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
 		return !common.IsSystemField(field.GetFieldID())
 	})
@@ -353,7 +355,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 				MsgType:   commonpb.MsgType_Import,
 				Timestamp: 0,
 			},
-			DbName:         coll.DbName,
+			DbName:         coll.DatabaseName,
 			CollectionName: schema.GetName(),
 			CollectionID:   collectionID,
 			PartitionIDs:   partitionIDs,

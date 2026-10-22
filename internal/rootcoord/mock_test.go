@@ -646,9 +646,6 @@ func withInvalidMixCoord() Opt {
 		nil, errors.New("error mock Flush"),
 	)
 
-	mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(
-		nil, errors.New("error mock broadCastAlteredCollection"),
-	)
 	mixc.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(
 		nil, errors.New("error mock DropIndex"),
 	)
@@ -695,9 +692,6 @@ func withFailedMixCoord() Opt {
 		}, nil,
 	)
 
-	mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(
-		merr.Status(err), nil,
-	)
 	mixc.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(
 		merr.Status(err), nil,
 	)
@@ -748,9 +742,6 @@ func withValidMixCoord() Opt {
 		}, nil,
 	)
 
-	mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(
-		merr.Success(), nil,
-	)
 	mixc.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(
 		merr.Success(), nil,
 	)
@@ -927,8 +918,6 @@ type mockBroker struct {
 	DropCollectionIndexFunc  func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 
-	BroadcastAlteredCollectionFunc func(ctx context.Context, collectionID UniqueID) error
-
 	ShowResourceGroupsFunc func(ctx context.Context) ([]string, error)
 
 	GCConfirmFunc func(ctx context.Context, collectionID, partitionID UniqueID) bool
@@ -946,9 +935,6 @@ func newValidMockBroker() *mockBroker {
 		return nil
 	}
 	broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
-		return nil
-	}
-	broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 		return nil
 	}
 	broker.ShowResourceGroupsFunc = func(ctx context.Context) ([]string, error) {
@@ -990,10 +976,6 @@ func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, pa
 
 func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
 	return b.GetSegmentIndexStateFunc(ctx, collID, indexName, segIDs)
-}
-
-func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error {
-	return b.BroadcastAlteredCollectionFunc(ctx, collectionID)
 }
 
 func (b mockBroker) ShowResourceGroups(ctx context.Context) ([]string, error) {

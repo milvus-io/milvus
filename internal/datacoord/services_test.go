@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -103,19 +104,8 @@ func TestServerSuite(t *testing.T) {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-		if req.CollectionID == 0 {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionID:        0,
-				VirtualChannelNames: []string{"ch1"},
-			}, nil
-		}
-		return &milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil
-	})
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, VChannelNames: []string{"ch1"}})
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 1})
 	tests := []struct {
 		description string
 		inTs        Timestamp
@@ -152,11 +142,7 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTsMissingCheckpoint() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:              merr.Success(),
-		CollectionID:        0,
-		VirtualChannelNames: []string{"missing-cp-channel"},
-	}, nil)
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, VChannelNames: []string{"missing-cp-channel"}})
 
 	resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{FlushTs: 13})
 	s.NoError(err)
@@ -1327,110 +1313,25 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: newEmptyTestMeta()}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-		req := &datapb.AlterCollectionRequest{
-			CollectionID: 1,
-			PartitionIDs: []int64{1},
-			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		}
-		resp, err := s.BroadcastAlteredCollection(ctx, req)
-		assert.NotNil(t, resp)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(s.meta.ListCollections()))
-	})
-
-	t.Run("test update meta", func(t *testing.T) {
+	// Collections are read from RootCoord's meta, so the RPC has nothing to
+	// refresh and must not write the collection it names.
+	t.Run("does not touch collections", func(t *testing.T) {
 		ms := metacache.NewMetaStore(nil)
-		ms.PutCollection(&collectionInfo{ID: 1})
-		s := &Server{meta: &meta{metaStore: ms}}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-		req := &datapb.AlterCollectionRequest{
-			CollectionID: 1,
-			PartitionIDs: []int64{1},
-			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		}
-
-		coll := s.meta.GetCollection(1)
-		assert.NotNil(t, coll)
-		assert.Nil(t, coll.Properties)
-		resp, err := s.BroadcastAlteredCollection(ctx, req)
-		assert.NotNil(t, resp)
-		assert.NoError(t, err)
-		coll = s.meta.GetCollection(1)
-		assert.NotNil(t, coll)
-		assert.NotNil(t, coll.Properties)
-	})
-
-	t.Run("published external source notifies index build", func(t *testing.T) {
-		spec := `{"format":"parquet"}`
-		ms := metacache.NewMetaStore(nil)
-		ms.PutCollection(&collectionInfo{ID: 100, Schema: externalRefreshIndexSchema("s3://bucket/a", spec)})
-		notifyIndexChan := make(chan UniqueID, 1)
-		s := &Server{meta: &meta{metaStore: ms}, notifyIndexChan: notifyIndexChan}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-
-		resp, err := s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
-			CollectionID: 100,
-			Schema:       externalRefreshIndexSchema("s3://bucket/a", spec),
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		assert.Empty(t, notifyIndexChan)
-
-		resp, err = s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
-			CollectionID: 100,
-			Schema:       externalRefreshIndexSchema("s3://bucket/b", spec),
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		require.Len(t, notifyIndexChan, 1)
-		assert.Equal(t, UniqueID(100), <-notifyIndexChan)
-	})
-
-	// RootCoord rebuilds this request from its authoritative meta on every
-	// alter, so an update must adopt the request's view wholesale. The previous
-	// code kept Partitions/StartPositions/DatabaseName/DatabaseID from the
-	// cached entry, which pinned them to whatever the initial load saw: create
-	// and drop partition never refreshed the partition list, and a rename that
-	// moves a collection to another database left the stale database on the
-	// entry that resource-key locks are built from.
-	t.Run("update adopts the request's partitions and database", func(t *testing.T) {
-		ms := metacache.NewMetaStore(nil)
-		ms.PutCollection(&collectionInfo{
-			ID:             1,
-			Partitions:     []int64{10},
-			StartPositions: []*commonpb.KeyDataPair{{Key: "ch-0", Data: []byte{1}}},
-			DatabaseName:   "old_db",
-			DatabaseID:     100,
-			VChannelNames:  []string{"ch-0"},
-			CreatedAt:      42,
-		})
+		existing := &collectionInfo{ID: 1, Partitions: []int64{10}}
+		ms.PutCollection(existing)
 		s := &Server{meta: &meta{metaStore: ms}}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 
-		resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
-			CollectionID:   1,
-			Schema:         &schemapb.CollectionSchema{Name: "coll", DbName: "new_db"},
-			PartitionIDs:   []int64{10, 11},
-			StartPositions: []*commonpb.KeyDataPair{{Key: "ch-1", Data: []byte{2}}},
-			DbID:           200,
-			VChannels:      []string{"ch-1"},
-			Properties:     []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-
-		coll := s.meta.GetCollection(1)
-		assert.Equal(t, []int64{10, 11}, coll.Partitions, "a newly created partition must show up")
-		assert.Equal(t, "new_db", coll.DatabaseName, "a cross-database rename must move the entry")
-		assert.Equal(t, int64(200), coll.DatabaseID)
-		assert.Equal(t, []string{"ch-1"}, coll.VChannelNames)
-		assert.Equal(t, "ch-1", coll.StartPositions[0].GetKey())
-		// The request carries no creation timestamp, so it is the one field the
-		// cached entry still owns.
-		assert.Equal(t, uint64(42), coll.CreatedAt)
+		for _, id := range []int64{1, 2} {
+			resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+				CollectionID: id,
+				PartitionIDs: []int64{10, 11},
+				Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
+			})
+			assert.NoError(t, merr.CheckRPCCall(resp, err))
+		}
+		assert.Same(t, existing, s.meta.GetCollection(1))
+		assert.Nil(t, s.meta.GetCollection(2))
 	})
 }
 
@@ -1473,6 +1374,11 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
+		})
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
@@ -1519,7 +1425,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1619,8 +1526,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1690,7 +1598,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1784,7 +1693,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		const expectedDataVersion int32 = 7
@@ -1856,8 +1766,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1896,8 +1807,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1935,8 +1847,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1975,8 +1888,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 
 		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -3794,7 +3708,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, newRestoreAbsentTargetBroker(t), nil, nil),
+			snapshotManager: NewSnapshotManager(newRestoreAbsentTargetMeta(), nil, nil, nil, nil, &restoreBrokerTarget{}, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3911,8 +3825,6 @@ func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 		VChannelNames: []string{"p1_100v0", "p2_100v1"},
 	}, nil).Build()
 	defer patchCollection.UnPatch()
-	patchExists := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
-	defer patchExists.UnPatch()
 	patchStart := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(&embeddedBroadcastAPI{}, nil).Build()
 	defer patchStart.UnPatch()
 	patchClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
@@ -3930,7 +3842,8 @@ func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 	defer patchBroadcast.UnPatch()
 	server := &Server{
 		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
-		handler:         &embeddedHandler{}, broker: &embeddedBroker{},
+		handler:         &embeddedHandler{},
+		meta:            newMetaWithCollections(&collectionInfo{ID: 100}),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 100})
@@ -4102,14 +4015,10 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
-		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
-		defer mockHasCollection.UnPatch()
-
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 			handler:         fakeHandler,
-			broker:          fakeBroker,
+			meta:            newMetaWithCollections(&collectionInfo{ID: 100}),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4159,20 +4068,14 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 			}).Build()
 		defer mockStartBroadcast.UnPatch()
 
-		hasCollectionCalled := false
-		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).To(
-			func(_ *embeddedBroker, _ context.Context, collectionID int64) (bool, error) {
-				hasCollectionCalled = true
-				assert.Equal(t, int64(100), collectionID)
-				return false, nil
-			}).Build()
-		defer mockHasCollection.UnPatch()
-
+		// The handler still resolved the collection before the lock; the view
+		// now shows it Dropping.
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 			handler:         fakeHandler,
-			broker:          fakeBroker,
+			meta: newMetaWithCollections(&collectionInfo{
+				ID: 100, State: etcdpb.CollectionState_CollectionDropping,
+			}),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4184,66 +4087,7 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp))
 		assert.True(t, errors.Is(merr.Error(resp), merr.ErrCollectionNotFound))
-		assert.True(t, hasCollectionCalled, "collection availability must be checked under the resource lock")
 		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast after DropCollection wins the lock race")
-	})
-
-	t.Run("collection_recheck_error_after_lock", func(t *testing.T) {
-		ctx := context.Background()
-
-		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).Return(
-			nil, merr.WrapErrSnapshotNotFound("race_snapshot", "not found"),
-		).Build()
-		defer mockGet.UnPatch()
-
-		fakeHandler := &embeddedHandler{}
-		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
-				ID:           100,
-				DatabaseName: "default",
-				Schema:       &schemapb.CollectionSchema{Name: "test_collection"},
-			}, nil,
-		).Build()
-		defer mockGetColl.UnPatch()
-
-		broadcastCalled := false
-		mockBroadcaster := &embeddedBroadcastAPI{}
-		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
-		defer mockClose.UnPatch()
-		mockDoBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
-			func(_ *embeddedBroadcastAPI, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
-				broadcastCalled = true
-				return &types2.BroadcastAppendResult{}, nil
-			}).Build()
-		defer mockDoBroadcast.UnPatch()
-		mockStartBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return mockBroadcaster, nil
-			}).Build()
-		defer mockStartBroadcast.UnPatch()
-
-		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(
-			false, errors.New("rootcoord unavailable"),
-		).Build()
-		defer mockHasCollection.UnPatch()
-
-		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
-			handler:         fakeHandler,
-			broker:          fakeBroker,
-		}
-		server.stateCode.Store(commonpb.StateCode_Healthy)
-
-		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
-			Name:         "race_snapshot",
-			CollectionId: 100,
-		})
-
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
-		assert.Contains(t, resp.GetReason(), "rootcoord unavailable")
-		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast if the lock-held collection recheck fails")
 	})
 }
 
@@ -4485,12 +4329,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
         }`
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
+		m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
@@ -4575,13 +4414,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 5},
-			}, nil).Maybe()
+		m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 5}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -4620,13 +4453,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 5},
-			}, nil).Maybe()
+		m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 5}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -4683,22 +4510,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
         }`
 		// First read (pre-broadcast) sees version 5; the second read (inside
 		// the broadcast boundary) sees version 6, as if an alter/drop-function
-		// committed between the two.
+		// committed while the resource keys were acquired.
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 5},
-			}, nil).Once()
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 6},
-			}, nil).Once()
+		m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 5}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -4709,6 +4523,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		bapi.EXPECT().Close().Return()
 		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 6}})
 				return bapi, nil
 			}).Build()
 		defer patch.UnPatch()
@@ -4747,13 +4562,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 9},
-			}, nil).Maybe()
+		m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 9}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -4865,12 +4674,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-			}, nil).Maybe()
+		m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c"}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -4932,10 +4736,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil)
+		m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c"}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -5043,10 +4844,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil)
+		m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c"}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -5262,10 +5060,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		b.WriteString(`}}`)
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil)
+		m.AddCollection(&collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c"}})
 
 		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
 
@@ -5332,12 +5127,10 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("collection not found"))
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -5355,12 +5148,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
 
 		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -5368,9 +5155,9 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		}, &collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -5388,12 +5175,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
 
 		// Mock WAL
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -5411,9 +5192,9 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcastPatch.UnPatch()
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		}, &collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -5431,12 +5212,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
 
 		// Mock WAL
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -5463,9 +5238,9 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcastPatch.UnPatch()
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		}, &collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
