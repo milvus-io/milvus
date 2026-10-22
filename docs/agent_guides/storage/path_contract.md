@@ -47,6 +47,9 @@ traversal and external namespaces are errors. Existing entries are not migrated.
 Builds retain their creation-time publication mode across switch changes and
 restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
 Readers and cleanup use each artifact's persisted version.
+Resolving v2 index files requires the owning segment's manifest base; load and
+snapshot consumers report missing or invalid metadata instead of guessing the
+canonical base. Snapshot generation uses its selected segment metadata.
 See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
 
 ## Local upgrade compatibility
@@ -119,6 +122,9 @@ directory from the output manifest base.
 - A dedicated build-aware scan handles canonical `insert_log/.../_index`
   orphans, including those in live V3 segments; snapshot and import protections
   still apply.
+- Malformed `_index` paths are skipped by the orphan scan because their build
+  ownership cannot be established. Dropped-segment directory cleanup still
+  covers them; malformed objects without a segment row can remain orphaned.
 - Therefore an uncommitted stats file inside a live V3 segment is not guaranteed
   to be reclaimed by DataCoord's orphan scan.
 - Legacy `R/M/insert_log` orphan/LOB layouts and old Explore temporary paths

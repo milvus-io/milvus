@@ -73,7 +73,8 @@ func TestIndexPathBuilder_FutureVersion_TreatedAsV1(t *testing.T) {
 func TestIsCollectionRooted(t *testing.T) {
 	assert.False(t, IsCollectionRooted(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED))
 	assert.True(t, IsCollectionRooted(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED))
-	assert.True(t, IsCollectionRooted(indexpb.IndexStorePathVersion(2)))
+	assert.False(t, IsCollectionRooted(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED))
+	assert.False(t, IsCollectionRooted(indexpb.IndexStorePathVersion(3)))
 }
 
 func TestIndexPathBuilder_SegmentRooted(t *testing.T) {

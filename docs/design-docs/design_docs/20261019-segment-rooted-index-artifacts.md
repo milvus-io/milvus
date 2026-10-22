@@ -99,6 +99,10 @@ LIST of the prefix. It remains active even when the write switch is off, because
 historical v2 files still need reclamation. Dropped-segment GC still owns whole
 segment deletion. Historical noncanonical local namespace orphan-scan gaps
 remain as documented in the storage path contract.
+Malformed `_index` paths are deliberately retained by the orphan scan when
+their ownership cannot be parsed. Dropped-segment directory deletion still
+covers them, but malformed objects with no owning segment may remain. Age
+alone is not sufficient evidence to delete an unrecognized path.
 
 ## Validation and PR organization
 

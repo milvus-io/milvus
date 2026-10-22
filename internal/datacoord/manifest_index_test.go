@@ -52,6 +52,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// Exercise storage's real relative/absolute conversion before DataCoord's
+// strict reader check, including a local legacy base outside today's layout.
+func TestManifestIndexLegacyBaseRoundTrip(t *testing.T) {
+	for _, suffix := range []string{"legacy/insert_log/1/2/3", "legacy/insert_log/1/2/3/"} {
+		t.Run(suffix, func(t *testing.T) {
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+			base := cfg.RootPath + "/" + suffix
+			segment := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2}
+			version := packed.ManifestEarliest
+			for _, buildID := range []int64{100, 200} {
+				manifest, err := packed.CommitManifestUpdates(base, version, cfg, &packed.ManifestUpdates{
+					Indexes: []packed.ManifestIndexInfo{{
+						ColumnName: "vector", IndexName: "index", IndexType: "HNSW",
+						Path: fmt.Sprintf("%d/1", buildID), IndexID: buildID, BuildID: buildID,
+						IndexVersion: 1, FieldID: 101, IndexFileKeys: []string{"index.bin"},
+						IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+					}},
+				})
+				require.NoError(t, err)
+				segment.ManifestPath = manifest
+				_, version, err = packed.UnmarshalManifestPath(manifest)
+				require.NoError(t, err)
+				entries, err := packed.GetManifestIndexInfos(manifest, cfg)
+				require.NoError(t, err)
+				require.Len(t, entries, int(buildID/100))
+				for _, entry := range entries {
+					info, ok := manifestIndexFilePathInfoForSegment(cfg.RootPath, segment, entry)
+					require.True(t, ok, "storage round-trip path must satisfy DataCoord validation: %s", entry.Path)
+					require.Equal(t, []string{strings.TrimRight(base, "/") + fmt.Sprintf("/_index/%d/1/index.bin", entry.BuildID)}, info.IndexFilePaths)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildManifestIndexInfoFromDataCoordMetadata proves the manifest entry is
 // assembled entirely from DataCoord state - no worker-supplied manifest input -
 // and that the artifact path is stored relative to the segment's _index

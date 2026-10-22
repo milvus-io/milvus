@@ -1388,7 +1388,7 @@ func generateTargetIndexPath(
 	if indexType == IndexTypeVectorScalarV0 && target.IndexStorePathVersion != nil &&
 		target.GetIndexStorePathVersion() != pathVersion {
 		fileOffset := buildIDOffset + 2
-		if !metautil.IsCollectionRooted(pathVersion) {
+		if pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED {
 			fileOffset = segmentOffset + 1
 		}
 		if keywordIdx+fileOffset >= len(parts) || keywordIdx+buildIDOffset+1 >= len(parts) {
