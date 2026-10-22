@@ -3,6 +3,7 @@ package balancer
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
@@ -61,6 +62,9 @@ func TestReconcileUsesLatestSchemaAndPreemptsObsoletePreparing(t *testing.T) {
 	require.ErrorIs(t, b.Reconcile(t.Context()), merr.ErrServiceUnavailable)
 	require.Equal(t, second.PreparingVersion, reg.Get(id).Stats().PreparingVersion)
 	readErr, latest = nil, 3
+	b.queue.mu.Lock()
+	b.queue.retryAt = time.Time{}
+	b.queue.mu.Unlock()
 	require.NoError(t, b.Reconcile(t.Context()))
 	require.Equal(t, latest, reg.Get(id).Stats().PreparingSchemaVersion)
 

@@ -94,8 +94,9 @@ func (r *ResourceGroupEntry) RangeNodes(fn func(int64) bool)       { r.nodes.eac
 func (r *ResourceGroupEntry) RangeCollections(fn func(int64) bool) { r.collections.each(fn) }
 
 type collectionSlot struct {
-	mu    sync.Mutex
-	value atomic.Pointer[CollectionEntry]
+	mu       sync.Mutex
+	value    atomic.Pointer[CollectionEntry]
+	scanSlot *collectionScanSlot
 	// Writer-owned historical fallback, retained only while latest/resident data needs it.
 	rows        map[int64]int64
 	uses        map[int64]int
@@ -113,6 +114,7 @@ type nodeSlot struct {
 type Cache struct {
 	mu            sync.RWMutex
 	collections   map[int64]*collectionSlot
+	scanIndex     collectionScanIndex
 	nodes         map[int64]*nodeSlot
 	replicas      map[int64]int64
 	groups        map[string]*ResourceGroupEntry
@@ -149,11 +151,16 @@ func NewFromSources(config *api.BalanceConfig, configs *loadmgr.LoadConfigStore,
 	return c
 }
 
-// Close detaches source hooks. Call after stopping the controller.
+// Close detaches source hooks and joins directory maintenance. Call after
+// stopping the controller.
 func (c *Cache) Close() {
+	c.mu.Lock()
+	c.scanIndex.closed = true
+	c.mu.Unlock()
 	for _, unsubscribe := range c.subscriptions {
 		unsubscribe()
 	}
+	c.scanIndex.workers.Wait()
 }
 
 // MarkReady opens the one-way initialization barrier after all sources have
@@ -234,6 +241,7 @@ func (c *Cache) collection(id int64) *collectionSlot {
 		slot = &collectionSlot{rows: make(map[int64]int64), uses: make(map[int64]int), replicaUses: make(map[int64]int), unknown: make(map[qviews.ShardID]struct{})}
 		slot.value.Store(&CollectionEntry{id: id})
 		c.collections[id] = slot
+		c.registerCollectionLocked(slot)
 	}
 	return slot
 }
@@ -633,6 +641,7 @@ func (c *Cache) finishCollection(id int64, slot *collectionSlot) {
 	if entry.config == nil && entry.data == nil && entry.shards.len() == 0 {
 		c.mu.Lock()
 		delete(c.collections, id)
+		c.retireCollectionLocked(slot)
 		c.mu.Unlock()
 	}
 	slot.mu.Unlock()

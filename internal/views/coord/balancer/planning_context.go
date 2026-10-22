@@ -180,39 +180,39 @@ func (p *planningContext) CurrentRows(id qviews.ShardID) map[int64]int64 {
 	return rows
 }
 
-// resolveCacheScope enumerates only keys and immutable references. Full passes
-// use the same cached statistics as scoped passes and never rebuild accounting.
+// resolveCacheScope expands local events only. Background scans enumerate
+// collections incrementally through cache.Scanner.
 func resolveCacheScope(reader balancercache.Reader, pending triggerBatch) []qviews.ShardID {
 	targets := make(map[qviews.ShardID]struct{})
-	addCollection := func(id int64) {
-		collection := reader.GetCollection(id)
-		if collection == nil {
-			return
+	for id := range pending.dirtyColls {
+		addCollectionShards(targets, reader.GetCollection(id))
+	}
+	for id := range pending.dirtyShards {
+		targets[id] = struct{}{}
+	}
+	for id := range pending.dirtyNodes {
+		if node := reader.GetNode(id); node != nil {
+			node.RangeShards(func(id qviews.ShardID) bool { targets[id] = struct{}{}; return true })
 		}
-		collection.RangeShards(func(shard *balancercache.ShardEntry) bool { targets[shard.ID()] = struct{}{}; return true })
-		if collection.LoadConfig() != nil && collection.DataView() != nil {
-			for _, replica := range collection.LoadConfig().Replicas {
-				for _, shard := range collection.DataView().Shards {
-					targets[qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shard.VChannel}] = struct{}{}
-				}
+	}
+	return shardKeys(targets)
+}
+
+func addCollectionShards(targets map[qviews.ShardID]struct{}, collection *balancercache.CollectionEntry) {
+	if collection == nil {
+		return
+	}
+	collection.RangeShards(func(shard *balancercache.ShardEntry) bool { targets[shard.ID()] = struct{}{}; return true })
+	if collection.LoadConfig() != nil && collection.DataView() != nil {
+		for _, replica := range collection.LoadConfig().Replicas {
+			for _, shard := range collection.DataView().Shards {
+				targets[qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shard.VChannel}] = struct{}{}
 			}
 		}
 	}
-	if pending.full {
-		reader.RangeCollectionIDs(func(id int64) bool { addCollection(id); return true })
-	} else {
-		for id := range pending.dirtyColls {
-			addCollection(id)
-		}
-		for id := range pending.dirtyShards {
-			targets[id] = struct{}{}
-		}
-		for id := range pending.dirtyNodes {
-			if node := reader.GetNode(id); node != nil {
-				node.RangeShards(func(id qviews.ShardID) bool { targets[id] = struct{}{}; return true })
-			}
-		}
-	}
+}
+
+func shardKeys(targets map[qviews.ShardID]struct{}) []qviews.ShardID {
 	shards := make([]qviews.ShardID, 0, len(targets))
 	for id := range targets {
 		shards = append(shards, id)

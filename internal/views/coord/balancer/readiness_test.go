@@ -66,7 +66,7 @@ func TestBalancerWaitsForRecoveryWithoutLosingWork(t *testing.T) {
 	require.Never(t, func() bool { return calls.Load() != 0 }, 20*time.Millisecond, time.Millisecond)
 	require.Equal(t, before, registry.Get(existing).Stats().PreparingVersion)
 	b.queue.mu.Lock()
-	full := b.queue.full
+	full := b.queue.scan
 	_, existingPending := b.queue.dirtyShards[existing]
 	_, addedPending := b.queue.dirtyShards[added]
 	b.queue.mu.Unlock()
@@ -87,7 +87,7 @@ func TestBalancerWaitsForRecoveryWithoutLosingWork(t *testing.T) {
 		return manager != nil && manager.Stats().PreparingVersion != nil
 	}, 5*time.Second, time.Millisecond)
 	require.Equal(t, before, registry.Get(existing).Stats().PreparingVersion, "recovered preparing view must not be released or replaced")
-	require.Equal(t, int64(1), calls.Load(), "queued work is coalesced into one batch")
+	require.GreaterOrEqual(t, calls.Load(), int64(1), "local work runs before the requested scan")
 }
 
 func TestBalancerStopCancelsRecoveryWait(t *testing.T) {
@@ -115,7 +115,7 @@ func TestBalancerStopCancelsRecoveryWait(t *testing.T) {
 	}
 	require.False(t, c.Ready())
 	require.Nil(t, registry.Get(shard), "shutdown must not run planning or apply")
-	require.True(t, b.queue.takePending().full, "canceled wait does not consume work")
+	require.True(t, b.queue.takePending().scan, "canceled wait does not consume work")
 	c.MarkReady()
 	b.Start(t.Context())
 	require.Eventually(t, func() bool {

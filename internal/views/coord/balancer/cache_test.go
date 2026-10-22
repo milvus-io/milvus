@@ -90,7 +90,7 @@ func TestCacheNodeAndResourceGroupScopes(t *testing.T) {
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, Stopping: true, ResourceGroup: "rg2"})
 	require.Contains(t, events[len(events)-1].DirtyNodes, int64(1))
 	require.Empty(t, newPlanningContext(c).CandidateNodes("rg2"))
-	require.ElementsMatch(t, []qviews.ShardID{a, b}, resolveCacheScope(c, triggerBatch{full: true}))
+	require.ElementsMatch(t, []qviews.ShardID{a, b}, resolveCacheScope(c, triggerBatch{dirtyColls: setOf[int64](1, 2)}))
 }
 
 func TestCacheControllerReadinessAndRetry(t *testing.T) {
@@ -101,7 +101,7 @@ func TestCacheControllerReadinessAndRetry(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	require.ErrorIs(t, controller.Reconcile(ctx), context.Canceled)
-	require.True(t, controller.queue.takePending().full, "cancellation must not consume pending work")
+	require.True(t, controller.queue.takePending().scan, "cancellation must not consume pending work")
 	c.MarkReady()
 	require.NoError(t, controller.Reconcile(t.Context()))
 	shard := cacheShard(1, 10)
@@ -110,18 +110,18 @@ func TestCacheControllerReadinessAndRetry(t *testing.T) {
 	// Active desired with missing DataView retries allocation once available.
 	controller.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shard}})
 	require.Error(t, controller.Reconcile(t.Context()))
-	require.Contains(t, controller.queue.takePending().dirtyShards, shard)
+	require.Contains(t, controller.queue.retries.dirtyShards, shard)
 	c.PublishDataView(1, cacheData(1, shard.VChannel, 10))
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	failure := mockey.Mock((*coordview.ShardViewManager).AddPreparing).Return(merr.WrapErrServiceUnavailableMsg("test unavailable version")).Build()
 	require.Error(t, controller.Reconcile(t.Context()))
 	failure.UnPatch()
-	require.Contains(t, controller.queue.takePending().dirtyShards, shard)
+	require.Contains(t, controller.queue.retries.dirtyShards, shard)
 	controller.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shard}})
 	require.NoError(t, controller.Reconcile(t.Context()))
 }
 
-func BenchmarkCacheFullPlan(b *testing.B) {
+func BenchmarkCacheScanBatchPlan(b *testing.B) {
 	for _, scenario := range []struct {
 		name                  string
 		collections, segments int
@@ -141,11 +141,12 @@ func BenchmarkCacheFullPlan(b *testing.B) {
 				c.PublishDataView(id, cacheData(id, shard.VChannel, rows...))
 			}
 			p := NewDefaultBalancePolicy()
+			controller := NewDefaultBalancer(c, nil, p, nil)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				reader := newPlanningContext(c)
-				p.Plan(reader, resolveCacheScope(reader, triggerBatch{full: true}))
+				p.Plan(reader, controller.scanBatch(reader))
 			}
 		})
 	}

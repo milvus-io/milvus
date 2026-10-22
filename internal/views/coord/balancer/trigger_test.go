@@ -35,7 +35,6 @@ func TestResolveCacheScope(t *testing.T) {
 		{"missing node", triggerBatch{dirtyNodes: setOf[int64](999)}, nil},
 		{"missing collection", triggerBatch{dirtyColls: setOf[int64](999)}, nil},
 		{"merged scopes deduplicate", triggerBatch{dirtyColls: setOf[int64](1), dirtyShards: setOf(a, unrelated), dirtyNodes: setOf[int64](100)}, []qviews.ShardID{a, a1, b, b1, residual, unrelated}},
-		{"full includes desired and residual", triggerBatch{full: true}, []qviews.ShardID{a, a1, b, b1, residual, unrelated}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.ElementsMatch(t, tc.want, resolveCacheScope(c, tc.pending))
@@ -52,7 +51,7 @@ func TestTriggerQueueCoalescesAndPreservesSuccessorWork(t *testing.T) {
 	q.add(TriggerScope{NodeChanged: true, DirtyNodes: []int64{100}})
 	<-q.signalCh()
 	first := q.takePending()
-	require.False(t, first.full)
+	require.False(t, first.scan)
 	require.Equal(t, setOf(a), first.dirtyShards)
 	require.Equal(t, setOf[int64](1), first.dirtyColls)
 	require.Equal(t, setOf[int64](100), first.dirtyNodes)
@@ -64,7 +63,7 @@ func TestTriggerQueueCoalescesAndPreservesSuccessorWork(t *testing.T) {
 	for _, scopes := range [][]TriggerScope{nil, {{NodeChanged: true}}} {
 		q.add(scopes...)
 		<-q.signalCh()
-		require.True(t, q.takePending().full)
+		require.True(t, q.takePending().scan)
 	}
 }
 

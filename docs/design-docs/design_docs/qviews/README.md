@@ -379,6 +379,11 @@ single locally prepared BM25 aggregate shared by all QueryView DataVersions.
 | Query Node | Sealed Segment Manager | Historical data management, maintaining Sealed Segment lifecycle |
 | Query Node | Pure Delete Stream Manager | Planned remote subscription client applying Delete data to each Segment; not wired by this SN extraction. |
 
+The extracted coordinator's background scheduling uses
+[Collection-batched Balancer Reconciliation](balancer_scanning.md): cache-owned
+scanners retain a directory slice across batches, and local work can run between
+collection checkpoints. Production activation remains separate integration work.
+
 ### 11.3 SyncQueryView RPC
 
 The sole RPC that unifies the synchronization layer behavior of StreamingNode
