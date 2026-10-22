@@ -8,43 +8,44 @@
 
 ## Summary
 
-Milvus rejects a collection schema that has no vector field. Outside
-`CreateCollection` and a few DataCoord and Proxy checks, nothing in the system
-depends on a vector field: segcore, QueryNode, storage, WAL, flush and
-compaction execution all work per field.
+Today a collection must have at least one vector field. The check lives in
+`CreateCollection` and a handful of Proxy and DataCoord places. Nothing below
+that depends on a vector field: segcore, QueryNode, storage, WAL, flush and
+compaction all work field by field.
 
-Phase 1 lets a collection be created without a vector field and keeps it that
-way for its lifetime: adding a vector field or a vector-producing function to
-it is rejected, as dropping the last vector field of a vector collection
-already is. Whether a collection has vectors is therefore fixed at creation and
-read from the schema. There is no new collection type, property or proto
-field.
+Phase 1 removes the check at creation. A collection created without a vector
+field stays that way: adding a vector field or a vector-producing function to
+it is rejected, just as dropping the last vector field is rejected today. So
+"does this collection have vectors" is decided once, at creation, and read
+from the schema. There is no new collection type, property or proto field.
 
-Such a collection supports everything except search: insert, upsert, delete,
+Such a collection can do everything except search: insert, upsert, delete,
 query, get, count, iterators, scalar indexes, partition and clustering keys,
-bulk import, compaction, load and release, and adding scalar fields. `search`,
+bulk import, compaction, load, release, and adding scalar fields. `search`,
 `hybrid_search` and `search_iterator` return one error.
 
-Two parts are more than removing a check:
+Most of the change is removing checks. Two things are more than that:
 
-- DataCoord's "is this segment indexed" filter is split into two predicates,
-  one for handoff and one for compaction input (Section 3).
-- Without a vector a 1 GB segment holds tens of millions of rows, and the
-  per-segment serial paths are exposed. Delete application, the one that
-  affects availability, is fixed in segcore (PR #54543, a dependency of this
-  phase). Narrow-row collections additionally get a row-derived segment size
-  target that bounds index build and load replay per segment (Section 4).
+- DataCoord asks "is this segment indexed" in two places with one filter,
+  and the filter waits for a vector index forever. It is split into two
+  predicates (Section 3).
+- Without a vector, a 1 GB segment holds tens of millions of rows. Three
+  things are done per segment on one thread and get slow at that size:
+  applying deletes, building scalar indexes, and replaying deletes at load.
+  Applying deletes is the one that blocks reads. It is fixed in segcore by
+  PR #54543, which this phase depends on. For the other two, narrow-row
+  collections get a smaller segment size target (Section 4).
 
-Phase 2, converting between zero and non-zero vector fields, is left until a
-use case needs it.
+Phase 2, converting a collection between zero and non-zero vector fields,
+waits for a use case.
 
 ## Background
 
 #52065 asks for a scalar-only collection with search rejected and everything
 else unchanged. The vector-anchored join MEP needs one as the scalar side of a
-join. Users work around the restriction today with a `BINARY_VECTOR(dim=8)`
-placeholder and a `BIN_FLAT` index, paying an index build per segment and
-exposing a fake vector field to every tool that reads the schema.
+join. Users work around the restriction with a `BINARY_VECTOR(dim=8)`
+placeholder and a `BIN_FLAT` index. They pay an index build per segment, and
+every tool that reads the schema sees a fake vector field.
 
 ## 1. Scope
 
@@ -57,13 +58,21 @@ exposing a fake vector field to every tool that reads the schema.
 | Quick-setup paths (`create_collection(dimension=...)`, REST `quickCreate`) | unchanged, still create a vector collection | |
 | Table type, join key, LSM store | no | join MEP |
 
-Fixing the property at creation removes the cases a transition would raise:
-load starting to require an index on an already loaded collection, the
-compaction-input rule changing from "nothing to wait for" to "wait for the
-vector index", the segment size target jumping and re-merging every existing
-segment, and old segments with no data for the new vector field.
+Deciding the property at creation avoids four problems that a transition
+would bring:
 
-## 2. Predicate, gate and entry checks
+- A collection that is already loaded would suddenly need an index.
+- The compaction-input rule would switch from "nothing to wait for" to "wait
+  for the vector index".
+- The segment size target would jump, and every existing segment would be
+  merged again.
+- Old segments would have no data for the new vector field.
+
+Phase 2 can take these on when something needs it.
+
+## 2. What changes
+
+One predicate answers "does this collection have vectors":
 
 ```go
 // HasVectorField reports whether the schema declares a vector typed field
@@ -73,170 +82,170 @@ func HasVectorField(schema *schemapb.CollectionSchema) bool {
 }
 ```
 
-Every "does this collection have vectors" decision goes through it.
+One config, `common.enableCollectionWithoutVector` (default `true` on
+master), gates `CreateCollection` only. With it off, the Proxy returns the
+existing `schema does not contain vector field`. Operators keep it off during
+a rolling upgrade until Proxy, DataCoord and QueryCoord are all new. An old
+DataCoord would never compact such a collection, and an old Proxy would reject
+its load.
 
-`common.enableCollectionWithoutVector` (default `true` on master) gates only
-`CreateCollection`. When `false` the Proxy returns the existing
-`schema does not contain vector field`. Operators keep it off during a rolling
-upgrade until Proxy, DataCoord and QueryCoord are upgraded: an old DataCoord
-never compacts such a collection and an old Proxy rejects its load.
+With the predicate in place, the behaviour changes are:
 
-The code changes are small and listed in Appendix A. In short:
-
-- **Create and load.** The vector-count checks at create time and in
-  `load_fields` validation apply only when the schema has vector fields. Load
-  fails only when a loaded vector field has no index, so a collection with no
-  vector needs no index. QueryCoord already treats "no index" as an empty
-  index list.
-- **Schema evolution.** RootCoord's single schema-evolution entry
-  (`prepareAlterSchemaAddField` and the function-add path) rejects any change
-  that turns `HasVectorField` from false to true: a vector field, a struct
-  array field with a vector sub-field, or a function with a vector output.
-  The Proxy repeats the check in `addCollectionFieldTask` and
-  `alterCollectionSchemaTask` for an early error, but RootCoord is
-  authoritative so that no entry can bypass it. Two Proxy drop checks that
-  compute `removed >= vectorCount` are always true when the count is 0 and
-  block every struct-field and function drop; they get the `removed > 0`
-  guard that RootCoord already has.
-- **Search.** `Search`, `HybridSearch`, `SearchIterator` and search by primary
-  key return `collection %s has no vector field, search is not supported`
-  before `anns_field` is resolved. Today four different messages cover this
+- **Create** accepts a schema with no vector field when the gate is on.
+- **Load** no longer requires an index. It fails only when a loaded vector
+  field has no index, so a collection with no vector field loads with no
+  index at all.
+- **Adding a vector** to such a collection is rejected. RootCoord's schema
+  evolution entry makes the decision, for a vector field, a struct field with
+  a vector sub-field, and a function with a vector output alike. The Proxy
+  repeats the check so the user gets the error early.
+- **Search** returns `collection %s has no vector field, search is not
+  supported` on every search entry. Today four different messages cover this
   case.
-- **REST and pymilvus.** The REST insert check and the pymilvus ORM
-  `check_schema` check that require a vector are removed.
-- **Import.** A file that matches none of the schema's columns currently makes
-  the import task loop forever, because the reader never produces a row and
-  never reaches EOF. A vector field always prevented this. Readers now reject
-  such a file at construction.
-- **Disk segment size.** `AllDenseWithDiskIndex` returns true for zero dense
-  fields, which gives sparse-only and scalar-only collections the 2 GB DiskANN
-  segment target. It gets a `len(dense) > 0` guard.
+
+Everything else is a check that assumed a vector exists and is wrong at zero:
+two Proxy drop checks, a REST insert check, a pymilvus check, the DiskANN
+segment size rule, and an import reader that loops forever on a file with no
+matching column. Appendix A lists each with its file and line.
 
 ## 3. Index readiness
 
-DataCoord uses one filter, `FilterInIndexedSegments`, for two questions:
+DataCoord uses one filter, `FilterInIndexedSegments`, to answer two questions:
 
-- may a compaction output replace its parents in the query view (handoff)?
-- may a segment be fed into another compaction?
+- May a compaction output replace its parents in the query view (handoff)?
+- May a segment be fed into another compaction?
 
-The filter's target set is the vector fields. It returns nothing until every
-target field has an index. For a collection with no vector field this is
-permanent: L1 mix compaction and delete-ratio compaction never run, and
-compaction outputs never become visible.
+The filter looks at the vector fields and returns nothing until every one of
+them has an index. With no vector field it never returns anything. L1 mix
+compaction and delete-ratio compaction never run, and compaction outputs
+never become visible.
 
-The filter is split into two predicates, both evaluated against the indexes
-defined in index meta rather than against the schema:
+The filter is split into two predicates. Both look at the indexes defined in
+index meta, not at the schema:
 
 | Predicate | Waits for | Nothing defined |
 |---|---|---|
 | `handoffReady` | every index of the collection, scalar and vector | ready |
 | `compactionInputReady` | vector indexes only | ready |
 
-`compactionInputReady` keeps today's behaviour for vector collections. Scalar
-indexes are not part of it, because they are rebuilt for each output segment
-and waiting for them on the input side only delays compaction.
+`compactionInputReady` keeps today's behaviour for vector collections. It does
+not wait for scalar indexes, because each output segment rebuilds them anyway
+and waiting on the input side only delays the compaction.
 
-`handoffReady` is today's `dataCoord.dataview.forceAllIndexReady=true` made
-the default, and the parameter is removed. **This changes vector collections
-too:** a compaction output becomes visible after its scalar indexes finish,
-not only its vector index. The cost is index build time per segment; for
-`INVERTED` on one `int32` field it is 8.5 s at 5.5 M rows. The parent segments
-keep serving until then. The upside is that a published segment never falls
-back to brute-force scalar filtering. Segments below
-`minSegmentNumRowsToEnableIndex` stay exempt.
+`handoffReady` is what `dataCoord.dataview.forceAllIndexReady=true` does
+today. It becomes the only behaviour and the parameter goes away. **This
+changes vector collections too.** A compaction output becomes visible after
+its scalar indexes finish, not just its vector index. The cost is one scalar
+index build per segment before publication, 8.5 s for `INVERTED` on one
+`int32` field at 5.5 M rows. The parents keep serving in the meantime. The
+gain is that a published segment never falls back to brute-force scalar
+filtering. Segments below `minSegmentNumRowsToEnableIndex` are exempt as
+before.
 
-Two further consequences for vector collections, which are why
-`forceAllIndexReady` was opt-in, need the DataCoord owner's agreement:
+Two more consequences for vector collections need the DataCoord owner's
+agreement. They are the reason `forceAllIndexReady` was opt-in:
 
-- A scalar index whose build fails terminally keeps the compaction output
-  invisible. Under the segment change staging design the group goes to
-  `FAILED` and the parents stay published; without staging the parents are
-  already retired and the rows are unavailable until the index build is
-  retried. Today only a failed vector index has this effect.
+- A scalar index whose build fails for good keeps the compaction output
+  invisible. With the segment change staging design, the group goes to
+  `FAILED` and the parents stay published. Without staging, the parents are
+  already gone and the rows are unavailable until the build is retried.
+  Today only a failed vector index does this.
 - Creating a scalar index while compaction outputs are still being indexed
   delays their publication by one more build.
 
-## 4. Segment size target
+## 4. Segment size
 
-### 4.1 Problem
+### 4.1 What a segment looks like without a vector
 
-Segments are sized in bytes everywhere: StreamingNode seal, compaction targets,
-import assignment and QueryNode admission. A vector field also caps the row
-count: 1 GB holds about 350 k rows at dim 768 and 2 M rows at dim 128. Without
-a vector field, 1 GB holds 44 M rows of `int64 + int32`.
+Segments are sized in bytes everywhere: StreamingNode seal, compaction
+targets, import assignment and QueryNode admission. A vector field also caps
+the row count as a side effect. 1 GB holds about 350 k rows at dim 768 and
+2 M rows at dim 128. Without a vector field, 1 GB of `int64 + int32` is 44 M
+rows.
 
-Delete application is the path that breaks. The delegator does not advance a
-channel's tsafe until a delete is applied to every affected segment, and
-inside one sealed segment each primary key is looked up with an independent
-binary search over the sorted primary-key column. Once that column no longer
-fits in cache, each search is about 25 cache misses: 6–13 µs per `int64` key
-and about 45 µs per `varchar` key on the two test machines. On a single
-44 M-row segment, a 10 % delete stalls tsafe for 28.6 s on aarch64 and 55 s on
-x86. With the same rows in eight segments of 5.5 M rows, the stall is 5.8 s
-and 8.1 s. Strong-consistency queries fail once the lag passes 3 s. Query
-latency and memory do not depend on segment count (Appendix B).
+Three things run per segment on a single thread, and at 44 M rows they are
+slow. Measured on one 44 M-row segment against eight 5.5 M-row segments with
+the same data (aarch64, details in Appendix B):
 
-### 4.2 Rule
+| Per-segment work | 1 × 44 M | 8 × 5.5 M |
+|---|---:|---:|
+| Apply a 10 % delete by expression (tsafe stall) | 28.6 s | 5.8 s |
+| Apply a 10 % delete by `varchar` pk list, 44 requests (tsafe stall) | 186 s | 14.5 s |
+| Build `INVERTED` on `int32` | 28.6 s | 8.5 s (parallel) |
+| Replay 6.34 M `varchar` deletes at load | 381 s | not measured |
 
-A new parameter `dataCoord.segment.maxRows` (default 4,000,000; 0 disables
-it) caps the per-collection size target:
+Query latency and memory do not depend on segment count (Appendix B).
+
+The delete stall is the one that matters. The delegator does not advance a
+channel's tsafe until a delete is applied to every affected segment, and a
+strong-consistency query fails once the lag passes 3 s. Inside a sealed
+segment each primary key was looked up with its own binary search over the
+sorted primary-key column. Once that column is bigger than the cache, each
+lookup is about 25 cache misses: 6–13 µs per `int64` key and about 45 µs per
+`varchar` key.
+
+### 4.2 Deletes: fixed in segcore (PR #54543, a dependency)
+
+PR #54543 sorts the delete batch by primary key and merges it against the
+sorted primary-key column in one pass, instead of one binary search per key.
+On the 44 M-row segment:
+
+| Delete | Before | After |
+|---|---:|---:|
+| 1.5 M `int64` keys, apply time | 18.2 s | 0.6 s |
+| 1.5 M `varchar` keys, apply time | 76.6 s | 1.1 s |
+| 4.4 M `int64` keys in 44 requests, tsafe stall | 43.6 s | 0.25 s |
+| 4.4 M `varchar` keys in 44 requests, tsafe stall | 209.8 s | 0.08 s |
+| Replay 6.34 M `varchar` deletes at load | 381 s | 11 s |
+
+With this, a 44 M-row segment has no availability problem on delete, for any
+key type. PR #54543 ships before or with this phase.
+
+### 4.3 A row-derived size target for the rest
+
+What remains per segment is latency, not availability: the scalar index
+build and the load-time replay above. For these, a new parameter
+`dataCoord.segment.maxRows` (default 4,000,000; 0 disables it) caps the
+per-collection size target:
 
 ```
 rowWidth(c)     = EstimateSizePerRecord(schema(c)) + 16   // + RowID and Timestamp
 expectedSize(c) = min(baseSize(c), maxRows × rowWidth(c))  // baseSize = maxSize, or the DiskANN size
 ```
 
-It is computed in `getExpectedSegmentSize`, which every DataCoord size consumer
-already reads: both planners, force-merge, clustering, import assignment and
-`CompactionPlan.max_size`. The StreamingNode seal limitation computes the same
-value through a shared helper. The planner, the compaction writer and import
-code are unchanged, and there is no proto change.
+It is computed in `getExpectedSegmentSize`, which every DataCoord size
+consumer already reads: both planners, force-merge, clustering, import
+assignment and `CompactionPlan.max_size`. The StreamingNode seal limitation
+computes the same value through a shared helper. The planner, the compaction
+writer and the import code do not change. There is no proto change.
 
-A collection whose estimated row is at least 268 B (`maxSize / maxRows`) keeps
-its current target. That covers every float vector with dim > 61. For
+A collection whose estimated row is at least 268 B (`maxSize / maxRows`)
+keeps its current target. That covers every float vector with dim > 61. For
 `int64 + int32` the target is 112 MB, about 4 M rows.
 
-The estimate over-states variable-length fields: a `varchar` counts as
-`min(max_length, 256)` (`common.estimate.varCharLengthAvg`) and JSON, Array,
-Text and Geometry count as 512 B (`common.estimate.dynamicFieldLengthAvg`).
-So the target binds only for schemas of fixed-width fields and `varchar`
-fields with a short declared `max_length`. A `varchar` primary key declared
-with `max_length ≥ 252`, or any JSON or Array field, puts the estimate above
-268 B and leaves the collection at `maxSize`, although its real rows may be
-40 B wide (a 16-byte key: 26 M rows per GB). This is why the delete path
-cannot rely on the target and is fixed in segcore instead (Section 4.3); the
-target is kept for what it does cover and for the per-segment costs below.
+**What the target covers.** The estimate rounds variable-length fields up: a
+`varchar` counts as `min(max_length, 256)` (`common.estimate.varCharLengthAvg`),
+and JSON, Array, Text and Geometry count as 512 B
+(`common.estimate.dynamicFieldLengthAvg`). So the target only takes effect
+for schemas made of fixed-width fields and `varchar` fields with a short
+declared `max_length`. A `varchar` primary key declared with
+`max_length ≥ 252`, or any JSON or Array field, pushes the estimate over
+268 B and leaves the collection at `maxSize`, even if its real rows are 40 B
+wide (a 16-byte key, 26 M rows per GB). This is why the delete path is fixed
+in segcore and not by the target. The target is kept for the schemas it does
+cover and for the two costs above, and `maxRows=0` turns it off.
 
-The rule cannot cause repeated re-compaction: planner classification and the
-writer compare bytes against the same `expectedSize(c)`, so an output that the
-writer fills is "full" to the planner and is not selected again. A simulation
-of both planners over 80 trigger intervals confirms this: write amplification
-is 0.9–1.6 and no full output is re-merged, for row widths from 13 B to 300 B,
-for estimates from 0.43× to 30× the real width, and across a schema change.
-Capping rows only at the writer, without changing the planner's target, gives
-a write amplification of 70.
+**It does not cause repeated re-compaction.** The planner's classification
+and the writer compare bytes against the same `expectedSize(c)`, so an output
+the writer fills is "full" to the planner and is not picked again. A
+simulation of both planners over 80 trigger intervals confirms it: write
+amplification is 0.9–1.6 and no full output is merged again, for row widths
+from 13 B to 300 B, for estimates from 0.43× to 30× the real width, and
+across a schema change. Capping rows only at the writer, without changing the
+planner's target, gives a write amplification of 70.
 
-Adding a scalar field raises `rowWidth`. Segments that were full under the old
-target are merged once, the same as when an operator raises `maxSize`.
-
-### 4.3 Delete-path fix (PR #54543, dependency of this phase)
-
-The fix for delete application is in segcore: sort the delete batch by
-primary key and merge it against the sorted primary-key column, instead of
-running one binary search per key. On the 44 M-row segment a 1.5 M-key delete
-drops from 18.2 s to 0.6 s (`int64`) and from 76.6 s to 1.1 s (`varchar`), a
-4.4 M-key delete in 44 requests stalls tsafe for 0.25 s instead of 43.6 s
-(`int64`) and 0.08 s instead of 209.8 s (`varchar`), and the load-time replay
-of 6.34 M deletes drops from 381 s to 11 s (`varchar`). With it, a 44 M-row
-segment has no availability problem on delete, whatever the key type, and
-the schemas the size target does not cover (Section 4.2) are safe.
-
-PR #54543 therefore ships before or with this phase. What the size target
-still bounds afterwards is per-segment serial work that is latency, not
-availability: scalar index builds (`INVERTED` on one `int32` field, 28.6 s on
-44 M rows against 8.5 s wall for eight 5.5 M-row segments built in parallel;
-`BITMAP` 48.6 s against 8.5 s) and the load-time delete replay (about 10 s
-for 6 M deletes on one segment). `maxRows=0` turns the target off.
+Adding a scalar field raises `rowWidth`. Segments that were full under the
+old target are merged once, the same as when an operator raises `maxSize`.
 
 ## 5. Compatibility
 
@@ -244,20 +253,20 @@ for 6 M deletes on one segment). `maxRows=0` turns the target off.
   output.
 - Rolling upgrade: keep the gate off until the control plane is upgraded
   (Section 2). After a downgrade, such a collection can still be read and
-  dropped but is not compacted.
-- Older pymilvus ORM rejects the schema on the client; `MilvusClient` and the
+  dropped, but it is not compacted.
+- Older pymilvus ORM rejects the schema on the client. `MilvusClient` and the
   Java, Go and Node SDKs work. Restore or CDC into an older cluster fails at
   `CreateCollection` with the old error.
 - Collections with an estimated row below 268 B seal, compact and import
-  smaller segments after upgrade. With only an `int64` primary key next to
-  the vector, that is `FLOAT_VECTOR` dim ≤ 61, `FLOAT16` / `BFLOAT16`
-  dim ≤ 122, `INT8_VECTOR` dim ≤ 244 and `BINARY_VECTOR` dim ≤ 1952; any
-  further field narrows the range.
-  Existing segments are not re-split. `maxRows=0` restores the old behaviour.
+  smaller segments after the upgrade. With only an `int64` primary key next
+  to the vector, that is `FLOAT_VECTOR` dim ≤ 61, `FLOAT16` / `BFLOAT16`
+  dim ≤ 122, `INT8_VECTOR` dim ≤ 244 and `BINARY_VECTOR` dim ≤ 1952. Any
+  further field narrows the range. Existing segments are not re-split.
+  `maxRows=0` restores the old behaviour.
 - Sparse-only collections get a 1 GB compaction and import target instead of
-  2 GB (the `AllDenseWithDiskIndex` fix).
+  2 GB (the `AllDenseWithDiskIndex` fix in Appendix A).
 - Handoff waits for scalar indexes on every collection (Section 3).
-- `dataCoord.dataview.forceAllIndexReady` is removed; a config that sets it
+- `dataCoord.dataview.forceAllIndexReady` is removed. A config that sets it
   logs a deprecation warning.
 
 ## 6. Testing
@@ -285,17 +294,17 @@ for 6 M deletes on one segment). `maxRows=0` turns the target off.
 
 ## 7. Alternatives
 
-- **An explicit table type or proto flag.** Rejected. Every client and tool
-  would have to learn it, and with Phase 1's rule the schema already
-  determines the property.
-- **Bytes and rows as two fullness dimensions inside the planner.** Rejected.
-  It produces the same plans as the size target in every simulated interval
-  while changing knapsack, both planners, the writer, import and the proto.
-  It remains the fallback if a hard row bound is ever needed.
-- **No row target at all, since PR #54543 removes the availability problem.**
-  Not taken: scalar index build and load replay remain serial per segment,
-  and the target costs no code outside `getExpectedSegmentSize` and the seal
-  limitation. It can be disabled with `maxRows=0`.
+- **An explicit table type or proto flag.** Every client and tool would have
+  to learn it, and with the Phase 1 rule the schema already carries the
+  property. Not needed.
+- **Bytes and rows as two fullness dimensions inside the planner.** It
+  produces the same plans as the size target in every simulated interval,
+  and it touches knapsack, both planners, the writer, import and the proto.
+  It stays as the fallback if a hard row bound is ever needed.
+- **No row target, since PR #54543 removes the availability problem.** Index
+  build and load replay are still serial per segment, and the target costs
+  nothing outside `getExpectedSegmentSize` and the seal limitation. It can be
+  turned off with `maxRows=0`. Kept.
 
 ## 8. Follow-ups
 
@@ -316,13 +325,13 @@ evolution rows, which are from `3df0cbcdd68`.
 |---|---|---|
 | `proxy/task.go:432` `createCollectionTask.PreExecute` | no vector → reject | reject only when the gate is off |
 | `proxy/util.go:1048` `validateLoadFieldsList`, `metacache/meta_cache.go:298` | at least one vector must be loaded | only if the schema has vectors |
-| `proxy/task.go:3141`, `:3410` load collection / partitions | `ErrIndexNotFound` fails the load | fail only if a loaded vector field has no index |
+| `proxy/task.go:3141`, `:3410` load collection / partitions | `ErrIndexNotFound` fails the load | fail only if a loaded vector field has no index; QueryCoord already treats "no index" as an empty index list |
 | `httpserver/utils.go:3061` `anyToColumns` | REST insert needs a vector or function | check removed |
-| RootCoord `prepareAlterSchemaAddField` and the function-add path; Proxy `task.go:644` `addCollectionFieldTask`, `:1033` `alterCollectionSchemaTask` | a vector field, struct vector sub-field or vector-output function may be added | rejected when `HasVectorField` would turn from false to true (RootCoord authoritative, Proxy early check) |
-| `proxy/task.go:1297`, `:1337` drop struct field / function | `removed >= count` is true at 0 | `removed > 0 &&` |
+| RootCoord `prepareAlterSchemaAddField` and the function-add path; Proxy `task.go:644` `addCollectionFieldTask`, `:1033` `alterCollectionSchemaTask` | a vector field, struct vector sub-field or vector-output function may be added | rejected when `HasVectorField` would turn from false to true (RootCoord decides, Proxy checks early) |
+| `proxy/task.go:1297`, `:1337` drop struct field / function | `removed >= vectorCount` blocks the drop; always true at 0, so every struct-field and function drop is blocked | `removed > 0 &&`, as RootCoord already does |
 | `datacoord/util.go:77` `FilterInIndexedSegments` | waits forever with no vector | split into `handoffReady` / `compactionInputReady` |
-| `datacoord/index_meta.go:1497` `AllDenseWithDiskIndex` | true at 0 dense fields | `len(dense) > 0 &&` |
-| `datanode/importv2` Parquet / NumPy / CSV / JSON readers | file with no schema column loops | rejected at construction |
+| `datacoord/index_meta.go:1497` `AllDenseWithDiskIndex` | true at 0 dense fields, so sparse-only and scalar-only collections get the 2 GB DiskANN target | `len(dense) > 0 &&` |
+| `datanode/importv2` Parquet / NumPy / CSV / JSON readers | a file that matches no schema column makes the task loop forever: the reader produces no row and never reaches EOF; a vector field used to prevent this | rejected when the reader is constructed |
 | `compaction_trigger_v2.go:872` `getExpectedSegmentSize`, `segment_limitation_policy.go`, `task_analyze.go:208` | global `maxSize` | `expectedSize(c)` |
 | Search entries, REST handlers | four different errors | one error |
 | pymilvus `orm/schema.py:1330` `check_schema` | client-side reject | removed |
@@ -358,8 +367,8 @@ estimated, 120 B RSS; `int64 + int32 + varchar(64) + JSON(115)` 217 B, 423 B
 and 265–422 B.
 
 Streaming insert of the narrow schema seals at 4.85–4.9 M rows (137 MB)
-against a 123 MB seal threshold. The wire size per row (26 B) is lower than `MemorySize`
-(29.6 B), the same ratio that applies to `maxSize` today.
+against a 123 MB seal threshold. The wire size per row (26 B) is lower than
+`MemorySize` (29.6 B), the same ratio that applies to `maxSize` today.
 
 ## References
 
