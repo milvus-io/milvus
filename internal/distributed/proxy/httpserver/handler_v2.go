@@ -1487,6 +1487,17 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
+	// A fieldName of the form "struct[sub]" adds a sub-field to an existing
+	// struct. The full name is kept as the field name; the server strips the
+	// struct prefix it finds in struct_path.
+	structPath, isSubField, err := splitStructSubFieldPath(httpReq.Schema.FieldName)
+	if err == nil && isSubField && typeutil.IsNestedArrayTypeSchema(schemaProto.GetTypeSchema()) {
+		err = completeNestedSubFieldTypeSchema(structPath, httpReq.Schema, schemaProto, nil)
+	}
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 
 	req := &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
@@ -1495,7 +1506,7 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
 				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
 					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
-						{FieldSchema: schemaProto},
+						{FieldSchema: schemaProto, StructPath: structPath},
 					},
 				},
 			},
@@ -1515,6 +1526,27 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
+}
+
+// splitStructSubFieldPath reads a fields/add fieldName. "struct[sub]" names a
+// sub-field of the struct field "struct" and returns "struct"; a name without
+// brackets is a top-level field. Only one level is accepted, as the server
+// accepts only a single-segment struct_path.
+func splitStructSubFieldPath(fieldName string) (string, bool, error) {
+	open := strings.IndexByte(fieldName, '[')
+	if open < 0 && !strings.Contains(fieldName, "]") {
+		return "", false, nil
+	}
+	structPath := fieldName[:max(open, 0)]
+	subName := ""
+	if open >= 0 && strings.HasSuffix(fieldName, "]") {
+		subName = fieldName[open+1 : len(fieldName)-1]
+	}
+	if open <= 0 || subName == "" || strings.ContainsAny(subName, "[]") {
+		return "", false, merr.WrapErrParameterInvalidMsg(
+			"invalid fieldName %s: a struct sub-field is named <struct>[<sub-field>] with exactly one level", fieldName)
+	}
+	return structPath, true, nil
 }
 
 func (h *HandlersV2) dropCollectionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
@@ -1648,6 +1680,9 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		if err == nil {
+			err = setQueryElementOffsets(outputData, queryResp.GetElementIndices())
+		}
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -2386,6 +2421,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			if err == nil {
+				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2575,6 +2613,9 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			if err == nil {
+				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2890,8 +2931,21 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				IsClusteringKey: field.IsClusteringKey,
 				DataType:        dataType,
 				TypeParams:      []*commonpb.KeyValuePair{},
-				Nullable:        field.Nullable,
+				Nullable:        field.IsNullable(),
 				ExternalField:   field.ExternalField,
+				// Only struct sub-fields support these; they are passed on so
+				// the server rejects them instead of their being dropped here.
+				ElementNullable: field.ElementNullable,
+			}
+			if field.TypeSchema != nil {
+				fieldSchema.TypeSchema, err = field.TypeSchema.GetProto(field.FieldName)
+				if err != nil {
+					HTTPAbortReturn(c, http.StatusOK, gin.H{
+						HTTPReturnCode:    merr.Code(err),
+						HTTPReturnMessage: err.Error(),
+					})
+					return nil, err
+				}
 			}
 
 			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
