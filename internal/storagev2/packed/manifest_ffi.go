@@ -721,6 +721,22 @@ func RefreshMilvusTableManifest(
 		stat := stats[key]
 		updates.Stats = append(updates.Stats, StatEntry{Key: key, Files: stat.Paths, Metadata: stat.Metadata})
 	}
+	updates.Indexes, err = GetManifestIndexInfos(oldManifestPath, storageConfig)
+	if err != nil {
+		return MilvusTableRefreshResult{}, merr.Wrap(err, "read retained manifest indexes")
+	}
+	// Completed indexes may live only in the manifest, with no Finished task
+	// record in etcd. Preserve them as well as stats so DataCoord can recover
+	// them after restart. Rows and the segment namespace are unchanged here.
+	for i := range updates.Indexes {
+		// Readers resolve index paths to complete keys, but writers require a
+		// path relative to <base>/_index. Re-encode it without moving artifacts;
+		// writing the resolved key directly would root remote keys twice.
+		updates.Indexes[i].Path, err = ManifestIndexRelativePath(basePath, updates.Indexes[i].Path)
+		if err != nil {
+			return MilvusTableRefreshResult{}, merr.Wrap(err, "prepare retained manifest index path")
+		}
+	}
 
 	// The source importer only replaces bloom-filter stats. All text/JSON entries
 	// in the final transaction are exactly the retained entries above, so their

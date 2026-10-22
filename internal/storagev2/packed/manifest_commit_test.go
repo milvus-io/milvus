@@ -273,7 +273,7 @@ func TestColumnGroupEntriesFromCValidatesNativeArrays(t *testing.T) {
 
 func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
 	oldManifest := MarshalManifestPath("files/refresh_errors/seg1", 1)
-	for _, stage := range []string{"invalid path", "canceled", "columns", "stats", "transaction"} {
+	for _, stage := range []string{"invalid path", "canceled", "columns", "stats", "indexes", "index path", "transaction"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -299,6 +299,21 @@ func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
 					return nil, nil
 				}).Build()
 			defer readPatch.UnPatch()
+			indexPatch := mockey.Mock(GetManifestIndexInfos).
+				To(func(_ string, _ *indexpb.StorageConfig) ([]ManifestIndexInfo, error) {
+					if stage == "indexes" {
+						return nil, failure
+					}
+					if stage == "index path" {
+						return []ManifestIndexInfo{{Path: "index"}}, nil
+					}
+					return nil, nil
+				}).Build()
+			defer indexPatch.UnPatch()
+			if stage == "index path" {
+				patch := mockey.Mock(ManifestIndexRelativePath).Return("", failure).Build()
+				defer patch.UnPatch()
+			}
 			commitCalls := 0
 			commitPatch := mockey.Mock(createMilvusTableManifest).
 				To(func(_ context.Context, _ string, _ []string, _ []Fragment, _ *indexpb.StorageConfig,
@@ -345,6 +360,14 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 				base := path.Join(cfg.RootPath, "target")
 				updates := &ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: path.Join(base, "_delta/old"), NumEntries: 1}}}
 				if withStats {
+					// Match the production layout: completed artifacts live outside
+					// the manifest namespace, with paths encoded relative to _index.
+					for i := int64(0); i < 2; i++ {
+						entry := indexEntry(t, base, path.Join(cfg.RootPath, fmt.Sprintf("index_v1/1/2/3/%d/1", 500+i)), 10+i, 500+i)
+						entry.ColumnName = "pk"
+						entry.NumRows = 1
+						updates.Indexes = append(updates.Indexes, entry)
+					}
 					updates.Stats = []StatEntry{
 						{Key: "bloom_filter.100", Files: []string{path.Join(base, "_stats/bloom")}, Metadata: map[string]string{"generation": "target"}},
 						{Key: "text_index.101", Files: []string{path.Join(base, "_stats/text")}, Metadata: map[string]string{"version": "7", "build_id": "8"}},
@@ -356,6 +379,8 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 				_, oldVersion, err := UnmarshalManifestPath(oldManifest)
 				require.NoError(t, err)
 				oldStats, err := GetManifestStats(oldManifest, cfg)
+				require.NoError(t, err)
+				oldIndexes, err := GetManifestIndexInfos(oldManifest, cfg)
 				require.NoError(t, err)
 				// A post-commit stats read must not be necessary for a successful
 				// refresh. Fail any read other than the old, retained snapshot.
@@ -381,6 +406,11 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, base, actualBase)
 				require.Equal(t, oldVersion+1, version, "one refresh must write exactly one manifest")
+				// Read the persisted index section, as startup recovery does, rather
+				// than trusting the unchanged in-memory SegmentIndex records.
+				indexes, err := GetManifestIndexInfos(result.ManifestPath, cfg)
+				require.NoError(t, err)
+				require.Equal(t, oldIndexes, indexes, "retain all index metadata and resolved artifact paths")
 				paths, err := GetDeltaLogPathsFromManifest(result.ManifestPath, cfg)
 				require.NoError(t, err)
 				if mode == MilvusTablePrimaryKeyModeExternal {
@@ -416,6 +446,38 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestRefreshMilvusTableManifestRetainsRemoteIndexPaths(t *testing.T) {
+	base := "files/insert_log/1/2/3"
+	oldManifest := MarshalManifestPath(base, 1)
+	index := ManifestIndexInfo{
+		ColumnName: "vec", IndexID: 10, BuildID: 500,
+		Path: "files/index_files/500/1", IndexFileKeys: []string{"index.v3"},
+	}
+	statsPatch := mockey.Mock(GetManifestStats).Return(nil, nil).Build()
+	defer statsPatch.UnPatch()
+	indexPatch := mockey.Mock(GetManifestIndexInfos).Return([]ManifestIndexInfo{index}, nil).Build()
+	defer indexPatch.UnPatch()
+	committed := MarshalManifestPath(base, 2)
+	commitCalls := 0
+	commitPatch := mockey.Mock(createMilvusTableManifest).To(func(_ context.Context, gotBase string,
+		_ []string, _ []Fragment, _ *indexpb.StorageConfig, _ ExternalSpecContext, updates *ManifestUpdates,
+	) (string, error) {
+		commitCalls++
+		require.Equal(t, base, gotBase)
+		// Remote complete keys are not absolute filesystem paths. Passing them
+		// through unchanged would put the artifact under <base>/_index/files/...
+		expected := index
+		expected.Path = "../../../../../index_files/500/1"
+		require.Equal(t, []ManifestIndexInfo{expected}, updates.Indexes)
+		return committed, nil
+	}).Build()
+	defer commitPatch.UnPatch()
+	result, err := RefreshMilvusTableManifest(context.Background(), oldManifest, nil, nil, nil, ExternalSpecContext{}, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, committed, result.ManifestPath)
+	require.Equal(t, 1, commitCalls)
 }
 
 func TestCreateMilvusTableManifestRejectsInvalidRetainedGroups(t *testing.T) {
