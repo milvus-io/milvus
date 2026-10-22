@@ -18,6 +18,7 @@ package pkindex
 
 import (
 	"bytes"
+	"hash/fnv"
 	"math"
 	"sort"
 	"testing"
@@ -55,24 +56,31 @@ func TestPKAccessors(t *testing.T) {
 	require.True(t, s.IsVarChar())
 	require.Equal(t, "a", s.VarChar())
 
-	require.Equal(t, Int64PK(42).Hash(), Int64PK(42).Hash())
-	require.Equal(t, VarCharPK("a").Hash(), VarCharPK("a").Hash())
-	require.NotEqual(t, Int64PK(1).Hash(), Int64PK(2).Hash())
+	require.Equal(t, uint64(42), Int64PK(42).lockKey())
+	require.Equal(t, VarCharPK("a").lockKey(), VarCharPK("a").lockKey())
+	require.NotEqual(t, VarCharPK("a").lockKey(), VarCharPK("b").lockKey())
 }
 
-// A plain multiplicative hash keeps the low-bit structure of the key, so keys
-// that are all multiples of the stripe count would land on the same stripe.
-// The splitmix64 finalizer must spread each key pattern over all 16 stripes.
-func TestInt64PKHashSpreadsMultiplesOverStripes(t *testing.T) {
-	const stripeCount = 16
-	for _, multiplier := range []int64{1, 2, 10, 100, 1024} {
+// An int64 key is its own lock key, so keys that are all multiples of the shard
+// count would land on one shard without the mixing of shardOf. Each key pattern
+// must spread over all shards.
+func TestInt64KeysSpreadOverShards(t *testing.T) {
+	for _, multiplier := range []int64{1, 2, 10, 64, 100, 1024} {
 		t.Run("", func(t *testing.T) {
-			stripes := make(map[uint64]struct{}, stripeCount)
+			shards := make(map[int]struct{}, inflightShardCount)
 			for i := int64(0); i < 100000; i++ {
-				k := multiplier * i
-				stripes[Int64PK(k).Hash()%stripeCount] = struct{}{}
+				shards[shardOf(Int64PK(multiplier*i).lockKey())] = struct{}{}
 			}
-			require.Len(t, stripes, stripeCount)
+			require.Len(t, shards, inflightShardCount)
 		})
+	}
+}
+
+// The varchar lock key is FNV-1a 64, written out to avoid a []byte copy.
+func TestVarCharLockKeyIsFNV1a(t *testing.T) {
+	for _, s := range []string{"", "a", "primary key 42"} {
+		h := fnv.New64a()
+		_, _ = h.Write([]byte(s))
+		require.Equal(t, h.Sum64(), VarCharPK(s).lockKey())
 	}
 }

@@ -28,8 +28,8 @@ type Intent struct {
 	d        *Decider
 	req      Request
 	decision Decision
-	txn      *pendingTxn // snapshot of the pending writes, for a CommitTxn
-	guard    *StripeGuard
+	txn      *pendingTxn    // snapshot of the pending writes, for a CommitTxn
+	write    *inflightWrite // the registration in the in-flight set; nil when the write registers no key
 	lockWait time.Duration
 	resolved bool
 }
@@ -39,15 +39,17 @@ func (i *Intent) Decision() Decision {
 	return i.decision
 }
 
-// LockWait returns how long Decide waited for the stripes.
+// LockWait returns how long Decide waited for the earlier writes of the same keys.
 func (i *Intent) LockWait() time.Duration {
 	return i.lockWait
 }
 
 // Apply confirms the decision after the whole group of messages was appended.
-func (i *Intent) Apply(ctx context.Context, r Applied) {
+// It does not write the engine: observe applies the appended messages. For a
+// registered write it fills in the time tick, which releases the lock of its
+// keys; the keys stay present in the in-flight set until observe applies them.
+func (i *Intent) Apply(_ context.Context, r Applied) {
 	i.resolve()
-	defer i.guard.Release()
 
 	switch {
 	case i.req.Kind == KindRollbackTxn:
@@ -56,24 +58,16 @@ func (i *Intent) Apply(ctx context.Context, r Applied) {
 		if i.txn == nil {
 			return
 		}
-		batch := i.d.authority.NewBatch()
-		// Deletes first. An insert of the same transaction takes effect at the same
-		// time tick and survives the delete.
-		for _, pk := range i.txn.deletes {
-			batch.Delete(pk)
-		}
-		for _, put := range i.txn.puts {
-			batch.Put(put.pk, Entry{SegmentID: put.segmentID})
-		}
-		i.mustWrite(ctx, batch)
+		i.d.inflight.fill(i.write, r.TimeTick)
 
 		i.d.pendingMu.Lock()
 		live, ok := i.d.pending[i.req.TxnID]
 		changed := ok && live.changedSince(i.txn)
 		i.d.pendingMu.Unlock()
 		if changed {
-			// The index of these keys was decided without the late body, so it is
-			// wrong from here on. The rule is in the WAL contract, see Decide.
+			// The companion deletes of this commit were decided without the late
+			// body, so a duplicate may be in the WAL. The rule is in the WAL
+			// contract, see Decide.
 			panic(fmt.Sprintf("a body of transaction %d on vchannel %s was applied after its commit decision, "+
 				"a producer must wait for the result of every body before it appends the CommitTxn",
 				i.req.TxnID, i.req.VChannel))
@@ -87,35 +81,38 @@ func (i *Intent) Apply(ctx context.Context, r Applied) {
 			i.d.pending[i.req.TxnID] = txn
 		}
 		if i.req.Kind == KindInsert {
-			txn.recordInsert(i.req.PKs, r.SegmentID)
+			txn.recordInsert(i.req.PKs)
 		} else {
 			txn.recordDelete(i.req.PKs)
 		}
 		i.d.pendingMu.Unlock()
-	case i.req.Kind == KindInsert:
-		batch := i.d.authority.NewBatch()
-		for _, pk := range i.req.PKs {
-			batch.Put(pk, Entry{SegmentID: r.SegmentID})
-		}
-		i.mustWrite(ctx, batch)
-	case i.req.Kind == KindDelete:
-		if len(i.decision.PresentPKs) == 0 {
-			return
-		}
-		batch := i.d.authority.NewBatch()
-		for _, pk := range i.decision.PresentPKs {
-			batch.Delete(pk)
-		}
-		i.mustWrite(ctx, batch)
+	default:
+		i.d.inflight.fill(i.write, r.TimeTick)
 	}
 }
 
-// Discard gives the decision up after an append failure, including a redo.
-// Neither the index nor the pending writes change. Discard does not log the
-// error, the caller reports it.
+// Discard ends a decision whose append failed and is known not to be in the WAL,
+// a redo for example. The registration is removed. Pending writes of a
+// transaction are kept: the client may retry the commit.
 func (i *Intent) Discard(_ context.Context, _ error) {
 	i.resolve()
-	i.guard.Release()
+	if i.write != nil {
+		i.d.inflight.remove(i.write)
+	}
+}
+
+// DiscardUncertain ends a decision whose append failed but may be in the WAL at
+// a time tick up to tt, a CommitTxn that may have been persisted for example.
+// tt must not be 0. The keys stay present in the in-flight set until observe
+// passes tt, and no longer block other writes.
+func (i *Intent) DiscardUncertain(_ context.Context, _ error, tt uint64) {
+	i.resolve()
+	if tt == 0 {
+		panic("primary key index intent discarded as uncertain without a time tick")
+	}
+	if i.write != nil {
+		i.d.inflight.markUncertain(i.write, tt)
+	}
 }
 
 func (i *Intent) resolve() {
@@ -123,16 +120,4 @@ func (i *Intent) resolve() {
 		panic("primary key index intent is resolved more than once")
 	}
 	i.resolved = true
-}
-
-// mustWrite applies the index update of a write that the WAL already accepted. The
-// caller's context may be canceled by then, and the update must still happen, so
-// only its values are kept. An engine write is a memory operation that fails only
-// on a bug or a closed engine. Continuing would leave the index stale for these
-// keys and let duplicates through in silence, so the failure ends the process.
-func (i *Intent) mustWrite(ctx context.Context, batch *Batch) {
-	if err := i.d.authority.Write(context.WithoutCancel(ctx), batch); err != nil {
-		panic(fmt.Sprintf("failed to apply an appended write to the primary key index of vchannel %s (%d keys): %v",
-			i.req.VChannel, batch.Len(), err))
-	}
 }

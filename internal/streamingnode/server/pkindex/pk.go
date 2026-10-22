@@ -18,7 +18,6 @@ package pkindex
 
 import (
 	"encoding/binary"
-	"hash/fnv"
 )
 
 // PK is one primary key, either an int64 or a varchar.
@@ -51,19 +50,22 @@ func (p PK) Encode() []byte {
 	return key
 }
 
-// Hash is used to spread keys over lock stripes.
-func (p PK) Hash() uint64 {
-	if p.varchar {
-		h := fnv.New64a()
-		_, _ = h.Write([]byte(p.s))
-		return h.Sum64()
+// lockKey returns the key of the primary key in the in-flight set: the value of
+// an int64 key, or the 64-bit FNV-1a hash of a varchar key. Two varchar keys
+// with the same hash share one key in the set. That only adds a wait for the
+// other key and a companion delete of a key that may not exist, both safe.
+func (p PK) lockKey() uint64 {
+	if !p.varchar {
+		return uint64(p.i)
 	}
-	// splitmix64 finalizer. Fibonacci hashing alone keeps the low-bit structure
-	// of the key, so keys that are multiples of the stripe count would all land
-	// on stripe 0. The finalizer mixes the high bits back down before the caller
-	// takes Hash() % stripeCount.
-	z := uint64(p.i) + 0x9E3779B97F4A7C15
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EB
-	return z ^ (z >> 31)
+	const (
+		offset64 = 14695981039346656037
+		prime64  = 1099511628211
+	)
+	h := uint64(offset64)
+	for i := 0; i < len(p.s); i++ {
+		h ^= uint64(p.s[i])
+		h *= prime64
+	}
+	return h
 }
