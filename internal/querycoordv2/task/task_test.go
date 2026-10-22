@@ -364,7 +364,8 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	// Expect
 	suite.cluster.EXPECT().UnsubDmChannel(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
-	// Test unsubscribe channel task
+	// Normal replica cleanup may unsubscribe a channel from a member node.
+	// NilReplica cleanup is reserved for orphaned or released collections.
 	tasks := []Task{}
 	dmChannels := make([]*datapb.VchannelInfo, 0)
 	for _, channel := range suite.unsubChannels {
@@ -377,7 +378,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 			timeout,
 			WrapIDSource(0),
 			suite.collection,
-			meta.NilReplica,
+			suite.replica,
 			NewChannelAction(targetNode, ActionTypeReduce, channel),
 		)
 
