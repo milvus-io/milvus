@@ -54,7 +54,7 @@ func (p metaKVStore) Load(ctx context.Context, key string) (string, bool, error)
 }
 
 // MultiLoad reads keys in one meta kv call. A key is missing when the meta kv
-// returns an empty value for it; a stored pointer or claim record is never empty.
+// returns an empty value for it; a stored pointer or pchannel meta is never empty.
 func (p metaKVStore) MultiLoad(ctx context.Context, keys []string) ([]string, []bool, error) {
 	values, err := p.kv.MultiLoad(ctx, keys)
 	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {

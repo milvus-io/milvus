@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	pkindexservice "github.com/milvus-io/milvus/internal/datacoord/pkindex/service"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -75,21 +76,21 @@ func TestPKIndexMetaKVStore(t *testing.T) {
 
 	// a write under a predicate on a second key that it does not write: it
 	// fails when that key does not hold the value, and leaves that key as is
-	claim := manifest.ClaimKey("ch")
-	require.NoError(t, p.Save(ctx, map[string]string{claim: "t1"}, predicates.KeyNotExist(claim)))
-	assert.Error(t, p.Save(ctx, map[string]string{key: "d"}, predicates.ValueEqual(key, "c"), predicates.ValueEqual(claim, "t2")))
+	pchannelMeta := streamingcoord.BuildPChannelInfoPath("ch")
+	require.NoError(t, p.Save(ctx, map[string]string{pchannelMeta: "t1"}, predicates.KeyNotExist(pchannelMeta)))
+	assert.Error(t, p.Save(ctx, map[string]string{key: "d"}, predicates.ValueEqual(key, "c"), predicates.ValueEqual(pchannelMeta, "t2")))
 	v, _, err = p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.Equal(t, "c", v)
-	require.NoError(t, p.Save(ctx, map[string]string{key: "d"}, predicates.ValueEqual(key, "c"), predicates.ValueEqual(claim, "t1")))
+	require.NoError(t, p.Save(ctx, map[string]string{key: "d"}, predicates.ValueEqual(key, "c"), predicates.ValueEqual(pchannelMeta, "t1")))
 	v, _, err = p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.Equal(t, "d", v)
-	v, _, err = p.Load(ctx, claim)
+	v, _, err = p.Load(ctx, pchannelMeta)
 	require.NoError(t, err)
 	assert.Equal(t, "t1", v)
 
-	values, founds, err = p.MultiLoad(ctx, []string{key, manifest.PointerKey(1, "missing_v0"), claim})
+	values, founds, err = p.MultiLoad(ctx, []string{key, manifest.PointerKey(1, "missing_v0"), pchannelMeta})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"d", "", "t1"}, values)
 	assert.Equal(t, []bool{true, false, true}, founds)
@@ -97,7 +98,7 @@ func TestPKIndexMetaKVStore(t *testing.T) {
 	keys, values, err := p.List(ctx, manifest.PointerPrefix)
 	require.NoError(t, err)
 	assert.Equal(t, []string{key}, keys)
-	assert.Equal(t, []string{"d"}, values, "the claim record is not under the pointer prefix")
+	assert.Equal(t, []string{"d"}, values, "the pchannel meta is not under the pointer prefix")
 	collectionID, vchannel, ok := manifest.ParsePointerKey(keys[0])
 	assert.True(t, ok)
 	assert.Equal(t, int64(1), collectionID)

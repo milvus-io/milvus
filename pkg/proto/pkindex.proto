@@ -47,21 +47,6 @@ message ManifestPointer {
   string body_key = 2;
 }
 
-// PChannelClaim is the etcd value of the claim record of one pchannel.
-message PChannelClaim {
-  // The pchannel term (PChannelInfo.term) of the current owner.
-  int64 pchannel_term = 1;
-}
-
-message ClaimPChannelRequest {
-  string pchannel = 1;
-  int64 pchannel_term = 2;
-}
-
-message ClaimPChannelResponse {
-  common.Status status = 1;
-}
-
 message CommitFlushRequest {
   int64 collection_id = 1;
   // The pchannel of the flush is the pchannel of this vchannel name.
@@ -107,7 +92,6 @@ message GetRecoveryManifestsResponse {
 }
 
 service PKIndexCoordService {
-  rpc ClaimPChannel(ClaimPChannelRequest) returns (ClaimPChannelResponse) {}
   rpc CommitFlush(CommitFlushRequest) returns (CommitFlushResponse) {}
   // Returns the manifest pointer of each vchannel; the caller reads the body
   // from object storage.
