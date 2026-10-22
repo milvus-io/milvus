@@ -8,7 +8,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -153,9 +152,7 @@ func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 
 	err = merr.CheckRPCCall(ddt.result, err)
 	if err == nil {
-		for _, id := range globalMetaCache.RemoveDatabase(ctx, ddt.DbName) {
-			rls.MarkCollectionDropped(id)
-		}
+		globalMetaCache.RemoveDatabase(ctx, ddt.DbName)
 	}
 	return err
 }

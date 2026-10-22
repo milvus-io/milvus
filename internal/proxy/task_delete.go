@@ -16,11 +16,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -298,23 +296,6 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
-	canonicalDBName := colInfo.dbName
-	if canonicalDBName == "" {
-		canonicalDBName = dr.req.GetDbName()
-	}
-	rlsEnabled := colInfo.rlsEnabled
-	if rlsEnabled && dr.req.GetSkipRls() {
-		rlsEnabled, err = resolveRLSEnforcement(ctx, rlsEnabled, colInfo.rlsForce, true,
-			canonicalDBName, colInfo.schema.GetName(), "delete")
-		if err != nil {
-			return err
-		}
-	}
-	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
-	if err != nil {
-		return err
-	}
-
 	dr.schema = colInfo.schema
 	colTimezone := getColTimezone(colInfo)
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
@@ -338,16 +319,6 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
-
-	if enforceRLS {
-		predicate, err := rls.ResolveUsingPredicate(ctx, dr.collectionID, principalName, rlsutil.PolicyActionDelete, dr.schema.schemaHelper)
-		if err != nil {
-			return err
-		}
-		if err := rls.MergeNormalizedPredicateToPlan(dr.plan, predicate); err != nil {
-			return err
-		}
-	}
 
 	// Set partitionIDs, could be empty if no partition name specified and no partition key
 	partName := dr.req.GetPartitionName()

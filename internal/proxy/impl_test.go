@@ -1790,18 +1790,6 @@ func TestProxy_ImportV2(t *testing.T) {
 	})
 }
 
-func TestConvertToV2ImportRequestPreservesRLSContext(t *testing.T) {
-	options := []*commonpb.KeyValuePair{
-		{Key: "rls_principal", Value: "alice"},
-		{Key: "skip_rls", Value: "true"},
-	}
-	req := convertToV2ImportRequest(&milvuspb.ImportRequest{
-		Options: options,
-	})
-
-	assert.Equal(t, options, req.GetOptions())
-}
-
 func TestGetCollectionRateSubLabel(t *testing.T) {
 	d := "db1"
 	collectionName := "test1"
@@ -2212,6 +2200,112 @@ func TestProxy_ListFileResources(t *testing.T) {
 	// 	assert.NoError(t, err)
 	// 	assert.Error(t, merr.Error(resp.GetStatus()))
 	// })
+}
+
+func TestPrepareSearchByPKAttempt(t *testing.T) {
+	node := &Proxy{}
+	ctx := context.Background()
+	originalCache := globalMetaCache
+	t.Cleanup(func() { globalMetaCache = originalCache })
+
+	t.Run("ordinary search keeps request", func(t *testing.T) {
+		globalMetaCache = NewMockCache(t)
+		request := &milvuspb.SearchRequest{CollectionName: "collection"}
+		attempt, preflight, err := node.prepareSearchByPKAttempt(ctx, request)
+		require.NoError(t, err)
+		require.Same(t, request, attempt)
+		require.Nil(t, preflight)
+	})
+
+	for _, tc := range []struct {
+		name         string
+		collectionID string
+		wantErr      string
+	}{
+		{name: "resolved collection"},
+		{name: "matching collection ID", collectionID: "42"},
+		{name: "invalid collection ID", collectionID: "invalid", wantErr: "value for collection id is invalid"},
+		{name: "mismatched collection ID", collectionID: "43", wantErr: "not consistent with resolved collection"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := NewMockCache(t)
+			globalMetaCache = cache
+			info := &collectionInfo{collID: 42}
+			cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "alias", int64(0)).Return(info, nil).Once()
+			request := &milvuspb.SearchRequest{
+				DbName:         "db",
+				CollectionName: "alias",
+				SearchInput: &milvuspb.SearchRequest_Ids{
+					Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+				},
+			}
+			if tc.collectionID != "" {
+				request.SearchParams = []*commonpb.KeyValuePair{{Key: CollectionID, Value: tc.collectionID}}
+			}
+			attempt, preflight, err := node.prepareSearchByPKAttempt(ctx, request)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				require.Same(t, request, attempt)
+				require.Nil(t, preflight)
+				return
+			}
+			require.NoError(t, err)
+			require.NotSame(t, request, attempt)
+			require.Equal(t, request, attempt)
+			require.Same(t, info, preflight.collectionInfo)
+			attempt.CollectionName = "canonical"
+			attempt.SearchParams = append(attempt.SearchParams, &commonpb.KeyValuePair{Key: AnnsFieldKey, Value: "vector"})
+			require.Equal(t, "alias", request.GetCollectionName())
+			require.Len(t, attempt.SearchParams, len(request.SearchParams)+1)
+		})
+	}
+}
+
+func TestTransformSearchByPKValidation(t *testing.T) {
+	node := &Proxy{}
+	ctx := context.Background()
+	validData, err := node.transformSearchByPK(ctx, &milvuspb.SearchRequest{}, nil)
+	require.NoError(t, err)
+	require.Nil(t, validData)
+
+	preflight := &searchByPKPreflight{collectionInfo: &collectionInfo{
+		collID: 42,
+		dbName: "canonical_db",
+		schema: newSchemaInfo(&schemapb.CollectionSchema{
+			Name: "canonical_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector},
+			},
+		}),
+	}}
+	for _, tc := range []struct {
+		name      string
+		ids       []int64
+		annsField string
+		wantErr   string
+	}{
+		{name: "duplicate IDs", ids: []int64{1, 1}, annsField: "vector", wantErr: "duplicate IDs"},
+		{name: "missing vector field", ids: []int64{1}, annsField: "missing", wantErr: "vector field not found"},
+		{name: "non-vector field", ids: []int64{1}, annsField: "pk", wantErr: "not of vector data type"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := &milvuspb.SearchRequest{
+				DbName:         "db",
+				CollectionName: "alias",
+				SearchInput: &milvuspb.SearchRequest_Ids{
+					Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: tc.ids}}},
+				},
+				SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: tc.annsField}},
+			}
+			validData, err := node.transformSearchByPK(ctx, request, preflight)
+			require.ErrorContains(t, err, tc.wantErr)
+			require.Nil(t, validData)
+			require.Equal(t, "canonical_db", request.GetDbName())
+			require.Equal(t, "canonical_collection", request.GetCollectionName())
+			require.Contains(t, request.SearchParams, &commonpb.KeyValuePair{Key: CollectionID, Value: "42"})
+		})
+	}
 }
 
 func TestHandleIfSearchByPK_BM25Detection(t *testing.T) {

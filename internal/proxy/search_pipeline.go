@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -829,7 +828,6 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 
 type requeryOperator struct {
 	traceCtx         context.Context
-	rlsPredicate     *planpb.Expr
 	outputFieldNames []string
 
 	timestamp          uint64
@@ -871,17 +869,16 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 			return true
 		})
 	}
-	collectionName := t.rlsCollectionName
+	collectionName := t.resolvedCollectionName
 	if collectionName == "" {
 		collectionName = t.request.GetCollectionName()
 	}
-	dbName := t.rlsDBName
+	dbName := t.resolvedDBName
 	if dbName == "" {
 		dbName = t.request.GetDbName()
 	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
-		rlsPredicate:       t.rlsPredicate,
 		outputFieldNames:   outputFieldNames.Collect(),
 		timestamp:          t.BeginTs(),
 		dbName:             dbName,
@@ -939,9 +936,6 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	plan := planparserv2.CreateRequeryPlan(op.primaryFieldSchema, ids)
 	// Reuse the exact top-level Search/HybridSearch predicate. queryTask must
 	// not resolve a separate Query-action policy for this internal retrieval.
-	if err := rls.AttachPredicateToRequeryPlan(plan, op.rlsPredicate); err != nil {
-		return nil, segcore.StorageCost{}, err
-	}
 	channelsMvcc := make(map[string]Timestamp)
 	for k, v := range op.queryChannelsTs {
 		channelsMvcc[k] = v
@@ -972,7 +966,6 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		preferredNodes: preferredNodes,
 		fastSkip:       true,
 		reQuery:        true,
-		skipRuntimeRLS: true,
 	}
 	queryResult, storageCost, err := op.node.(*Proxy).query(op.traceCtx, qt, span)
 	if err != nil {
