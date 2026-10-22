@@ -1953,3 +1953,11 @@ func TestSnapshotDescriptionLengthConfig(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }
+
+func TestProxyLocalCollectionVisibilityDefault(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	require.False(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
+	require.NoError(t, params.Save(params.ProxyCfg.EnableLocalCollectionVisibility.Key, "true"))
+	require.True(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
+}
