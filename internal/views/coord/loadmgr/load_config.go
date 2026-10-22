@@ -17,10 +17,8 @@ type LoadConfig struct {
 	DbID                     int64
 	CollectionID             int64
 	PartitionIDs             []int64
-	LoadFields               []*messagespb.LoadFieldConfig // Preload hints, not query scope.
+	LoadFields               []*messagespb.LoadFieldConfig // Preload hints; empty follows the target schema, not query scope.
 	RequiredFields           []*messagespb.LoadFieldConfig // Explicit internal query scope.
-	LoadAllFields            *bool
-	SkipLoadDynamicField     bool
 	UserSpecifiedReplicaMode bool
 	Replicas                 []*ReplicaAssignment
 }
@@ -42,11 +40,7 @@ func (c *LoadConfig) Clone() *LoadConfig {
 		DbID:                     c.DbID,
 		CollectionID:             c.CollectionID,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
-		SkipLoadDynamicField:     c.SkipLoadDynamicField,
 		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
-	}
-	if c.LoadAllFields != nil {
-		out.LoadAllFields = proto.Bool(*c.LoadAllFields)
 	}
 	if len(c.PartitionIDs) > 0 {
 		out.PartitionIDs = append([]int64{}, c.PartitionIDs...)
@@ -86,11 +80,7 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 		CollectionID:             msg.GetCollectionId(),
 		PartitionIDs:             append([]int64{}, msg.GetPartitionIds()...),
 		UserSpecifiedReplicaMode: msg.GetUserSpecifiedReplicaMode(),
-		SkipLoadDynamicField:     msg.GetSkipLoadDynamicField(),
 		RequiredFields:           cloneFieldConfigs(msg.GetRequiredFields()),
-	}
-	if msg.LoadAllFields != nil {
-		cfg.LoadAllFields = proto.Bool(msg.GetLoadAllFields())
 	}
 	for _, f := range msg.GetLoadFields() {
 		cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{
@@ -121,12 +111,7 @@ func buildFromPersisted(
 		DbID:                     info.GetDbID(),
 		CollectionID:             info.GetCollectionID(),
 		UserSpecifiedReplicaMode: info.GetUserSpecifiedReplicaMode(),
-		SkipLoadDynamicField:     info.GetSkipLoadDynamicField(),
 		RequiredFields:           cloneFieldConfigs(info.GetRequiredFields()),
-	}
-
-	if info.LoadAllFields != nil {
-		cfg.LoadAllFields = proto.Bool(info.GetLoadAllFields())
 	}
 
 	// PartitionIDs: derived from PartitionLoadInfo list.
@@ -170,11 +155,7 @@ func (c *LoadConfig) toCollectionLoadInfoProto() *querypb.CollectionLoadInfo {
 		ReplicaNumber:            int32(len(c.Replicas)),
 		Status:                   querypb.LoadStatus_Loaded,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
-		SkipLoadDynamicField:     c.SkipLoadDynamicField,
 		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
-	}
-	if c.LoadAllFields != nil {
-		info.LoadAllFields = proto.Bool(*c.LoadAllFields)
 	}
 	if len(c.LoadFields) > 0 {
 		info.LoadFields = make([]int64, 0, len(c.LoadFields))

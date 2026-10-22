@@ -50,20 +50,13 @@ func reconcileSchemaFields(current *LoadConfig, oldSchema, target *schemapb.Coll
 	}
 	// Full-load intent is represented by an empty hint. Explicit hints retain
 	// their surviving fields and never acquire additions from schema evolution.
-	if next.LoadAllFields != nil && *next.LoadAllFields {
-		next.LoadFields = nil
-	} else {
-		next.LoadFields = slices.DeleteFunc(next.LoadFields, func(field *messagespb.LoadFieldConfig) bool {
-			return !desired[field.GetFieldId()]
-		})
-	}
+	next.LoadFields = slices.DeleteFunc(next.LoadFields, func(field *messagespb.LoadFieldConfig) bool {
+		return !desired[field.GetFieldId()]
+	})
 	return next
 }
 
 func equalSchemaLoadIntent(a, b *LoadConfig) bool {
-	if (a.LoadAllFields == nil) != (b.LoadAllFields == nil) || (a.LoadAllFields != nil && *a.LoadAllFields != *b.LoadAllFields) || a.SkipLoadDynamicField != b.SkipLoadDynamicField {
-		return false
-	}
 	equal := func(a, b *messagespb.LoadFieldConfig) bool { return proto.Equal(a, b) }
 	return slices.EqualFunc(a.LoadFields, b.LoadFields, equal) && slices.EqualFunc(a.RequiredFields, b.RequiredFields, equal)
 }
