@@ -83,8 +83,6 @@ func (c *DDLCallback) registerCollectionCallbacks() {
 
 	registry.RegisterTruncateCollectionV2AckCallback(c.truncateCollectionV2AckCallback)
 	registry.RegisterTruncateCollectionV2AckOnceCallback(c.truncateCollectionV2AckOnceCallback)
-	registry.RegisterAlterRLSMetadataV2AckCallback(c.alterRLSMetadataV2AckCallback)
-	registry.RegisterDropRLSMetadataV2AckCallback(c.dropRLSMetadataV2AckCallback)
 }
 
 // registerPartitionCallbacks registers the partition callbacks.
@@ -108,7 +106,7 @@ func (c *DDLCallback) ExpireCaches(ctx context.Context, expirations any) error {
 	return c.expireCaches(ctx, expirations, 0)
 }
 
-func (c *DDLCallback) expireCaches(ctx context.Context, expirations any, ts typeutil.Timestamp, opts ...proxyutil.ExpireCacheOpt) error {
+func (c *DDLCallback) expireCaches(ctx context.Context, expirations any, ts typeutil.Timestamp) error {
 	var cacheExpirations *message.CacheExpirations
 	if g, ok := expirations.(CacheExpirationsGetter); ok {
 		cacheExpirations = g.GetCacheExpirations()
@@ -120,14 +118,14 @@ func (c *DDLCallback) expireCaches(ctx context.Context, expirations any, ts type
 		panic(fmt.Sprintf("invalid getter type: %T", expirations))
 	}
 	for _, cacheExpiration := range cacheExpirations.CacheExpirations {
-		if err := c.expireCache(ctx, cacheExpiration, ts, opts...); err != nil {
+		if err := c.expireCache(ctx, cacheExpiration, ts); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.CacheExpiration, ts typeutil.Timestamp, opts ...proxyutil.ExpireCacheOpt) error {
+func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.CacheExpiration, ts typeutil.Timestamp) error {
 	if ts == 0 {
 		var err error
 		ts, err = c.tsoAllocator.GenerateTSO(1)
@@ -138,9 +136,6 @@ func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.
 	switch cacheExpiration.Cache.(type) {
 	case *messagespb.CacheExpiration_LegacyProxyCollectionMetaCache:
 		legacyProxyCollectionMetaCache := cacheExpiration.GetLegacyProxyCollectionMetaCache()
-		expireOpts := append([]proxyutil.ExpireCacheOpt{
-			proxyutil.SetMsgType(legacyProxyCollectionMetaCache.MsgType),
-		}, opts...)
 		return c.ExpireMetaCache(
 			ctx,
 			legacyProxyCollectionMetaCache.DbName,
@@ -148,7 +143,7 @@ func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.
 			legacyProxyCollectionMetaCache.CollectionId,
 			legacyProxyCollectionMetaCache.PartitionName,
 			ts,
-			expireOpts...)
+			proxyutil.SetMsgType(legacyProxyCollectionMetaCache.MsgType))
 	}
 	return nil
 }
