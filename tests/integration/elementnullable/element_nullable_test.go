@@ -347,10 +347,14 @@ func (s *ElementNullableSuite) queryRow(ctx context.Context, name string, pk int
 }
 
 func (s *ElementNullableSuite) assertRows(ctx context.Context, name string) {
+	s.assertRowsWithScore(ctx, name, func(pk int64) int64 { return pk * 10 })
+}
+
+func (s *ElementNullableSuite) assertRowsWithScore(ctx context.Context, name string, score func(pk int64) int64) {
 	for _, pk := range []int64{1, 2, 3} {
 		fields := s.queryRow(ctx, name, pk)
 		s.Equal([]int64{pk}, fields["pk"].GetScalars().GetLongData().GetData())
-		s.Equal([]int64{pk * 10}, fields["score"].GetScalars().GetLongData().GetData())
+		s.Equal([]int64{score(pk)}, fields["score"].GetScalars().GetLongData().GetData())
 		s.Equal(vector(float32(pk)), fields["embedding"].GetVectors().GetFloatVector().GetData())
 		legacy := fields["legacy"].GetScalars().GetArrayData().GetData()
 		s.Require().Len(legacy, 1)
@@ -534,4 +538,85 @@ func (s *ElementNullableSuite) TestGrowingSealedSearchAndExpressions() {
 		return err == nil && merr.Ok(state.GetStatus()) && state.GetState() == commonpb.CompactionState_Completed
 	}, 5*time.Minute, 2*time.Second)
 	s.assertRows(ctx, name)
+}
+
+func (s *ElementNullableSuite) flushAndReload(ctx context.Context, name string) {
+	flush, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{CollectionNames: []string{name}})
+	s.Require().NoError(merr.CheckRPCCall(flush.GetStatus(), err))
+	segmentIDs := flush.GetFlushCollSegIDs()[name].GetData()
+	s.Require().NotEmpty(segmentIDs)
+	s.WaitForFlush(ctx, segmentIDs, flush.GetCollFlushTs()[name], "", name)
+	status, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForLoad(ctx, name)
+}
+
+// partialUpsertScore updates only score. The struct field is omitted, so
+// partial upsert keeps the old struct value read back by Query.
+func (s *ElementNullableSuite) partialUpsertScore(ctx context.Context, name string, pks []int64, score func(pk int64) int64) {
+	scores := make([]int64, len(pks))
+	for i, pk := range pks {
+		scores[i] = score(pk)
+	}
+	result, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
+		CollectionName: name, NumRows: uint32(len(pks)), PartialUpdate: true,
+		HashKeys: integration.GenerateHashKeys(len(pks)),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "pk", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: pks}},
+				}},
+			},
+			{
+				FieldName: "score", FieldId: 101, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: scores}},
+				}},
+			},
+		},
+	})
+	s.Require().NoError(merr.CheckRPCCall(result, err))
+	s.Equal(int64(len(pks)), result.GetUpsertCnt())
+}
+
+func (s *ElementNullableSuite) TestPartialUpsertKeepsOmittedStruct() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	name := "w7i_partial_" + funcutil.RandomString(8)
+	s.Require().NoError(merr.Error(s.create(ctx, collectionSchema(name))))
+	plainName := typeutil.ConcatStructFieldName(structName, plainVec)
+	for _, field := range []string{"embedding", plainName} {
+		metricType := metric.L2
+		if field == plainName {
+			metricType = metric.MaxSim
+		}
+		status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+			CollectionName: name, FieldName: field, IndexName: "idx_" + funcutil.RandomString(4),
+			ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metricType),
+		})
+		s.Require().NoError(merr.CheckRPCCall(status, err))
+		s.WaitForIndexBuilt(ctx, name, field)
+	}
+	status, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForLoad(ctx, name)
+	s.Require().NoError(s.insert(ctx, name, insertFields()))
+
+	// The old rows are read from a growing segment. The request order differs
+	// from the insert order, and pk 3 has a null struct.
+	first := func(pk int64) int64 { return pk*10 + 1 }
+	s.partialUpsertScore(ctx, name, []int64{3, 1, 2}, first)
+	s.assertRowsWithScore(ctx, name, first)
+
+	// The old rows are read from a sealed segment.
+	s.flushAndReload(ctx, name)
+	s.assertRowsWithScore(ctx, name, first)
+	second := func(pk int64) int64 { return pk*10 + 2 }
+	s.partialUpsertScore(ctx, name, []int64{2, 3, 1}, second)
+	s.assertRowsWithScore(ctx, name, second)
+	s.flushAndReload(ctx, name)
+	s.assertRowsWithScore(ctx, name, second)
 }
