@@ -6,6 +6,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -18,6 +21,65 @@ import (
 // Exercise the real replication admission, consumer buffer and recovery together.
 // Connections deliberately overlap; only the complete source prefix may commit.
 func TestLocalFlushReplayAndRecovery(t *testing.T) {
+	testLocalFlushReplayAndRecovery(t, func() []message.ImmutableMessage {
+		source := newImmutableTxnMessageWithTxnID("test2", 100, 1)
+		// Two bodies; their source IDs need not follow the local TT order.
+		return []message.ImmutableMessage{source[0], source[1], source[1], newSourceCommit(2)}
+	})
+}
+
+// TestLocalFlushReplayAndRecoveryOfAssembledTxn replays the shape of a transaction
+// that the wal assembles around one autocommit insert: BeginTxn, the insert, one
+// extra delete and a CommitTxn that counts both bodies.
+func TestLocalFlushReplayAndRecoveryOfAssembledTxn(t *testing.T) {
+	testLocalFlushReplayAndRecovery(t, func() []message.ImmutableMessage {
+		insert := message.NewInsertMessageBuilderV1().
+			WithVChannel("test2-rootcoord-dml_0").
+			WithHeader(&message.InsertMessageHeader{
+				CollectionId: 1,
+				Partitions:   []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 1, BinarySize: 1024}},
+			}).
+			WithBody(&msgpb.InsertRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert}}).
+			MustBuildMutable()
+		del := message.NewDeleteMessageBuilderV1().
+			WithVChannel("test2-rootcoord-dml_0").
+			WithHeader(&message.DeleteMessageHeader{CollectionId: 1, Rows: 1}).
+			WithBody(&msgpb.DeleteRequest{
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
+				CollectionID: 1,
+				PrimaryKeys:  &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}},
+				NumRows:      1,
+				Timestamps:   []uint64{0},
+			}).
+			MustBuildMutable()
+		source := newImmutableTxnMessageWithTxnID("test2", 100, 1)
+		return []message.ImmutableMessage{source[0], newSourceTxnBody(insert), newSourceTxnBody(del), newSourceCommit(2)}
+	})
+}
+
+// newSourceTxnBody returns msg as a body of the source transaction that
+// newImmutableTxnMessageWithTxnID("test2", 100, 1) begins.
+func newSourceTxnBody(msg message.MutableMessage) message.ImmutableMessage {
+	return msg.
+		WithTxnContext(message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}).
+		WithTimeTick(100).
+		WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+}
+
+// newSourceCommit returns the CommitTxn of the source transaction with the given body count.
+func newSourceCommit(bodyCnt uint64) message.ImmutableMessage {
+	return newSourceTxnBody(message.NewCommitTxnMessageBuilderV2().
+		WithHeader(&message.CommitTxnMessageHeader{BodyCnt: bodyCnt}).
+		WithBody(&message.CommitTxnMessageBody{}).
+		WithVChannel("test2-rootcoord-dml_0").
+		MustBuildMutable())
+}
+
+// testLocalFlushReplayAndRecovery drives a replicated transaction through a local
+// flush, a replay and a recovery. source returns BeginTxn, two bodies and a
+// CommitTxn with BodyCnt 2.
+func testLocalFlushReplayAndRecovery(t *testing.T, source func() []message.ImmutableMessage) {
 	for _, operation := range []string{"ManualFlush", "FlushAll", "CreateSnapshot"} {
 		t.Run(operation, func(t *testing.T) {
 			ctx := context.Background()
@@ -33,18 +95,14 @@ func TestLocalFlushReplayAndRecovery(t *testing.T) {
 			}
 			rm := recoverManager()
 			makeTxn := func() []message.MutableMessage {
-				source := newImmutableTxnMessageWithTxnID("test2", 100, 1)
-				// Two bodies; their source IDs need not follow the local TT order.
-				source = append(source[:2:2], source[1], source[2])
+				msgs := source()
+				// The source IDs of the bodies need not follow the local TT order.
 				ids := []int64{10, 30, 20, 40}
-				out := make([]message.MutableMessage, len(source))
-				for i, msg := range source {
+				out := make([]message.MutableMessage, len(msgs))
+				for i, msg := range msgs {
 					wire := msg.IntoImmutableMessageProto()
 					wire.Id = walimplstest.NewTestMessageID(ids[i]).IntoProto()
 					replicated := message.MustNewReplicateMessage("test2", wire)
-					if replicated.MessageType() == message.MessageTypeCommitTxn {
-						message.MustAsMutableCommitTxnMessageV2(replicated).OverwriteHeader(&message.CommitTxnMessageHeader{BodyCnt: 2})
-					}
 					replicated.OverwriteReplicateVChannel("test1-rootcoord-dml_0")
 					out[i] = replicated
 				}
@@ -83,6 +141,7 @@ func TestLocalFlushReplayAndRecovery(t *testing.T) {
 			first := makeTxn()
 			require.Empty(t, appendMessage(first[0]))
 			require.Empty(t, appendMessage(first[1]))
+			reject(makeTxn()[3]) // One body of two cannot commit.
 			// Failed Flush cannot discard an accepted prefix.
 			acker, err := rm.BeginReplicateMessage(ctx, flush("test1-rootcoord-dml_0"))
 			require.NoError(t, err)
@@ -106,6 +165,7 @@ func TestLocalFlushReplayAndRecovery(t *testing.T) {
 			require.Empty(t, appendMessage(replayed[0]))
 			reject(makeTxn()[3]) // Old connection cannot commit an empty prefix.
 			require.Empty(t, appendMessage(replayed[1]))
+			reject(makeTxn()[3])  // Nor can one replayed body.
 			rm = recoverManager() // Recover a partial replay, without a new epoch.
 			ignore(makeTxn()[0])
 			ignore(makeTxn()[1])
