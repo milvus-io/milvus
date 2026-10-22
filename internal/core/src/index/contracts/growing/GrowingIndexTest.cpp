@@ -450,6 +450,17 @@ TEST(GrowingIndexContractTest, RTreeConcurrentAppendAndPinnedQueryProgress) {
     }
     const auto finished_in_time =
         progress.load(std::memory_order_relaxed) == kRows;
+    // Wait for the reader to complete at least one pinned query before stopping
+    // it. The writer can race through all appends before the reader thread is
+    // scheduled on a loaded machine, which would otherwise leave
+    // observed_queries at 0 and flake the assertion below. The bounded deadline
+    // keeps a genuinely stuck PinSnapshot() failing instead of hanging.
+    const auto reader_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (observed_queries.load(std::memory_order_relaxed) == 0 &&
+           std::chrono::steady_clock::now() < reader_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     stop.store(true, std::memory_order_relaxed);
     writer.join();
     reader.join();
