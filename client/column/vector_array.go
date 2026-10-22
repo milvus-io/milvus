@@ -37,6 +37,13 @@ type columnVectorArrayBase[T entity.Vector] struct {
 	validData    []bool
 	sparseMode   bool
 	indexMapping []int
+
+	// Element validity of an element-nullable struct sub-field, aligned with values:
+	// elementValid[i] holds one flag per logical vector of payload row i. In compact mode
+	// values[i] holds only the valid vectors; in sparse mode null vectors are nil.
+	elementNullable bool
+	elementValid    [][]bool
+	elementSparse   bool
 }
 
 func (c *columnVectorArrayBase[T]) Name() string {
@@ -62,14 +69,27 @@ func (c *columnVectorArrayBase[T]) Len() int {
 	return len(c.values)
 }
 
+// Get returns the vectors of one row; for an element-nullable column a null vector is nil.
 func (c *columnVectorArrayBase[T]) Get(idx int) (any, error) {
-	if err := c.rangeCheck(idx); err != nil {
+	p, ok, err := c.payloadRow(idx)
+	if err != nil || !ok {
 		return nil, err
 	}
-	if c.nullable && !c.validData[idx] {
-		return nil, nil
+	if c.elementNullable && !c.elementSparse {
+		return denseElements(c.values[p], c.elementValid[p]), nil
 	}
-	return c.values[c.valueIndex(idx)], nil
+	return c.values[p], nil
+}
+
+// payloadRow returns the index into values of a logical row, and false for a null row.
+func (c *columnVectorArrayBase[T]) payloadRow(idx int) (int, bool, error) {
+	if err := c.rangeCheck(idx); err != nil {
+		return 0, false, err
+	}
+	if c.nullable && !c.validData[idx] {
+		return 0, false, nil
+	}
+	return c.valueIndex(idx), true, nil
 }
 
 func (c *columnVectorArrayBase[T]) AppendValue(value any) error {
@@ -80,9 +100,117 @@ func (c *columnVectorArrayBase[T]) AppendValue(value any) error {
 	if !ok {
 		return errors.Newf("unexpected append value type %T, field type %v", value, c.fieldType)
 	}
-	c.values = append(c.values, v)
+	return c.appendRow(v)
+}
+
+// appendRow appends the vectors of one row; a nil vector is a null element and requires an
+// element-nullable column.
+func (c *columnVectorArrayBase[T]) appendRow(row []T) error {
+	if !c.elementNullable {
+		for j, v := range row {
+			if isNilVector(v) {
+				return errors.Newf("vector %d of vector array %q is nil but the column is not element nullable", j, c.name)
+			}
+		}
+		c.values = append(c.values, row)
+		c.markValueAppended()
+		return nil
+	}
+	valid := make([]bool, len(row))
+	stored := row
+	if !c.elementSparse {
+		stored = make([]T, 0, len(row))
+	}
+	for j, v := range row {
+		if isNilVector(v) {
+			continue
+		}
+		valid[j] = true
+		if !c.elementSparse {
+			stored = append(stored, v)
+		}
+	}
+	c.values = append(c.values, stored)
+	c.elementValid = append(c.elementValid, valid)
 	c.markValueAppended()
 	return nil
+}
+
+func (c *columnVectorArrayBase[T]) appendNullElements(n int) error {
+	if !c.elementNullable {
+		return errors.Newf("append null elements to not element nullable vector array column %q", c.name)
+	}
+	return c.appendRow(make([]T, n))
+}
+
+func isNilVector(v any) bool {
+	switch x := v.(type) {
+	case entity.FloatVector:
+		return x == nil
+	case entity.Float16Vector:
+		return x == nil
+	case entity.BFloat16Vector:
+		return x == nil
+	case entity.BinaryVector:
+		return x == nil
+	case entity.Int8Vector:
+		return x == nil
+	default:
+		return v == nil
+	}
+}
+
+func (c *columnVectorArrayBase[T]) ElementNullable() bool {
+	return c.elementNullable
+}
+
+func (c *columnVectorArrayBase[T]) SetElementNullable(nullable bool) {
+	if nullable == c.elementNullable {
+		return
+	}
+	c.elementNullable = nullable
+	if !nullable {
+		c.elementValid = nil
+		c.elementSparse = false
+		return
+	}
+	c.elementValid = make([][]bool, len(c.values))
+	for i, row := range c.values {
+		c.elementValid[i] = allValid(len(row))
+	}
+}
+
+func (c *columnVectorArrayBase[T]) ElementLen(row int) (int, error) {
+	p, ok, err := c.payloadRow(row)
+	if err != nil || !ok {
+		return 0, err
+	}
+	if c.elementNullable {
+		return len(c.elementValid[p]), nil
+	}
+	return len(c.values[p]), nil
+}
+
+func (c *columnVectorArrayBase[T]) ElementValidData(row int) ([]bool, error) {
+	p, ok, err := c.payloadRow(row)
+	if err != nil || !ok {
+		return nil, err
+	}
+	if c.elementNullable {
+		return append([]bool(nil), c.elementValid[p]...), nil
+	}
+	return allValid(len(c.values[p])), nil
+}
+
+func (c *columnVectorArrayBase[T]) ElementIsNull(row, j int) (bool, error) {
+	valid, err := c.ElementValidData(row)
+	if err != nil {
+		return false, err
+	}
+	if err := elementRangeCheck(len(valid), j); err != nil {
+		return false, err
+	}
+	return !valid[j], nil
 }
 
 func (c *columnVectorArrayBase[T]) GetAsInt64(_ int) (int64, error) {
@@ -115,6 +243,9 @@ func (c *columnVectorArrayBase[T]) AppendNull() error {
 	c.validData = append(c.validData, false)
 	if c.sparseMode {
 		c.values = append(c.values, nil)
+		if c.elementNullable {
+			c.elementValid = append(c.elementValid, nil)
+		}
 	} else {
 		c.indexMapping = append(c.indexMapping, -1)
 	}
@@ -140,6 +271,19 @@ func (c *columnVectorArrayBase[T]) SetNullable(nullable bool) {
 }
 
 func (c *columnVectorArrayBase[T]) ValidateNullable() error {
+	if err := c.validateRowNullable(); err != nil {
+		return err
+	}
+	if !c.elementNullable {
+		return nil
+	}
+	if err := validateElementRows(c.values, c.elementValid, c.elementSparse); err != nil {
+		return errors.Wrapf(err, "vector array column %q", c.name)
+	}
+	return nil
+}
+
+func (c *columnVectorArrayBase[T]) validateRowNullable() error {
 	if !c.nullable {
 		return nil
 	}
@@ -157,20 +301,29 @@ func (c *columnVectorArrayBase[T]) ValidateNullable() error {
 	return nil
 }
 
+// CompactNullableValues compacts both the rows and the vectors of a sparse column.
 func (c *columnVectorArrayBase[T]) CompactNullableValues() {
-	if !c.nullable || !c.sparseMode {
+	if c.nullable && c.sparseMode {
+		if c.elementNullable {
+			c.elementValid = filterValidRows(c.elementValid, c.validData)
+		}
+		values := c.values[:0]
+		for idx, valid := range c.validData {
+			if valid {
+				values = append(values, c.values[idx])
+			}
+		}
+		c.values = values
+		c.sparseMode = false
+		c.rebuildIndexMapping()
+	}
+	if !c.elementNullable || !c.elementSparse {
 		return
 	}
-
-	values := c.values[:0]
-	for idx, valid := range c.validData {
-		if valid {
-			values = append(values, c.values[idx])
-		}
+	for i, row := range c.values {
+		c.values[i] = compactElements(row, c.elementValid[i])
 	}
-	c.values = values
-	c.sparseMode = false
-	c.rebuildIndexMapping()
+	c.elementSparse = false
 }
 
 func (c *columnVectorArrayBase[T]) ValidCount() int {
@@ -185,19 +338,7 @@ func (c *columnVectorArrayBase[T]) Slice(start, end int) Column {
 }
 
 func (c *columnVectorArrayBase[T]) slice(start, end int) *columnVectorArrayBase[T] {
-	l := c.Len()
-	if start < 0 {
-		start = 0
-	}
-	if start > l {
-		start = l
-	}
-	if end == -1 || end > l {
-		end = l
-	}
-	if start > end {
-		start = end
-	}
+	start, end = normalizeSliceRange(start, end, c.Len())
 
 	valueStart, valueEnd := start, end
 	if c.nullable && !c.sparseMode {
@@ -211,6 +352,12 @@ func (c *columnVectorArrayBase[T]) slice(start, end int) *columnVectorArrayBase[
 		values:      append([][]T(nil), c.values[valueStart:valueEnd]...),
 		nullable:    c.nullable,
 		sparseMode:  c.sparseMode,
+
+		elementNullable: c.elementNullable,
+		elementSparse:   c.elementSparse,
+	}
+	if c.elementNullable {
+		result.elementValid = selectElementRows(c.elementValid, valueStart, valueEnd)
 	}
 	if c.nullable {
 		result.validData = append([]bool(nil), c.validData[start:end]...)
@@ -221,8 +368,18 @@ func (c *columnVectorArrayBase[T]) slice(start, end int) *columnVectorArrayBase[
 
 func (c *columnVectorArrayBase[T]) FieldData() *schemapb.FieldData {
 	rows := make([]*schemapb.VectorField, 0, len(c.values))
-	for _, row := range c.values {
-		rows = append(rows, values2Vectors(row, c.elementType, int64(c.dim)))
+	for i, row := range c.values {
+		if !c.elementNullable {
+			rows = append(rows, values2Vectors(row, c.elementType, int64(c.dim)))
+			continue
+		}
+		valid := c.elementValid[i]
+		if c.elementSparse {
+			row = compactElements(row, valid)
+		}
+		vf := values2Vectors(row, c.elementType, int64(c.dim))
+		setVectorArrayElementValidData(vf, valid)
+		rows = append(rows, vf)
 	}
 	fd := &schemapb.FieldData{
 		Type:      schemapb.DataType_ArrayOfVector,
@@ -286,6 +443,27 @@ func (c *columnVectorArrayBase[T]) rebuildIndexMapping() {
 	}
 }
 
+// setElementValidData installs element validity parsed from a result; values are in sparse form.
+func (c *columnVectorArrayBase[T]) setElementValidData(elementValid [][]bool) {
+	c.elementNullable = true
+	c.elementValid = elementValid
+	c.elementSparse = true
+}
+
+// initElementNullable sets up the element layer of a column built by a constructor.
+func (c *columnVectorArrayBase[T]) initElementNullable(elementValidData [][]bool, opts []ElementNullableOption) error {
+	o := newElementNullableOptions(opts)
+	c.sparseMode = o.sparse
+	if o.rowValidData != nil {
+		c.nullable = true
+		c.validData = o.rowValidData
+	}
+	c.elementNullable = true
+	c.elementValid = elementValidData
+	c.elementSparse = o.sparse
+	return c.ValidateNullable()
+}
+
 func (c *columnVectorArrayBase[T]) setNullableData(validData []bool, sparseMode bool) error {
 	c.nullable = true
 	c.validData = validData
@@ -342,34 +520,32 @@ func (c *ColumnFloatVectorArray) AppendValue(value any) error {
 	}
 	switch v := value.(type) {
 	case []entity.FloatVector:
-		c.values = append(c.values, v)
+		return c.appendRow(v)
 	case [][]float32:
 		row := make([]entity.FloatVector, 0, len(v))
 		for _, x := range v {
 			row = append(row, entity.FloatVector(x))
 		}
-		c.values = append(c.values, row)
+		return c.appendRow(row)
 	default:
 		return errors.Newf("unexpected append value type %T, field type %v", value, c.elementType)
 	}
-	c.markValueAppended()
-	return nil
 }
 
-func appendByteVectorArrayRow[T ~[]byte](values *[][]T, value any) error {
+func byteVectorArrayRow[T ~[]byte](value any) ([]T, error) {
 	switch v := value.(type) {
 	case []T:
-		*values = append(*values, v)
+		return v, nil
 	case [][]byte:
 		row := make([]T, 0, len(v))
 		for _, x := range v {
+			// keep nil entries nil so they read as null vectors
 			row = append(row, T(x))
 		}
-		*values = append(*values, row)
+		return row, nil
 	default:
-		return errors.Newf("unexpected append value type %T", value)
+		return nil, errors.Newf("unexpected append value type %T", value)
 	}
-	return nil
 }
 
 /* float16 vector array */
@@ -382,11 +558,11 @@ func (c *ColumnFloat16VectorArray) AppendValue(value any) error {
 	if value == nil {
 		return c.AppendNull()
 	}
-	if err := appendByteVectorArrayRow(&c.values, value); err != nil {
+	row, err := byteVectorArrayRow[entity.Float16Vector](value)
+	if err != nil {
 		return err
 	}
-	c.markValueAppended()
-	return nil
+	return c.appendRow(row)
 }
 
 func NewColumnFloat16VectorArray(fieldName string, dim int, data [][][]byte) *ColumnFloat16VectorArray {
@@ -425,11 +601,11 @@ func (c *ColumnBFloat16VectorArray) AppendValue(value any) error {
 	if value == nil {
 		return c.AppendNull()
 	}
-	if err := appendByteVectorArrayRow(&c.values, value); err != nil {
+	row, err := byteVectorArrayRow[entity.BFloat16Vector](value)
+	if err != nil {
 		return err
 	}
-	c.markValueAppended()
-	return nil
+	return c.appendRow(row)
 }
 
 func NewColumnBFloat16VectorArray(fieldName string, dim int, data [][][]byte) *ColumnBFloat16VectorArray {
@@ -468,11 +644,11 @@ func (c *ColumnBinaryVectorArray) AppendValue(value any) error {
 	if value == nil {
 		return c.AppendNull()
 	}
-	if err := appendByteVectorArrayRow(&c.values, value); err != nil {
+	row, err := byteVectorArrayRow[entity.BinaryVector](value)
+	if err != nil {
 		return err
 	}
-	c.markValueAppended()
-	return nil
+	return c.appendRow(row)
 }
 
 func NewColumnBinaryVectorArray(fieldName string, dim int, data [][][]byte) *ColumnBinaryVectorArray {
@@ -514,18 +690,16 @@ func (c *ColumnInt8VectorArray) AppendValue(value any) error {
 	}
 	switch v := value.(type) {
 	case []entity.Int8Vector:
-		c.values = append(c.values, v)
+		return c.appendRow(v)
 	case [][]int8:
 		row := make([]entity.Int8Vector, 0, len(v))
 		for _, x := range v {
 			row = append(row, entity.Int8Vector(x))
 		}
-		c.values = append(c.values, row)
+		return c.appendRow(row)
 	default:
 		return errors.Newf("unexpected append value type %T, field type %v", value, c.elementType)
 	}
-	c.markValueAppended()
-	return nil
 }
 
 func NewColumnInt8VectorArray(fieldName string, dim int, data [][][]int8) *ColumnInt8VectorArray {
@@ -552,4 +726,36 @@ func (c *ColumnInt8VectorArray) Slice(start, end int) Column {
 	return &ColumnInt8VectorArray{
 		columnVectorArrayBase: c.columnVectorArrayBase.slice(start, end),
 	}
+}
+
+/* element-nullable vector arrays */
+
+// The NewElementNullableColumnXxxVectorArray constructors create the column of an element-nullable
+// vector struct sub-field. values[i] holds the valid vectors of row i (compact mode) and
+// elementValidData[i] one flag per logical vector. Use WithRowValidData for null rows and
+// WithElementSparseMode for values in sparse form, where null vectors are nil.
+
+func NewElementNullableColumnFloatVectorArray(fieldName string, dim int, values [][][]float32, elementValidData [][]bool, opts ...ElementNullableOption) (*ColumnFloatVectorArray, error) {
+	col := NewColumnFloatVectorArray(fieldName, dim, values)
+	return col, col.initElementNullable(elementValidData, opts)
+}
+
+func NewElementNullableColumnFloat16VectorArray(fieldName string, dim int, values [][][]byte, elementValidData [][]bool, opts ...ElementNullableOption) (*ColumnFloat16VectorArray, error) {
+	col := NewColumnFloat16VectorArray(fieldName, dim, values)
+	return col, col.initElementNullable(elementValidData, opts)
+}
+
+func NewElementNullableColumnBFloat16VectorArray(fieldName string, dim int, values [][][]byte, elementValidData [][]bool, opts ...ElementNullableOption) (*ColumnBFloat16VectorArray, error) {
+	col := NewColumnBFloat16VectorArray(fieldName, dim, values)
+	return col, col.initElementNullable(elementValidData, opts)
+}
+
+func NewElementNullableColumnBinaryVectorArray(fieldName string, dim int, values [][][]byte, elementValidData [][]bool, opts ...ElementNullableOption) (*ColumnBinaryVectorArray, error) {
+	col := NewColumnBinaryVectorArray(fieldName, dim, values)
+	return col, col.initElementNullable(elementValidData, opts)
+}
+
+func NewElementNullableColumnInt8VectorArray(fieldName string, dim int, values [][][]int8, elementValidData [][]bool, opts ...ElementNullableOption) (*ColumnInt8VectorArray, error) {
+	col := NewColumnInt8VectorArray(fieldName, dim, values)
+	return col, col.initElementNullable(elementValidData, opts)
 }

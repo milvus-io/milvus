@@ -770,11 +770,11 @@ func (s *CollectionSuite) TestAddCollectionStructField() {
 			WithName("clips").
 			WithDataType(entity.FieldTypeArray).
 			WithElementType(entity.FieldTypeStruct).
-			WithStructSchema(entity.NewStructSchema().WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithNullable(true)))
+			WithStructSchema(entity.NewStructSchema().WithField(entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true)))
 
 		err := s.client.AddCollectionStructField(ctx, NewAddCollectionStructFieldOption(collName, field))
 		s.Error(err)
-		s.Contains(err.Error(), "must not be nullable")
+		s.Contains(err.Error(), "must not be primary key")
 	})
 }
 
