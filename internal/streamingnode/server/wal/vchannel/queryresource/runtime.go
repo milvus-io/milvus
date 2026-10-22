@@ -419,12 +419,15 @@ func (r *QueryRuntime) applyBatch(ctx context.Context, batch []walview.VChannelR
 	}
 }
 
-// CheckSchemaVersion is called after the event barrier, before reporting Ready.
-func (r *QueryRuntime) CheckSchemaVersion(version int32) error {
+// CheckWriteSchemaVersion checks WAL application after the event barrier.
+// Preparing an older read schema must not invalidate another view's resources.
+func (r *QueryRuntime) CheckWriteSchemaVersion(version int32) error {
 	var err error
 	r.RangeModules(func(module QueryRuntimeModule) bool {
-		if resource, ok := module.(interface{ SchemaVersion() int32 }); ok && resource.SchemaVersion() < version {
-			err = merr.WrapErrServiceNotReadyMsg("query runtime schema %d has not reached %d", resource.SchemaVersion(), version)
+		if resource, ok := module.(QueryRuntimeWriteSchemaModule); ok {
+			if applied := resource.WriteSchemaVersion(); applied < version {
+				err = merr.WrapErrServiceNotReadyMsg("query runtime write schema %d has not reached %d", applied, version)
+			}
 		}
 		return err == nil
 	})

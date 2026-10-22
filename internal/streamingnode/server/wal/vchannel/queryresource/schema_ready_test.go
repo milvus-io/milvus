@@ -15,7 +15,7 @@ import (
 
 func TestReadyWaitsForWALSchemaApplication(t *testing.T) {
 	applied := int32(1)
-	patch := mockey.Mock((*growingruntime.Runtime).SchemaVersion).To(func(_ *growingruntime.Runtime) int32 { return applied }).Build()
+	patch := mockey.Mock((*growingruntime.Runtime).WriteSchemaVersion).To(func(_ *growingruntime.Runtime) int32 { return applied }).Build()
 	defer patch.UnPatch()
 	runtime := NewQueryRuntime(&growingruntime.Runtime{})
 	prepare := mockey.Mock((*QueryRuntime).PrepareQueryView).Return(nil).Build()

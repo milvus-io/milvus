@@ -202,7 +202,7 @@ func TestRuntimePreparesOneSharedOracle(t *testing.T) {
 	version := qviews.DataVersion{StreamingVersion: 12}
 	resources := []*datapb.StreamingNodeBM25Resource{}
 	mockViewResources(t, r, &version, &resources)
-	module := &Runtime{oracle: r}
+	module := &Runtime{oracle: r, oracles: map[queryresource.ReadSchemaKey]*oracleRuntime{{}: r}}
 	require.NoError(t, module.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
 	require.NoError(t, module.PrepareDataVersion(context.Background(), version))
 	require.Eventually(t, func() bool {

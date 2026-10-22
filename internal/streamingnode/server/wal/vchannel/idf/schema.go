@@ -30,6 +30,8 @@ func (s *schemaRefresh) includes(event walview.VChannelResourceEvent) bool {
 	return event.SegmentSealed != nil && event.SegmentSealed.SealedAtDataVersion.GT(s.version)
 }
 
+// SchemaVersion identifies the default oracle, not progress on the WAL path.
+// View readiness is checked by PrepareSchemaDataVersion using the exact key.
 func (r *Runtime) SchemaVersion() int32 {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -47,7 +49,7 @@ func (r *Runtime) PrepareSchema(ctx context.Context, meta *viewpb.QueryViewMeta,
 	r.mu.RLock()
 	base, closed := r.view, r.closed
 	_, prepared := r.oracles[queryresource.ReadSchemaKey{SchemaVersion: meta.GetSchemaVersion(), LoadInfoVersion: meta.GetLoadInfoVersion()}]
-	oracle := r.oracle
+	floor := r.minDataVersion
 	r.mu.RUnlock()
 	if closed {
 		return context.Canceled
@@ -58,16 +60,12 @@ func (r *Runtime) PrepareSchema(ctx context.Context, meta *viewpb.QueryViewMeta,
 	if base.CaptureQueryView == nil {
 		return merr.WrapErrServiceInternalMsg("BM25 schema refresh has no WAL snapshot provider")
 	}
-	// An older retained view must not roll the shared aggregate back to files
-	// whose DataView has already been released after a newer preparation.
+	// An older retained view must not capture files below the DataView retention
+	// floor. The last prepared oracle may be older, or disabled for a schema
+	// without BM25, and therefore cannot be the authority for this boundary.
 	target := proto.Clone(meta).(*viewpb.QueryViewMeta)
-	if oracle != nil {
-		oracle.mu.RLock()
-		version := oracle.currentVersion
-		oracle.mu.RUnlock()
-		if version.GT(qviews.FromProtoDataVersion(target.GetVersion().GetDataVersion())) {
-			target.Version.DataVersion = version.IntoProto()
-		}
+	if floor.GT(qviews.FromProtoDataVersion(target.GetVersion().GetDataVersion())) {
+		target.Version.DataVersion = floor.IntoProto()
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
