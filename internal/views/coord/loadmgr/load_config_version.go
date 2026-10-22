@@ -43,11 +43,6 @@ func loadInfoVersion(config *LoadConfig) uint64 {
 	for _, field := range cfg.RequiredFields {
 		add(field.GetFieldId())
 	}
-	if cfg.SkipLoadDynamicField {
-		add(1)
-	} else {
-		add(0)
-	}
 	add(int64(len(cfg.Replicas)))
 	for _, replica := range cfg.Replicas {
 		add(replica.ReplicaID)

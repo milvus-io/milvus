@@ -83,7 +83,7 @@ func (s *LoadInfoStore) Ensure(ctx context.Context, cfg *LoadConfig) error {
 		return nil
 	}
 	owned := cfg.Clone()
-	info := &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: cfg.CollectionID, Version: key.version, PartitionIDs: owned.PartitionIDs, LoadFields: owned.LoadFields, RequiredFields: owned.RequiredFields, SkipLoadDynamicField: owned.SkipLoadDynamicField}
+	info := &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: cfg.CollectionID, Version: key.version, PartitionIDs: owned.PartitionIDs, LoadFields: owned.LoadFields, RequiredFields: owned.RequiredFields}
 	for _, fields := range [][]*messagespb.LoadFieldConfig{info.LoadFields, info.RequiredFields} {
 		for _, field := range fields {
 			field.IndexId = 0
@@ -127,9 +127,6 @@ func (s *LoadInfoStore) normalize(ctx context.Context, cfg *LoadConfig) (*LoadCo
 		if len(cfg.RequiredFields) == 0 {
 			return nil, merr.WrapErrServiceInternalMsg("collection %d has no required query fields", cfg.CollectionID)
 		}
-	}
-	if cfg.LoadAllFields != nil && *cfg.LoadAllFields {
-		cfg.LoadFields = nil
 	}
 	return cfg, nil
 }

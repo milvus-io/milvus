@@ -109,7 +109,7 @@ message QueryViewOfPartition {
     int64 partition_id = 1;
     repeated int64 segment_ids = 2;
     repeated int64 ready_segment_ids = 3;
-    repeated int64 segment_manifest_versions = 5 [packed = true];
+    repeated int64 segment_manifest_versions = 4 [packed = true];
 }
 
 // SyncRequest carries an atomic state-machine input or closes the stream.

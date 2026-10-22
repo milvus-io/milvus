@@ -33,12 +33,11 @@ func TestLoadInfoVersionCanonicalPersistedIdentity(t *testing.T) {
 	reordered.LoadFields[0].IndexId++
 	require.Equal(t, version, loadInfoVersion(reordered), "index replacement does not change view loading scope")
 	for name, change := range map[string]func(*LoadConfig){
-		"required field":    func(c *LoadConfig) { c.RequiredFields[0].FieldId++ },
-		"skip dynamic hint": func(c *LoadConfig) { c.SkipLoadDynamicField = !c.SkipLoadDynamicField },
-		"field":             func(c *LoadConfig) { c.LoadFields[0].FieldId++ },
-		"partition":         func(c *LoadConfig) { c.PartitionIDs[0]++ },
-		"replica":           func(c *LoadConfig) { c.Replicas[0].ReplicaID++ },
-		"resource group":    func(c *LoadConfig) { c.Replicas[0].ResourceGroup = "other" },
+		"required field": func(c *LoadConfig) { c.RequiredFields[0].FieldId++ },
+		"field":          func(c *LoadConfig) { c.LoadFields[0].FieldId++ },
+		"partition":      func(c *LoadConfig) { c.PartitionIDs[0]++ },
+		"replica":        func(c *LoadConfig) { c.Replicas[0].ReplicaID++ },
+		"resource group": func(c *LoadConfig) { c.Replicas[0].ResourceGroup = "other" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			next := cfg.Clone()
