@@ -2,6 +2,7 @@ package coordview
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -132,15 +133,25 @@ func TestRegistry_RemovesManagerAfterLastViewDurablyDropped(t *testing.T) {
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
 	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateUp)
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	var removals atomic.Int64
+	stop := reg.RegisterShardRemovalListener(100, func() { removals.Add(1) })
+	defer stop()
 	require.NoError(t, manager.RequestRelease(context.Background()))
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
 	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateDown)
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
 	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateDropped)
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	require.Zero(t, removals.Load(), "the remaining QueryNode still needs cleanup")
+	batch := reg.Begin()
+	defer batch.Commit()
 	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateDropped)
+	require.Same(t, manager, reg.Get(shardID))
+	require.Zero(t, removals.Load(), "node acknowledgements must not notify before durable deletion")
+	batch.Commit()
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
 
+	assert.Equal(t, int64(1), removals.Load())
 	assert.Nil(t, reg.Get(shardID))
 	assert.Empty(t, reg.ShardIDs())
 	assert.Empty(t, reg.CollectionShards(100))
@@ -152,6 +163,9 @@ func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
 	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
 	oldManager := reg.Ensure(shardID)
+	removals := 0
+	stop := reg.RegisterShardRemovalListener(100, func() { removals++ })
+	defer stop()
 	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil, stubDataViewRefProvider{})
 	replacement.SetStatsObserver(reg.onShardStatsChanged)
 	replacement.setOnReleasedEmpty(reg.removeReleasedManager)
@@ -162,6 +176,7 @@ func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
 	reg.removeReleasedManager(shardID, oldManager)
 
 	assert.Same(t, replacement, reg.Get(shardID))
+	assert.Zero(t, removals, "a stale manager must not publish removal of its replacement")
 }
 
 func TestRegistry_IgnoresStatsFromEvictedManager(t *testing.T) {
@@ -540,7 +555,7 @@ func TestRecoverShardViewRegistryAllowsTerminalCleanup(t *testing.T) {
 	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, _ *viewpb.DataVersion) (qviews.DataViewRef, error) {
 		return nil, nil
 	}).Build()
-	mockey.Mock((stubDataViewRef).Deref).To(func(_ stubDataViewRef) { derefs++ }).Build()
+	mockey.Mock(stubDataViewRef.Deref).To(func(_ stubDataViewRef) { derefs++ }).Build()
 	defer mockey.UnPatchAll()
 
 	s := newMockSyncer()
@@ -581,13 +596,105 @@ func TestRecoverShardViewRegistryRollsBackReferencesOnFailure(t *testing.T) {
 		}
 		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
 	}).Build()
-	mockey.Mock((stubDataViewRef).Deref).To(func(_ stubDataViewRef) { derefs++ }).Build()
+	mockey.Mock(stubDataViewRef.Deref).To(func(_ stubDataViewRef) { derefs++ }).Build()
 	defer mockey.UnPatchAll()
 
 	_, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
 	require.EqualError(t, err, "recover failed")
 	require.Equal(t, 2, acquisitions)
 	require.Equal(t, 1, derefs)
+}
+
+func TestRegistryShardRemovalListener(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"}
+	first := reg.Ensure(shardID)
+	other := reg.Ensure(qviews.ShardID{ReplicaID: 3, VChannel: "p_200v0"})
+	removals, otherRemovals := 0, 0
+	stop := reg.RegisterShardRemovalListener(100, func() { removals++ })
+	defer stop()
+	stopOther := reg.RegisterShardRemovalListener(200, func() { otherRemovals++ })
+	defer stopOther()
+	require.Zero(t, removals, "registration must not replay resident shards")
+	require.Zero(t, otherRemovals)
+
+	second := reg.Ensure(qviews.ShardID{ReplicaID: 2, VChannel: "p_100v0"})
+	reg.onShardStatsChanged(shardID, first, emptyShardStats())
+	require.Zero(t, removals, "creation and stats changes are not removal events")
+	require.NoError(t, other.RequestRelease(t.Context()))
+	require.Zero(t, removals, "another collection must not notify this listener")
+	require.Equal(t, 1, otherRemovals)
+
+	require.NoError(t, first.RequestRelease(t.Context()))
+	require.Equal(t, 1, removals)
+	require.NoError(t, first.RequestRelease(t.Context()))
+	require.Equal(t, 1, removals, "repeated release must not repeat the removal event")
+	require.NoError(t, second.RequestRelease(t.Context()))
+	require.Equal(t, 2, removals, "each replica's final removal must notify")
+	require.Equal(t, 1, otherRemovals)
+}
+
+func TestRegistryShardRemovalListenerUnsubscribe(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"}
+	manager := reg.Ensure(shardID)
+	first, second, replacement := 0, 0, 0
+	stopFirst := reg.RegisterShardRemovalListener(100, func() { first++ })
+	defer stopFirst()
+	stopSecond := reg.RegisterShardRemovalListener(100, func() { second++ })
+	defer stopSecond()
+	stopFirst()
+	stopFirst()
+	require.Len(t, reg.shardRemovalListeners[100], 1)
+	require.NoError(t, manager.RequestRelease(t.Context()))
+	require.Zero(t, first)
+	require.Equal(t, 1, second, "unsubscribing one listener must preserve other waiters")
+	stopSecond()
+	require.Empty(t, reg.shardRemovalListeners, "empty collection buckets must be reclaimed")
+
+	stopReplacement := reg.RegisterShardRemovalListener(100, func() { replacement++ })
+	defer stopReplacement()
+	stopSecond()
+	require.NoError(t, reg.Ensure(shardID).RequestRelease(t.Context()))
+	require.Equal(t, 1, replacement, "an old unsubscribe must not remove a new subscription")
+	require.Equal(t, 1, second)
+	stopReplacement()
+	require.Empty(t, reg.shardRemovalListeners)
+}
+
+func TestRegistryShardRemovalListenerConcurrent(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	const shards = 32
+	managers := make([]*ShardViewManager, shards)
+	for i := range managers {
+		managers[i] = reg.Ensure(qviews.ShardID{ReplicaID: int64(i + 1), VChannel: "p_100v0"})
+	}
+	var removals atomic.Int64
+	stop := reg.RegisterShardRemovalListener(100, func() { removals.Add(1) })
+	defer stop()
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	for _, manager := range managers {
+		workers.Add(2)
+		go func() {
+			defer workers.Done()
+			<-start
+			assert.NoError(t, manager.RequestRelease(t.Context()))
+		}()
+		go func() {
+			defer workers.Done()
+			<-start
+			unsubscribe := reg.RegisterShardRemovalListener(100, func() {})
+			unsubscribe()
+			unsubscribe()
+		}()
+	}
+	close(start)
+	workers.Wait()
+	require.Equal(t, int64(shards), removals.Load())
+	require.Empty(t, reg.CollectionShards(100))
+	stop()
+	require.Empty(t, reg.shardRemovalListeners)
 }
 
 func TestRegistryPublicationReplayRejectsRetiredManager(t *testing.T) {

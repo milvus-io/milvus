@@ -41,9 +41,10 @@ type ShardViewRegistry struct {
 	publishedSchemas map[int64]int32
 	nodeShards       map[int64]map[qviews.ShardID]struct{}
 
-	statsObservers       []func(qviews.ShardID, *ShardStats)
-	publicationListeners map[uint64]ShardPublicationListener
-	nextListener         uint64
+	statsObservers        []func(qviews.ShardID, *ShardStats)
+	publicationListeners  map[uint64]ShardPublicationListener
+	shardRemovalListeners map[int64]map[uint64]func()
+	nextListener          uint64
 }
 
 // RecoverShardViewRegistry retains the original standalone registry API.
@@ -200,11 +201,16 @@ func (r *ShardViewRegistry) removeReleasedManager(shardID qviews.ShardID, manage
 		return
 	}
 	r.removeNodeShardsLocked(shardID, r.stats[shardID])
-	r.removeCollectionShardLocked(shardID)
+	collectionID, ok := r.removeCollectionShardLocked(shardID)
 	delete(r.stats, shardID)
 	delete(r.shards, shardID)
 	r.publishShardLocked(shardID, nil)
 	r.version++
+	if ok {
+		for _, listener := range r.shardRemovalListeners[collectionID] {
+			listener()
+		}
+	}
 }
 
 // Snapshot returns the current resident immutable shard-view snapshot. It
@@ -363,16 +369,17 @@ func (r *ShardViewRegistry) addCollectionShardLocked(shardID qviews.ShardID) {
 	shards[shardID] = struct{}{}
 }
 
-func (r *ShardViewRegistry) removeCollectionShardLocked(shardID qviews.ShardID) {
+func (r *ShardViewRegistry) removeCollectionShardLocked(shardID qviews.ShardID) (int64, bool) {
 	_, collectionID, _, err := funcutil.ParseVChannel(shardID.VChannel)
 	if err != nil {
-		return
+		return 0, false
 	}
 	shards := r.collectionShards[collectionID]
 	delete(shards, shardID)
 	if len(shards) == 0 {
 		delete(r.collectionShards, collectionID)
 	}
+	return collectionID, true
 }
 
 func (r *ShardViewRegistry) addNodeShardsLocked(shardID qviews.ShardID, stats *ShardStats) {
@@ -419,6 +426,36 @@ func emptyShardStats() *ShardStats {
 // ShardPublicationListener consumes immutable committed statistics; nil means
 // final removal. It must not re-enter the registry/managers or perform I/O.
 type ShardPublicationListener func(qviews.ShardID, *ShardStats)
+
+// RegisterShardRemovalListener subscribes to final removal of resident
+// shards in one collection, without replaying existing state or reporting stats
+// changes. Subscribe before checking CollectionShards to avoid missing removal.
+// The listener runs under the registry lock and must not re-enter the registry
+// or managers, perform I/O, or block. The returned unsubscribe is idempotent.
+func (r *ShardViewRegistry) RegisterShardRemovalListener(collectionID int64, listener func()) func() {
+	r.mu.Lock()
+	if r.shardRemovalListeners == nil {
+		r.shardRemovalListeners = make(map[int64]map[uint64]func())
+	}
+	listeners := r.shardRemovalListeners[collectionID]
+	if listeners == nil {
+		listeners = make(map[uint64]func())
+		r.shardRemovalListeners[collectionID] = listeners
+	}
+	r.nextListener++
+	listenerID := r.nextListener
+	listeners[listenerID] = listener
+	r.mu.Unlock()
+	return func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		listeners := r.shardRemovalListeners[collectionID]
+		delete(listeners, listenerID)
+		if len(listeners) == 0 {
+			delete(r.shardRemovalListeners, collectionID)
+		}
+	}
+}
 
 // RegisterPublicationListener installs and replays under the publication lock.
 func (r *ShardViewRegistry) RegisterPublicationListener(listener ShardPublicationListener) func() {
