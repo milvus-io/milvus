@@ -12,8 +12,9 @@ Add a primary key index to the WAL write path of the streaming node. When an
 insert carries a primary key that the index already holds, the interceptor
 appends the insert and a companion delete of that key as one transaction. Both
 take effect at the TimeTick of the CommitTxn, so the old row is masked and the
-new row survives. The index is per vchannel and lives in memory. The feature is
-off by default.
+new row survives. The index is per vchannel. The write path only reads it: the
+writes reach the index when the WAL is applied to it after the append. The
+feature is off by default.
 
 This document covers the first step of the LSM-based primary key index
 (#52305): the write path. Persistence, recovery, the read path and the
@@ -113,7 +114,7 @@ internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin
         │ translates WAL messages into requests, appends what the decider asks for
         ▼
 internal/streamingnode/server/pkindex                    the index of the streaming node
-        │ Decider: probe, striped locks, pending writes of transactions
+        │ Decider: in-flight set (also the key lock), probe, pending writes of transactions
         │ Authority: the index of one vchannel, key-value semantics
         │            (Get, MultiGet, NewBatch, Write)
         ▼
@@ -133,23 +134,25 @@ error, never a lenient pass and never a panic.
 
 ### An autocommit insert that hits an existing key
 
-Key 1 is in the index in segment S0. Key 2 is not.
+Key 1 is in the index. Key 2 is not.
 
 ```
 wal.Append(Insert pk=1,2)
  └ idempotency → redo → lock (shared lock of v0 held ●) → replicate
     └ pkindex
-       ├ Decide(Insert [1,2]) ── lock the stripes of 1 and 2 ── MultiGet: 1 hits
+       ├ Decide(Insert [1,2])
+       │    ├ register 1 and 2 in the in-flight set, wait for earlier writes of 1 and 2
+       │    └ in-flight set: no earlier entry ── MultiGet on the engine: 1 hits
        ├ build Delete(pk=1)
        ├ txn.AppendInTxn(Insert, [Delete])
        │    ├ BeginTxn      → timetick → shard → partialupdate → backend   tt=100
-       │    ├ Insert (copy) → timetick → shard assigns S5 → …            tt=101
+       │    ├ Insert (copy) → timetick → shard → …                       tt=101
        │    ├ Delete(1)     → timetick → shard → …                       tt=102
        │    └ CommitTxn     → timetick → …                               tt=103
-       ├ read S5 back from the appended insert
-       └ Apply: index 1→S5, 2→S5, release the stripes ○
+       └ Apply: fill in tt=103 in the entry. Later writes of 1 and 2 stop waiting.
 client ◀ MessageID and TimeTick of the CommitTxn (tt=103)
-consumer: one Txn message at tt=103 with Insert and Delete. The row of key 1 in S0 is masked.
+consumer: one Txn message at tt=103 with Insert and Delete. The row of key 1 is masked.
+observe: writes 1 and 2 into the engine at tt=103, then removes the entry.
 ```
 
 The caller's insert message is not modified. The helper appends a copy. When
@@ -189,14 +192,14 @@ not in it. A key that the index does not know may still exist in the data.
 
 So the index only ever adds deletes. A delete of a client reaches the WAL
 unchanged. The decider still computes which keys of the delete exist, but that
-result is used for the index update and the metrics only.
+result is used for the metrics only.
 
 ### Failure
 
 ```
-Decide ✓ (stripes held ●) → BeginTxn ✓ → Insert ✓ → Delete ✗
+Decide ✓ (entry registered ●) → BeginTxn ✓ → Insert ✓ → Delete ✗
 → the helper appends RollbackTxn
-→ Discard: the index is unchanged, the stripes are released ○
+→ Discard: the transaction can not have committed, so the entry is removed ○
 → client ◀ the error
 ```
 
@@ -207,32 +210,165 @@ transaction that the helper built ends with a transaction error, the helper
 reports it as a retriable internal error, because the client asked for an
 autocommit append and its retry starts a new transaction.
 
-## Concurrency contract
+A failed append is one of two kinds:
 
-Writes of one vchannel hold a shared lock and run concurrently. For one key,
-the order of the decisions must equal the order of the TimeTicks, and a later
-writer must see the index update of an earlier writer. So the critical section
-runs from `Decide` through the downstream TimeTick allocation and the WAL write
-to `Apply` or `Discard`.
+- **Not written.** The failure is known to leave nothing in the WAL. The entry
+  is removed. These are: no TimeTick was assigned to the message, a redo, and
+  every failure that `AppendInTxn` reports with `NotCommitted`. That is a
+  failure before the CommitTxn, a failed CommitTxn followed by a persisted
+  RollbackTxn, and a failed extra body of a client transaction.
+- **Unknown.** The message may be in the WAL. The backend can persist a
+  message and still return an error, for example on a timeout. The entry stays
+  in the set and its keys stay present. It stops blocking other writes of its
+  keys. It leaves the set when observe passes the largest TimeTick that the
+  failed append assigned.
 
-- The decider owns the locks: keys are hashed onto a fixed number of stripes,
-  and the stripes of one decision are locked in ascending order.
-- The interceptor guarantees the sequence `Decide`, the WAL write, then exactly
-  one of `Apply` and `Discard`. A panic in between ends the process, like every
-  panic on the append path, so no decision is left unresolved in a live node.
-- An exclusive DDL waits for the vchannel lock and never asks for a stripe, so
-  it can not form a cycle with a write that holds stripes.
-- Cost: the stripes stay held during the backend write. When the backend is
-  slow, writers of the same stripe queue up.
+That largest TimeTick is exact, for these reasons:
+
+- The timetick interceptor writes the allocated TimeTick into the message in
+  place, before the write.
+- No interceptor between this interceptor and the timetick interceptor copies
+  the message.
+- Below the timetick interceptor, the append retries the same message and
+  never allocates again.
+- A redo runs the whole chain again, and this interceptor makes a new decision.
+
+A message can carry the TimeTick of an earlier attempt, after a redo for
+example. So the interceptor counts a TimeTick only when the failed call
+changed it. `utility.AppendAndGetTimeTick` does this for a plain append, and
+`txn.AllocatedTimeTick` returns it for `AppendInTxn`.
+
+## The in-flight set and the key lock
+
+The index engine has one writer: observe, the step that applies the WAL to the
+engine after the append. It applies the messages in TimeTick order, for the
+replay at WAL open and for live messages. The write path never writes the
+engine. So a write is invisible in the engine from its decision until observe
+applies it. The in-flight set covers that gap.
+
+The in-flight set of a vchannel holds the decided writes that observe has not
+applied yet. It answers one question: does a key exist. Two ordering rules keep
+the set and the engine complete together:
+
+- **Rule A (observe).** Write the engine first, then remove the entries.
+- **Rule B (writer).** Read the set first, then the engine.
+
+If a writer does not find a key in the set, the entry was removed before the
+read. Rule A wrote the engine before that removal, so the engine read finds the
+key.
+
+### Entry life cycle
+
+1. **Register** before the append. The entry has no TimeTick yet.
+2. **Fill in** the TimeTick after the append returns. If observe already passed
+   that TimeTick, the writer removes the entry itself.
+3. **Remove** in one of three ways: observe applies the write, the writer finds
+   that observe passed its TimeTick, or the append failed and the message was
+   not written.
+
+The registration happens before the append because observe can apply a message
+before its append returns to the writer. A registration made after the append
+could stay in the set for ever.
+
+Steps 2 and 3 race. Observe raises the observed TimeTick and then removes the
+entries of that TimeTick. A writer stores its TimeTick in the entry and then
+reads the observed TimeTick. Both use sequentially consistent atomics. So at
+least one side sees the store of the other, and the entry is always removed.
+If either side does the read before the store, an entry can stay for ever.
+A test puts a hook between the store and the read on each side and fails when
+either order is reversed.
+
+### Presence
+
+A key is present for a write when the set holds an entry of the key that was
+registered before the write, or when the engine holds the key. The write's own
+entry, and the entries of later writes, do not count. A later write waits for
+this one and gets a larger TimeTick.
+
+### The lock
+
+An entry without a TimeTick is the lock of its keys. The design follows the
+partial update row lock (`wal/interceptors/partialupdate/row_lock.go`) and the
+latch manager of CockroachDB (`spanlatch`):
+
+- A write registers all its keys in one step. It takes the mutexes of all
+  involved shards in ascending shard order. So the registrations of two
+  overlapping writes are totally ordered.
+- A write waits only for the last entry without a TimeTick of each key. That
+  entry waited for the entries before it. The waits form no cycle, so writes of
+  many keys can not deadlock.
+- A write whose context ends while it waits keeps its place in line. It leaves
+  after the writes it waited for, so a later write still waits for them.
+- The fill-in stores the TimeTick with one atomic store and closes a channel.
+  It takes no shard mutex. Only a writer that finds that observe passed its
+  TimeTick takes the mutexes, to remove its own entry.
+- The shard mutexes are held only while the maps change, never across an
+  append.
+
+The set has 64 shards. A key of the set is a 64-bit number: the value of an
+int64 primary key, or the 64-bit FNV-1a hash of a VarChar primary key. Two
+VarChar keys with the same hash share one entry. That only adds a wait and a
+companion delete of a key that may not exist. Both are safe. The keys of one
+write are deduplicated after the hash.
+
+An exclusive DDL waits for the vchannel lock and never registers in the set, so
+it can not form a cycle with a write that holds entries.
+
+### Cost
+
+One insert of 1000 new int64 keys, one writer, no contention, Intel i7-8700:
+
+| Step | Time |
+|---|---|
+| Decode the body and the primary keys (key column only) | 15 µs |
+| Decode the body and the primary keys (with a 128-dim float vector column) | 250 µs |
+| Lock: register, wait, fill in, removal by observe | 193 µs |
+| Decision with the in-memory test engine (lock, set read, probe) | 259 µs |
+| Probe of 1000 keys on the Pebble engine (all miss, 1M keys in the memtable) | 1330 µs |
+
+With the Pebble probe, the lock is about 12% of decode, decision and lock
+(193 of about 1570 µs). With the in-memory test engine it is about 70%.
+
+Under contention, 32 writers each hold the lock for a simulated 2 ms append.
+The table gives messages per second at `GOMAXPROCS=2`:
+
+| Keys per message | Row lock, exclusive mode | In-flight set |
+|---|---|---|
+| 1 | 14794 | 14516 |
+| 16 | 14341 | 13725 |
+| 100 | 13142 | 11398 |
+| 1000 | 7700 | 4150 |
+
+A write of 1000 keys touches almost all 64 shards. Its registration takes almost
+every shard mutex at the same time, which is the same as a table lock. The set
+also does more work per key than the row lock. So large writes reach about half
+of the row lock throughput. A vchannel-wide lock for writes above some number of
+keys (lock escalation) is an open item.
+
+### Degraded mode
+
+`DegradeUntil(T)` makes every key present until observe reaches TimeTick `T`.
+An insert then gets a companion delete for each of its keys. That is always
+correct and only costs extra deletes. It never blocks a write. It covers events
+whose earlier writes did not pass through the in-flight set: the index is
+enabled for an existing collection, a secondary is promoted to primary, or the
+engine recovers from a failure. This step adds the mechanism only. Nothing
+calls it yet.
+
+### Contract of the interceptor
+
+The interceptor calls `Decide`, the WAL append, then exactly one of `Apply`,
+`Discard` and `DiscardUncertain`. A panic in between ends the process, like
+every panic on the append path, so no decision is left unresolved in a live
+node.
 
 ## Configuration
 
 | Key | Default | Meaning |
 |---|---|---|
 | `streaming.pkindex.enabled` | `false` | Whether the streaming node maintains the index. Experimental. |
-| `streaming.pkindex.lockStripes` | `256` | The number of lock stripes per vchannel. |
 
-Both are internal (`Export: false`). The only index engine compiles with the
+It is internal (`Export: false`). The only index engine compiles with the
 `test` build tag. A production binary has no engine. When the switch is on in
 such a binary, the streaming node panics at start with a message that names the
 switch. A silent pass-through would hide a correctness difference: the operator
@@ -269,6 +405,19 @@ insert, so WAL record and byte counts under-report such an append.
 
 ## Known limitations and follow-ups
 
+- **Do not enable the index before observe exists.** This step has no observe.
+  An entry of the in-flight set then never leaves the set, so the set grows
+  with every write and every written key stays present. Observe comes with the
+  recovery step (#54365).
+- The total size of the in-flight set has no limit yet. What to do above a
+  limit (back pressure or degraded mode) is open.
+- Lock escalation for writes of many keys, and its threshold, are open.
+- An empty shard map is set to nil so that it does not keep its peak memory.
+  Keeping the maps would make the lock of a 1000-key write about 30% faster
+  (140 µs instead of 193 µs).
+- Rule A needs an engine write to be visible to reads as soon as it returns.
+  A test must check this for the Pebble engine when observe writes it.
+- Pending writes of a transaction are not rebuilt at WAL open.
 - The index starts empty on every WAL open. An insert of a key written before
   the open is not detected as a duplicate. Recovery is a later step.
 - A transaction left uncommitted by a previous WAL lifetime can still be
@@ -285,9 +434,6 @@ insert, so WAL record and byte counts under-report such an append.
 - An index probe failure makes the append fail with a retriable error. The
   producer retries such errors without a limit, so a permanently broken engine
   stalls the writes of that collection instead of failing them.
-- An index write failure after the WAL accepted the write ends the process.
-  The engine write is a memory operation, so it fails only on a bug, and a
-  stale index would let duplicates through in silence.
 - Duplicate primary keys inside one insert are not detected.
 
 ## Test plan
@@ -300,7 +446,16 @@ insert, so WAL record and byte counts under-report such an append.
   companion delete at commit, a delete reaches the WAL unchanged, and 320
   concurrent inserts of one key produce exactly one insert without a companion
   delete.
-- Mutation checks: without the stripe locks, the serialization test fails
-  in 10 of 10 runs. Without the rollback, the redo test fails.
+- Tests of the in-flight set: registration races with observe, the fill-in
+  races with observe (a hook on each side), an append with an unknown outcome,
+  two writers of one key, a canceled waiter, writes of many overlapping keys
+  with no deadlock, a lock key collision, and a stress run against a simulated
+  WAL with an observer.
+- Mutation checks: each test fails when its rule is broken. That is: no removal
+  at fill-in, the set is not read, no wait, a canceled waiter leaves at once,
+  either order of the observe and fill-in race is reversed. Without the
+  rollback, the redo test fails.
+- Benchmarks: the lock under contention (hot key, batches of 1 to 1000 keys,
+  mixed batches), and the cost of each step of one 1000-key write.
 - An integration test inserts the same keys twice and checks `count(*)`. With
   the switch off it reads 150 rows, with the switch on it reads 100.
