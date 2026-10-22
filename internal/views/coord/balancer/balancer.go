@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"context"
+	"io"
 	"slices"
 	"sync"
 	"time"
@@ -34,6 +35,9 @@ type DefaultBalancer struct {
 	viewRegistry  *coordview.ShardViewRegistry
 	policy        BalancePolicy
 	queue         *triggerQueue
+	scanner       balancercache.Scanner
+	scanning      bool
+	scanRequested bool
 	configChanged chan struct{}
 
 	mu     sync.Mutex
@@ -64,6 +68,7 @@ func NewDefaultBalancer(
 		configChanged: make(chan struct{}, 1),
 	}
 	if cache != nil {
+		balancer.scanner = cache.NewScanner()
 		cache.SetNotifier(func(scope TriggerScope) { balancer.Trigger(scope) })
 	}
 	return balancer
@@ -121,47 +126,47 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 		}
 	}
 
-	retryDelay := 100 * time.Millisecond
 	for {
+		var retry <-chan time.Time
+		var timer *time.Timer
+		if delay, pending := b.queue.retryWait(); pending {
+			timer = time.NewTimer(delay)
+			retry = timer.C
+		}
 		select {
 		case <-ctx.Done():
+			if timer != nil {
+				timer.Stop()
+			}
 			return
 		case <-b.configChanged:
+			if timer != nil {
+				timer.Stop()
+			}
 			resetTicker()
 			continue
 		case <-b.queue.signalCh():
+		case <-retry:
 		case <-ticker.C:
 			b.queue.add()
-			continue
 		}
-
+		if timer != nil {
+			timer.Stop()
+		}
 		if err := b.Reconcile(ctx); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			mlog.Warn(ctx, "query view balance will retry", mlog.Err(err))
-			timer := time.NewTimer(retryDelay)
-			waiting := true
-			for waiting {
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return
-				case <-b.configChanged:
-					resetTicker()
-				case <-timer.C:
-					waiting = false
-				}
-			}
-			retryDelay = min(5*time.Second, retryDelay*2)
 		} else {
-			retryDelay = 100 * time.Millisecond
+			b.queue.resetRetryDelay()
 		}
 	}
 }
 
-// Reconcile runs one reconcile cycle. It is exported primarily for tests and
-// for callers that want a synchronous controller pass during startup.
+// Reconcile handles queued local work or one collection scan batch. A single
+// call does not drain a full scan. It is exported primarily for tests and for
+// callers that want a synchronous controller pass during startup.
 // It waits for cache readiness before consuming queued work; ctx cancels that wait.
 func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	if b.cache == nil || b.viewRegistry == nil || b.policy == nil {
@@ -176,22 +181,28 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 		return err
 	}
 	pending := b.queue.takePending()
-	if pending.empty() {
+	b.scanRequested = b.scanRequested || pending.scan
+	if !pending.hasScopes() && !b.scanning && !b.scanRequested {
 		return nil
 	}
-	if pending.full {
-		if policy, ok := b.policy.(*DefaultBalancePolicy); ok {
-			policy.mu.Lock()
-			for collectionID := range policy.layouts.domains {
-				if collection := b.cache.GetCollection(collectionID); collection == nil || collection.LoadConfig() == nil {
-					delete(policy.layouts.domains, collectionID)
-				}
-			}
-			policy.mu.Unlock()
+	// A pass releases reconcileMu before another scan batch can start. Local
+	// publications and management calls can therefore run between batches.
+	defer func() {
+		if b.scanning || b.scanRequested {
+			b.queue.wake()
 		}
-	}
+	}()
 	reader := newPlanningContext(b.cache)
-	dirty := resolveCacheScope(reader, pending)
+	b.pruneLayouts(reader, pending.dirtyColls)
+	var dirty []qviews.ShardID
+	if pending.hasScopes() {
+		dirty = resolveCacheScope(reader, pending)
+	} else if b.scanning || b.scanRequested {
+		if !b.scanning {
+			b.scanning, b.scanRequested = true, false
+		}
+		dirty = b.scanBatch(reader)
+	}
 	if len(dirty) == 0 {
 		return nil
 	}
@@ -212,6 +223,42 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	return errors.CombineErrors(err, errors.CombineErrors(applyErr, recoveryErr))
 }
 
+const (
+	scanShardThreshold = 100
+	scanSlotBudget     = 256
+)
+
+func (b *DefaultBalancer) scanBatch(reader *planningContext) []qviews.ShardID {
+	targets := make(map[qviews.ShardID]struct{})
+	collections := make(map[int64]struct{})
+	err := b.scanner.Scan(scanSlotBudget, func(collection *balancercache.CollectionEntry) bool {
+		collections[collection.ID()] = struct{}{}
+		// The scanner pins directory membership only. Re-read current contents
+		// through this batch's planning context, just as for a local event.
+		addCollectionShards(targets, reader.GetCollection(collection.ID()))
+		return len(targets) <= scanShardThreshold
+	})
+	if err == io.EOF {
+		b.scanning = false
+	}
+	b.pruneLayouts(reader, collections)
+	return shardKeys(targets)
+}
+
+// Configuration removal also works after the collection has left the cache;
+// do not scan every retained layout at the start of each background batch.
+func (b *DefaultBalancer) pruneLayouts(reader balancercache.Reader, collections map[int64]struct{}) {
+	if policy, ok := b.policy.(*DefaultBalancePolicy); ok && len(collections) > 0 {
+		policy.mu.Lock()
+		defer policy.mu.Unlock()
+		for id := range collections {
+			if c := reader.GetCollection(id); c == nil || c.LoadConfig() == nil {
+				delete(policy.layouts.domains, id)
+			}
+		}
+	}
+}
+
 func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 	if plan == nil {
 		return nil
@@ -227,7 +274,7 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		}
 		if err := mgr.RequestRelease(ctx); err != nil {
 			errs = append(errs, err)
-			b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
+			b.queue.addRetry(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 		}
 	}
 	for shardID, builder := range plan.Prepares {
@@ -237,14 +284,14 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		mgr := b.viewRegistry.Ensure(shardID)
 		if err := mgr.AddPreparing(ctx, builder); err != nil {
 			errs = append(errs, err)
-			b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
+			b.queue.addRetry(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 		}
 	}
 	if len(plan.Continues) > 0 {
 		b.Trigger(TriggerScope{DirtyShards: plan.Continues})
 	}
 	if len(plan.Retries) > 0 {
-		b.Trigger(TriggerScope{DirtyShards: plan.Retries})
+		b.queue.addRetry(TriggerScope{DirtyShards: plan.Retries})
 		errs = append(errs, merr.WrapErrServiceUnavailableMsg("balance inputs are not ready for %d shards", len(plan.Retries)))
 	}
 	var err error
@@ -276,7 +323,7 @@ func (b *DefaultBalancer) readSchemaVersions(ctx context.Context, reader *planni
 			if err != nil {
 				failed[id] = err
 				result = errors.CombineErrors(result, err)
-				b.Trigger(TriggerScope{DirtyCollections: []int64{id}})
+				b.queue.addRetry(TriggerScope{DirtyCollections: []int64{id}})
 			} else {
 				reader.schemaVersions[id] = version
 			}

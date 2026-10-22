@@ -39,7 +39,7 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 	require.NoError(t, p.Save(key, "3"))
 	require.Equal(t, 3.0, c.GetBalanceConfig().MovePrice)
 	require.Equal(t, 0.02, pinned.GetBalanceConfig().MovePrice, "an existing batch retains its config")
-	require.True(t, b.queue.takePending().full)
+	require.True(t, b.queue.takePending().scan)
 	previous := c.GetBalanceConfig()
 	require.NoError(t, p.Save(key, "3"))
 	require.Same(t, previous, c.GetBalanceConfig())
@@ -69,7 +69,7 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 
 	require.NoError(t, p.Save(p.QueryViewCfg.BalancerAutoBalance.Key, "false"))
 	require.False(t, c.GetBalanceConfig().AutoBalance)
-	require.True(t, b.queue.takePending().full)
+	require.True(t, b.queue.takePending().scan)
 	previous = c.GetBalanceConfig()
 	require.NoError(t, p.Save(p.QueryViewCfg.BalancerAutoBalance.Key, "invalid"))
 	require.Same(t, previous, c.GetBalanceConfig())
@@ -98,7 +98,7 @@ func TestBalanceConfigIndependentOfQueryCoord(t *testing.T) {
 
 	require.NoError(t, p.Save(p.QueryViewCfg.BalancerAutoBalance.Key, "false"))
 	require.False(t, c.GetBalanceConfig().AutoBalance)
-	require.True(t, b.queue.takePending().full)
+	require.True(t, b.queue.takePending().scan)
 	previous := c.GetBalanceConfig()
 	require.NoError(t, p.Save(p.QueryCoordCfg.AutoBalance.Key, "true"))
 	require.Same(t, previous, c.GetBalanceConfig())

@@ -102,7 +102,7 @@ func (b *DefaultBalancer) recoverPublishedSchemas(ctx context.Context, p *planni
 		}
 		if err != nil {
 			result = errors.CombineErrors(result, err)
-			b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{id}})
+			b.queue.addRetry(TriggerScope{DirtyShards: []qviews.ShardID{id}})
 		}
 	}
 	return result
