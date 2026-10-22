@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/encoding"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -245,6 +246,27 @@ func (c *Client) QueryStream(ctx context.Context, req *querypb.QueryRequest, _ .
 func (c *Client) QuerySegments(ctx context.Context, req *querypb.QueryRequest, _ ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.RetrieveResults, error) {
 		return client.QuerySegments(ctx, req)
+	})
+}
+
+// materializeCallOptions are the caller's options for a Materialize RPC,
+// with Identity appended last so it wins: the body carries its own
+// compression.
+func materializeCallOptions(opts []grpc.CallOption) []grpc.CallOption {
+	return append(opts[:len(opts):len(opts)], grpc.UseCompressor(encoding.Identity))
+}
+
+func (c *Client) Materialize(ctx context.Context, req *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	opts = materializeCallOptions(opts)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.MaterializeResults, error) {
+		return client.Materialize(ctx, req, opts...)
+	})
+}
+
+func (c *Client) MaterializeSegments(ctx context.Context, req *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	opts = materializeCallOptions(opts)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.MaterializeResults, error) {
+		return client.MaterializeSegments(ctx, req, opts...)
 	})
 }
 

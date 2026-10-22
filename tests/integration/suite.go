@@ -110,7 +110,9 @@ func (s *MiniClusterSuite) SetupSuite() {
 	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout) //nolint:gosec // cancel is stored and called in TearDownSuite()
 	s.cancelFunc = cancel
 
-	s.Cluster = cluster.NewMiniClusterV3(ctx, cluster.WithExtraEnv(s.envConfigs), cluster.WithWorkDir(s.WorkDir()))
+	opts := append([]cluster.MiniClusterV3Option{cluster.WithExtraEnv(s.envConfigs), cluster.WithWorkDir(s.WorkDir())},
+		s.opt.clusterOptions...)
+	s.Cluster = cluster.NewMiniClusterV3(ctx, opts...)
 	s.T().Log("Setup test success")
 }
 

@@ -120,6 +120,12 @@ func Test_NewClient(t *testing.T) {
 		r24, err := client.GetHighlight(ctx, nil)
 		retCheck(retNotNil, r24, err)
 
+		r25, err := client.Materialize(ctx, nil)
+		retCheck(retNotNil, r25, err)
+
+		r26, err := client.MaterializeSegments(ctx, nil)
+		retCheck(retNotNil, r26, err)
+
 		// stream rpc
 		client, err := client.QueryStream(ctx, nil)
 		retCheck(retNotNil, client, err)

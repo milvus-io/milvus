@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration/cluster/process"
@@ -78,6 +80,15 @@ func WithExtraEnv(env map[string]string) MiniClusterV3Option {
 	}
 }
 
+// WithMetricsPorts gives every process its own metrics/HTTP port, a free
+// one picked when the process is created, so a test can scrape one
+// (MilvusProcess.GetMetricsAddr).
+func WithMetricsPorts() MiniClusterV3Option {
+	return func(c *MiniClusterV3) {
+		c.metricsPorts = true
+	}
+}
+
 // NewMiniClusterV3 creates a new mini cluster v3.
 func NewMiniClusterV3(
 	ctx context.Context,
@@ -114,6 +125,7 @@ type MiniClusterV3 struct {
 	rootPath              string
 	configRefreshInterval time.Duration
 	extraEnv              map[string]string
+	metricsPorts          bool
 
 	defaultMixCoord      *process.MixcoordProcess
 	defaultProxy         *process.ProxyProcess
@@ -717,6 +729,9 @@ func (c *MiniClusterV3) getOptions() []process.Option {
 		"PROXY_PORT":              "19530",
 		"ROOTCOORD_DMLCHANNELNUM": "2", // set smaller dml channel num to speed up the test.
 		paramtable.MilvusConfigRefreshIntervalEnvKey: c.configRefreshInterval.String(), // set smaller config refresh interval to speed up the test.
+	}
+	if c.metricsPorts {
+		env["METRICS_PORT"] = strconv.Itoa(funcutil.GetAvailablePort())
 	}
 	for k, v := range c.extraEnv {
 		env[k] = v

@@ -2803,6 +2803,7 @@ type proxyConfig struct {
 	MaxResultEntries                  ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
+	MaterializeEnabled                ParamItem `refreshable:"true"`
 
 	// EnableElementNullAndNestedArray is a temporary preview switch that lets
 	// the proxy accept element-nullable and nested Array fields while the feature
@@ -3454,6 +3455,20 @@ Disabled if the value is less or equal to 0.`,
 		Export: true,
 	}
 	p.MaxSearchAggregationResultEntries.Init(base.mgr)
+
+	// Materialize needs every node to serve the new RPCs; operators turn it
+	// on after the rolling upgrade (design doc 20261019 section 8).
+	p.MaterializeEnabled = ParamItem{
+		Key:          "proxy.materialize.enabled",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Export:       false,
+		Doc: "Whether search requery uses the Materialize RPC. " +
+			"Turn on only after every node is upgraded; downgrading a cluster with it on may return errors. " +
+			"It is independent of common.interface.zeroCopy: Materialize requests always use the Arrow retrieve path " +
+			"on QueryNodes, and zeroCopy keeps governing only the Query path.",
+	}
+	p.MaterializeEnabled.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",
@@ -4393,6 +4408,9 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
+	MaterializeCodec           ParamItem `refreshable:"true"`
+	MaterializeZstdMinBodySize ParamItem `refreshable:"true"`
+
 	StrictGroupStrategy              ParamItem `refreshable:"true"`
 	StrictGroupPhase1CandidateWeight ParamItem `refreshable:"true"`
 	StrictGroupSkipRefine            ParamItem `refreshable:"true"`
@@ -4633,6 +4651,29 @@ func formatDurationWithMillisecondFallback(v string) string {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
+	p.MaterializeCodec = ParamItem{
+		Key:          "queryNode.materialize.codec",
+		Version:      "3.1.0",
+		DefaultValue: "none",
+		Doc: "Compression of the Materialize body (Arrow IPC, per buffer). grpc.client.* does not " +
+			"apply: the Materialize RPCs are sent without gRPC compression. none: never; zstd: zstd " +
+			"for every buffer that saves at least 10%, except replies that carry a vector column or " +
+			"are under queryNode.materialize.zstdMinBodySize, which go raw.",
+		Export: false,
+	}
+	p.MaterializeCodec.Init(base.mgr)
+
+	p.MaterializeZstdMinBodySize = ParamItem{
+		Key:          "queryNode.materialize.zstdMinBodySize",
+		Version:      "3.1.0",
+		DefaultValue: "16384",
+		Doc: "Under Materialize codec zstd, the uncompressed bytes below which a reply goes raw; " +
+			"replies with a vector column also go raw. 0 compresses every reply, vectors included, " +
+			"for clusters that pay for bytes more than for CPU.",
+		Export: false,
+	}
+	p.MaterializeZstdMinBodySize.Init(base.mgr)
+
 	p.StrictGroupStrategy = ParamItem{
 		Key:     "queryNode.groupBy.strictGroupStrategy",
 		Version: "2.6.23", DefaultValue: "per_group", Export: true,

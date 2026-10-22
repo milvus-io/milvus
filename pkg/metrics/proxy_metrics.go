@@ -469,6 +469,37 @@ var (
 			Help:      "counter of retry search",
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
+	// ProxyMaterializeFallbackTotal counts requests that went back to Query
+	// because a node could not serve Materialize.
+	ProxyMaterializeFallbackTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "materialize_fallback_total",
+			Help:      "counter of Materialize requests rerun with Query",
+		}, []string{nodeIDLabelName, "reason"})
+
+	// ProxyMaterializeShardTotal counts shard replies the proxy reduced from
+	// Materialize. Replies a whole-request fallback discarded are not counted.
+	ProxyMaterializeShardTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "materialize_shard_total",
+			Help:      "counter of shard results reduced from Materialize replies",
+		}, []string{nodeIDLabelName})
+
+	// ProxyQueryExecuteLatency is the latency of a query task's fan-out by the
+	// path that served it, so that Materialize and Query can be compared.
+	ProxyQueryExecuteLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "query_execute_latency",
+			Help:      "latency of a query task's fan-out to the delegators in ms, by the path that served it",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, queryTypeLabelName, "path"})
+
 	// ProxyRetrySearchResultInsufficientCount records the retry search without reducing topk that still not meet result limit
 	// there are more likely some non-index-related reasons like we do not have enough entities for very big k, duplicate pks, etc
 	ProxyRetrySearchResultInsufficientCount = prometheus.NewCounterVec(
@@ -604,6 +635,9 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(MaxInsertRate)
 	registry.MustRegister(ProxyRetrySearchCount)
+	registry.MustRegister(ProxyMaterializeFallbackTotal)
+	registry.MustRegister(ProxyMaterializeShardTotal)
+	registry.MustRegister(ProxyQueryExecuteLatency)
 	registry.MustRegister(ProxyRetrySearchResultInsufficientCount)
 	registry.MustRegister(ProxyRecallSearchCount)
 

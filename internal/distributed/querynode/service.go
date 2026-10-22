@@ -417,6 +417,14 @@ func (s *Server) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (
 	return s.querynode.QuerySegments(ctx, req)
 }
 
+func (s *Server) Materialize(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	return s.querynode.Materialize(ctx, req)
+}
+
+func (s *Server) MaterializeSegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	return s.querynode.MaterializeSegments(ctx, req)
+}
+
 // SyncReplicaSegments syncs replica segment information to shard leader
 func (s *Server) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
 	return s.querynode.SyncReplicaSegments(ctx, req)
