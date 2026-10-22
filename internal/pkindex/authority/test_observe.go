@@ -17,7 +17,7 @@
 //go:build test
 // +build test
 
-package pkindex
+package authority
 
 import "context"
 
@@ -27,15 +27,15 @@ import "context"
 // upgraded, puts are the keys of the insert and deletes the keys of the
 // companion delete. Deletes are applied first, because both take effect at the
 // same time tick and the insert survives the delete.
-func (d *Decider) ObserveForTest(ctx context.Context, tt uint64, segmentID int64, puts []PK, deletes []PK) error {
-	batch := d.authority.NewBatch()
+func (d *Authority) ObserveForTest(ctx context.Context, tt uint64, segmentID int64, puts []PK, deletes []PK) error {
+	batch := d.store.NewBatch()
 	for _, pk := range deletes {
 		batch.Delete(pk)
 	}
 	for _, pk := range puts {
 		batch.Put(pk, Entry{SegmentID: segmentID})
 	}
-	if err := d.authority.Write(ctx, batch); err != nil {
+	if err := d.store.Write(ctx, batch); err != nil {
 		return err
 	}
 	d.inflight.observe(tt, append(append([]PK(nil), deletes...), puts...))
@@ -44,18 +44,18 @@ func (d *Decider) ObserveForTest(ctx context.Context, tt uint64, segmentID int64
 
 // ObserveTimeTickForTest stands in for observe of a message that writes no key
 // of this vchannel, a TimeTick for example.
-func (d *Decider) ObserveTimeTickForTest(tt uint64) {
+func (d *Authority) ObserveTimeTickForTest(tt uint64) {
 	d.inflight.observeTimeTick(tt)
 }
 
 // InflightLenForTest returns the number of key entries in the in-flight set.
-func (d *Decider) InflightLenForTest() int {
+func (d *Authority) InflightLenForTest() int {
 	return d.inflight.len()
 }
 
 // PresentForTest reports whether pk exists for the write path: it has any write
 // in the in-flight set, or the engine holds it.
-func (d *Decider) PresentForTest(ctx context.Context, pk PK) (bool, error) {
+func (d *Authority) PresentForTest(ctx context.Context, pk PK) (bool, error) {
 	key := pk.lockKey()
 	d.inflight.mu.Lock()
 	inSet := len(d.inflight.keys[key]) > 0
@@ -63,6 +63,6 @@ func (d *Decider) PresentForTest(ctx context.Context, pk PK) (bool, error) {
 	if inSet {
 		return true, nil
 	}
-	entry, err := d.authority.Get(ctx, pk)
+	entry, err := d.store.Get(ctx, pk)
 	return entry != nil, err
 }

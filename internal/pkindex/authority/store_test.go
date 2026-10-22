@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package authority
 
 import (
 	"context"
@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestAuthority(t *testing.T) Authority {
+func newTestAuthority(t *testing.T) Store {
 	t.Helper()
-	a, err := NewAuthority("v1")
+	a, err := NewStore("v1")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = a.Close() })
 	return a
@@ -103,7 +103,7 @@ func TestAuthorityRejectsCorruptValue(t *testing.T) {
 	engine, err := NewMemoryEngine("v1")
 	require.NoError(t, err)
 	require.NoError(t, engine.Write(ctx, []Mutation{{Key: Int64PK(1).Encode(), Value: []byte{1, 2, 3}}}))
-	a := newAuthority("v1", engine)
+	a := newStore("v1", engine)
 
 	_, err = a.Get(ctx, Int64PK(1))
 	require.Error(t, err)
@@ -112,7 +112,7 @@ func TestAuthorityRejectsCorruptValue(t *testing.T) {
 
 func TestAuthorityAfterClose(t *testing.T) {
 	ctx := context.Background()
-	a, err := NewAuthority("v1")
+	a, err := NewStore("v1")
 	require.NoError(t, err)
 	require.NoError(t, a.Close())
 	_, err = a.Get(ctx, Int64PK(1))
@@ -140,7 +140,7 @@ func TestAuthorityMultiGetRejectsWrongLength(t *testing.T) {
 		{"too many values", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newAuthority("v1", &fakeLengthEngine{returnLen: tc.returnLen})
+			a := newStore("v1", &fakeLengthEngine{returnLen: tc.returnLen})
 			_, err := a.MultiGet(ctx, []PK{Int64PK(1), Int64PK(2)})
 			require.Error(t, err)
 		})
@@ -152,6 +152,6 @@ func TestNewWithoutEngineFactory(t *testing.T) {
 	defer RegisterEngineFactory(NewMemoryEngine)
 
 	require.False(t, HasEngineFactory())
-	_, err := NewAuthority("v1")
+	_, err := NewStore("v1")
 	require.True(t, errors.Is(err, ErrNoEngineFactory))
 }
