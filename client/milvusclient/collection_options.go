@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
@@ -672,6 +673,36 @@ type addCollectionFieldOption struct {
 	fieldSch       *entity.Field
 }
 
+// splitStructSubFieldPath splits a struct sub-field path "s[b]" into the struct and sub-field
+// names. ok is false for a plain field name.
+func splitStructSubFieldPath(name string) (structName string, subName string, ok bool, err error) {
+	if !strings.ContainsAny(name, "[]") {
+		return "", "", false, nil
+	}
+	open := strings.IndexByte(name, '[')
+	if open > 0 && strings.HasSuffix(name, "]") {
+		structName, subName = name[:open], name[open+1:len(name)-1]
+	}
+	if structName == "" || subName == "" || strings.ContainsAny(subName, "[]") {
+		return "", "", false, merr.WrapErrParameterInvalidMsg("invalid struct sub-field path %q, expect \"struct[sub_field]\"", name)
+	}
+	return structName, subName, true, nil
+}
+
+// alterSchemaRequest returns the AlterCollectionSchema request adding a struct sub-field when the
+// field name is a sub-field path "s[b]". The sub-field describes one struct element, as in
+// entity.StructSchema; the server fills its row-level nullable and max_capacity from the struct.
+func (c *addCollectionFieldOption) alterSchemaRequest() (*milvuspb.AlterCollectionSchemaRequest, bool, error) {
+	structName, _, ok, err := splitStructSubFieldPath(c.fieldSch.Name)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	fieldSchema := entity.StructSubFieldProto(c.fieldSch, false, "")
+	req := newAlterCollectionSchemaAddRequest(c.collectionName, fieldSchema, nil)
+	req.GetAction().GetAddRequest().GetFieldInfos()[0].StructPath = structName
+	return req, true, nil
+}
+
 func (c *addCollectionFieldOption) Request() *milvuspb.AddCollectionFieldRequest {
 	bs, _ := proto.Marshal(c.fieldSch.ProtoMessage())
 	return &milvuspb.AddCollectionFieldRequest{
@@ -682,6 +713,21 @@ func (c *addCollectionFieldOption) Request() *milvuspb.AddCollectionFieldRequest
 
 // Validate validates the option before sending request
 func (c *addCollectionFieldOption) Validate() error {
+	if c.fieldSch == nil {
+		return merr.WrapErrParameterMissingMsg("field schema is required")
+	}
+	structName, subName, isSubField, err := splitStructSubFieldPath(c.fieldSch.Name)
+	if err != nil {
+		return err
+	}
+	if isSubField {
+		if !c.fieldSch.Nullable {
+			return merr.WrapErrParameterInvalidMsg("adding struct sub-field %s requires nullable=true", c.fieldSch.Name)
+		}
+		sub := *c.fieldSch
+		sub.Name = subName
+		return entity.NewStructSchema().WithField(&sub).Validate(structName)
+	}
 	// Vector fields must be nullable when adding to existing collection
 	if c.fieldSch.DataType.IsVectorType() && !c.fieldSch.Nullable {
 		return fmt.Errorf("adding vector field to existing collection requires nullable=true, field name = %s", c.fieldSch.Name)
