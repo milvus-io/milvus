@@ -90,6 +90,7 @@ set(MILVUS_TEST_FILES
 set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/segcore/storagev1translator/TextIndexTranslatorTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/LegacyIndexLoadTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/indexbuilder/BuildInputMaterializerTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/indexbuilder/MaterializerArrayTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/LoadResourceTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/PackedIndexLoadTest.cpp

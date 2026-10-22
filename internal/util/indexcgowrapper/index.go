@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type CodecIndex interface {
@@ -27,14 +28,47 @@ type CodecIndex interface {
 	UpLoad() (*cgopb.IndexStats, error)
 }
 
-var _ CodecIndex = (*CgoIndex)(nil)
+// PreparedIndex retains the input loaded by LoadData until Build consumes it.
+// Delete also releases input when a task is canceled before building.
+type PreparedIndex interface {
+	CodecIndex
+	LoadData() error
+	HasResidentInput() bool
+	TryReserveBuild() (bool, error)
+	SpillInput(context.Context) (bool, error)
+	ReleaseInputMemory() error
+	Build() error
+}
+
+var (
+	_ CodecIndex    = (*CgoIndex)(nil)
+	_ PreparedIndex = (*CgoIndex)(nil)
+)
 
 type CgoIndex struct {
-	indexPtr C.CIndex
-	close    bool
+	indexPtr      C.CIndex
+	close         bool
+	buildCtx      context.Context
+	residentInput bool
 }
 
 func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (CodecIndex, error) {
+	index, err := createIndex(ctx, buildIndexInfo, true)
+	if err != nil {
+		return nil, err
+	}
+	return index, nil
+}
+
+func CreateIndexBuilder(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (PreparedIndex, error) {
+	index, err := createIndex(ctx, buildIndexInfo, false)
+	if err != nil {
+		return nil, err
+	}
+	return index, nil
+}
+
+func createIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo, build bool) (*CgoIndex, error) {
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
 		mlog.Warn(ctx, "marshal buildIndexInfo failed",
@@ -44,14 +78,23 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 		return nil, err
 	}
 	var indexPtr C.CIndex
-	status := C.CreateIndex(&indexPtr, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
+	data := (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(buildIndexInfoBlob)))
+	size := C.uint64_t(len(buildIndexInfoBlob))
+	var status C.CStatus
+	if build {
+		status = C.CreateIndex(&indexPtr, data, size)
+	} else {
+		status = C.CreateIndexBuilder(&indexPtr, data, size)
+	}
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}
 
 	index := &CgoIndex{
-		indexPtr: indexPtr,
-		close:    false,
+		indexPtr:      indexPtr,
+		close:         false,
+		buildCtx:      ctx,
+		residentInput: true,
 	}
 
 	runtime.SetFinalizer(index, func(index *CgoIndex) {
@@ -61,6 +104,69 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 	})
 
 	return index, nil
+}
+
+func (index *CgoIndex) LoadData() error {
+	if index.close || index.indexPtr == nil {
+		return merr.WrapErrServiceInternalMsg("index builder is closed")
+	}
+	residentInput := C.bool(true)
+	status := C.LoadIndexData(index.indexPtr, &residentInput)
+	index.residentInput = bool(residentInput)
+	return HandleCStatus(&status, "failed to load index data")
+}
+
+func (index *CgoIndex) HasResidentInput() bool {
+	return index.residentInput
+}
+
+func (index *CgoIndex) TryReserveBuild() (bool, error) {
+	var admitted C.bool
+	status := C.TryReserveIndexBuild(index.indexPtr, &admitted)
+	return bool(admitted), HandleCStatus(&status, "failed to reserve index build")
+}
+
+func (index *CgoIndex) SpillInput(ctx context.Context) (bool, error) {
+	stopped := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		status := C.StopIndexSpill(index.indexPtr)
+		_ = HandleCStatus(&status, "failed to stop index spill")
+		close(stopped)
+	})
+	var complete C.bool
+	status := C.SpillIndexInput(index.indexPtr, &complete)
+	if !stop() {
+		<-stopped
+	}
+	return bool(complete), HandleCStatus(&status, "failed to spill index input")
+}
+
+func (index *CgoIndex) ReleaseInputMemory() error {
+	status := C.ReleaseIndexInputMemory(index.indexPtr)
+	if err := HandleCStatus(&status, "failed to release index input"); err != nil {
+		return err
+	}
+	index.residentInput = false
+	return nil
+}
+
+func (index *CgoIndex) Build() error {
+	if index.close || index.indexPtr == nil {
+		return merr.WrapErrServiceInternalMsg("index builder is closed")
+	}
+	ctx := index.buildCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	status := C.BuildIndex(index.indexPtr)
+	err := HandleCStatus(&status, "failed to build index")
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 type JSONKeyStatsResult struct {

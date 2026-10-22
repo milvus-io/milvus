@@ -14,8 +14,10 @@
 #include <nlohmann/json.hpp>
 #include <parquet/properties.h>
 #include <atomic>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <exception>
@@ -381,6 +383,36 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
     storage::FileManagerContext ctx(field_meta, index_meta, cm_, fs_);
     ctx.set_loon_ffi_properties(
         storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties());
+    ctx.indexMeta.dim = kDim;
+    std::vector<uint8_t> resident;
+    auto read_rows = ReadFieldDataFromManifestInto(
+        data.ManifestPathJson(), ctx, total_rows, [&] {
+            resident.resize(total_rows * kDim * sizeof(float));
+            return resident.data();
+        });
+    ASSERT_TRUE(read_rows.has_value());
+    EXPECT_EQ(*read_rows, total_rows);
+
+    std::vector<uint8_t> visited;
+    auto outcome = VisitFieldDataFromManifest(
+        data.ManifestPathJson(),
+        ctx.loon_ffi_properties,
+        field_meta,
+        DataType::VECTOR_FLOAT,
+        kDim,
+        DataType::NONE,
+        std::nullopt,
+        [&](FieldDataPtr field_data) {
+            const auto* begin = static_cast<const uint8_t*>(field_data->Data());
+            visited.insert(
+                visited.end(),
+                begin,
+                begin + field_data->get_num_rows() * kDim * sizeof(float));
+            return VisitControl::Continue;
+        },
+        kStreamingInflightBytes);
+    EXPECT_EQ(outcome, VisitOutcome::Exhausted);
+    EXPECT_EQ(visited, resident);
 
     milvus::Config config;
     config[STORAGE_VERSION_KEY] = STORAGE_V3;
@@ -424,6 +456,8 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
     for (size_t i = 0; i < payload.size(); ++i) {
         ASSERT_TRUE(std::isfinite(payload[i])) << "row-major offset " << i;
     }
+    ASSERT_EQ(resident.size(), payload.size() * sizeof(float));
+    EXPECT_EQ(std::memcmp(resident.data(), payload.data(), resident.size()), 0);
 }
 
 // The storage-v2 pagination parameters (num_rows / offset) are assembled by

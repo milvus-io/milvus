@@ -19,6 +19,7 @@
 #include <algorithm>
 #include "common/FastMem.h"
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -61,6 +62,22 @@
 #include "storage/Types.h"
 
 namespace milvus::storage {
+
+// Read or fill the payload after the raw-vector row/dimension header.
+void
+ReadRawData(const std::string& path, void* data, size_t bytes);
+
+void
+WriteRawData(const std::string& path, const void* data, size_t bytes);
+
+// Publishes a complete raw-vector file, or removes the partial file on cancellation.
+bool
+SpillRawData(const std::string& path,
+             const void* data,
+             size_t rows,
+             size_t dim,
+             size_t row_bytes,
+             const std::atomic<bool>& canceled);
 
 // Controls how parent-valid external dense-vector rows with a mixture of
 // valid and null child elements are normalized. All-null child ranges are
@@ -401,6 +418,15 @@ constexpr int64_t kStreamingInflightBytes = 512LL << 20;
 // source arrow batches held alive by in-flight decode futures; a few batches
 // are enough to keep fetch and decode overlapped.
 constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
+
+// Reads a complete non-null dense column into caller-owned memory. Unsupported
+// layouts return nullopt before allocating; ordinary visitors supply defaults,
+// nullable compaction and external-column normalization.
+std::optional<size_t>
+ReadFieldDataFromManifestInto(const std::string& manifest_path,
+                              const FileManagerContext& context,
+                              size_t expected_rows,
+                              const std::function<uint8_t*()>& allocate);
 
 // Visits manifest data on the calling thread in source order. Stop prevents
 // further ReadNext calls, decode submissions, and callbacks. Decode work

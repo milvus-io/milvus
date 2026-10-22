@@ -39,6 +39,7 @@
 #include "index/vector/VectorTypeUtils.h"
 #include "knowhere/sparse_utils.h"
 #include "storage/artifact/LocalDirectory.h"
+#include "storage/Util.h"
 
 namespace milvus::indexbuilder {
 namespace {
@@ -362,9 +363,20 @@ VectorDiskBuildMaterializer::Add(const FieldDataPtr& batch) {
             WriteEmbeddingList(*batch, physical_rows);
         } else if (value_type_ == DataType::VECTOR_SPARSE_U32_F32) {
             WriteSparse(*batch, physical_rows);
-        } else {
+        } else if (!input_spec_.use_memory) {
             raw_file_->Write(batch->Data(),
                              static_cast<size_t>(batch->DataSize()));
+        } else {
+            if (!input_) {
+                AllocateInput();
+            }
+            const auto offset =
+                physical_rows_ * vector_bytes_per_element(value_type_, dim_);
+            if (batch->DataSize() != 0) {
+                std::memcpy(input_->Data() + offset,
+                            batch->Data(),
+                            static_cast<size_t>(batch->DataSize()));
+            }
         }
         logical_rows_ = next_logical;
         physical_rows_ = next_physical;
@@ -392,6 +404,9 @@ VectorDiskBuildMaterializer::FinishPrimary() {
                    raw_dim_);
         const uint32_t header[2] = {static_cast<uint32_t>(physical_rows_),
                                     static_cast<uint32_t>(raw_dim_)};
+        if (physical_rows_ == 0) {
+            input_.reset();
+        }
         raw_file_->WriteAt(header, sizeof(header), 0);
         raw_file_->Close();
         raw_file_.reset();
@@ -435,6 +450,75 @@ VectorDiskBuildMaterializer::FinishPrimary() {
         state_ = State::Failed;
         throw;
     }
+}
+
+bool
+VectorDiskBuildMaterializer::TryReserveBuild() {
+    AssertState(State::PrimaryFinished, "reserve");
+    return std::visit(
+        [](auto& builder) {
+            using B = std::decay_t<decltype(builder)>;
+            if constexpr (std::is_same_v<B, std::monostate>) {
+                return false;
+            } else {
+                return builder->TryReserveBuild();
+            }
+        },
+        builder_);
+}
+
+uint8_t*
+VectorDiskBuildMaterializer::AllocateInput() {
+    AssertState(State::Feeding, "allocate input for");
+    AssertInfo(input_spec_.use_memory && !embedding_list_ &&
+                   value_type_ != DataType::VECTOR_SPARSE_U32_F32 &&
+                   logical_rows_ == 0,
+               "resident disk input requires an opted-in empty dense vector "
+               "materializer");
+    const auto row_bytes = vector_bytes_per_element(value_type_, dim_);
+    AssertInfo(
+        row_bytes > 0 && uint64_t(expected_rows_) <=
+                             std::numeric_limits<size_t>::max() / row_bytes,
+        "vector tensor size overflows size_t");
+    if (!input_) {
+        input_ = std::make_unique<VectorInput>(
+            size_t(expected_rows_) * row_bytes, raw_path_);
+    }
+    return input_->Data();
+}
+
+void
+VectorDiskBuildMaterializer::FinishInput(size_t rows) {
+    AssertState(State::Feeding, "finish resident input on");
+    AssertInfo(input_ && rows == size_t(expected_rows_) &&
+                   rows <= std::numeric_limits<uint32_t>::max(),
+               "resident vector input has unexpected row count {}",
+               rows);
+    logical_rows_ = physical_rows_ = physical_valid_parents_ = rows;
+    if (primary_layout_) {
+        primary_layout_->Append(rows, {});
+    }
+}
+
+bool
+VectorDiskBuildMaterializer::SpillInput() {
+    AssertState(State::PrimaryFinished, "spill");
+    return input_ && input_->Spill(physical_rows_,
+                                   dim_,
+                                   vector_bytes_per_element(value_type_, dim_));
+}
+
+void
+VectorDiskBuildMaterializer::StopSpill() {
+    if (input_) {
+        input_->StopSpill();
+    }
+}
+
+void
+VectorDiskBuildMaterializer::ReleaseInputMemory() {
+    AssertInfo(input_ != nullptr, "vector input is not spillable");
+    input_->ReleaseMemory();
 }
 
 bool
@@ -749,7 +833,9 @@ VectorDiskBuildMaterializer::VectorDiskBuildMaterializer(
     bool nullable,
     int64_t expected_rows,
     const index::IndexFamily& family,
-    const index::BuildParams& params) {
+    const index::BuildParams& params,
+    milvus::OpContext* op_context)
+    : op_context_(op_context) {
     auto create_builder = [&]<typename T>() {
         auto builder = index::BuilderRegistry<
                            index::PreparedVectorBuildFiles<T>>::Instance()
@@ -821,6 +907,8 @@ VectorDiskBuildMaterializer::Swap(VectorDiskBuildMaterializer& other) noexcept {
     swap(scalar_info_path_, other.scalar_info_path_);
     swap(input_spec_, other.input_spec_);
     swap(builder_, other.builder_);
+    swap(op_context_, other.op_context_);
+    swap(input_, other.input_);
 }
 
 const index::BuilderInputSpec&
@@ -852,6 +940,9 @@ VectorDiskBuildMaterializer::Build() && {
                     .validity_path = inputs.valid_path,
                     .embedding_offsets_path = inputs.offsets_path,
                     .scalar_info_path = inputs.scalar_info_path,
+                    .op_context = op_context_,
+                    .tensor = input_ ? input_->Data() : nullptr,
+                    .raw_file_complete = !input_ || input_->OnDisk(),
                 };
                 auto builder = std::move(typed_builder);
                 AssertInfo(builder != nullptr,

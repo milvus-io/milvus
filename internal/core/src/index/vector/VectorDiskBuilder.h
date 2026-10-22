@@ -49,6 +49,9 @@ class VectorDiskBuilder final
     BuilderInputSpec
     InputSpec() const override;
 
+    bool
+    TryReserveBuild() override;
+
     storage::ArtifactPtr
         Build(const PreparedVectorBuildFiles<T>& input) &&
         override;

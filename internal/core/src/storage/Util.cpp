@@ -17,6 +17,11 @@
 #include <algorithm>
 #include <atomic>
 #include <charconv>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
+#include <folly/ScopeGuard.h>
+#include <folly/futures/Future.h>
 #include <chrono>
 #include <cmath>
 #include <deque>
@@ -26,6 +31,7 @@
 #include <limits>
 #include <memory>
 #include <string_view>
+#include <numeric>
 #include "common/FastMem.h"
 
 #include "arrow/array/builder_binary.h"
@@ -68,6 +74,7 @@
 #include "storage/RecordBatchSize.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/artifact/LocalFileUtils.h"
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
@@ -86,11 +93,111 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/lob_column/lob_column_manager.h"
 #include "milvus-storage/reader.h"
+#include "milvus-storage/thread_pool.h"
 #include "milvus-storage/segment/segment_reader.h"
 #include "nlohmann/json.hpp"
 #include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
+
+void
+ReadRawData(const std::string& path, void* data, size_t bytes) {
+    const auto read =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager()->Read(
+            path, 2 * sizeof(uint32_t), data, bytes);
+    if (read != bytes) {
+        ThrowInfo(FileReadFailed,
+                  "incomplete raw-vector input {}: read {} bytes, expected {}",
+                  path,
+                  read,
+                  bytes);
+    }
+}
+
+void
+WriteRawData(const std::string& path, const void* data, size_t bytes) {
+    int fd = ::open(path.c_str(), O_WRONLY);
+    auto close = folly::makeGuard([&] {
+        if (fd >= 0) {
+            ::close(fd);
+        }
+    });
+    if (fd < 0 || ::lseek(fd, 2 * sizeof(uint32_t), SEEK_SET) < 0) {
+        ThrowInfo(FileOpenFailed,
+                  "failed to open vector build input {}: {}",
+                  path,
+                  strerror(errno));
+    }
+    WriteAll(fd, data, bytes, path, "vector build input");
+    if (::close(std::exchange(fd, -1)) != 0) {
+        ThrowInfo(FileWriteFailed,
+                  "failed to close vector build input {}: {}",
+                  path,
+                  strerror(errno));
+    }
+}
+
+bool
+SpillRawData(const std::string& path,
+             const void* data,
+             size_t rows,
+             size_t dim,
+             size_t row_bytes,
+             const std::atomic<bool>& canceled) {
+    const auto partial = path + ".partial";
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    const int fd =
+        ::open(partial.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "cannot create spilled input: {}",
+                  strerror(errno));
+    }
+    auto cleanup = folly::makeGuard([&] {
+        ::close(fd);
+        std::error_code ignored;
+        std::filesystem::remove(partial, ignored);
+    });
+    AssertInfo(rows <= std::numeric_limits<uint32_t>::max() && dim > 0 &&
+                   dim <= std::numeric_limits<uint32_t>::max(),
+               "spilled input does not fit the raw-vector file header");
+    const uint32_t header[] = {uint32_t(rows), uint32_t(dim)};
+    WriteAll(fd, header, sizeof(header), partial, "spilled input");
+    const auto* values = static_cast<const char*>(data);
+    const size_t bytes = rows * row_bytes;
+    constexpr size_t chunk_bytes = 8 << 20;
+    for (size_t offset = 0; offset < bytes;) {
+        if (canceled.load()) {
+            return false;
+        }
+        const auto count = std::min(chunk_bytes, bytes - offset);
+        WriteAll(fd, values + offset, count, partial, "spilled input");
+        // Bound dirty page-cache memory independently of the retained input.
+        int status;
+        do {
+            status = ::fdatasync(fd);
+        } while (status != 0 && errno == EINTR);
+        if (status != 0) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "cannot flush spilled input: {}",
+                      strerror(errno));
+        }
+        const int error =
+            ::posix_fadvise(fd, offset, count, POSIX_FADV_DONTNEED);
+        if (error != 0) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "cannot release spill cache: {}",
+                      strerror(error));
+        }
+        offset += count;
+    }
+    if (canceled.load()) {
+        return false;
+    }
+    std::filesystem::rename(partial, path);
+    return true;
+}
 
 namespace {
 
@@ -1987,6 +2094,152 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                       "always-continue storage-v2 visitor stopped early");
     }
     return field_data_list;
+}
+
+std::optional<size_t>
+ReadFieldDataFromManifestInto(const std::string& manifest_path,
+                              const FileManagerContext& context,
+                              size_t expected_rows,
+                              const std::function<uint8_t*()>& allocate) {
+    const auto& schema = context.fieldDataMeta.field_schema;
+    const auto type = static_cast<DataType>(schema.data_type());
+    const auto mapping =
+        context.storage_column_mappings.find(context.fieldDataMeta.field_id);
+    if (schema.nullable() || !IsVectorDataType(type) ||
+        type == DataType::VECTOR_ARRAY || IsSparseFloatVectorDataType(type) ||
+        !schema.external_field().empty() ||
+        (mapping != context.storage_column_mappings.end() &&
+         mapping->second.is_external_column)) {
+        return std::nullopt;
+    }
+    const auto& properties = context.loon_ffi_properties;
+    AssertInfo(properties != nullptr, "manifest reader properties are missing");
+    auto column = mapping != context.storage_column_mappings.end()
+                      ? mapping->second.storage_column_name
+                      : std::string{};
+    if (column.empty()) {
+        column = std::to_string(context.fieldDataMeta.field_id);
+    }
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        GetLoonManifest(manifest_path, properties)->columnGroups());
+    for (size_t i = 0; i < column_groups->size(); ++i) {
+        const auto& group = column_groups->at(i);
+        if (std::find(group->columns.begin(), group->columns.end(), column) ==
+            group->columns.end()) {
+            continue;
+        }
+        if (group->format != LOON_FORMAT_PARQUET) {
+            return std::nullopt;
+        }
+        uint64_t source_rows = 0;
+        for (const auto& file : group->files) {
+            source_rows += file.end_index - file.start_index;
+        }
+        if (source_rows != expected_rows) {
+            return std::nullopt;
+        }
+        auto read = [&]() -> arrow::Result<size_t> {
+            auto columns = std::make_shared<std::vector<std::string>>(
+                std::vector<std::string>{column});
+            auto reader = milvus_storage::api::Reader::create(
+                column_groups, nullptr, columns, *context.loon_ffi_properties);
+            auto pool = milvus_storage::ThreadPoolHolder::GetThreadPool(
+                milvus_storage::ThreadPoolHolder::GetParallelism());
+            ARROW_ASSIGN_OR_RAISE(auto chunks,
+                                  reader->get_chunk_reader_async(i, columns)
+                                      .via(pool.get())
+                                      .get());
+            std::vector<int64_t> chunk_indices(
+                chunks->total_number_of_chunks());
+            std::iota(chunk_indices.begin(), chunk_indices.end(), 0);
+            auto batches_future =
+                chunks->get_chunks_async(chunk_indices).via(pool.get());
+            // Keep the reader alive if allocation fails while I/O is in flight.
+            auto wait_for_read = folly::makeGuard([&] {
+                if (batches_future.valid()) {
+                    batches_future.wait();
+                }
+            });
+            const auto row_bytes =
+                vector_bytes_per_element(type, context.indexMeta.dim);
+            auto* destination = allocate();
+            // Fault in destination pages while storage reads and decodes.
+            // Touch one byte per page, not the entire buffer; the copies below
+            // overwrite it only after this preparation and the read finish.
+            const auto bytes = expected_rows * row_bytes;
+            const auto page_size = static_cast<size_t>(getpagesize());
+            volatile uint8_t* pages = destination;
+            for (size_t offset = 0; offset < bytes; offset += page_size) {
+                pages[offset] = 0;
+            }
+            if (bytes != 0) {
+                pages[bytes - 1] = 0;
+            }
+            ARROW_ASSIGN_OR_RAISE(auto batches,
+                                  std::move(batches_future).get());
+            std::vector<folly::Future<folly::Unit>> copies;
+            copies.reserve(batches.size());
+            // An input error or submission failure must not release the
+            // destination while previously submitted copies are still writing.
+            auto wait_for_copies = folly::makeGuard([&] {
+                for (auto& copy : copies) {
+                    if (copy.valid()) {
+                        copy.wait();
+                    }
+                }
+            });
+            size_t rows = 0;
+            // Storage restores chunk order after asynchronous completion.
+            // Assign disjoint destinations in that order; copies can then run
+            // independently on the existing read pool.
+            for (auto& batch : batches) {
+                if (batch->num_columns() != 1) {
+                    return arrow::Status::Invalid(
+                        "Vector input requires a single projected column");
+                }
+                const auto& column = batch->column(0);
+                if (column->type_id() != arrow::Type::FIXED_SIZE_BINARY ||
+                    column->null_count() != 0) {
+                    return arrow::Status::Invalid(
+                        "Vector input requires non-null fixed-size binary "
+                        "values");
+                }
+                auto values =
+                    std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+                        column);
+                if (values->byte_width() != row_bytes || rows > expected_rows ||
+                    batch->num_rows() > expected_rows - rows) {
+                    return arrow::Status::Invalid(
+                        "Vector input does not match its destination");
+                }
+                copies.push_back(folly::via(
+                    pool.get(),
+                    [values = std::move(values),
+                     dst = destination + rows * row_bytes,
+                     size = batch->num_rows() * row_bytes]() mutable {
+                        std::memcpy(dst, values->raw_values(), size);
+                        values.reset();
+                    }));
+                rows += batch->num_rows();
+                batch.reset();
+            }
+            if (rows != expected_rows) {
+                return arrow::Status::Invalid(
+                    "Vector input returned an unexpected row count");
+            }
+            for (auto& copy : copies) {
+                std::move(copy).get();
+            }
+            return rows;
+        }();
+        if (!read.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(read.status()),
+                      "failed to read manifest input: {}",
+                      read.status().ToString());
+        }
+        return read.ValueOrDie();
+    }
+    return std::nullopt;
 }
 
 // Shared implementation of the manifest read paths. `max_rows == 0` streams

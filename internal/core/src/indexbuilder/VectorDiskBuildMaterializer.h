@@ -46,9 +46,10 @@ struct VectorDiskBuildInputs {
     std::optional<std::string> scalar_info_path;
 };
 
-// Streams one disk-vector primary column into a uniquely owned local
-// generation. FieldData and its payload pointers are borrowed only during Add.
-class VectorDiskBuildMaterializer final {
+// Prepares a disk-vector primary column and its sidecars, streaming to files by
+// default. Builders may opt into resident dense input, retained after spilling
+// until explicitly released. FieldData is borrowed only during Add.
+class VectorDiskBuildMaterializer final : public BuildInputMaterializer {
  public:
     VectorDiskBuildMaterializer(std::string staging_parent,
                                 DataType field_type,
@@ -57,8 +58,9 @@ class VectorDiskBuildMaterializer final {
                                 bool nullable,
                                 int64_t expected_rows,
                                 const index::IndexFamily& family,
-                                const index::BuildParams& params);
-    ~VectorDiskBuildMaterializer();
+                                const index::BuildParams& params,
+                                milvus::OpContext* op_context = nullptr);
+    ~VectorDiskBuildMaterializer() override;
 
     VectorDiskBuildMaterializer(VectorDiskBuildMaterializer&&) noexcept;
     VectorDiskBuildMaterializer&
@@ -69,11 +71,34 @@ class VectorDiskBuildMaterializer final {
     operator=(const VectorDiskBuildMaterializer&) = delete;
 
     void
-    Add(const FieldDataPtr& batch);
+    Add(const FieldDataPtr& batch) override;
 
     // Ends primary input exactly once. No Add is valid after this transition.
     void
     FinishPrimary();
+
+    bool
+    HasResidentInput() const override {
+        return input_ && input_->Data() != nullptr;
+    }
+
+    bool
+    TryReserveBuild() override;
+
+    uint8_t*
+    AllocateInput();
+
+    void
+    FinishInput(size_t rows);
+
+    bool
+    SpillInput() override;
+
+    void
+    StopSpill() override;
+
+    void
+    ReleaseInputMemory() override;
 
     bool
     RequiresEngineBuild() const;
@@ -85,10 +110,11 @@ class VectorDiskBuildMaterializer final {
     SetScalarInfo(VectorScalarInfo scalar_info);
 
     const index::BuilderInputSpec&
-    InputSpec() const;
+    InputSpec() const override;
 
     storage::ArtifactPtr
-    Build() &&;
+        Build() &&
+        override;
 
  private:
     class OutputFile;
@@ -181,6 +207,8 @@ class VectorDiskBuildMaterializer final {
     std::optional<std::string> scalar_info_path_;
     index::BuilderInputSpec input_spec_;
     Builder builder_;
+    milvus::OpContext* op_context_{nullptr};
+    std::unique_ptr<VectorInput> input_;
 };
 
 }  // namespace milvus::indexbuilder
