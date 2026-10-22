@@ -17,6 +17,7 @@
 package segments
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"sync"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -379,6 +382,39 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
 		newVecFieldID)
 }
 
+func (s *CollectionManagerSuite) TestIndexMetaIgnoresOlderList() {
+	coll := s.cm.Get(1)
+	oldMeta := proto.Clone(coll.GetCCollection().IndexMeta()).(*segcorepb.CollectionIndexMeta)
+	schema := coll.Schema()
+	newVecFieldID := int64(200)
+	newMeta := proto.Clone(oldMeta).(*segcorepb.CollectionIndexMeta)
+	newMeta.IndexMetas = append(newMeta.IndexMetas, &segcorepb.FieldIndexMeta{CollectionID: 1, FieldID: newVecFieldID, IndexName: "new_index"})
+	hasNewField := func() bool {
+		return lo.ContainsBy(coll.GetCCollection().IndexMeta().GetIndexMetas(), func(m *segcorepb.FieldIndexMeta) bool {
+			return m.GetFieldID() == newVecFieldID
+		})
+	}
+
+	s.Require().NoError(s.cm.PutOrRef(1, schema, newMeta, &querypb.LoadMetaInfo{IndexInfoVersion: 20}))
+	defer s.cm.Unref(1, 1)
+	s.True(hasNewField())
+
+	// A load that listed the indexes before the new one was created arrives late.
+	s.Require().NoError(s.cm.PutOrRef(1, schema, oldMeta, &querypb.LoadMetaInfo{IndexInfoVersion: 10}))
+	defer s.cm.Unref(1, 1)
+	s.True(hasNewField())
+
+	oldInfos := lo.Map(oldMeta.GetIndexMetas(), func(m *segcorepb.FieldIndexMeta, _ int) *indexpb.IndexInfo {
+		return &indexpb.IndexInfo{CollectionID: 1, FieldID: m.GetFieldID(), IndexName: m.GetIndexName(), IndexParams: m.GetIndexParams()}
+	})
+	s.NoError(s.cm.UpdateIndexMeta(context.Background(), 1, oldInfos, 15))
+	s.True(hasNewField())
+	s.NoError(s.cm.UpdateIndexMeta(context.Background(), 1, oldInfos, 30))
+	s.False(hasNewField())
+
+	s.NoError(s.cm.UpdateIndexMeta(context.Background(), 404, oldInfos, 40))
+}
+
 func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNativeLock() {
 	coll := s.cm.Get(1)
 	s.Require().NotNil(coll)
@@ -667,7 +703,7 @@ func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethods() {
 	s.Require().True(ok)
 	releaser.Release()
 
-	s.NoError(coll.updateIndexMeta(nil))
+	s.NoError(coll.updateIndexMeta(nil, 0))
 }
 
 func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethodsReleased() {
@@ -690,7 +726,7 @@ func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethodsReleased() {
 		SegmentType: SegmentTypeSealed,
 	})
 	s.Error(err)
-	s.Error(coll.updateIndexMeta(indexMeta))
+	s.Error(coll.updateIndexMeta(indexMeta, 0))
 	s.Error(coll.updateSchema(coll.Schema(), 1))
 }
 
