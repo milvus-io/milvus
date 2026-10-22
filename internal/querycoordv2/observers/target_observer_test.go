@@ -687,6 +687,7 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 			syncedNodes = append(syncedNodes, nodeID)
 			assert.Same(t, schema, req.GetSchema())
 			assert.Equal(t, schemaBarrierTs, req.GetLoadMeta().GetSchemaBarrierTs())
+			assert.Positive(t, req.GetLoadMeta().GetIndexInfoVersion())
 			return merr.Success(), nil
 		}).Maybe()
 

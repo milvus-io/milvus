@@ -32,6 +32,7 @@ import (
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -52,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -89,6 +91,7 @@ type ShardDelegator interface {
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	SyncIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, version int64) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -192,6 +195,10 @@ type shardDelegator struct {
 	collectionVersion atomic.Uint64
 	// bm25Functions is the BM25 function set applied to the channel-local IDF runtime.
 	bm25Functions bm25FunctionSet
+
+	// indexMeta is the collection index list last published to the workers.
+	indexMetaMu sync.Mutex
+	indexMeta   publishedIndexMeta
 
 	// limits delegator-side post-load work after worker LoadSegments returns.
 	postLoadSem           *syncutil.Semaphore
@@ -1434,6 +1441,113 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		mlog.Int("bm25FunctionNum", len(newBM25FunctionSet(schema))),
 	)
 	return nil
+}
+
+type publishedIndexMeta struct {
+	infos   []*indexpb.IndexInfo
+	version int64
+	// workers holds the nodes known to have applied infos.
+	workers typeutil.UniqueSet
+}
+
+// SyncIndexMeta publishes a collection index list to every node that serves
+// this shard: the nodes of the online sealed segments and the delegator node,
+// which serves the growing ones. A node that already has the same list is
+// skipped, so a target sync with an unchanged list sends no RPC.
+func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, version int64) error {
+	log := sd.getLogger(ctx).With(mlog.Int64("indexInfoVersion", version))
+	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
+		return err
+	}
+	defer sd.lifetime.Done()
+
+	sd.indexMetaMu.Lock()
+	defer sd.indexMetaMu.Unlock()
+
+	if version < sd.indexMeta.version {
+		return nil
+	}
+	if sd.indexMeta.workers == nil || !sameIndexInfos(sd.indexMeta.infos, indexInfos) {
+		sd.indexMeta.infos = indexInfos
+		sd.indexMeta.workers = typeutil.NewUniqueSet()
+	}
+	sd.indexMeta.version = version
+
+	sealed, _, distVersion := sd.distribution.PinOnlineSegments()
+	sd.distribution.Unpin(distVersion)
+	nodes := typeutil.NewUniqueSet(paramtable.GetNodeID())
+	for _, item := range sealed {
+		if len(item.Segments) > 0 {
+			nodes.Insert(item.NodeID)
+		}
+	}
+	// Forget the nodes that left the shard; they get the list again if they come back.
+	sd.indexMeta.workers = sd.indexMeta.workers.Intersection(nodes)
+	targets := nodes.Complement(sd.indexMeta.workers).Collect()
+	if len(targets) == 0 {
+		return nil
+	}
+
+	req := &querypb.SyncIndexMetaRequest{
+		Base:             commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+		CollectionID:     sd.collectionID,
+		IndexInfoList:    indexInfos,
+		IndexInfoVersion: version,
+	}
+	synced := make([]bool, len(targets))
+	group, gctx := errgroup.WithContext(ctx)
+	for i, nodeID := range targets {
+		group.Go(func() error {
+			worker, err := sd.workerManager.GetWorker(gctx, nodeID)
+			if err != nil {
+				return err
+			}
+			nodeReq := typeutil.Clone(req)
+			nodeReq.GetBase().TargetID = nodeID
+			if err := merr.CheckRPCCall(worker.SyncIndexMeta(gctx, nodeReq)); err != nil {
+				return merr.Wrapf(err, "failed to sync index meta to node %d", nodeID)
+			}
+			synced[i] = true
+			return nil
+		})
+	}
+	err := group.Wait()
+	for i, nodeID := range targets {
+		if synced[i] {
+			sd.indexMeta.workers.Insert(nodeID)
+		}
+	}
+	if err != nil {
+		log.Warn(ctx, "failed to sync index meta", mlog.Int64s("nodes", targets), mlog.Err(err))
+		return err
+	}
+	log.Info(ctx, "synced index meta", mlog.Int64s("nodes", targets), mlog.Int("indexNum", len(indexInfos)))
+	return nil
+}
+
+// forgetIndexMetaWorker drops a node from the published set after it applied
+// an index list older than the published one through a load: if the load
+// created the collection on that node, the node does not have the published
+// list, so the next SyncIndexMeta sends it again.
+func (sd *shardDelegator) forgetIndexMetaWorker(nodeID int64, indexInfos []*indexpb.IndexInfo, version int64) {
+	sd.indexMetaMu.Lock()
+	defer sd.indexMetaMu.Unlock()
+	if sd.indexMeta.workers != nil && version < sd.indexMeta.version && !sameIndexInfos(sd.indexMeta.infos, indexInfos) {
+		sd.indexMeta.workers.Remove(nodeID)
+	}
+}
+
+func sameIndexInfos(a, b []*indexpb.IndexInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	byID := lo.SliceToMap(a, func(info *indexpb.IndexInfo) (int64, *indexpb.IndexInfo) {
+		return info.GetIndexID(), info
+	})
+	return lo.EveryBy(b, func(info *indexpb.IndexInfo) bool {
+		other, ok := byID[info.GetIndexID()]
+		return ok && proto.Equal(info, other)
+	})
 }
 
 type StatusWrapper commonpb.Status

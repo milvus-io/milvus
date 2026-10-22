@@ -712,6 +712,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 	log.Debug(ctx, "work loads segments done")
+	sd.forgetIndexMetaWorker(targetNodeID, req.GetIndexInfoList(), req.GetLoadMeta().GetIndexInfoVersion())
 
 	if err := sd.syncCollectionMeta(ctx, req); err != nil {
 		log.Warn(ctx, "failed to sync collection metadata on delegator", mlog.Err(err))
