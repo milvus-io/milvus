@@ -14,11 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package pkindex is the primary key index of a streaming node: the index of
-// each vchannel (Authority) and the write path decisions made with it
-// (Decider): which keys of an insert need a companion delete, which keys of a
-// delete exist, and how the writes of a transaction take effect at its commit.
-package pkindex
+package dedup
 
 import (
 	"context"
@@ -28,38 +24,7 @@ import (
 	"time"
 )
 
-// WriteKind is the kind of write the caller is about to append.
-type WriteKind int
-
-const (
-	KindInsert WriteKind = iota
-	KindDelete
-	KindCommitTxn
-	KindRollbackTxn
-)
-
-// Request describes one write in primary key index terms.
-type Request struct {
-	Kind     WriteKind
-	VChannel string
-	PKs      []PK  // The keys of an insert or delete. Empty for commit and rollback.
-	TxnID    int64 // 0 for an autocommit write
-}
-
-// Decision tells the caller what to append.
-type Decision struct {
-	CompanionDeletePKs []PK // keys of an insert that need a companion delete in the same transaction
-	PresentPKs         []PK // keys of a delete that exist in the index, in request order. Nil when none exists.
-}
-
-// Applied is what the caller read back from the appended main message.
-type Applied struct {
-	// TimeTick is the time tick at which the write takes effect: the time tick of
-	// the CommitTxn for a write that was upgraded to a transaction.
-	TimeTick uint64
-}
-
-// Decider makes the write path decisions of one vchannel on top of its Authority.
+// decider makes the write path decisions of one vchannel on top of its Store.
 //
 // The decider never writes the engine. A decided write is kept in an in-flight
 // set from before its append until observe applied it to the engine. Observe is
@@ -69,9 +34,9 @@ type Applied struct {
 // TODO: duplicate primary keys inside one insert are not detected.
 // TODO: observe does not apply the WAL to the engine yet, so a decided write stays
 // in the in-flight set for the life of the index. The recovery step adds observe.
-type Decider struct {
-	authority Authority
-	inflight  inflightSet
+type decider struct {
+	store    Store
+	inflight inflightSet
 	// degradedUntil is the time tick before which this vchannel is degraded: while
 	// observe has not reached it, every key counts as present and the engine is
 	// not probed. See DegradeUntil.
@@ -83,11 +48,11 @@ type Decider struct {
 	pending   map[int64]*pendingTxn
 }
 
-// NewDecider creates the Decider of a vchannel. It takes ownership of a.
-func NewDecider(a Authority) *Decider {
-	return &Decider{
-		authority: a,
-		pending:   make(map[int64]*pendingTxn),
+// New creates the Decider of a vchannel. It takes ownership of a.
+func New(a Store) Decider {
+	return &decider{
+		store:   a,
+		pending: make(map[int64]*pendingTxn),
 	}
 }
 
@@ -104,7 +69,7 @@ func NewDecider(a Authority) *Decider {
 // TODO: call it when the WAL is promoted from a secondary to a primary, with the
 // time tick of the role switch.
 // TODO: call it when the engine recovers from a failure.
-func (d *Decider) DegradeUntil(tt uint64) {
+func (d *decider) DegradeUntil(tt uint64) {
 	for {
 		cur := d.degradedUntil.Load()
 		if tt <= cur || d.degradedUntil.CompareAndSwap(cur, tt) {
@@ -113,25 +78,18 @@ func (d *Decider) DegradeUntil(tt uint64) {
 	}
 }
 
-func (d *Decider) degraded() bool {
+func (d *decider) degraded() bool {
 	return d.inflight.observedTimeTick() < d.degradedUntil.Load()
 }
 
-// Decide makes the decision for req. For an autocommit write and for a CommitTxn
-// it registers the affected keys in the in-flight set and waits for the earlier
-// writes of the same keys, before it reads the index. The returned Intent holds
-// that registration, which is the lock of those keys until Apply or Discard. The
-// caller must call exactly one of Apply, Discard and DiscardUncertain, exactly
-// once, after the downstream append. A panic between Decide and that call ends
-// the process, like every panic on the append path.
-func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
+func (d *decider) Decide(ctx context.Context, req DecideRequest) (*WriteIntent, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-d.authority.Ready():
+	case <-d.store.Ready():
 	}
 
-	intent := &Intent{d: d, req: req}
+	intent := &WriteIntent{d: d, req: req}
 	switch {
 	case req.Kind == KindRollbackTxn:
 		return intent, nil
@@ -142,8 +100,8 @@ func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 			// "Transaction Lifecycle", Commit): a producer appends the CommitTxn
 			// only after it received the results of all bodies, and one producer
 			// drives one transaction. So no body of the same transaction is
-			// applied between this snapshot and this Intent's Apply. Apply ends
-			// the process when that rule is broken.
+			// applied between this snapshot and Committed of this WriteIntent.
+			// Committed ends the process when that rule is broken.
 			intent.txn = txn.snapshot()
 		}
 		d.pendingMu.Unlock()
@@ -151,7 +109,7 @@ func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 			return intent, nil
 		}
 		// pendingMu must be released before the wait: a body of another
-		// transaction takes pendingMu in Apply.
+		// transaction takes pendingMu in Committed.
 		if err := intent.register(ctx, intent.txn.allPKs()); err != nil {
 			return nil, err
 		}
@@ -190,7 +148,7 @@ func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 // Rule B: the in-flight set is read before the engine. Observe writes the engine
 // before it removes an entry (rule A), so a key that left the set between the two
 // reads is found in the engine.
-func (d *Decider) present(ctx context.Context, w *inflightWrite, pks []PK) ([]PK, error) {
+func (d *decider) present(ctx context.Context, w *inflightWrite, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
@@ -228,11 +186,11 @@ func (d *Decider) present(ctx context.Context, w *inflightWrite, pks []PK) ([]PK
 }
 
 // probe returns the keys of pks that the engine holds, in the order of pks.
-func (d *Decider) probe(ctx context.Context, pks []PK) ([]PK, error) {
+func (d *decider) probe(ctx context.Context, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
-	entries, err := d.authority.MultiGet(ctx, pks)
+	entries, err := d.store.MultiGet(ctx, pks)
 	if err != nil {
 		return nil, err
 	}
@@ -245,8 +203,7 @@ func (d *Decider) probe(ctx context.Context, pks []PK) ([]PK, error) {
 	return present, nil
 }
 
-// PendingTxnIDs returns the transactions that have pending writes.
-func (d *Decider) PendingTxnIDs() []int64 {
+func (d *decider) PendingTxnIDs() []int64 {
 	d.pendingMu.Lock()
 	defer d.pendingMu.Unlock()
 	ids := make([]int64, 0, len(d.pending))
@@ -256,16 +213,14 @@ func (d *Decider) PendingTxnIDs() []int64 {
 	return ids
 }
 
-// DropTxn forgets the pending writes of a transaction that expired or was failed.
-func (d *Decider) DropTxn(txnID int64) {
+func (d *decider) DropTxn(txnID int64) {
 	d.pendingMu.Lock()
 	defer d.pendingMu.Unlock()
 	delete(d.pending, txnID)
 }
 
-// Close closes the underlying Authority.
-func (d *Decider) Close() error {
-	return d.authority.Close()
+func (d *decider) Close() error {
+	return d.store.Close()
 }
 
 // register adds the keys of this write to the in-flight set and waits for the
@@ -273,7 +228,7 @@ func (d *Decider) Close() error {
 // observe may apply a write as soon as its append is acknowledged, which can be
 // before the append returns, so a registration made after the append could be
 // left in the set forever.
-func (i *Intent) register(ctx context.Context, pks []PK) error {
+func (i *WriteIntent) register(ctx context.Context, pks []PK) error {
 	start := time.Now()
 	w, earlier := i.d.inflight.register(pks)
 	if err := i.d.inflight.wait(ctx, w, earlier); err != nil {
@@ -286,7 +241,7 @@ func (i *Intent) register(ctx context.Context, pks []PK) error {
 
 // withdraw removes the registration of a decision that failed before anything
 // was appended.
-func (i *Intent) withdraw() {
+func (i *WriteIntent) withdraw() {
 	i.d.inflight.remove(i.write)
 	i.write = nil
 }

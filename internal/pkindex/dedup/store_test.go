@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package dedup
 
 import (
 	"context"
@@ -24,26 +24,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestAuthority(t *testing.T) Authority {
+func newTestStore(t *testing.T) Store {
 	t.Helper()
-	a, err := NewAuthority("v1")
+	a, err := NewStore("v1")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = a.Close() })
 	return a
 }
 
-func TestAuthorityIsReadyAfterNew(t *testing.T) {
-	a := newTestAuthority(t)
+func TestStoreIsReadyAfterNew(t *testing.T) {
+	a := newTestStore(t)
 	select {
 	case <-a.Ready():
 	default:
-		t.Fatal("authority should be ready once the engine is created")
+		t.Fatal("store should be ready once the engine is created")
 	}
 }
 
-func TestAuthorityGetAndWrite(t *testing.T) {
+func TestStoreGetAndWrite(t *testing.T) {
 	ctx := context.Background()
-	a := newTestAuthority(t)
+	a := newTestStore(t)
 
 	entry, err := a.Get(ctx, Int64PK(1))
 	require.NoError(t, err)
@@ -65,9 +65,9 @@ func TestAuthorityGetAndWrite(t *testing.T) {
 	require.Equal(t, []*Entry{{SegmentID: 200}, nil, {SegmentID: 100}}, entries)
 }
 
-func TestAuthorityOverwriteAndDelete(t *testing.T) {
+func TestStoreOverwriteAndDelete(t *testing.T) {
 	ctx := context.Background()
-	a := newTestAuthority(t)
+	a := newTestStore(t)
 
 	b := a.NewBatch()
 	b.Put(VarCharPK("a"), Entry{SegmentID: 1})
@@ -89,30 +89,30 @@ func TestAuthorityOverwriteAndDelete(t *testing.T) {
 	require.Nil(t, entry)
 }
 
-func TestAuthorityEmptyBatchAndEmptyMultiGet(t *testing.T) {
+func TestStoreEmptyBatchAndEmptyMultiGet(t *testing.T) {
 	ctx := context.Background()
-	a := newTestAuthority(t)
+	a := newTestStore(t)
 	require.NoError(t, a.Write(ctx, a.NewBatch()))
 	entries, err := a.MultiGet(ctx, nil)
 	require.NoError(t, err)
 	require.Empty(t, entries)
 }
 
-func TestAuthorityRejectsCorruptValue(t *testing.T) {
+func TestStoreRejectsCorruptValue(t *testing.T) {
 	ctx := context.Background()
 	engine, err := NewMemoryEngine("v1")
 	require.NoError(t, err)
 	require.NoError(t, engine.Write(ctx, []Mutation{{Key: Int64PK(1).Encode(), Value: []byte{1, 2, 3}}}))
-	a := newAuthority("v1", engine)
+	a := newStore("v1", engine)
 
 	_, err = a.Get(ctx, Int64PK(1))
 	require.Error(t, err)
 	require.False(t, errors.Is(err, ErrNoEngineFactory))
 }
 
-func TestAuthorityAfterClose(t *testing.T) {
+func TestStoreAfterClose(t *testing.T) {
 	ctx := context.Background()
-	a, err := NewAuthority("v1")
+	a, err := NewStore("v1")
 	require.NoError(t, err)
 	require.NoError(t, a.Close())
 	_, err = a.Get(ctx, Int64PK(1))
@@ -130,7 +130,7 @@ func (e *fakeLengthEngine) MultiGet(_ context.Context, _ [][]byte) ([][]byte, er
 	return make([][]byte, e.returnLen), nil
 }
 
-func TestAuthorityMultiGetRejectsWrongLength(t *testing.T) {
+func TestStoreMultiGetRejectsWrongLength(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name      string
@@ -140,7 +140,7 @@ func TestAuthorityMultiGetRejectsWrongLength(t *testing.T) {
 		{"too many values", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newAuthority("v1", &fakeLengthEngine{returnLen: tc.returnLen})
+			a := newStore("v1", &fakeLengthEngine{returnLen: tc.returnLen})
 			_, err := a.MultiGet(ctx, []PK{Int64PK(1), Int64PK(2)})
 			require.Error(t, err)
 		})
@@ -152,6 +152,6 @@ func TestNewWithoutEngineFactory(t *testing.T) {
 	defer RegisterEngineFactory(NewMemoryEngine)
 
 	require.False(t, HasEngineFactory())
-	_, err := NewAuthority("v1")
+	_, err := NewStore("v1")
 	require.True(t, errors.Is(err, ErrNoEngineFactory))
 }

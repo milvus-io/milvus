@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package dedup
 
 import (
 	"context"
@@ -28,7 +28,7 @@ type Mutation struct {
 	Delete bool // when true, Value is ignored and Key becomes absent
 }
 
-// Engine is the byte-level key-value store behind one vchannel's Authority.
+// Engine is the byte-level key-value store behind one vchannel's Store.
 // It is defined here, by its consumer. Storage implementations adapt to it.
 //
 // TODO: replace the test-only memory engine with the persistent engine.
