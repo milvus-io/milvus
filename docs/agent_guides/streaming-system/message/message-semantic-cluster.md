@@ -6,13 +6,13 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 
 | Message | Dispatch | ExclusiveRequired | ResourceKey |
 |---------|----------|-------------------|-------------|
-| FlushAll | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
+| FlushAll | Broadcast: all PChannels, Unreplicable (`_ur`) | Yes (all PChannels) | ExclusiveCluster |
 | AlterReplicateConfig | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
 | AlterWAL | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
 | AlterResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
 | DropResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
 
-- **FlushAll**: Flushes ALL growing segments across ALL collections on ALL PChannels.
+- **FlushAll**: Flushes local growing segments across all collections on either role; CDC skips newly marked messages. Retains ExclusiveCluster and GetFlushAllState checkpoint-based persistence checks.
 - **AlterReplicateConfig**: Changes replication topology — enabling, disabling, or switching PRIMARY/SECONDARY roles.
 - **AlterWAL**: Switches WAL backend implementation across the entire cluster.
 - **AlterResourceGroup**: Creates, updates, or transfers nodes between query resource groups.

@@ -254,7 +254,7 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 					return err
 				}
 
-				// send txn messages
+				// Preserve source body order and IDs on every replay.
 				err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
 					return r.sendMessage(msg)
 				})
@@ -262,7 +262,7 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 					return err
 				}
 
-				// send txn commit message
+				// Forward the source Commit unchanged, including historical zero body count.
 				commitMsg := txnMsg.Commit()
 				err = r.sendMessage(commitMsg)
 				if err != nil {

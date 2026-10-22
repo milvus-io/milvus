@@ -90,7 +90,7 @@ func TestReleaseManualFlushPreparer(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		return flushMsg.VChannel() == "vchannel" &&
+		return flushMsg.IsUnreplicable() && flushMsg.VChannel() == "vchannel" &&
 			flushMsg.Header().GetCollectionId() == 10
 	})).Return(&types.AppendResult{
 		TimeTick: 200,

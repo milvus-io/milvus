@@ -269,11 +269,20 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 
 // handleManualFlushMessage handles the manual flush message.
 func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	maunalFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
-	header := maunalFlushMsg.Header()
+	manualFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
+	header := manualFlushMsg.Header()
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
-		return nil, status.NewUnrecoverableError(err.Error())
+		if !msg.IsUnreplicable() || msg.ReplicateHeader() != nil || !errors.Is(err, shards.ErrCollectionNotFound) {
+			return nil, status.NewUnrecoverableError(err.Error())
+		}
+		// Proxy resolves an existing collection before flushing; release handoff
+		// requires an existing growing-source channel. Collection IDs are never
+		// reused, so a missing shard means Drop overtook this local flush. Append
+		// an empty best-effort WAL record. The caller's metadata/progress checks
+		// still decide completion (and release handoff rollback on failure).
+		// Historical/replicated flushes and other errors retain their behavior.
+		segmentIDs = nil
 	}
 
 	// Modify the extra response for manual flush message.
@@ -281,7 +290,7 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 		return &messagespb.ManualFlushExtraResponse{SegmentIds: segmentIDs}
 	})
 	header.SegmentIds = segmentIDs
-	maunalFlushMsg.OverwriteHeader(header)
+	manualFlushMsg.OverwriteHeader(header)
 
 	return appendOp(ctx, msg)
 }

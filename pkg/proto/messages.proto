@@ -264,8 +264,11 @@ message BeginTxnMessageHeader {
 }
 
 // CommitTxnMessageHeader is the header of commit transaction message.
-// Just do nothing now.
-message CommitTxnMessageHeader {}
+message CommitTxnMessageHeader {
+    // Expected number of logical body messages, excluding Begin/Commit and WAL
+    // chunks/retries. Zero disables validation for legacy senders and empty txns.
+    uint64 body_cnt = 1;
+}
 
 // RollbackTxnMessageHeader is the header of rollback transaction
 // message.

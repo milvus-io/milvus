@@ -455,13 +455,11 @@ An ordinary Insert may omit `schema_version`; its PKs come from the same
 descriptor. Only CAS Insert requires an explicit version. Milvus cannot alter
 the primary key field, so every schema version of a collection has the same
 PK descriptor; the shard interceptor, not PK extraction, rejects a schema
-version mismatch on a live append. A recovered transaction body is not
-re-validated: an exclusive schema change fails the open transactions of its
-vchannel only in memory, so a transaction it crossed before a WAL reopen is
-recovered as live and can still commit its stale-version body. This gap
-predates partial-update CAS and belongs to transaction recovery, whose replay
-should roll such a transaction back as `FailTxnAtVChannel` does live; it is
-left to a transaction-layer follow-up.
+version mismatch on a live append. A recovered transaction body is not re-validated against the current schema.
+Local Flush Control makes successful exclusive schema operations durable abort
+boundaries in both TxnManager and the consuming/recovering TxnBuffer, so a stale
+body cannot cross that boundary and later commit after WAL reopen. See
+[Local Flush Control](wal/local_flush_control.md).
 
 The message builder writes metadata into the Insert body before encryption and
 before `BuildMutable()`. When cluster encryption is enabled, the proof is
@@ -863,10 +861,10 @@ row locks, `handleCommit` fails with `TRANSACTION_EXPIRED`; the producer
 replays the transaction, or returns the CAS retry signal to Proxy for local
 CAS. If cleanup removes the session and its partial-update state before
 admission, the commit takes no row lock and `handleCommit` fails with
-`TRANSACTION_EXPIRED` in the same way. A TSO failure happens before
-`handleCommit`, so the session stays InFlight and the client can retry the
-same CommitTxn. Ambiguous WAL append failures retain their existing
-transaction outcome handling.
+`TRANSACTION_EXPIRED` in the same way. Append TSO allocation retries inside the WAL until success or WAL lifecycle
+cancellation, before `handleCommit`. Backend attempt context errors likewise
+retry while the WAL remains live. Cancellation/fencing leaves an ambiguous Commit
+for WAL recovery; it is not marked committed by a failed append.
 
 Ordinary nontransactional writes acquire shared locks for their exact PK set
 before the write timestamp is allocated and retain them through WAL append and
@@ -1067,11 +1065,11 @@ advances the vchannel-wide incomplete-transaction fence instead, so a later
 local CAS on that vchannel whose read timestamp precedes the commit is rejected
 as retryable.
 
-Replication retry and persistence correctness are handled separately in #54380
-and are unchanged here: a TSO allocation failure after the replicate interceptor
-has forgotten the in-progress transaction, backend context errors while the WAL
-is still live, a commit that finds no transaction in progress, and the lifetime
-of replicated sessions.
+Replication retry and persistence follow [Local Flush Control](wal/local_flush_control.md):
+missing Begin or incomplete nonzero body count triggers complete CDC replay;
+Commit clears the prefix only after successful append. Scoped durable exclusive
+operations abort both local and replicated sessions and their pending PK state.
+Zero-count historical commits preserve their unchecked compatibility behavior.
 
 A full CDC replay can reuse the source TxnID of an earlier attempt. Begin on the
 new session installs a fresh pending record before registering cleanup: old
@@ -1270,8 +1268,8 @@ Focused tests must verify ordering and observable concurrency, including:
 - TimeTick cleanup can expire a session while its commit waits for row locks;
   `handleCommit` rejects it with `TRANSACTION_EXPIRED` before WAL append and
   its row locks are released; cleanup before admission leaves the commit
-  without row locks and `handleCommit` rejects it the same way; a TSO failure
-  leaves the session InFlight so the same CommitTxn can be retried;
+  without row locks and `handleCommit` rejects it the same way; a transient TSO failure
+  retries inside the live WAL before Commit preparation;
 - a CommitTxn resent after its transaction committed, for ordinary and local
   CAS transactions, takes no row lock, receives `INVALID_TRANSACTION_STATE`
   from TimeTick, and never reaches the WAL, so the producer does not replay it;

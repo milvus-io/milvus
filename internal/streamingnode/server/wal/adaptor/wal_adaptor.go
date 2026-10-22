@@ -283,6 +283,9 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 
 	// An append operation should be retried until it succeeds or some unrecoverable error occurs.
 	for i := 0; ; i++ {
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
+		}
 		msgID, err := w.rwWALImpls.Append(ctx, msg)
 		if err == nil {
 			if msg.MessageType() == message.MessageTypeAlterWAL {
@@ -291,8 +294,13 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 			}
 			return msgID, nil
 		}
-		if errors.IsAny(err, context.Canceled, context.DeadlineExceeded, walimpls.ErrFenced) {
+		// A backend timeout only ends that attempt; cancellation of the outer
+		// WAL context or writer fencing ends this writer.
+		if errors.Is(err, walimpls.ErrFenced) {
 			return nil, err
+		}
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
 		}
 		w.writeMetrics.ObserveRetry()
 		nextInterval := backoff.NextBackOff()
