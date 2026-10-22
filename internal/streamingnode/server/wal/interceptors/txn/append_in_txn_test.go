@@ -240,6 +240,29 @@ func TestAppendInTxnAutocommitKeepsBarrierTimeTick(t *testing.T) {
 	require.Equal(t, uint64(999), beginBarrier, "the begin message must wait for the barrier of the main message")
 }
 
+// The self-built CommitTxn counts the main body plus the extras in BodyCnt.
+func TestAppendInTxnAutocommitCountsBodies(t *testing.T) {
+	cases := []struct {
+		name   string
+		extras []message.MutableMessage
+		want   uint64
+	}{
+		{"no extras", nil, 1},
+		{"one extra", []message.MutableMessage{newTestDelete()}, 2},
+		{"two extras", []message.MutableMessage{newTestDelete(), newTestDelete()}, 3},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFakeAppender()
+			ctx, _ := newTestAppendContext()
+			result, err := AppendInTxn(ctx, f.append, message.CreateTestEmptyInsertMesage(1, nil), c.extras)
+			require.NoError(t, err)
+			require.Equal(t, c.want, message.MustAsImmutableCommitTxnMessageV2(result.Commit).Header().GetBodyCnt())
+			require.Equal(t, c.want, message.MustAsImmutableCommitTxnMessageV2(assembleTestTxn(t, f).Commit()).Header().GetBodyCnt())
+		})
+	}
+}
+
 func TestAppendInTxnAutocommitRollsBackOnFailure(t *testing.T) {
 	boom := errors.New("boom")
 	for _, c := range []struct {
@@ -421,6 +444,36 @@ func TestAppendInTxnCommit(t *testing.T) {
 	require.Equal(t, result.Main.MessageID(), result.Commit.MessageID())
 	// the transaction belongs to the client, so it keeps its txn context.
 	require.NotNil(t, appendResult.TxnCtx)
+}
+
+// A client counts its own bodies in BodyCnt. The appended CommitTxn counts the
+// extras too, and the CommitTxn of the client is not modified, so a redo counts
+// the extras once again. A BodyCnt of 0 turns the check off and stays 0.
+func TestAppendInTxnCommitCountsTheExtras(t *testing.T) {
+	bodyCntOf := func(msg message.BasicMessage) uint64 {
+		return message.MustAsMutableCommitTxnMessageV2(msg.(message.MutableMessage)).Header().GetBodyCnt()
+	}
+	commit := newTestCommit()
+	header := message.MustAsMutableCommitTxnMessageV2(commit).Header()
+	header.BodyCnt = 3
+	message.MustAsMutableCommitTxnMessageV2(commit).OverwriteHeader(header)
+
+	for attempt := 0; attempt < 2; attempt++ {
+		f := newFakeAppender()
+		ctx, _ := newTestAppendContext()
+		_, err := AppendInTxn(ctx, f.append, commit, []message.MutableMessage{newTestDelete(), newTestDelete()})
+		require.NoError(t, err)
+		require.Equal(t, uint64(5), bodyCntOf(f.appended[2]))
+		require.Equal(t, uint64(3), bodyCntOf(commit))
+	}
+
+	f := newFakeAppender()
+	ctx, _ := newTestAppendContext()
+	legacy := newTestCommit()
+	_, err := AppendInTxn(ctx, f.append, legacy, []message.MutableMessage{newTestDelete()})
+	require.NoError(t, err)
+	require.Same(t, legacy, f.appended[1])
+	require.Zero(t, bodyCntOf(f.appended[1]))
 }
 
 func TestAppendInTxnCommitExtraFailure(t *testing.T) {
