@@ -1,7 +1,7 @@
 # Design: STL_SORT indexes for ordinary ARRAY fields
 
 - Date: 2026-10-21
-- Status: Implemented on `feat/array-stl-sort` with targeted validation complete. Real upgrade, SDK, and performance validation remain outstanding.
+- Status: Implemented on `feat/array-stl-sort` with targeted validation complete. Local SDK validation is covered below; real mixed-binary upgrade and performance validation remain outstanding.
 - Related PR: [milvus-io/milvus#53972](https://github.com/milvus-io/milvus/pull/53972)
 - Review record: [ARRAY STL_SORT design review](https://zilliverse.feishu.link/app/app_17gfpkhg788)
 - Analysis baseline: PR snapshot `66b9f0b86d77`; source baseline `5c4b3520c1f0`.
@@ -267,3 +267,49 @@ Following approval of ingestion checks and build protection, explicit ordinary A
 - Binlog build integration passed 2/2. Finite FLOAT/DOUBLE preserve parent postings. NaN/±Inf fail binlog → materializer → SORT builds and leave sessions unpublishable, through both index entry points.
 - `make lint-fix` completed with zero issues in the root, pkg, and client modules; `internal/core/run_clang_format.sh` and `git diff --check` completed successfully.
 - Real multi-node SDK E2E was not run. Direct snapshot file copying does not scan values; new SORT builds still validate stored data.
+
+
+## 15. CI target versions and SDK compatibility coverage
+
+Date: 2026-10-22.
+
+The Go SDK CI failure on `887e12cd58` had two causes: SDK tests still expected
+ARRAY STL_SORT to be unsupported, and the Helm values forced scalar target v5
+with `forceRebuildScalarSegmentIndex=true`. The new binary correctly rejected
+explicit ARRAY SORT because its resolved build target was below v6. This was
+not evidence of an old QueryNode or a SORT build/query failure.
+
+Regular current-binary E2E/nightly values now force target v6. The supported
+scalar-index test includes ordinary ARRAY fields, and SORT is removed from the
+unsupported ARRAY index list. A dedicated nonparallel SDK test temporarily
+selects v5 and v6 through the management API and restores both configuration
+settings afterward. It asserts rejection without index metadata at v5,
+explicit SORT success at v6, and matching membership/any/all/NOT/empty-query
+results for HYBRID at both targets, with row counts above the indexing threshold.
+Low- and high-cardinality fields are covered through the public AUTOINDEX
+entry, which selects internal HYBRID. Native selector tests verify the
+physical BITMAP/INVERTED/SORT choices; the public HYBRID description cannot
+prove its concrete backend.
+
+The runtime matrix requires a writable EtcdSource-backed management API. Local
+validation uses the branch binary, local FS, Woodpecker local, and an independent
+Docker etcd. The earlier embedded-etcd setup can serve SDK requests but lacks a
+writable remote configuration source because parameters initialize before the
+embedded server. No production workaround for that environment issue is added.
+
+Both artifact target versions retain the finite-value ingestion contract of the
+new binary. An explicit low-version SORT request still returns the existing
+retriable ServiceNotReady error. Distinguishing a fixed administrator override
+from a transient rolling-upgrade condition remains a separate follow-up.
+This target-version matrix does not establish mixed-binary upgrade safety.
+
+
+Validation for the CI follow-up passed on the local native branch binary:
+`TestCreateSortedScalarIndex`, `TestCreateUnsupportedIndexArrayField`, and
+`TestArraySTLSORTVersionCompatibility` (all four v5/v6 SORT/HYBRID subcases).
+Each successful matrix build indexed 1,200 rows and verified membership,
+any/all, NOT, and empty-all results. The v5 rejection leaves no index metadata;
+the management API confirms restoration to the original target and force flag.
+Both native selector regressions passed, and all 18 modified Helm values parsed
+with scalar target v6. This is local targeted SDK coverage, not the complete
+CI SDK suite or a real mixed-binary upgrade.

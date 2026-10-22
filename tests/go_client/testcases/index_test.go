@@ -19,7 +19,7 @@ import (
 /*
 Info about scalar index
 TRIE: only support varchar
-STL_SORT: only support numeric (not include Array field)
+STL_SORT: numeric/varchar scalars and supported ARRAY elements from scalar engine v6
 INVERTED: all supported except Json
 Bitmap: all supported except Json, float, double. (If Array field, according to its ElementType)
 ScalarAutoIndex: {"int_*": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float/double": "HYBRID"}
@@ -490,12 +490,12 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 
-	// create Trie scalar index on varchar field
+	// Create SORT on supported scalars and ordinary ARRAY fields.
 	idx := index.NewSortedIndex()
 	for _, field := range schema.Fields {
 		if hp.SupportScalarIndexFieldType(field.DataType) {
 			if field.DataType == entity.FieldTypeBool ||
-				field.DataType == entity.FieldTypeJSON || field.DataType == entity.FieldTypeArray {
+				field.DataType == entity.FieldTypeJSON {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
 				// STL_SORT on JSON is supported with a json_cast_type; without
 				// it the server rejects with a missing-cast-type error instead
@@ -695,7 +695,6 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 
@@ -999,8 +998,8 @@ func TestCreateIndexVanillaFaissGeneric(t *testing.T) {
 	descIdx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName))
 	common.CheckErr(t, err, true)
 	common.CheckIndex(t, descIdx, index.NewGenericIndex(common.DefaultFloatVecFieldName, idx.Params()), common.TNewCheckIndexOpt(common.DefaultNb))
-	require.Equal(t, "FAISS", descIdx.Index.Params()[index.IndexTypeKey])
-	require.Equal(t, "IVF64,Flat", descIdx.Index.Params()["faiss_index_name"])
+	require.Equal(t, "FAISS", descIdx.Params()[index.IndexTypeKey])
+	require.Equal(t, "IVF64,Flat", descIdx.Params()["faiss_index_name"])
 
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 

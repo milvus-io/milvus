@@ -208,3 +208,45 @@ gotestsum --format testname --hide-summary=output -v ./testcases/... --addr=127.
    - Run `golangci-lint run` to check for style mistakes
    - Use `gofmt -w your/code/path` to format your code before submitting
    - CI will verify both golint and go format compliance
+
+
+## ARRAY STL_SORT version coverage
+
+Current-binary E2E and nightly Helm values force scalar index engine v6 so
+ordinary ARRAY STL_SORT is exercised by the regular SDK suite.
+`TestCreateSortedScalarIndex` builds supported ARRAY indexes; SORT is no longer
+listed as an unsupported ARRAY index.
+
+`TestArraySTLSORTVersionCompatibility` independently sets targets v5 and v6
+through the management API. It does not run in parallel, restores both the
+previous target and force-rebuild setting, and checks explicit expectations:
+
+| Target | Explicit ARRAY SORT | Low-cardinality HYBRID | High-cardinality HYBRID |
+| --- | --- | --- | --- |
+| v5 | Service-not-ready error; no index metadata | BITMAP | INVERTED |
+| v6 | Build, load, and query succeed | BITMAP | SORT |
+
+The SDK test requests internal HYBRID through the public AUTOINDEX entry and
+verifies indexed row counts and query results for both targets.
+Native `HybridIndexBuilderTest.ArrayRowsSelectSortOnlyFromGateVersion` checks
+the persisted physical selector independently; public HYBRID index descriptions
+alone do not expose that selector.
+
+The compatibility test requires a writable management configuration API backed
+by an EtcdSource. An embedded-etcd process that initialized its parameter table
+before the embedded server may not have that source. For local validation, run
+the branch binary with local FS/Woodpecker and an independent etcd instance.
+An unavailable configuration API fails this test rather than silently skipping
+version coverage or inferring capabilities from a successful/failed request.
+
+```sh
+go test -tags dynamic,test -gcflags="all=-N -l" -count=1 -v ./testcases \
+  -run '^(TestArraySTLSORTVersionCompatibility|TestCreateSortedScalarIndex|TestCreateUnsupportedIndexArrayField)$' \
+  -uri=http://127.0.0.1:19530
+```
+
+These tests use the new binary with different artifact build targets. They do
+not replace a mixed-binary rolling-upgrade or downgrade test. The existing
+retriable not-ready classification remains unchanged, including the fixed-v5
+configuration case; distinguishing that permanent configuration restriction is
+a separate error-handling follow-up.
