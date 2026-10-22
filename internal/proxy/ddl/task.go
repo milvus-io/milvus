@@ -1852,7 +1852,6 @@ type AlterCollectionTask struct {
 	Condition
 	*milvuspb.AlterCollectionRequest
 	ctx      context.Context
-	node     taskmodel.TaskNode
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
 }

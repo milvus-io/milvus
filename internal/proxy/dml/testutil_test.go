@@ -188,10 +188,6 @@ func (n *mockTaskNode) ShardMgr() shardclient.ShardClientMgr { return nil }
 func (n *mockTaskNode) ChMgr() channelmgr.ChannelsMgr        { return nil }
 func (n *mockTaskNode) TsoAllocator() taskmodel.TsoAllocator { return nil }
 
-func (n *mockTaskNode) CheckManageRLSPrivilege(_ context.Context, _ metacache.Cache, _ *milvuspb.AlterCollectionRequest, _, _ string) error {
-	return nil
-}
-
 func (n *mockTaskNode) CheckClusterPrivilege(_ context.Context, _ interface{}, _, _ string) error {
 	return nil
 }

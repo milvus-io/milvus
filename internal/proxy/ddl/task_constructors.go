@@ -191,7 +191,6 @@ func NewAlterCollectionTask(ctx context.Context, node taskmodel.TaskNode, reques
 		ctx:                    ctx,
 		Condition:              NewTaskCondition(ctx),
 		AlterCollectionRequest: request,
-		node:                   node,
 		mixCoord:               node.MixCoord(),
 	}
 }
