@@ -57,9 +57,7 @@ func TestAlterCallbacksApplyLoadConfigDirectly(t *testing.T) {
 			t.Cleanup(func() { p.UnPatch() })
 			// No MixCoord client or broadcaster is installed. The callbacks must
 			// use the existing manager directly under their enclosing DDL guard.
-			c := &DDLCallback{Core: &Core{meta: &MetaTable{}, broker: &mockBroker{
-				BroadcastAlteredCollectionFunc: func(context.Context, int64) error { return nil },
-			}}}
+			c := &DDLCallback{Core: &Core{meta: &MetaTable{}}}
 			channel := funcutil.GetControlChannel("test")
 			apply := func() error {
 				if database {

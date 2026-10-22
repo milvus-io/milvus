@@ -18,7 +18,6 @@ package meta
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -35,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -161,37 +159,6 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionSchema() {
 
 		_, err := s.broker.DescribeCollection(ctx, collectionID)
 		s.Error(err)
-		s.resetMock()
-	})
-}
-
-func (s *CoordinatorBrokerRootCoordSuite) TestGetPartitions() {
-	ctx := context.Background()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	collection := int64(100)
-	partitions := []int64{10, 11, 12}
-
-	s.Run("normal_case", func() {
-		s.mixcoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
-			Status:       merr.Status(nil),
-			PartitionIDs: partitions,
-		}, nil)
-
-		retPartitions, err := s.broker.GetPartitions(ctx, collection)
-		s.NoError(err)
-		s.ElementsMatch(partitions, retPartitions)
-		s.resetMock()
-	})
-
-	s.Run("collection_not_exist", func() {
-		s.mixcoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
-			Status: merr.Status(merr.WrapErrCollectionNotFound("mock")),
-		}, nil)
-
-		_, err := s.broker.GetPartitions(ctx, collection)
-		s.Error(err)
-		s.ErrorIs(err, merr.ErrCollectionNotFound)
 		s.resetMock()
 	})
 }
@@ -589,90 +556,6 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetIndexInfoPreservesIndexStorePat
 	s.Require().Len(infos[segmentID], 1)
 	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, infos[segmentID][0].GetIndexStorePathVersion())
 	s.resetMock()
-}
-
-func (s *CoordinatorBrokerRootCoordSuite) TestDescribeDatabase() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	s.Run("normal_case", func() {
-		s.mixcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
-			Return(&rootcoordpb.DescribeDatabaseResponse{
-				Status: merr.Success(),
-			}, nil)
-		_, err := s.broker.DescribeDatabase(ctx, "fake_db1")
-		s.NoError(err)
-		s.resetMock()
-	})
-
-	s.Run("rootcoord_return_error", func() {
-		s.mixcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
-		_, err := s.broker.DescribeDatabase(ctx, "fake_db1")
-		s.Error(err)
-		s.resetMock()
-	})
-
-	s.Run("rootcoord_return_failure_status", func() {
-		s.mixcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
-			Return(&rootcoordpb.DescribeDatabaseResponse{
-				Status: merr.Status(errors.New("fake error")),
-			}, nil)
-		_, err := s.broker.DescribeDatabase(ctx, "fake_db1")
-		s.Error(err)
-		s.resetMock()
-	})
-
-	s.Run("rootcoord_return_unimplemented", func() {
-		s.mixcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented)
-		_, err := s.broker.DescribeDatabase(ctx, "fake_db1")
-		s.Error(err)
-		s.resetMock()
-	})
-}
-
-func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionLoadInfo() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	s.Run("normal_case", func() {
-		s.mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			DbName: "fake_db1",
-		}, nil)
-		s.mixcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
-			Return(&rootcoordpb.DescribeDatabaseResponse{
-				Status: merr.Success(),
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.DatabaseReplicaNumber,
-						Value: "3",
-					},
-					{
-						Key:   common.DatabaseResourceGroups,
-						Value: strings.Join([]string{"rg1", "rg2"}, ","),
-					},
-				},
-			}, nil)
-		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, 1)
-		s.NoError(err)
-		s.Equal(int64(3), replicas)
-		s.Contains(rgs, "rg1")
-		s.Contains(rgs, "rg2")
-		s.resetMock()
-	})
-
-	s.Run("props not set", func() {
-		s.mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			DbName: "fake_db1",
-		}, nil)
-		s.mixcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
-			Return(&rootcoordpb.DescribeDatabaseResponse{
-				Status:     merr.Success(),
-				Properties: []*commonpb.KeyValuePair{},
-			}, nil)
-		_, _, err := s.broker.GetCollectionLoadInfo(ctx, 1)
-		s.NoError(err)
-		s.resetMock()
-	})
 }
 
 func TestCoordinatorBroker(t *testing.T) {

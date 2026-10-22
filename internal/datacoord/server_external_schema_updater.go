@@ -33,7 +33,9 @@ import (
 // overwrites that can occur when DataCoord broadcasts full schema directly.
 func (s *Server) updateExternalSchemaViaWAL(ctx context.Context, collectionID int64, externalSource, externalSpec string) error {
 	coll := s.meta.GetCollection(collectionID)
-	if coll == nil {
+	// AlterCollection goes by name, which a Dropping collection may already
+	// have handed to a new one.
+	if !coll.IsCreated() {
 		return merr.WrapErrCollectionNotFound(collectionID)
 	}
 
