@@ -1090,7 +1090,7 @@ func validatePersistedSegmentManifestVersions(view *viewpb.DataViewOfCollection)
 	for _, shard := range view.GetShards() {
 		for _, partition := range shard.GetPartitions() {
 			versions := partition.GetSegmentManifestVersions()
-			if len(versions) != 0 && len(versions) != len(partition.GetSegmentIds()) {
+			if len(versions) != len(partition.GetSegmentIds()) {
 				return merr.WrapErrDataIntegrityMsg(
 					"persisted DataView has misaligned Segment arrays: collection=%d vchannel=%q partition=%d segments=%d manifestVersions=%d",
 					view.GetCollectionId(),
@@ -1216,9 +1216,7 @@ func canonicalizePartitionSegments(partition *viewpb.DataViewOfPartition) {
 	versions := partition.GetSegmentManifestVersions()
 	for idx, segmentID := range partition.GetSegmentIds() {
 		segments[idx].id = segmentID
-		if idx < len(versions) {
-			segments[idx].manifestVersion = versions[idx]
-		}
+		segments[idx].manifestVersion = versions[idx]
 	}
 	sort.Slice(segments, func(i, j int) bool {
 		return segments[i].id < segments[j].id

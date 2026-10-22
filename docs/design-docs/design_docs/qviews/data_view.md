@@ -56,10 +56,10 @@ Manifest version has two modes:
   and derive all Segment loading information from it. Such a Segment no longer
   needs the Coordinator SegmentMeta watcher for data updates.
 
-Zero is a resolution mode, not a comparable data revision. Existing persisted
-DataViews omit `segment_manifest_versions`; recovery expands the missing values
-to zero. Manifest versions are monotonic within successive DataViews: an
-existing Segment may keep its version or advance to a higher version, but it
+Zero is a resolution mode, not a comparable data revision. Every persisted
+DataView must include one `segment_manifest_versions` entry per Segment, even
+when its value is zero. Manifest versions are monotonic within successive
+DataViews: an existing Segment may keep its version or advance to a higher version, but it
 cannot regress. `Recompute` rebuilds every Manifest version from the current
 SegmentMeta, so a projection that reports a Manifest version lower than the
 stored one is rejected as a data-integrity error. A projection that reports
@@ -308,10 +308,10 @@ lifecycle record.
 
 For a valid Collection, recovery picks the maximum version as latest,
 initializes runtime ref counts to zero, and keeps the first of two identical
-snapshots under one version. It expands absent legacy
-`segment_manifest_versions` entries to zero. A malformed snapshot (missing
-DataVersion, invalid identity, or misaligned segment arrays) or a conflicting
-second snapshot under one version is skipped with a warning instead of aborting
+snapshots under one version. A malformed snapshot (missing DataVersion, invalid
+identity, or misaligned segment arrays, including an absent Manifest-version
+array for nonempty Segments) or a conflicting second snapshot under one version
+is skipped with a warning instead of aborting
 recovery, so a single bad key cannot brick the Coordinator. The snapshot is not
 deleted automatically: automatic deletion could turn metadata corruption into
 silent data loss. The bad key stays in etcd for operator inspection and manual
