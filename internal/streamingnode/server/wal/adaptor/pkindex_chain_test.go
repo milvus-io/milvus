@@ -453,13 +453,15 @@ func TestPKIndexChainDeleteReachesTheWALUnchanged(t *testing.T) {
 	// none of the keys is in the index.
 	_, err = w.Append(ctx, newPKChainDelete([]int64{8, 9}))
 	require.NoError(t, err)
-	// key 1 was removed from the index by the delete, so this insert misses.
+	// The in-flight set only answers whether a key exists, and a delete in flight
+	// counts as present: until observe applies the delete, this insert of key 1
+	// gets a companion delete, which is always correct.
 	_, err = w.Append(ctx, newPKChainInsert([]int64{1}, pkChainLastMarker()))
 	require.NoError(t, err)
 
 	msgs := readPKChainMessages(t, w)
 	require.Equal(t, []message.MessageType{
-		message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeDelete, message.MessageTypeInsert,
+		message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeDelete, message.MessageTypeTxn,
 	}, pkChainTypesOf(msgs))
 	requireAscendingTimeTicks(t, msgs)
 	require.Equal(t, []int64{1, 9}, pkChainDeleteKeys(t, msgs[1]))

@@ -42,14 +42,12 @@ type target struct {
 
 // registry maps vchannels to their targets.
 type registry struct {
-	stripeCount int
-
 	mu      sync.RWMutex
 	targets map[string]*target
 }
 
-func newRegistry(stripeCount int) *registry {
-	return &registry{stripeCount: stripeCount, targets: make(map[string]*target)}
+func newRegistry() *registry {
+	return &registry{targets: make(map[string]*target)}
 }
 
 func (r *registry) get(vchannel string) *target {
@@ -104,7 +102,7 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	// because a schema change can neither drop the primary key field nor alter
 	// its id or its data type.
 	r.targets[vchannel] = &target{
-		decider:      snpkindex.NewDecider(a, r.stripeCount),
+		decider:      snpkindex.NewDecider(a),
 		collectionID: collectionID,
 		pkFieldID:    pkField.GetFieldID(),
 		pkDataType:   pkField.GetDataType(),

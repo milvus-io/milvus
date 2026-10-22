@@ -16,28 +16,24 @@
 
 package pkindex
 
-// pendingTxn collects the primary key writes of a transaction that has not been
-// committed yet. They reach the index only when the CommitTxn is applied.
+// pendingTxn collects the primary keys written by the bodies of a transaction
+// that has not been committed yet. The CommitTxn decides on them, because the
+// bodies take effect at its time tick.
 type pendingTxn struct {
-	puts    map[string]pendingPut // encoded key -> the last insert of that key
-	deletes map[string]PK
-}
-
-type pendingPut struct {
-	pk        PK
-	segmentID int64
+	puts    map[string]PK // encoded key -> a key inserted by a body
+	deletes map[string]PK // encoded key -> a key deleted by a body
 }
 
 func newPendingTxn() *pendingTxn {
 	return &pendingTxn{
-		puts:    make(map[string]pendingPut),
+		puts:    make(map[string]PK),
 		deletes: make(map[string]PK),
 	}
 }
 
-func (p *pendingTxn) recordInsert(pks []PK, segmentID int64) {
+func (p *pendingTxn) recordInsert(pks []PK) {
 	for _, pk := range pks {
-		p.puts[string(pk.Encode())] = pendingPut{pk: pk, segmentID: segmentID}
+		p.puts[string(pk.Encode())] = pk
 	}
 }
 
@@ -70,7 +66,7 @@ func (p *pendingTxn) changedSince(snapshot *pendingTxn) bool {
 func (p *pendingTxn) allPKs() []PK {
 	pks := make([]PK, 0, len(p.puts)+len(p.deletes))
 	for _, put := range p.puts {
-		pks = append(pks, put.pk)
+		pks = append(pks, put)
 	}
 	for k, pk := range p.deletes {
 		if _, ok := p.puts[k]; !ok {
@@ -85,7 +81,7 @@ func (p *pendingTxn) companionCandidates() []PK {
 	pks := make([]PK, 0, len(p.puts))
 	for k, put := range p.puts {
 		if _, ok := p.deletes[k]; !ok {
-			pks = append(pks, put.pk)
+			pks = append(pks, put)
 		}
 	}
 	return pks

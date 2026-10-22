@@ -22,7 +22,9 @@ package pkindex
 
 import (
 	"context"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -52,41 +54,76 @@ type Decision struct {
 
 // Applied is what the caller read back from the appended main message.
 type Applied struct {
-	SegmentID int64 // the segment an insert was assigned to
-	// TimeTick is the time tick at which the write takes effect. This version of
-	// the decider does not read it: the decision order of one key is enforced by
-	// the stripe locks, not by comparing time ticks. The field is kept for callers
-	// and for a future version that may need it.
+	// TimeTick is the time tick at which the write takes effect: the time tick of
+	// the CommitTxn for a write that was upgraded to a transaction.
 	TimeTick uint64
 }
 
 // Decider makes the write path decisions of one vchannel on top of its Authority.
 //
+// The decider never writes the engine. A decided write is kept in an in-flight
+// set from before its append until observe applied it to the engine. Observe is
+// the single writer of the engine, for the replay at WAL open and for the live
+// messages alike.
+//
 // TODO: duplicate primary keys inside one insert are not detected.
-// TODO: pick the stripe count from a throughput benchmark.
+// TODO: observe does not apply the WAL to the engine yet, so a decided write stays
+// in the in-flight set for the life of the index. The recovery step adds observe.
 type Decider struct {
 	authority Authority
-	stripes   *stripeLocks
+	inflight  inflightSet
+	// degradedUntil is the time tick before which this vchannel is degraded: while
+	// observe has not reached it, every key counts as present and the engine is
+	// not probed. See DegradeUntil.
+	degradedUntil atomic.Uint64
 
-	// pendingMu guards pending and every pendingTxn in it. Lock order: stripes
-	// first, then pendingMu. No code may wait for a stripe while it holds pendingMu.
+	// pendingMu guards pending and every pendingTxn in it. No code waits for an
+	// in-flight write while it holds pendingMu.
 	pendingMu sync.Mutex
 	pending   map[int64]*pendingTxn
 }
 
 // NewDecider creates the Decider of a vchannel. It takes ownership of a.
-func NewDecider(a Authority, stripeCount int) *Decider {
+func NewDecider(a Authority) *Decider {
 	return &Decider{
 		authority: a,
-		stripes:   newStripeLocks(stripeCount),
 		pending:   make(map[int64]*pendingTxn),
 	}
 }
 
-// Decide makes the decision for req. For an autocommit write and for a CommitTxn it
-// acquires the stripes of the affected keys, which the returned Intent holds until
-// Apply or Discard. The caller must call exactly one of them, exactly once. A panic
-// between Decide and that call ends the process, like every panic on the append path.
+// DegradeUntil makes the vchannel degraded until observe reaches tt. A degraded
+// decision treats every key as present: an insert gets a companion delete for
+// each of its keys. That is always correct and costs only extra deletes. It
+// never blocks a write.
+//
+// It covers the events that the in-flight set can not cover, because writes that
+// took effect before them did not pass through this decider.
+//
+// TODO: call it when the index of a vchannel is enabled by CreateIndex, with the
+// time tick of that message.
+// TODO: call it when the WAL is promoted from a secondary to a primary, with the
+// time tick of the role switch.
+// TODO: call it when the engine recovers from a failure.
+func (d *Decider) DegradeUntil(tt uint64) {
+	for {
+		cur := d.degradedUntil.Load()
+		if tt <= cur || d.degradedUntil.CompareAndSwap(cur, tt) {
+			return
+		}
+	}
+}
+
+func (d *Decider) degraded() bool {
+	return d.inflight.observedTimeTick() < d.degradedUntil.Load()
+}
+
+// Decide makes the decision for req. For an autocommit write and for a CommitTxn
+// it registers the affected keys in the in-flight set and waits for the earlier
+// writes of the same keys, before it reads the index. The returned Intent holds
+// that registration, which is the lock of those keys until Apply or Discard. The
+// caller must call exactly one of Apply, Discard and DiscardUncertain, exactly
+// once, after the downstream append. A panic between Decide and that call ends
+// the process, like every panic on the append path.
 func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 	select {
 	case <-ctx.Done():
@@ -113,12 +150,14 @@ func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 		if intent.txn == nil {
 			return intent, nil
 		}
-		// mu must be released before acquire: Apply takes mu while it holds the
-		// stripes, so holding both here would deadlock with a concurrent Apply.
-		intent.acquire(intent.txn.allPKs())
-		hits, err := d.present(ctx, intent.txn.companionCandidates())
+		// pendingMu must be released before the wait: a body of another
+		// transaction takes pendingMu in Apply.
+		if err := intent.register(ctx, intent.txn.allPKs()); err != nil {
+			return nil, err
+		}
+		hits, err := d.present(ctx, intent.write, intent.txn.companionCandidates())
 		if err != nil {
-			intent.guard.Release()
+			intent.withdraw()
 			return nil, err
 		}
 		intent.decision.CompanionDeletePKs = hits
@@ -128,10 +167,12 @@ func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 		return intent, nil
 	}
 
-	intent.acquire(req.PKs)
-	present, err := d.present(ctx, req.PKs)
+	if err := intent.register(ctx, req.PKs); err != nil {
+		return nil, err
+	}
+	present, err := d.present(ctx, intent.write, req.PKs)
 	if err != nil {
-		intent.guard.Release()
+		intent.withdraw()
 		return nil, err
 	}
 	switch req.Kind {
@@ -143,8 +184,51 @@ func (d *Decider) Decide(ctx context.Context, req Request) (*Intent, error) {
 	return intent, nil
 }
 
-// present returns the keys of pks that exist in the index, in the order of pks.
-func (d *Decider) present(ctx context.Context, pks []PK) ([]PK, error) {
+// present returns the keys of pks that exist, in the order of pks. w is the
+// caller's own registration, which has already waited for the earlier writes.
+//
+// Rule B: the in-flight set is read before the engine. Observe writes the engine
+// before it removes an entry (rule A), so a key that left the set between the two
+// reads is found in the engine.
+func (d *Decider) present(ctx context.Context, w *inflightWrite, pks []PK) ([]PK, error) {
+	if len(pks) == 0 {
+		return nil, nil
+	}
+	if d.degraded() {
+		return slices.Clone(pks), nil
+	}
+	inSet := d.inflight.presentBefore(w)
+	var probe []PK
+	for _, pk := range pks {
+		if _, ok := inSet[pk.lockKey()]; !ok {
+			probe = append(probe, pk)
+		}
+	}
+	if len(probe) == len(pks) && len(probe) > 0 {
+		// The common case: no key is in the set, the engine answers alone.
+		return d.probe(ctx, probe)
+	}
+	inEngine, err := d.probe(ctx, probe)
+	if err != nil {
+		return nil, err
+	}
+	var present []PK
+	j := 0
+	for _, pk := range pks {
+		if _, ok := inSet[pk.lockKey()]; ok {
+			present = append(present, pk)
+			continue
+		}
+		if j < len(inEngine) && pk == inEngine[j] {
+			present = append(present, pk)
+			j++
+		}
+	}
+	return present, nil
+}
+
+// probe returns the keys of pks that the engine holds, in the order of pks.
+func (d *Decider) probe(ctx context.Context, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
@@ -184,8 +268,25 @@ func (d *Decider) Close() error {
 	return d.authority.Close()
 }
 
-func (i *Intent) acquire(pks []PK) {
+// register adds the keys of this write to the in-flight set and waits for the
+// earlier writes of the same keys. It must run before the downstream append:
+// observe may apply a write as soon as its append is acknowledged, which can be
+// before the append returns, so a registration made after the append could be
+// left in the set forever.
+func (i *Intent) register(ctx context.Context, pks []PK) error {
 	start := time.Now()
-	i.guard = i.d.stripes.acquire(pks)
+	w, earlier := i.d.inflight.register(pks)
+	if err := i.d.inflight.wait(ctx, w, earlier); err != nil {
+		return err
+	}
+	i.write = w
 	i.lockWait = time.Since(start)
+	return nil
+}
+
+// withdraw removes the registration of a decision that failed before anything
+// was appended.
+func (i *Intent) withdraw() {
+	i.d.inflight.remove(i.write)
+	i.write = nil
 }
