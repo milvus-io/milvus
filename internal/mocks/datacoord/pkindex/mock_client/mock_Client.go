@@ -22,53 +22,6 @@ func (_m *MockClient) EXPECT() *MockClient_Expecter {
 	return &MockClient_Expecter{mock: &_m.Mock}
 }
 
-// ClaimPChannel provides a mock function with given fields: ctx, req
-func (_m *MockClient) ClaimPChannel(ctx context.Context, req *pkindexpb.ClaimPChannelRequest) error {
-	ret := _m.Called(ctx, req)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ClaimPChannel")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *pkindexpb.ClaimPChannelRequest) error); ok {
-		r0 = rf(ctx, req)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockClient_ClaimPChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClaimPChannel'
-type MockClient_ClaimPChannel_Call struct {
-	*mock.Call
-}
-
-// ClaimPChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *pkindexpb.ClaimPChannelRequest
-func (_e *MockClient_Expecter) ClaimPChannel(ctx interface{}, req interface{}) *MockClient_ClaimPChannel_Call {
-	return &MockClient_ClaimPChannel_Call{Call: _e.mock.On("ClaimPChannel", ctx, req)}
-}
-
-func (_c *MockClient_ClaimPChannel_Call) Run(run func(ctx context.Context, req *pkindexpb.ClaimPChannelRequest)) *MockClient_ClaimPChannel_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*pkindexpb.ClaimPChannelRequest))
-	})
-	return _c
-}
-
-func (_c *MockClient_ClaimPChannel_Call) Return(_a0 error) *MockClient_ClaimPChannel_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockClient_ClaimPChannel_Call) RunAndReturn(run func(context.Context, *pkindexpb.ClaimPChannelRequest) error) *MockClient_ClaimPChannel_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Close provides a mock function with no fields
 func (_m *MockClient) Close() {
 	_m.Called()

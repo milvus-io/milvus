@@ -31,9 +31,11 @@ Explore is a separate layout: local temporary manifests live under
   `manifest/<version>-<uuid>.pb` and SSTs in `sst/<id>.sst`. All writers, the
   manifest service and its GC build these keys with
   `internal/pkindex/objpath.go`. `pk_index` is `common.PKIndexPath` and is
-  listed in `InternalStorageRootSegments`. The manifest pointers and pchannel
-  claim records are meta kv keys under `pkindex-meta/`, built by
-  `internal/datacoord/pkindex/manifest`.
+  listed in `InternalStorageRootSegments`. The manifest pointers are meta kv
+  keys under `pkindex-meta/manifest/`, built by
+  `internal/datacoord/pkindex/manifest`. A flush also reads the streaming
+  coordinator key `streamingcoord-meta/pchannel/<pchannel>`, built by
+  `BuildPChannelInfoPath` in `internal/metastore/kv/streamingcoord`.
 - Readers consume the complete key recorded in metadata or the manifest.
   They must not prepend another root.
 - Some API fields describe relative file names rather than complete keys.

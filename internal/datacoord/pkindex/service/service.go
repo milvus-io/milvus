@@ -55,24 +55,6 @@ func (s *Service) manager() (*manifest.Manager, error) {
 	return nil, merr.WrapErrServiceNotReadyMsg("primary key index manifest service is not ready")
 }
 
-// ClaimPChannel claims a pchannel for a pchannel term.
-func (s *Service) ClaimPChannel(ctx context.Context, req *pkindexpb.ClaimPChannelRequest) (*pkindexpb.ClaimPChannelResponse, error) {
-	if err := validatePChannel(req.GetPchannel()); err != nil {
-		return &pkindexpb.ClaimPChannelResponse{Status: merr.Status(err)}, nil
-	}
-	if err := validateTerm(req.GetPchannelTerm()); err != nil {
-		return &pkindexpb.ClaimPChannelResponse{Status: merr.Status(err)}, nil
-	}
-	m, err := s.manager()
-	if err != nil {
-		return &pkindexpb.ClaimPChannelResponse{Status: merr.Status(err)}, nil
-	}
-	if err := m.ClaimPChannel(ctx, req.GetPchannel(), req.GetPchannelTerm()); err != nil {
-		return &pkindexpb.ClaimPChannelResponse{Status: merr.Status(toMerr(err, req.GetPchannel()))}, nil
-	}
-	return &pkindexpb.ClaimPChannelResponse{Status: merr.Success()}, nil
-}
-
 // CommitFlush adds the uploaded SSTs of a flush and returns the manifest
 // after the commit. The first flush of a vchannel creates its manifest.
 func (s *Service) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.CommitFlushResponse, error) {
@@ -167,31 +149,14 @@ func validateFlush(req *pkindexpb.CommitFlushRequest) error {
 }
 
 // validateTarget checks that a request names a collection and a vchannel that
-// can form a manifest key: a positive collection ID and a valid channel name.
+// can form a manifest key: a positive collection ID, and a vchannel name that
+// is not empty, ".", or "..", and does not contain "/".
 func validateTarget(collectionID int64, vchannel string) error {
 	if collectionID <= 0 {
 		return merr.WrapErrServiceInternalMsg("collection_id must be positive, got %d", collectionID)
 	}
-	return validateChannelName("vchannel", vchannel)
-}
-
-// validateChannelName checks that a channel name can be part of a key: it is
-// not empty, ".", or "..", and does not contain "/".
-func validateChannelName(field, name string) error {
-	if name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
-		return merr.WrapErrServiceInternalMsg("invalid %s %q", field, name)
-	}
-	return nil
-}
-
-// validatePChannel checks that a pchannel name is a valid channel name and not
-// a vchannel name. A vchannel name would claim a key that no flush checks.
-func validatePChannel(name string) error {
-	if err := validateChannelName("pchannel", name); err != nil {
-		return err
-	}
-	if !funcutil.IsPhysicalChannel(name) {
-		return merr.WrapErrServiceInternalMsg("pchannel %q is not a pchannel name", name)
+	if vchannel == "" || vchannel == "." || vchannel == ".." || strings.Contains(vchannel, "/") {
+		return merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
 	}
 	return nil
 }

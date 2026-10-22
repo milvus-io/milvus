@@ -60,9 +60,6 @@ var _ Client = (*client)(nil)
 // errors in it. With retry.Do, the caller must pass
 // retry.RetryErr(merr.IsRetryableErr); else retry.Do retries a fenced call.
 type Client interface {
-	// ClaimPChannel claims a pchannel for the term in the request.
-	ClaimPChannel(ctx context.Context, req *pkindexpb.ClaimPChannelRequest) error
-
 	// CommitFlush commits a flush result to the manifest of a vchannel.
 	CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error)
 
@@ -148,15 +145,6 @@ type client struct {
 	rb      resolver.Builder
 	conn    lazygrpc.Conn
 	service lazygrpc.Service[pkindexpb.PKIndexCoordServiceClient]
-}
-
-func (c *client) ClaimPChannel(ctx context.Context, req *pkindexpb.ClaimPChannelRequest) error {
-	svc, err := c.service.GetService(ctx)
-	if err != nil {
-		return toClientErr(err)
-	}
-	resp, err := svc.ClaimPChannel(ctx, req)
-	return toClientErr(merr.CheckRPCCall(resp, err))
 }
 
 func (c *client) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error) {

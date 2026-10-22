@@ -52,13 +52,6 @@ type fakeCoordClient struct {
 	err    error
 }
 
-func (f *fakeCoordClient) ClaimPChannel(context.Context, *pkindexpb.ClaimPChannelRequest, ...grpc.CallOption) (*pkindexpb.ClaimPChannelResponse, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return &pkindexpb.ClaimPChannelResponse{Status: f.status}, nil
-}
-
 func (f *fakeCoordClient) CommitFlush(context.Context, *pkindexpb.CommitFlushRequest, ...grpc.CallOption) (*pkindexpb.CommitFlushResponse, error) {
 	if f.err != nil {
 		return nil, f.err
@@ -83,8 +76,6 @@ func TestClientSuccess(t *testing.T) {
 	c := newTestClient(&fakeCoordClient{status: merr.Success()})
 	ctx := context.Background()
 
-	assert.NoError(t, c.ClaimPChannel(ctx, &pkindexpb.ClaimPChannelRequest{}))
-
 	m, err := c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
@@ -108,8 +99,6 @@ func TestClientErrorStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newTestClient(&fakeCoordClient{status: merr.Status(tc.err)})
 
-			assert.ErrorIs(t, c.ClaimPChannel(ctx, &pkindexpb.ClaimPChannelRequest{}), tc.err)
-
 			m, err := c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
 			assert.ErrorIs(t, err, tc.err)
 			assert.Nil(t, m)
@@ -123,17 +112,16 @@ func TestClientErrorStatus(t *testing.T) {
 
 func TestClientTransportError(t *testing.T) {
 	c := newTestClient(&fakeCoordClient{err: merr.ErrServiceUnavailable})
-	err := c.ClaimPChannel(context.Background(), &pkindexpb.ClaimPChannelRequest{})
+	_, err := c.CommitFlush(context.Background(), &pkindexpb.CommitFlushRequest{})
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
 
-// callAll calls the three methods and returns their errors.
+// callAll calls the two methods and returns their errors.
 func callAll(c *client) []error {
 	ctx := context.Background()
-	e1 := c.ClaimPChannel(ctx, &pkindexpb.ClaimPChannelRequest{})
-	_, e2 := c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
-	_, e3 := c.GetRecoveryManifests(ctx, &pkindexpb.GetRecoveryManifestsRequest{})
-	return []error{e1, e2, e3}
+	_, e1 := c.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{})
+	_, e2 := c.GetRecoveryManifests(ctx, &pkindexpb.GetRecoveryManifestsRequest{})
+	return []error{e1, e2}
 }
 
 func TestClientRawErrorsBecomeUnavailable(t *testing.T) {

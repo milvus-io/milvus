@@ -15,8 +15,8 @@
 // limitations under the License.
 
 // Package manifest holds the only durable writer of the primary key index
-// manifests and the pchannel claim records: the claim, flush and compaction
-// rules, the commit protocol, and the meta keys.
+// manifests: the flush and compaction rules, the pchannel term check of a
+// flush, the commit protocol, and the meta keys.
 package manifest
 
 import (
@@ -36,8 +36,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// MetaStore is the metadata store of the manifest pointers and the pchannel
-// claim records.
+// MetaStore is the metadata store of the manifest pointers. It also holds the
+// streamingcoord pchannel meta, which a flush reads but does not write.
 type MetaStore interface {
 	// Load returns the value of key and whether key exists.
 	Load(ctx context.Context, key string) (value string, found bool, err error)
@@ -66,12 +66,12 @@ type ObjectStore interface {
 }
 
 var (
-	// ErrFenced reports a claim or a flush from a pchannel term below the
-	// term of the pchannel claim record.
-	ErrFenced = errors.New("pchannel term is below the claimed term")
-	// ErrNotClaimed reports a flush whose pchannel has no claim record, or
-	// whose term is above the term of the claim record.
-	ErrNotClaimed = errors.New("pchannel is not claimed for the flush term")
+	// ErrFenced reports a flush from a pchannel term below the term of the
+	// streamingcoord pchannel meta.
+	ErrFenced = errors.New("pchannel term is below the assigned term")
+	// ErrTermNotAssigned reports a flush whose pchannel has no streamingcoord
+	// pchannel meta, or whose term is above the term of that meta.
+	ErrTermNotAssigned = errors.New("pchannel term is not the assigned term")
 	// ErrNoManifest reports a compaction on a vchannel that has no manifest.
 	ErrNoManifest = errors.New("vchannel has no manifest")
 	// ErrCheckpointRegressed reports a flush whose checkpoint is not after
@@ -105,17 +105,17 @@ type vchannelManifest struct {
 	pointer string
 }
 
-// Manager is the only writer of the manifests and the pchannel claim records.
-// It applies the edits of one vchannel one at a time. The manifests it
-// returns are shared with its cache; the caller must not change them.
+// Manager is the only writer of the manifests. It applies the edits of one
+// vchannel one at a time. The manifests it returns are shared with its cache;
+// the caller must not change them.
 //
 // The cache of a vchannel is filled on its first use and is refreshed only
 // after a failed write. Until then, the manager does not see the commits of
 // another coordinator. LoadPointers does not use the cache. The predicates of
 // each write keep commits safe when the cache is stale: a flush writes on the
-// predicate that the claim record still holds the flush term.
+// predicate that the pchannel meta still holds the value that the flush term
+// was checked against.
 type Manager struct {
-	claims   *claimTable
 	meta     MetaStore
 	store    ObjectStore
 	rootPath string
@@ -125,11 +125,11 @@ type Manager struct {
 	manifests map[string]*vchannelManifest // by pointer key
 }
 
-// New returns a Manager that keeps the pointers and the claim records in meta
-// and the manifest bodies in store, under rootPath of the object storage.
+// New returns a Manager that keeps the pointers in meta and the manifest bodies
+// in store, under rootPath of the object storage. meta also holds the
+// streamingcoord pchannel meta.
 func New(meta MetaStore, store ObjectStore, rootPath string) *Manager {
 	return &Manager{
-		claims:    newClaimTable(meta),
 		meta:      meta,
 		store:     store,
 		rootPath:  rootPath,
@@ -138,27 +138,20 @@ func New(meta MetaStore, store ObjectStore, rootPath string) *Manager {
 	}
 }
 
-// ClaimPChannel claims a pchannel for term. A claim creates the claim record,
-// or raises it when term is above the recorded term; the same term is
-// idempotent, and a lower term returns ErrFenced. It reads the claim record
-// from the meta store, not from the cache.
-func (m *Manager) ClaimPChannel(ctx context.Context, pchannel string, term int64) error {
-	return m.claims.claim(ctx, pchannel, term)
-}
-
 // CommitFlush applies a flush (see applyFlush) and returns the resulting
 // version. The pchannel of the flush is the pchannel of the vchannel name.
-// The flush term must equal the term of the claim record of that pchannel,
-// and the pointer write has the predicate that the claim record still holds
-// it. The first version of a vchannel gets the SST base path of the vchannel
-// under the root path.
+// The flush term must equal the term of the streamingcoord pchannel meta of
+// that pchannel (see checkPChannelTerm), and the pointer write has the
+// predicate that the pchannel meta has not changed since the check. The first
+// version of a vchannel gets the SST base path of the vchannel under the root
+// path.
 func (m *Manager) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error) {
-	cp, err := m.claims.checkClaimedTerm(ctx, funcutil.ToPhysicalChannel(req.GetVchannel()), req.GetPchannelTerm())
+	pchannelPred, err := checkPChannelTerm(ctx, m.meta, funcutil.ToPhysicalChannel(req.GetVchannel()), req.GetPchannelTerm())
 	if err != nil {
 		return nil, err
 	}
 	sstBasePath := pkindex.SSTBasePath(m.rootPath, req.GetCollectionId(), req.GetVchannel())
-	return m.commit(ctx, req.GetCollectionId(), req.GetVchannel(), cp, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error) {
+	return m.commit(ctx, req.GetCollectionId(), req.GetVchannel(), []predicates.Predicate{pchannelPred}, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error) {
 		return applyFlush(cur, req, sstBasePath)
 	})
 }
@@ -219,9 +212,9 @@ func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerR
 // the new version, or nil when the edit does not change the manifest. When the
 // edit changes the manifest, commit writes the new body under a unique key, then
 // writes the pointer on the predicate that the stored pointer is still the
-// one it loaded, or does not exist for the first version. With cp, the same
-// write also requires cp.pred; it does not write the claim record.
-func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel string, cp *pchannelClaimPred,
+// one it loaded, or does not exist for the first version. The same write also
+// requires preds; it does not write their keys.
+func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel string, preds []predicates.Predicate,
 	apply func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error),
 ) (*pkindexpb.Manifest, error) {
 	key := PointerKey(collectionID, vchannel)
@@ -258,20 +251,14 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 	}
 	ptr := string(ptrBytes)
 
-	preds := []predicates.Predicate{predicates.KeyNotExist(key)}
+	pointerPred := predicates.KeyNotExist(key)
 	if cur != nil {
-		preds[0] = predicates.ValueEqual(key, cur.pointer)
+		pointerPred = predicates.ValueEqual(key, cur.pointer)
 	}
-	if cp != nil {
-		preds = append(preds, cp.pred)
-	}
-	if err := m.meta.Save(ctx, map[string]string{key: ptr}, preds...); err != nil {
+	if err := m.meta.Save(ctx, map[string]string{key: ptr}, append([]predicates.Predicate{pointerPred}, preds...)...); err != nil {
 		// the write may have taken effect: the stored pointer decides
 		if err := decideByReadBack(ctx, m.meta, key, ptr, err); err != nil {
 			m.forget(key)
-			if cp != nil {
-				m.claims.forget(cp.pchannel)
-			}
 			return nil, markUnavailable(err, "write manifest pointer %s version %d", key, next.GetVersion())
 		}
 	}
@@ -402,7 +389,7 @@ type Compaction struct {
 // ErrCheckpointRegressed when the checkpoint does not move forward and the
 // flush term differs from the last flush term, and ErrDuplicateSST when the
 // checkpoint moves forward and an SST is already in cur or is listed twice in
-// the flush. It does not check the flush term against the claim record. It
+// the flush. It does not check the flush term against the pchannel meta. It
 // does not change cur.
 func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstBasePath string) (*pkindexpb.Manifest, error) {
 	base := cur

@@ -19,7 +19,9 @@ package manifest
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math/rand"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -30,8 +32,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -94,59 +98,27 @@ func bodyKeys(t *testing.T, s *FakeObjectStore) []string {
 	return keys
 }
 
-// storedClaim returns the term of the stored claim record of pch.
-func storedClaim(t *testing.T, p *FakeMetaStore) int64 {
-	v, found, err := p.Load(context.Background(), ClaimKey(pch))
-	require.NoError(t, err)
-	require.True(t, found)
-	var c pkindexpb.PChannelClaim
-	require.NoError(t, proto.Unmarshal([]byte(v), &c))
-	return c.GetPchannelTerm()
-}
-
-// claimed returns a manager on new stores whose pch is claimed for term.
-func claimed(t *testing.T, term int64) (*Manager, *FakeMetaStore, *FakeObjectStore) {
+// assigned returns a manager on new stores whose pch is assigned at term in
+// the pchannel meta.
+func assigned(t *testing.T, term int64) (*Manager, *FakeMetaStore, *FakeObjectStore) {
 	m, p, s := newTestManager()
-	require.NoError(t, m.ClaimPChannel(context.Background(), pch, term))
+	p.AssignPChannel(pch, term)
 	return m, p, s
 }
 
-// A flush checks the claim record but does not write it.
-func TestFlushDoesNotWriteClaimRecord(t *testing.T) {
-	m, p, _ := claimed(t, 3)
+// A flush checks the pchannel meta but does not write it.
+func TestFlushDoesNotWritePChannelMeta(t *testing.T) {
+	m, p, _ := assigned(t, 3)
 	_, err := m.CommitFlush(context.Background(), flush(3, 50, 9))
 	require.NoError(t, err)
 	assert.Len(t, p.LastSave, 1)
 	assert.Contains(t, p.LastSave, PointerKey(1, vch))
 }
 
-func TestClaimPChannelRules(t *testing.T) {
-	m, p, s := newTestManager()
-	ctx := context.Background()
-
-	require.NoError(t, m.ClaimPChannel(ctx, pch, 3))
-	assert.EqualValues(t, 3, storedClaim(t, p))
-	require.NoError(t, m.ClaimPChannel(ctx, pch, 3), "the same term is idempotent")
-	require.NoError(t, m.ClaimPChannel(ctx, pch, 4))
-	assert.EqualValues(t, 4, storedClaim(t, p))
-	err := m.ClaimPChannel(ctx, pch, 3)
-	assert.True(t, errors.Is(err, ErrFenced))
-	assert.EqualValues(t, 4, storedClaim(t, p))
-
-	// a claim does not create a manifest
-	_, found, err := get(ctx, m, 1, vch)
-	require.NoError(t, err)
-	assert.False(t, found)
-
-	// a new manager reads the claim record from the store
-	err = New(p, s, testRoot).ClaimPChannel(ctx, pch, 3)
-	assert.True(t, errors.Is(err, ErrFenced))
-}
-
 // The first flush of a vchannel creates version 1 with the SST base path of
 // the vchannel and the primary key data type of the flush.
 func TestFirstFlushCreatesVersion1(t *testing.T) {
-	m, p, s := claimed(t, 3)
+	m, p, s := assigned(t, 3)
 	ctx := context.Background()
 	got, err := m.CommitFlush(ctx, flush(3, 50, 9))
 	require.NoError(t, err)
@@ -168,22 +140,71 @@ func TestFlushTermRules(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := newTestManager()
 	_, err := m.CommitFlush(ctx, flush(1, 10))
-	assert.True(t, errors.Is(err, ErrNotClaimed), "no claim record")
+	assert.True(t, errors.Is(err, ErrTermNotAssigned), "no pchannel meta")
 
-	m, _, _ = claimed(t, 3)
+	m, _, _ = assigned(t, 3)
 	_, err = m.CommitFlush(ctx, flush(2, 10, 1))
 	assert.True(t, errors.Is(err, ErrFenced), "a lower term is fenced")
 	_, err = m.CommitFlush(ctx, flush(4, 10, 1))
-	assert.True(t, errors.Is(err, ErrNotClaimed), "a higher term must claim first")
+	assert.True(t, errors.Is(err, ErrTermNotAssigned), "a higher term is not in the pchannel meta")
 	_, found, err := get(ctx, m, 1, vch)
 	require.NoError(t, err)
 	assert.False(t, found)
 }
 
+// A flush term above the term of the first read of the pchannel meta reads
+// the meta again.
+func TestFlushHigherTermReadsAgain(t *testing.T) {
+	m, p, _ := assigned(t, 3)
+	p.AfterLoad = func() { p.AssignPChannel(pch, 4) }
+	got, err := m.CommitFlush(context.Background(), flush(4, 10, 1))
+	require.NoError(t, err)
+	assert.EqualValues(t, 4, got.GetLastFlushTerm())
+}
+
+// The predicate of a flush holds only for the stored bytes of the pchannel
+// meta that the term was checked against.
+func TestCheckPChannelTermPredicate(t *testing.T) {
+	ctx := context.Background()
+	p := NewFakeMetaStore()
+	p.AssignPChannel(pch, 3)
+	key := streamingcoord.BuildPChannelInfoPath(pch)
+	raw, _, err := p.Load(ctx, key)
+	require.NoError(t, err)
+
+	pred, err := checkPChannelTerm(ctx, p, pch, 3)
+	require.NoError(t, err)
+	assert.Equal(t, key, pred.Key())
+	assert.True(t, pred.IsTrue(raw))
+
+	p.PutPChannelMeta(pch, 3, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE)
+	changed, _, err := p.Load(ctx, key)
+	require.NoError(t, err)
+	assert.False(t, pred.IsTrue(changed))
+}
+
+// The pchannel meta does not decode, has term 0, or cannot be read.
+func TestPChannelMetaLoadErrors(t *testing.T) {
+	ctx := context.Background()
+	m, p, _ := assigned(t, 3)
+
+	p.LoadErr = errors.New("etcd down")
+	_, err := m.CommitFlush(ctx, flush(3, 10))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
+
+	zeroTerm, err := proto.Marshal(&streamingpb.PChannelMeta{Channel: &streamingpb.PChannelInfo{Name: pch}})
+	require.NoError(t, err)
+	for _, v := range []string{"\xff", "", string(zeroTerm)} {
+		p.Put(streamingcoord.BuildPChannelInfoPath(pch), v)
+		_, err = m.CommitFlush(ctx, flush(3, 10))
+		assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "meta %q", v)
+	}
+}
+
 // A flush whose checkpoint does not move forward is a retry when its term is
 // the last flush term, and a regression otherwise.
 func TestFlushRetryVersusRegression(t *testing.T) {
-	m, _, _ := claimed(t, 3)
+	m, p, _ := assigned(t, 3)
 	ctx := context.Background()
 	first, err := m.CommitFlush(ctx, flush(3, 50, 9))
 	require.NoError(t, err)
@@ -192,7 +213,7 @@ func TestFlushRetryVersusRegression(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, proto.Equal(first, again))
 
-	require.NoError(t, m.ClaimPChannel(ctx, pch, 4))
+	p.AssignPChannel(pch, 4)
 	_, err = m.CommitFlush(ctx, flush(4, 50, 10))
 	assert.True(t, errors.Is(err, ErrCheckpointRegressed))
 	_, err = m.CommitFlush(ctx, flush(3, 60, 10))
@@ -204,61 +225,67 @@ func TestFlushRetryVersusRegression(t *testing.T) {
 	assert.EqualValues(t, 4, up.GetLastFlushTerm())
 }
 
-// Another coordinator raises the claim record after this manager cached it:
-// a flush with the new term reloads the record and succeeds.
-func TestFlushReloadsRaisedClaim(t *testing.T) {
-	a, p, s := claimed(t, 3)
+// Every flush reads the pchannel meta: a flush sees a new term at once.
+func TestFlushReadsPChannelMetaEveryTime(t *testing.T) {
+	m, p, _ := assigned(t, 3)
 	ctx := context.Background()
-	_, err := a.CommitFlush(ctx, flush(3, 10, 1))
+	_, err := m.CommitFlush(ctx, flush(3, 10, 1))
 	require.NoError(t, err)
-	require.NoError(t, New(p, s, testRoot).ClaimPChannel(ctx, pch, 4))
+	p.AssignPChannel(pch, 4)
 
-	got, err := a.CommitFlush(ctx, flush(4, 20, 2))
+	_, err = m.CommitFlush(ctx, flush(3, 20, 2))
+	assert.True(t, errors.Is(err, ErrFenced))
+	got, err := m.CommitFlush(ctx, flush(4, 20, 2))
 	require.NoError(t, err)
 	assert.Equal(t, []int64{2, 1}, sstIDs(got))
 }
 
-// The claim record changes between the cache read of a flush and its write:
-// the write fails, the error is retryable, and the retry is fenced.
-func TestFlushFailsWhenClaimChangesBeforeWrite(t *testing.T) {
-	a, p, s := claimed(t, 3)
-	b := New(p, s, testRoot)
-	ctx := context.Background()
-	_, err := a.CommitFlush(ctx, flush(3, 10, 1))
-	require.NoError(t, err)
+// The pchannel meta changes between the term check of a flush and its write:
+// the predicate fails, the error is retryable, and the retry checks the term
+// again.
+func TestFlushRetriesWhenPChannelMetaChangesBeforeWrite(t *testing.T) {
+	t.Run("new term", func(t *testing.T) {
+		m, p, s := assigned(t, 3)
+		ctx := context.Background()
+		_, err := m.CommitFlush(ctx, flush(3, 10, 1))
+		require.NoError(t, err)
 
-	var claimErr error
-	p.BeforeWrite = func() { claimErr = b.ClaimPChannel(ctx, pch, 4) }
-	_, err = a.CommitFlush(ctx, flush(3, 20, 2))
-	require.NoError(t, claimErr)
-	assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
+		p.BeforeWrite = func() { p.AssignPChannel(pch, 4) }
+		_, err = m.CommitFlush(ctx, flush(3, 20, 2))
+		assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
+		assert.True(t, errors.Is(err, ErrFakeValueMismatch), "%v", err)
 
-	_, err = a.CommitFlush(ctx, flush(3, 20, 2))
-	assert.True(t, errors.Is(err, ErrFenced))
-	got, _, err := get(ctx, New(p, s, testRoot), 1, vch)
-	require.NoError(t, err)
-	assert.Equal(t, []int64{1}, sstIDs(got))
-	assert.EqualValues(t, 4, storedClaim(t, p))
-}
+		_, err = m.CommitFlush(ctx, flush(3, 20, 2))
+		assert.True(t, errors.Is(err, ErrFenced))
+		got, _, err := get(ctx, New(p, s, testRoot), 1, vch)
+		require.NoError(t, err)
+		assert.Equal(t, []int64{1}, sstIDs(got))
+	})
+	t.Run("same term", func(t *testing.T) {
+		m, p, s := assigned(t, 3)
+		ctx := context.Background()
+		_, err := m.CommitFlush(ctx, flush(3, 10, 1))
+		require.NoError(t, err)
 
-// A flush with a stale cached claim record does not pass the claim predicate
-// of the write, even when the pointer predicate holds.
-func TestFlushWithStaleCachedClaim(t *testing.T) {
-	a, p, s := claimed(t, 3)
-	ctx := context.Background()
-	require.NoError(t, New(p, s, testRoot).ClaimPChannel(ctx, pch, 4))
+		p.BeforeWrite = func() {
+			p.PutPChannelMeta(pch, 3, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE)
+		}
+		_, err = m.CommitFlush(ctx, flush(3, 20, 2))
+		assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
+		assert.True(t, errors.Is(err, ErrFakeValueMismatch), "%v", err)
 
-	_, err := a.CommitFlush(ctx, flush(3, 10, 1))
-	assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
-	_, found, err := get(ctx, New(p, s, testRoot), 1, vch)
-	require.NoError(t, err)
-	assert.False(t, found)
-	_, err = a.CommitFlush(ctx, flush(3, 10, 1))
-	assert.True(t, errors.Is(err, ErrFenced))
+		got, err := m.CommitFlush(ctx, flush(3, 20, 2))
+		require.NoError(t, err)
+		assert.EqualValues(t, 2, got.GetVersion())
+		assert.Equal(t, []int64{2, 1}, sstIDs(got))
+		read, _, err := get(ctx, New(p, s, testRoot), 1, vch)
+		require.NoError(t, err)
+		assert.True(t, proto.Equal(got, read))
+	})
 }
 
 func TestCommitCompaction(t *testing.T) {
-	m, _, _ := claimed(t, 1)
+	m, p, _ := assigned(t, 1)
 	ctx := context.Background()
 	_, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{1}, Outputs: []*pkindexpb.SSTRef{{Id: 2}}})
 	assert.True(t, errors.Is(err, ErrNoManifest), "no manifest before the first flush")
@@ -272,54 +299,21 @@ func TestCommitCompaction(t *testing.T) {
 
 	_, err = m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{2, 1}, Outputs: []*pkindexpb.SSTRef{{Id: 11}}})
 	assert.True(t, errors.Is(err, ErrStaleEdit))
-}
 
-// The claim write reports an error after it took effect: the manager reads
-// the record back and reports success.
-func TestClaimUncertainButApplied(t *testing.T) {
-	m, p, _ := newTestManager()
-	p.WriteErr, p.WriteApplies = errors.New("timeout"), true
-	require.NoError(t, m.ClaimPChannel(context.Background(), pch, 3))
-	assert.EqualValues(t, 3, storedClaim(t, p))
-}
-
-// The claim write fails and did not take effect: the error is retryable and
-// the next claim succeeds.
-func TestClaimFailedIsRetryable(t *testing.T) {
-	m, p, _ := newTestManager()
-	ctx := context.Background()
-	cause := errors.New("timeout")
-	p.WriteErr = cause
-	err := m.ClaimPChannel(ctx, pch, 3)
-	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
-	assert.True(t, errors.Is(err, cause), "the cause stays in the chain")
-	require.NoError(t, m.ClaimPChannel(ctx, pch, 3))
-}
-
-func TestClaimRecordLoadErrors(t *testing.T) {
-	ctx := context.Background()
-	m, p, s := claimed(t, 3)
-
-	p.LoadErr = errors.New("etcd down")
-	err := m.ClaimPChannel(ctx, pch, 3)
-	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
-	p.LoadErr = errors.New("etcd down")
-	_, err = New(p, s, testRoot).CommitFlush(ctx, flush(3, 10))
-	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
-
-	for _, v := range []string{"\xff", ""} {
-		p.Put(ClaimKey(pch), v)
-		err = New(p, s, testRoot).ClaimPChannel(ctx, pch, 3)
-		assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "record %q", v)
-		_, err = New(p, s, testRoot).CommitFlush(ctx, flush(3, 10))
-		assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "record %q", v)
-	}
+	// a compaction does not read or check the pchannel meta
+	p.AssignPChannel(pch, 9)
+	p.LoadErr, p.LoadErrKey = errors.New("must not be read"), streamingcoord.BuildPChannelInfoPath(pch)
+	got, err = m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{10}, Outputs: []*pkindexpb.SSTRef{{Id: 11}}})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{3, 11}, sstIDs(got))
+	assert.Equal(t, []string{PointerKey(1, vch)}, slices.Collect(maps.Keys(p.LastSave)))
+	p.LoadErr, p.LoadErrKey = nil, ""
 }
 
 // The pointer swap reports an error after it took effect: the manager reads
 // the pointer back and reports success.
 func TestSwapUncertainButApplied(t *testing.T) {
-	m, p, s := claimed(t, 1)
+	m, p, s := assigned(t, 1)
 	ctx := context.Background()
 	_, err := m.CommitFlush(ctx, flush(1, 1))
 	require.NoError(t, err)
@@ -336,7 +330,7 @@ func TestSwapUncertainButApplied(t *testing.T) {
 // The caller's ctx ends during the pointer swap and the swap took effect: the
 // read back does not use the ended ctx, and the commit reports success.
 func TestSwapUncertainAfterCallerCtxEnds(t *testing.T) {
-	m, p, s := claimed(t, 1)
+	m, p, s := assigned(t, 1)
 	_, err := m.CommitFlush(context.Background(), flush(1, 1))
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -355,7 +349,7 @@ func TestSwapUncertainAfterCallerCtxEnds(t *testing.T) {
 // The first pointer write reports an error after it took effect: the manager
 // reads the pointer back and reports success.
 func TestCreateUncertainButApplied(t *testing.T) {
-	m, p, s := claimed(t, 1)
+	m, p, s := assigned(t, 1)
 	ctx := context.Background()
 	p.WriteErr, p.WriteApplies = errors.New("timeout"), true
 	got, err := m.CommitFlush(ctx, flush(1, 5, 1))
@@ -371,7 +365,7 @@ func TestCreateUncertainButApplied(t *testing.T) {
 // The first pointer write fails and did not take effect: the error is
 // retryable and the next flush succeeds.
 func TestCreateFailedIsRetryable(t *testing.T) {
-	m, p, _ := claimed(t, 1)
+	m, p, _ := assigned(t, 1)
 	ctx := context.Background()
 	cause := errors.New("timeout")
 	p.WriteErr = cause
@@ -387,7 +381,7 @@ func TestCreateFailedIsRetryable(t *testing.T) {
 // The pointer swap fails and did not take effect: the error is retryable and
 // the next commit succeeds.
 func TestSwapFailedIsRetryable(t *testing.T) {
-	m, p, _ := claimed(t, 1)
+	m, p, _ := assigned(t, 1)
 	ctx := context.Background()
 	_, err := m.CommitFlush(ctx, flush(1, 1))
 	require.NoError(t, err)
@@ -405,7 +399,7 @@ func TestSwapFailedIsRetryable(t *testing.T) {
 // The pointer swap took effect, but the read back fails: the commit reports a
 // retryable error and drops its cache, so the retry loads the applied version.
 func TestReadBackFails(t *testing.T) {
-	m, p, _ := claimed(t, 1)
+	m, p, _ := assigned(t, 1)
 	ctx := context.Background()
 	_, err := m.CommitFlush(ctx, flush(1, 1))
 	require.NoError(t, err)
@@ -424,7 +418,7 @@ func TestReadBackFails(t *testing.T) {
 // A crash between the body write and the pointer swap leaves the old version
 // current and an orphan body in the store.
 func TestCrashBeforeSwap(t *testing.T) {
-	m, p, s := claimed(t, 1)
+	m, p, s := assigned(t, 1)
 	ctx := context.Background()
 	old, err := m.CommitFlush(ctx, flush(1, 1))
 	require.NoError(t, err)
@@ -456,7 +450,7 @@ func TestCrashBeforeSwap(t *testing.T) {
 // create succeeds, the other gets a retryable error, and its retry applies
 // its flush on top of the winner's version.
 func TestTwoManagersCreateFirstVersion(t *testing.T) {
-	a, p, s := claimed(t, 1)
+	a, p, s := assigned(t, 1)
 	b := New(p, s, testRoot)
 	ctx := context.Background()
 
@@ -483,7 +477,7 @@ func TestTwoManagersCreateFirstVersion(t *testing.T) {
 
 // A pointer whose body has another version is corrupted.
 func TestLoadVersionMismatch(t *testing.T) {
-	m, p, s := claimed(t, 1)
+	m, p, s := assigned(t, 1)
 	ctx := context.Background()
 	body, err := proto.Marshal(&pkindexpb.Manifest{CollectionId: 1, Vchannel: vch, Version: 5})
 	require.NoError(t, err)
@@ -501,7 +495,7 @@ func TestLoadVersionMismatch(t *testing.T) {
 
 func TestLoadErrors(t *testing.T) {
 	ctx := context.Background()
-	m, p, s := claimed(t, 1)
+	m, p, s := assigned(t, 1)
 	_, err := m.CommitFlush(ctx, flush(1, 1))
 	require.NoError(t, err)
 
@@ -544,7 +538,7 @@ func TestLoadErrors(t *testing.T) {
 }
 
 func TestBodyWriteFails(t *testing.T) {
-	m, p, s := claimed(t, 1)
+	m, p, s := assigned(t, 1)
 	ctx := context.Background()
 	s.WriteErr = errors.New("s3 down")
 	_, err := m.CommitFlush(ctx, flush(1, 5, 1))
@@ -557,7 +551,7 @@ func TestBodyWriteFails(t *testing.T) {
 // Edits on one manager from many goroutines apply one at a time: all succeed
 // and none is lost.
 func TestConcurrentEdits(t *testing.T) {
-	m, p, s := claimed(t, 1)
+	m, p, s := assigned(t, 1)
 	ctx := context.Background()
 	const compacts, flushes = 16, 16
 	base := make([]int64, 0, compacts)
@@ -603,10 +597,9 @@ func TestConcurrentEdits(t *testing.T) {
 	assert.Equal(t, want, sstIDs(got))
 }
 
-// Flushes of the vchannels of one pchannel, and claims of that pchannel with
-// the same term, run in parallel without errors.
+// Flushes of the vchannels of one pchannel run in parallel without errors.
 func TestParallelVChannelsOfOnePChannel(t *testing.T) {
-	m, _, _ := claimed(t, 1)
+	m, _, _ := assigned(t, 1)
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -616,7 +609,6 @@ func TestParallelVChannelsOfOnePChannel(t *testing.T) {
 			for j := 1; j <= 10; j++ {
 				_, err := m.CommitFlush(ctx, flushOn(v, 1, uint64(j), int64(j)))
 				assert.NoError(t, err)
-				assert.NoError(t, m.ClaimPChannel(ctx, pch, 1))
 			}
 		}(fmt.Sprintf("%s_1v%d", pch, i))
 	}
@@ -628,7 +620,7 @@ func TestParallelVChannelsOfOnePChannel(t *testing.T) {
 // with the pointer's version that holds exactly the SSTs of the applied
 // commits.
 func TestTwoWriters(t *testing.T) {
-	a, p, s := claimed(t, 1)
+	a, p, s := assigned(t, 1)
 	b := New(p, s, testRoot)
 	ctx := context.Background()
 	_, err := a.CommitFlush(ctx, flush(1, 1))
@@ -694,7 +686,7 @@ func TestTwoWriters(t *testing.T) {
 // LoadPointers reads the store in batches and returns one result per target,
 // in order: found, not found, and corrupted targets each get their own result.
 func TestLoadPointers(t *testing.T) {
-	m, p, _ := claimed(t, 1)
+	m, p, _ := assigned(t, 1)
 	ctx := context.Background()
 	const n = 2*pointerBatchSize + 5
 	targets := make([]Target, 0, n)
@@ -732,7 +724,7 @@ func TestLoadPointers(t *testing.T) {
 
 // The failure of one batch read fails the targets of that batch only.
 func TestLoadPointersBatchFailure(t *testing.T) {
-	m, p, _ := claimed(t, 1)
+	m, p, _ := assigned(t, 1)
 	ctx := context.Background()
 	targets := make([]Target, 0, pointerBatchSize+1)
 	for i := 0; i <= pointerBatchSize; i++ {
@@ -753,7 +745,7 @@ func TestLoadPointersBatchFailure(t *testing.T) {
 
 // LoadPointers reads the store, so it sees a commit of another manager.
 func TestLoadPointersIgnoresCache(t *testing.T) {
-	a, p, s := claimed(t, 1)
+	a, p, s := assigned(t, 1)
 	ctx := context.Background()
 	_, err := a.CommitFlush(ctx, flush(1, 10, 1))
 	require.NoError(t, err)
@@ -763,23 +755,6 @@ func TestLoadPointersIgnoresCache(t *testing.T) {
 	results := a.LoadPointers(ctx, []Target{{CollectionID: 1, VChannel: vch}})
 	require.NoError(t, results[0].Err)
 	assert.Equal(t, got.GetVersion(), results[0].Pointer.GetVersion())
-}
-
-// The cached claim term only goes up.
-func TestClaimCacheOnlyRaises(t *testing.T) {
-	m, _, _ := newTestManager()
-	claims := m.claims
-	claim := func(term int64) *pchannelClaim {
-		return &pchannelClaim{pb: &pkindexpb.PChannelClaim{PchannelTerm: term}, value: fmt.Sprint(term)}
-	}
-	claims.remember(pch, claim(4))
-	claims.remember(pch, claim(3))
-	assert.EqualValues(t, 4, claims.cached(pch).pb.GetPchannelTerm())
-	claims.remember(pch, claim(5))
-	assert.EqualValues(t, 5, claims.cached(pch).pb.GetPchannelTerm())
-	claims.forget(pch)
-	claims.remember(pch, claim(3))
-	assert.EqualValues(t, 3, claims.cached(pch).pb.GetPchannelTerm())
 }
 
 // editFlush returns a flush of vchannel "v" of collection 1 with an Int64
@@ -802,37 +777,6 @@ func ssts(ids ...int64) []*pkindexpb.SSTRef {
 		out = append(out, &pkindexpb.SSTRef{Id: id})
 	}
 	return out
-}
-
-func TestPChannelClaimRules(t *testing.T) {
-	ctx := context.Background()
-	c := newClaimTable(NewFakeMetaStore())
-
-	require.NoError(t, c.claim(ctx, "p", 5))
-	assert.EqualValues(t, 5, c.cached("p").pb.GetPchannelTerm())
-
-	require.NoError(t, c.claim(ctx, "p", 5), "the same term is idempotent")
-	assert.EqualValues(t, 5, c.cached("p").pb.GetPchannelTerm())
-
-	require.NoError(t, c.claim(ctx, "p", 6))
-	assert.EqualValues(t, 6, c.cached("p").pb.GetPchannelTerm())
-
-	assert.True(t, errors.Is(c.claim(ctx, "p", 5), ErrFenced))
-}
-
-func TestCheckClaimedTermRules(t *testing.T) {
-	ctx := context.Background()
-	c := newClaimTable(NewFakeMetaStore())
-	_, err := c.checkClaimedTerm(ctx, "p", 5)
-	assert.True(t, errors.Is(err, ErrNotClaimed))
-
-	require.NoError(t, c.claim(ctx, "p", 5))
-	_, err = c.checkClaimedTerm(ctx, "p", 5)
-	assert.NoError(t, err)
-	_, err = c.checkClaimedTerm(ctx, "p", 4)
-	assert.True(t, errors.Is(err, ErrFenced))
-	_, err = c.checkClaimedTerm(ctx, "p", 6)
-	assert.True(t, errors.Is(err, ErrNotClaimed))
 }
 
 // The first flush of a vchannel creates version 1 from the fields of the flush.
@@ -1070,7 +1014,6 @@ func TestFlushAndCompactCommute(t *testing.T) {
 
 func TestKeys(t *testing.T) {
 	assert.Equal(t, "pkindex-meta/manifest/7/by-dev-dml_0_7v0", PointerKey(7, "by-dev-dml_0_7v0"))
-	assert.Equal(t, "pkindex-meta/claim/by-dev-dml_0", ClaimKey("by-dev-dml_0"))
 	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst", pkindex.SSTBasePath("files", 7, "by-dev-dml_0_7v0"))
 	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst/42.sst", pkindex.SSTKey("files/pk_index/7/by-dev-dml_0_7v0/sst", 42))
 	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/manifest/3-abc.pb", pkindex.ManifestBodyKey(pkindex.ManifestDir("files", 7, "by-dev-dml_0_7v0"), 3, "abc"))
@@ -1137,7 +1080,7 @@ func TestStoreFailureClassification(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			m, _, s := claimed(t, 3)
+			m, _, s := assigned(t, 3)
 			s.WriteErr = c.err
 			_, err := m.CommitFlush(context.Background(), flush(3, 10, 1))
 			require.Error(t, err)
