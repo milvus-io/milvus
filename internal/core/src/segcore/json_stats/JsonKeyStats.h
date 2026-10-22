@@ -29,6 +29,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -81,6 +82,8 @@ class JsonStatsProjectionTestAccessor;
 class JsonStatsScanTestAccessor;
 
 namespace milvus::index {
+
+struct JsonStatsParquetMetadata;
 
 struct JsonStatsFieldDataSlice {
     FieldDataPtr data;
@@ -137,7 +140,9 @@ class JsonKeyStats {
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas, bool nullable);
 
     void
-    Load(milvus::tracer::TraceContext ctx, const Config& config = {});
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config = {},
+         OpContext* op_ctx = nullptr);
 
     void
     Build(const Config& config = {});
@@ -526,7 +531,7 @@ class JsonKeyStats {
     WriteMetaFile();
 
     void
-    LoadMetaFile(const std::string& meta_file_path);
+    LoadMetaFile(const std::string& remote_path, OpContext* ctx);
 
     void
     AddKeyStats(const std::vector<std::string>& path,
@@ -615,26 +620,31 @@ class JsonKeyStats {
 
     void
     LoadShreddingData(const std::vector<std::string>& index_files,
-                      const std::string& warmup_policy = "");
+                      const std::string& warmup_policy,
+                      OpContext* ctx);
 
     void
-    GetColumnSchemaFromParquet(int64_t column_group_id,
-                               const std::string& file);
+    ParseParquetSchema(const std::shared_ptr<arrow::Schema>& schema);
 
     void
-    GetCommonMetaFromParquet(const std::string& file);
+    ParseParquetLayout(
+        const std::string& file,
+        const std::shared_ptr<const arrow::KeyValueMetadata>& metadata);
 
     void
     LoadColumnGroup(int64_t column_group_id,
                     const std::vector<int64_t>& file_ids,
-                    const std::string& warmup_policy = "",
-                    const std::string& override_prefix = "");
+                    const std::string& warmup_policy,
+                    const std::string& override_prefix,
+                    std::span<const JsonStatsParquetMetadata> metadata,
+                    OpContext* ctx);
 
-    void
+    std::vector<JsonStatsParquetMetadata>
     LoadShreddingMeta(
         const std::vector<std::pair<int64_t, std::vector<int64_t>>>&
             sorted_files,
-        const std::string& override_prefix = "");
+        const std::string& override_prefix,
+        OpContext* ctx);
 
     std::string
     AddBucketName(const std::string& remote_prefix);
@@ -643,7 +653,8 @@ class JsonKeyStats {
     LoadSharedKeyIndex(const std::vector<std::string>& shared_key_index_files,
                        bool enable_mmap,
                        int64_t index_size,
-                       const std::string& warmup_policy = "");
+                       const std::string& warmup_policy,
+                       OpContext* ctx);
 
  private:
     proto::schema::FieldSchema schema_;

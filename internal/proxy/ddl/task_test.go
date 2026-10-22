@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
-	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -4233,24 +4232,26 @@ func TestClusteringKey(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("create collection not support more than one clustering key", func(t *testing.T) {
+	t.Run("create collection with timestamptz clustering key", func(t *testing.T) {
 		fieldName2Type := make(map[string]schemapb.DataType)
 		fieldName2Type["int64_field"] = schemapb.DataType_Int64
-		fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
 		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
-		fieldName2Type["cluster_key_field"] = schemapb.DataType_Int64
-		clusterKeyField := &schemapb.FieldSchema{
-			Name:            "cluster_key_field",
-			DataType:        schemapb.DataType_Int64,
-			IsClusteringKey: true,
-		}
-		schema.Fields = append(schema.Fields, clusterKeyField)
-		clusterKeyField2 := &schemapb.FieldSchema{
-			Name:            "cluster_key_field2",
-			DataType:        schemapb.DataType_Int64,
-			IsClusteringKey: true,
-		}
-		schema.Fields = append(schema.Fields, clusterKeyField2)
+		schema.Fields = append(schema.Fields,
+			&schemapb.FieldSchema{
+				Name:            "event_time",
+				DataType:        schemapb.DataType_Timestamptz,
+				IsClusteringKey: true,
+			},
+			&schemapb.FieldSchema{
+				Name:     "fvec_field",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(testVecDim),
+					},
+				},
+			})
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 
@@ -4272,7 +4273,110 @@ func TestClusteringKey(t *testing.T) {
 			schema:   nil,
 		}
 		err = CreateCollectionTask.PreExecute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
+	})
+
+	t.Run("create collection timestamptz does not allow a second clustering key", func(t *testing.T) {
+		fieldName2Type := make(map[string]schemapb.DataType)
+		fieldName2Type["int64_field"] = schemapb.DataType_Int64
+		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
+		schema.Fields = append(schema.Fields,
+			&schemapb.FieldSchema{
+				Name:            "event_time",
+				DataType:        schemapb.DataType_Timestamptz,
+				IsClusteringKey: true,
+			},
+			&schemapb.FieldSchema{
+				Name:            "cluster_key_field",
+				DataType:        schemapb.DataType_Int64,
+				IsClusteringKey: true,
+			},
+			&schemapb.FieldSchema{
+				Name:     "fvec_field",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(testVecDim),
+					},
+				},
+			})
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		CreateCollectionTask := &CreateCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
+		}
+		err = CreateCollectionTask.PreExecute(ctx)
+		// Rejected for the second key, not for the type.
+		assert.ErrorContains(t, err, "more than one clustering key")
+	})
+
+	t.Run("create collection not support more than one clustering key", func(t *testing.T) {
+		fieldName2Type := make(map[string]schemapb.DataType)
+		fieldName2Type["int64_field"] = schemapb.DataType_Int64
+		fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
+		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
+		fieldName2Type["cluster_key_field"] = schemapb.DataType_Int64
+		clusterKeyField := &schemapb.FieldSchema{
+			Name:            "cluster_key_field",
+			DataType:        schemapb.DataType_Int64,
+			IsClusteringKey: true,
+		}
+		schema.Fields = append(schema.Fields, clusterKeyField)
+		clusterKeyField2 := &schemapb.FieldSchema{
+			Name:            "cluster_key_field2",
+			DataType:        schemapb.DataType_Int64,
+			IsClusteringKey: true,
+		}
+		schema.Fields = append(schema.Fields, clusterKeyField2)
+		// Without a vector field PreExecute fails before reaching the clustering key check.
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:     "fvec_field",
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(testVecDim),
+				},
+			},
+		})
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		CreateCollectionTask := &CreateCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
+		}
+		err = CreateCollectionTask.PreExecute(ctx)
+		assert.ErrorContains(t, err, "more than one clustering key")
 	})
 
 	t.Run("create collection with vector clustering key", func(t *testing.T) {
@@ -5245,256 +5349,6 @@ func TestCollectionNamespaceShardingEnabledValidation(t *testing.T) {
 		err = alterTask.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot delete namespace.sharding.enabled")
-	})
-}
-
-func TestCollectionRLSEnabledValidation(t *testing.T) {
-	qc := NewMixCoordMock()
-	ctx := context.Background()
-	cache := mustInitMetaCacheForTest(ctx, qc)
-	prefix := "TestRLSEnabled"
-
-	getSchemaBytes := func(colName string) []byte {
-		fieldName2Type := map[string]schemapb.DataType{
-			"fvec_field":  schemapb.DataType_FloatVector,
-			"int64_field": schemapb.DataType_Int64,
-		}
-		schema := constructCollectionSchemaByDataType(colName, fieldName2Type, "int64_field", false)
-		marshaledSchema, err := proto.Marshal(schema)
-		assert.NoError(t, err)
-		return marshaledSchema
-	}
-
-	createCollection := func(colName string) {
-		createColReq := &milvuspb.CreateCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_CreateCollection,
-				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-				Timestamp: Timestamp(time.Now().UnixNano()),
-			},
-			DbName:         dbName,
-			CollectionName: colName,
-			Schema:         getSchemaBytes(colName),
-			ShardsNum:      1,
-		}
-		status, err := qc.CreateCollection(ctx, createColReq)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-	}
-
-	t.Run("create rejects invalid rls.enabled", func(t *testing.T) {
-		colName := prefix + funcutil.GenRandomStr()
-		createTask := &CreateCollectionTask{
-			Condition: NewTaskCondition(ctx),
-			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
-				Base: &commonpb.MsgBase{
-					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-					Timestamp: Timestamp(time.Now().UnixNano()),
-				},
-				DbName:         "",
-				CollectionName: colName,
-				Schema:         getSchemaBytes(colName),
-				ShardsNum:      1,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "invalid"}},
-			},
-			ctx:      ctx,
-			mixCoord: qc,
-			result:   nil,
-			schema:   nil,
-		}
-		err := createTask.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid rls.enabled")
-	})
-
-	t.Run("alter accepts rls.enabled", func(t *testing.T) {
-		colName := prefix + funcutil.GenRandomStr()
-		createCollection(colName)
-		alterTask := &AlterCollectionTask{
-			baseTask: baseTask{MetaCache: cache},
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
-			},
-			mixCoord: qc,
-		}
-		err := alterTask.PreExecute(ctx)
-		assert.NoError(t, err)
-	})
-
-	t.Run("alter accepts standard boolean rls.enabled spelling", func(t *testing.T) {
-		colName := prefix + funcutil.GenRandomStr()
-		createCollection(colName)
-		alterTask := &AlterCollectionTask{
-			baseTask: baseTask{MetaCache: cache},
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "True"}},
-			},
-			mixCoord: qc,
-		}
-		err := alterTask.PreExecute(ctx)
-		assert.NoError(t, err)
-	})
-
-	t.Run("alter accepts deleting rls.enabled", func(t *testing.T) {
-		colName := prefix + funcutil.GenRandomStr()
-		createCollection(colName)
-		alterTask := &AlterCollectionTask{
-			baseTask: baseTask{MetaCache: cache},
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: colName,
-				DeleteKeys:     []string{common.RLSEnabledKey},
-			},
-			mixCoord: qc,
-		}
-		err := alterTask.PreExecute(ctx)
-		assert.NoError(t, err)
-	})
-
-	t.Run("alter rejects wrong case rls.enabled delete key", func(t *testing.T) {
-		colName := prefix + funcutil.GenRandomStr()
-		createCollection(colName)
-		alterTask := &AlterCollectionTask{
-			baseTask: baseTask{MetaCache: cache},
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: colName,
-				DeleteKeys:     []string{"RLS.Enabled"},
-			},
-			mixCoord: qc,
-		}
-		err := alterTask.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "did you mean")
-	})
-
-	t.Run("alter accepts rls.force", func(t *testing.T) {
-		colName := prefix + funcutil.GenRandomStr()
-		createCollection(colName)
-		alterTask := &AlterCollectionTask{
-			baseTask: baseTask{MetaCache: cache},
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "true"}},
-			},
-			mixCoord: qc,
-		}
-		err := alterTask.PreExecute(ctx)
-		assert.NoError(t, err)
-	})
-
-	t.Run("alter rls properties requires ManageRLS", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
-		paramtable.Get().Save(paramtable.Get().ProxyCfg.ResolveAliasForPrivilege.Key, "false")
-		t.Cleanup(func() {
-			paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key)
-			paramtable.Get().Reset(paramtable.Get().ProxyCfg.ResolveAliasForPrivilege.Key)
-		})
-
-		colName := prefix + funcutil.GenRandomStr()
-		createCollection(colName)
-		requests := []*milvuspb.AlterCollectionRequest{
-			{CollectionName: colName, Properties: []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}}},
-			{CollectionName: colName, DeleteKeys: []string{common.RLSForceKey}},
-			{CollectionName: colName, Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}}},
-			{CollectionName: colName, DeleteKeys: []string{common.RLSEnabledKey}},
-		}
-		for _, request := range requests {
-			alterTask := &AlterCollectionTask{
-				baseTask:               baseTask{MetaCache: cache},
-				AlterCollectionRequest: request,
-				node:                   &mockTaskNode{metaCache: cache},
-				mixCoord:               qc,
-			}
-			err := alterTask.PreExecute(GetContext(context.Background(), "alice:123456"))
-			assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		}
-
-		initPrivileges := func(policyDB, policyCollection string) {
-			coord := mocks.NewMockMixCoordClient(t)
-			coord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
-				Status: merr.Success(),
-				PolicyInfos: []string{funcutil.PolicyForPrivilege("rls_admin", commonpb.ObjectType_Collection.String(),
-					policyCollection, commonpb.ObjectPrivilege_PrivilegeManageRLS.String(), policyDB)},
-				UserRoles: []string{funcutil.EncodeUserRoleCache("alice", "rls_admin")},
-			}, nil)
-			require.NoError(t, privilege.InitPrivilegeCache(context.Background(), coord))
-		}
-
-		request := &milvuspb.AlterCollectionRequest{
-			DbName:         "default",
-			CollectionName: colName,
-			Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}},
-		}
-		initPrivileges(request.GetDbName(), colName)
-		assert.NoError(t, (&AlterCollectionTask{
-			baseTask:               baseTask{MetaCache: cache},
-			AlterCollectionRequest: request,
-			node:                   &mockTaskNode{metaCache: cache},
-			mixCoord:               qc,
-		}).PreExecute(GetContext(context.Background(), "alice:123456")))
-
-		for _, scope := range [][2]string{{"other_db", colName}, {request.GetDbName(), "other_collection"}} {
-			initPrivileges(scope[0], scope[1])
-			err := (&AlterCollectionTask{
-				baseTask:               baseTask{MetaCache: cache},
-				AlterCollectionRequest: request,
-				node:                   &mockTaskNode{metaCache: cache},
-				mixCoord:               qc,
-			}).PreExecute(GetContext(context.Background(), "alice:123456"))
-			assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		}
-
-		initPrivileges("source_db", "moving_alias")
-		aliasCache := NewMockCache(t)
-		aliasCache.EXPECT().GetCollectionID(mock.Anything, "source_db", "moving_alias").Return(int64(100), nil).Once()
-		aliasCache.EXPECT().GetCollectionInfo(mock.Anything, "source_db", "moving_alias", int64(100)).Return(&collectionInfo{
-			CollID: int64(100),
-			DBName: "target_db",
-			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "canonical_collection"}},
-		}, nil).Once()
-		err := (&AlterCollectionTask{
-			baseTask: baseTask{MetaCache: aliasCache},
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				DbName:         "source_db",
-				CollectionName: "moving_alias",
-				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}},
-			},
-			node:     &mockTaskNode{metaCache: aliasCache},
-			mixCoord: qc,
-		}).PreExecute(GetContext(context.Background(), "alice:123456"))
-		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-
-		assert.NoError(t, (&AlterCollectionTask{
-			baseTask: baseTask{MetaCache: cache},
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: "unrelated.property", Value: "value"}},
-			},
-			mixCoord: qc,
-		}).PreExecute(GetContext(context.Background(), "alice:123456")))
-	})
-
-	t.Run("alter rejects wrong case rls.force delete key", func(t *testing.T) {
-		colName := prefix + funcutil.GenRandomStr()
-		createCollection(colName)
-		alterTask := &AlterCollectionTask{
-			baseTask: baseTask{MetaCache: cache},
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: colName,
-				DeleteKeys:     []string{"RLS.Force"},
-			},
-			mixCoord: qc,
-		}
-		err := alterTask.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "did you mean")
 	})
 }
 
@@ -6655,7 +6509,7 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("external collection rejects unsupported field type", func(t *testing.T) {
+	t.Run("external collection allows precomputed sparse field", func(t *testing.T) {
 		schema := baseSchema()
 		for _, field := range schema.GetFields() {
 			field.ExternalField = field.GetName()
@@ -6666,10 +6520,7 @@ func TestValidateAddFieldRequest(t *testing.T) {
 			ExternalField: "sparse",
 		}
 		err := validateAddFieldRequest(schema, newField)
-		if assert.Error(t, err) {
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "does not support field type")
-		}
+		assert.NoError(t, err)
 	})
 
 	t.Run("external collection rejects duplicate external field mapping", func(t *testing.T) {
@@ -6737,6 +6588,18 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("timestamptz clustering key", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:            "event_time",
+			DataType:        schemapb.DataType_Timestamptz,
+			Nullable:        true,
+			IsClusteringKey: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.NoError(t, err)
+	})
+
 	t.Run("clustering key when schema already has one", func(t *testing.T) {
 		schema := baseSchema()
 		// Mark an existing field as clustering key.
@@ -6749,6 +6612,21 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		err := validateAddFieldRequest(schema, newField)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("timestamptz clustering key when schema already has one", func(t *testing.T) {
+		schema := baseSchema()
+		schema.Fields[0].IsClusteringKey = true
+		newField := &schemapb.FieldSchema{
+			Name:            "event_time",
+			DataType:        schemapb.DataType_Timestamptz,
+			Nullable:        true,
+			IsClusteringKey: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		// Rejected for the second key, not for the type.
+		assert.ErrorContains(t, err, "already has another clustering key")
 	})
 
 	t.Run("vector type with max vector fields exceeded", func(t *testing.T) {

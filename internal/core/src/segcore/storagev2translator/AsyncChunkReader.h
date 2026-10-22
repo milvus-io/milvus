@@ -43,7 +43,7 @@ struct ChunkReaderOpenSpec {
 
 // Configures scheduling for a batch of asynchronous reader opens.
 struct AsyncChunkReaderOpenOptions {
-    // Selects the priority queue used for reader factory work.
+    // Selects shared admission and executor priority for reader factory work.
     milvus::proto::common::LoadPriority load_priority{
         milvus::proto::common::LoadPriority::HIGH};
     // Empty selects the process-wide async-load executor. The keep-alive is
@@ -59,8 +59,11 @@ struct AsyncChunkReaderOpenOptions {
 // Shared ownership lets a preopened reader move across worker boundaries.
 using ChunkReaderPtr = std::shared_ptr<milvus_storage::api::ChunkReader>;
 
-// Opens chunk readers with bounded concurrency per call on the async-load
-// executor and returns them in request order. The first observed open failure
+// Opens chunk readers with a per-call window and one shared load slot per open
+// on the async-load executor, without charging footer bytes. Slots are released
+// after opens drain and are not retained by returned readers. Callers must not
+// hold a load slot while awaiting this operation. Returns readers in request
+// order. The first observed open failure
 // cancels pending dispatches; issued storage opens are drained before returning.
 // Caller/context cancellation takes precedence over that failure and is checked
 // before each dispatch and after draining. The context token is captured at call

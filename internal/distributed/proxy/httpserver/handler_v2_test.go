@@ -29,6 +29,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -48,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -103,6 +103,64 @@ func captureHTTPServerLogs(t *testing.T) *mlog.TestSink {
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
 	})
+}
+
+func TestRESTV2MutationFailureOmitsExplicitPayloadLogFields(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.TraceLogMode.Key, "0"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(proxy.Params.CommonCfg.TraceLogMode.Key))
+	})
+
+	cases := []struct {
+		name   string
+		body   string
+		schema *schemapb.CollectionSchema
+		rows   bool
+	}{
+		{
+			name:   "row conversion",
+			body:   `{"collectionName":"book","data":[0],"debug":"REST_BODY_SECRET_SENTINEL"}`,
+			schema: &schemapb.CollectionSchema{Name: "book"},
+		},
+		{
+			name: "column conversion",
+			body: `{"collectionName":"book","data":[{"id":"REST_BODY_SECRET_SENTINEL"}]}`,
+			schema: &schemapb.CollectionSchema{Name: "book", Fields: []*schemapb.FieldSchema{
+				{FieldID: common.StartOfUserFieldID, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_VarChar},
+			}},
+			rows: true,
+		},
+	}
+	for _, action := range []string{InsertAction, UpsertAction} {
+		for _, test := range cases {
+			t.Run(action+"/"+test.name, func(t *testing.T) {
+				describePatch := mockey.Mock((*mockProxyComponent).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+					Schema: test.schema,
+					Status: merr.Success(),
+				}, nil).Build()
+				defer describePatch.UnPatch()
+
+				logs := captureHTTPServerLogs(t)
+				body := []byte(test.body)
+				engine := initHTTPServerV2(&mockProxyComponent{}, false)
+				request := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), bytes.NewReader(body))
+				response := httptest.NewRecorder()
+				engine.ServeHTTP(response, request)
+
+				var result ReturnErrMsg
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &result))
+				assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), result.Code)
+				if !test.rows {
+					assert.Contains(t, result.Message, "data[0] must be a JSON object")
+				}
+				assert.Contains(t, logs.String(), "bodyBytes")
+				if test.rows {
+					assert.Contains(t, logs.String(), "rows")
+				}
+				assert.NotContains(t, logs.String(), "REST_BODY_SECRET_SENTINEL")
+			})
+		}
+	}
 }
 
 func TestRESTV2PathReplaceRejectsNullOperandInCompatibilityMode(t *testing.T) {
@@ -249,6 +307,132 @@ func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
 			assert.Contains(t, request, "***")
 			assert.Contains(t, request, "parquet")
 		})
+	}
+}
+
+func TestTraceLogRequestFieldHandlesTypedNilRequests(t *testing.T) {
+	for _, req := range []any{
+		(*CollectionReq)(nil),
+		(*RefreshExternalCollectionReq)(nil),
+		(*ImportReq)(nil),
+		(*PasswordReq)(nil),
+		(*NewPasswordReq)(nil),
+		(*RestoreExternalSnapshotReq)(nil),
+		(*ExportSnapshotReq)(nil),
+		(*QueryReqV2)(nil),
+		(*CollectionFilterReq)(nil),
+		(*SearchReqV2)(nil),
+		(*HybridSearchReq)(nil),
+	} {
+		assert.Equal(t, req, getTraceLogRequestFieldWithoutSensitiveInfo(req).Interface)
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTImportCredentials(t *testing.T) {
+	for _, req := range []*ImportReq{nil, {}, {Options: map[string]string{}}} {
+		assert.Equal(t, req, getTraceLogRequestFieldWithoutSensitiveInfo(req).Interface)
+	}
+
+	for _, spec := range []string{
+		`{"extfs":{"access_key_id":"IMPORT_ACCESS_SENTINEL","access_key_value":"IMPORT_SECRET_SENTINEL","future_password":"IMPORT_FUTURE_SENTINEL"}}`,
+		`{"extfs":{"access_key_value":"IMPORT_SECRET_SENTINEL"`,
+	} {
+		req := &ImportReq{
+			DbName:         "db",
+			CollectionName: "target",
+			PartitionName:  "p1",
+			Files:          [][]string{{"s3://bucket/snapshot.json"}},
+			Options: map[string]string{
+				"backup":        "true",
+				"source_type":   "snapshot",
+				"external_spec": spec,
+				"EXTERNAL_SPEC": spec,
+				"ezk":           "IMPORT_EZK_SENTINEL",
+				"EzK":           "IMPORT_EZK_MIXED_SENTINEL",
+			},
+		}
+		before, err := json.Marshal(req)
+		require.NoError(t, err)
+
+		field := getTraceLogRequestFieldWithoutSensitiveInfo(req)
+		require.Equal(t, "request", field.Key)
+		redacted, ok := field.Interface.(*ImportReq)
+		require.True(t, ok)
+		want := *req
+		want.Options = map[string]string{
+			"backup":        "true",
+			"source_type":   "snapshot",
+			"external_spec": "<redacted>",
+			"EXTERNAL_SPEC": "<redacted>",
+			"ezk":           "<redacted>",
+			"EzK":           "<redacted>",
+		}
+		assert.Equal(t, &want, redacted)
+		after, err := json.Marshal(req)
+		require.NoError(t, err)
+		assert.Equal(t, before, after, "logging must not change the live import request")
+		redacted.Options["backup"] = "false"
+		assert.Equal(t, "true", req.Options["backup"], "the log copy must not alias live options")
+	}
+}
+
+func TestCreateImportJobTraceLogRedactsCredentials(t *testing.T) {
+	type importProxy struct{ types.ProxyComponent }
+
+	params := paramtable.Get()
+	traceMode := params.CommonCfg.TraceLogMode.GetValue()
+	authEnabled := params.CommonCfg.AuthorizationEnabled.GetValue()
+	require.NoError(t, params.Save(params.CommonCfg.AuthorizationEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Save(params.CommonCfg.TraceLogMode.Key, traceMode))
+		require.NoError(t, params.Save(params.CommonCfg.AuthorizationEnabled.Key, authEnabled))
+	})
+
+	for _, mode := range []string{"2", "3"} {
+		for _, importErr := range []error{nil, merr.ErrImportFailed} {
+			t.Run(fmt.Sprintf("mode_%s/error_%v", mode, importErr != nil), func(t *testing.T) {
+				require.NoError(t, params.Save(params.CommonCfg.TraceLogMode.Key, mode))
+				logs := captureHTTPServerLogs(t)
+				options := map[string]string{
+					"backup":        "true",
+					"source_type":   "snapshot",
+					"external_spec": `{"extfs":{"access_key_id":"IMPORT_ACCESS_SENTINEL","access_key_value":"IMPORT_SECRET_SENTINEL","future_password":"IMPORT_FUTURE_SENTINEL"}}`,
+					"ezk":           "IMPORT_EZK_SENTINEL",
+				}
+				fakeProxy := &importProxy{}
+				called := false
+				patch := mockey.Mock((*importProxy).ImportV2).To(
+					func(_ *importProxy, _ context.Context, req *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
+						called = true
+						assert.Equal(t, options, funcutil.KeyValuePair2Map(req.GetOptions()))
+						return &internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "123"}, importErr
+					}).Build()
+				defer patch.UnPatch()
+				testEngine := initHTTPServerV2(fakeProxy, false)
+				body, err := json.Marshal(&ImportReq{
+					CollectionName: "import_trace_target",
+					Files:          [][]string{{"s3://bucket/snapshot.json"}},
+					Options:        options,
+				})
+				require.NoError(t, err)
+				req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction), bytes.NewReader(body))
+				w := httptest.NewRecorder()
+				testEngine.ServeHTTP(w, req)
+
+				require.True(t, called, "the real REST import handler must forward the request")
+				require.Equal(t, http.StatusOK, w.Code)
+				var response ReturnErrMsg
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+				assert.Equal(t, merr.Code(importErr), response.Code)
+				output := logs.String()
+				assert.Contains(t, output, "trace info:")
+				assert.Contains(t, output, "import_trace_target")
+				assert.Contains(t, output, "redacted")
+				for _, secret := range []string{"IMPORT_ACCESS_SENTINEL", "IMPORT_SECRET_SENTINEL", "IMPORT_FUTURE_SENTINEL", "IMPORT_EZK_SENTINEL"} {
+					assert.NotContains(t, output, secret)
+				}
+			})
+		}
 	}
 }
 
@@ -4977,81 +5161,6 @@ func TestDML(t *testing.T) {
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
-func TestRESTV2ForwardsRLSFields(t *testing.T) {
-	paramtable.Init()
-	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
-	t.Cleanup(func() {
-		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
-	})
-
-	matchesRLS := func(req interface {
-		GetRlsPrincipal() string
-		GetSkipRls() bool
-	},
-	) bool {
-		return req.GetRlsPrincipal() == "alice" && req.GetSkipRls()
-	}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Times(7)
-	mp.EXPECT().Query(mock.Anything, mock.MatchedBy(func(req *milvuspb.QueryRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.QueryResults{Status: commonSuccessStatus}, nil).Twice()
-	mp.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(req *milvuspb.DeleteRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.MutationResult{Status: commonSuccessStatus}, nil).Once()
-	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.MutationResult{
-		Status: commonSuccessStatus, IDs: generateIDs(schemapb.DataType_Int64, 1), InsertCnt: 1,
-	}, nil).Once()
-	mp.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpsertRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.MutationResult{
-		Status: commonSuccessStatus, IDs: generateIDs(schemapb.DataType_Int64, 1), UpsertCnt: 1,
-	}, nil).Once()
-	mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.SearchResults{
-		Status: commonSuccessStatus, Results: &schemapb.SearchResultData{},
-	}, nil).Once()
-	mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
-		return matchesRLS(req) && len(req.GetRequests()) == 1 &&
-			req.GetRequests()[0].GetRlsPrincipal() == "" && !req.GetRequests()[0].GetSkipRls()
-	})).Return(&milvuspb.SearchResults{
-		Status: commonSuccessStatus, Results: &schemapb.SearchResultData{},
-	}, nil).Once()
-	mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
-		principal, skip, err := importutilv2.GetRLSOptions(req.GetOptions())
-		return err == nil && principal == "alice" && skip
-	})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "1"}, nil).Once()
-
-	engine := initHTTPServerV2(mp, false)
-	send := func(action, body string) {
-		t.Helper()
-		w := httptest.NewRecorder()
-		engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), strings.NewReader(body)))
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	}
-
-	send(QueryAction, `{"collectionName":"book","filter":"book_id > 0","rlsPrincipal":"alice","skipRls":true}`)
-	send(GetAction, `{"collectionName":"book","id":[1],"rlsPrincipal":"alice","skipRls":true}`)
-	send(DeleteAction, `{"collectionName":"book","filter":"book_id in [1]","rlsPrincipal":"alice","skipRls":true}`)
-	send(InsertAction, `{"collectionName":"book","data":[{"book_id":1,"word_count":1,"book_intro":[0.1,0.2]}],"rlsPrincipal":"alice","skipRls":true}`)
-	send(UpsertAction, `{"collectionName":"book","data":[{"book_id":1,"word_count":1,"book_intro":[0.1,0.2]}],"rlsPrincipal":"alice","skipRls":true}`)
-	send(SearchAction, `{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":1,"rlsPrincipal":"alice","skipRls":true}`)
-	send(HybridSearchAction, `{"collectionName":"book","search":[{"data":[[0.1,0.2]],"annsField":"book_intro","limit":1}],"limit":1,"rlsPrincipal":"alice","skipRls":true}`)
-
-	w := httptest.NewRecorder()
-	engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction),
-		strings.NewReader(`{"collectionName":"book","files":[["book.json"]],"options":{"rls_principal":"alice","skip_rls":"true"}}`)))
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-}
-
 func TestQueryOrderByFields(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -6711,8 +6820,7 @@ func TestCommitImportJob(t *testing.T) {
 
 		mp := mocks.NewMockProxy(t)
 		mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
-			Status:         &StatusSuccess,
-			CollectionName: DefaultCollectionName,
+			Status: merr.Status(merr.WrapErrPrivilegeNotPermitted("not allowed to access import job")),
 		}, nil).Once()
 		testEngine := initHTTPServerV2(mp, true)
 		req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CommitAction), bytes.NewReader([]byte(`{"jobId": "123"}`)))
@@ -6725,8 +6833,8 @@ func TestCommitImportJob(t *testing.T) {
 		returnBody := &ReturnErrMsg{}
 		err := json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
-		assert.Equal(t, int32(65535), returnBody.Code)
-		assert.Contains(t, returnBody.Message, "PrivilegeImport: permission deny to test")
+		assert.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "not allowed to access import job")
 		mp.AssertNotCalled(t, "CommitImport", mock.Anything, mock.Anything)
 	})
 
@@ -6885,8 +6993,7 @@ func TestAbortImportJob(t *testing.T) {
 
 		mp := mocks.NewMockProxy(t)
 		mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
-			Status:         &StatusSuccess,
-			CollectionName: DefaultCollectionName,
+			Status: merr.Status(merr.WrapErrPrivilegeNotPermitted("not allowed to access import job")),
 		}, nil).Once()
 		testEngine := initHTTPServerV2(mp, true)
 		req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, AbortAction), bytes.NewReader([]byte(`{"jobId": "123"}`)))
@@ -6899,8 +7006,8 @@ func TestAbortImportJob(t *testing.T) {
 		returnBody := &ReturnErrMsg{}
 		err := json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
-		assert.Equal(t, int32(65535), returnBody.Code)
-		assert.Contains(t, returnBody.Message, "PrivilegeImport: permission deny to test")
+		assert.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "not allowed to access import job")
 		mp.AssertNotCalled(t, "AbortImport", mock.Anything, mock.Anything)
 	})
 
@@ -6991,6 +7098,83 @@ func TestInsertMalformedBodyNeverReachesProxy(t *testing.T) {
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
 			assert.NotEqual(t, int32(0), returnBody.Code,
 				"a malformed body must not be accepted: %s", tt.body)
+		})
+	}
+}
+
+func TestWrapperPostCollectionDataKeepsRowsRaw(t *testing.T) {
+	paramtable.Init()
+	body := []byte(`{"dbName":"db","collectionName":"book","partitionName":"part","data":[{"vector":[1.5,2.5]}]}`)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/insert", bytes.NewReader(body))
+	c.Set(ContextUsername, "root")
+
+	called := false
+	wrapperPost(func() any { return &CollectionDataReq{} }, func(_ context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+		called = true
+		dataReq := req.(*CollectionDataReq)
+		assert.Equal(t, "db", dbName)
+		assert.Equal(t, "book", dataReq.CollectionName)
+		assert.Equal(t, "part", dataReq.PartitionName)
+		assert.Nil(t, dataReq.Data, "row objects should not be materialized before schema-aware conversion")
+		cachedBody, ok := c.Get(gin.BodyBytesKey)
+		assert.True(t, ok)
+		assert.Equal(t, body, cachedBody)
+		return nil, nil
+	})(c)
+	require.True(t, called)
+}
+
+func TestBindCollectionDataMetadataRequiredData(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "missing data", body: `{"collectionName":"book"}`, wantErr: true},
+		{name: "null data", body: `{"collectionName":"book","data":null}`, wantErr: true},
+		{name: "object data", body: `{"collectionName":"book","data":{}}`, wantErr: true},
+		{name: "empty array", body: `{"collectionName":"book","data":[]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/insert", strings.NewReader(test.body))
+			req := &CollectionDataReq{}
+			err := bindCollectionDataMetadata(c, req)
+			if test.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Nil(t, req.Data)
+			}
+		})
+	}
+}
+
+func BenchmarkCollectionDataBinding(b *testing.B) {
+	vector := "[" + strings.TrimSuffix(strings.Repeat("0.125,", 768), ",") + "]"
+	row := `{"v1":` + vector + `,"v2":` + vector + `,"v3":` + vector + `,"v4":` + vector + `,"v5":` + vector + `}`
+	body := []byte(`{"collectionName":"book","data":[` + strings.TrimSuffix(strings.Repeat(row+",", 100), ",") + `]}`)
+	for _, test := range []struct {
+		name string
+		bind func(*gin.Context, *CollectionDataReq) error
+	}{
+		{name: "generic", bind: func(c *gin.Context, req *CollectionDataReq) error {
+			return c.ShouldBindBodyWith(req, binding.JSON)
+		}},
+		{name: "metadata", bind: bindCollectionDataMetadata},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(body)))
+			for i := 0; i < b.N; i++ {
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/insert", bytes.NewReader(body))
+				if err := test.bind(c, &CollectionDataReq{}); err != nil {
+					b.Fatal(err)
+				}
+			}
 		})
 	}
 }

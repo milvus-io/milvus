@@ -178,6 +178,9 @@ PhyFilterBitsNode::GetOutput() {
             num_processed_rows_ = need_process_rows_;
         });
         if (cached_output != nullptr) {
+            MarkFeature(
+                query_context_->get_plan_options().feature_recorder.get(),
+                FeatureBit::ExprCacheHit);
             return cached_output;
         }
     }

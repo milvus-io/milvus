@@ -60,11 +60,14 @@ class TestConnectionParams(TestcaseBase):
                 check_items={ct.err_code: 999, ct.err_msg: "Type of 'host' must be str"},
             )
 
+        # Since pymilvus 3.1.0rc95, is_legal_port rejects out-of-range ports up front,
+        # so an out-of-range port fails the type/legality check before the explicit
+        # range check ("port number ... out of range") is ever reached.
         data = {"port": "-1", "host": "hostlocal"}
         self.connection_wrap.add_connection(
             _kwargs=data,
             check_task=ct.CheckTasks.err_res,
-            check_items={ct.err_code: 999, ct.err_msg: "port number -1 out of range, valid range [0, 65535)"},
+            check_items={ct.err_code: 999, ct.err_msg: "Type of 'port' must be str or int"},
         )
 
         # get addr of default alias
@@ -1193,9 +1196,17 @@ class TestConnectAddressInvalid(TestcaseBase):
         expected: connected is False
         """
         address = f"{host}:{port}"
+        # An in-range but unused port ("100") passes SDK validation and fails at the
+        # gRPC layer. Since pymilvus 3.1.0rc95, is_legal_port rejects out-of-range
+        # ports ("65536") up front, so the SDK raises during address validation and
+        # no RPC is ever sent.
+        if 0 <= int(port) < 65535:
+            err_msg = "illegal connection params or server unavailable"
+        else:
+            err_msg = f"Illegal address: {address}, should be in form 'localhost:19530'"
         self.connection_wrap.connect(
             alias=connect_name,
             address=address,
             check_task=ct.CheckTasks.err_res,
-            check_items={ct.err_code: 999, ct.err_msg: "illegal connection params or server unavailable"},
+            check_items={ct.err_code: 999, ct.err_msg: err_msg},
         )

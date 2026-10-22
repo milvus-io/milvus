@@ -110,8 +110,9 @@ type LBPolicy interface {
 }
 
 const (
-	RoundRobin = "round_robin"
-	LookAside  = "look_aside"
+	RoundRobin       = "round_robin"
+	LookAside        = "look_aside"
+	RefinedLookAside = "refined_look_aside"
 )
 
 type LBPolicyImpl struct {
@@ -125,6 +126,7 @@ type LBPolicyImpl struct {
 func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 	balancerMap := make(map[string]LBBalancer)
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
+	balancerMap[RefinedLookAside] = NewRefinedLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
 
 	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()

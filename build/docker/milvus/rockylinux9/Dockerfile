@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 
 FROM rockylinux/rockylinux:9
 
@@ -29,7 +29,9 @@ RUN dnf install -y dnf-plugins-core && \
     rm -rf /var/cache/dnf/*
 
 RUN uv --no-cache python install 3.12.13 && \
-    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        --upgrade setuptools msgpack urllib3
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \

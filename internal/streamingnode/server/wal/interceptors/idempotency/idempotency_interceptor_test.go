@@ -18,12 +18,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/replicate/mock_replicates"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	idempotencyutils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -943,7 +945,7 @@ func TestTxnInsertResultBufferReclaimsUntrackedTxn(t *testing.T) {
 	}, 0)
 	require.NotNil(t, buffers.Build(body))
 
-	// The txn session vanished (e.g. RollbackAllInFlightTransactions on failover)
+	// The txn session vanished (e.g. FailTxnAtVChannel on failover)
 	// without a commit/rollback message reaching the interceptor.
 	active[1] = false
 	require.Nil(t, buffers.Build(body))
@@ -953,6 +955,7 @@ func TestInterceptorClearsExpiredTxnInsertResults(t *testing.T) {
 	baseTimeTick := tsoutil.ComposeTS(1000, 0)
 	keepalive := 10 * time.Millisecond
 	mvccManager := mvcc.NewMVCCManager(baseTimeTick)
+	mvccManager.ApplyRecoveryBarrier("v1", baseTimeTick)
 	interceptor := newIdempotencyInterceptorWithParam(WindowConfig{}, &interceptors.InterceptorBuildParam{
 		MVCCManager: mvccManager,
 	})
@@ -974,6 +977,61 @@ func TestInterceptorClearsExpiredTxnInsertResults(t *testing.T) {
 
 	expiredTimeTick := tsoutil.AddPhysicalDurationOnTs(baseTimeTick, keepalive)
 	mvccManager.UpdateMVCC(newIdempotentInsertMessage(t, "v1", "").WithTimeTick(expiredTimeTick))
+	require.Nil(t, interceptor.txnInsertResultBuffers.Build(body))
+}
+
+func TestInterceptorClearsExpiredTxnInsertResultsOnIdleChannel(t *testing.T) {
+	paramtable.Init()
+	resource.InitForTest(t)
+	baseTimeTick := tsoutil.ComposeTS(1000, 0)
+	keepalive := 10 * time.Millisecond
+	mvccManager := mvcc.NewMVCCManager(baseTimeTick)
+	mvccManager.ApplyRecoveryBarrier("v1", baseTimeTick)
+	txnManager := txn.NewTxnManager(types.PChannelInfo{Name: "idle-mvcc"}, nil)
+	t.Cleanup(func() {
+		txnManager.FailTxnAtVChannel("")
+		require.NoError(t, txnManager.GracefulClose(context.Background()))
+	})
+	interceptor := newIdempotencyInterceptorWithParam(WindowConfig{}, &interceptors.InterceptorBuildParam{
+		MVCCManager: mvccManager,
+		TxnManager:  txnManager,
+	})
+	begin, err := message.AsMutableBeginTxnMessageV2(message.NewBeginTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: keepalive.Milliseconds()}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().WithTimeTick(baseTimeTick))
+	require.NoError(t, err)
+	session, err := txnManager.BeginNewTxn(context.Background(), begin)
+	require.NoError(t, err)
+	body := newIdempotentInsertMessageWithInsertResult(t, "v1", "txn-key", &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{100}}},
+		},
+	}).WithTxnContext(session.TxnContext())
+
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err = interceptor.DoAppend(ctx, body, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		require.NoError(t, session.AddNewMessage(ctx, baseTimeTick))
+		session.AddNewMessageDoneAndKeepalive(baseTimeTick)
+		utility.ReplaceAppendResultTimeTick(ctx, baseTimeTick)
+		return newTestMessageID(10), nil
+	})
+	require.NoError(t, err)
+	require.NotNil(t, interceptor.txnInsertResultBuffers.Build(body))
+
+	expiredTimeTick := tsoutil.AddPhysicalDurationOnTs(baseTimeTick, keepalive)
+	txnManager.CleanupTxnUntil(expiredTimeTick - 1)
+	require.NotNil(t, interceptor.txnInsertResultBuffers.Build(body))
+	// The timetick interceptor expires txn sessions independently of retained
+	// MVCC. The next buffer operation reclaims the expired session's results.
+	txnManager.CleanupTxnUntil(expiredTimeTick)
+	mvccManager.UpdateMVCC(message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).MustBuildMutable().WithTimeTick(expiredTimeTick))
+	require.Equal(t, baseTimeTick, mvccManager.GetMVCCOfVChannel("v1").Timetick)
+	require.Equal(t, expiredTimeTick, mvccManager.GetConfirmedTimeTick())
+	_, err = txnManager.GetSessionOfTxn(session.TxnContext().TxnID)
+	require.Error(t, err)
 	require.Nil(t, interceptor.txnInsertResultBuffers.Build(body))
 }
 

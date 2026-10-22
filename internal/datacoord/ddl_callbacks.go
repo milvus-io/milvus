@@ -82,6 +82,19 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 	return broadcaster, nil
 }
 
+// startLocalFlushBroadcast serializes local collection operations on either role.
+// Replicated Drop bypasses these locks; the WAL accepts the admitted local flush
+// as an empty flush if Drop removes its shard before it appends.
+func (s *Server) startLocalFlushBroadcast(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	return broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(coll.GetDbName()),
+		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
+}
+
 // startBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.
 // It only creates the broadcaster with appropriate resource keys (DB, collection, snapshot)
 // without performing resource validation.

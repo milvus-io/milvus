@@ -12,17 +12,20 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metacache"
+	dccatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/storage"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/adminauth"
@@ -90,6 +93,10 @@ type mixCoordImpl struct {
 	// Set in initInternal, unregistered in Stop.
 	rootCredentialVerifier *adminauth.CachedRootVerifier
 
+	// metaStore is the shared metacache backing DataCoord (read-write) and
+	// QueryCoord (read-only) segment/collection metadata.
+	metaStore metacache.MetaStore
+
 	// POSIX directory cleanup task
 	posixCleanupCancel    context.CancelFunc
 	posixCleanupWg        sync.WaitGroup
@@ -106,17 +113,14 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	ctx, cancel := context.WithCancel(c) //nolint:gosec // cancel is stored below and called in Stop
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
-	dataCoordServer := datacoord.CreateServer(c, factory)
 
 	recoveryBarrier := newRecoveryBarrier()
-	dataCoordServer.SetDataViewCollectionRecoveryValidator(rootCoordServer.ValidateDataViewCollectionForRecovery)
 
 	return &mixCoordImpl{
 		ctx:              ctx,
 		cancel:           cancel,
 		rootcoordServer:  rootCoordServer,
 		queryCoordServer: queryCoordServer,
-		datacoordServer:  dataCoordServer,
 		factory:          factory,
 		recoveryBarrier:  recoveryBarrier,
 	}, nil
@@ -173,9 +177,33 @@ func (s *mixCoordImpl) activateFunc() error {
 }
 
 func (s *mixCoordImpl) initInternal() error {
+	// Create catalog and MetaStore — MetaStore owns the catalog.
+	metaKV := s.metaKVCreator()
+	var metaRootPath string
+	if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
+		metaRootPath = Params.TiKVCfg.MetaRootPath.GetValue()
+	} else {
+		metaRootPath = Params.EtcdCfg.MetaRootPath.GetValue()
+	}
+	// The catalog rebuilds text log paths against the chunk manager's root, so
+	// it must use the same root the persistent chunk manager is built with.
+	catalog := dccatalog.NewCatalog(metaKV, storage.PersistentStorageRootPath(Params), metaRootPath)
+	s.metaStore = metacache.NewMetaStore(catalog)
+
+	// Create DC server with MetaStore injected via constructor option.
+	s.datacoordServer = datacoord.CreateServer(s.ctx, s.factory, datacoord.WithMetaStore(s.metaStore), datacoord.WithCatalog(catalog))
+	s.datacoordServer.SetDataViewCollectionRecoveryValidator(s.rootcoordServer.ValidateDataViewCollectionForRecovery)
+	s.datacoordServer.SetSession(s.session)
+	s.datacoordServer.SetAddress(s.address)
+	s.datacoordServer.SetEtcdClient(s.etcdCli)
+	if s.tikvCli != nil {
+		s.datacoordServer.SetTiKVClient(s.tikvCli)
+	}
+
 	s.rootcoordServer.SetMixCoord(s)
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
+	s.queryCoordServer.SetMetaView(s.metaStore)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
 
 	if err := s.streamingCoord.Start(s.ctx, s.fileResourceObserver); err != nil {
@@ -207,45 +235,29 @@ func (s *mixCoordImpl) initInternal() error {
 	s.rootCredentialVerifier = adminauth.NewCachedRootVerifier(s.fetchRootHash)
 	internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotCoordinator, s.rootCredentialVerifier.Verify)
 
-	// DataCoord and QueryCoord are independent of each other;
-	// both only depend on RootCoord being ready. Recover them in parallel first.
-	g, _ := errgroup.WithContext(s.ctx)
-	g.Go(func() error {
-		s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
-		if err := s.datacoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
-			return err
-		}
-		return nil
-	})
-	g.Go(func() error {
-		s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
-		if err := s.queryCoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
-			return err
-		}
-		return nil
-	})
-	if err := g.Wait(); err != nil {
+	// DC must init first: its Init seeds the shared MetaStore with both the
+	// segments (newMeta -> LoadFromCatalog) and the collections
+	// (reloadCollectionsFromRootcoord) that QueryCoord then resolves against.
+	// MixCoord deliberately does not seed collections itself -- a second walk
+	// here would double RootCoord's boot load and could not degrade anyway,
+	// since DataCoord's copy is fatal on error.
+	s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
+	if err := s.datacoordServer.Init(); err != nil {
+		mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
+		return err
+	}
+	if err := s.datacoordServer.Start(); err != nil {
+		mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))
 		return err
 	}
 
-	g, _ = errgroup.WithContext(s.ctx)
-	g.Go(func() error {
-		if err := s.datacoordServer.Start(); err != nil {
-			mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))
-			return err
-		}
-		return nil
-	})
-	g.Go(func() error {
-		if err := s.queryCoordServer.Start(); err != nil {
-			mlog.Error(s.ctx, "queryCoord start failed", mlog.Err(err))
-			return err
-		}
-		return nil
-	})
-	if err := g.Wait(); err != nil {
+	s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
+	if err := s.queryCoordServer.Init(); err != nil {
+		mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
+		return err
+	}
+	if err := s.queryCoordServer.Start(); err != nil {
+		mlog.Error(s.ctx, "queryCoord start failed", mlog.Err(err))
 		return err
 	}
 
@@ -297,6 +309,8 @@ func (s *mixCoordImpl) Start() error {
 // - `activateFunc` when enableActiveStandBy is true
 func (s *mixCoordImpl) startAndUpdateHealthy() {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	// task-creation feature counters (see internal/featureusage)
+	featureusage.SetEnabled(Params.CommonCfg.FeatureUsageCountersEnabled.GetAsBool())
 	s.startPosixCleanupTask()
 	RegisterMgrRoute(s)
 
@@ -328,8 +342,10 @@ func (s *mixCoordImpl) OnActive(fn func()) {
 }
 
 func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
+	if s.datacoordServer != nil && s.datacoordServer.ServerExist(serverID) {
+		return true
+	}
 	return s.queryCoordServer.ServerExist(serverID) ||
-		s.datacoordServer.ServerExist(serverID) ||
 		s.rootcoordServer.ServerExist(serverID)
 }
 
@@ -467,8 +483,10 @@ func (s *mixCoordImpl) Stop() error {
 		mlog.Error(s.ctx, "Failed to stop queryCoord", mlog.Err(err))
 	}
 
-	if err := s.datacoordServer.Stop(); err != nil {
-		mlog.Error(s.ctx, "Failed to stop dataCoord", mlog.Err(err))
+	if s.datacoordServer != nil {
+		if err := s.datacoordServer.Stop(); err != nil {
+			mlog.Error(s.ctx, "Failed to stop dataCoord", mlog.Err(err))
+		}
 	}
 
 	if err := s.rootcoordServer.Stop(); err != nil {
@@ -504,7 +522,6 @@ func (s *mixCoordImpl) initSession() error {
 	// MixCoord owns the session lifecycle and stops it after all coordinators have stopped.
 	s.session.SetMixCoordMode(true)
 	s.rootcoordServer.SetSession(s.session)
-	s.datacoordServer.SetSession(s.session)
 	s.queryCoordServer.SetSession(s.session)
 
 	return nil
@@ -513,21 +530,18 @@ func (s *mixCoordImpl) initSession() error {
 func (s *mixCoordImpl) SetAddress(address string) {
 	s.address = address
 	s.rootcoordServer.SetAddress(address)
-	s.datacoordServer.SetAddress(address)
 	s.queryCoordServer.SetAddress(address)
 }
 
 func (s *mixCoordImpl) SetEtcdClient(client *clientv3.Client) {
 	s.etcdCli = client
 	s.rootcoordServer.SetEtcdClient(client)
-	s.datacoordServer.SetEtcdClient(client)
 	s.queryCoordServer.SetEtcdClient(client)
 }
 
 func (s *mixCoordImpl) SetTiKVClient(client *txnkv.Client) {
 	s.tikvCli = client
 	s.rootcoordServer.SetTiKVClient(client)
-	s.datacoordServer.SetTiKVClient(client)
 	s.queryCoordServer.SetTiKVClient(client)
 }
 
@@ -1594,4 +1608,38 @@ func (s *mixCoordImpl) GetRefreshExternalCollectionProgress(ctx context.Context,
 
 func (s *mixCoordImpl) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
 	return s.datacoordServer.ListRefreshExternalCollectionJobs(ctx, req)
+}
+
+func (s *mixCoordImpl) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	resp, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, req)
+	if merr.CheckRPCCall(resp, err) == nil {
+		resp.IndexInfoList = s.datacoordServer.GetQueryViewCollectionIndexInfos(req.GetCollectionID())
+	}
+	return resp, err
+}
+
+func (s *mixCoordImpl) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	if req.GetLoadInfoVersion() != 0 {
+		loadInfo, err := s.queryCoordServer.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{
+			CollectionID: req.GetCollectionId(),
+			Version:      req.GetLoadInfoVersion(),
+		})
+		if err := merr.CheckRPCCall(loadInfo, err); err != nil {
+			return &datapb.GetStreamingNodeQueryViewResourcesResponse{
+				Status:       merr.Status(err),
+				CollectionId: req.GetCollectionId(),
+				Vchannel:     req.GetVchannel(),
+				DataVersion:  req.GetDataVersion(),
+			}, nil
+		}
+		req = &datapb.GetStreamingNodeQueryViewResourcesRequest{
+			Base:            req.GetBase(),
+			CollectionId:    req.GetCollectionId(),
+			Vchannel:        req.GetVchannel(),
+			DataVersion:     req.GetDataVersion(),
+			LoadInfoVersion: req.GetLoadInfoVersion(),
+			PartitionIds:    append([]int64(nil), loadInfo.GetPartitionIDs()...),
+		}
+	}
+	return s.datacoordServer.GetStreamingNodeQueryViewResources(ctx, req)
 }

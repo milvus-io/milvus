@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -35,14 +36,6 @@ import (
 // recoveryScanProgressInterval is the number of keys between two progress logs
 // of one recovery prefix scan.
 const recoveryScanProgressInterval = 100000
-
-// recoveryPrefixWalker is a metadata store that scans a prefix page by page.
-// GetPath returns the full form of a key, which is the form WalkWithPrefix
-// passes to its callback.
-type recoveryPrefixWalker interface {
-	prefixWalker
-	GetPath(key string) string
-}
 
 // ListCollectionsForRecovery returns the collections of every database in
 // dbIDs, keyed by database ID, as ListCollections returns them for each
@@ -58,7 +51,7 @@ func (kc *Catalog) ListCollectionsForRecovery(
 	dbIDs []int64,
 	ts typeutil.Timestamp,
 ) (map[int64][]*model.Collection, error) {
-	walker, ok := kc.Txn.(recoveryPrefixWalker)
+	walker, ok := kc.Txn.(kv.MetaKv)
 	if !ok {
 		return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "metadata store does not support paginated collection recovery scans")
 	}
@@ -136,7 +129,7 @@ func (kc *Catalog) ListCollectionsForRecovery(
 // collections.
 func attachRecoveryChildMetadata(
 	ctx context.Context,
-	walker recoveryPrefixWalker,
+	walker kv.MetaKv,
 	targets map[int64]*model.Collection,
 	duplicates map[int64][]*model.Collection,
 ) error {
@@ -171,7 +164,7 @@ func attachRecoveryChildMetadata(
 // are skipped without being decoded.
 func scanRecoveryChildren[T any](
 	ctx context.Context,
-	walker recoveryPrefixWalker,
+	walker kv.MetaKv,
 	prefix string,
 	targets map[int64]*model.Collection,
 	duplicates map[int64][]*model.Collection,
@@ -201,10 +194,11 @@ func scanRecoveryChildren[T any](
 // skipped, as a read of <prefix><id>/ would not return them either.
 func walkRecoveryPrefixByID(
 	ctx context.Context,
-	walker recoveryPrefixWalker,
+	walker kv.MetaKv,
 	prefix string,
 	fn func(id int64, value []byte) error,
 ) error {
+	// WalkWithPrefix passes full keys, in the form GetPath returns.
 	fullPrefix := []byte(walker.GetPath(prefix))
 	return walkRecoveryPrefix(ctx, walker, prefix, func(key, value []byte) error {
 		id, ok := parseRecoveryKeyID(fullPrefix, key)
@@ -221,7 +215,7 @@ func walkRecoveryPrefixByID(
 // legacy tombstone, reading metastore.paginationSize keys per request.
 func walkRecoveryPrefix(
 	ctx context.Context,
-	walker recoveryPrefixWalker,
+	walker kv.MetaKv,
 	prefix string,
 	fn func(key, value []byte) error,
 ) error {

@@ -90,7 +90,7 @@ MOCKERY_VERSION := 2.53.3
 MOCKERY_OUTPUT := $(shell $(INSTALL_PATH)/mockery --version 2>/dev/null)
 INSTALL_MOCKERY := $(findstring $(MOCKERY_VERSION),$(MOCKERY_OUTPUT))
 # gci
-GCI_VERSION := 0.13.4
+GCI_VERSION := 0.13.7
 GCI_OUTPUT := $(shell $(INSTALL_PATH)/gci --version 2>/dev/null)
 INSTALL_GCI := $(findstring $(GCI_VERSION),$(GCI_OUTPUT))
 # gofumpt
@@ -545,6 +545,10 @@ codecov-cpp: build-cpp-with-coverage
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
 # Build each component and install binary to $GOPATH/bin.
+# Package builds audit the AWS runtime even without native unit tests.
+# An explicit environment or command-line value can override this default.
+install gpu-install: export MILVUS_AUDIT_AWS_RUNTIME ?= ON
+
 install: milvus build-pyudf-runtime-wheel
 	@echo "Installing binary to './bin'"
 	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)

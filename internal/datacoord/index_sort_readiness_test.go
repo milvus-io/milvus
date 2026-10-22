@@ -88,7 +88,7 @@ func TestIndexServingReadinessSortTransition(t *testing.T) {
 				s.meta.catalog = catalog
 				s.meta.ctx = context.Background()
 				collection := s.meta.GetCollection(1)
-				segments, _, err := s.meta.completeSortCompactionMutation(&datapb.CompactionTask{
+				segments, err := s.meta.completeSortCompactionMutation(&datapb.CompactionTask{
 					PlanID: 1000, CollectionID: 1, InputSegments: []int64{1}, Schema: collection.Schema,
 				}, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 					SegmentID: 2, NumOfRows: 90, IsSorted: true,

@@ -29,6 +29,7 @@
 #include "filemanager/InputStream.h"
 #include "folly/CancellationToken.h"
 #include "folly/coro/Task.h"
+#include "pb/common.pb.h"
 #include "storage/LoadAdmissionController.h"
 #include "storage/ThreadPools.h"
 
@@ -68,6 +69,13 @@ ThrowIfCancelled(const folly::CancellationToken& cancellation_token,
         ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
     }
 }
+
+// Reserves one shared load slot without charging metadata bytes. Hold it until
+// issued I/O drains; release it before calling a child that acquires load slots.
+// Pending cancellation is reported as FollyCancel, including coroutine cancellation.
+[[nodiscard]] folly::coro::Task<LoadAdmissionLease>
+AcquireMetadataLoadSlotAsync(proto::common::LoadPriority priority,
+                             folly::CancellationToken token = {});
 
 // Drain issued I/O before checking cancellation so the stream and the
 // caller-owned destination remain alive through completion and retries.

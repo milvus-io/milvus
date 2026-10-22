@@ -19,6 +19,7 @@ package binlog
 import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -31,11 +32,17 @@ func FilterWithDelete(r *reader) (Filter, error) {
 	}
 	return func(row map[int64]interface{}) bool {
 		rowPk := row[pkField.GetFieldID()]
-		rowTs := row[common.TimeStampField]
-		if ts, ok := r.deleteData[rowPk]; ok && int64(ts) > rowTs.(int64) {
-			return false
+		deleteTs, exists := r.deleteData[rowPk]
+		if !exists {
+			return true
 		}
-		return true
+		rowTs := row[common.TimeStampField].(int64)
+		if r.snapshotSource != nil {
+			// Read validates the source invariant before applying any filter.
+			// Never use the destination Import job's timestamp for this test.
+			return deleteTs <= tsoutil.EffectiveTimestamp(uint64(rowTs), r.snapshotSource.GetSourceCommitTimestamp())
+		}
+		return int64(deleteTs) <= rowTs
 	}, nil
 }
 

@@ -301,14 +301,30 @@ struct LoadedValidity {
 template <typename Engine>
 LoadedValidity
 InspectLoadedValidity(const Engine& engine) {
-    const auto& id_map = engine.native_index.GetIdMap();
-    const auto valid_bitmap = id_map.ValidBitmap();
-    if (valid_bitmap.empty()) {
+    const auto has_validity = engine.native_index.HasValidity();
+    if (!has_validity.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(has_validity.error()),
+                  "failed to inspect loaded validity: {}",
+                  has_validity.what());
+    }
+    if (!has_validity.value()) {
         return {};
     }
+    const auto logical_count = engine.native_index.LogicalCount();
+    if (!logical_count.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(logical_count.error()),
+                  "failed to read loaded logical count: {}",
+                  logical_count.what());
+    }
+    const auto valid_count = engine.native_index.ValidCount();
+    if (!valid_count.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(valid_count.error()),
+                  "failed to read loaded valid count: {}",
+                  valid_count.what());
+    }
     return {true,
-            static_cast<int64_t>(valid_bitmap.size()),
-            static_cast<int64_t>(id_map.InCount())};
+            static_cast<int64_t>(logical_count.value()),
+            static_cast<int64_t>(valid_count.value())};
 }
 
 template <typename Engine>

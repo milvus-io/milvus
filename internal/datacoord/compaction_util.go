@@ -99,6 +99,12 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 	case *datapb.PreImportRequest:
 		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *datapb.ReshardTaskRequest:
+		job := msg
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *datapb.ImportTaskV3Request:
+		job := msg
+		job.PluginContext = append(job.PluginContext, pluginContext...)
 	default:
 		return
 	}

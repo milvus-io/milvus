@@ -28,12 +28,15 @@
 #include "common/resource_c.h"
 #include "storage/FileManager.h"
 #include "cachinglayer/LoadingOverhead.h"
+#include "folly/coro/Task.h"
 
 namespace milvus::storage {
-class AsyncIndexEntryReader;
+class V1RemoteSource;
 }
 
 namespace milvus::index {
+
+struct PackedIndexSource;
 
 // Admission reserve for resident scalar reader metadata, charged once per index.
 inline constexpr uint64_t kScalarIndexFixedResidentBytes = 2 * 1024;
@@ -64,6 +67,25 @@ struct ScalarIndexLoadResources {
     std::optional<cachinglayer::LoadingOverheadConfig> overhead;
 };
 
+// Borrow an opened legacy source so inspection can be reused by its first load.
+// The caller binds token/priority and keeps the source alive through the task.
+folly::coro::Task<LoadResourceRequest>
+LegacyScalarIndexLoadResourceAsync(
+    DataType field_type,
+    uint64_t index_size,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    storage::V1RemoteSource& source);
+
+// Inspect only eagerly loaded vector entries on the caller's bound source.
+folly::coro::Task<LoadResourceRequest>
+LegacyVectorFileLoadResourceAsync(LoadResourceRequest request,
+                                  bool disk_family,
+                                  const storage::LoadOptions& options,
+                                  storage::V1RemoteSource& source);
+
+// op_ctx is borrowed only through metadata inspection; estimates retain no context.
 ScalarIndexLoadResources
 ScalarIndexFileLoadResource(
     DataType field_type,
@@ -74,11 +96,12 @@ ScalarIndexFileLoadResource(
     const std::vector<std::string>& index_files,
     const storage::FileManagerContext& context,
     storage::ArtifactStorageNamespace storage_namespace =
-        storage::ArtifactStorageNamespace::Index);
+        storage::ArtifactStorageNamespace::Index,
+    milvus::OpContext* op_ctx = nullptr);
 
 /**
  * @brief Estimate packed scalar loading resources from inspected metadata.
- * @param reader Borrowed directory and metadata; this calculation performs no I/O.
+ * @param source Borrowed directory and metadata; this calculation performs no I/O.
  * @param use_async_load Pinned loading mode used by the caller.
  */
 ScalarIndexLoadResources
@@ -89,16 +112,7 @@ PackedScalarIndexLoadResource(
     bool mmap_enable,
     int64_t num_rows,
     const std::vector<std::string>& index_files,
-    const storage::AsyncIndexEntryReader& reader,
+    const PackedIndexSource& source,
     bool use_async_load);
-
-// Add envelope/decode scratch for the entries actually prepared by async
-// vector loading. Native remote-stream engine entries remain uninspected.
-LoadResourceRequest
-LegacyVectorFileLoadResource(LoadResourceRequest request,
-                             bool disk_family,
-                             const storage::LoadOptions& options,
-                             const std::vector<std::string>& paths,
-                             const storage::FileManagerContext& context);
 
 }  // namespace milvus::index

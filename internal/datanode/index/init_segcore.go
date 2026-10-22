@@ -111,6 +111,9 @@ func InitSegcore(nodeID int64) error {
 	if err := initcore.InitExternalVectorNullPolicy(paramtable.Get()); err != nil {
 		return err
 	}
+	if err := initcore.InitExternalSparseConversionConfig(paramtable.Get()); err != nil {
+		return err
+	}
 
 	// Publish the External Table IOPS policy once for native IndexBuilder
 	// readers. Reader config watchers must not rewrite this startup policy.
