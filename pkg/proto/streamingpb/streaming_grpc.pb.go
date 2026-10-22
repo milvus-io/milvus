@@ -468,6 +468,7 @@ var StreamingCoordAssignmentService_ServiceDesc = grpc.ServiceDesc{
 
 const (
 	StreamingNodeHandlerService_GetCollectionSchema_FullMethodName    = "/milvus.proto.streaming.StreamingNodeHandlerService/GetCollectionSchema"
+	StreamingNodeHandlerService_ValidateAnalyzer_FullMethodName       = "/milvus.proto.streaming.StreamingNodeHandlerService/ValidateAnalyzer"
 	StreamingNodeHandlerService_RunAnalyzer_FullMethodName            = "/milvus.proto.streaming.StreamingNodeHandlerService/RunAnalyzer"
 	StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/GetReplicateCheckpoint"
 	StreamingNodeHandlerService_GetSalvageCheckpoint_FullMethodName   = "/milvus.proto.streaming.StreamingNodeHandlerService/GetSalvageCheckpoint"
@@ -480,6 +481,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingNodeHandlerServiceClient interface {
 	GetCollectionSchema(ctx context.Context, in *StreamingNodeGetCollectionSchemaRequest, opts ...grpc.CallOption) (*StreamingNodeGetCollectionSchemaResponse, error)
+	ValidateAnalyzer(ctx context.Context, in *StreamingNodeValidateAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeValidateAnalyzerResponse, error)
 	RunAnalyzer(ctx context.Context, in *StreamingNodeRunAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeRunAnalyzerResponse, error)
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
@@ -515,6 +517,15 @@ func NewStreamingNodeHandlerServiceClient(cc grpc.ClientConnInterface) Streaming
 func (c *streamingNodeHandlerServiceClient) GetCollectionSchema(ctx context.Context, in *StreamingNodeGetCollectionSchemaRequest, opts ...grpc.CallOption) (*StreamingNodeGetCollectionSchemaResponse, error) {
 	out := new(StreamingNodeGetCollectionSchemaResponse)
 	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_GetCollectionSchema_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *streamingNodeHandlerServiceClient) ValidateAnalyzer(ctx context.Context, in *StreamingNodeValidateAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeValidateAnalyzerResponse, error) {
+	out := new(StreamingNodeValidateAnalyzerResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_ValidateAnalyzer_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -615,6 +626,7 @@ func (x *streamingNodeHandlerServiceConsumeClient) Recv() (*ConsumeResponse, err
 // for forward compatibility
 type StreamingNodeHandlerServiceServer interface {
 	GetCollectionSchema(context.Context, *StreamingNodeGetCollectionSchemaRequest) (*StreamingNodeGetCollectionSchemaResponse, error)
+	ValidateAnalyzer(context.Context, *StreamingNodeValidateAnalyzerRequest) (*StreamingNodeValidateAnalyzerResponse, error)
 	RunAnalyzer(context.Context, *StreamingNodeRunAnalyzerRequest) (*StreamingNodeRunAnalyzerResponse, error)
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
@@ -645,6 +657,9 @@ type UnimplementedStreamingNodeHandlerServiceServer struct {
 
 func (UnimplementedStreamingNodeHandlerServiceServer) GetCollectionSchema(context.Context, *StreamingNodeGetCollectionSchemaRequest) (*StreamingNodeGetCollectionSchemaResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCollectionSchema not implemented")
+}
+func (UnimplementedStreamingNodeHandlerServiceServer) ValidateAnalyzer(context.Context, *StreamingNodeValidateAnalyzerRequest) (*StreamingNodeValidateAnalyzerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
 }
 func (UnimplementedStreamingNodeHandlerServiceServer) RunAnalyzer(context.Context, *StreamingNodeRunAnalyzerRequest) (*StreamingNodeRunAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
@@ -687,6 +702,24 @@ func _StreamingNodeHandlerService_GetCollectionSchema_Handler(srv interface{}, c
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(StreamingNodeHandlerServiceServer).GetCollectionSchema(ctx, req.(*StreamingNodeGetCollectionSchemaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StreamingNodeHandlerService_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StreamingNodeValidateAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeHandlerServiceServer).ValidateAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeHandlerService_ValidateAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeHandlerServiceServer).ValidateAnalyzer(ctx, req.(*StreamingNodeValidateAnalyzerRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -807,6 +840,10 @@ var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCollectionSchema",
 			Handler:    _StreamingNodeHandlerService_GetCollectionSchema_Handler,
+		},
+		{
+			MethodName: "ValidateAnalyzer",
+			Handler:    _StreamingNodeHandlerService_ValidateAnalyzer_Handler,
 		},
 		{
 			MethodName: "RunAnalyzer",

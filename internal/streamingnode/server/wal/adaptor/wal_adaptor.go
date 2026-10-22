@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -193,6 +194,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 
 	// Setup the term of wal.
 	msg = msg.WithWALTerm(w.Channel().Term)
+	ctx = redo.WithCallerContext(ctx)
 
 	// we need to promise the state of wal kept consistent with the memory state of streamingnode.
 	// So we don't allow the append operation can be canceled by the append caller to avoid leave a inconsistent state of alive wal,

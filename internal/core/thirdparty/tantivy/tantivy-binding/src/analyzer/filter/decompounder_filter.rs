@@ -16,7 +16,7 @@ impl FilterBuilder for SplitCompoundWords {
         let mut dict = Vec::<String>::new();
         if let Some(value) = params.get(WORD_LIST_KEY) {
             if !value.is_array() {
-                return Err(TantivyBindingError::InternalError(
+                return Err(TantivyBindingError::InvalidArgument(
                     "decompounder word list should be array".to_string(),
                 ));
             }
@@ -25,7 +25,7 @@ impl FilterBuilder for SplitCompoundWords {
                 if let Some(word) = element.as_str() {
                     dict.push(word.to_string());
                 } else {
-                    return Err(TantivyBindingError::InternalError(
+                    return Err(TantivyBindingError::InvalidArgument(
                         "decompounder word list item should be string".to_string(),
                     ));
                 }
@@ -42,7 +42,7 @@ impl FilterBuilder for SplitCompoundWords {
         }
 
         if dict.is_empty() {
-            return Err(TantivyBindingError::InternalError(
+            return Err(TantivyBindingError::InvalidArgument(
                 "decompounder word list is empty".to_string(),
             ));
         }

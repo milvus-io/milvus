@@ -3466,6 +3466,11 @@ func (_c *IMetaTable_ListDatabases_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// GetFileResourcesByNames is patched with mockey by resource-binding tests.
+func (_m *IMetaTable) GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error) {
+	panic("mock GetFileResourcesByNames with mockey")
+}
+
 // ListFileResource provides a mock function with given fields: ctx
 func (_m *IMetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
 	ret := _m.Called(ctx)

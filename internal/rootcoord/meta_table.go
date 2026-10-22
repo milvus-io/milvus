@@ -159,6 +159,7 @@ type IMetaTable interface {
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
 	HasFileResource(ctx context.Context) bool
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
+	GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error)
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 	IncFileResourceRefCnt(ids []int64) error
 	DecFileResourceRefCnt(ids []int64)
@@ -2631,6 +2632,21 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	defer mt.ddLock.RUnlock()
 
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+// GetFileResourcesByNames resolves unbound names together under the metadata lock.
+func (mt *MetaTable) GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	resources := make([]*internalpb.FileResourceInfo, 0, len(names))
+	for _, name := range names {
+		resource, ok := mt.fileResourceName2Meta[name]
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("file resource %s not found", name)
+		}
+		resources = append(resources, proto.Clone(resource).(*internalpb.FileResourceInfo))
+	}
+	return resources, nil
 }
 
 func (mt *MetaTable) HasFileResource(ctx context.Context) bool {

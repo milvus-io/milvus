@@ -43,14 +43,14 @@ type Server struct {
 // Init initializes the streamingnode server.
 func (s *Server) init() {
 	mlog.Info(context.TODO(), "init streamingnode server...")
+	// Install on-demand resource loading before WAL recovery registers function runners.
+	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.GetLocalMode())
+	fileresource.SetResourceFetcher(resource.Resource().ChunkManager(), fetchFileResources)
 	// init all basic components.
 	s.initBasicComponent()
 
 	// init all service.
 	s.initService()
-
-	// init file resource manager
-	fileresource.InitManager(resource.Resource().ChunkManager(), fileresource.GetLocalMode())
 
 	if err := analyzer.InitOptions(); err != nil {
 		panic(fmt.Sprintf("init analyzer options failed, %+v", err))
@@ -69,6 +69,7 @@ func (s *Server) Stop() {
 	mlog.Info(context.TODO(), "stopping streamingnode server...")
 	mlog.Info(context.TODO(), "close wal manager...")
 	s.walManager.Close()
+	fileresource.CloseAnalyzerResourceManager()
 	mlog.Info(context.TODO(), "release streamingnode resources...")
 	resource.Release()
 	mlog.Info(context.TODO(), "streamingnode server stopped")

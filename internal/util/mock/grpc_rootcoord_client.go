@@ -421,3 +421,7 @@ func (m *GrpcRootCoordClient) GetClientTelemetry(ctx context.Context, in *milvus
 func (m *GrpcRootCoordClient) PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
 	return &milvuspb.PushClientCommandResponse{}, m.Err
 }
+
+func (*GrpcRootCoordClient) FetchFileResources(context.Context, *rootcoordpb.FetchFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
+	panic("mock FetchFileResources with mockey")
+}

@@ -20,12 +20,12 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -35,13 +35,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	util "github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -256,31 +256,15 @@ func (c *Core) validateAnalyzerInfos(ctx context.Context, analyzerInfos []*query
 		return nil, nil
 	}
 
-	// validate analyzer params at any streaming node
-	// and set file resource ids to schema
-	err := retry.Do(ctx, func() error {
-		if c.fileResourceObserver == nil {
-			return nil
-		}
-		if err := c.fileResourceObserver.CheckAllQnReady(); err != nil {
-			return err
-		}
-		return nil
-	}, retry.Attempts(10), retry.Sleep(3*time.Second))
+	infos := make([]*streamingpb.StreamingAnalyzerInfo, 0, len(analyzerInfos))
+	for _, info := range analyzerInfos {
+		infos = append(infos, &streamingpb.StreamingAnalyzerInfo{Params: info.GetParams(), Field: info.GetField(), Name: info.GetName()})
+	}
+	resp, err := streaming.WAL().AnalyzerClient().ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: infos})
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := c.mixCoord.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
-		AnalyzerInfos: analyzerInfos,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if err := merr.Error(resp.GetStatus()); err != nil {
-		return nil, err
-	}
 	return resp.GetResourceIds(), nil
 }
 
