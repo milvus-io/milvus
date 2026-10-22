@@ -455,8 +455,34 @@ func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 		if field.DataType == schemapb.DataType_Array || field.DataType == schemapb.DataType_ArrayOfVector {
 			fieldDetail[HTTPReturnFieldElementType] = field.GetElementType().String()
 		}
+		if field.GetElementNullable() {
+			fieldDetail[HTTPReturnFieldElementNullable] = true
+		}
+		if field.GetTypeSchema() != nil {
+			fieldDetail[HTTPReturnFieldTypeSchema] = printTypeSchema(field.GetTypeSchema())
+		}
 	}
 	return fieldDetail
+}
+
+// printTypeSchema renders a type_schema in the shape a create request takes it,
+// so a described sub-field can be sent back as it is.
+func printTypeSchema(typeSchema *schemapb.TypeSchema) *TypeSchemaReq {
+	nullable := typeSchema.GetNullable()
+	out := &TypeSchemaReq{Nullable: &nullable}
+	if len(typeSchema.GetTypeParams()) > 0 {
+		out.TypeParams = make(map[string]interface{}, len(typeSchema.GetTypeParams()))
+		for _, kv := range typeSchema.GetTypeParams() {
+			out.TypeParams[kv.GetKey()] = kv.GetValue()
+		}
+	}
+	switch kind := typeSchema.GetKind().(type) {
+	case *schemapb.TypeSchema_ArrayElement:
+		out.ArrayElement = printTypeSchema(kind.ArrayElement)
+	case *schemapb.TypeSchema_LeafType:
+		out.LeafType = kind.LeafType.String()
+	}
+	return out
 }
 
 func printStructArrayFieldsV2(structFields []*schemapb.StructArrayFieldSchema) []gin.H {
@@ -1551,8 +1577,11 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 
 // schemaForPathReplaceOperands validates information that would be lost during
 // REST row conversion and returns a request-local schema view. A PATH_REPLACE
-// StructArray operand must contain all children for an element path or exactly
-// the selected child for a child path. The collection schema remains complete.
+// StructArray operand must contain every child that is not element_nullable for
+// an element path, or exactly the selected child for a child path. An element
+// path may omit element_nullable children; the request schema leaves them out
+// and Proxy fills a null element for them, as it does for gRPC. The collection
+// schema remains complete.
 func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSchema, fieldOps []*schemapb.FieldPartialUpdateOp) (*schemapb.CollectionSchema, error) {
 	targets := make(map[string]string)
 	for _, fieldOp := range fieldOps {
@@ -1650,11 +1679,8 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 		expectedMask := expectedMasks[structSchema.GetName()]
 
 		path := targets[structSchema.GetName()]
-		if strings.Count(path, "[") == 1 {
-			if len(expectedMask) != len(structSchema.GetFields()) {
-				return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q whole element requires all struct children", structSchema.GetName())
-			}
-		} else if len(expectedMask) != 1 || !strings.HasSuffix(path, "["+expectedMask[0]+"]") {
+		wholeElement := strings.Count(path, "[") == 1
+		if !wholeElement && (len(expectedMask) != 1 || !strings.HasSuffix(path, "["+expectedMask[0]+"]")) {
 			return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q path requires exactly the selected child", structSchema.GetName())
 		}
 		selected := make(map[string]struct{}, len(expectedMask))
@@ -1662,17 +1688,25 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 			selected[name] = struct{}{}
 		}
 		children := make([]*schemapb.FieldSchema, 0, len(selected))
+		var missing *schemapb.FieldSchema
 		for _, child := range structSchema.GetFields() {
 			name := subShortName(child)
 			if _, ok := selected[name]; ok {
 				children = append(children, child)
 				delete(selected, name)
+			} else if missing == nil && !child.GetElementNullable() {
+				missing = child
 			}
 		}
-		if len(selected) > 0 {
-			for name := range selected {
+		// expectedMask is sorted, so the first unknown key is deterministic.
+		for _, name := range expectedMask {
+			if _, unknown := selected[name]; unknown {
 				return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE struct field %q has no child %q", structSchema.GetName(), name)
 			}
+		}
+		if wholeElement && missing != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q element at %s is missing sub-field %q, which is not element nullable",
+				structSchema.GetName(), path, subShortName(missing))
 		}
 		structSchema.Fields = children
 	}
@@ -1725,35 +1759,57 @@ func parseStructArrayRow(rawJSON string, structSchema *schemapb.StructArrayField
 	}
 	elems := parsed.Array()
 	collected := make(map[string][]gjson.Result, len(structSchema.GetFields()))
-	expected := make(map[string]struct{}, len(structSchema.GetFields()))
 	for _, sub := range structSchema.GetFields() {
 		key := subShortName(sub)
 		collected[key] = make([]gjson.Result, 0, len(elems))
-		expected[key] = struct{}{}
 	}
 	for idx, elem := range elems {
 		if elem.Type != gjson.JSON || !elem.IsObject() {
 			return nil, merr.WrapErrParameterInvalidMsg(
 				"struct array field %s element #%d must be a JSON object", structSchema.GetName(), idx)
 		}
-		seen := make(map[string]struct{}, len(structSchema.GetFields()))
+		var keyErr error
 		elem.ForEach(func(key, value gjson.Result) bool {
 			name := key.String()
-			if _, ok := expected[name]; !ok {
-				return true
+			values, ok := collected[name]
+			if !ok {
+				// A key no sub-field has is most likely a sub-field that was
+				// dropped; storing the rest of the element would lose it silently.
+				keyErr = merr.WrapErrParameterInvalidMsg(
+					"struct array field %s element #%d has unknown sub-field %s",
+					structSchema.GetName(), idx, name)
+				return false
 			}
-			collected[name] = append(collected[name], value)
-			seen[name] = struct{}{}
+			if len(values) > idx {
+				keyErr = merr.WrapErrParameterInvalidMsg(
+					"struct array field %s element #%d has duplicated sub-field %s",
+					structSchema.GetName(), idx, name)
+				return false
+			}
+			collected[name] = append(values, value)
 			return true
 		})
-		if len(seen) != len(expected) {
-			for name := range expected {
-				if _, ok := seen[name]; !ok {
+		if keyErr != nil {
+			return nil, keyErr
+		}
+		for _, sub := range structSchema.GetFields() {
+			name := subShortName(sub)
+			if len(collected[name]) > idx {
+				if collected[name][idx].Type == gjson.Null && !sub.GetElementNullable() {
 					return nil, merr.WrapErrParameterInvalidMsg(
-						"struct array field %s element #%d missing sub-field %s",
+						"struct array field %s element #%d: sub-field %s is not element nullable",
 						structSchema.GetName(), idx, name)
 				}
+				continue
 			}
+			if !sub.GetElementNullable() {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"struct array field %s element #%d missing sub-field %s",
+					structSchema.GetName(), idx, name)
+			}
+			// A missing element-nullable sub-field is a null element; the zero
+			// Result is a JSON null.
+			collected[name] = append(collected[name], gjson.Result{})
 		}
 	}
 
@@ -1761,14 +1817,20 @@ func parseStructArrayRow(rawJSON string, structSchema *schemapb.StructArrayField
 	for _, sub := range structSchema.GetFields() {
 		key := subShortName(sub)
 		vals := collected[key]
-		switch sub.GetDataType() {
-		case schemapb.DataType_Array:
+		switch {
+		case sub.GetDataType() == schemapb.DataType_Array && typeutil.IsNestedArrayTypeSchema(sub.GetTypeSchema()):
+			scalar, err := buildStructSubNestedArray(sub, vals, compatibilityMode)
+			if err != nil {
+				return nil, err
+			}
+			row[key] = scalar
+		case sub.GetDataType() == schemapb.DataType_Array:
 			scalar, err := buildStructSubArrayScalar(sub, vals, compatibilityMode)
 			if err != nil {
 				return nil, err
 			}
 			row[key] = scalar
-		case schemapb.DataType_ArrayOfVector:
+		case sub.GetDataType() == schemapb.DataType_ArrayOfVector:
 			vec, err := buildStructSubVectorField(sub, vals)
 			if err != nil {
 				return nil, err
@@ -1781,6 +1843,23 @@ func parseStructArrayRow(rawJSON string, structSchema *schemapb.StructArrayField
 		}
 	}
 	return row, nil
+}
+
+// splitNullElements separates the null elements of one row of an
+// element-nullable sub-field from its values. validData has one entry per
+// element; values holds the non-null elements in order, which is the compact
+// payload the proxy expects for every nullable level.
+func splitNullElements(vals []gjson.Result) ([]bool, []gjson.Result) {
+	validData := make([]bool, len(vals))
+	values := make([]gjson.Result, 0, len(vals))
+	for i, v := range vals {
+		if v.Type == gjson.Null {
+			continue
+		}
+		validData[i] = true
+		values = append(values, v)
+	}
+	return validData, values
 }
 
 func isJSONDigit(ch byte) bool {
@@ -2208,8 +2287,20 @@ func parseScalarArrayElements(elementType schemapb.DataType, vals []gjson.Result
 	}
 }
 
+// buildStructSubArrayScalar builds one row of a scalar Array sub-field. When the
+// sub-field is element nullable the row is compact: the payload holds the
+// non-null elements and valid_data has one entry per element, written even
+// when every element is valid.
 func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, compatibilityMode bool) (*schemapb.ScalarField, error) {
-	scalar, err := parseScalarArrayElements(sub.GetElementType(), vals, compatibilityMode)
+	return parseStructSubScalars(sub, sub.GetElementType(), vals, sub.GetElementNullable(), compatibilityMode)
+}
+
+func parseStructSubScalars(sub *schemapb.FieldSchema, elementType schemapb.DataType, vals []gjson.Result, nullable bool, compatibilityMode bool) (*schemapb.ScalarField, error) {
+	var validData []bool
+	if nullable {
+		validData, vals = splitNullElements(vals)
+	}
+	scalar, err := parseScalarArrayElements(elementType, vals, compatibilityMode)
 	if err != nil {
 		var elemErr *arrayElementError
 		if errors.As(err, &elemErr) {
@@ -2217,12 +2308,79 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, c
 		}
 		return nil, merr.WrapErrParameterInvalidMsg(
 			"sub-field %s has unsupported array element type %s",
-			sub.GetName(), sub.GetElementType())
+			sub.GetName(), elementType)
+	}
+	if nullable {
+		typeutil.SetArrayElementValidData(scalar, validData)
 	}
 	return scalar, nil
 }
 
+// buildStructSubNestedArray builds one row of an Array<Array<T>> sub-field: one
+// inner array per struct element. Each nullable level is compact, the way the
+// proxy reads it: a null inner array is left out of array_data and recorded in
+// the row's valid_data; a null leaf is left out of its inner array's payload
+// and recorded in that inner array's valid_data. The outer element_type is set
+// to Array by the caller; each row names the leaf type.
+func buildStructSubNestedArray(sub *schemapb.FieldSchema, vals []gjson.Result, compatibilityMode bool) (*schemapb.ScalarField, error) {
+	innerSchema := sub.GetTypeSchema().GetArrayElement()
+	leafSchema := innerSchema.GetArrayElement()
+	leafType := leafSchema.GetLeafType()
+	if leafSchema == nil || leafType == schemapb.DataType_None {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"sub-field %s supports exactly one nested array level", sub.GetName())
+	}
+	var validData []bool
+	if sub.GetElementNullable() {
+		validData, vals = splitNullElements(vals)
+	}
+	inner := make([]*schemapb.ScalarField, 0, len(vals))
+	for _, v := range vals {
+		if !v.IsArray() {
+			return nil, wrapStructSubParseError(sub, v, "expect an array")
+		}
+		leaves := v.Array()
+		if !leafSchema.GetNullable() {
+			for idx, leaf := range leaves {
+				if leaf.Type == gjson.Null {
+					return nil, wrapStructSubParseError(sub, v,
+						fmt.Sprintf("null at index %d; the inner array element is not nullable", idx))
+				}
+			}
+		}
+		scalar, err := parseStructSubScalars(sub, leafType, leaves, leafSchema.GetNullable(), compatibilityMode)
+		if err != nil {
+			return nil, err
+		}
+		inner = append(inner, scalar)
+	}
+	row := &schemapb.ScalarField{
+		Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+			Data:        inner,
+			ElementType: leafType,
+		}},
+	}
+	typeutil.SetArrayElementValidData(row, validData)
+	return row, nil
+}
+
+// buildStructSubVectorField builds one row of an ArrayOfVector sub-field. When
+// the sub-field is element nullable the row is compact: the payload holds the
+// non-null vectors and valid_data has one entry per element.
 func buildStructSubVectorField(sub *schemapb.FieldSchema, vals []gjson.Result) (*schemapb.VectorField, error) {
+	if !sub.GetElementNullable() {
+		return buildStructSubVectorPayload(sub, vals)
+	}
+	validData, vectors := splitNullElements(vals)
+	vf, err := buildStructSubVectorPayload(sub, vectors)
+	if err != nil {
+		return nil, err
+	}
+	typeutil.SetVectorArrayElementValidData(vf, validData)
+	return vf, nil
+}
+
+func buildStructSubVectorPayload(sub *schemapb.FieldSchema, vals []gjson.Result) (*schemapb.VectorField, error) {
 	dim, err := getDim(sub)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(
@@ -2231,9 +2389,11 @@ func buildStructSubVectorField(sub *schemapb.FieldSchema, vals []gjson.Result) (
 
 	// A null coordinate decodes to 0, which is a coordinate the caller never
 	// sent and which takes full part in the distance computation. A vector is a
-	// dense fixed-width array of numbers with no per-element validity to record
-	// "absent" in -- VectorField carries only a dim and a packed array -- so
-	// there is nothing to store but a number. Not gated by compatibilityMode:
+	// dense fixed-width array of numbers with no per-coordinate validity to
+	// record "absent" in -- VectorField's valid_data is per vector, not per
+	// coordinate -- so there is nothing to store but a number. A whole null
+	// vector of an element-nullable sub-field never reaches here; the caller
+	// has already moved it to valid_data. Not gated by compatibilityMode:
 	// there is no such thing as a null coordinate to stay compatible with.
 	//
 	// The check on top-level vectors runs in checkAndSetData, which never sees
@@ -2760,57 +2920,151 @@ func (accessor *structArrayRowAccessor) row(rowIdx int, enableInt64 bool) ([]map
 		return nil, nil
 	}
 
-	elemCount, err := structSubElemCount(subs[0], rowIndices[0], accessor.subDims)
-	if err != nil {
-		return nil, err
+	// Every sub-field holds the same elements, so all of them must agree on
+	// the count. The count is the logical one: an element-nullable level
+	// carries one valid_data entry per element even where its payload is
+	// compact.
+	elemCount := 0
+	columns := make([][]interface{}, len(subs))
+	for subIdx, sub := range subs {
+		values, err := accessor.subRowValues(sub, rowIndices[subIdx], enableInt64)
+		if err != nil {
+			return nil, err
+		}
+		if subIdx == 0 {
+			elemCount = len(values)
+		} else if len(values) != elemCount {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"struct array field %s sub-field %s element count mismatch at row %d: expect %d got %d",
+				fd.GetFieldName(), sub.GetFieldName(), rowIdx, elemCount, len(values))
+		}
+		columns[subIdx] = values
 	}
 	out := make([]map[string]interface{}, elemCount)
 	for i := 0; i < elemCount; i++ {
 		out[i] = make(map[string]interface{}, len(subs))
 	}
 	for subIdx, sub := range subs {
-		dataIdx := rowIndices[subIdx]
 		short := structFieldShortName(sub.GetFieldName())
-		switch sub.GetType() {
-		case schemapb.DataType_Array:
-			rowData := sub.GetScalars().GetArrayData().GetData()
-			if dataIdx >= len(rowData) {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
-			}
-			values := scalarArrayToInterfaces(rowData[dataIdx], enableInt64)
-			if len(values) != elemCount {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s element count mismatch: expect %d got %d",
-					short, elemCount, len(values))
-			}
-			for i, v := range values {
-				out[i][short] = v
-			}
-		case schemapb.DataType_ArrayOfVector:
-			va := sub.GetVectors().GetVectorArray()
-			if va == nil {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s has no vector array", short)
-			}
-			if dataIdx >= len(va.GetData()) {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
-			}
-			dim, ok := accessor.subDims[short]
-			if !ok || dim <= 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("schema missing dim for struct sub-field %s", short)
-			}
-			values, err := vectorFieldToInterfaces(va.GetData()[dataIdx], va.GetElementType(), dim)
-			if err != nil {
-				return nil, err
-			}
-			if len(values) != elemCount {
-				return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s vector element count mismatch: expect %d got %d",
-					short, elemCount, len(values))
-			}
-			for i, v := range values {
-				out[i][short] = v
-			}
-		default:
-			return nil, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s", sub.GetType())
+		for i, v := range columns[subIdx] {
+			out[i][short] = v
 		}
+	}
+	return out, nil
+}
+
+// subRowValues returns the elements of one sub-field in one struct row, one
+// value per logical element, with a null element as nil.
+func (accessor *structArrayRowAccessor) subRowValues(sub *schemapb.FieldData, dataIdx int, enableInt64 bool) ([]interface{}, error) {
+	short := structFieldShortName(sub.GetFieldName())
+	switch sub.GetType() {
+	case schemapb.DataType_Array:
+		arrayData := sub.GetScalars().GetArrayData()
+		rowData := arrayData.GetData()
+		if dataIdx >= len(rowData) {
+			return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
+		}
+		row := rowData[dataIdx]
+		var values []interface{}
+		if arrayData.GetElementType() == schemapb.DataType_Array {
+			var err error
+			values, err = nestedArrayToInterfaces(row, enableInt64)
+			if err != nil {
+				return nil, merr.Wrapf(err, "struct sub-field %s row %d", short, dataIdx)
+			}
+		} else {
+			values = scalarArrayToInterfaces(row, enableInt64)
+		}
+		values, err := expandElementValidity(values, typeutil.GetArrayElementValidData(row))
+		if err != nil {
+			return nil, merr.Wrapf(err, "struct sub-field %s row %d", short, dataIdx)
+		}
+		return values, nil
+	case schemapb.DataType_ArrayOfVector:
+		va := sub.GetVectors().GetVectorArray()
+		if va == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s has no vector array", short)
+		}
+		if dataIdx >= len(va.GetData()) {
+			return nil, merr.WrapErrParameterInvalidMsg("struct sub-field %s missing row %d", short, dataIdx)
+		}
+		dim, ok := accessor.subDims[short]
+		if !ok || dim <= 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("schema missing dim for struct sub-field %s", short)
+		}
+		row := va.GetData()[dataIdx]
+		values, err := vectorFieldToInterfaces(row, va.GetElementType(), dim)
+		if err != nil {
+			return nil, err
+		}
+		values, err = expandElementValidity(values, typeutil.GetVectorArrayElementValidData(row))
+		if err != nil {
+			return nil, merr.Wrapf(err, "struct sub-field %s row %d", short, dataIdx)
+		}
+		return values, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s", sub.GetType())
+	}
+}
+
+// expandElementValidity places the payload of one nullable level at its
+// logical positions. Without valid_data the level is not nullable and the
+// payload is returned as it is. With it, the payload is either dense -- one
+// value per element, a placeholder at each null, which is how the server
+// returns scalars -- or compact -- only the valid values, which is how it
+// returns vectors. Both are accepted for every level; when every element is
+// valid the two are the same.
+func expandElementValidity(values []interface{}, validData []bool) ([]interface{}, error) {
+	if len(validData) == 0 {
+		return values, nil
+	}
+	if len(values) == len(validData) {
+		for i, valid := range validData {
+			if !valid {
+				values[i] = nil
+			}
+		}
+		return values, nil
+	}
+	validCount := 0
+	for _, valid := range validData {
+		if valid {
+			validCount++
+		}
+	}
+	if len(values) != validCount {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"payload has %d values, expect %d (dense) or %d (compact) for %d elements",
+			len(values), len(validData), validCount, len(validData))
+	}
+	out := make([]interface{}, len(validData))
+	physical := 0
+	for i, valid := range validData {
+		if valid {
+			out[i] = values[physical] //nolint:gosec // G602: physical < len(values), which equals the valid count checked above
+			physical++
+		}
+	}
+	return out, nil
+}
+
+// nestedArrayToInterfaces converts one row of an Array<Array<T>> sub-field to
+// one value per inner array, before the row's own validity is applied. An
+// inner array becomes a list of its leaves, with a null leaf as nil.
+func nestedArrayToInterfaces(row *schemapb.ScalarField, enableInt64 bool) ([]interface{}, error) {
+	children := row.GetArrayData().GetData()
+	out := make([]interface{}, len(children))
+	for i, child := range children {
+		leaves := scalarArrayToInterfaces(child, enableInt64)
+		if leaves == nil {
+			// a valid empty inner array may carry no payload at all
+			leaves = []interface{}{}
+		}
+		leaves, err := expandElementValidity(leaves, typeutil.GetArrayElementValidData(child))
+		if err != nil {
+			return nil, merr.Wrapf(err, "inner array %d", i)
+		}
+		out[i] = leaves
 	}
 	return out, nil
 }
@@ -2834,32 +3088,6 @@ func structArraySubDims(fieldName string, schema *schemapb.CollectionSchema) (ma
 		break
 	}
 	return subDims, nil
-}
-
-func structSubElemCount(sub *schemapb.FieldData, rowIdx int, subDims map[string]int64) (int, error) {
-	switch sub.GetType() {
-	case schemapb.DataType_Array:
-		rowData := sub.GetScalars().GetArrayData().GetData()
-		if rowIdx >= len(rowData) {
-			return 0, merr.WrapErrParameterInvalidMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
-		}
-		// Element count is independent of the Int64 response mode; pass true to
-		// skip the per-element string conversion.
-		return len(scalarArrayToInterfaces(rowData[rowIdx], true)), nil
-	case schemapb.DataType_ArrayOfVector:
-		va := sub.GetVectors().GetVectorArray()
-		if va == nil || rowIdx >= len(va.GetData()) {
-			return 0, merr.WrapErrParameterInvalidMsg("struct sub-field %s row %d out of range", sub.GetFieldName(), rowIdx)
-		}
-		short := structFieldShortName(sub.GetFieldName())
-		dim, ok := subDims[short]
-		if !ok || dim <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("schema missing dim for struct sub-field %s", short)
-		}
-		return vectorFieldElemCount(va.GetData()[rowIdx], va.GetElementType(), dim)
-	default:
-		return 0, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field type %s", sub.GetType())
-	}
 }
 
 // scalarArrayToInterfaces flattens one array row into per-element values so the
@@ -2916,26 +3144,6 @@ func scalarArrayToInterfaces(sf *schemapb.ScalarField, enableInt64 bool) []inter
 		return out
 	default:
 		return nil
-	}
-}
-
-func vectorFieldElemCount(vf *schemapb.VectorField, elemType schemapb.DataType, dim int64) (int, error) {
-	if dim <= 0 {
-		return 0, merr.WrapErrParameterInvalidMsg("invalid dim %d", dim)
-	}
-	switch elemType {
-	case schemapb.DataType_FloatVector:
-		return len(vf.GetFloatVector().GetData()) / int(dim), nil
-	case schemapb.DataType_Float16Vector:
-		return len(vf.GetFloat16Vector()) / int(dim*2), nil
-	case schemapb.DataType_BFloat16Vector:
-		return len(vf.GetBfloat16Vector()) / int(dim*2), nil
-	case schemapb.DataType_BinaryVector:
-		return len(vf.GetBinaryVector()) / int(dim/8), nil
-	case schemapb.DataType_Int8Vector:
-		return len(vf.GetInt8Vector()) / int(dim), nil
-	default:
-		return 0, merr.WrapErrParameterInvalidMsg("unsupported vector element type %s", elemType)
 	}
 }
 
@@ -4491,6 +4699,44 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	}
 
 	return queryResp, nil
+}
+
+// setSearchElementOffsets adds the matched element's offset to every hit of an
+// element-level search. elementIndices is SearchResultData.element_indices, one
+// entry per hit in the order of the ids; a search that is not element-level
+// returns none, and its hits are left as they are.
+func setSearchElementOffsets(rows []map[string]interface{}, elementIndices *schemapb.LongArray) error {
+	offsets := elementIndices.GetData()
+	if len(offsets) == 0 {
+		return nil
+	}
+	if len(offsets) != len(rows) {
+		return wrapResultStageErr("search element offsets", merr.WrapErrServiceInternalMsg(
+			"search result has %d element indices for %d hits", len(offsets), len(rows)))
+	}
+	for i, row := range rows {
+		row[HTTPReturnOffset] = offsets[i]
+	}
+	return nil
+}
+
+// setQueryElementOffsets adds the offsets of the matched elements to every row
+// of an element-level query. The rows are not expanded per element: each row
+// keeps its shape and gets the list of its matched offsets. elementIndices is
+// QueryResults.element_indices, one entry per row; a query that is not
+// element-level returns none, and its rows are left as they are.
+func setQueryElementOffsets(rows []map[string]interface{}, elementIndices []*milvuspb.ElementIndices) error {
+	if len(elementIndices) == 0 {
+		return nil
+	}
+	if len(elementIndices) != len(rows) {
+		return wrapResultStageErr("query element offsets", merr.WrapErrServiceInternalMsg(
+			"query result has %d element index lists for %d rows", len(elementIndices), len(rows)))
+	}
+	for i, row := range rows {
+		row[HTTPReturnOffset] = nonNilSlice(elementIndices[i].GetIndices().GetData())
+	}
+	return nil
 }
 
 // jsonFieldsToStrings turns the named fields back into their textual form.

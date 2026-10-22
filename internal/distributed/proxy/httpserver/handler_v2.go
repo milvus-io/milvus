@@ -1487,6 +1487,15 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
+	// A fieldName of the form "struct[sub]" adds a sub-field to an existing
+	// struct. The full name is sent as the field name and the server parses
+	// and validates it.
+	if open := strings.IndexByte(httpReq.Schema.FieldName, '['); open >= 0 && typeutil.IsNestedArrayTypeSchema(schemaProto.GetTypeSchema()) {
+		if err := completeNestedSubFieldTypeSchema(httpReq.Schema.FieldName[:open], httpReq.Schema, schemaProto, nil); err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+	}
 
 	req := &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
@@ -1648,6 +1657,9 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		if err == nil {
+			err = setQueryElementOffsets(outputData, queryResp.GetElementIndices())
+		}
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -2386,6 +2398,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			if err == nil {
+				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2575,6 +2590,9 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			if err == nil {
+				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2890,8 +2908,21 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				IsClusteringKey: field.IsClusteringKey,
 				DataType:        dataType,
 				TypeParams:      []*commonpb.KeyValuePair{},
-				Nullable:        field.Nullable,
+				Nullable:        field.IsNullable(),
 				ExternalField:   field.ExternalField,
+				// Only struct sub-fields support these; they are passed on so
+				// the server rejects them instead of their being dropped here.
+				ElementNullable: field.ElementNullable,
+			}
+			if field.TypeSchema != nil {
+				fieldSchema.TypeSchema, err = field.TypeSchema.GetProto(field.FieldName)
+				if err != nil {
+					HTTPAbortReturn(c, http.StatusOK, gin.H{
+						HTTPReturnCode:    merr.Code(err),
+						HTTPReturnMessage: err.Error(),
+					})
+					return nil, err
+				}
 			}
 
 			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
