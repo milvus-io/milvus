@@ -102,7 +102,7 @@ func newReadinessIndexMeta(collectionID int64, fieldIndexes map[int64]*model.Ind
 // and whose indexMeta is the given one.
 func readinessMeta(coll *collectionInfo, im *indexMeta) *meta {
 	mt := createMeta(datacoord.NewCatalog(NewMetaMemoryKV(), "", ""), withIndexMeta(im))
-	mt.collections.Insert(coll.ID, coll)
+	mt.AddCollection(coll)
 	return mt
 }
 
