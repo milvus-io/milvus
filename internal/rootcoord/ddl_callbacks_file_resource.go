@@ -54,17 +54,9 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 	var size int64
 	sizeChecked := false
 	for {
-		resources, _ := c.meta.ListFileResource(ctx)
-		var resource *internalpb.FileResourceInfo
-		for _, existing := range resources {
-			if existing.GetName() != req.GetName() {
-				continue
-			}
-			if existing.GetPath() != req.GetPath() {
-				return merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())
-			}
-			resource = existing
-			break
+		resource := c.meta.FindFileResource(ctx, req.GetName())
+		if resource != nil && resource.GetPath() != req.GetPath() {
+			return merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())
 		}
 		if resource == nil {
 			if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {

@@ -18,11 +18,14 @@ package coordinator
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
@@ -126,7 +129,7 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
 		mockMeta.EXPECT().HasFileResource(mock.Anything).Return(false).Once()
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2)).Once()
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(2)).Twice()
 		observer.meta = mockMeta
 
 		// Mutation retries use the unconditional notification path and must not be
@@ -159,7 +162,7 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
 		mockMeta.EXPECT().HasFileResource(mock.Anything).Return(true).Once()
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(1)).Once()
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(1)).Twice()
 		observer.meta = mockMeta
 
 		observer.Start()
@@ -188,7 +191,7 @@ func (s *FileResourceObserverSuite) TestStartStop() {
 		resources := []*internalpb.FileResourceInfo{{Name: "test"}}
 		mockMeta := mockrootcoord.NewIMetaTable(s.T())
 		mockMeta.EXPECT().HasFileResource(mock.Anything).Return(true).Once()
-		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(2)).Once()
+		mockMeta.EXPECT().ListFileResource(mock.Anything).Return(resources, uint64(2)).Twice()
 
 		proxyManager := proxyutil.NewProxyClientManager(nil)
 		proxyClient := mocks.NewMockProxyClient(s.T())
@@ -897,4 +900,96 @@ func (s *FileResourceObserverSuite) TestRetryNotify() {
 
 func TestFileResourceObserverSuite(t *testing.T) {
 	suite.Run(t, new(FileResourceObserverSuite))
+}
+
+func TestFileResourceObserverSharesSyncAttempts(t *testing.T) {
+	paramtable.Init()
+	firstFailure := errors.New("first node timeout")
+	nextFailure := errors.New("next node timeout")
+	type syncRPC struct {
+		nodeID  int64
+		version uint64
+	}
+	for _, tc := range []struct {
+		name         string
+		change       string
+		firstErr     error
+		nextErr      error
+		followerErr  error
+		retry        bool
+		expectedRPCs []syncRPC
+	}{
+		{name: "share failure and allow later retry", firstErr: firstFailure, followerErr: firstFailure, retry: true, expectedRPCs: []syncRPC{{1, 1}, {1, 1}}},
+		{name: "new version needs a fresh attempt", change: "version", firstErr: firstFailure, nextErr: nextFailure, followerErr: nextFailure, expectedRPCs: []syncRPC{{1, 1}, {1, 2}}},
+		{name: "new node cannot reuse stale success", change: "add node", nextErr: nextFailure, followerErr: nextFailure, expectedRPCs: []syncRPC{{1, 1}, {2, 1}}},
+		{name: "removed node cannot reuse stale failure", change: "remove node", firstErr: firstFailure, expectedRPCs: []syncRPC{{1, 1}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var version atomic.Uint64
+				version.Store(1)
+				meta := mockrootcoord.NewIMetaTable(t)
+				meta.EXPECT().ListFileResource(mock.Anything).
+					RunAndReturn(func(context.Context) ([]*internalpb.FileResourceInfo, uint64) {
+						return nil, version.Load()
+					})
+				nodes := qcsession.NewNodeManager()
+				nodes.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 1}))
+				cluster := qcsession.NewMockCluster(t)
+				release := make(chan struct{})
+				requests := make(chan syncRPC, len(tc.expectedRPCs))
+				var calls atomic.Int32
+				cluster.EXPECT().SyncFileResource(mock.Anything, mock.Anything, mock.Anything).
+					RunAndReturn(func(_ context.Context, nodeID int64, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+						requests <- syncRPC{nodeID, req.GetVersion()}
+						err := tc.nextErr
+						if calls.Add(1) == 1 {
+							<-release
+							err = tc.firstErr
+						}
+						if err != nil {
+							return nil, err
+						}
+						return merr.Success(), nil
+					}).Times(len(tc.expectedRPCs))
+				observer := &FileResourceObserver{
+					ctx:          context.Background(),
+					meta:         meta,
+					distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+					qnManager:    nodes,
+					cluster:      cluster,
+					qnMode:       fileresource.SyncMode,
+					dnMode:       fileresource.CloseMode,
+					proxyMode:    fileresource.CloseMode,
+				}
+				first := make(chan error, 1)
+				go func() { first <- observer.Sync() }()
+				synctest.Wait()
+				require.Equal(t, int32(1), calls.Load())
+				switch tc.change {
+				case "version":
+					version.Store(2)
+				case "add node":
+					nodes.Add(qcsession.NewNodeInfo(qcsession.ImmutableNodeInfo{NodeID: 2}))
+				case "remove node":
+					nodes.Remove(1)
+				}
+				follower := make(chan error, 1)
+				go func() { follower <- observer.Sync() }()
+				synctest.Wait()
+				close(release)
+				synctest.Wait()
+				require.ErrorIs(t, <-first, tc.firstErr)
+				require.ErrorIs(t, <-follower, tc.followerErr)
+				if tc.retry {
+					require.Equal(t, int32(1), calls.Load())
+					require.NoError(t, observer.Sync())
+				}
+				require.Equal(t, int32(len(tc.expectedRPCs)), calls.Load())
+				for _, expected := range tc.expectedRPCs {
+					require.Equal(t, expected, <-requests)
+				}
+			})
+		})
+	}
 }

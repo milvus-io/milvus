@@ -2052,7 +2052,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		}
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
@@ -2074,7 +2074,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(101), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
 		mockFileResourceBroadcast(t, c)
@@ -2100,11 +2100,11 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{
 			Id:   99,
 			Name: request.GetName(),
 			Path: request.GetPath(),
-		}}, uint64(1))
+		})
 
 		meta.EXPECT().AddFileResource(mock.Anything, mock.MatchedBy(func(r *internalpb.FileResourceInfo) bool { return r.GetId() == 99 })).Return(nil)
 
@@ -2127,11 +2127,11 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{
 			Id:   99,
 			Name: request.GetName(),
 			Path: "/path/to/old-file",
-		}}, uint64(1))
+		})
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
 		mockFileResourceBroadcast(t, c)
@@ -2150,7 +2150,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), sizeErr)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
 		mockFileResourceBroadcast(t, c)
@@ -2171,7 +2171,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(-1), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
 		mockFileResourceBroadcast(t, c)

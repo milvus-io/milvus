@@ -45,7 +45,7 @@ func mockFileResourceBroadcast(t *testing.T, core *Core) *mock_broadcaster.MockB
 		core.meta = mockrootcoord.NewIMetaTable(t)
 	}
 	if meta, ok := core.meta.(*mockrootcoord.IMetaTable); ok {
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0)).Maybe()
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil).Maybe()
 		meta.EXPECT().PrepareRemoveFileResource(mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, name string) (*internalpb.FileResourceInfo, error) {
 				return &internalpb.FileResourceInfo{Id: 100, Name: name}, nil

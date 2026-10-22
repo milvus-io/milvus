@@ -1983,6 +1983,55 @@ func (_c *IMetaTable_FeatureUsageSnapshot_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// FindFileResource provides a mock function with given fields: ctx, name
+func (_m *IMetaTable) FindFileResource(ctx context.Context, name string) *internalpb.FileResourceInfo {
+	ret := _m.Called(ctx, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindFileResource")
+	}
+
+	var r0 *internalpb.FileResourceInfo
+	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.FileResourceInfo); ok {
+		r0 = rf(ctx, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.FileResourceInfo)
+		}
+	}
+
+	return r0
+}
+
+// IMetaTable_FindFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindFileResource'
+type IMetaTable_FindFileResource_Call struct {
+	*mock.Call
+}
+
+// FindFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+func (_e *IMetaTable_Expecter) FindFileResource(ctx interface{}, name interface{}) *IMetaTable_FindFileResource_Call {
+	return &IMetaTable_FindFileResource_Call{Call: _e.mock.On("FindFileResource", ctx, name)}
+}
+
+func (_c *IMetaTable_FindFileResource_Call) Run(run func(ctx context.Context, name string)) *IMetaTable_FindFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_FindFileResource_Call) Return(_a0 *internalpb.FileResourceInfo) *IMetaTable_FindFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_FindFileResource_Call) RunAndReturn(run func(context.Context, string) *internalpb.FileResourceInfo) *IMetaTable_FindFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAvailableCollectionCount provides a mock function with given fields: ctx, dbID
 func (_m *IMetaTable) GetAvailableCollectionCount(ctx context.Context, dbID int64) (int, int, bool) {
 	ret := _m.Called(ctx, dbID)

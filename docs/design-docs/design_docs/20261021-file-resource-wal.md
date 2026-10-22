@@ -38,10 +38,10 @@ content version and is not copied from the source cluster.
 ## Request and replay paths
 
 Add validates the name and object existence, acquires ExclusiveCluster, then
-checks existing metadata. An identical name and path reuse the existing ID and
-skip the size admission check. A different path under the same name is rejected
-before broadcasting. When a new resource needs size admission, the request
-releases the guard for object-storage I/O, then reacquires it and rechecks current
+looks up the resource through the name index. An identical name and path reuse
+the existing ID and skip the size admission check. A different path under the
+same name is rejected before broadcasting. When a new resource needs size
+admission, the request releases the guard for object-storage I/O, then reacquires it and rechecks current
 metadata. A concurrent identical registration reuses its ID; otherwise the new
 resource obeys the current `common.fileResource.maxFileSize` and receives an ID.
 The request broadcasts the resolved resource record while holding the guard.
@@ -73,6 +73,12 @@ synchronous Observer.Sync attempt. A sync failure returns the existing
 "metadata operation succeeded but some node sync failed" error and schedules
 another observer attempt. Metadata is not rolled back. Remove of an absent
 resource still succeeds without a synchronous sync attempt.
+
+Overlapping background and source Sync calls share an in-flight attempt,
+including its error, when its metadata version covers the caller's version and
+its target nodes match. A caller that observes a newer version or different nodes
+waits for a fresh attempt. Failures are not cached across attempts, and replay
+notifications remain unconditional after successful metadata apply.
 
 ## Ordering and recovery
 
