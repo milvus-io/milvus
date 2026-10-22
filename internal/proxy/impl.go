@@ -5664,10 +5664,10 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 
 	priCache := privilege.GetPrivilegeCache()
 	if priCache != nil {
-		err := priCache.RefreshPolicyInfo(typeutil.CacheOp{
+		err := priCache.RefreshPolicyInfoWithVisibility(typeutil.CacheOp{
 			OpType: typeutil.CacheOpType(req.OpType),
 			OpKey:  req.OpKey,
-		})
+		}, req.GetCollectionVisibility())
 		if err != nil {
 			mlog.Warn(ctx, "fail to refresh policy info",
 				mlog.Err(err))
