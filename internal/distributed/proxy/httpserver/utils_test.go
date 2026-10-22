@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -5422,7 +5423,7 @@ func TestSchemaForPathReplaceOperandsMatchesPathScope(t *testing.T) {
 		name, path, operand, wantErr string
 		children                     int
 	}{
-		{"whole_missing_child", "[1]", `{"sub_int":18}`, "requires all struct children", 0},
+		{"whole_missing_child", "[1]", `{"sub_int":18}`, `PATH_REPLACE field "my_struct" element at [1] is missing sub-field "sub_vec", which is not element nullable`, 0},
 		{"whole_complete", "[1]", `{"sub_int":18,"sub_vec":[0.1,0.2,0.3,0.4]}`, "", 2},
 		{"child_exact", "[1][sub_int]", `{"sub_int":18}`, "", 1},
 		{"child_extra", "[1][sub_int]", `{"sub_int":18,"sub_vec":[0.1,0.2,0.3,0.4]}`, "exactly the selected child", 0},
@@ -5440,6 +5441,98 @@ func TestSchemaForPathReplaceOperandsMatchesPathScope(t *testing.T) {
 				require.Len(t, got.GetStructArrayFields()[0].GetFields(), tc.children)
 			}
 			require.Len(t, schema.GetStructArrayFields()[0].GetFields(), 2)
+		})
+	}
+}
+
+// An [index] operand may omit element_nullable children. The request schema
+// leaves them out, so REST sends only the supplied children and Proxy fills a
+// null element for each omitted one, as for gRPC; see
+// TestPathReplaceSynthesizesOmittedNullableStructChild in internal/proxy/dml.
+func TestSchemaForPathReplaceOperandsOmitsElementNullableChildren(t *testing.T) {
+	ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "clips", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[1]"}}
+	for _, tc := range []struct {
+		name, operand string
+		children      []string
+	}{
+		{"only non-nullable child", `{"score":5}`, []string{"score"}},
+		{"some nullable children", `{"score":5,"lang":"en","emb":null}`, []string{"lang", "score", "emb"}},
+		{"every child", `{"score":5,"lang":"en","emb":[0.1,0.2],"tags":["a"]}`, []string{"lang", "score", "emb", "tags"}},
+	} {
+		for _, nullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/nullable=%v", tc.name, nullable), func(t *testing.T) {
+				schema := buildElementNullableStructTestSchema(nullable)
+				body := []byte(`{"data":[{"id":1,"clips":[` + tc.operand + `]},{"id":2,"clips":[` + tc.operand + `]}]}`)
+				requestSchema, err := schemaForPathReplaceOperands(body, schema, ops)
+				require.NoError(t, err)
+				require.Len(t, schema.GetStructArrayFields()[0].GetFields(), 4, "collection schema must not be mutated")
+				got := make([]string, 0, len(tc.children))
+				for _, child := range requestSchema.GetStructArrayFields()[0].GetFields() {
+					got = append(got, subShortName(child))
+				}
+				require.Equal(t, tc.children, got)
+
+				rows, validData, err := checkAndSetData(body, requestSchema, true, ops...)
+				require.NoError(t, err)
+				fieldsData, err := anyToColumns(rows, validData, requestSchema, false, true)
+				require.NoError(t, err)
+				var structFD *schemapb.FieldData
+				for _, field := range fieldsData {
+					if field.GetFieldName() == "clips" {
+						structFD = field
+					}
+				}
+				require.NotNil(t, structFD)
+				// Omitted children are absent from the request, which is the shape
+				// Proxy needs to fill them with null elements.
+				require.Len(t, structFD.GetStructArrays().GetFields(), len(tc.children))
+				for _, name := range tc.children {
+					subFieldDataByName(t, structFD, name)
+				}
+				score := subFieldDataByName(t, structFD, "score").GetScalars().GetArrayData().GetData()
+				require.Len(t, score, 2)
+				for _, row := range score {
+					assert.Equal(t, []int64{5}, row.GetLongData().GetData())
+				}
+				if strings.Contains(tc.operand, `"emb":null`) {
+					emb := subFieldDataByName(t, structFD, "emb").GetVectors().GetVectorArray().GetData()
+					require.Len(t, emb, 2)
+					for _, row := range emb {
+						assert.Equal(t, []bool{false}, row.GetValidData())
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestSchemaForPathReplaceOperandsRejectsMissingOrUnknownChildren(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, operand, want string
+		dropTags                  bool
+	}{
+		{"missing non-nullable child", "[1]", `{"lang":"en","emb":[0.1,0.2],"tags":["a"]}`, `PATH_REPLACE field "clips" element at [1] is missing sub-field "score", which is not element nullable`, false},
+		{"unknown key", "[1]", `{"score":5,"bogus":1}`, `PATH_REPLACE struct field "clips" has no child "bogus"`, false},
+		{"unknown key with every child", "[1]", `{"score":5,"lang":"en","emb":[0.1,0.2],"tags":["a"],"bogus":1}`, `has no child "bogus"`, false},
+		{"unknown key and missing child", "[1]", `{"lang":"en","bogus":1}`, `has no child "bogus"`, false},
+		{"dropped sub-field", "[1]", `{"score":5,"tags":["a"]}`, `has no child "tags"`, true},
+		{"child path unknown", "[1][bogus]", `{"bogus":1}`, `has no child "bogus"`, false},
+		{"child path extra key", "[1][lang]", `{"lang":"en","score":5}`, "exactly the selected child", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := buildElementNullableStructTestSchema(false)
+			if tc.dropTags {
+				schema.GetStructArrayFields()[0].Fields = schema.GetStructArrayFields()[0].Fields[:3]
+			}
+			before := proto.Clone(schema)
+			body := []byte(`{"data":[{"id":1,"clips":[` + tc.operand + `]}]}`)
+			ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "clips", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: tc.path}}
+			got, err := schemaForPathReplaceOperands(body, schema, ops)
+			require.Nil(t, got)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.Equal(t, merr.InputError, merr.GetErrorType(err))
+			require.ErrorContains(t, err, tc.want)
+			require.True(t, proto.Equal(before, schema))
 		})
 	}
 }
@@ -5694,7 +5787,7 @@ func TestStructArrayFieldSchemaGetProto(t *testing.T) {
 				FieldName:       "sub_null",
 				DataType:        "Array",
 				ElementDataType: "Int32",
-				Nullable:        true,
+				Nullable:        new(true),
 			},
 		},
 	}).GetProto(ctx)
@@ -6714,20 +6807,13 @@ func TestStructArrayHelperValueConversions(t *testing.T) {
 	}
 	for _, test := range vectorTests {
 		t.Run(test.name, func(t *testing.T) {
-			count, err := vectorFieldElemCount(test.vector, test.elementType, test.dim)
-			require.NoError(t, err)
-			assert.Equal(t, test.count, count)
 			values, err := vectorFieldToInterfaces(test.vector, test.elementType, test.dim)
 			require.NoError(t, err)
 			assert.Len(t, values, test.count)
 		})
 	}
 
-	_, err := vectorFieldElemCount(&schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
-	assert.Error(t, err)
-	_, err = vectorFieldElemCount(&schemapb.VectorField{}, schemapb.DataType_JSON, 1)
-	assert.Error(t, err)
-	_, err = vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
+	_, err := vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
 	assert.Error(t, err)
 	_, err = vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_JSON, 1)
 	assert.Error(t, err)
@@ -6823,7 +6909,7 @@ func TestFieldSchemaStructArrayHelpers(t *testing.T) {
 		Description:     "clip metadata",
 		DataType:        "Array",
 		ElementDataType: "Struct",
-		Nullable:        true,
+		Nullable:        new(true),
 		ElementTypeParams: map[string]interface{}{
 			common.MaxCapacityKey: 16,
 		},
@@ -6911,7 +6997,7 @@ func TestCheckAndSetDataStructArrayRows(t *testing.T) {
 			"id": 1,
 			"vec": [0.1, 0.2, 0.3, 0.4],
 			"my_struct": [
-				{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4], "ignored": true}
+				{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4]}
 			]
 		}
 	]}`)
@@ -6924,6 +7010,11 @@ func TestCheckAndSetDataStructArrayRows(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, structRow, "sub_int")
 	assert.Contains(t, structRow, "sub_vec")
+
+	// A key that names no sub-field is rejected rather than dropped.
+	_, _, err = checkAndSetData([]byte(`{"data": [{"id": 1, "vec": [0.1,0.2,0.3,0.4], "my_struct": [{"sub_int": 10, "sub_vec": [1.1,1.2,1.3,1.4], "ignored": true}]}]}`), schema, false)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "unknown sub-field ignored")
 
 	int64Schema := buildStructArrayTestSchema()
 	int64Schema.GetStructArrayFields()[0].GetFields()[0].ElementType = schemapb.DataType_Int64
@@ -6983,11 +7074,15 @@ func TestParseStructArrayRowQualifiedSchemaNames(t *testing.T) {
 			},
 		},
 	}
-	row, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2], "unknown": "ignored"}]`, schema, false)
+	row, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2]}]`, schema, false)
 	require.NoError(t, err)
 	assert.Contains(t, row, "sub_int")
 	assert.Contains(t, row, "sub_vec")
-	assert.NotContains(t, row, "unknown")
+
+	// A key no sub-field has is rejected rather than dropped.
+	_, err = parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2], "unknown": "ignored"}]`, schema, false)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "unknown sub-field unknown")
 
 	unsupported := proto.Clone(schema).(*schemapb.StructArrayFieldSchema)
 	unsupported.Fields = append(unsupported.Fields, &schemapb.FieldSchema{Name: "bad", DataType: schemapb.DataType_Bool})
@@ -9827,4 +9922,421 @@ func TestStructSubVectorBase64FloatVector(t *testing.T) {
 			assert.Contains(t, err.Error(), "sub_vec")
 		})
 	}
+}
+
+// buildElementNullableStructTestSchema is a struct "clips" whose sub-fields
+// cover each element-nullable shape: a scalar (lang), a non-nullable scalar
+// (score), a vector (emb) and an Array<VarChar> whose inner arrays and leaves
+// are both nullable (tags). Sub-field names are stored qualified, as the
+// server stores them.
+func buildElementNullableStructTestSchema(nullable bool) *schemapb.CollectionSchema {
+	capacity := &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "8"}
+	lang := &schemapb.FieldSchema{
+		FieldID: 201, Name: "clips[lang]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+		ElementNullable: true, Nullable: nullable,
+		TypeParams: []*commonpb.KeyValuePair{capacity, {Key: common.MaxLengthKey, Value: "16"}},
+	}
+	score := &schemapb.FieldSchema{
+		FieldID: 202, Name: "clips[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		Nullable: nullable, TypeParams: []*commonpb.KeyValuePair{capacity},
+	}
+	emb := &schemapb.FieldSchema{
+		FieldID: 203, Name: "clips[emb]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+		ElementNullable: true, Nullable: nullable,
+		TypeParams: []*commonpb.KeyValuePair{capacity, {Key: common.DimKey, Value: "2"}},
+	}
+	tags := &schemapb.FieldSchema{
+		FieldID: 204, Name: "clips[tags]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+		ElementNullable: true, Nullable: nullable,
+		TypeSchema: &schemapb.TypeSchema{
+			TypeParams: []*commonpb.KeyValuePair{capacity},
+			Nullable:   nullable,
+			Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+				Nullable:   true,
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "8"}},
+					Nullable:   true,
+					Kind:       &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_VarChar},
+				}},
+			}},
+		},
+	}
+	return &schemapb.CollectionSchema{
+		Name: "c_element_null",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}}},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200, Name: "clips", Nullable: nullable,
+			Fields: []*schemapb.FieldSchema{lang, score, emb, tags},
+		}},
+	}
+}
+
+// validateStructWithProxy runs the proxy's insert validation over the struct
+// field data REST builds, after flattening it the way the proxy does, so the
+// wire shape is checked against the reader rather than against a copy of it.
+func validateStructWithProxy(t *testing.T, schema *schemapb.CollectionSchema, structFD *schemapb.FieldData, numRows uint64) {
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	flattened := make([]*schemapb.FieldData, 0, len(structFD.GetStructArrays().GetFields()))
+	for _, sub := range structFD.GetStructArrays().GetFields() {
+		sub = proto.Clone(sub).(*schemapb.FieldData)
+		sub.FieldName = typeutil.ConcatStructFieldName(structFD.GetFieldName(), sub.GetFieldName())
+		flattened = append(flattened, sub)
+	}
+	v := fieldvalidator.NewValidateUtil(fieldvalidator.WithMaxCapCheck(), fieldvalidator.WithMaxLenCheck())
+	require.NoError(t, v.Validate(flattened, helper, numRows))
+}
+
+func subFieldDataByName(t *testing.T, structFD *schemapb.FieldData, name string) *schemapb.FieldData {
+	for _, sub := range structFD.GetStructArrays().GetFields() {
+		if sub.GetFieldName() == name {
+			return sub
+		}
+	}
+	require.Failf(t, "sub-field not found", "%s", name)
+	return nil
+}
+
+func TestParseStructArrayRowElementNull(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(false)
+	structSchema := schema.GetStructArrayFields()[0]
+	// element 0: every value present, a null leaf in tags
+	// element 1: JSON null for every element-nullable sub-field
+	// element 2: element-nullable sub-fields omitted, tags an empty array
+	row, err := parseStructArrayRow(`[
+		{"lang": "en", "score": 1, "emb": [0.1, 0.2], "tags": ["a", null]},
+		{"lang": null, "score": 2, "emb": null, "tags": null},
+		{"score": 3, "tags": []}
+	]`, structSchema, false)
+	require.NoError(t, err)
+
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"en"}}},
+		ValidData: []bool{true, false, false},
+	}, row["lang"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+	}, row["score"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(&schemapb.VectorField{
+		Dim:       2,
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}}},
+		ValidData: []bool{true, false, false},
+	}, row["emb"].(*schemapb.VectorField)))
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+			ElementType: schemapb.DataType_VarChar,
+			Data: []*schemapb.ScalarField{
+				{
+					Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}},
+					ValidData: []bool{true, false},
+				},
+				{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+			},
+		}},
+		ValidData: []bool{true, false, true},
+	}, row["tags"].(*schemapb.ScalarField)))
+
+	structFD, err := buildStructArrayFieldData(structSchema, []structArrayRow{row})
+	require.NoError(t, err)
+	assert.Equal(t, schemapb.DataType_Array, subFieldDataByName(t, structFD, "tags").GetScalars().GetArrayData().GetElementType())
+	validateStructWithProxy(t, schema, structFD, 1)
+
+	// all-valid element-nullable rows still carry valid_data, which the proxy
+	// requires for a nullable level with elements
+	row, err = parseStructArrayRow(`[{"lang": "en", "score": 1, "emb": [0.1, 0.2], "tags": ["a"]}]`, structSchema, false)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true}, row["lang"].(*schemapb.ScalarField).GetValidData())
+	assert.Equal(t, []bool{true}, row["emb"].(*schemapb.VectorField).GetValidData())
+	assert.Equal(t, []bool{true}, row["tags"].(*schemapb.ScalarField).GetValidData())
+	assert.Empty(t, row["score"].(*schemapb.ScalarField).GetValidData())
+	structFD, err = buildStructArrayFieldData(structSchema, []structArrayRow{row})
+	require.NoError(t, err)
+	validateStructWithProxy(t, schema, structFD, 1)
+}
+
+func TestParseStructArrayRowElementNullErrors(t *testing.T) {
+	structSchema := buildElementNullableStructTestSchema(false).GetStructArrayFields()[0]
+	for _, tc := range []struct {
+		name string
+		raw  string
+		msg  string
+	}{
+		{"null for a non-nullable sub-field", `[{"score": null}]`, "sub-field score is not element nullable"},
+		{"missing non-nullable sub-field", `[{"lang": "en"}]`, "missing sub-field score"},
+		{"unknown key", `[{"score": 1, "extra": 1}]`, "unknown sub-field extra"},
+		{"duplicated key", `[{"score": 1, "score": 2}]`, "duplicated sub-field score"},
+		{"inner array not an array", `[{"score": 1, "tags": "a"}]`, "expect an array"},
+		{"null coordinate", `[{"score": 1, "emb": [0.1, null]}]`, "a vector element cannot be null"},
+		{"wrong leaf type", `[{"score": 1, "tags": [1]}]`, "expect string"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseStructArrayRow(tc.raw, structSchema, false)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), tc.msg)
+		})
+	}
+
+	t.Run("null leaf of a non-nullable leaf", func(t *testing.T) {
+		schema := buildElementNullableStructTestSchema(false)
+		tags := schema.GetStructArrayFields()[0].GetFields()[3]
+		tags.GetTypeSchema().GetArrayElement().GetArrayElement().Nullable = false
+		_, err := parseStructArrayRow(`[{"score": 1, "tags": ["a", null]}]`, schema.GetStructArrayFields()[0], false)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "the inner array element is not nullable")
+	})
+
+	t.Run("null inner array of a non-nullable inner array", func(t *testing.T) {
+		schema := buildElementNullableStructTestSchema(false)
+		tags := schema.GetStructArrayFields()[0].GetFields()[3]
+		tags.ElementNullable = false
+		tags.GetTypeSchema().GetArrayElement().Nullable = false
+		_, err := parseStructArrayRow(`[{"score": 1, "tags": null}]`, schema.GetStructArrayFields()[0], false)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "sub-field tags is not element nullable")
+		_, err = parseStructArrayRow(`[{"score": 1}]`, schema.GetStructArrayFields()[0], false)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "missing sub-field tags")
+	})
+}
+
+// TestAnyToColumnsElementNullWithNullRows: row-level null of a nullable struct
+// and element-level null inside its valid rows combine.
+func TestAnyToColumnsElementNullWithNullRows(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(true)
+	body := []byte(`{"data": [
+		{"id": 1, "vec": [0.1, 0.2], "clips": [{"lang": null, "score": 1, "emb": [0.3, 0.4]}]},
+		{"id": 2, "vec": [0.1, 0.2], "clips": null},
+		{"id": 3, "vec": [0.1, 0.2], "clips": [{"score": 2}, {"lang": "fr", "score": 3, "tags": [null]}]}
+	]}`)
+	rows, validData, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false, true}, validData["clips"])
+	fds, err := anyToColumns(rows, validData, schema, true, false)
+	require.NoError(t, err)
+	var structFD *schemapb.FieldData
+	for _, fd := range fds {
+		if fd.GetType() == schemapb.DataType_ArrayOfStruct {
+			structFD = fd
+		}
+	}
+	require.NotNil(t, structFD)
+	for _, sub := range structFD.GetStructArrays().GetFields() {
+		assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(sub), sub.GetFieldName())
+	}
+	lang := subFieldDataByName(t, structFD, "lang").GetScalars().GetArrayData().GetData()
+	require.Len(t, lang, 2)
+	assert.Equal(t, []bool{false}, lang[0].GetValidData())
+	assert.Equal(t, []bool{false, true}, lang[1].GetValidData())
+	assert.Equal(t, []string{"fr"}, lang[1].GetStringData().GetData())
+	tags := subFieldDataByName(t, structFD, "tags").GetScalars().GetArrayData().GetData()
+	assert.Equal(t, []bool{false}, tags[0].GetValidData())
+	assert.Equal(t, []bool{false, true}, tags[1].GetValidData())
+	require.Len(t, tags[1].GetArrayData().GetData(), 1)
+	assert.Equal(t, []bool{false}, tags[1].GetArrayData().GetData()[0].GetValidData())
+	validateStructWithProxy(t, schema, structFD, 3)
+}
+
+// elementNullStructOutput is server-shaped output for one struct row of three
+// elements: scalars dense with a placeholder at each null, vectors compact.
+// emb comes first so the element count cannot come from a dense payload.
+func elementNullStructOutput(langValid []bool) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: "clips",
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{
+			{
+				Type: schemapb.DataType_ArrayOfVector, FieldName: "clips[emb]",
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{Dim: 2, ElementType: schemapb.DataType_FloatVector, Data: []*schemapb.VectorField{{
+						Dim:       2,
+						Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.5, 0.25}}},
+						ValidData: []bool{false, true, false},
+					}}},
+				}}},
+			},
+			{
+				Type: schemapb.DataType_Array, FieldName: "clips[lang]",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_VarChar, Data: []*schemapb.ScalarField{{
+						Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"en", "", ""}}},
+						ValidData: langValid,
+					}}},
+				}}},
+			},
+			{
+				Type: schemapb.DataType_Array, FieldName: "clips[score]",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64, Data: []*schemapb.ScalarField{{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+					}}},
+				}}},
+			},
+			{
+				Type: schemapb.DataType_Array, FieldName: "clips[tags]",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Array, Data: []*schemapb.ScalarField{{
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_VarChar,
+							Data: []*schemapb.ScalarField{
+								{
+									Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", ""}}},
+									ValidData: []bool{true, false},
+								},
+								{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+								{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+							},
+						}},
+						ValidData: []bool{true, false, true},
+					}}},
+				}}},
+			},
+		}}},
+	}
+}
+
+func TestBuildQueryRespStructElementNull(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(false)
+	resp, err := buildQueryResp(0, []string{"clips"}, []*schemapb.FieldData{elementNullStructOutput([]bool{true, false, false})}, nil, nil, false, schema)
+	require.NoError(t, err)
+	require.Len(t, resp, 1)
+	blob, err := json.Marshal(resp[0]["clips"])
+	require.NoError(t, err)
+	// Int64 follows Accept-Type-Allow-Int64 inside a struct as everywhere else
+	assert.JSONEq(t, `[
+		{"emb": null, "lang": "en", "score": "1", "tags": ["a", null]},
+		{"emb": [0.5, 0.25], "lang": null, "score": "2", "tags": null},
+		{"emb": null, "lang": null, "score": "3", "tags": []}
+	]`, string(blob))
+
+	t.Run("element count mismatch", func(t *testing.T) {
+		// lang reads as two elements, its siblings as three
+		fd := elementNullStructOutput([]bool{true, false})
+		lang := subFieldDataByName(t, fd, "clips[lang]").GetScalars().GetArrayData().GetData()[0]
+		lang.GetStringData().Data = []string{"en"}
+		_, err := buildQueryResp(0, []string{"clips"}, []*schemapb.FieldData{fd}, nil, nil, false, schema)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Contains(t, err.Error(), "element count mismatch")
+	})
+	t.Run("payload matches neither dense nor compact", func(t *testing.T) {
+		fd := elementNullStructOutput([]bool{true, false, false, true})
+		_, err := buildQueryResp(0, []string{"clips"}, []*schemapb.FieldData{fd}, nil, nil, false, schema)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+	t.Run("single sub-field output", func(t *testing.T) {
+		fd := elementNullStructOutput([]bool{true, false, false})
+		fd.GetStructArrays().Fields = fd.GetStructArrays().GetFields()[1:2]
+		resp, err := buildQueryResp(0, []string{"clips[lang]"}, []*schemapb.FieldData{fd}, nil, nil, true, schema)
+		require.NoError(t, err)
+		blob, err := json.Marshal(resp[0]["clips"])
+		require.NoError(t, err)
+		assert.JSONEq(t, `[{"lang": "en"}, {"lang": null}, {"lang": null}]`, string(blob))
+	})
+}
+
+// TestStructElementNullInsertQueryRoundTrip: what REST writes, compact at every
+// nullable level, reads back as the elements that were sent.
+func TestStructElementNullInsertQueryRoundTrip(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(true)
+	body := []byte(`{"data": [
+		{"id": 1, "vec": [0.1, 0.2], "clips": [
+			{"lang": "en", "score": 1, "emb": [0.5, 0.25], "tags": ["a", null]},
+			{"lang": null, "score": 2, "emb": null, "tags": null},
+			{"score": 3, "tags": []}
+		]},
+		{"id": 2, "vec": [0.1, 0.2], "clips": null}
+	]}`)
+	rows, validData, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+	fds, err := anyToColumns(rows, validData, schema, true, false)
+	require.NoError(t, err)
+	var structFD *schemapb.FieldData
+	for _, fd := range fds {
+		if fd.GetType() == schemapb.DataType_ArrayOfStruct {
+			structFD = fd
+		}
+	}
+	require.NotNil(t, structFD)
+	resp, err := buildQueryResp(0, []string{"clips"}, []*schemapb.FieldData{structFD}, nil, nil, true, schema)
+	require.NoError(t, err)
+	require.Len(t, resp, 2)
+	blob, err := json.Marshal(resp[0]["clips"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"lang": "en", "score": 1, "emb": [0.5, 0.25], "tags": ["a", null]},
+		{"lang": null, "score": 2, "emb": null, "tags": null},
+		{"lang": null, "score": 3, "emb": null, "tags": []}
+	]`, string(blob))
+	assert.Nil(t, resp[1]["clips"])
+}
+
+func TestExpandElementValidity(t *testing.T) {
+	values, err := expandElementValidity([]interface{}{1, 2}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []interface{}{1, 2}, values)
+
+	values, err = expandElementValidity([]interface{}{1, 0, 3}, []bool{true, false, true})
+	require.NoError(t, err)
+	assert.Equal(t, []interface{}{1, nil, 3}, values)
+
+	values, err = expandElementValidity([]interface{}{1, 3}, []bool{true, false, true})
+	require.NoError(t, err)
+	assert.Equal(t, []interface{}{1, nil, 3}, values)
+
+	values, err = expandElementValidity([]interface{}{}, []bool{false, false})
+	require.NoError(t, err)
+	assert.Equal(t, []interface{}{nil, nil}, values)
+
+	_, err = expandElementValidity([]interface{}{1}, []bool{true, false, true})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestSetElementOffsets(t *testing.T) {
+	rows := []map[string]interface{}{{"id": 1}, {"id": 2}}
+	require.NoError(t, setSearchElementOffsets(rows, nil))
+	assert.NotContains(t, rows[0], HTTPReturnOffset)
+	require.NoError(t, setSearchElementOffsets(rows, &schemapb.LongArray{Data: []int64{4, 0}}))
+	assert.Equal(t, int64(4), rows[0][HTTPReturnOffset])
+	assert.Equal(t, int64(0), rows[1][HTTPReturnOffset])
+	err := setSearchElementOffsets(rows, &schemapb.LongArray{Data: []int64{4}})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.Equal(t, merr.ErrInvalidSearchResult.Error()+", error: failed to build search element offsets", resultErrMessage(err))
+
+	rows = []map[string]interface{}{{"id": 1}, {"id": 2}}
+	require.NoError(t, setQueryElementOffsets(rows, nil))
+	assert.NotContains(t, rows[0], HTTPReturnOffset)
+	require.NoError(t, setQueryElementOffsets(rows, []*milvuspb.ElementIndices{
+		{Indices: &schemapb.LongArray{Data: []int64{0, 2}}},
+		{},
+	}))
+	assert.Equal(t, []int64{0, 2}, rows[0][HTTPReturnOffset])
+	assert.Equal(t, []int64{}, rows[1][HTTPReturnOffset])
+	err = setQueryElementOffsets(rows, []*milvuspb.ElementIndices{{}})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestPrintFieldDetailElementNullable(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(true)
+	printed := printStructArrayFieldsV2(schema.GetStructArrayFields())
+	require.Len(t, printed, 1)
+	subs := printed[0]["fields"].([]gin.H)
+	require.Len(t, subs, 4)
+	assert.Equal(t, "lang", subs[0][HTTPReturnFieldName])
+	assert.Equal(t, true, subs[0][HTTPReturnFieldElementNullable])
+	assert.NotContains(t, subs[1], HTTPReturnFieldElementNullable)
+	assert.Equal(t, true, subs[2][HTTPReturnFieldElementNullable])
+	assert.Equal(t, "Array", subs[3][HTTPReturnFieldElementType])
+	typeSchema, ok := subs[3][HTTPReturnFieldTypeSchema].(*TypeSchemaReq)
+	require.True(t, ok)
+	assert.Equal(t, "8", typeSchema.TypeParams[common.MaxCapacityKey])
+	assert.Equal(t, "VarChar", typeSchema.ArrayElement.ArrayElement.LeafType)
+	assert.True(t, *typeSchema.ArrayElement.Nullable)
+
+	// fields that are not element nullable keep their shape
+	plain := printFieldDetail(buildStructArrayTestSchema().GetStructArrayFields()[0].GetFields()[0], false)
+	assert.NotContains(t, plain, HTTPReturnFieldElementNullable)
+	assert.NotContains(t, plain, HTTPReturnFieldTypeSchema)
 }

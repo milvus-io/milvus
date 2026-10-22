@@ -7723,3 +7723,264 @@ func TestFloatVectorBase64V2(t *testing.T) {
 	assert.Equal(t, [][]byte{want, want}, searchValues, "base64 and array search must build the same placeholder")
 	assert.Equal(t, [][]byte{want, want}, hybridValues)
 }
+
+func (s *AddCollectionFieldSuite) TestAddCollectionStructSubField() {
+	s.Run("scalar", func() {
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+			infos := req.GetAction().GetAddRequest().GetFieldInfos()
+			if len(infos) != 1 {
+				return false
+			}
+			field := infos[0].GetFieldSchema()
+			return infos[0].GetStructPath() == "clips" &&
+				field.GetName() == "clips[lang]" &&
+				field.GetDataType() == schemapb.DataType_Array &&
+				field.GetElementType() == schemapb.DataType_VarChar &&
+				field.GetElementNullable() &&
+				field.GetTypeSchema() == nil &&
+				kvPairsToMap(field.GetTypeParams())[common.MaxLengthKey] == "16"
+		})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Once()
+		validateRequestBodyTestCases(s.T(), s.testEngine, []requestBodyTestCase{{
+			path: versionalV2(CollectionFieldCategory, AddAction),
+			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "clips[lang]", "dataType": "Array",
+				"elementDataType": "VarChar", "elementNullable": true, "elementTypeParams": {"max_length": 16}}}`),
+		}}, false)
+	})
+
+	s.Run("vector", func() {
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+			info := req.GetAction().GetAddRequest().GetFieldInfos()[0]
+			return info.GetStructPath() == "clips" &&
+				info.GetFieldSchema().GetName() == "clips[emb2]" &&
+				info.GetFieldSchema().GetDataType() == schemapb.DataType_ArrayOfVector &&
+				info.GetFieldSchema().GetElementNullable()
+		})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Once()
+		validateRequestBodyTestCases(s.T(), s.testEngine, []requestBodyTestCase{{
+			path: versionalV2(CollectionFieldCategory, AddAction),
+			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "clips[emb2]", "dataType": "ArrayOfVector",
+				"elementDataType": "FloatVector", "elementNullable": true, "elementTypeParams": {"dim": 4}}}`),
+		}}, false)
+	})
+
+	s.Run("nested_array", func() {
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+			info := req.GetAction().GetAddRequest().GetFieldInfos()[0]
+			field := info.GetFieldSchema()
+			root := field.GetTypeSchema()
+			inner := root.GetArrayElement()
+			leaf := inner.GetArrayElement()
+			// The root capacity is left to the server, which takes the
+			// struct's; the inner array's nullable follows elementNullable.
+			return info.GetStructPath() == "clips" &&
+				field.GetElementType() == schemapb.DataType_Array &&
+				field.GetElementNullable() &&
+				kvPairsToMap(root.GetTypeParams())[common.MaxCapacityKey] == "" &&
+				inner.GetNullable() &&
+				kvPairsToMap(inner.GetTypeParams())[common.MaxCapacityKey] == "4" &&
+				leaf.GetLeafType() == schemapb.DataType_VarChar &&
+				leaf.GetNullable() &&
+				kvPairsToMap(leaf.GetTypeParams())[common.MaxLengthKey] == "8"
+		})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Once()
+		validateRequestBodyTestCases(s.T(), s.testEngine, []requestBodyTestCase{{
+			path: versionalV2(CollectionFieldCategory, AddAction),
+			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "clips[tags]", "dataType": "Array",
+				"elementDataType": "Array", "elementNullable": true,
+				"typeSchema": {"arrayElement": {"typeParams": {"max_capacity": 4},
+					"arrayElement": {"leafType": "VarChar", "nullable": true, "typeParams": {"max_length": 8}}}}}}`),
+		}}, false)
+	})
+
+	s.Run("bad_path", func() {
+		for _, name := range []string{"clips[a][b]", "[a]", "clips[]", "clips[a", "clips]", "clips[a]b"} {
+			requestBody := []byte(fmt.Sprintf(`{"collectionName": "book", "schema": {"fieldName": %q, "dataType": "Array",
+				"elementDataType": "Int64", "elementNullable": true}}`, name))
+			req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionFieldCategory, AddAction), bytes.NewReader(requestBody))
+			w := httptest.NewRecorder()
+			s.testEngine.ServeHTTP(w, req)
+			s.Equal(http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			s.NoError(json.Unmarshal(w.Body.Bytes(), returnBody))
+			s.Equal(merr.Code(merr.ErrParameterInvalid), returnBody.Code, name)
+			s.Contains(returnBody.Message, "invalid fieldName", name)
+		}
+	})
+
+	s.Run("nested_inner_nullable_conflict", func() {
+		requestBody := []byte(`{"collectionName": "book", "schema": {"fieldName": "clips[tags]", "dataType": "Array",
+			"elementDataType": "Array", "elementNullable": false,
+			"typeSchema": {"arrayElement": {"nullable": true, "arrayElement": {"leafType": "Int64"}}}}}`)
+		req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionFieldCategory, AddAction), bytes.NewReader(requestBody))
+		w := httptest.NewRecorder()
+		s.testEngine.ServeHTTP(w, req)
+		returnBody := &ReturnErrMsg{}
+		s.NoError(json.Unmarshal(w.Body.Bytes(), returnBody))
+		s.Equal(merr.Code(merr.ErrParameterInvalid), returnBody.Code)
+		s.Contains(returnBody.Message, "must match elementNullable")
+	})
+}
+
+func (s *AddCollectionFieldSuite) TestDropCollectionStructSubField() {
+	s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.MatchedBy(func(req *milvuspb.AlterCollectionSchemaRequest) bool {
+		return req.GetAction().GetDropRequest().GetFieldName() == "clips[lang]"
+	})).Return(&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Success()}, nil).Once()
+	validateRequestBodyTestCases(s.T(), s.testEngine, []requestBodyTestCase{{
+		path:        versionalV2(CollectionFieldCategory, DropAction),
+		requestBody: []byte(`{"collectionName":"book","fieldName":"clips[lang]"}`),
+	}}, false)
+}
+
+func (s *AddCollectionFieldSuite) TestAddCollectionStructFieldElementNullable() {
+	s.mp.EXPECT().AddCollectionStructField(mock.Anything, mock.MatchedBy(func(req *milvuspb.AddCollectionStructFieldRequest) bool {
+		fields := req.GetStructArrayFieldSchema().GetFields()
+		if len(fields) != 2 {
+			return false
+		}
+		tags := fields[1]
+		root := tags.GetTypeSchema()
+		return fields[0].GetElementNullable() &&
+			tags.GetElementType() == schemapb.DataType_Array &&
+			kvPairsToMap(root.GetTypeParams())[common.MaxCapacityKey] == "16" &&
+			kvPairsToMap(tags.GetTypeParams())[common.MaxCapacityKey] == "" &&
+			!root.GetArrayElement().GetNullable() &&
+			root.GetArrayElement().GetArrayElement().GetLeafType() == schemapb.DataType_Int64
+	})).Return(merr.Success(), nil).Once()
+
+	requestBody := []byte(`{"collectionName": "book", "schema": {
+		"fieldName": "clips",
+		"dataType": "ArrayOfStruct",
+		"typeParams": {"max_capacity": 16},
+		"fields": [
+			{"fieldName": "lang", "dataType": "Array", "elementDataType": "VarChar", "elementNullable": true, "elementTypeParams": {"max_length": 8}},
+			{"fieldName": "tags", "dataType": "Array", "elementDataType": "Array",
+			 "typeSchema": {"arrayElement": {"typeParams": {"max_capacity": 4}, "arrayElement": {"leafType": "Int64"}}}}
+		]
+	}}`)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionStructFieldCategory, AddAction), bytes.NewReader(requestBody))
+	w := httptest.NewRecorder()
+	s.testEngine.ServeHTTP(w, req)
+	returnBody := &ReturnErrMsg{}
+	s.NoError(json.Unmarshal(w.Body.Bytes(), returnBody))
+	s.Equal(int32(0), returnBody.Code, returnBody.Message)
+}
+
+func TestSplitStructSubFieldPath(t *testing.T) {
+	structPath, isSub, err := splitStructSubFieldPath("plain")
+	require.NoError(t, err)
+	assert.False(t, isSub)
+	assert.Empty(t, structPath)
+
+	structPath, isSub, err = splitStructSubFieldPath("clips[lang]")
+	require.NoError(t, err)
+	assert.True(t, isSub)
+	assert.Equal(t, "clips", structPath)
+
+	for _, name := range []string{"clips[a][b]", "[a]", "clips[]", "clips[a", "clips]", "clips[a]b", "]"} {
+		_, _, err = splitStructSubFieldPath(name)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid, name)
+	}
+}
+
+// TestElementLevelOffsetsInResults: an element-level search gives each hit the
+// matched element's "offset"; an element-level query keeps one row per entity
+// and gives it the list of matched offsets. Results without element indices
+// keep their shape.
+func TestElementLevelOffsetsInResults(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil)
+	ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 8}}}}
+	searchResults := func(elementIndices *schemapb.LongArray) *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           2,
+			Topks:          []int64{2},
+			Ids:            ids,
+			Scores:         []float32{0.9, 0.8},
+			ElementIndices: elementIndices,
+		}}
+	}
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(searchResults(&schemapb.LongArray{Data: []int64{3, 0}}), nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(searchResults(nil), nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(searchResults(&schemapb.LongArray{Data: []int64{3}}), nil).Once()
+	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(searchResults(&schemapb.LongArray{Data: []int64{1, 2}}), nil).Once()
+	queryResults := func(elementIndices []*milvuspb.ElementIndices) *milvuspb.QueryResults {
+		return &milvuspb.QueryResults{
+			Status:       commonSuccessStatus,
+			OutputFields: []string{FieldBookID},
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_Int64,
+				FieldName: FieldBookID,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7, 8}}},
+				}},
+			}},
+			ElementIndices: elementIndices,
+		}
+	}
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(queryResults([]*milvuspb.ElementIndices{
+		{Indices: &schemapb.LongArray{Data: []int64{0, 2}}},
+		{Indices: &schemapb.LongArray{Data: []int64{1}}},
+	}), nil).Once()
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(queryResults(nil), nil).Once()
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(queryResults([]*milvuspb.ElementIndices{
+		{Indices: &schemapb.LongArray{Data: []int64{0}}},
+	}), nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+
+	send := func(action, body string) map[string]interface{} {
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), strings.NewReader(body)))
+		require.Equal(t, http.StatusOK, w.Code)
+		resp := map[string]interface{}{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp
+	}
+	rowsOf := func(resp map[string]interface{}) []map[string]interface{} {
+		require.EqualValues(t, 0, resp[HTTPReturnCode], resp[HTTPReturnMessage])
+		data := resp[HTTPReturnData].([]interface{})
+		rows := make([]map[string]interface{}, 0, len(data))
+		for _, row := range data {
+			rows = append(rows, row.(map[string]interface{}))
+		}
+		return rows
+	}
+	searchBody := `{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 2}`
+
+	rows := rowsOf(send(SearchAction, searchBody))
+	require.Len(t, rows, 2)
+	assert.EqualValues(t, 3, rows[0][HTTPReturnOffset])
+	assert.EqualValues(t, 0, rows[1][HTTPReturnOffset])
+
+	rows = rowsOf(send(SearchAction, searchBody))
+	require.Len(t, rows, 2)
+	assert.NotContains(t, rows[0], HTTPReturnOffset)
+
+	resp := send(SearchAction, searchBody)
+	assert.EqualValues(t, merr.Code(merr.ErrInvalidSearchResult), resp[HTTPReturnCode])
+
+	rows = rowsOf(send(AdvancedSearchAction, `{"collectionName": "book", "search": [{"data": [[0.1, 0.2]], "annsField": "book_intro", "limit": 2}], "rerank": {"strategy": "rrf", "params": {}}, "limit": 2}`))
+	require.Len(t, rows, 2)
+	assert.EqualValues(t, 1, rows[0][HTTPReturnOffset])
+	assert.EqualValues(t, 2, rows[1][HTTPReturnOffset])
+
+	queryBody := `{"collectionName": "book", "filter": "element_filter(clips, $[lang] == \"en\")", "outputFields": ["book_id"]}`
+	rows = rowsOf(send(QueryAction, queryBody))
+	require.Len(t, rows, 2)
+	assert.Equal(t, []interface{}{float64(0), float64(2)}, rows[0][HTTPReturnOffset])
+	assert.Equal(t, []interface{}{float64(1)}, rows[1][HTTPReturnOffset])
+
+	rows = rowsOf(send(QueryAction, queryBody))
+	require.Len(t, rows, 2)
+	assert.NotContains(t, rows[0], HTTPReturnOffset)
+
+	resp = send(QueryAction, queryBody)
+	assert.EqualValues(t, merr.Code(merr.ErrInvalidSearchResult), resp[HTTPReturnCode])
+}

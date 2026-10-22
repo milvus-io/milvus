@@ -18,6 +18,7 @@ package httpserver
 
 import (
 	"context"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type EmptyReq struct{}
@@ -865,8 +867,70 @@ type FieldSchema struct {
 	ElementTypeParams map[string]interface{} `json:"elementTypeParams"`
 	TypeParams        map[string]interface{} `json:"typeParams"`
 	Fields            []FieldSchema          `json:"fields"`
-	Nullable          bool                   `json:"nullable"`
-	DefaultValue      interface{}            `json:"defaultValue"`
+	// Nullable is a pointer so that a struct sub-field can leave its
+	// nullability to the struct's.
+	Nullable     *bool       `json:"nullable"`
+	DefaultValue interface{} `json:"defaultValue"`
+	// ElementNullable lets an element of an Array / ArrayOfVector struct
+	// sub-field be null. For an Array<Array<T>> sub-field it is the nullability
+	// of an inner array.
+	ElementNullable bool `json:"elementNullable"`
+	// TypeSchema describes an Array<Array<T>> struct sub-field, which is
+	// declared with dataType Array and elementDataType Array.
+	TypeSchema *TypeSchemaReq `json:"typeSchema"`
+}
+
+// TypeSchemaReq is the RESTful form of schemapb.TypeSchema. A node is either an
+// Array, whose element is described by ArrayElement, or a leaf of type
+// LeafType. Nullable is a pointer so that a struct sub-field can leave the
+// inner array's nullability to its elementNullable.
+type TypeSchemaReq struct {
+	LeafType     string                 `json:"leafType,omitempty"`
+	ArrayElement *TypeSchemaReq         `json:"arrayElement,omitempty"`
+	TypeParams   map[string]interface{} `json:"typeParams,omitempty"`
+	Nullable     *bool                  `json:"nullable,omitempty"`
+}
+
+// GetProto converts the node and its descendants. The checks a node's
+// combination of kinds and params needs are left to the server, which owns
+// them for every client; only what cannot be expressed in the proto is
+// rejected here.
+func (ts *TypeSchemaReq) GetProto(fieldName string) (*schemapb.TypeSchema, error) {
+	if (ts.LeafType == "") == (ts.ArrayElement == nil) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"typeSchema of field %s must set exactly one of leafType and arrayElement on every node", fieldName)
+	}
+	proto := &schemapb.TypeSchema{
+		TypeParams: make([]*commonpb.KeyValuePair, 0, len(ts.TypeParams)),
+		Nullable:   ts.Nullable != nil && *ts.Nullable,
+	}
+	keys := make([]string, 0, len(ts.TypeParams))
+	for key := range ts.TypeParams {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value, err := getElementTypeParams(ts.TypeParams[key])
+		if err != nil {
+			return nil, err
+		}
+		proto.TypeParams = append(proto.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
+	}
+	if ts.ArrayElement != nil {
+		element, err := ts.ArrayElement.GetProto(fieldName)
+		if err != nil {
+			return nil, err
+		}
+		proto.Kind = &schemapb.TypeSchema_ArrayElement{ArrayElement: element}
+		return proto, nil
+	}
+	leafType, ok := schemapb.DataType_value[ts.LeafType]
+	if !ok {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"typeSchema leaf type %s of field %s is invalid(case sensitive)", ts.LeafType, fieldName)
+	}
+	proto.Kind = &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType(leafType)}
+	return proto, nil
 }
 
 func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, error) {
@@ -884,8 +948,9 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 		IsClusteringKey: field.IsClusteringKey,
 		DataType:        dataType,
 		TypeParams:      []*commonpb.KeyValuePair{},
-		Nullable:        field.Nullable,
+		Nullable:        field.IsNullable(),
 		ExternalField:   field.ExternalField,
+		ElementNullable: field.ElementNullable,
 	}
 
 	var err error
@@ -908,7 +973,18 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 		}
 		fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
+	if field.TypeSchema != nil {
+		fieldSchema.TypeSchema, err = field.TypeSchema.GetProto(field.FieldName)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return fieldSchema, nil
+}
+
+// IsNullable reports whether the field is declared nullable; an omitted nullable is false.
+func (field *FieldSchema) IsNullable() bool {
+	return field.Nullable != nil && *field.Nullable
 }
 
 func (field *FieldSchema) IsStructArrayField() bool {
@@ -940,13 +1016,15 @@ func (field *FieldSchema) GetStructArrayProto(ctx context.Context) (*schemapb.St
 		Description: field.Description,
 		Fields:      field.Fields,
 		TypeParams:  typeParams,
-		Nullable:    field.Nullable,
+		Nullable:    field.IsNullable(),
 	}).GetProto(ctx)
 }
 
 // StructArrayFieldSchema describes a struct array field in RESTful v2 API.
 // Each struct array field contains multiple sub-fields; every sub-field must
 // be declared as either Array (scalar element) or ArrayOfVector (vector element).
+// An Array<Array<T>> sub-field is an Array with elementDataType Array and a
+// typeSchema.
 type StructArrayFieldSchema struct {
 	FieldName   string                 `json:"fieldName" binding:"required"`
 	Description string                 `json:"description"`
@@ -993,11 +1071,15 @@ func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.Struc
 				"sub-field %s of struct %s cannot be primary / partition / clustering key",
 				sub.FieldName, sf.FieldName)
 		}
-		if subProto.Nullable {
+		// Row-level null is declared on the struct. A sub-field that omits
+		// nullable takes the struct's; one that sets it, as describe reports
+		// it, must set the struct's.
+		if sub.Nullable != nil && *sub.Nullable != sf.Nullable {
 			return nil, merr.WrapErrParameterInvalidMsg(
-				"sub-field %s of struct %s cannot be nullable",
-				sub.FieldName, sf.FieldName)
+				"sub-field %s of struct %s has nullable=%t but the struct has nullable=%t; set nullable on the struct instead",
+				sub.FieldName, sf.FieldName, *sub.Nullable, sf.Nullable)
 		}
+		subProto.Nullable = sf.Nullable
 		if subProto.DefaultValue != nil {
 			return nil, merr.WrapErrParameterInvalidMsg(
 				"sub-field %s of struct %s cannot set defaultValue",
@@ -1008,12 +1090,37 @@ func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.Struc
 				"duplicated sub-field name %s in struct %s", subProto.Name, sf.FieldName)
 		}
 		subNames[subProto.Name] = struct{}{}
-		if maxCapacity, ok := parentTypeParams[common.MaxCapacityKey]; ok && !hasTypeParam(subProto.TypeParams, common.MaxCapacityKey) {
+		if typeutil.IsNestedArrayTypeSchema(subProto.GetTypeSchema()) {
+			if err := completeNestedSubFieldTypeSchema(sf.FieldName, &sub, subProto, parentTypeParams); err != nil {
+				return nil, err
+			}
+		} else if maxCapacity, ok := parentTypeParams[common.MaxCapacityKey]; ok && !hasTypeParam(subProto.TypeParams, common.MaxCapacityKey) {
 			subProto.TypeParams = append(subProto.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: maxCapacity})
 		}
 		proto.Fields = append(proto.Fields, subProto)
 	}
 	return proto, nil
+}
+
+// completeNestedSubFieldTypeSchema fills what an Array<Array<T>> sub-field's
+// typeSchema may leave to the struct: the root node's max_capacity is the
+// struct's (the root is the outer array, one entry per struct element), and
+// the inner array's nullable is the sub-field's elementNullable. The struct's
+// max_capacity goes to the root rather than to the sub-field's typeParams,
+// where the server reads it as a mirror of the root.
+func completeNestedSubFieldTypeSchema(structName string, sub *FieldSchema, subProto *schemapb.FieldSchema, parentTypeParams map[string]string) error {
+	root := subProto.GetTypeSchema()
+	if maxCapacity, ok := parentTypeParams[common.MaxCapacityKey]; ok && !hasTypeParam(root.GetTypeParams(), common.MaxCapacityKey) {
+		root.TypeParams = append(root.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: maxCapacity})
+	}
+	inner := root.GetArrayElement()
+	if requested := sub.TypeSchema.ArrayElement.Nullable; requested != nil && *requested != sub.ElementNullable {
+		return merr.WrapErrParameterInvalidMsg(
+			"sub-field %s of struct %s: typeSchema inner array nullable=%t must match elementNullable=%t",
+			sub.FieldName, structName, *requested, sub.ElementNullable)
+	}
+	inner.Nullable = sub.ElementNullable
+	return nil
 }
 
 func hasTypeParam(typeParams []*commonpb.KeyValuePair, key string) bool {
