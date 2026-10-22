@@ -127,7 +127,7 @@ func TestDataViewFlushPublishesOnlyCommit(t *testing.T) {
 }
 
 func TestRecoveryFootprintFillReplacesPublishedObjects(t *testing.T) {
-	view := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version(2, 0), Shards: []*viewpb.DataViewOfShard{{Vchannel: "v0", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 10, SegmentIds: []int64{100}}}}}}
+	view := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version(2, 0), Shards: []*viewpb.DataViewOfShard{{Vchannel: "v0", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 10, SegmentIds: []int64{100}, SegmentManifestVersions: []int64{0}}}}}}
 	patch := mockey.Mock((*datacatalog.Catalog).ListAllDataViews).Return([]*viewpb.DataViewOfCollection{view}, nil).Build()
 	defer patch.UnPatch()
 	m, err := RecoverManager(t.Context(), datacatalog.NewCatalog(nil, "", ""), recoverAllCollections, nil, nil, nil)

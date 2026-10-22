@@ -52,6 +52,9 @@ func (s *LoadInfoStore) Get(ctx context.Context, collectionID int64, version uin
 	if info == nil {
 		return nil, merr.WrapErrServiceNotReadyMsg("query view load snapshot %d for collection %d is unavailable", version, collectionID)
 	}
+	if len(info.RequiredFields) == 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("query view load snapshot %d for collection %d has no required fields", version, collectionID)
+	}
 	s.cache.Store(key, info)
 	return s.withCurrentIndexes(info), nil
 }
@@ -59,6 +62,9 @@ func (s *LoadInfoStore) Get(ctx context.Context, collectionID int64, version uin
 // Ensure persists a snapshot before its config can drive creation of a view.
 // Only the field/partition scope is retained; indexes are resolved when read.
 func (s *LoadInfoStore) Ensure(ctx context.Context, cfg *LoadConfig) error {
+	if len(cfg.RequiredFields) == 0 {
+		return merr.WrapErrServiceInternalMsg("query view load config for collection %d has no required fields", cfg.CollectionID)
+	}
 	key := loadInfoKey{cfg.CollectionID, loadInfoVersion(cfg)}
 	s.locks.Lock(key)
 	defer s.locks.Unlock(key)
@@ -70,6 +76,9 @@ func (s *LoadInfoStore) Ensure(ctx context.Context, cfg *LoadConfig) error {
 		return err
 	}
 	if existing != nil {
+		if len(existing.RequiredFields) == 0 {
+			return merr.WrapErrDataIntegrityMsg("query view load snapshot %d for collection %d has no required fields", key.version, key.collectionID)
+		}
 		s.cache.Store(key, existing)
 		return nil
 	}
@@ -98,15 +107,15 @@ func (s *LoadInfoStore) withCurrentIndexes(stored *querypb.GetQueryViewLoadInfoR
 	}
 	info.IndexInfoList = nil
 	for _, index := range s.indexes(info.CollectionID) {
-		if _, loaded := fields[index.GetFieldID()]; loaded || len(fields) == 0 {
+		if _, loaded := fields[index.GetFieldID()]; loaded {
 			info.IndexInfoList = append(info.IndexInfoList, proto.Clone(index).(*indexpb.IndexInfo))
 		}
 	}
 	return info
 }
 
-// normalize materializes legacy required scopes before desired state publication.
-// Historical snapshots are resolved against their View schema by the worker.
+// normalize materializes required scopes from existing QueryCoord metadata and
+// load-config messages before publishing a new immutable QueryView snapshot.
 func (s *LoadInfoStore) normalize(ctx context.Context, cfg *LoadConfig) (*LoadConfig, error) {
 	cfg = cfg.Clone()
 	if len(cfg.RequiredFields) == 0 && s.schema != nil {
