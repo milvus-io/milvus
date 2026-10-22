@@ -414,6 +414,8 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		rec, err := rr[ri].Next()
 		recs[ri] = rec // assign nil if err
 		if err != nil {
+			// Next invalidates the previous record, including on EOF.
+			clear(outputColumns[ri])
 			return err
 		}
 		pos[ri] = 0

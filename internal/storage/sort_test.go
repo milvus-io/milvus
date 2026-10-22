@@ -452,6 +452,78 @@ func TestMergeSortResolvesOutputColumnsOncePerRecord(t *testing.T) {
 	require.Equal(t, 1, record.columnCalls[payloadField], "output binding should resolve the payload once")
 }
 
+func TestMergeSortClearsOutputColumnsOnReaderError(t *testing.T) {
+	const pkField, payloadField = FieldID(100), FieldID(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: payloadField, Name: "payload", DataType: schemapb.DataType_Int64},
+	}}
+	makeRecord := func(keys, payload []int64) *countedRecord {
+		columns := make([]arrow.Array, 0, 2)
+		for _, values := range [][]int64{keys, payload} {
+			builder := array.NewInt64Builder(memory.DefaultAllocator)
+			builder.AppendValues(values, nil)
+			columns = append(columns, builder.NewArray())
+			builder.Release()
+		}
+		return &countedRecord{Record: &compositeRecord{
+			index: map[FieldID]int16{pkField: 0, payloadField: 1}, recs: columns,
+		}, live: 1}
+	}
+	for _, terminalErr := range []error{io.EOF, io.ErrUnexpectedEOF} {
+		t.Run(terminalErr.Error(), func(t *testing.T) {
+			first := makeRecord([]int64{1}, []int64{10})
+			reader := &IterativeRecordReader{
+				cur:     &borrowingRecordReader{recs: []Record{first}},
+				iterate: func() (RecordReader, error) { return nil, terminalErr },
+			}
+			defer reader.Close()
+			other := &borrowingRecordReader{recs: []Record{makeRecord([]int64{2, 3}, []int64{20, 30})}}
+			defer other.Close()
+
+			// Observe the cache's backing slice without depending on GC timing.
+			var finishedColumns []arrow.Array
+			assertCleared := func() {
+				require.Zero(t, first.live, "the reader must release its finished record")
+				require.Len(t, finishedColumns, 2)
+				for _, column := range finishedColumns {
+					require.Nil(t, column, "finished reader must not keep borrowed output columns")
+				}
+			}
+			var appendColumns func(*RecordBuilder, []arrow.Array, int, int) error
+			mock := mockey.Mock((*RecordBuilder).appendColumns).To(func(b *RecordBuilder, columns []arrow.Array, start, end int) error {
+				if finishedColumns == nil {
+					finishedColumns = columns
+				} else {
+					// Reader 0 is already at EOF while reader 1 still has rows.
+					assertCleared()
+				}
+				return appendColumns(b, columns, start, end)
+			}).Origin(&appendColumns).Build()
+			defer mock.UnPatch()
+
+			var gotKeys, gotPayload []int64
+			writer := &MockRecordWriter{writefn: func(rec Record) error {
+				gotKeys = append(gotKeys, rec.Column(pkField).(*array.Int64).Int64Values()...)
+				gotPayload = append(gotPayload, rec.Column(payloadField).(*array.Int64).Int64Values()...)
+				return nil
+			}}
+			rows, err := MergeSort(1<<20, schema, []RecordReader{reader, other}, writer,
+				func(Record, int, int) bool { return true }, []int64{pkField})
+			assertCleared()
+			if terminalErr == io.EOF {
+				require.NoError(t, err)
+				require.Equal(t, 3, rows)
+				require.Equal(t, []int64{1, 2, 3}, gotKeys)
+				require.Equal(t, []int64{10, 20, 30}, gotPayload)
+			} else {
+				require.ErrorIs(t, err, terminalErr)
+				require.Empty(t, gotKeys)
+			}
+		})
+	}
+}
+
 func TestMergeSortCachedColumnsPreserveTextAcrossRecords(t *testing.T) {
 	const pkField, textField = FieldID(100), FieldID(101)
 	makeRecord := func(pkValue int64, missingText bool) Record {
