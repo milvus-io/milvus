@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -85,7 +86,9 @@ type Txn[K comparable, V any] interface {
 	Raw(op RawOp)
 	// Group starts a group: the ops added until the next Group call land in
 	// one batch when the transaction has to be split, unless they exceed the
-	// op limit on their own (e.g. a segment record and its binlog KVs).
+	// op limit on their own (e.g. a segment record and its binlog KVs). A
+	// group whose raw ops land ahead of its versioned op keeps them under
+	// that op's version (see planBatches).
 	Group()
 	// AtomicOnly makes Commit fail instead of splitting an over-limit
 	// transaction into ordered batches.
@@ -285,6 +288,13 @@ func (t *txnOps[K, V]) AtomicOnly() {
 	t.atomicOnly = true
 }
 
+// txnBatch is one commit batch: the indexes of its ops, and its guards, the
+// versioned ops whose keys it compares and touches (see planBatches).
+type txnBatch struct {
+	ops    []int
+	guards []int
+}
+
 // planBatches splits op indexes into commit batches of at most limit ops,
 // mirroring the metastore composite-write contract (kv/txn.Commit): a set that
 // fits is one atomic batch in recorded order; otherwise the non-commit ops are
@@ -293,7 +303,16 @@ func (t *txnOps[K, V]) AtomicOnly() {
 // non-commit ops of a group (see Txn.Group) share a batch: a group that does
 // not fit in the current batch starts the next one, and only a group over the
 // limit on its own is split.
-func (t *txnOps[K, V]) planBatches(limit int) ([][]int, error) {
+//
+// A batch that lands raw ops of a group ahead of the group's versioned op (a
+// group over the limit, or a commit-marked versioned op) is guarded by that
+// op: it compares the op's key with the version the op expects, and puts the
+// key back with its stored value (a touch), which takes a slot of the batch.
+// The op then expects the version of the last touch. The raw ops thus land
+// only on the version the op was built on, and once they did, a writer of the
+// key built on that version conflicts. An absent key (version 0) is compared
+// and not touched.
+func (t *txnOps[K, V]) planBatches(limit int) ([]txnBatch, error) {
 	if len(t.ops) == 0 {
 		return nil, nil
 	}
@@ -302,45 +321,84 @@ func (t *txnOps[K, V]) planBatches(limit int) ([][]int, error) {
 		all[i] = i
 	}
 	if limit <= 0 || len(t.ops) <= limit {
-		return [][]int{all}, nil
+		return []txnBatch{{ops: all}}, nil
 	}
 	if t.atomicOnly {
 		return nil, merr.WrapErrServiceInternalMsg("atomic transaction needs %d ops but the limit is %d", len(t.ops), limit)
 	}
-	var batches [][]int
-	var batch, commit []int
+	var batches []txnBatch
+	var batch txnBatch
+	var commit []int
+	// size counts the ops of b with the touches of its guards.
+	size := func(b txnBatch) int {
+		n := len(b.ops)
+		for _, guard := range b.guards {
+			if t.ops[guard].version != 0 {
+				n++
+			}
+		}
+		return n
+	}
 	for start := 0; start < len(t.ops); {
 		end := start + 1
 		for end < len(t.ops) && t.ops[end].group == t.ops[start].group {
 			end++
 		}
 		var group []int
+		versioned := -1
 		for i := start; i < end; i++ {
+			if t.ops[i].versioned() {
+				versioned = i
+			}
 			if t.ops[i].commit {
 				commit = append(commit, i)
 			} else {
 				group = append(group, i)
 			}
 		}
-		if len(batch) > 0 && len(batch)+len(group) > limit {
+		// place returns ops of the group as the batch that holds them does:
+		// with the guard when they include raw ops that land ahead of
+		// versioned, those recorded before it or, when it is commit-marked,
+		// all of them.
+		place := func(ops []int) txnBatch {
+			b := txnBatch{ops: ops}
+			if versioned >= 0 && !slices.Contains(ops, versioned) && slices.ContainsFunc(ops, func(i int) bool {
+				return t.ops[i].kind == opRaw && (t.ops[versioned].commit || i < versioned)
+			}) {
+				b.guards = []int{versioned}
+			}
+			return b
+		}
+		part := place(group)
+		if len(batch.ops) > 0 && size(batch)+size(part) > limit {
 			batches = append(batches, batch)
-			batch = nil
+			batch = txnBatch{}
 		}
-		for len(group) > limit {
-			batches = append(batches, group[:limit])
-			group = group[limit:]
+		for size(part) > limit {
+			// A part takes at most one slot more than its ops: the touch.
+			n := limit
+			if size(place(group[:n])) > limit {
+				n--
+			}
+			if n == 0 {
+				return nil, merr.WrapErrServiceInternalMsg("transaction op limit %d leaves no room for a touch", limit)
+			}
+			batches = append(batches, place(group[:n]))
+			group = group[n:]
+			part = place(group)
 		}
-		batch = append(batch, group...)
+		batch.ops = append(batch.ops, part.ops...)
+		batch.guards = append(batch.guards, part.guards...)
 		start = end
 	}
-	if len(batch) > 0 {
+	if len(batch.ops) > 0 {
 		batches = append(batches, batch)
 	}
 	if len(commit) > limit {
 		return nil, merr.WrapErrServiceInternalMsg("transaction commit set of %d ops exceeds the limit %d", len(commit), limit)
 	}
 	if len(commit) > 0 {
-		batches = append(batches, commit)
+		batches = append(batches, txnBatch{ops: commit})
 	}
 	mlog.Warn(context.TODO(), "optimistic txn exceeds atomic limit, falling back to ordered batches",
 		mlog.Int("total", len(t.ops)), mlog.Int("limit", limit), mlog.Int("batches", len(batches)))
@@ -462,7 +520,7 @@ func (t *etcdTxn[K, V]) Commit() ([]TxnResult[V], error) {
 	return results, nil
 }
 
-func (t *etcdTxn[K, V]) commitBatch(batch []int, results []TxnResult[V]) error {
+func (t *etcdTxn[K, V]) commitBatch(batch txnBatch, results []TxnResult[V]) error {
 	commitStart := time.Now()
 	retryCount := 0
 
@@ -470,14 +528,23 @@ func (t *etcdTxn[K, V]) commitBatch(batch []int, results []TxnResult[V]) error {
 		retryCount++
 		ctx, cancel := t.persist.requestContext(t.ctx)
 		defer cancel()
-		cmps := make([]clientv3.Cmp, 0, len(batch))
-		putOps := make([]clientv3.Op, 0, len(batch))
-		written := make(map[int]bool, len(batch))
-		hasVersioned := false
+		cmps := make([]clientv3.Cmp, 0, len(batch.ops)+len(batch.guards))
+		putOps := make([]clientv3.Op, 0, len(batch.ops)+len(batch.guards))
+		written := make(map[int]bool, len(batch.ops))
+		hasVersioned := len(batch.guards) > 0
+		for _, i := range batch.guards {
+			op := t.ops[i]
+			cmps = append(cmps, etcdVersionCmp(string(op.key), op.version))
+			if op.version != 0 {
+				// The compare fails on an absent key, so the put never
+				// misses the value it keeps.
+				putOps = append(putOps, clientv3.OpPut(string(op.key), "", clientv3.WithIgnoreValue()))
+			}
+		}
 
 		// Phase 1: read existing values of read-modify-write ops from etcd
 		getStart := time.Now()
-		for _, i := range batch {
+		for _, i := range batch.ops {
 			op := t.ops[i]
 			keyStr := string(op.key)
 			switch op.kind {
@@ -619,7 +686,7 @@ func (t *etcdTxn[K, V]) commitBatch(batch []int, results []TxnResult[V]) error {
 				mlog.Duration("total", totalDur),
 				mlog.Duration("etcdGet", getDur),
 				mlog.Duration("etcdTxn", txnDur),
-				mlog.Int("numOps", len(batch)),
+				mlog.Int("numOps", len(batch.ops)),
 				mlog.Int("numPuts", len(putOps)),
 				mlog.Int("retryCount", retryCount))
 		}
@@ -659,6 +726,12 @@ func (t *etcdTxn[K, V]) commitBatch(batch []int, results []TxnResult[V]) error {
 				results[i].Version = txnResp.Header.Revision
 			}
 		}
+		for _, i := range batch.guards {
+			if t.ops[i].version != 0 {
+				// The op expects the version its last touch left.
+				t.ops[i].version = txnResp.Header.Revision
+			}
+		}
 		return nil
 	}, retry.Attempts(maxCompareAttempts), retry.RetryErr(func(err error) bool { return errors.Is(err, errCompareFailed) }))
 	if errors.Is(err, errCompareFailed) {
@@ -671,7 +744,7 @@ func (t *etcdTxn[K, V]) commitBatch(batch []int, results []TxnResult[V]) error {
 // until the store answers, or the transaction's context ends. A batch that
 // landed unseen would fail a write that took effect, and leave the cache
 // behind the store until a later write of its segments reads them back.
-func (t *etcdTxn[K, V]) resolveUnknownOutcome(batch []int, results []TxnResult[V]) (bool, error) {
+func (t *etcdTxn[K, V]) resolveUnknownOutcome(batch txnBatch, results []TxnResult[V]) (bool, error) {
 	backoff := 10 * time.Millisecond
 	for {
 		ctx, cancel := t.persist.requestContext(context.WithoutCancel(t.ctx))
@@ -689,23 +762,41 @@ func (t *etcdTxn[K, V]) resolveUnknownOutcome(batch []int, results []TxnResult[V
 	}
 }
 
-// resolveVersionedFailure rereads the keys of the batch's versioned ops after
-// a failed compare. It reports ErrVersionConflict when one of them moved to a
-// value this batch did not write, (false, nil) when all of them are still at
-// their expected versions (the read-modify-write compares failed: retry), and
-// (true, nil) when the whole batch is found already applied - an earlier
-// attempt of this batch landed but its response was lost. In that case the
-// results are filled from the store.
+// resolveVersionedFailure rereads the keys of the batch's versioned ops and
+// guards after a failed compare. It reports ErrVersionConflict when one of
+// them moved to a value this batch did not write, or a guard's key moved at
+// all: a touch keeps the value, so another writer's write cannot be told from
+// this batch's touch, and the write is built again from the store. It
+// reports (false, nil) when all of them are still at their expected versions
+// (the read-modify-write compares failed: retry), and (true, nil) when the
+// whole batch is found already applied - an earlier attempt of this batch
+// landed but its response was lost. In that case the results are filled from
+// the store.
 //
 // A versioned op counts as applied when the stored value equals its value, and
 // the batch only when its raw ops are found applied too: the catalog encoding
 // keeps a segment's binlogs out of its record, so another writer may have
 // stored an equal record with other binlogs.
-func (t *etcdTxn[K, V]) resolveVersionedFailure(ctx context.Context, batch []int, results []TxnResult[V]) (bool, error) {
+func (t *etcdTxn[K, V]) resolveVersionedFailure(ctx context.Context, batch txnBatch, results []TxnResult[V]) (bool, error) {
 	unchanged, applied := 0, 0
-	revisions := make(map[int]int64, len(batch))
+	for _, i := range batch.guards {
+		op := t.ops[i]
+		resp, err := t.persist.cli.Get(ctx, string(op.key), clientv3.WithKeysOnly())
+		if err != nil {
+			return false, err
+		}
+		current := int64(0)
+		if len(resp.Kvs) > 0 {
+			current = resp.Kvs[0].ModRevision
+		}
+		if current != op.version {
+			return false, errors.Wrapf(ErrVersionConflict, "key %s: expected version %d, current %d", string(op.key), op.version, current)
+		}
+		unchanged++
+	}
+	revisions := make(map[int]int64, len(batch.ops))
 	var rawOps []RawOp
-	for _, i := range batch {
+	for _, i := range batch.ops {
 		op := t.ops[i]
 		switch {
 		case op.kind == opRaw:
@@ -739,7 +830,7 @@ func (t *etcdTxn[K, V]) resolveVersionedFailure(ctx context.Context, batch []int
 	if applied == 0 {
 		return false, nil
 	}
-	if unchanged > 0 || applied+len(rawOps) != len(batch) {
+	if unchanged > 0 || applied+len(rawOps) != len(batch.ops) {
 		return false, errors.Wrapf(ErrVersionConflict, "batch partially applied by another writer")
 	}
 	for _, op := range rawOps {
@@ -755,7 +846,7 @@ func (t *etcdTxn[K, V]) resolveVersionedFailure(ctx context.Context, batch []int
 		results[i].Value = t.ops[i].value
 		results[i].Version = revision
 	}
-	mlog.Info(t.ctx, "etcdTxn.Commit found an earlier attempt applied", mlog.Int("numOps", len(batch)))
+	mlog.Info(t.ctx, "etcdTxn.Commit found an earlier attempt applied", mlog.Int("numOps", len(batch.ops)))
 	return true, nil
 }
 

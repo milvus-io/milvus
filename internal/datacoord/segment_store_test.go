@@ -81,7 +81,7 @@ func newCASTestMetaOn(t *testing.T, m *meta, persist OptimisticTxnPersist[string
 		catalog:  m.catalog,
 		segments: NewSegmentsInfo(metacache.NewMetaStore(nil)),
 	}
-	other.segmentStore = newCASSegmentStore(persist, m.catalog, testSegmentStoreRoot)
+	other.segmentStore = newCASSegmentStore(persist, m.catalog, m.segmentStore.(*casSegmentStore).rootPath)
 	segments, versions, err := other.store().ListSegments(context.Background(), 1)
 	require.NoError(t, err)
 	for i, segment := range segments {
@@ -128,13 +128,13 @@ func TestOptimisticTxnPlanBatches(t *testing.T) {
 
 	batches, err := ops.planBatches(10)
 	require.NoError(t, err)
-	require.Equal(t, [][]int{{0, 1, 2, 3}}, batches)
+	require.Equal(t, []txnBatch{{ops: []int{0, 1, 2, 3}}}, batches)
 
 	// Over the limit: non-commit ops flush first in recorded order, the
 	// commit-marked op lands alone in the final batch.
 	batches, err = ops.planBatches(2)
 	require.NoError(t, err)
-	require.Equal(t, [][]int{{0, 2}, {3}, {1}}, batches)
+	require.Equal(t, []txnBatch{{ops: []int{0, 2}}, {ops: []int{3}}, {ops: []int{1}}}, batches)
 
 	ops.AtomicOnly()
 	_, err = ops.planBatches(2)
@@ -151,10 +151,34 @@ func TestOptimisticTxnPlanBatches(t *testing.T) {
 	}
 	batches, err = grouped.planBatches(3)
 	require.NoError(t, err)
-	require.Equal(t, [][]int{{0, 1}, {2, 3, 4}, {5}}, batches)
+	require.Equal(t, []txnBatch{{ops: []int{0, 1}}, {ops: []int{2, 3, 4}}, {ops: []int{5}}}, batches)
 	batches, err = grouped.planBatches(2)
 	require.NoError(t, err)
-	require.Equal(t, [][]int{{0, 1}, {2, 3}, {4, 5}}, batches)
+	require.Equal(t, []txnBatch{{ops: []int{0, 1}}, {ops: []int{2, 3}}, {ops: []int{4, 5}}}, batches)
+
+	// A batch that lands raw ops of a group ahead of the group's versioned op
+	// is guarded by it, and its touch takes a slot; an absent key is only
+	// compared.
+	segment := func(version int64, commit bool) *txnOps[string, *datapb.SegmentInfo] {
+		ops := &txnOps[string, *datapb.SegmentInfo]{}
+		ops.Group()
+		for _, field := range []string{"a", "b", "c"} {
+			ops.Raw(RawOp{Key: field})
+		}
+		ops.PutIfVersion("s", &datapb.SegmentInfo{}, version, commit)
+		return ops
+	}
+	batches, err = segment(7, false).planBatches(3)
+	require.NoError(t, err)
+	require.Equal(t, []txnBatch{{ops: []int{0, 1}, guards: []int{3}}, {ops: []int{2, 3}}}, batches)
+	batches, err = segment(7, true).planBatches(3)
+	require.NoError(t, err)
+	require.Equal(t, []txnBatch{{ops: []int{0, 1}, guards: []int{3}}, {ops: []int{2}, guards: []int{3}}, {ops: []int{3}}}, batches)
+	batches, err = segment(0, false).planBatches(3)
+	require.NoError(t, err)
+	require.Equal(t, []txnBatch{{ops: []int{0, 1, 2}, guards: []int{3}}, {ops: []int{3}}}, batches)
+	_, err = segment(7, false).planBatches(1)
+	require.Error(t, err, "a batch of one op has no room for a touch")
 }
 
 func TestCASSegmentStoreWritesCatalogEncodingAgainstCachedVersions(t *testing.T) {
@@ -971,6 +995,109 @@ func TestOptimisticTxnEtcdKeepsAGroupInOneBatch(t *testing.T) {
 	require.Positive(t, results[1].Version)
 	require.EqualValues(t, 1, countKeys(t, cli, root+"/binlog/1/"))
 	require.Zero(t, countKeys(t, cli, root+"/binlog/2/"), "the group of the conflicting record lands nothing")
+}
+
+// A group split over the op limit lands its raw ops only on the version its
+// record is compared with: a writer built on an older version lands none of
+// its binlog KVs over the ones another writer stored with the record.
+func TestOptimisticTxnEtcdSplitGroupLandsOnlyOnItsVersion(t *testing.T) {
+	ctx := context.Background()
+	persist, cli, root := newTestEtcdPersist(t)
+	key := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key
+	paramtable.Get().Save(key, "3")
+	defer paramtable.Get().Reset(key)
+
+	fields := []string{"a", "b", "c", "d", "e"}
+	record := root + "/s/1"
+	write := func(version int64, value string, commit bool) (int64, error) {
+		txn := persist.Txn(ctx)
+		txn.Group()
+		for _, field := range fields {
+			txn.Raw(RawOp{Key: root + "/binlog/" + field, Value: value})
+		}
+		txn.PutIfVersion(record, &datapb.SegmentInfo{ID: 1, InsertChannel: value}, version, commit)
+		results, err := txn.Commit()
+		if err != nil {
+			return 0, err
+		}
+		return results[len(fields)].Version, nil
+	}
+	base, err := write(0, "created", false)
+	require.NoError(t, err)
+	// Each batch ahead of the record compares the version the one before it
+	// left.
+	winner, err := write(base, "winner", false)
+	require.NoError(t, err)
+
+	for _, commit := range []bool{false, true} {
+		_, err = write(base, "stale", commit)
+		require.ErrorIs(t, err, ErrVersionConflict)
+		for _, field := range fields {
+			resp, err := cli.Get(ctx, root+"/binlog/"+field)
+			require.NoError(t, err)
+			require.Equal(t, "winner", string(resp.Kvs[0].Value), "field %s", field)
+		}
+		resp, err := cli.Get(ctx, record)
+		require.NoError(t, err)
+		require.Equal(t, winner, resp.Kvs[0].ModRevision)
+	}
+}
+
+// hookMarshaler runs hook the first time it marshals a value: in an etcd
+// commit, once the batches ahead of the batch of the first versioned put
+// landed.
+type hookMarshaler struct {
+	SegmentInfoMarshaler
+	hook func()
+}
+
+func (m *hookMarshaler) Marshal(v *datapb.SegmentInfo) ([]byte, error) {
+	if hook := m.hook; hook != nil {
+		m.hook = nil
+		hook()
+	}
+	return m.SegmentInfoMarshaler.Marshal(v)
+}
+
+// Once a split group landed a batch, a writer of its record built on the
+// version the group started from conflicts.
+func TestOptimisticTxnEtcdSplitGroupConflictsAWriterBetweenItsBatches(t *testing.T) {
+	ctx := context.Background()
+	persist, cli, root := newTestEtcdPersist(t)
+	key := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key
+	paramtable.Get().Save(key, "3")
+	defer paramtable.Get().Reset(key)
+
+	record := root + "/s/1"
+	created := persist.Txn(ctx)
+	created.PutIfVersion(record, &datapb.SegmentInfo{ID: 1}, 0, false)
+	results, err := created.Commit()
+	require.NoError(t, err)
+	base := results[0].Version
+
+	marshaler := &hookMarshaler{hook: func() {
+		other := persist.Txn(ctx)
+		other.Raw(RawOp{Key: root + "/binlog/a", Value: "other"})
+		other.PutIfVersion(record, &datapb.SegmentInfo{ID: 1, NumOfRows: 2}, base, false)
+		_, err := other.Commit()
+		require.ErrorIs(t, err, ErrVersionConflict)
+	}}
+	split := NewOptimisticTxnEtcdPersist[string, *datapb.SegmentInfo](cli, marshaler).Txn(ctx)
+	split.Group()
+	for _, field := range []string{"a", "b", "c"} {
+		split.Raw(RawOp{Key: root + "/binlog/" + field, Value: "split"})
+	}
+	split.PutIfVersion(record, &datapb.SegmentInfo{ID: 1, NumOfRows: 1}, base, false)
+	_, err = split.Commit()
+	require.NoError(t, err)
+	require.Nil(t, marshaler.hook, "the other writer ran between the batches")
+
+	resp, err := cli.Get(ctx, root+"/binlog/a")
+	require.NoError(t, err)
+	require.Equal(t, "split", string(resp.Kvs[0].Value))
+	stored, err := persist.Get(ctx, []string{record})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, stored[record].Value.GetNumOfRows())
 }
 
 // A truncate that conflicts with a compaction of its segments, stored but not

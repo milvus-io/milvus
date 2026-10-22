@@ -446,3 +446,47 @@ func TestSegmentWritePublishesTheBatchesThatLanded(t *testing.T) {
 		200: commonpb.SegmentState_Flushed,
 	}, states)
 }
+
+// Two DataCoords add binlogs to one segment, each write split over the op
+// limit, built on the same version. The loser's binlog KVs never overwrite the
+// winner's, which its cache has not seen: its rebuild keeps them.
+func TestSplitSegmentWritesKeepTheBinlogsOfEachOther(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	persist, cli, root := newTestEtcdPersist(t)
+	hooked := &hookPersist{OptimisticTxnPersist: persist}
+	m := &meta{
+		ctx:      context.Background(),
+		catalog:  datacoord.NewCatalog(etcdkv.NewEtcdKV(cli, root), "", root),
+		segments: NewSegmentsInfo(metacache.NewMetaStore(nil)),
+	}
+	m.segmentStore = newCASSegmentStore(hooked, m.catalog, root)
+	require.NoError(t, m.AddSegment(ctx, newFlushedTestSegment(100)))
+	other := newCASTestMetaOn(t, m, persist)
+
+	// Four binlog KVs and the record: batches of three ops split the write.
+	key := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key
+	paramtable.Get().Save(key, "3")
+	defer paramtable.Get().Reset(key)
+	logs := func(logID int64) []*datapb.FieldBinlog {
+		var binlogs []*datapb.FieldBinlog
+		for field := int64(101); field <= 104; field++ {
+			binlogs = append(binlogs, &datapb.FieldBinlog{FieldID: field, Binlogs: []*datapb.Binlog{{LogID: logID, EntriesNum: 1}}})
+		}
+		return binlogs
+	}
+	hooked.hook = func() {
+		require.NoError(t, other.UpdateSegmentsInfo(ctx, AddBinlogsOperator(100, logs(200), nil, nil, nil)))
+	}
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, AddBinlogsOperator(100, logs(100), nil, nil, nil)))
+
+	listed, err := m.catalog.ListSegments(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	for _, segment := range []*datapb.SegmentInfo{listed[0], m.GetSegment(ctx, 100).SegmentInfo} {
+		require.Len(t, segment.GetBinlogs(), 4)
+		for _, field := range segment.GetBinlogs() {
+			require.ElementsMatch(t, []int64{100, 200}, logIDs([]*datapb.FieldBinlog{field}), "field %d", field.GetFieldID())
+		}
+	}
+}

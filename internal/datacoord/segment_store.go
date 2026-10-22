@@ -495,10 +495,12 @@ func (b *segmentTxn) track(segment *datapb.SegmentInfo, dropped bool) {
 
 // write stages a segment action in the catalog encoding: the binlog KVs, then
 // the versioned record, as one group, so on the ordered fallback they land in
-// one batch and a record never lands ahead of its binlogs. A record still at
-// the version of a cached value thus has the binlogs of that value (see
-// segmentStore.ReadSegment). Only a segment whose ops exceed the batch limit
-// on their own is split; its batches are taken to land together.
+// one batch and a record never lands ahead of its binlogs. Binlog KVs that do
+// land ahead of their record (a segment whose ops exceed the batch limit on
+// their own, or a commit-marked record) land in batches that compare the
+// record's version and move it (see planBatches). A record still at the
+// version of a cached value thus has the binlogs of that value (see
+// segmentStore.ReadSegment).
 //
 // A segment whose persisted record still carries its binlogs gets every
 // binlog family written out (keeping the caller's field removals): the record
