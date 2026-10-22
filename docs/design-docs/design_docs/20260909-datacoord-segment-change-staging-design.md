@@ -477,7 +477,7 @@ Per-term definition and edge cases:
   (`indexMeta.GetIndexesForCollection(collection, "")`, scalar and vector) has a
   `segmentIndex` record for the segment in state `Finished`. This is the
   `handoffReady` predicate of
-  `20261007-collection-without-vector-field.md` (Section 2.6) and replaces the
+  `20261007-collection-without-vector-field.md` (Section 3) and replaces the
   earlier "vector fields + (when `DVForceAllIndexReady`) scalar-indexed fields"
   target set; `dataCoord.dataview.forceAllIndexReady` is removed. **Edge
   cases**: a collection with no index defined satisfies the term (same as the
