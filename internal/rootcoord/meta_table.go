@@ -156,9 +156,11 @@ type IMetaTable interface {
 	GetPrivilegeGroupRoles(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error)
 
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
-	RemoveFileResource(ctx context.Context, name string) (error, bool)
+	PrepareRemoveFileResource(ctx context.Context, name string) (*internalpb.FileResourceInfo, error)
+	RemoveFileResource(ctx context.Context, name string, resourceID int64) (error, bool)
 	HasFileResource(ctx context.Context) bool
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
+	FindFileResource(ctx context.Context, name string) *internalpb.FileResourceInfo
 	GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error)
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 	IncFileResourceRefCnt(ids []int64) error
@@ -2587,10 +2589,13 @@ func (mt *MetaTable) AddFileResource(ctx context.Context, resource *internalpb.F
 	defer mt.ddLock.Unlock()
 
 	if old, ok := mt.fileResourceName2Meta[resource.Name]; ok {
-		if old.Path == resource.Path {
+		if old.Path == resource.Path && old.Id == resource.Id {
 			return nil
 		}
-		return merr.WrapErrParameterInvalidMsg("file resource %s already exists", resource.Name)
+		return merr.WrapErrServiceInternalMsg("file resource %s conflicts with persisted resource %d", resource.Name, old.Id)
+	}
+	if old, ok := mt.fileResourceID2Meta[resource.Id]; ok {
+		return merr.WrapErrServiceInternalMsg("file resource ID %d is already used by %s", resource.Id, old.Name)
 	}
 
 	err := mt.catalog.SaveFileResource(ctx, resource, mt.fileResourceVersion+1)
@@ -2604,13 +2609,26 @@ func (mt *MetaTable) AddFileResource(ctx context.Context, resource *internalpb.F
 	return nil
 }
 
-func (mt *MetaTable) RemoveFileResource(ctx context.Context, name string) (error, bool) {
+func (mt *MetaTable) PrepareRemoveFileResource(ctx context.Context, name string) (*internalpb.FileResourceInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	resource, ok := mt.fileResourceName2Meta[name]
+	if !ok {
+		return nil, nil
+	}
+	if mt.fileResourceRefCnt[resource.Id] > 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id])
+	}
+	return proto.Clone(resource).(*internalpb.FileResourceInfo), nil
+}
+
+func (mt *MetaTable) RemoveFileResource(ctx context.Context, name string, resourceID int64) (error, bool) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if resource, ok := mt.fileResourceName2Meta[name]; ok {
+	if resource, ok := mt.fileResourceName2Meta[name]; ok && resource.Id == resourceID {
 		if mt.fileResourceRefCnt[resource.Id] > 0 {
-			return merr.WrapErrParameterInvalidMsg("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id]), false
+			return merr.WrapErrServiceUnavailableMsg("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id]), false
 		}
 
 		err := mt.catalog.RemoveFileResource(ctx, resource.Id, mt.fileResourceVersion+1)
@@ -2632,6 +2650,16 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	defer mt.ddLock.RUnlock()
 
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+// FindFileResource returns a copy of the named resource, or nil if it is absent.
+func (mt *MetaTable) FindFileResource(ctx context.Context, name string) *internalpb.FileResourceInfo {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	if resource := mt.fileResourceName2Meta[name]; resource != nil {
+		return proto.Clone(resource).(*internalpb.FileResourceInfo)
+	}
+	return nil
 }
 
 // GetFileResourcesByNames resolves unbound names together under the metadata lock.
