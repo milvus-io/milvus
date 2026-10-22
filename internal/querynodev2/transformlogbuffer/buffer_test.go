@@ -73,6 +73,7 @@ type fakeStream struct {
 	subscribeErr     error
 	subscribeErrs    []error
 	subscribeEvent   *wal.TransformLogStreamEvent
+	subscribeFailure error
 }
 
 func newFakeStream() *fakeStream {
@@ -104,12 +105,15 @@ func (s *fakeStream) Subscribe(_ context.Context, opt wal.TransformLogSubscripti
 	if subscribeErr != nil {
 		return nil, subscribeErr
 	}
+	if s.subscribeFailure != nil {
+		s.fail(s.subscribeFailure)
+	}
 	if s.subscribeEvent != nil {
 		event := *s.subscribeEvent
 		if event.VChannel == "" {
 			event.VChannel = opt.VChannel
 		}
-		_ = opt.Handler.Handle(event)
+		opt.Handler.Handle(event)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -122,23 +126,23 @@ func (s *fakeStream) Done() <-chan struct{} {
 }
 
 func (s *fakeStream) Error() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.err
 }
 
 func (s *fakeStream) Close() error {
-	s.closeOnce.Do(func() {
-		close(s.done)
-	})
-	return s.err
+	s.fail(nil)
+	return s.Error()
 }
 
-func (s *fakeStream) failSubscription(err error) {
-	s.mu.Lock()
-	subscriptions := append([]wal.TransformLogSubscriptionOption(nil), s.subscriptions...)
-	s.mu.Unlock()
-	for _, sub := range subscriptions {
-		_ = sub.Handler.Handle(wal.TransformLogStreamEvent{VChannel: sub.VChannel, Err: err})
-	}
+func (s *fakeStream) fail(err error) {
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.err = err
+		s.mu.Unlock()
+		close(s.done)
+	})
 }
 
 func (s *fakeStream) emit(event wal.TransformLogStreamEvent) {
@@ -147,7 +151,7 @@ func (s *fakeStream) emit(event wal.TransformLogStreamEvent) {
 	s.mu.Unlock()
 	for _, sub := range subscriptions {
 		if sub.VChannel == event.VChannel {
-			_ = sub.Handler.Handle(event)
+			sub.Handler.Handle(event)
 			return
 		}
 	}
@@ -406,6 +410,12 @@ func TestBufferAcquireDoesNotPoisonBufferOnRecoverableSubscriptionError(t *testi
 	streams.streams["v1"] = stream
 	buffer := New(streams, 4)
 
+	// Retain the range while a preparation attempt fails so the retry uses
+	// the same buffer and its still-owned logical stream.
+	retained, err := buffer.Bind(newTestQueryView("v1", 50))
+	require.NoError(t, err)
+	defer retained.Release()
+
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.Nil(t, guard)
 	require.ErrorContains(t, err, "transient stream failure")
@@ -417,16 +427,68 @@ func TestBufferAcquireDoesNotPoisonBufferOnRecoverableSubscriptionError(t *testi
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
 }
 
-func TestBufferAcquireReturnsHandlerErrorBeforeSubscriptionReady(t *testing.T) {
+func TestBufferAcquireReturnsStreamErrorBeforeSubscriptionReady(t *testing.T) {
 	streams := newFakeStreamManager()
 	stream := newFakeStream()
-	stream.subscribeEvent = &wal.TransformLogStreamEvent{Err: errors.New("catchup failed")}
+	stream.subscribeFailure = errors.New("catchup failed")
 	streams.streams["v1"] = stream
 	buffer := New(streams, 4)
 
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.Nil(t, guard)
 	require.ErrorContains(t, err, "catchup failed")
+}
+
+func TestBufferTerminalStreamErrorFailsSharedRegistrations(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams, 2)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	liveGuard, err := buffer.Acquire(ctx, newTestQueryView("p_1v0", 50))
+	require.NoError(t, err)
+	defer liveGuard.Release()
+	pendingGuard, err := buffer.Acquire(ctx, newTestQueryView("p_2v0", 50))
+	require.NoError(t, err)
+	defer pendingGuard.Release()
+	stream := streams.stream("p")
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", SyncUp: &wal.TransformLogSyncUp{TimeTick: 50}})
+	live, err := buffer.RegisterSegment(ctx, &fakeSegment{id: 1, vchannel: "p_1v0", startAfter: 50})
+	require.NoError(t, err)
+	defer live.Unregister()
+	require.NoError(t, live.WaitCatchup(ctx))
+	pending, err := buffer.RegisterSegment(ctx, &fakeSegment{id: 2, vchannel: "p_2v0", startAfter: 50})
+	require.NoError(t, err)
+	defer pending.Unregister()
+
+	streamErr := errors.New("logical stream stopped")
+	stream.fail(streamErr)
+	require.ErrorIs(t, live.WaitFailure(ctx), streamErr)
+	require.ErrorIs(t, pending.WaitCatchup(ctx), streamErr)
+	require.ErrorIs(t, liveGuard.WaitTransformVisible(ctx, 60), streamErr)
+	require.ErrorIs(t, pendingGuard.WaitTransformVisible(ctx, 60), streamErr)
+	retryable, err := liveGuard.Prepare(ctx)
+	require.False(t, retryable)
+	require.ErrorIs(t, err, streamErr)
+}
+
+func TestBufferPrepareAfterStreamWatcherFinished(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	first, err := buffer.Acquire(ctx, newTestQueryView("p_1v0", 50))
+	require.NoError(t, err)
+	defer first.Release()
+	streamErr := errors.New("logical stream stopped")
+	streams.stream("p").fail(streamErr)
+	// The watcher has snapshotted only the first buffer before the next binds.
+	require.ErrorIs(t, first.WaitTransformVisible(ctx, 60), streamErr)
+	next, err := buffer.Bind(newTestQueryView("p_2v0", 50))
+	require.NoError(t, err)
+	defer next.Release()
+	retryable, err := next.Prepare(ctx)
+	require.False(t, retryable)
+	require.ErrorIs(t, err, streamErr)
 }
 
 func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *testing.T) {
@@ -694,7 +756,7 @@ func TestGuardWaitTransformVisibleReturnsScannerError(t *testing.T) {
 	stream := streams.stream("v1")
 	require.NotNil(t, stream)
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
-	stream.failSubscription(errors.New("transform log truncated"))
+	stream.fail(errors.New("transform log truncated"))
 
 	require.ErrorContains(t, <-waitDone, "transform log truncated")
 }
@@ -708,7 +770,7 @@ func TestBufferRegisterSegmentFailsWhenScannerFailsBeforeSyncUp(t *testing.T) {
 	stream := streams.stream("v1")
 	require.NotNil(t, stream)
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
-	stream.failSubscription(errors.New("truncated"))
+	stream.fail(errors.New("truncated"))
 
 	require.Eventually(t, func() bool {
 		_, err = buffer.RegisterSegment(context.Background(), &fakeSegment{id: 10, vchannel: "v1", startAfter: 50})

@@ -2,6 +2,7 @@ package transformlogbuffer
 
 import (
 	"context"
+	"io"
 	"sync"
 	"sync/atomic"
 
@@ -144,7 +145,36 @@ func (b *Buffer) getOrCreateStreamLocked(ctx context.Context, pchannel string) (
 		refs:     make(map[string]*vchannelBuffer),
 	}
 	b.streamsByPChannel[pchannel] = state
+	go b.watchStream(state)
 	return state, nil
+}
+
+// The resumable stream owns transient reconnects. Only its terminal result
+// invalidates the buffers and their pending or live segment registrations.
+func (b *Buffer) watchStream(state *streamState) {
+	<-state.stream.Done()
+	err := streamTerminalError(state.stream)
+	b.mu.Lock()
+	buffers := make([]*vchannelBuffer, 0, len(state.refs))
+	for _, buf := range state.refs {
+		buffers = append(buffers, buf)
+	}
+	b.mu.Unlock()
+	for _, buf := range buffers {
+		buf.fail(err)
+	}
+}
+
+func streamTerminalError(stream wal.TransformLogStream) error {
+	select {
+	case <-stream.Done():
+		if err := stream.Error(); err != nil {
+			return err
+		}
+		return io.EOF
+	default:
+		return nil
+	}
 }
 
 func (b *Buffer) removeLocked(vchannel string, buf *vchannelBuffer) wal.TransformLogStream {
@@ -171,17 +201,7 @@ type bufEventHandler struct {
 	buffer *vchannelBuffer
 }
 
-func (h bufEventHandler) Handle(event wal.TransformLogStreamEvent) error {
-	if event.Err != nil {
-		mlog.Debug(context.TODO(), "querynode transform log buffer received subscription error",
-			mlog.FieldPChannel(h.buffer.pchannel),
-			mlog.FieldVChannel(h.buffer.vchannel),
-			mlog.Int64("subscriptionID", event.SubscriptionID),
-			mlog.Err(event.Err),
-		)
-		h.buffer.fail(event.Err)
-		return nil
-	}
+func (h bufEventHandler) Handle(event wal.TransformLogStreamEvent) {
 	if event.Entry != nil {
 		mlog.Debug(context.TODO(), "querynode transform log buffer received entry",
 			mlog.FieldPChannel(h.buffer.pchannel),
@@ -200,7 +220,6 @@ func (h bufEventHandler) Handle(event wal.TransformLogStreamEvent) error {
 		)
 		h.buffer.onSyncUp(event.SyncUp.TimeTick)
 	}
-	return nil
 }
 
 func (h bufEventHandler) Close() {}
@@ -225,7 +244,15 @@ func (g *guard) Prepare(ctx context.Context) (bool, error) {
 		return true, err
 	}
 	err = g.buffer.ensureSubscribed(ctx, stream.stream)
+	// A buffer can attach after the stream watcher has taken its snapshot, or
+	// Subscribe can finish concurrently with stream termination.
+	if terminalErr := streamTerminalError(stream.stream); terminalErr != nil {
+		g.buffer.fail(terminalErr)
+	}
 	g.buffer.mu.Lock()
+	if g.buffer.err != nil {
+		err = g.buffer.err
+	}
 	retryable := g.buffer.err == nil
 	g.buffer.mu.Unlock()
 	return retryable, err
