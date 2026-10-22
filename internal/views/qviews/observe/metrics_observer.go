@@ -64,11 +64,11 @@ type metricShardKey struct {
 }
 
 type metricViewState struct {
-	collectionID int64
-	state        qviews.QueryViewState
-	enteredAt    time.Time
-	version      uint64
-	readyLe      string
+	collectionID   int64
+	state          qviews.QueryViewState
+	lastProgressAt time.Time
+	version        uint64
+	readyLe        string
 }
 
 type metricShardState struct {
@@ -79,9 +79,9 @@ type metricShardState struct {
 }
 
 type viewStateAgeCandidate struct {
-	key       metricViewKey
-	enteredAt time.Time
-	version   uint64
+	key            metricViewKey
+	lastProgressAt time.Time
+	version        uint64
 }
 
 type viewStateAgeHeap []viewStateAgeCandidate
@@ -91,8 +91,8 @@ func (h viewStateAgeHeap) Len() int {
 }
 
 func (h viewStateAgeHeap) Less(i, j int) bool {
-	if !h[i].enteredAt.Equal(h[j].enteredAt) {
-		return h[i].enteredAt.Before(h[j].enteredAt)
+	if !h[i].lastProgressAt.Equal(h[j].lastProgressAt) {
+		return h[i].lastProgressAt.Before(h[j].lastProgressAt)
 	}
 	return lessMetricViewKey(h[i].key, h[j].key)
 }
@@ -202,10 +202,16 @@ func (o *MetricsObserver) Observe(_ context.Context, event Event) {
 			transition.View,
 			transition.To,
 			readyPercentLe(reported.ResourceReadyPercent),
+			reported.ResourceProgress,
 		)
 		return
 	}
-	o.moveState(component, transition.CollectionID, transition.View, transition.To)
+	progress := false
+	if ready, ok := event.(QueryNodeSegmentsReadyEvent); ok {
+		// Worker callbacks carry newly ready segments, unlike cumulative reports.
+		progress = ready.ReadySegmentCount > 0
+	}
+	o.moveState(component, transition.CollectionID, transition.View, transition.To, progress)
 }
 
 func (o *MetricsObserver) setState(component string, collectionID int64, view qviews.QueryViewKey, state qviews.QueryViewState) {
@@ -213,10 +219,10 @@ func (o *MetricsObserver) setState(component string, collectionID int64, view qv
 	defer o.mu.Unlock()
 
 	key := metricViewKey{component: component, view: view}
-	o.upsertStateLocked(key, collectionID, state, "")
+	o.upsertStateLocked(key, collectionID, state, "", false)
 }
 
-func (o *MetricsObserver) moveState(component string, collectionID int64, view qviews.QueryViewKey, to qviews.QueryViewState) {
+func (o *MetricsObserver) moveState(component string, collectionID int64, view qviews.QueryViewKey, to qviews.QueryViewState, progress bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -228,7 +234,7 @@ func (o *MetricsObserver) moveState(component string, collectionID int64, view q
 		}
 		readyLe = old.readyLe
 	}
-	o.upsertStateLocked(key, collectionID, to, readyLe)
+	o.upsertStateLocked(key, collectionID, to, readyLe, progress)
 }
 
 func (o *MetricsObserver) moveStateWithReadyLe(
@@ -237,6 +243,7 @@ func (o *MetricsObserver) moveStateWithReadyLe(
 	view qviews.QueryViewKey,
 	to qviews.QueryViewState,
 	readyLe string,
+	progress bool,
 ) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -245,7 +252,7 @@ func (o *MetricsObserver) moveStateWithReadyLe(
 	if old, ok := o.states[key]; ok && collectionID == 0 {
 		collectionID = old.collectionID
 	}
-	o.upsertStateLocked(key, collectionID, to, readyLe)
+	o.upsertStateLocked(key, collectionID, to, readyLe, progress)
 }
 
 func (o *MetricsObserver) upsertStateLocked(
@@ -253,8 +260,25 @@ func (o *MetricsObserver) upsertStateLocked(
 	collectionID int64,
 	state qviews.QueryViewState,
 	readyLe string,
+	progress bool,
 ) {
+	readyLe = normalizeReadyPercentLe(key.component, state, readyLe)
 	if old, ok := o.states[key]; ok {
+		if old.state == state {
+			// Only actual progress renews the timer and top-K candidate.
+			o.decReadyPercentBucket(key.component, old.state, old.readyLe)
+			old.collectionID = collectionID
+			old.readyLe = readyLe
+			if progress {
+				old.lastProgressAt = o.now()
+				old.version = o.nextVersion()
+				o.pushTopKCandidate(key, old)
+			}
+			o.states[key] = old
+			o.compactTopKCandidates(key.component)
+			o.incReadyPercentBucket(key.component, state, readyLe)
+			return
+		}
 		metrics.QVViewStates.WithLabelValues(key.component, old.state.String()).Dec()
 		o.decReadyPercentBucket(key.component, old.state, old.readyLe)
 		o.removeShardState(key, old)
@@ -262,14 +286,13 @@ func (o *MetricsObserver) upsertStateLocked(
 	} else if isMaxAgeCandidateState(state) {
 		o.topKValidCounts[key.component]++
 	}
-	readyLe = normalizeReadyPercentLe(key.component, state, readyLe)
 
 	stateSnapshot := metricViewState{
-		collectionID: collectionID,
-		state:        state,
-		enteredAt:    o.now(),
-		version:      o.nextVersion(),
-		readyLe:      readyLe,
+		collectionID:   collectionID,
+		state:          state,
+		lastProgressAt: o.now(),
+		version:        o.nextVersion(),
+		readyLe:        readyLe,
 	}
 	o.states[key] = stateSnapshot
 	o.addShardState(key, stateSnapshot)
@@ -319,9 +342,9 @@ func (o *MetricsObserver) pushTopKCandidate(key metricViewKey, state metricViewS
 		o.topK[key.component] = h
 	}
 	heap.Push(h, viewStateAgeCandidate{
-		key:       key,
-		enteredAt: state.enteredAt,
-		version:   state.version,
+		key:            key,
+		lastProgressAt: state.lastProgressAt,
+		version:        state.version,
 	})
 }
 
@@ -334,9 +357,9 @@ func (o *MetricsObserver) rebuildTopK(component string) {
 		}
 		validCount++
 		*h = append(*h, viewStateAgeCandidate{
-			key:       key,
-			enteredAt: state.enteredAt,
-			version:   state.version,
+			key:            key,
+			lastProgressAt: state.lastProgressAt,
+			version:        state.version,
 		})
 	}
 	if validCount == 0 {
@@ -564,7 +587,7 @@ func metricFromViewState(key metricViewKey, state metricViewState, rank int, now
 		VChannel:         key.view.ShardID.VChannel,
 		QueryViewVersion: key.view.QueryViewVersion.String(),
 		DataVersion:      key.view.QueryViewVersion.DataVersion.String(),
-		AgeSeconds:       now.Sub(state.enteredAt).Seconds(),
+		AgeSeconds:       now.Sub(state.lastProgressAt).Seconds(),
 	}
 }
 

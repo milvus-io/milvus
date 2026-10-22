@@ -62,7 +62,7 @@ func newQVViewStateMaxAgeCollector() *qvViewStateMaxAgeCollector {
 	return &qvViewStateMaxAgeCollector{
 		desc: prometheus.NewDesc(
 			prometheus.BuildFQName(milvusNamespace, qvSubsystem, "view_state_max_age_seconds"),
-			"top QueryViews by active state age in seconds",
+			"top QueryViews by seconds since last state or resource progress",
 			[]string{
 				QVComponentLabel,
 				QVStateLabel,

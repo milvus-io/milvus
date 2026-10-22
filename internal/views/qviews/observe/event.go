@@ -271,6 +271,9 @@ type CoordViewReportAppliedEvent struct {
 	Node                 qviews.WorkNode
 	ReportedState        qviews.QueryViewState
 	ResourceReadyPercent int64
+	// ResourceProgress is true only when this node advances preparation or
+	// cleanup relative to its previous report. Repeated reports are not progress.
+	ResourceProgress bool
 }
 
 func (e CoordViewReportAppliedEvent) LogLevel() mlog.Level {
