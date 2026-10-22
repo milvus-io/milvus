@@ -22,7 +22,7 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -31,7 +31,7 @@ import (
 
 // target is what the interceptor needs to handle the writes of one vchannel.
 type target struct {
-	decider      *snpkindex.Decider
+	decider      *authority.Authority
 	collectionID int64
 	pkFieldID    int64
 	pkDataType   schemapb.DataType
@@ -94,7 +94,7 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	if _, ok := r.targets[vchannel]; ok {
 		return false, nil
 	}
-	a, err := snpkindex.NewAuthority(vchannel)
+	a, err := authority.NewStore(vchannel)
 	if err != nil {
 		return false, err
 	}
@@ -102,7 +102,7 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	// because a schema change can neither drop the primary key field nor alter
 	// its id or its data type.
 	r.targets[vchannel] = &target{
-		decider:      snpkindex.NewDecider(a),
+		decider:      authority.New(a),
 		collectionID: collectionID,
 		pkFieldID:    pkField.GetFieldID(),
 		pkDataType:   pkField.GetDataType(),

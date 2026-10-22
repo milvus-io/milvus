@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package authority
 
 import (
 	"context"
@@ -27,11 +27,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestDecider(t *testing.T) (*Decider, Authority) {
+func newTestDecider(t *testing.T) (*Authority, Store) {
 	t.Helper()
-	a, err := NewAuthority("v1")
+	a, err := NewStore("v1")
 	require.NoError(t, err)
-	d := NewDecider(a)
+	d := New(a)
 	t.Cleanup(func() { _ = d.Close() })
 	return d, a
 }
@@ -44,7 +44,7 @@ func int64PKs(values ...int64) []PK {
 	return pks
 }
 
-func seed(t *testing.T, a Authority, segmentID int64, values ...int64) {
+func seed(t *testing.T, a Store, segmentID int64, values ...int64) {
 	t.Helper()
 	b := a.NewBatch()
 	for _, pk := range int64PKs(values...) {
@@ -53,7 +53,7 @@ func seed(t *testing.T, a Authority, segmentID int64, values ...int64) {
 	require.NoError(t, a.Write(context.Background(), b))
 }
 
-func requireSegment(t *testing.T, a Authority, pk int64, segmentID int64) {
+func requireSegment(t *testing.T, a Store, pk int64, segmentID int64) {
 	t.Helper()
 	entry, err := a.Get(context.Background(), Int64PK(pk))
 	require.NoError(t, err)
@@ -66,9 +66,9 @@ func requireSegment(t *testing.T, a Authority, pk int64, segmentID int64) {
 }
 
 // decideInsert decides an autocommit insert and returns its companion delete keys.
-func decideInsert(t *testing.T, d *Decider, values ...int64) (*Intent, []PK) {
+func decideInsert(t *testing.T, d *Authority, values ...int64) (*WriteGuard, []PK) {
 	t.Helper()
-	intent, err := d.Decide(context.Background(), Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(values...)})
+	intent, err := d.Decide(context.Background(), DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(values...)})
 	require.NoError(t, err)
 	return intent, intent.Decision().CompanionDeletePKs
 }
@@ -156,19 +156,19 @@ func TestAutocommitDelete(t *testing.T) {
 	seed(t, a, 100, 1, 2)
 
 	t.Run("all present", func(t *testing.T) {
-		intent, err := d.Decide(ctx, Request{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1, 2)})
+		intent, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1, 2)})
 		require.NoError(t, err)
 		require.Equal(t, Decision{PresentPKs: int64PKs(1, 2)}, intent.Decision())
 		intent.Discard(ctx, nil)
 	})
 	t.Run("partly present", func(t *testing.T) {
-		intent, err := d.Decide(ctx, Request{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1, 9)})
+		intent, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1, 9)})
 		require.NoError(t, err)
 		require.Equal(t, Decision{PresentPKs: int64PKs(1)}, intent.Decision())
 		intent.Discard(ctx, nil)
 	})
 	t.Run("none present", func(t *testing.T) {
-		intent, err := d.Decide(ctx, Request{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(8, 9)})
+		intent, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(8, 9)})
 		require.NoError(t, err)
 		require.Equal(t, Decision{}, intent.Decision())
 		intent.Apply(ctx, Applied{TimeTick: 11})
@@ -186,7 +186,7 @@ func TestTxnDecidesAtCommit(t *testing.T) {
 	d, _ := newTestDecider(t)
 	const txnID = 7
 
-	body, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(8), TxnID: txnID})
+	body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(8), TxnID: txnID})
 	require.NoError(t, err)
 	require.Equal(t, Decision{}, body.Decision())
 	body.Apply(ctx, Applied{TimeTick: 11})
@@ -197,14 +197,14 @@ func TestTxnDecidesAtCommit(t *testing.T) {
 	require.Empty(t, companion)
 	auto.Apply(ctx, Applied{TimeTick: 13})
 
-	commit, err := d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 	require.NoError(t, err)
 	require.Equal(t, int64PKs(8), commit.Decision().CompanionDeletePKs)
 	commit.Apply(ctx, Applied{TimeTick: 15})
 	require.Equal(t, 2, d.InflightLenForTest())
 
 	// the pending set is gone: committing again decides nothing.
-	again, err := d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	again, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 	require.NoError(t, err)
 	require.Equal(t, Decision{}, again.Decision())
 	again.Discard(ctx, nil)
@@ -217,15 +217,15 @@ func TestTxnOwnDeleteSuppressesCompanionDelete(t *testing.T) {
 	const txnID = 9
 
 	// an upsert-like transaction: insert 1 and 2, delete 1.
-	ins, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1, 2), TxnID: txnID})
+	ins, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1, 2), TxnID: txnID})
 	require.NoError(t, err)
 	ins.Apply(ctx, Applied{TimeTick: 11})
-	del, err := d.Decide(ctx, Request{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
+	del, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
 	require.NoError(t, err)
 	require.Equal(t, Decision{}, del.Decision())
 	del.Apply(ctx, Applied{TimeTick: 12})
 
-	commit, err := d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 	require.NoError(t, err)
 	require.Equal(t, int64PKs(2), commit.Decision().CompanionDeletePKs)
 	commit.Apply(ctx, Applied{TimeTick: 13})
@@ -238,10 +238,10 @@ func TestTxnDeleteOnly(t *testing.T) {
 	seed(t, a, 100, 1)
 	const txnID = 11
 
-	del, err := d.Decide(ctx, Request{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
+	del, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
 	require.NoError(t, err)
 	del.Apply(ctx, Applied{TimeTick: 12})
-	commit, err := d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 	require.NoError(t, err)
 	require.Empty(t, commit.Decision().CompanionDeletePKs)
 	commit.Apply(ctx, Applied{TimeTick: 13})
@@ -253,19 +253,19 @@ func TestTxnRollbackAndDrop(t *testing.T) {
 
 	for _, end := range []func(txnID int64){
 		func(txnID int64) {
-			rollback, err := d.Decide(ctx, Request{Kind: KindRollbackTxn, VChannel: "v1", TxnID: txnID})
+			rollback, err := d.Decide(ctx, DecideRequest{Kind: KindRollbackTxn, VChannel: "v1", TxnID: txnID})
 			require.NoError(t, err)
 			rollback.Apply(ctx, Applied{TimeTick: 20})
 		},
 		func(txnID int64) { d.DropTxn(txnID) },
 	} {
 		const txnID = 21
-		body, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(5), TxnID: txnID})
+		body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(5), TxnID: txnID})
 		require.NoError(t, err)
 		body.Apply(ctx, Applied{TimeTick: 11})
 		end(txnID)
 
-		commit, err := d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+		commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 		require.NoError(t, err)
 		commit.Apply(ctx, Applied{TimeTick: 30})
 		require.Equal(t, 0, d.InflightLenForTest())
@@ -277,17 +277,17 @@ func TestTxnCommitDiscardKeepsPending(t *testing.T) {
 	d, _ := newTestDecider(t)
 	const txnID = 31
 
-	body, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(5), TxnID: txnID})
+	body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(5), TxnID: txnID})
 	require.NoError(t, err)
 	body.Apply(ctx, Applied{TimeTick: 11})
 
-	commit, err := d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 	require.NoError(t, err)
 	commit.Discard(ctx, errors.New("an extra body failed, the commit was not appended"))
 	require.Equal(t, 0, d.InflightLenForTest())
 
 	// the client retries the commit.
-	retry, err := d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	retry, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 	require.NoError(t, err)
 	retry.Apply(ctx, Applied{TimeTick: 20})
 	require.Equal(t, 1, d.InflightLenForTest())
@@ -299,7 +299,7 @@ func TestPendingTxnIDs(t *testing.T) {
 	require.Empty(t, d.PendingTxnIDs())
 
 	for _, txnID := range []int64{41, 42} {
-		body, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(txnID), TxnID: txnID})
+		body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(txnID), TxnID: txnID})
 		require.NoError(t, err)
 		body.Apply(ctx, Applied{TimeTick: 11})
 	}
@@ -322,23 +322,23 @@ func TestIntentResolvedOnce(t *testing.T) {
 func TestDecideHonorsContextWhileWaitingForReady(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	d := NewDecider(&notReadyAuthority{ready: make(chan struct{})})
-	_, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	d := New(&notReadyAuthority{ready: make(chan struct{})})
+	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestDecideReturnsProbeError(t *testing.T) {
 	ctx := context.Background()
-	a, err := NewAuthority("v1")
+	a, err := NewStore("v1")
 	require.NoError(t, err)
-	d := NewDecider(a)
+	d := New(a)
 	require.NoError(t, a.Close()) // the memory engine fails every call after Close
 
-	_, err = d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	_, err = d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 	require.Error(t, err)
 	// nothing was appended, so the registration is gone and does not block.
 	require.Equal(t, 0, d.InflightLenForTest())
-	requireDecideReturns(t, d, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	requireDecideReturns(t, d, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 }
 
 // A CommitTxn decision probes the index through the same present() path as an
@@ -348,21 +348,21 @@ func TestDecideCommitReturnsProbeError(t *testing.T) {
 	d, a := newTestDecider(t)
 	const txnID = 51
 
-	body, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
+	body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
 	require.NoError(t, err)
 	body.Apply(ctx, Applied{TimeTick: 11})
 
 	require.NoError(t, a.Close()) // the memory engine fails every call after Close
 
-	_, err = d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	_, err = d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 	require.Error(t, err)
 	require.Equal(t, 0, d.InflightLenForTest())
-	requireDecideReturns(t, d, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	requireDecideReturns(t, d, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 }
 
 // requireDecideReturns checks that no stale registration blocks req. The
 // decision itself may fail.
-func requireDecideReturns(t *testing.T, d *Decider, req Request) {
+func requireDecideReturns(t *testing.T, d *Authority, req DecideRequest) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
@@ -381,7 +381,7 @@ func TestApplyOnACanceledContext(t *testing.T) {
 	d, _ := newTestDecider(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	intent, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	intent, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 	require.NoError(t, err)
 	cancel()
 	intent.Apply(ctx, Applied{TimeTick: 11})
@@ -398,15 +398,15 @@ func TestBodyAppliedAfterCommitDecisionPanics(t *testing.T) {
 	d, _ := newTestDecider(t)
 	const txnID = 77
 
-	first, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
+	first, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
 	require.NoError(t, err)
 	first.Apply(ctx, Applied{TimeTick: 11})
 
-	commit, err := d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 	require.NoError(t, err)
 
 	// the late body: a body registers nothing, so it does not wait for the commit.
-	late, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(2), TxnID: txnID})
+	late, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(2), TxnID: txnID})
 	require.NoError(t, err)
 	late.Apply(ctx, Applied{TimeTick: 12})
 
@@ -451,7 +451,7 @@ func TestSameKeyDecisionsAreSerialized(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-barrier
-			intent, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+			intent, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 			if err != nil {
 				t.Error(err)
 				return
@@ -493,14 +493,14 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 			<-barrier
 			for r := 0; r < rounds; r++ {
 				txnID := nextTxnID.Add(1)
-				body, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
+				body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
 				if err != nil {
 					t.Error(err)
 					return
 				}
 				body.Apply(ctx, Applied{TimeTick: timeTick.Add(1)})
 
-				commit, err := d.Decide(ctx, Request{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+				commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
 				if err != nil {
 					t.Error(err)
 					return
@@ -518,7 +518,7 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 			defer wg.Done()
 			<-barrier
 			for r := 0; r < rounds; r++ {
-				intent, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+				intent, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 				if err != nil {
 					t.Error(err)
 					return
@@ -537,7 +537,7 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 }
 
 type notReadyAuthority struct {
-	Authority
+	Store
 	ready chan struct{}
 }
 

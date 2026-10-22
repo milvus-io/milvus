@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package authority
 
 import (
 	"context"
@@ -22,11 +22,11 @@ import (
 	"time"
 )
 
-// Intent is a decision that has not been confirmed yet. It belongs to one
+// WriteGuard is a decision that has not been confirmed yet. It belongs to one
 // append and must not be shared between goroutines.
-type Intent struct {
-	d        *Decider
-	req      Request
+type WriteGuard struct {
+	d        *Authority
+	req      DecideRequest
 	decision Decision
 	txn      *pendingTxn    // snapshot of the pending writes, for a CommitTxn
 	write    *inflightWrite // the registration in the in-flight set; nil when the write registers no key
@@ -35,12 +35,12 @@ type Intent struct {
 }
 
 // Decision returns what the caller should append.
-func (i *Intent) Decision() Decision {
+func (i *WriteGuard) Decision() Decision {
 	return i.decision
 }
 
 // LockWait returns how long Decide waited for the earlier writes of the same keys.
-func (i *Intent) LockWait() time.Duration {
+func (i *WriteGuard) LockWait() time.Duration {
 	return i.lockWait
 }
 
@@ -48,7 +48,7 @@ func (i *Intent) LockWait() time.Duration {
 // It does not write the engine: observe applies the appended messages. For a
 // registered write it fills in the time tick, which releases the lock of its
 // keys; the keys stay present in the in-flight set until observe applies them.
-func (i *Intent) Apply(_ context.Context, r Applied) {
+func (i *WriteGuard) Apply(_ context.Context, r Applied) {
 	i.resolve()
 
 	switch {
@@ -94,7 +94,7 @@ func (i *Intent) Apply(_ context.Context, r Applied) {
 // Discard ends a decision whose append failed and is known not to be in the WAL,
 // a redo for example. The registration is removed. Pending writes of a
 // transaction are kept: the client may retry the commit.
-func (i *Intent) Discard(_ context.Context, _ error) {
+func (i *WriteGuard) Discard(_ context.Context, _ error) {
 	i.resolve()
 	if i.write != nil {
 		i.d.inflight.remove(i.write)
@@ -105,7 +105,7 @@ func (i *Intent) Discard(_ context.Context, _ error) {
 // a time tick up to tt, a CommitTxn that may have been persisted for example.
 // tt must not be 0. The keys stay present in the in-flight set until observe
 // passes tt, and no longer block other writes.
-func (i *Intent) DiscardUncertain(_ context.Context, _ error, tt uint64) {
+func (i *WriteGuard) DiscardUncertain(_ context.Context, _ error, tt uint64) {
 	i.resolve()
 	if tt == 0 {
 		panic("primary key index intent discarded as uncertain without a time tick")
@@ -115,7 +115,7 @@ func (i *Intent) DiscardUncertain(_ context.Context, _ error, tt uint64) {
 	}
 }
 
-func (i *Intent) resolve() {
+func (i *WriteGuard) resolve() {
 	if i.resolved {
 		panic("primary key index intent is resolved more than once")
 	}

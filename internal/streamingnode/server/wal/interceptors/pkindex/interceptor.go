@@ -22,7 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
@@ -151,8 +151,8 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 	}
 	i.rememberCipher(t, msg)
 
-	intent, err := i.decide(ctx, t, snpkindex.Request{
-		Kind:     snpkindex.KindInsert,
+	intent, err := i.decide(ctx, t, authority.DecideRequest{
+		Kind:     authority.KindInsert,
 		VChannel: msg.VChannel(),
 		PKs:      toPKs(keys),
 		TxnID:    txnIDOf(msg),
@@ -168,7 +168,7 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 			discard(ctx, intent, err, tt)
 			return id, err
 		}
-		intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
+		intent.Apply(ctx, authority.Applied{TimeTick: msg.TimeTick()})
 		return id, nil
 	}
 
@@ -189,7 +189,7 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
 	// The insert and the companion delete take effect at the time tick of the CommitTxn.
-	intent.Apply(ctx, snpkindex.Applied{TimeTick: result.Commit.TimeTick()})
+	intent.Apply(ctx, authority.Applied{TimeTick: result.Commit.TimeTick()})
 	return result.Commit.MessageID(), nil
 }
 
@@ -209,8 +209,8 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	}
 	i.rememberCipher(t, msg)
 
-	intent, err := i.decide(ctx, t, snpkindex.Request{
-		Kind:     snpkindex.KindDelete,
+	intent, err := i.decide(ctx, t, authority.DecideRequest{
+		Kind:     authority.KindDelete,
 		VChannel: msg.VChannel(),
 		PKs:      toPKs(keys),
 		TxnID:    txnIDOf(msg),
@@ -230,13 +230,13 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 		discard(ctx, intent, err, tt)
 		return id, err
 	}
-	intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
+	intent.Apply(ctx, authority.Applied{TimeTick: msg.TimeTick()})
 	return id, nil
 }
 
 func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	intent, err := i.decide(ctx, t, snpkindex.Request{
-		Kind:     snpkindex.KindCommitTxn,
+	intent, err := i.decide(ctx, t, authority.DecideRequest{
+		Kind:     authority.KindCommitTxn,
 		VChannel: msg.VChannel(),
 		TxnID:    txnIDOf(msg),
 	})
@@ -267,13 +267,13 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 		return nil, err
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
-	intent.Apply(ctx, snpkindex.Applied{TimeTick: result.Commit.TimeTick()})
+	intent.Apply(ctx, authority.Applied{TimeTick: result.Commit.TimeTick()})
 	return result.Commit.MessageID(), nil
 }
 
 func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	intent, err := i.decide(ctx, t, snpkindex.Request{
-		Kind:     snpkindex.KindRollbackTxn,
+	intent, err := i.decide(ctx, t, authority.DecideRequest{
+		Kind:     authority.KindRollbackTxn,
 		VChannel: msg.VChannel(),
 		TxnID:    txnIDOf(msg),
 	})
@@ -287,7 +287,7 @@ func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg m
 		intent.Discard(ctx, err)
 		return id, err
 	}
-	intent.Apply(ctx, snpkindex.Applied{TimeTick: msg.TimeTick()})
+	intent.Apply(ctx, authority.Applied{TimeTick: msg.TimeTick()})
 	return id, nil
 }
 
@@ -296,7 +296,7 @@ func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg m
 // to be in the WAL leaves the in-flight set. Any other failed write may be in
 // the WAL at a time tick up to tt, for example when the backend persisted it and
 // then returned an error, so its keys stay present until observe passes tt.
-func discard(ctx context.Context, intent *snpkindex.Intent, err error, tt uint64) {
+func discard(ctx context.Context, intent *authority.WriteGuard, err error, tt uint64) {
 	// Without a time tick nothing reached the timetick interceptor, so nothing
 	// was written. The shard interceptor returns ErrRedo before anything is
 	// written, and AppendInTxn reports when its transaction can not have committed.
@@ -308,7 +308,7 @@ func discard(ctx context.Context, intent *snpkindex.Intent, err error, tt uint64
 }
 
 // decide calls the decider and classifies its error for the WAL.
-func (i *appendInterceptor) decide(ctx context.Context, t *target, req snpkindex.Request) (*snpkindex.Intent, error) {
+func (i *appendInterceptor) decide(ctx context.Context, t *target, req authority.DecideRequest) (*authority.WriteGuard, error) {
 	start := time.Now()
 	intent, err := t.decider.Decide(ctx, req)
 	if err != nil {
@@ -319,17 +319,17 @@ func (i *appendInterceptor) decide(ctx context.Context, t *target, req snpkindex
 		return nil, status.NewInner("primary key index lookup failed: %v", err)
 	}
 	switch {
-	case req.Kind == snpkindex.KindCommitTxn:
+	case req.Kind == authority.KindCommitTxn:
 		// A commit probes the pending writes of its transaction, and the decider
 		// does not expose how many keys that is. Without that number the hit and
 		// miss counters can not both be fed, and feeding only the hits would make
 		// the ratio of the two wrong. Only the duration and the lock wait are
 		// observed until the decider reports the size of the pending snapshot.
 		i.metrics.observeCommitDecide(time.Since(start), intent.LockWait())
-	case req.TxnID == 0 && (req.Kind == snpkindex.KindInsert || req.Kind == snpkindex.KindDelete):
+	case req.TxnID == 0 && (req.Kind == authority.KindInsert || req.Kind == authority.KindDelete):
 		d := intent.Decision()
 		hit := len(d.CompanionDeletePKs)
-		if req.Kind == snpkindex.KindDelete {
+		if req.Kind == authority.KindDelete {
 			hit = len(d.PresentPKs)
 		}
 		i.metrics.observeDecide(time.Since(start), intent.LockWait(), len(req.PKs), hit)

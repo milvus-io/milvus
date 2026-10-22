@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package authority
 
 import (
 	"context"
@@ -33,7 +33,7 @@ import (
 // hookAuthority runs beforeMultiGet before each engine probe, to place observe
 // between the in-flight set read and the engine read of a decision.
 type hookAuthority struct {
-	Authority
+	Store
 	beforeMultiGet func()
 }
 
@@ -41,7 +41,7 @@ func (a *hookAuthority) MultiGet(ctx context.Context, pks []PK) ([]*Entry, error
 	if a.beforeMultiGet != nil {
 		a.beforeMultiGet()
 	}
-	return a.Authority.MultiGet(ctx, pks)
+	return a.Store.MultiGet(ctx, pks)
 }
 
 // Registration races with observe. A write of p was appended (filled in, tt 10)
@@ -58,10 +58,10 @@ func TestRegistrationRacesWithObserve(t *testing.T) {
 		{"observe between the set read and the engine read", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			a, err := NewAuthority("v1")
+			a, err := NewStore("v1")
 			require.NoError(t, err)
-			hook := &hookAuthority{Authority: a}
-			d := NewDecider(hook)
+			hook := &hookAuthority{Store: a}
+			d := New(hook)
 			defer d.Close()
 
 			first, _ := decideInsert(t, d, 1)
@@ -178,12 +178,12 @@ func TestLockKeyCollisionOnlyAddsWork(t *testing.T) {
 	a := VarCharPK("a")
 	twin := Int64PK(int64(a.lockKey()))
 
-	first, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: []PK{twin}})
+	first, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: []PK{twin}})
 	require.NoError(t, err)
 
 	decided := make(chan []PK)
 	go func() {
-		second, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: []PK{a}})
+		second, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: []PK{a}})
 		if err != nil {
 			close(decided)
 			return
@@ -264,7 +264,7 @@ func TestInflightStressWithObserve(t *testing.T) {
 			r := rand.New(rand.NewSource(seed))
 			for i := 0; i < rounds; i++ {
 				values := randomKeys(r, 1+r.Intn(4), keys)
-				intent, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(values...)})
+				intent, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(values...)})
 				if err != nil {
 					t.Error(err)
 					return
@@ -305,7 +305,7 @@ func TestTwoWritersOnTheSamePK(t *testing.T) {
 	first, _ := decideInsert(t, d, 1)
 	second := make(chan []PK)
 	go func() {
-		intent, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+		intent, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 		if err != nil {
 			t.Error(err)
 			close(second)
@@ -347,14 +347,14 @@ func TestCanceledWaiterKeepsItsPlace(t *testing.T) {
 	canceledCtx, cancel := context.WithCancel(ctx)
 	canceled := make(chan error)
 	go func() {
-		_, err := d.Decide(canceledCtx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+		_, err := d.Decide(canceledCtx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 		canceled <- err
 	}()
 	require.Eventually(t, func() bool { return d.InflightLenForTest() == 2 }, 5*time.Second, time.Millisecond)
 
 	third := make(chan []PK)
 	go func() {
-		intent, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+		intent, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 		if err != nil {
 			t.Error(err)
 			close(third)
@@ -402,7 +402,7 @@ func TestMultiKeyWritesDoNotDeadlock(t *testing.T) {
 				if r.Intn(10) == 0 {
 					cancel()
 				}
-				intent, err := d.Decide(writeCtx, Request{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(values...)})
+				intent, err := d.Decide(writeCtx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(values...)})
 				cancel()
 				if err != nil {
 					continue
@@ -475,9 +475,9 @@ func BenchmarkInflightLock(b *testing.B) {
 	} {
 		b.Run(c.name, func(b *testing.B) {
 			ctx := context.Background()
-			a, err := NewAuthority("v1")
+			a, err := NewStore("v1")
 			require.NoError(b, err)
-			d := NewDecider(a)
+			d := New(a)
 			defer d.Close()
 
 			var next, tt atomic.Uint64
@@ -496,7 +496,7 @@ func BenchmarkInflightLock(b *testing.B) {
 							return
 						}
 						pks := int64PKs(c.keys(r, int(i))...)
-						intent, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: pks})
+						intent, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: pks})
 						if err != nil {
 							b.Error(err)
 							return
@@ -590,7 +590,7 @@ func BenchmarkWritePathOf1000Keys(b *testing.B) {
 		}
 	})
 	b.Run("probe", func(b *testing.B) {
-		a, err := NewAuthority("v1")
+		a, err := NewStore("v1")
 		require.NoError(b, err)
 		defer a.Close()
 		b.ReportAllocs()
@@ -601,15 +601,15 @@ func BenchmarkWritePathOf1000Keys(b *testing.B) {
 		}
 	})
 	b.Run("decision", func(b *testing.B) {
-		a, err := NewAuthority("v1")
+		a, err := NewStore("v1")
 		require.NoError(b, err)
-		d := NewDecider(a)
+		d := New(a)
 		defer d.Close()
 		ctx := context.Background()
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			pks := batches[i%len(batches)]
-			intent, err := d.Decide(ctx, Request{Kind: KindInsert, VChannel: "v1", PKs: pks})
+			intent, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: pks})
 			if err != nil {
 				b.Fatal(err)
 			}

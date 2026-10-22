@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/authority"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -63,7 +63,7 @@ func TestMain(m *testing.M) {
 
 // testEngine is a memory engine that a test can read back and that counts probes.
 type testEngine struct {
-	snpkindex.Engine
+	authority.Engine
 	mu       sync.Mutex
 	multiGet int
 }
@@ -84,14 +84,14 @@ func (e *testEngine) probes() int {
 // put seeds the index of one primary key, as an earlier insert would have done.
 func (e *testEngine) put(t *testing.T, pk int64, segmentID int64) {
 	t.Helper()
-	e.putPK(t, snpkindex.Int64PK(pk), segmentID)
+	e.putPK(t, authority.Int64PK(pk), segmentID)
 }
 
-func (e *testEngine) putPK(t *testing.T, pk snpkindex.PK, segmentID int64) {
+func (e *testEngine) putPK(t *testing.T, pk authority.PK, segmentID int64) {
 	t.Helper()
 	value := make([]byte, 8)
 	binary.BigEndian.PutUint64(value, uint64(segmentID))
-	require.NoError(t, e.Write(context.Background(), []snpkindex.Mutation{
+	require.NoError(t, e.Write(context.Background(), []authority.Mutation{
 		{Key: pk.Encode(), Value: value},
 	}))
 }
@@ -99,10 +99,10 @@ func (e *testEngine) putPK(t *testing.T, pk snpkindex.PK, segmentID int64) {
 // segmentOf returns the segment of a primary key and whether it is in the index.
 func (e *testEngine) segmentOf(t *testing.T, pk int64) (int64, bool) {
 	t.Helper()
-	return e.segmentOfPK(t, snpkindex.Int64PK(pk))
+	return e.segmentOfPK(t, authority.Int64PK(pk))
 }
 
-func (e *testEngine) segmentOfPK(t *testing.T, pk snpkindex.PK) (int64, bool) {
+func (e *testEngine) segmentOfPK(t *testing.T, pk authority.PK) (int64, bool) {
 	t.Helper()
 	values, err := e.Engine.MultiGet(context.Background(), [][]byte{pk.Encode()})
 	require.NoError(t, err)
@@ -121,13 +121,13 @@ type testEngines struct {
 
 func newTestEngines(t *testing.T) *testEngines {
 	e := &testEngines{engines: make(map[string]*testEngine)}
-	snpkindex.RegisterEngineFactory(e.create)
-	t.Cleanup(func() { snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine) })
+	authority.RegisterEngineFactory(e.create)
+	t.Cleanup(func() { authority.RegisterEngineFactory(authority.NewMemoryEngine) })
 	return e
 }
 
-func (e *testEngines) create(vchannel string) (snpkindex.Engine, error) {
-	inner, err := snpkindex.NewMemoryEngine(vchannel)
+func (e *testEngines) create(vchannel string) (authority.Engine, error) {
+	inner, err := authority.NewMemoryEngine(vchannel)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +434,7 @@ func requireInner(t *testing.T, err error) {
 
 // presentOf reports whether a key exists for the write path of testVChannel:
 // in the in-flight set or in the engine.
-func presentOf(t *testing.T, i *appendInterceptor, pk snpkindex.PK) bool {
+func presentOf(t *testing.T, i *appendInterceptor, pk authority.PK) bool {
 	t.Helper()
 	present, err := i.registry.get(testVChannel).decider.PresentForTest(context.Background(), pk)
 	require.NoError(t, err)
@@ -463,8 +463,8 @@ func TestNewBuilderPanicsWhenEnabledWithoutEngineFactory(t *testing.T) {
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
 	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-	snpkindex.RegisterEngineFactory(nil)
-	defer snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine)
+	authority.RegisterEngineFactory(nil)
+	defer authority.RegisterEngineFactory(authority.NewMemoryEngine)
 
 	require.PanicsWithValue(t, params.StreamingCfg.PKIndexEnabled.Key+" is true but this binary has no primary key index engine", func() {
 		NewInterceptorBuilder()
@@ -472,8 +472,8 @@ func TestNewBuilderPanicsWhenEnabledWithoutEngineFactory(t *testing.T) {
 }
 
 func TestNewBuilderWithoutEngineFactoryWhenDisabled(t *testing.T) {
-	snpkindex.RegisterEngineFactory(nil)
-	defer snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine)
+	authority.RegisterEngineFactory(nil)
+	defer authority.RegisterEngineFactory(authority.NewMemoryEngine)
 
 	require.NotPanics(t, func() {
 		i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
@@ -517,10 +517,10 @@ func TestBuildPanicsWhenTheIndexOfAnExistingCollectionCanNotBeCreated(t *testing
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
 	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-	snpkindex.RegisterEngineFactory(func(string) (snpkindex.Engine, error) {
+	authority.RegisterEngineFactory(func(string) (authority.Engine, error) {
 		return nil, errors.New("disk is full")
 	})
-	t.Cleanup(func() { snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine) })
+	t.Cleanup(func() { authority.RegisterEngineFactory(authority.NewMemoryEngine) })
 
 	defer func() {
 		value := recover()
@@ -551,7 +551,7 @@ func TestInsertMiss(t *testing.T) {
 	// through the in-flight set.
 	_, ok := engines.of(t, testVChannel).segmentOf(t, 1)
 	require.False(t, ok)
-	require.True(t, presentOf(t, i, snpkindex.Int64PK(1)))
+	require.True(t, presentOf(t, i, authority.Int64PK(1)))
 }
 
 func TestInsertHit(t *testing.T) {
@@ -602,7 +602,7 @@ func TestInsertHitOfSomeKeys(t *testing.T) {
 	require.Equal(t, []int64{1}, f.deleteBodyAt(t, 2).GetPrimaryKeys().GetIntId().GetData())
 
 	for _, pk := range []int64{1, 2} {
-		require.True(t, presentOf(t, i, snpkindex.Int64PK(pk)))
+		require.True(t, presentOf(t, i, authority.Int64PK(pk)))
 	}
 }
 
@@ -653,7 +653,7 @@ func TestFailedInsertWithAnUnknownOutcomeKeepsItsKey(t *testing.T) {
 
 	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
 	require.Error(t, err)
-	require.True(t, presentOf(t, i, snpkindex.Int64PK(1)))
+	require.True(t, presentOf(t, i, authority.Int64PK(1)))
 
 	f2 := newFakeAppender()
 	f2.nextTT = 200
@@ -685,7 +685,7 @@ func TestFailedInsertWithoutATimeTickRemovesItsKey(t *testing.T) {
 	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
 	require.Error(t, err)
 	require.Equal(t, 0, inflightLen(i))
-	require.False(t, presentOf(t, i, snpkindex.Int64PK(1)))
+	require.False(t, presentOf(t, i, authority.Int64PK(1)))
 
 	// a redo or a retry passes the message again with the time tick of an earlier
 	// attempt still in it. That time tick does not count.
@@ -764,7 +764,7 @@ func TestFailedCommitOfAnInsertHitWithAnUnknownOutcomeKeepsItsKeys(t *testing.T)
 	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1, 2), appendOp)
 	require.ErrorIs(t, err, boom)
 	require.Equal(t, 2, inflightLen(i))
-	require.True(t, presentOf(t, i, snpkindex.Int64PK(2)))
+	require.True(t, presentOf(t, i, authority.Int64PK(2)))
 }
 
 func TestInsertFailsWhenTheIndexIsUnavailable(t *testing.T) {
@@ -861,15 +861,15 @@ func TestVarCharInsertMiss(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
 
-	require.True(t, presentOf(t, i, snpkindex.VarCharPK("a")))
-	_, ok := engines.of(t, testVChannel).segmentOfPK(t, snpkindex.VarCharPK("a"))
+	require.True(t, presentOf(t, i, authority.VarCharPK("a")))
+	_, ok := engines.of(t, testVChannel).segmentOfPK(t, authority.VarCharPK("a"))
 	require.False(t, ok)
 }
 
 func TestVarCharInsertHit(t *testing.T) {
 	i, engines := newTestInterceptorOfSchema(t, nil, testVarCharSchema())
 	engine := engines.of(t, testVChannel)
-	engine.putPK(t, snpkindex.VarCharPK("a"), 100)
+	engine.putPK(t, authority.VarCharPK("a"), 100)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newVarCharInsert(testVChannel, "a"), f.append)
@@ -885,14 +885,14 @@ func TestVarCharInsertHit(t *testing.T) {
 	require.Equal(t, []string{"a"}, body.GetPrimaryKeys().GetStrId().GetData())
 	require.Nil(t, body.GetPrimaryKeys().GetIntId())
 	require.Equal(t, int64(1), body.GetNumRows())
-	require.True(t, presentOf(t, i, snpkindex.VarCharPK("a")))
+	require.True(t, presentOf(t, i, authority.VarCharPK("a")))
 }
 
 func TestVarCharDeleteOfPresentKeys(t *testing.T) {
 	i, engines := newTestInterceptorOfSchema(t, nil, testVarCharSchema())
 	engine := engines.of(t, testVChannel)
-	engine.putPK(t, snpkindex.VarCharPK("a"), 100)
-	engine.putPK(t, snpkindex.VarCharPK("b"), 100)
+	engine.putPK(t, authority.VarCharPK("a"), 100)
+	engine.putPK(t, authority.VarCharPK("b"), 100)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newVarCharDelete(testVChannel, "a", "b"), f.append)
@@ -901,7 +901,7 @@ func TestVarCharDeleteOfPresentKeys(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, f.deleteBodyAt(t, 0).GetPrimaryKeys().GetStrId().GetData())
 
 	for _, pk := range []string{"a", "b"} {
-		require.True(t, presentOf(t, i, snpkindex.VarCharPK(pk)))
+		require.True(t, presentOf(t, i, authority.VarCharPK(pk)))
 	}
 }
 
@@ -951,7 +951,7 @@ func TestTxnCommitMiss(t *testing.T) {
 	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f2.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, f2.types)
-	require.True(t, presentOf(t, i, snpkindex.Int64PK(5)))
+	require.True(t, presentOf(t, i, authority.Int64PK(5)))
 }
 
 func TestTxnRollbackDropsThePendingWrites(t *testing.T) {
@@ -966,14 +966,14 @@ func TestTxnRollbackDropsThePendingWrites(t *testing.T) {
 	_, err = i.DoAppend(newTestAppendContext(), newRollback(testVChannel, txnCtx), f2.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeRollbackTxn}, f2.types)
-	require.False(t, presentOf(t, i, snpkindex.Int64PK(6)))
+	require.False(t, presentOf(t, i, authority.Int64PK(6)))
 
 	// a commit of the same transaction finds nothing left to apply.
 	f3 := newFakeAppender()
 	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f3.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, f3.types)
-	require.False(t, presentOf(t, i, snpkindex.Int64PK(6)))
+	require.False(t, presentOf(t, i, authority.Int64PK(6)))
 }
 
 // A failed CommitTxn of a client transaction may have been persisted, so its keys
@@ -991,7 +991,7 @@ func TestFailedCommitKeepsThePendingWrites(t *testing.T) {
 	f2.failAt, f2.failErr, f2.failAfterTimeTick = 0, boom, true
 	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f2.append)
 	require.ErrorIs(t, err, boom)
-	require.True(t, presentOf(t, i, snpkindex.Int64PK(9)), "the commit may be in the WAL")
+	require.True(t, presentOf(t, i, authority.Int64PK(9)), "the commit may be in the WAL")
 
 	// the pending writes survive the failure, so the retried commit decides on
 	// them again, and it returns because the failed decision no longer holds its
@@ -1014,11 +1014,11 @@ func TestFailedRollbackKeepsThePendingWrites(t *testing.T) {
 	f2.failAt, f2.failErr = 0, boom
 	_, err = i.DoAppend(newTestAppendContext(), newRollback(testVChannel, txnCtx), f2.append)
 	require.ErrorIs(t, err, boom)
-	require.False(t, presentOf(t, i, snpkindex.Int64PK(10)), "a failed rollback must not change the index")
+	require.False(t, presentOf(t, i, authority.Int64PK(10)), "a failed rollback must not change the index")
 
 	f3 := newFakeAppender()
 	require.NoError(t, requireDoAppendReturns(t, i, newCommit(testVChannel, txnCtx), f3.append))
-	require.True(t, presentOf(t, i, snpkindex.Int64PK(10)), "a failed rollback must not drop the pending writes")
+	require.True(t, presentOf(t, i, authority.Int64PK(10)), "a failed rollback must not drop the pending writes")
 }
 
 func TestCommitFailsWhenTheIndexIsUnavailable(t *testing.T) {
@@ -1106,7 +1106,7 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, f2.types)
 	for _, pk := range []int64{7, 8} {
-		require.False(t, presentOf(t, i, snpkindex.Int64PK(pk)), "the pending writes of an ended transaction must not reach the index")
+		require.False(t, presentOf(t, i, authority.Int64PK(pk)), "the pending writes of an ended transaction must not reach the index")
 	}
 }
 
@@ -1136,7 +1136,7 @@ func TestReplicatedMessagePassesThrough(t *testing.T) {
 	_, err := i.DoAppend(newTestAppendContext(), msg, f.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
-	require.False(t, presentOf(t, i, snpkindex.Int64PK(1)))
+	require.False(t, presentOf(t, i, authority.Int64PK(1)))
 }
 
 func TestVChannelWithoutTargetPassesThrough(t *testing.T) {
@@ -1162,7 +1162,7 @@ func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
 
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
 	require.NoError(t, err)
-	require.True(t, presentOf(t, i, snpkindex.Int64PK(1)))
+	require.True(t, presentOf(t, i, authority.Int64PK(1)))
 
 	_, err = i.DoAppend(newTestAppendContext(), newDropCollection(testVChannel), f.append)
 	require.NoError(t, err)
@@ -1211,10 +1211,10 @@ func TestCreateCollectionOfAutoIDHasNoTarget(t *testing.T) {
 }
 
 func TestCreateCollectionRejectedWhenTheIndexCanNotBeCreated(t *testing.T) {
-	snpkindex.RegisterEngineFactory(func(string) (snpkindex.Engine, error) {
+	authority.RegisterEngineFactory(func(string) (authority.Engine, error) {
 		return nil, errors.New("disk is full")
 	})
-	t.Cleanup(func() { snpkindex.RegisterEngineFactory(snpkindex.NewMemoryEngine) })
+	t.Cleanup(func() { authority.RegisterEngineFactory(authority.NewMemoryEngine) })
 	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
 	defer i.Close()
 	f := newFakeAppender()
