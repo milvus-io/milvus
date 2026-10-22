@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -110,14 +111,14 @@ type walAdaptorImpl struct {
 
 // Metrics returns the metrics of the wal.
 func (w *walAdaptorImpl) Metrics() types.WALMetrics {
-	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(w.Channel().Name)
+	confirmedTimeTick := w.param.MVCCManager.GetConfirmedTimeTick()
 	recoveryTimeTick := uint64(0)
 	if w.param.RecoveryStorage != nil {
 		recoveryTimeTick = w.param.RecoveryStorage.Metrics().RecoveryTimeTick
 	}
 	return types.RWWALMetrics{
 		ChannelInfo:      w.Channel(),
-		MVCCTimeTick:     currentMVCC.Timetick,
+		MVCCTimeTick:     confirmedTimeTick,
 		RecoveryTimeTick: recoveryTimeTick,
 	}
 }
@@ -193,6 +194,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 
 	// Setup the term of wal.
 	msg = msg.WithWALTerm(w.Channel().Term)
+	ctx = redo.WithCallerContext(ctx)
 
 	// we need to promise the state of wal kept consistent with the memory state of streamingnode.
 	// So we don't allow the append operation can be canceled by the append caller to avoid leave a inconsistent state of alive wal,
@@ -385,6 +387,9 @@ func (w *walAdaptorImpl) appendOneWithRetry(ctx context.Context, msg message.Mut
 
 	// An append operation should be retried until it succeeds or some unrecoverable error occurs.
 	for i := 0; ; i++ {
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
+		}
 		appendCtx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAppendImpl)
 		message.OverwriteTraceContext(appendCtx, msg)
 		msgID, err := w.rwWALImpls.Append(appendCtx, msg)
@@ -400,8 +405,14 @@ func (w *walAdaptorImpl) appendOneWithRetry(ctx context.Context, msg message.Mut
 			}
 			return msgID, nil
 		}
-		if errors.IsAny(err, context.Canceled, context.DeadlineExceeded, walimpls.ErrFenced) {
+		// A backend may cancel or time out its own attempt while this WAL is
+		// still available. Only writer fencing or our lifecycle context ends
+		// the retry loop; a backend context error alone does not.
+		if errors.Is(err, walimpls.ErrFenced) {
 			return nil, err
+		}
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
 		}
 		w.writeMetrics.ObserveRetry()
 		nextInterval := backoff.NextBackOff()

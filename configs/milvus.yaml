@@ -461,7 +461,7 @@ proxy:
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
   maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built membership_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
-  maxMembershipFilterPlanSize: 134217728 # The request-wide large-filter budget in bytes. It independently limits the aggregate serialized size of membership-filter-bearing plans and RLS-bearing HybridSearch plans, and the aggregate estimated decoded size of Roaring filters. The proxy checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.
+  maxMembershipFilterPlanSize: 134217728 # The request-wide large-filter budget in bytes. It independently limits the aggregate serialized size of membership-filter-bearing plans, and the aggregate estimated decoded size of Roaring filters. The proxy checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
@@ -489,20 +489,6 @@ proxy:
   # If the number of derived result entries exceeds this limit, the search aggregation request will be rejected.
   # Disabled if the value is less or equal to 0.
   maxSearchAggregationResultEntries: 10000
-  rls:
-    maxPoliciesPerCollection: 100 # Maximum number of row policies allowed on one collection.
-    maxTagsPerPrincipal: 50 # Maximum number of tags allowed on one collection-scoped RLS principal.
-    maxExpressionLength: 4096 # Maximum length of one RLS using_expr or check_expr in bytes.
-    maxCombinedExpressionLength: 16384 # Maximum length of the final combined RLS expression in bytes.
-    maxPolicyNameLength: 255 # Maximum RLS policy name length in bytes.
-    maxPolicyDescriptionLength: 1024 # Maximum RLS policy description length in bytes.
-    maxPrincipalNameLength: 255 # Maximum RLS principal name length in bytes.
-    maxTagKeyLength: 128 # Maximum RLS principal tag key length in bytes.
-    maxTagValueLength: 1024 # Maximum RLS principal string tag value or array string element length in bytes.
-    maxArrayLiteralElements: 1024 # Maximum elements for RLS array tags and in or array_contains* predicates.
-    maxPrincipalCacheEntries: 65536 # Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.
-    maxPrincipalCacheBytes: 67108864 # Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.
-    metaRefreshInterval: 3600 # Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -1019,7 +1005,7 @@ dataCoord:
     # importJob entries stay in etcd, each carrying its schema, file list and options
     # plus every preimport and import task under it.
     # The 48h default exists for BulkImport idempotency and only for it: the idempotency
-    # window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+    # window can extend beyond streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
     # earlier than its tombstone lets an in-window retry resolve to a jobID that
     # GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
     # as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
@@ -1027,7 +1013,8 @@ dataCoord:
     # remaining life by up to another maxLifetime, while this retention keeps counting
     # from the job's own completion. Equal values hold only for a window with no restart,
     # which is not a property a default may assume. Raise it further if StreamingCoord
-    # restarts more than once inside one tombstone lifetime.
+    # restarts more than once inside one tombstone lifetime or WAL checkpoint lag extends
+    # tombstone retention. No fixed multiple bounds retention during a checkpoint stall.
     # A cluster whose clients never send an Idempotency-Key is under no such requirement
     # and can lower this freely; 10800 was the default before idempotency keys existed.
     taskRetention: 172800
@@ -1334,6 +1321,8 @@ common:
       # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
       # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
       partialNullPolicy: error
+    externalSparseVector:
+      conversionMemoryLimit: 268435456 # Positive byte budget for estimated additional buffers per external sparse-vector normalization call. Includes output, Arrow offsets/validity, sorting and encoding scratch; excludes source data, allocator overhead and other concurrent calls. Ordered Binary arrays reused without conversion are exempt. Requires a restart.
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -1386,8 +1375,18 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
+    # Whether to expose the feature usage report at GET /management/feature_usage on the Proxy
+    # management port. The endpoint requires HTTP Basic Auth as root. See
+    # docs/design-docs/design_docs/20260902-feature-usage-reporting.md.
+    featureUsageEnabled: false
     internaltlsEnabled: false
     tlsMode: 0
+  featureUsage:
+    # Whether the components count feature usage on their request paths (Proxy, QueryNode)
+    # and at task creation (DataCoord). One branch and one atomic add per counted feature.
+    # It is read once at component start; the report endpoint is gated separately by
+    # common.security.featureUsageEnabled.
+    countersEnabled: true
   session:
     ttl: 15 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
@@ -1435,6 +1434,7 @@ common:
       proxy: close # File resource mode for proxy, options: [sync, close]. Default is close.
     maxFileSize: 0 # Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.
     downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
+    cacheTtl: 15m # Idle lease for on-demand analyzer resource files after their last consumer releases them. Accepts duration strings such as 30s or 15m; 0s disables retention. Takes effect on restart.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 

@@ -30,6 +30,7 @@
 #include "expr/ITypeExpr.h"
 #include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/scalar/ngram/NgramRegex.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
@@ -334,6 +335,82 @@ TEST(NgramBenchmark, NgramFilteringEffectiveness) {
                              size_t count = 0;
                              for (const auto& row : data.rows)
                                  count += matcher(row);
+                             return count;
+                         }));
+    }
+}
+
+// RegexMatch planning: AND within a branch, OR across branches, scan when a
+// branch has no usable literal or the bounded condition overflows. Reports
+// planning overhead (cold: RE2 compile + condition + projection; warm: the
+// thread-local preparation cache), phase 1 pruning, and end-to-end time.
+TEST(NgramBenchmark, RegexAlternationPruning) {
+    NgramBenchmarkData data;
+    std::string overflow;
+    const std::string heads =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for (size_t i = 0; i < 40; ++i) {
+        const auto head = heads.substr(i, 1);
+        overflow += (i == 0 ? "" : "|") + head + "q.*z" + head + "w";
+    }
+    const std::vector<std::pair<std::string, std::string>> patterns = {
+        {"rare alternation", "qzxw|vjkq"},
+        {"alternation then literal", "(?:qz|xv)kw"},
+        {"branch conjunctions", "abc.*xyz|mno.*pqr"},
+        {"alternation and suffix", "(?:qzx|wvy).*abc"},
+        {"common bigram branches", "th|er"},
+        {"short branch (scan)", "qzxw|q"},
+        {"over budget (scan)", overflow},
+    };
+    for (const auto& item : patterns) {
+        const auto& name = item.first;
+        const auto& pattern = item.second;
+        SCOPED_TRACE(name);
+        PartialRegexMatcher matcher(pattern);
+        TargetBitmap expected(data.rows.size(), false);
+        for (size_t row = 0; row < data.rows.size(); ++row) {
+            expected[row] = matcher(data.rows[row]);
+        }
+        const Pattern query{name.c_str(),
+                            pattern.c_str(),
+                            "",
+                            proto::plan::RegexMatch,
+                            index::PatternOp::RegexMatch};
+        ASSERT_NO_FATAL_FAILURE(data.Check(data.Execute(query), expected));
+        std::cout << "\n" << name << ": " << pattern.substr(0, 40) << "\n";
+        PrintMeasurement("plan cold", Measure([&] {
+                             return index::PlanNgramRegexCondition(
+                                        PartialRegexMatcher(pattern)
+                                            .RequiredIndexCondition(),
+                                        2)
+                                 .NodeCount();
+                         }));
+        PrintMeasurement(
+            "plan warm", Measure([&] {
+                return index::PlanNgramRegex(pattern, 2).NodeCount();
+            }));
+        if (data.ngram->CanHandle(pattern, index::PatternOp::RegexMatch)) {
+            TargetBitmap candidates(data.rows.size(), true);
+            data.ngram->Candidates(
+                pattern, index::PatternOp::RegexMatch, candidates);
+            for (size_t row = 0; row < data.rows.size(); ++row) {
+                ASSERT_FALSE(expected[row] && !candidates[row])
+                    << "row=" << row;
+            }
+            std::cout << "  phase 1 candidates: " << candidates.count() << "/"
+                      << data.rows.size() << "\n";
+        } else {
+            std::cout << "  NGRAM declined; expression uses scan\n";
+        }
+        const auto result =
+            Measure([&] { return data.Execute(query).count(); });
+        EXPECT_EQ(result.matches, expected.count());
+        PrintMeasurement("NGRAM expression with recheck", result);
+        PrintMeasurement("RE2 scan", Measure([&] {
+                             size_t count = 0;
+                             for (const auto& row : data.rows) {
+                                 count += matcher(row);
+                             }
                              return count;
                          }));
     }

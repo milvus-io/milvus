@@ -326,9 +326,8 @@ TEST_F(PackedScalarLoadRoutingTest,
                     }
                     OpContext operation(cancelled.getToken());
                     operation.runtime_load_priority = priority;
-                    index::PackedIndexSource source{
-                        std::shared_ptr<storage::AsyncIndexEntryReader>(
-                            index::InspectPackedIndexFile({path}, context_))};
+                    auto source =
+                        index::InspectPackedIndexFile({path}, context_);
                     auto plan =
                         [state](const storage::IndexEntryDirectory& directory,
                                 const nlohmann::json&,

@@ -80,9 +80,7 @@ func WrapDecodeErr(err error, what string) error {
 // terminal codes ErrDataIntegrity, ErrImportSysFailed and ErrImportFailed, and
 // ErrParameterInvalid for caller-input defects (oversized import file,
 // parquet type/dimension mismatch, string over max_length, invalid UTF-8),
-// and ErrPrivilegeNotPermitted for an RLS write-predicate denial (the
-// imported rows violate the principal's policy; retrying the same rows cannot
-// change the outcome, and Import V2 fails such an import outright): the request
+// and ErrPrivilegeNotPermitted for permission denials: the request
 // content itself forces these branches, so retrying cannot change the outcome —
 // but each retry burns a fresh segment and log range with no retry cap.
 // Everything else retries until the job timeout. That notably

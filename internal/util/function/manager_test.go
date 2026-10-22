@@ -580,7 +580,7 @@ func TestFunctionRunnerManagerReleaseRemovesNotReadyEntry(t *testing.T) {
 	releaseBuild := make(chan struct{})
 	buildDone := make(chan struct{})
 	var startedOnce, buildDoneOnce sync.Once
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		// Signal the first build only: the patched builder is global, so a
 		// second invocation would close an already-closed channel.
 		defer buildDoneOnce.Do(func() { close(buildDone) })
@@ -608,7 +608,7 @@ func TestFunctionRunnerManagerReleaseCloseDoesNotBlockManager(t *testing.T) {
 	schema := newBM25SignatureTestSchema()
 	closeStarted := make(chan struct{})
 	releaseClose := make(chan struct{})
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		return newTestFunctionRunner(schema, fn)
 	})
 
@@ -747,7 +747,7 @@ func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentClose(t *testing.T)
 
 	schema := newBM25SignatureTestSchema()
 	closeStarted := make(chan struct{})
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		return newTestFunctionRunner(schema, fn)
 	})
 	require.NoError(t, manager.Alloc(1, "v1", schema))
@@ -810,7 +810,7 @@ func TestFunctionRunnerManagerRunWithRunnerProtectsConcurrentKeyUpdate(t *testin
 	base := newBM25SignatureTestSchema()
 	changedOutput := newSchemaWithChangedOutput(base)
 	closeStarted := make(chan struct{})
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		return newTestFunctionRunner(schema, fn)
 	})
 	require.NoError(t, manager.Alloc(1, "v1", base))
@@ -886,7 +886,7 @@ func TestFunctionRunnerManagerInitScopedByEntry(t *testing.T) {
 		})
 	}
 	t.Cleanup(releaseFirstBuild)
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		count := buildCount.Add(1)
 		switch count {
 		case 1:
@@ -1191,7 +1191,7 @@ func TestFunctionRunnerManagerMaterializeHonorsContextForInitWaiter(t *testing.T
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		once.Do(func() {
 			close(started)
 		})
@@ -1235,7 +1235,7 @@ func TestFunctionRunnerManagerMaterializeHonorsContextForInitCreator(t *testing.
 		})
 	}
 	t.Cleanup(releaseBuild)
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		buildCount.Add(1)
 		startedOnce.Do(func() {
 			close(started)
@@ -1280,7 +1280,7 @@ func TestFunctionRunnerManagerMaterializeWaitsForInitialBuild(t *testing.T) {
 	release := make(chan struct{})
 	var once sync.Once
 	var buildCount atomic.Int32
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		buildCount.Add(1)
 		once.Do(func() {
 			close(started)
@@ -1324,7 +1324,7 @@ func TestFunctionRunnerManagerMaterializeLeasesInitializedRunners(t *testing.T) 
 	}
 	t.Cleanup(releaseSecond)
 	var buildCount atomic.Int32
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		if buildCount.Add(1) == 2 {
 			close(secondBuildStarted)
 			<-releaseSecondBuild
@@ -1384,7 +1384,7 @@ func TestFunctionRunnerManagerRetriesFailedInitOnNextRequest(t *testing.T) {
 
 	var buildCount atomic.Int32
 	expectedErr := errors.New("mock init failed")
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		if buildCount.Add(1) == 1 {
 			return nil, expectedErr
 		}
@@ -1417,7 +1417,7 @@ func TestFunctionRunnerManagerAllocRetriesFailedInitOnNextRequest(t *testing.T) 
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+	patchBuildEmbeddingRunner(t, func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 		count := buildCount.Add(1)
 		if count == 1 {
 			once.Do(func() {
@@ -1591,7 +1591,7 @@ func newMockFunctionRunnerManager(t *testing.T) (*functionRunnerManager, *testFu
 
 func patchBuildEmbeddingRunner(
 	t *testing.T,
-	build func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error),
+	build func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error),
 ) {
 	t.Helper()
 
@@ -1607,7 +1607,7 @@ type testFunctionRunnerFactory struct {
 	runners    []*testFunctionRunner
 }
 
-func (f *testFunctionRunnerFactory) Build(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+func (f *testFunctionRunnerFactory) Build(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
 	f.buildCount.Add(1)
 	runner, err := newTestFunctionRunner(schema, fn)
 	if err != nil {

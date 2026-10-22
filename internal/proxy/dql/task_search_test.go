@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/types"
@@ -177,66 +176,6 @@ func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, time.Date(2025, 1, 1, 0, 0, 0, 0, shanghai).UnixMicro(), rangeExpr.GetValue().GetInt64Val())
 	})
-}
-
-func TestSearchTaskPreExecutePreservesPresetRLSPredicate(t *testing.T) {
-	mockey.PatchConvey("preset RLS predicate is not resolved again", t, func() {
-		const (
-			collectionName = "search_by_pk_collection"
-			collectionID   = int64(101)
-		)
-		schema := mustNewSchemaInfo(constructCollectionSchema("id", testFloatVecField, 2, collectionName))
-		predicate, err := planparserv2.ParseExpr(schema.SchemaHelper, "id == 1", nil)
-		require.NoError(t, err)
-
-		mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, RlsEnabled: true}, nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
-		mockTest(t, isIgnoreGrowing, false, nil)
-		mockTest(t, (*SearchTask).checkNq, int64(1), nil)
-		mockey.Mock((*SearchTask).resolveRLSUsingPredicate).To(func(*SearchTask, string, bool) (*planpb.Expr, error) {
-			return nil, errors.New("preset RLS predicate must not be resolved again")
-		}).Build()
-
-		task := &SearchTask{
-			baseTask:      baseTask{MetaCache: newTestCache()},
-			Condition:     NewTaskCondition(context.Background()),
-			SearchRequest: &internalpb.SearchRequest{},
-			ctx:           context.Background(),
-			request: &milvuspb.SearchRequest{
-				CollectionName: collectionName,
-				Nq:             1,
-				SearchParams:   getValidSearchParams(),
-			},
-			result: &milvuspb.SearchResults{Status: merr.Success()},
-		}
-		task.SetResolvedRLSPredicate(predicate)
-		require.NoError(t, task.OnEnqueue())
-		require.NoError(t, task.PreExecute(context.Background()))
-
-		plan := &planpb.PlanNode{}
-		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
-		require.True(t, proto.Equal(predicate, plan.GetVectorAnns().GetPredicates()))
-	})
-}
-
-func TestSearchTaskResolvedRLSSnapshot(t *testing.T) {
-	predicate := &planpb.Expr{}
-	task := &SearchTask{
-		SearchRequest:     &internalpb.SearchRequest{CollectionID: 101},
-		rlsDBName:         "canonical_db",
-		rlsCollectionName: "canonical_collection",
-	}
-
-	assert.Nil(t, task.ResolvedRLSSnapshot())
-	task.SetResolvedRLSPredicate(predicate)
-
-	snapshot := task.ResolvedRLSSnapshot()
-	require.NotNil(t, snapshot)
-	assert.Equal(t, int64(101), snapshot.CollectionID)
-	assert.Equal(t, "canonical_db", snapshot.DBName)
-	assert.Equal(t, "canonical_collection", snapshot.CollectionName)
-	assert.Same(t, predicate, snapshot.Predicate)
 }
 
 func TestSearchTask_PostExecute(t *testing.T) {
@@ -7572,60 +7511,6 @@ func TestParseElementScope(t *testing.T) {
 	assert.Equal(t, 0, cfg.TopK)
 	assert.NotContains(t, sanitized, elementScopeKey)
 	assert.Contains(t, sanitized, "nprobe")
-}
-
-func TestHybridSearchResolvesRLSPredicateOnce(t *testing.T) {
-	const (
-		collectionID   = int64(991006)
-		collectionName = "rls_hybrid_collection"
-	)
-	ctx := context.Background()
-	schema := mustNewSchemaInfo(constructCollectionSchema("id", "vector", 2, collectionName))
-	predicate, err := planparserv2.ParseExpr(schema.SchemaHelper, "id < 10", nil)
-	require.NoError(t, err)
-	predicateBefore := proto.Clone(predicate).(*planpb.Expr)
-
-	resolveCount := 0
-	m := mockey.Mock((*SearchTask).resolveRLSUsingPredicate).To(func(_ *SearchTask, operation string, isIterator bool) (*planpb.Expr, error) {
-		resolveCount++
-		require.Equal(t, "hybrid search", operation)
-		require.False(t, isIterator)
-		return predicate, nil
-	}).Build()
-	defer m.UnPatch()
-
-	rankParams, err := parseRankParams([]*commonpb.KeyValuePair{{Key: LimitKey, Value: "10"}}, schema.CollectionSchema, false)
-	require.NoError(t, err)
-	subSearchParams := getValidSearchParams()
-	resetSearchParamsValue(subSearchParams, AnnsFieldKey, "vector")
-
-	task := &SearchTask{
-		ctx:            ctx,
-		collectionName: collectionName,
-		SearchRequest:  &internalpb.SearchRequest{CollectionID: collectionID},
-		request: &milvuspb.SearchRequest{
-			DbName:         "default",
-			CollectionName: collectionName,
-		},
-		schema:     schema,
-		rankParams: rankParams,
-	}
-	task.IsAdvanced = true
-
-	firstPlan, _, _, _, _, _, err := task.tryGeneratePlan(subSearchParams, "", nil, nil, false)
-	require.NoError(t, err)
-	secondPlan, _, _, _, _, _, err := task.tryGeneratePlan(subSearchParams, "", nil, nil, false)
-	require.NoError(t, err)
-	require.Equal(t, 1, resolveCount)
-
-	firstPredicate := firstPlan.GetVectorAnns().GetPredicates()
-	secondPredicate := secondPlan.GetVectorAnns().GetPredicates()
-	require.NotNil(t, firstPredicate)
-	require.NotNil(t, secondPredicate)
-	require.True(t, proto.Equal(firstPredicate, secondPredicate))
-	require.Same(t, predicate, firstPredicate)
-	require.Same(t, firstPredicate, secondPredicate)
-	require.True(t, proto.Equal(predicateBefore, predicate))
 }
 
 func TestSearchTask_SearchRequeryPolicy(t *testing.T) {

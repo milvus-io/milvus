@@ -53,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -97,7 +96,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	var bc broadcaster.BroadcastAPI
 	if streamingutil.IsStreamingServiceEnabled() {
 		var err error
-		bc, err = s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+		bc, err = s.startLocalFlushBroadcast(ctx, req.GetCollectionID())
 		if err != nil {
 			return &datapb.FlushResponse{
 				Status: merr.Status(err),
@@ -126,6 +125,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 // broadcastManualFlush waits for L1 and L0 completion on every collection VChannel.
 func (s *Server) broadcastManualFlush(ctx context.Context, bc broadcaster.BroadcastAPI, coll *collectionInfo) error {
 	msg := message.NewManualFlushMessageBuilderV2().
+		WithUnreplicable().
 		WithHeader(&message.ManualFlushMessageHeader{CollectionId: coll.ID}).
 		WithBody(&message.ManualFlushMessageBody{}).
 		WithBroadcast(coll.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
@@ -218,7 +218,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}
 
 	// Create a new broadcaster with exclusive cluster resource key.
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+	broadcaster, err := broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
@@ -228,6 +228,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 
 	cc := channel.GetClusterChannels()
 	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
+		WithUnreplicable().
 		WithHeader(&message.FlushAllMessageHeader{}).
 		WithBody(&message.FlushAllMessageBody{}).
 		WithClusterLevelBroadcast(cc, message.OptBuildBroadcastAckSyncUp()).
@@ -1678,7 +1679,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	}
 	for _, channelName := range req.GetChannelNames() {
 		// TODO: redundant channel mark by now, remove it in future.
-		if err := s.meta.catalog.MarkChannelAdded(ctx, channelName); err != nil {
+		if err := s.meta.metaStore.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
 			mlog.Error(context.TODO(), "failed to mark channel added", mlog.Err(err))
 			resp.Status = merr.Status(err)
@@ -1890,34 +1891,33 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 		return merr.Status(err), nil
 	}
 
-	// get collection info from cache
-	clonedColl := s.meta.GetClonedCollectionInfo(req.CollectionID)
-
 	properties := make(map[string]string)
 	for _, pair := range req.Properties {
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	// cache miss and update cache
-	if clonedColl == nil {
-		collInfo := &collectionInfo{
-			ID:             req.GetCollectionID(),
-			Schema:         req.GetSchema(),
-			Partitions:     req.GetPartitionIDs(),
-			StartPositions: req.GetStartPositions(),
-			Properties:     properties,
-			DatabaseID:     req.GetDbID(),
-			DatabaseName:   req.GetSchema().GetDbName(),
-			VChannelNames:  req.GetVChannels(),
-		}
-		s.meta.AddCollection(collInfo)
-		return merr.Success(), nil
+	// RootCoord builds this request from its authoritative meta and populates
+	// every field (broker.go BroadcastAlteredCollection), so the request wins
+	// throughout. Taking Partitions/DatabaseName/DatabaseID from the existing
+	// entry instead -- as the pre-metacache code did -- pinned them to whatever
+	// the initial load saw: create/drop partition never refreshed Partitions,
+	// and a cross-database rename left DatabaseName stale for the resource-key
+	// locks built from it. CreatedAt is the one field the request lacks, so it
+	// is carried over.
+	info := &collectionInfo{
+		ID:             req.GetCollectionID(),
+		Schema:         req.GetSchema(),
+		Partitions:     req.GetPartitionIDs(),
+		StartPositions: req.GetStartPositions(),
+		Properties:     properties,
+		DatabaseID:     req.GetDbID(),
+		DatabaseName:   req.GetSchema().GetDbName(),
+		VChannelNames:  req.GetVChannels(),
 	}
-
-	clonedColl.Properties = properties
-	// add field will change the schema
-	clonedColl.Schema = req.GetSchema()
-	s.meta.AddCollection(clonedColl)
+	if existing := s.meta.GetCollection(req.GetCollectionID()); existing != nil {
+		info.CreatedAt = existing.CreatedAt
+	}
+	s.meta.AddCollection(info)
 	return merr.Success(), nil
 }
 
@@ -2104,8 +2104,6 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		jobID,
 		in.GetChannelNames(),
 		interceptor.IdempotencyKeyFromContext(ctx),
-		in.GetRlsPrincipal(),
-		in.GetSkipRls(),
 		version,
 	)
 	if err != nil {
@@ -2131,6 +2129,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			mlog.String("originalState", originalState))
 		return resp, nil
 	}
+	recordImportFileTypes(in.GetFiles(), in.GetOptions())
 
 	resp.JobID = fmt.Sprint(jobID)
 	mlog.Info(context.TODO(), "import request broadcasted successfully", mlog.String("jobID", resp.JobID))
@@ -2162,27 +2161,6 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 
 	body := result.Message.MustBody()
 	options := funcutil.Map2KeyValuePair(body.GetOptions())
-	version, trustedRLSContext := result.Message.Properties().Get(importRLSContextVersionProperty)
-	trustedRLSContext = trustedRLSContext && version == importRLSContextVersion
-	var rlsPrincipal string
-	var skipRLS bool
-	var err error
-	if trustedRLSContext {
-		rlsPrincipal, skipRLS, err = importutilv2.GetRLSOptions(options)
-	}
-	if !trustedRLSContext || err != nil {
-		// Import options predate RLS and were client-controlled. Only a message
-		// marked after DataCoord sanitizes the options may carry authorized RLS
-		// context. Malformed marked context also fails closed without wedging the
-		// indefinitely retried ACK callback.
-		if err != nil {
-			mlog.Warn(ctx, "ignore malformed RLS context in import message", mlog.Err(err))
-		}
-		rlsPrincipal, skipRLS = "", false
-	}
-	options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
-		return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
-	})
 	files := importFilesFromMessage(body.GetFiles(), options)
 	if body.Schema != nil {
 		body.Schema.DbName = body.DbName
@@ -2285,17 +2263,9 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(options) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
-	var rlsPredicate *planpb.Expr
-	var rlsErr error
-	if !l0ImportDisabled {
-		rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, &internalpb.ImportRequestInternal{
-			CollectionID: body.GetCollectionID(), Schema: body.GetSchema(),
-			Options: options, RlsPrincipal: rlsPrincipal, SkipRls: skipRLS,
-		})
-	}
 
 	isBackup := importutilv2.IsBackup(options)
-	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil && rlsErr == nil {
+	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, options)
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2350,7 +2320,6 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 			DataTs:              result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 			AutoCommit:          importutilv2.IsAutoCommit(options),
 			CommitByCoordinator: result.Message.Header().GetCommitByCoordinator(),
-			RlsCheckPredicate:   rlsPredicate,
 			Version:             jobVersion,
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
@@ -2362,11 +2331,6 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
 			"into data segment deltalogs before restore, or set the config to true on this cluster " +
 			"to re-enable the legacy L0 import")(job)
-	} else if rlsErr != nil {
-		mlog.Warn(ctx, "RLS import check could not be prepared, creating the job in Failed state",
-			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", body.GetCollectionID()), mlog.Err(rlsErr))
-		UpdateJobState(internalpb.ImportJobState_Failed)(job)
-		UpdateJobReason(rlsErr.Error())(job)
 	}
 	if sourceErr != nil {
 		// ACK callbacks retry indefinitely. Persist malformed/lost source
@@ -2431,6 +2395,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp.Reason = reason
 	resp.Progress = progress
 	resp.CollectionName = job.GetCollectionName()
+	resp.CollectionId = job.GetCollectionID()
 	resp.CreateTime = job.GetCreateTime()
 	resp.CompleteTime = job.GetCompleteTime()
 	resp.ImportedRows = importedRows
@@ -2469,6 +2434,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		resp.Reasons = append(resp.Reasons, reason)
 		resp.Progresses = append(resp.Progresses, progress)
 		resp.CollectionNames = append(resp.CollectionNames, job.GetCollectionName())
+		resp.CollectionIds = append(resp.CollectionIds, job.GetCollectionID())
 	}
 	return resp, nil
 }
@@ -3566,6 +3532,15 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		return merr.Status(err), nil
 	}
 	job := s.importMeta.GetJob(ctx, req.GetJobId())
+	if job == nil {
+		forgotten, err := s.importJobForgotten(ctx, req.GetJobId())
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if forgotten {
+			return merr.Success(), nil
+		}
+	}
 	if job != nil && job.GetCommitByCoordinator() {
 		return merr.Success(), nil
 	}

@@ -43,6 +43,8 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -109,6 +111,8 @@ type Server struct {
 	metaRootPath                        string
 	meta                                *meta
 	dataViewManager                     DataViewManager
+	metaStore                           metacache.MetaStore
+	catalog                             metastore.DataCoordCatalog
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
 	segmentManager                      Manager
 	allocator                           allocator.Allocator
@@ -161,6 +165,7 @@ type Server struct {
 	statsInspector                   *statsInspector
 	indexInspector                   *indexInspector
 	analyzeInspector                 *analyzeInspector
+	talonPrewarmInspector            *TalonPrewarmInspector
 	externalCollectionRefreshManager ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
 
@@ -204,6 +209,22 @@ func WithDataNodeCreator(creator session.DataNodeCreatorFunc) Option {
 func WithSegmentManager(manager Manager) Option {
 	return func(svr *Server) {
 		svr.segmentManager = manager
+	}
+}
+
+// WithMetaStore returns an Option to set the shared MetaStore for datacoord
+// to use as the primary segment and collection storage.
+func WithMetaStore(store metacache.MetaStore) Option {
+	return func(svr *Server) {
+		svr.metaStore = store
+	}
+}
+
+// WithCatalog returns an Option to set the DataCoordCatalog for sub-meta
+// initialization (indexMeta, analyzeMeta, importMeta, etc.).
+func WithCatalog(catalog metastore.DataCoordCatalog) Option {
+	return func(svr *Server) {
+		svr.catalog = catalog
 	}
 }
 
@@ -324,7 +345,7 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
-	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog, s.allocator, s.meta)
+	s.importMeta, err = NewImportMeta(s.ctx, s.catalog, s.allocator, s.meta)
 	if err != nil {
 		return err
 	}
@@ -412,6 +433,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	mlog.Info(s.ctx, "init snapshot manager done")
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	if err := s.initTalonPrewarm(); err != nil {
+		return err
+	}
 
 	mlog.Info(s.ctx, "init datacoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 
@@ -442,6 +466,11 @@ func (s *Server) startDataCoord() {
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	// The first prewarm round reads the recovered metadata through a healthy
+	// DataCoord; starting it earlier could skip that round as not ready.
+	if s.talonPrewarmInspector != nil {
+		s.talonPrewarmInspector.Start()
+	}
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
 }
 
@@ -659,14 +688,27 @@ func (s *Server) initKV() error {
 }
 
 func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
+	// MixCoord injects the shared catalog and MetaStore. A standalone
+	// DataCoord (e.g. in tests) builds its own over the local KV.
+	if s.catalog == nil {
+		s.catalog = datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+	}
+	if s.metaStore == nil {
+		s.metaStore = metacache.NewMetaStore(s.catalog)
+	}
 	if s.meta != nil {
 		return nil
 	}
-	catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+	// DataView persistence lives on the concrete KV catalog, not on the
+	// DataCoordCatalog interface.
+	catalog, ok := s.catalog.(dataview.Catalog)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("datacoord catalog does not support DataView persistence")
+	}
 	var recoveredMeta *meta
 	reloadEtcdFn := func() error {
 		var err error
-		recoveredMeta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		recoveredMeta, err = newMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker)
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -1114,6 +1156,11 @@ func (s *Server) initMixCoord() error {
 //
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
+	// Init can create the client without reaching Start. Release it even when
+	// the state guard below skips the rest of component shutdown.
+	if s.talonPrewarmInspector != nil {
+		s.talonPrewarmInspector.Stop()
+	}
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}
@@ -1276,7 +1323,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	collInfo := &collectionInfo{
+	s.meta.AddCollection(&collectionInfo{
 		ID:             resp.CollectionID,
 		Schema:         resp.Schema,
 		Partitions:     partitionIDs,
@@ -1286,8 +1333,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		DatabaseName:   resp.GetDbName(),
 		DatabaseID:     resp.GetDbId(),
 		VChannelNames:  resp.GetVirtualChannelNames(),
-	}
-	s.meta.AddCollection(collInfo)
+	})
 	return nil
 }
 

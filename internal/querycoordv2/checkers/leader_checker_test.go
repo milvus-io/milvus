@@ -21,10 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -40,8 +40,10 @@ import (
 
 type LeaderCheckerTestSuite struct {
 	suite.Suite
-	checker *LeaderChecker
-	kv      kv.MetaKv
+	// metaStore is shared by Meta and TargetManager.
+	metaStore metacache.MetaStore
+	checker   *LeaderChecker
+	kv        kv.MetaKv
 
 	meta    *meta.Meta
 	broker  *meta.MockBroker
@@ -70,11 +72,12 @@ func (suite *LeaderCheckerTestSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
+	suite.metaStore = metacache.NewMetaStore(nil)
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, suite.metaStore)
 	suite.broker = meta.NewMockBroker(suite.T())
 
 	distManager := meta.NewDistributionManager(suite.nodeMgr)
-	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
 	suite.checker = NewLeaderChecker(suite.meta, distManager, targetManager, suite.nodeMgr)
 }
 
@@ -101,8 +104,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 
 	// before target ready, should skip check collection
 	tasks := suite.checker.Check(context.TODO())
@@ -201,8 +203,7 @@ func (suite *LeaderCheckerTestSuite) TestActivation() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -266,8 +267,7 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
 	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
@@ -313,8 +313,7 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -375,8 +374,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -448,8 +446,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, nil, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, nil, nil)
 	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
 	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
 
@@ -501,8 +498,7 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
 
 	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
@@ -557,8 +553,7 @@ func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
 			PartitionStatsVersions: newPartitionStatsMap,
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 
 	// before target ready, should skip check collection
 	tasks := suite.checker.Check(context.TODO())

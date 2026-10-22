@@ -361,6 +361,9 @@ message StreamingError {
 // write on that log node. Server: all log node. Running on every log node.
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
+    rpc GetCollectionSchema(StreamingNodeGetCollectionSchemaRequest) returns (StreamingNodeGetCollectionSchemaResponse) {};
+
+    rpc ValidateAnalyzer(StreamingNodeValidateAnalyzerRequest) returns (StreamingNodeValidateAnalyzerResponse) {};
     rpc RunAnalyzer(StreamingNodeRunAnalyzerRequest) returns (StreamingNodeRunAnalyzerResponse) {};
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
     // from the correct position, ensuring no duplicate or missing messages.
@@ -1027,5 +1030,42 @@ message StreamingFieldAnalyzer {
 }
 message StreamingNodeRunAnalyzerResponse {
     repeated milvus.AnalyzerResult results = 1;
+    common.Status status = 2;
+}
+
+// Schema access is independent of collection loading. The selector distinguishes
+// the current write schema from an exact historical version, including zero.
+// Failures use native streaming gRPC errors, not an embedded response status.
+message StreamingNodeGetCollectionSchemaRequest {
+    // Collection identity is derived from the canonical vchannel name.
+    string vchannel = 1;
+    PChannelInfo pchannel = 2;
+    oneof selector {
+        bool current_write = 3;
+        int32 schema_version = 4;
+    }
+}
+
+message StreamingNodeGetCollectionSchemaResponse {
+    schema.CollectionSchema schema = 1;
+    // Zero means the exact effective boundary is unknown for a legacy schema
+    // baseline, not proof that the channel has crossed a schema boundary.
+    uint64 effective_time_tick = 2;
+}
+
+// Analyzer validation is collection-independent. Business failures use Status;
+// successful responses identify the resources to reserve before DDL.
+message StreamingAnalyzerInfo {
+    string params = 1;
+    string field = 2;
+    string name = 3;
+}
+
+message StreamingNodeValidateAnalyzerRequest {
+    repeated StreamingAnalyzerInfo analyzer_infos = 1;
+}
+
+message StreamingNodeValidateAnalyzerResponse {
+    repeated int64 resource_ids = 1;
     common.Status status = 2;
 }

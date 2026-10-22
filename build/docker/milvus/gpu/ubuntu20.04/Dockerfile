@@ -26,7 +26,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 RUN uv --no-cache python install 3.12.13 && \
-    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        --upgrade setuptools msgpack urllib3
 
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     install -d -o milvus -g milvus /milvus /milvus/bin /var/lib/milvus

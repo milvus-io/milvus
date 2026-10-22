@@ -129,3 +129,28 @@ func int64FieldData(fieldID int64, fieldName string, values []int64) *schemapb.F
 func intIDs(values ...int64) *schemapb.IDs {
 	return &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: values}}}
 }
+
+func TestPresizeRows(t *testing.T) {
+	result := func(rows int) *schemapb.SearchResultData {
+		return &schemapb.SearchResultData{Ids: intIDs(make([]int64, rows)...)}
+	}
+	results := []*schemapb.SearchResultData{result(0), result(30), result(20)}
+
+	cases := []struct {
+		name      string
+		results   []*schemapb.SearchResultData
+		keepBound int64
+		want      int64
+	}{
+		{"bounded by rows kept", results, 10, 10},
+		{"bounded by input rows", results, 1000, 50},
+		{"negative rows kept", results, -1, 0},
+		{"no input rows", []*schemapb.SearchResultData{result(0)}, 1000, 0},
+		{"no results", nil, 1000, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, PresizeRows(tc.results, tc.keepBound))
+		})
+	}
+}

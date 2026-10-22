@@ -288,3 +288,7 @@ func getExpectErr() error {
 func (n *noopWALAccesser) AnalyzerClient() AnalyzerClient {
 	return nil
 }
+
+func (n *noopWALAccesser) SchemaClient() SchemaClient {
+	return nil
+}

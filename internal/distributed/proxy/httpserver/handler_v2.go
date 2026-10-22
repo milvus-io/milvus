@@ -766,19 +766,6 @@ func (h *HandlersV2) checkAuthorizationV2(ctx context.Context, c *gin.Context, i
 	return nil
 }
 
-func (h *HandlersV2) checkAuthorizationHelper(ctx context.Context, c *gin.Context, req interface{}) error {
-	username, ok := c.Get(ContextUsername)
-	if !ok || username.(string) == "" {
-		return merr.ErrNeedAuthenticate
-	}
-	ctx, authErr := proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
-	if authErr != nil {
-		return authErr
-	}
-	c.Request = c.Request.WithContext(ctx)
-	return nil
-}
-
 func (h *HandlersV2) wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, ignoreErr bool, fullMethod string, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
 	return h.wrapperProxyWithLimit(ctx, c, req, checkAuth, ignoreErr, fullMethod, false, nil, handler)
 }
@@ -1608,8 +1595,6 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		Expr:           httpReq.Filter,
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
@@ -1710,8 +1695,6 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	req := &milvuspb.QueryRequest{
 		DbName:             dbName,
 		CollectionName:     httpReq.CollectionName,
-		RlsPrincipal:       httpReq.RlsPrincipal,
-		SkipRls:            httpReq.SkipRls,
 		OutputFields:       httpReq.OutputFields,
 		PartitionNames:     httpReq.PartitionNames,
 		Expr:               filter,
@@ -1772,8 +1755,6 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		Expr:           httpReq.Filter,
 	}
@@ -1819,8 +1800,6 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		// PartitionName:  "_default",
 	}
@@ -1895,8 +1874,6 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		PartialUpdate:  httpReq.PartialUpdate,
 		// PartitionName:  "_default",
@@ -2139,8 +2116,6 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		Dsl:            httpReq.Filter,
 		DslType:        commonpb.DslType_BoolExprV1,
 		OutputFields:   httpReq.OutputFields,
@@ -2472,8 +2447,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionNames: httpReq.PartitionNames,
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
@@ -4056,15 +4029,7 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 
 		for i, jobID := range jobIDs {
 			collection := collections[i]
-			if h.checkAuth {
-				err = h.checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
-					DbName:         dbName,
-					CollectionName: collection,
-				})
-				if err != nil {
-					continue
-				}
-			}
+			// Proxy has filtered jobs using their persisted resource identities.
 			jobDetail := make(map[string]interface{})
 			jobDetail["jobId"] = jobID
 			jobDetail["collectionName"] = collection
@@ -4128,9 +4093,6 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 	if err != nil {
 		return response, err
 	}
-	if err := h.checkImportPrivilege(ctx, c, dbName, response.GetCollectionName()); err != nil {
-		return nil, err
-	}
 
 	returnData := make(map[string]interface{})
 	returnData["jobId"] = jobIDGetter.GetJobID()
@@ -4176,32 +4138,18 @@ func (h *HandlersV2) getImportProgress(ctx context.Context, c *gin.Context, dbNa
 	}
 	c.Set(ContextRequest, req)
 
-	resp, err := h.wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/GetImportProgress", func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxy(ctx, c, req, false, true, "/milvus.proto.milvus.MilvusService/GetImportProgress", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
 	})
 	if err != nil {
+		httpStatus := http.StatusOK
+		if errors.Is(err, merr.ErrPrivilegeNotPermitted) {
+			httpStatus = http.StatusForbidden
+		}
+		HTTPAbortReturn(c, httpStatus, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 	return resp.(*internalpb.GetImportProgressResponse), nil
-}
-
-func (h *HandlersV2) checkImportPrivilege(ctx context.Context, c *gin.Context, dbName string, collectionName string) error {
-	if !h.checkAuth {
-		return nil
-	}
-
-	authErr := h.checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	if authErr != nil {
-		HTTPReturn(c, http.StatusForbidden, gin.H{
-			HTTPReturnCode:    merr.Code(authErr),
-			HTTPReturnMessage: authErr.Error(),
-		})
-		return authErr
-	}
-	return nil
 }
 
 func (h *HandlersV2) checkImportJobAuth(ctx context.Context, c *gin.Context, dbName string, jobID string) error {
@@ -4209,13 +4157,9 @@ func (h *HandlersV2) checkImportJobAuth(ctx context.Context, c *gin.Context, dbN
 		return nil
 	}
 
-	// Commit/abort requests only carry jobID. Import privilege is collection-scoped,
-	// so resolve the job's collection before checking PrivilegeImport.
-	response, err := h.getImportProgress(ctx, c, dbName, jobID)
-	if err != nil {
-		return err
-	}
-	return h.checkImportPrivilege(ctx, c, dbName, response.GetCollectionName())
+	// Proxy checks Import on the job's actual resource before returning progress.
+	_, err := h.getImportProgress(ctx, c, dbName, jobID)
+	return err
 }
 
 func (h *HandlersV2) restoreExternalSnapshot(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

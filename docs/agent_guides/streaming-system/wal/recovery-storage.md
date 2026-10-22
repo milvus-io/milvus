@@ -19,6 +19,32 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 
 Control may persist its latest state ahead of the global checkpoint, like a Segment snapshot. Its `control_checkpoint_time_tick` suppresses already covered control effects without skipping data replay. External effects still require idempotent retries when a crash precedes metadata publication. Startup failure and normal shutdown close the retained stream, including when it is paused at the barrier.
 
+The physical LastConfirmedMessageID may overlap the completed prefix. Startup
+observation skips scanner output at or before the recovered checkpoint's
+TimeTick, including broadcasts whose consuming ACK has already completed. This
+filter runs after ordering and transaction assembly; raw transaction fragments
+before the checkpoint remain available to assemble commits beyond it. The exact
+RecoveryBarrier is still recognized independently of this observation filter.
+
+Legacy DataCoord seek timestamps are inclusive replay positions, not completed
+prefixes. Migration preserves the safe physical MessageID but publishes the
+final V2 checkpoint with TimeTick zero. Replay therefore includes the legacy
+boundary, even if the process restarts immediately after migration commits.
+Component checkpoints and the independent control frontier retain their existing
+values and provide deduplication. The preliminary legacy-format rewind keeps its
+original seek timestamp so an interrupted migration can still rebuild component
+baselines; only the final V2 global TimeTick is reset.
+
+WAL append cancellation ends the writer lifecycle and requires this recovery flow
+before writes resume. It does not prove that the interrupted record was absent.
+A durable Commit is replayed as a completed transaction; an incomplete receiving
+prefix reconstructs both TxnManager and ReplicatesManager from the same TxnBuffer;
+a durable exclusive operation (including ManualFlush/FlushAll) removes the aborted
+prefix in its scope, regardless of replication origin or the `_ur` marker.
+Explicitly ignored topology records have no abort effect. The old session is not reset
+for another Commit attempt on the cancelled writer. See
+[Append retry and writer lifetime](../walbackend/walbackend.md#append-retry-and-writer-lifetime).
+
 The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
 Size, buffer age, explicit Flush and recovery-tail requests trigger output.
 Earlier L1 segments must be registered in DataCoord, but need not be flushed.

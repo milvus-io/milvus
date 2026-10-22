@@ -1151,6 +1151,7 @@ BitmapIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
         state->meta.count,
         !has_validity && (state->meta.nested || !state->params.nullable));
     IndexLoadPlan plan;
+    plan.worker_writes = false;
     plan.load_context = state;
     plan.entries.reserve(3);
     state->projection = PreparePackedJsonProjectedOpen(

@@ -30,6 +30,7 @@
 
 #include "common/Array.h"
 #include "common/StructElementOffsets.h"
+#include "common/FeatureBits.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -40,6 +41,7 @@
 #include "exec/expression/ExprCacheHelper.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
+#include "index/Families.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/INullReader.h"
@@ -451,6 +453,14 @@ class Expr : public std::enable_shared_from_this<Expr> {
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) {
     }
 
+    // Bind the request's execution feature recorder, null unless the plan
+    // collects feature bits. Called by the expression compiler next to
+    // SetSnapshot; the recorder is owned by the plan and outlives the task.
+    // Default no-op for expressions that do not choose an execution path.
+    virtual void
+    SetFeatureRecorder(FeatureRecorder* recorder) {
+    }
+
  protected:
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
@@ -559,6 +569,33 @@ class SegmentExpr : public Expr {
     virtual bool
     IsSource() const override {
         return true;
+    }
+
+    // The recorder bound to this expression, or null. A wrapper that serves
+    // this expression's result from a cache (RawExprCacheAdapter) records
+    // through it, so request gating and the internal-filter exclusion apply.
+    FeatureRecorder*
+    feature_recorder() const {
+        return feature_recorder_;
+    }
+
+    // The TTL filter the compiler adds on its own and the namespace
+    // predicate the plan parser merges in (MergeExprWithNamespace) are not
+    // user filters, so an expression on either field records nothing.
+    void
+    SetFeatureRecorder(FeatureRecorder* recorder) override {
+        if (recorder == nullptr) {
+            feature_recorder_ = nullptr;
+            return;
+        }
+        const auto& schema = *segment_->get_schema_snapshot();
+        auto ttl_field = schema.get_ttl_field_id();
+        auto namespace_field = schema.get_namespace_field_id();
+        const bool internal =
+            (ttl_field.has_value() && ttl_field.value() == field_id_) ||
+            (namespace_field.has_value() &&
+             namespace_field.value() == field_id_);
+        feature_recorder_ = internal ? nullptr : recorder;
     }
 
     void
@@ -1076,6 +1113,9 @@ class SegmentExpr : public Expr {
                 cache_hit = true;
             }
         });
+        if (cache_hit) {
+            MarkFeature(feature_recorder_, FeatureBit::ExprCacheHit);
+        }
         return cache_hit;
     }
 
@@ -3097,7 +3137,9 @@ class SegmentExpr : public Expr {
                         valid_res = null_reader_->IsNotNull();
                     }
                     return {std::move(res), std::move(valid_res)};
-                });
+                },
+                /*enable_cache_write=*/true,
+                feature_recorder_);
             cached_index_chunk_res_ = cached.result;
             cached_index_chunk_valid_res_ = cached.valid;
             cached_index_chunk_id_ = 0;
@@ -3132,7 +3174,7 @@ class SegmentExpr : public Expr {
             if (use_index) {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
-                if (std::is_same_v<T, ArrayView>) {
+                if constexpr (std::is_same_v<T, ArrayView>) {
                     auto schema = segment_->get_schema_snapshot();
                     auto element_type = (*schema)[field_id_].get_element_type();
                     switch (element_type) {
@@ -3169,8 +3211,9 @@ class SegmentExpr : public Expr {
                                       "unsupported element type: {}",
                                       element_type);
                     }
+                } else {
+                    return ProcessIndexChunksForValid<T>();
                 }
-                return ProcessIndexChunksForValid<T>();
             } else {
                 return ProcessDataChunksForValid<T>();
             }
@@ -3199,7 +3242,7 @@ class SegmentExpr : public Expr {
             if (use_index) {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
-                if (std::is_same_v<T, ArrayView>) {
+                if constexpr (std::is_same_v<T, ArrayView>) {
                     auto schema = segment_->get_schema_snapshot();
                     auto element_type = (*schema)[field_id_].get_element_type();
                     switch (element_type) {
@@ -3241,13 +3284,14 @@ class SegmentExpr : public Expr {
                                       "unsupported element type: {}",
                                       element_type);
                     }
+                } else {
+                    const auto& res = GetCachedIndexValidBitmap();
+                    if (!cached_index_all_valid_) {
+                        for (auto i = 0; i < batch_size; ++i) {
+                            valid_result[i] = res[input[i]];
+                        }
+                    }  // else: valid_result is already all-set
                 }
-                const auto& res = GetCachedIndexValidBitmap();
-                if (!cached_index_all_valid_) {
-                    for (auto i = 0; i < batch_size; ++i) {
-                        valid_result[i] = res[input[i]];
-                    }
-                }  // else: valid_result is already all-set
             } else {
                 apply_field_valid_data();
             }
@@ -3853,13 +3897,139 @@ class SegmentExpr : public Expr {
             // an exception escape can leave pthread_once active on this runtime,
             // so cleanup's second call would wait forever after prefetch fails.
             try {
-                const_cast<SegmentExpr*>(this)->DetermineExecPath();
+                auto self = const_cast<SegmentExpr*>(this);
+                self->DetermineExecPath();
+                self->RecordExecPath();
             } catch (...) {
                 determine_exec_path_error_ = std::current_exception();
             }
         });
         if (determine_exec_path_error_) {
             std::rethrow_exception(determine_exec_path_error_);
+        }
+    }
+
+    // Whether this expression's execution path is a user-visible feature
+    // (filter_exec_path=*). False for internal nodes, such as the GIS refine
+    // pass that always re-checks the coarse candidates on raw data.
+    virtual bool
+    ReportsExecPath() const {
+        return true;
+    }
+
+    // Whether falling back to raw data despite an index on the field means
+    // the index was declined. False where raw data is the designed path
+    // whenever it exists (membership filters, timestamptz arithmetic) or
+    // where the index is a different kind the expression cannot use.
+    virtual bool
+    ReportsIndexDecline() const {
+        return true;
+    }
+
+    // Record the execution path DetermineExecPath() chose, once per
+    // expression per segment. Determined is not always executed: a later
+    // whole-filter cache hit or a conjunction that runs out of rows can skip
+    // the evaluation. The report counts feature use, so that only affects
+    // how often, never whether.
+    void
+    RecordExecPath() {
+        auto* recorder = feature_recorder_;
+        if (recorder == nullptr || !ReportsExecPath()) {
+            return;
+        }
+        switch (exec_path_) {
+            case ExprExecPath::ScalarIndex:
+                // An NGRAM candidate reader is selected on this path; the
+                // NGRAM hooks record it when its candidates are used.
+                if (CanUseNgramIndex()) {
+                    return;
+                }
+                recorder->Mark(FeatureBit::FilterPathScalarIndex);
+                RecordScalarIndexFamily(recorder);
+                return;
+            case ExprExecPath::PkIndex:
+                recorder->Mark(FeatureBit::FilterPathPkIndex);
+                return;
+            case ExprExecPath::TextIndex:
+                recorder->Mark(FeatureBit::FilterPathTextMatchIndex);
+                return;
+            case ExprExecPath::JsonStats:
+                recorder->Mark(FeatureBit::FilterPathJsonShredding);
+                return;
+            case ExprExecPath::RawData:
+                recorder->Mark(FeatureBit::FilterPathBruteForce);
+                // The field has an index this expression could have used:
+                // selection pinned one and the operator or literal refined
+                // it away, or no reader interface fit the expression.
+                if (ReportsIndexDecline() && HasIndexForThisPath()) {
+                    recorder->Mark(FeatureBit::FilterIndexDeclined);
+                }
+                return;
+        }
+    }
+
+    // Whether a scalar index exists that this expression could have used,
+    // for the index-declined feature, from the segment's index metadata.
+    // Only an entry that serves filters counts (a predicate, pattern, NGRAM,
+    // spatial or JSON-path reader): a text-match index serves text_match()
+    // alone and is no index a LIKE or a comparison could have used. A JSON
+    // field's indexes are per path: one on another path is no index for
+    // this expression, so only an entry covering the path counts (a flat
+    // index routing the path, or a cast index on exactly this path).
+    bool
+    HasIndexForThisPath() const {
+        const auto capabilities = segment_->IndexCapability(field_id_);
+        const auto path = field_type_ == DataType::JSON
+                              ? milvus::Json::pointer(nested_path_)
+                              : std::string{};
+        for (const auto& entry : capabilities.entries()) {
+            const auto& caps = entry.caps;
+            if (!(caps.predicate || caps.pattern_match ||
+                  caps.ngram_candidates || caps.spatial || caps.json_paths)) {
+                continue;
+            }
+            if (field_type_ != DataType::JSON) {
+                return true;
+            }
+            if (caps.json_paths &&
+                index_path_detail::IsPathPrefix(entry.json_path, path)) {
+                return true;
+            }
+            if (!entry.json_path.empty() && entry.json_path == path) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The family of the selected scalar index, from the segment's index
+    // metadata rather than anything the user wrote. The family is the
+    // canonical registry key (index/Families.h): a JSON flat index is an
+    // INVERTED index underneath but registers as its own family, and the
+    // HYBRID selector has none, having resolved to bitmap or inverted at
+    // load.
+    void
+    RecordScalarIndexFamily(FeatureRecorder* recorder) const {
+        if (!selected_index_entry_.has_value()) {
+            return;
+        }
+        const auto& family = selected_index_entry_->family;
+        if (family == index::families::kJsonFlat) {
+            recorder->Mark(FeatureBit::ScalarIndexJsonFlat);
+        } else if (family == index::families::kBitmap) {
+            recorder->Mark(FeatureBit::ScalarIndexBitmap);
+        } else if (family == index::families::kSort) {
+            recorder->Mark(FeatureBit::ScalarIndexStlSort);
+        } else if (family == index::families::kMarisa) {
+            recorder->Mark(FeatureBit::ScalarIndexTrie);
+        } else if (family == index::families::kInverted) {
+            recorder->Mark(FeatureBit::ScalarIndexInverted);
+        } else if (family == index::families::kRTree) {
+            recorder->Mark(FeatureBit::ScalarIndexRtree);
+        } else if (family == index::families::kNgram) {
+            recorder->Mark(FeatureBit::ScalarIndexNgram);
+        } else if (family == index::families::kFmIndex) {
+            recorder->Mark(FeatureBit::ScalarIndexFmindex);
         }
     }
 
@@ -4125,6 +4295,9 @@ class SegmentExpr : public Expr {
     bool is_json_contains_{false};
     bool is_data_mode_{false};
     query::PlanOptions plan_options_;
+    // Execution feature recorder of the request, or null; see
+    // SetFeatureRecorder.
+    FeatureRecorder* feature_recorder_{nullptr};
     // Execution path determined once, preferably by PrefetchAsync() on the
     // prefetch pool. Direct callers that do not prefetch determine it lazily.
     ExprExecPath exec_path_{ExprExecPath::RawData};

@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -5162,81 +5161,6 @@ func TestDML(t *testing.T) {
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
-func TestRESTV2ForwardsRLSFields(t *testing.T) {
-	paramtable.Init()
-	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
-	t.Cleanup(func() {
-		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
-	})
-
-	matchesRLS := func(req interface {
-		GetRlsPrincipal() string
-		GetSkipRls() bool
-	},
-	) bool {
-		return req.GetRlsPrincipal() == "alice" && req.GetSkipRls()
-	}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Times(7)
-	mp.EXPECT().Query(mock.Anything, mock.MatchedBy(func(req *milvuspb.QueryRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.QueryResults{Status: commonSuccessStatus}, nil).Twice()
-	mp.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(req *milvuspb.DeleteRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.MutationResult{Status: commonSuccessStatus}, nil).Once()
-	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.MutationResult{
-		Status: commonSuccessStatus, IDs: generateIDs(schemapb.DataType_Int64, 1), InsertCnt: 1,
-	}, nil).Once()
-	mp.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpsertRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.MutationResult{
-		Status: commonSuccessStatus, IDs: generateIDs(schemapb.DataType_Int64, 1), UpsertCnt: 1,
-	}, nil).Once()
-	mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
-		return matchesRLS(req)
-	})).Return(&milvuspb.SearchResults{
-		Status: commonSuccessStatus, Results: &schemapb.SearchResultData{},
-	}, nil).Once()
-	mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
-		return matchesRLS(req) && len(req.GetRequests()) == 1 &&
-			req.GetRequests()[0].GetRlsPrincipal() == "" && !req.GetRequests()[0].GetSkipRls()
-	})).Return(&milvuspb.SearchResults{
-		Status: commonSuccessStatus, Results: &schemapb.SearchResultData{},
-	}, nil).Once()
-	mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
-		principal, skip, err := importutilv2.GetRLSOptions(req.GetOptions())
-		return err == nil && principal == "alice" && skip
-	})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "1"}, nil).Once()
-
-	engine := initHTTPServerV2(mp, false)
-	send := func(action, body string) {
-		t.Helper()
-		w := httptest.NewRecorder()
-		engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), strings.NewReader(body)))
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	}
-
-	send(QueryAction, `{"collectionName":"book","filter":"book_id > 0","rlsPrincipal":"alice","skipRls":true}`)
-	send(GetAction, `{"collectionName":"book","id":[1],"rlsPrincipal":"alice","skipRls":true}`)
-	send(DeleteAction, `{"collectionName":"book","filter":"book_id in [1]","rlsPrincipal":"alice","skipRls":true}`)
-	send(InsertAction, `{"collectionName":"book","data":[{"book_id":1,"word_count":1,"book_intro":[0.1,0.2]}],"rlsPrincipal":"alice","skipRls":true}`)
-	send(UpsertAction, `{"collectionName":"book","data":[{"book_id":1,"word_count":1,"book_intro":[0.1,0.2]}],"rlsPrincipal":"alice","skipRls":true}`)
-	send(SearchAction, `{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":1,"rlsPrincipal":"alice","skipRls":true}`)
-	send(HybridSearchAction, `{"collectionName":"book","search":[{"data":[[0.1,0.2]],"annsField":"book_intro","limit":1}],"limit":1,"rlsPrincipal":"alice","skipRls":true}`)
-
-	w := httptest.NewRecorder()
-	engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction),
-		strings.NewReader(`{"collectionName":"book","files":[["book.json"]],"options":{"rls_principal":"alice","skip_rls":"true"}}`)))
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-}
-
 func TestQueryOrderByFields(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit
@@ -6896,8 +6820,7 @@ func TestCommitImportJob(t *testing.T) {
 
 		mp := mocks.NewMockProxy(t)
 		mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
-			Status:         &StatusSuccess,
-			CollectionName: DefaultCollectionName,
+			Status: merr.Status(merr.WrapErrPrivilegeNotPermitted("not allowed to access import job")),
 		}, nil).Once()
 		testEngine := initHTTPServerV2(mp, true)
 		req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CommitAction), bytes.NewReader([]byte(`{"jobId": "123"}`)))
@@ -6910,8 +6833,8 @@ func TestCommitImportJob(t *testing.T) {
 		returnBody := &ReturnErrMsg{}
 		err := json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
-		assert.Equal(t, int32(65535), returnBody.Code)
-		assert.Contains(t, returnBody.Message, "PrivilegeImport: permission deny to test")
+		assert.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "not allowed to access import job")
 		mp.AssertNotCalled(t, "CommitImport", mock.Anything, mock.Anything)
 	})
 
@@ -7070,8 +6993,7 @@ func TestAbortImportJob(t *testing.T) {
 
 		mp := mocks.NewMockProxy(t)
 		mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
-			Status:         &StatusSuccess,
-			CollectionName: DefaultCollectionName,
+			Status: merr.Status(merr.WrapErrPrivilegeNotPermitted("not allowed to access import job")),
 		}, nil).Once()
 		testEngine := initHTTPServerV2(mp, true)
 		req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, AbortAction), bytes.NewReader([]byte(`{"jobId": "123"}`)))
@@ -7084,8 +7006,8 @@ func TestAbortImportJob(t *testing.T) {
 		returnBody := &ReturnErrMsg{}
 		err := json.Unmarshal(w.Body.Bytes(), returnBody)
 		assert.Nil(t, err)
-		assert.Equal(t, int32(65535), returnBody.Code)
-		assert.Contains(t, returnBody.Message, "PrivilegeImport: permission deny to test")
+		assert.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), returnBody.Code)
+		assert.Contains(t, returnBody.Message, "not allowed to access import job")
 		mp.AssertNotCalled(t, "AbortImport", mock.Anything, mock.Anything)
 	})
 

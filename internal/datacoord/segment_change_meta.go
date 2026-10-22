@@ -640,10 +640,6 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 		meta:       m,
 		segments:   make(map[int64]*SegmentInfo),
 		increments: make(map[int64]metastore.BinlogsIncrement),
-		metricMutation: &segMetricMutation{
-			stateChange:             make(segmentMetricStateChange),
-			deferSegmentLabelChange: true,
-		},
 	}
 	for _, operator := range operators {
 		operator(updatePack)
@@ -748,7 +744,6 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 			}
 		}
 	}
-	updatePack.prepareSegmentMetricUpdates()
 
 	// C2: deterministic action order. updatePack.segments is a Go map, so a
 	// direct iteration interleaves member flips and superseded retirements
@@ -862,8 +857,8 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 			mlog.Err(err))
 		return err
 	}
-	// Apply metric mutation and memory status after a successful meta update.
-	updatePack.metricMutation.commit()
+	// Apply memory status after a successful meta update; the MetaStore
+	// emits segment metrics as segments are installed.
 	for id, s := range updatePack.segments {
 		m.segments.SetSegment(id, s)
 	}

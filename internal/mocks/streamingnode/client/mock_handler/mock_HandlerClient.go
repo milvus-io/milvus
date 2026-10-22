@@ -175,6 +175,65 @@ func (_c *MockHandlerClient_CreateProducer_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// GetCollectionSchema provides a mock function with given fields: _a0, _a1
+func (_m *MockHandlerClient) GetCollectionSchema(_a0 context.Context, _a1 *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionSchema")
+	}
+
+	var r0 *streamingpb.StreamingNodeGetCollectionSchemaResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) *streamingpb.StreamingNodeGetCollectionSchemaResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.StreamingNodeGetCollectionSchemaResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_GetCollectionSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionSchema'
+type MockHandlerClient_GetCollectionSchema_Call struct {
+	*mock.Call
+}
+
+// GetCollectionSchema is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *streamingpb.StreamingNodeGetCollectionSchemaRequest
+func (_e *MockHandlerClient_Expecter) GetCollectionSchema(_a0 interface{}, _a1 interface{}) *MockHandlerClient_GetCollectionSchema_Call {
+	return &MockHandlerClient_GetCollectionSchema_Call{Call: _e.mock.On("GetCollectionSchema", _a0, _a1)}
+}
+
+func (_c *MockHandlerClient_GetCollectionSchema_Call) Run(run func(_a0 context.Context, _a1 *streamingpb.StreamingNodeGetCollectionSchemaRequest)) *MockHandlerClient_GetCollectionSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*streamingpb.StreamingNodeGetCollectionSchemaRequest))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_GetCollectionSchema_Call) Return(_a0 *streamingpb.StreamingNodeGetCollectionSchemaResponse, _a1 error) *MockHandlerClient_GetCollectionSchema_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_GetCollectionSchema_Call) RunAndReturn(run func(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error)) *MockHandlerClient_GetCollectionSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetLatestMVCCTimestampIfLocal provides a mock function with given fields: ctx, vchannel
 func (_m *MockHandlerClient) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
 	ret := _m.Called(ctx, vchannel)
@@ -522,6 +581,65 @@ func (_c *MockHandlerClient_RunAnalyzer_Call) Return(_a0 *streamingpb.StreamingN
 }
 
 func (_c *MockHandlerClient_RunAnalyzer_Call) RunAndReturn(run func(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)) *MockHandlerClient_RunAnalyzer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ValidateAnalyzer provides a mock function with given fields: _a0, _a1
+func (_m *MockHandlerClient) ValidateAnalyzer(_a0 context.Context, _a1 *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateAnalyzer")
+	}
+
+	var r0 *streamingpb.StreamingNodeValidateAnalyzerResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) *streamingpb.StreamingNodeValidateAnalyzerResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.StreamingNodeValidateAnalyzerResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_ValidateAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateAnalyzer'
+type MockHandlerClient_ValidateAnalyzer_Call struct {
+	*mock.Call
+}
+
+// ValidateAnalyzer is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *streamingpb.StreamingNodeValidateAnalyzerRequest
+func (_e *MockHandlerClient_Expecter) ValidateAnalyzer(_a0 interface{}, _a1 interface{}) *MockHandlerClient_ValidateAnalyzer_Call {
+	return &MockHandlerClient_ValidateAnalyzer_Call{Call: _e.mock.On("ValidateAnalyzer", _a0, _a1)}
+}
+
+func (_c *MockHandlerClient_ValidateAnalyzer_Call) Run(run func(_a0 context.Context, _a1 *streamingpb.StreamingNodeValidateAnalyzerRequest)) *MockHandlerClient_ValidateAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*streamingpb.StreamingNodeValidateAnalyzerRequest))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_ValidateAnalyzer_Call) Return(_a0 *streamingpb.StreamingNodeValidateAnalyzerResponse, _a1 error) *MockHandlerClient_ValidateAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)) *MockHandlerClient_ValidateAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -76,10 +77,14 @@ func TestGarbageCollectorBM25OrphanFiles(t *testing.T) {
 					{LogID: 1000}, {LogID: 1}, {LogID: 1002, LogPath: key("100/10/200/101/777")},
 				}}},
 			}}
-			mt := &meta{segments: &SegmentsInfo{segments: map[int64]*SegmentInfo{
-				200: segment,
-				300: {SegmentInfo: &datapb.SegmentInfo{ID: 300, CollectionID: 100, PartitionID: 10, StorageVersion: storage.StorageV3}},
-			}}, snapshotMeta: &snapshotMeta{}}
+			mt := &meta{
+				metaStore: metacache.NewMetaStore(nil),
+				segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+					200: segment,
+					300: {SegmentInfo: &datapb.SegmentInfo{ID: 300, CollectionID: 100, PartitionID: 10, StorageVersion: storage.StorageV3}},
+				}),
+				snapshotMeta: &snapshotMeta{},
+			}
 			blocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).To(
 				func(_ *snapshotMeta, _ int64, segmentID int64) bool { return segmentID == 205 },
 			).Build()

@@ -248,7 +248,7 @@ func (p *preImportV3Task) DropTaskOnWorker(cluster session.Cluster) {
 	}
 	// ErrNodeNotFound means the bound DataNode already left, so the drop is
 	// vacuously done: clear the binding anyway. Returning on it would leave
-	// NodeID set forever and the terminal-job GC's quiesce phase stuck.
+	// NodeID set forever and the terminal-job GC's prepare phase stuck.
 	err := cluster.DropPreImportV3(p.GetNodeID(), p.GetTaskID())
 	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
 		mlog.Warn(context.TODO(), "drop preimport v3 failed", WrapTaskLog(p, mlog.Err(err))...)

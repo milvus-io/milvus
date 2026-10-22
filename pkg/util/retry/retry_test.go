@@ -163,6 +163,35 @@ func TestWrap(t *testing.T) {
 	assert.False(t, IsRecoverable(err2))
 }
 
+func TestUnrecoverablePreservesStatus(t *testing.T) {
+	for _, cause := range []error{
+		merr.WrapErrParameterInvalidMsg("file resource missing not found"),
+		merr.ErrServiceInternal,
+		merr.ErrIoKeyNotFound,
+		merr.ErrIoPermissionDenied,
+		merr.ErrServiceUnavailable,
+		context.Canceled,
+		context.DeadlineExceeded,
+	} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			attempts := 0
+			err := Do(t.Context(), func() error {
+				attempts++
+				return merr.Wrap(Unrecoverable(cause), "fetch resource")
+			}, Attempts(3))
+			assert.Equal(t, 1, attempts)
+			assert.ErrorIs(t, err, cause)
+			assert.False(t, IsRecoverable(err))
+			assert.Equal(t, merr.Code(cause), merr.Code(err))
+			assert.Equal(t, merr.IsRetryableErr(cause), merr.IsRetryableErr(err))
+			assert.Equal(t, merr.GetErrorType(cause), merr.GetErrorType(err))
+			assert.Equal(t, merr.Status(merr.Wrap(cause, "fetch resource")), merr.Status(err))
+		})
+	}
+	assert.ErrorIs(t, Unrecoverable(nil), errUnrecoverable)
+	assert.False(t, IsRecoverable(Unrecoverable(nil)))
+}
+
 func TestRetryErrorParam(t *testing.T) {
 	{
 		mockErr := errors.New("mock not retry error")
