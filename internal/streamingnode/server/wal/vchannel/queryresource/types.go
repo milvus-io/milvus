@@ -22,9 +22,10 @@ type QueryRuntimeModule interface {
 }
 
 // QueryRuntimePrepareModule prepares shared resources before a QueryView is ready.
-// It does not retain a separate aggregate per version.
+// Preparation selects the exact schema and load scope from the view metadata.
+// It does not retain a separate aggregate per DataVersion.
 type QueryRuntimePrepareModule interface {
-	PrepareDataVersion(context.Context, qviews.DataVersion) error
+	PrepareSchemaDataVersion(context.Context, *viewpb.QueryViewMeta) error
 }
 
 // QueryRuntimeIndexModule refreshes collection search metadata for a reused runtime.

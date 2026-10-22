@@ -29,7 +29,7 @@ func TestServerSearchOnViewDelegatesAndReleasesTasks(t *testing.T) {
 		LegacyReq: &internalpb.SearchRequest{CollectionID: 10},
 		ShardId:   testShardID().IntoProto(),
 		Version:   testVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 101, TransformingTimetick: 99}},
 	}
 
 	resp, err := server.SearchOnView(context.Background(), req)
@@ -83,7 +83,7 @@ func TestServerQueryOnViewDelegatesAndReleasesTasks(t *testing.T) {
 		LegacyReq: &internalpb.RetrieveRequest{CollectionID: 11},
 		ShardId:   testShardID().IntoProto(),
 		Version:   testVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 101, TransformingTimetick: 99}},
 	}
 
 	resp, err := server.QueryOnView(context.Background(), req)
@@ -145,21 +145,12 @@ func TestServerRejectsInvalidRequestShape(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-func TestServerRequeryOnViewIsUnimplemented(t *testing.T) {
-	server := NewServer(&fakeTaskProvider{}, &fakeScheduler{})
-
-	_, err := server.RequeryOnView(context.Background(), &viewpb.RequeryOnViewRequest{})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.Unimplemented, status.Code(err))
-}
-
 func validSearchRequest() *viewpb.SearchOnViewRequest {
 	return &viewpb.SearchOnViewRequest{
 		LegacyReq: &internalpb.SearchRequest{CollectionID: 10},
 		ShardId:   testShardID().IntoProto(),
 		Version:   testVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 101, TransformingTimetick: 99}},
 	}
 }
 
@@ -168,7 +159,7 @@ func validQueryRequest() *viewpb.QueryOnViewRequest {
 		LegacyReq: &internalpb.RetrieveRequest{CollectionID: 10},
 		ShardId:   testShardID().IntoProto(),
 		Version:   testVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 101, TransformingTimetick: 99}},
 	}
 }
 
@@ -277,4 +268,23 @@ func (t *fakeQuerySegmentTasks) Tasks() []QuerySegmentTask {
 
 func (t *fakeQuerySegmentTasks) Release() {
 	t.releaseCount++
+}
+
+func TestServerRequiresBindingBeforeAcquiringEvenEmptyTasks(t *testing.T) {
+	provider := &fakeTaskProvider{}
+	server := NewServer(provider, &fakeScheduler{})
+	search := validSearchRequest()
+	search.Mvcc.SchemaBinding = nil
+	search.LegacyReq.IgnoreGrowing = true
+	_, err := server.SearchOnView(context.Background(), search)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing its schema binding")
+	require.Nil(t, provider.searchReq)
+
+	query := validQueryRequest()
+	query.Mvcc.SchemaBinding = nil
+	_, err = server.QueryOnView(context.Background(), query)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing its schema binding")
+	require.Nil(t, provider.queryReq)
 }

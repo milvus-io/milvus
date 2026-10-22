@@ -635,8 +635,8 @@ func (*versionedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VCha
 
 func (*versionedQueryRuntimeModule) Advance(qviews.DataVersion) {}
 
-func (m *versionedQueryRuntimeModule) PrepareDataVersion(ctx context.Context, version qviews.DataVersion) error {
-	return m.prepare(ctx, version)
+func (m *versionedQueryRuntimeModule) PrepareSchemaDataVersion(ctx context.Context, meta *viewpb.QueryViewMeta) error {
+	return m.prepare(ctx, qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion()))
 }
 
 func (m *versionedQueryRuntimeModule) ReleaseDataVersion(version qviews.DataVersion) {

@@ -248,7 +248,7 @@ func advancedSearchOnViewRequest(subReqs []*internalpb.SubSearchRequest) *viewpb
 		},
 		ShardId: testShardID().IntoProto(),
 		Version: testVersion().IntoProto(),
-		Mvcc:    &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99},
+		Mvcc:    &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 101, TransformingTimetick: 99}},
 	}
 }
 

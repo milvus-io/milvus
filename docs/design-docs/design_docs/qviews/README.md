@@ -67,7 +67,7 @@ only supplies their query contracts.
   CSegments through asynchronous scoring, while LocalSegments keep their local
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
 - **Scope:** retained requery uses `QueryOnView` with the original View/MVCC.
-  The existing `RequeryOnView` wire method is retained. Production Proxy wiring
+  Production Proxy wiring
   remains integration work. See [plan/schema/read-proof contracts](query/query_plan.md).
 
 Key source paths: `internal/streamingnode/server/queryplan/server.go`,

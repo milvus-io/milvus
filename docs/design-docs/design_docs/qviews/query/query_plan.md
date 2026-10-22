@@ -14,7 +14,8 @@ observe its Growing and Transform frontiers before checking field-removal
 history. It then resolves the View's loaded partitions, optimizes against the
 exact read runtime, and validates all referenced fields, including fields needed
 by later stages. `QuerySchemaBinding` ties schema version and field IDs to these
-same two frontiers. Phase 2 validates this binding when acquiring tasks.
+same two frontiers. Phase 2 requires this binding, including for schema version
+zero and empty results, and validates it when acquiring tasks.
 The lease is renewed just before a successful plan return.
 
 ## Three distinct timestamp contracts
@@ -88,8 +89,9 @@ This master-based extraction also synchronizes the query-facing schema contracts
 `QueryViewMeta.schema_version`, Search/RetrieveRequest.schema_version,
 QuerySchemaBinding, the BarrierMVCC input, and required_fields /
 skip_load_dynamic_field in GetQueryViewLoadInfoResponse. It does not add their
-Coordinator or QN/native implementations. Existing RPC signatures, Requery
-messages and DataView fields are preserved.
+Coordinator or QN/native implementations. The unused, unimplemented
+RequeryOnView RPC and its messages are removed; retained requery uses QueryOnView.
+DataView fields are preserved.
 Optional fields do not prove that an older peer enforces the new semantics:
 activation and mixed-version acceptance require integration validation.
 

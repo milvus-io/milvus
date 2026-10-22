@@ -10,10 +10,12 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -91,7 +93,8 @@ func TestQueryViewBarrierStopsOnCloseOrCancellation(t *testing.T) {
 		patch := mockey.Mock((*QueryRuntime).submitDrain).Return().Build()
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
-		go func() { done <- runtime.PrepareQueryView(ctx, qviews.DataVersion{}) }()
+		meta, _ := testManagerQueryViewMetaAndKey(1)
+		go func() { done <- runtime.PrepareQueryView(ctx, meta) }()
 		require.Eventually(t, func() bool {
 			runtime.mu.Lock()
 			defer runtime.mu.Unlock()
@@ -248,4 +251,30 @@ func TestInitialAdvanceCannotBeOvertakenByReadyAdvance(t *testing.T) {
 	require.Equal(t, []qviews.DataVersion{initial, next}, module.advancedVersions())
 	runtime.Close()
 	require.NotPanics(t, func() { runtime.Advance(initial) })
+}
+
+func TestPrepareQueryViewPreservesExactReadIdentity(t *testing.T) {
+	module := &versionedQueryRuntimeModule{}
+	runtime := NewQueryRuntime(module)
+	defer runtime.Close()
+	require.NoError(t, runtime.Initialize(context.Background(), walview.VChannelWALView{}))
+	var prepared []*viewpb.QueryViewMeta
+	prepareErr := merr.WrapErrServiceNotReadyMsg("schema preparation pending")
+	patch := mockey.Mock((*versionedQueryRuntimeModule).PrepareSchemaDataVersion).To(func(_ *versionedQueryRuntimeModule, _ context.Context, meta *viewpb.QueryViewMeta) error {
+		prepared = append(prepared, proto.Clone(meta).(*viewpb.QueryViewMeta))
+		if meta.GetSchemaVersion() == 2 {
+			return prepareErr
+		}
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+	first, _ := testManagerQueryViewMetaAndKey(3)
+	first.SchemaVersion, first.LoadInfoVersion = 0, 20
+	second := proto.Clone(first).(*viewpb.QueryViewMeta)
+	second.SchemaVersion, second.LoadInfoVersion = 2, 10
+	require.NoError(t, runtime.PrepareQueryView(context.Background(), first))
+	require.ErrorIs(t, runtime.PrepareQueryView(context.Background(), second), prepareErr)
+	require.Len(t, prepared, 2)
+	require.True(t, proto.Equal(first, prepared[0]))
+	require.True(t, proto.Equal(second, prepared[1]))
 }
