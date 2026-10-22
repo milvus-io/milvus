@@ -70,7 +70,7 @@ func requireRegisteredChannelTask(t *testing.T, scheduler *taskScheduler, task *
 	t.Helper()
 	_, registered := scheduler.tasks.Get(task.ID())
 	require.True(t, registered)
-	indexed, found := scheduler.channelTasks.Get(replicaChannelIndex{task.ReplicaID(), task.Channel()})
+	indexed, found := scheduler.channelTasks.Get(NewReplicaChannelIndex(task))
 	require.True(t, found, "old cleanup must not erase a replacement's deduplication index")
 	require.Same(t, task, indexed)
 	require.True(t, scheduler.channelTaskDelta.taskIDRecords.Contain(task.ID()))
@@ -128,7 +128,7 @@ func TestSchedulerRegistrationAndRemovalAreAtomic(t *testing.T) {
 			require.Equal(t, TaskStatusCanceled, task.Status())
 			_, registered := scheduler.tasks.Get(task.ID())
 			require.False(t, registered, "removal must not leave an unqueued task registered after Add resumes")
-			_, indexed := scheduler.channelTasks.Get(replicaChannelIndex{task.ReplicaID(), task.Channel()})
+			_, indexed := scheduler.channelTasks.Get(NewReplicaChannelIndex(task))
 			require.False(t, indexed)
 			require.False(t, scheduler.channelTaskDelta.taskIDRecords.Contain(task.ID()))
 			require.Zero(t, scheduler.GetChannelTaskDelta(1, membershipCollectionID))
@@ -243,7 +243,7 @@ func TestSchedulerAddsInDifferentCollectionsRunConcurrently(t *testing.T) {
 	scheduler := newChannelMembershipScheduler(t, replica)
 	otherReplica := registrationOtherReplica(t, scheduler)
 	first := registrationChannelTask(t, replica, 14, "parallel-registration")
-	second := registrationChannelTask(t, otherReplica, 14, "parallel-registration")
+	second := registrationChannelTask(t, otherReplica, 14, "parallel-registration-other")
 	published, resume := make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(resume) }) }

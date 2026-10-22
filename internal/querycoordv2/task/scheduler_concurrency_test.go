@@ -280,7 +280,13 @@ func TestSchedulerProcessingSnapshotPreservesReplacement(t *testing.T) {
 	waitRegistrationBarrier(t, snapshotted)
 	addDone := make(chan struct{})
 	var addErr error
-	go func() { defer close(addDone); addErr = scheduler.Add(replacement) }()
+	go func() {
+		defer close(addDone)
+		// Processing tasks cannot be preempted by priority. Retire the old
+		// task explicitly to exercise a stale processing snapshot after removal.
+		retireOwnershipTask(scheduler, old)
+		addErr = scheduler.Add(replacement)
+	}()
 	defer func() {
 		release()
 		waitRegistrationBarrier(t, addDone)

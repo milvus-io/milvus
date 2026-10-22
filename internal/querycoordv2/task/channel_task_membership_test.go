@@ -95,7 +95,7 @@ func requireMembershipTaskRemoved(t *testing.T, scheduler *taskScheduler, task *
 	require.Zero(t, scheduler.processQueue.LenByNode(1))
 	require.Zero(t, scheduler.processQueue.LenByNode(12))
 	require.Zero(t, scheduler.GetChannelTaskNum())
-	_, exists := scheduler.channelTasks.Get(replicaChannelIndex{membershipReplicaID, membershipChannel})
+	_, exists := scheduler.channelTasks.Get(replicaChannelIndex{ReplicaID: membershipReplicaID, Channel: membershipChannel})
 	require.False(t, exists)
 	require.Zero(t, scheduler.GetChannelTaskDelta(1, membershipCollectionID))
 	require.Zero(t, scheduler.GetChannelTaskDelta(12, membershipCollectionID))

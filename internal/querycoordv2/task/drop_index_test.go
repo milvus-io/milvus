@@ -222,6 +222,10 @@ func TestSchedulerDropIndexOwnershipAcrossPromotion(t *testing.T) {
 	require.Empty(t, scheduler.waitQueue.Snapshot())
 	require.Len(t, scheduler.processQueue.SnapshotByNode(1), 1)
 
+	// Processing ownership cannot be preempted. Retire it explicitly before
+	// checking that an old processing snapshot cannot remove its successor.
+	retireOwnershipTask(scheduler, old)
+
 	replacement := NewDropIndexTask(context.Background(), WrapIDSource(1), membershipCollectionID, replica, 2,
 		NewDropIndexAction(1, ActionTypeDropIndex, membershipChannel, []int64{1000}))
 	replacement.SetPriority(TaskPriorityHigh)

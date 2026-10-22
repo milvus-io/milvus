@@ -68,6 +68,8 @@ func (t Type) String() string {
 }
 
 type replicaSegmentIndex struct {
+	// Orphan cleanup has no replica; distinguish copies on different nodes.
+	NodeID    int64
 	ReplicaID int64
 	SegmentID int64
 	IsGrowing bool
@@ -75,11 +77,11 @@ type replicaSegmentIndex struct {
 
 func NewReplicaSegmentIndex(task *SegmentTask) replicaSegmentIndex {
 	isGrowing := task.Actions()[0].(*SegmentAction).GetScope() == querypb.DataScope_Streaming
-	return replicaSegmentIndex{
-		ReplicaID: task.ReplicaID(),
-		SegmentID: task.SegmentID(),
-		IsGrowing: isGrowing,
+	index := replicaSegmentIndex{ReplicaID: task.ReplicaID(), SegmentID: task.SegmentID(), IsGrowing: isGrowing}
+	if task.ReplicaID() == -1 {
+		index.NodeID = task.Actions()[0].Node()
 	}
+	return index
 }
 
 func NewReplicaLeaderIndex(task *LeaderTask) replicaSegmentIndex {
@@ -99,8 +101,17 @@ func NewReplicaDropIndex(task *DropIndexTask) replicaSegmentIndex {
 }
 
 type replicaChannelIndex struct {
+	NodeID    int64
 	ReplicaID int64
 	Channel   string
+}
+
+func NewReplicaChannelIndex(task *ChannelTask) replicaChannelIndex {
+	index := replicaChannelIndex{ReplicaID: task.ReplicaID(), Channel: task.Channel()}
+	if task.ReplicaID() == -1 {
+		index.NodeID = task.Actions()[0].Node()
+	}
+	return index
 }
 
 type taskQueue struct {
@@ -631,8 +642,11 @@ type taskScheduler struct {
 	tasks        *ConcurrentMap[UniqueID, scheduledTask]
 	segmentTasks *ConcurrentMap[replicaSegmentIndex, Task]
 	channelTasks *ConcurrentMap[replicaChannelIndex, Task]
-	processQueue *nodeTaskQueue
-	waitQueue    *taskQueue
+	// Physical reservations also exclude conflicting work across replica IDs.
+	segmentOwners *ConcurrentMap[nodeSegmentIndex, Task]
+	channelOwners *ConcurrentMap[nodeChannelIndex, Task]
+	processQueue  *nodeTaskQueue
+	waitQueue     *taskQueue
 
 	taskStats            *expirable.LRU[UniqueID, Task]
 	lastUpdateMetricTime atomic.Time
@@ -668,6 +682,8 @@ func NewScheduler(ctx context.Context,
 		tasks:            NewConcurrentMap[UniqueID, scheduledTask](),
 		segmentTasks:     NewConcurrentMap[replicaSegmentIndex, Task](),
 		channelTasks:     NewConcurrentMap[replicaChannelIndex, Task](),
+		segmentOwners:    NewConcurrentMap[nodeSegmentIndex, Task](),
+		channelOwners:    NewConcurrentMap[nodeChannelIndex, Task](),
 		processQueue:     newNodeTaskQueue(),
 		waitQueue:        newTaskQueue(),
 		taskStats:        expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
@@ -757,7 +773,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 		scheduler.segmentTasks.Insert(index, task)
 
 	case *ChannelTask:
-		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
+		index := NewReplicaChannelIndex(task)
 		scheduler.channelTasks.Insert(index, task)
 
 	case *LeaderTask:
@@ -845,110 +861,67 @@ func (scheduler *taskScheduler) updateTaskMetrics() {
 // preAdd checks admission while holding lifecycleMu for reading and the
 // collection lock, including cleanup of a lower-priority replacement.
 func (scheduler *taskScheduler) preAdd(task Task) error {
-	switch task := task.(type) {
+	var old Task
+	var object string
+	switch typed := task.(type) {
 	case *SegmentTask:
-		index := NewReplicaSegmentIndex(task)
-		if old, ok := scheduler.segmentTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
-					zap.Int64("oldID", old.ID()),
-					zap.String("oldPriority", old.Priority().String()),
-					zap.Int64("newID", task.ID()),
-					zap.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
-			}
-
-			return merr.WrapErrServiceInternal("task with the same segment exists")
-		}
-
-		taskType := GetTaskType(task)
-
-		if taskType == TaskTypeMove {
-			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
-			if leader == nil {
-				return merr.WrapErrServiceInternal("segment's delegator leader not found, stop balancing")
-			}
-			segmentInTargetNode := scheduler.distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(task.Actions()[1].Node()), meta.WithSegmentID(task.SegmentID()))
-			if len(segmentInTargetNode) == 0 {
-				return merr.WrapErrServiceInternal("source segment released, stop balancing")
-			}
-		}
-
+		old, _ = scheduler.segmentTasks.Get(NewReplicaSegmentIndex(typed))
+		object = "segment"
 	case *ChannelTask:
-		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
-		if old, ok := scheduler.channelTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
-					zap.Int64("oldID", old.ID()),
-					zap.String("oldPriority", old.Priority().String()),
-					zap.Int64("newID", task.ID()),
-					zap.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
-			}
-
-			return merr.WrapErrServiceInternal("task with the same channel exists")
-		}
-
-		taskType := GetTaskType(task)
-		switch taskType {
-		case TaskTypeGrow:
-			delegatorList := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(task.Channel()))
-			nodesWithChannel := lo.Map(delegatorList, func(v *meta.DmChannel, _ int) UniqueID { return v.Node })
-			replicaNodeMap := utils.GroupNodesByReplica(task.ctx, scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
-			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
-				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
-			}
-		case TaskTypeMove:
-			delegatorList := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(task.Channel()))
-			_, ok := lo.Find(delegatorList, func(v *meta.DmChannel) bool { return v.Node == task.Actions()[1].Node() })
-			if !ok {
-				return merr.WrapErrServiceInternal("source channel unsubscribed, stop balancing")
-			}
-		}
+		old, _ = scheduler.channelTasks.Get(NewReplicaChannelIndex(typed))
+		object = "channel"
 	case *LeaderTask:
-		index := NewReplicaLeaderIndex(task)
-		if old, ok := scheduler.segmentTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
-					zap.Int64("oldID", old.ID()),
-					zap.String("oldPriority", old.Priority().String()),
-					zap.Int64("newID", task.ID()),
-					zap.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
-			}
-
-			return merr.WrapErrServiceInternal("task with the same segment exists")
-		}
+		old, _ = scheduler.segmentTasks.Get(NewReplicaLeaderIndex(typed))
+		object = "segment"
 	case *DropIndexTask:
-		index := NewReplicaDropIndex(task)
-		if old, ok := scheduler.segmentTasks.Get(index); ok {
-			if task.Priority() > old.Priority() {
-				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
-					zap.Int64("oldID", old.ID()),
-					zap.String("oldPriority", old.Priority().String()),
-					zap.Int64("newID", task.ID()),
-					zap.String("newPriority", task.Priority().String()),
-				)
-				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
-				scheduler.remove(old)
-				return nil
-			}
-
-			return merr.WrapErrServiceInternal("task with the same segment exists")
-		}
+		old, _ = scheduler.segmentTasks.Get(NewReplicaDropIndex(typed))
+		object = "segment"
 	default:
 		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
 	}
-	return nil
+	if old != nil && (task.Priority() <= old.Priority() || !scheduler.isCurrent(old, taskWaiting)) {
+		// A processing task may already have sent an RPC. Priority cannot revoke it.
+		return merr.WrapErrServiceInternal("task with the same " + object + " exists")
+	}
+	if err := scheduler.checkTaskResources(task, old); err != nil {
+		return err
+	}
+	if old == nil {
+		switch typed := task.(type) {
+		case *SegmentTask:
+			if GetTaskType(task) == TaskTypeMove {
+				if scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID()) == nil {
+					return merr.WrapErrServiceInternal("segment's delegator leader not found, stop balancing")
+				}
+				segments := scheduler.distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(task.Actions()[1].Node()), meta.WithSegmentID(typed.SegmentID()))
+				if len(segments) == 0 {
+					return merr.WrapErrServiceInternal("source segment released, stop balancing")
+				}
+			}
+		case *ChannelTask:
+			switch GetTaskType(task) {
+			case TaskTypeGrow:
+				channels := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(typed.Channel()))
+				nodes := lo.Map(channels, func(v *meta.DmChannel, _ int) UniqueID { return v.Node })
+				replicas := utils.GroupNodesByReplica(task.Context(), scheduler.meta.ReplicaManager, task.CollectionID(), nodes)
+				if _, ok := replicas[task.ReplicaID()]; ok {
+					return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
+				}
+			case TaskTypeMove:
+				channels := scheduler.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(typed.Channel()))
+				_, ok := lo.Find(channels, func(v *meta.DmChannel) bool { return v.Node == task.Actions()[1].Node() })
+				if !ok {
+					return merr.WrapErrServiceInternal("source channel unsubscribed, stop balancing")
+				}
+			}
+		}
+	}
+	if old != nil {
+		log.Ctx(task.Context()).Info("replace waiting task with higher priority", zap.Int64("oldID", old.ID()), zap.Int64("newID", task.ID()))
+		old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
+		scheduler.remove(old)
+	}
+	return scheduler.reserveTaskResources(task)
 }
 
 func (scheduler *taskScheduler) getReplicaShardLeader(channelName string, replicaID int64) *meta.DmChannel {
@@ -991,7 +964,7 @@ func (scheduler *taskScheduler) isCurrent(task Task, stage taskStage) bool {
 	case *SegmentTask:
 		indexed, _ = scheduler.segmentTasks.Get(NewReplicaSegmentIndex(task))
 	case *ChannelTask:
-		indexed, _ = scheduler.channelTasks.Get(replicaChannelIndex{task.ReplicaID(), task.Channel()})
+		indexed, _ = scheduler.channelTasks.Get(NewReplicaChannelIndex(task))
 	case *LeaderTask:
 		indexed, _ = scheduler.segmentTasks.Get(NewReplicaLeaderIndex(task))
 	case *DropIndexTask:
@@ -1410,6 +1383,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 	scheduler.waitQueue.Remove(task)
 	scheduler.processQueue.Remove(task)
 	scheduler.decExecutingTaskDelta(task)
+	scheduler.releaseTaskResources(task)
 
 	switch task := task.(type) {
 	case *SegmentTask:
@@ -1423,7 +1397,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		}
 
 	case *ChannelTask:
-		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
+		index := NewReplicaChannelIndex(task)
 		scheduler.channelTasks.CompareAndDelete(index, task)
 		log = log.With(zap.String("channel", task.Channel()))
 
@@ -1530,6 +1504,10 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 	}
 
 	for _, action := range task.Actions() {
+		if orphanCleanupReassigned(scheduler.meta, task, action) {
+			return merr.WrapErrServiceInternal("orphan cleanup node reassigned to a replica")
+		}
+
 		// Determine the target node for stale checking.
 		// For LeaderAction, we need to check the leader node (delegator) instead of the worker node.
 		// This is because LeaderAction.Node() returns the worker node where the segment resides,

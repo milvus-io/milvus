@@ -1,0 +1,180 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package task
+
+import (
+	"fmt"
+
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+)
+
+type nodeSegmentIndex struct {
+	nodeID    int64
+	segmentID int64
+	scope     querypb.DataScope
+}
+
+type nodeChannelIndex struct {
+	nodeID  int64
+	channel string
+}
+
+// All touches both physical copies. Historical and Streaming may otherwise run
+// independently, including while a growing segment is being sealed.
+func segmentScopes(scope querypb.DataScope) []querypb.DataScope {
+	if scope == querypb.DataScope_All {
+		return []querypb.DataScope{querypb.DataScope_Streaming, querypb.DataScope_Historical}
+	}
+	return []querypb.DataScope{scope}
+}
+
+func taskResourceKeys(task Task) ([]nodeSegmentIndex, []nodeChannelIndex) {
+	var segments []nodeSegmentIndex
+	var channels []nodeChannelIndex
+	switch task.(type) {
+	case *SegmentTask:
+		for _, action := range task.Actions() {
+			a := action.(*SegmentAction)
+			for _, scope := range segmentScopes(a.GetScope()) {
+				segments = append(segments, nodeSegmentIndex{a.Node(), a.SegmentID, scope})
+			}
+		}
+	case *ChannelTask:
+		for _, action := range task.Actions() {
+			a := action.(*ChannelAction)
+			channels = append(channels, nodeChannelIndex{a.Node(), a.ChannelName()})
+		}
+	}
+	return segments, channels
+}
+
+// Registration and retirement hold the collection lock. Segment IDs and channel
+// names identify one collection, so check-all then reserve-all is atomic for
+// competing tasks; the maps themselves allow unrelated collections to proceed.
+func (scheduler *taskScheduler) checkTaskResources(task, replacement Task) error {
+	segments, channels := taskResourceKeys(task)
+	for _, key := range segments {
+		if owner, ok := scheduler.segmentOwners.Get(key); ok && owner != replacement {
+			return merr.WrapErrServiceInternal("task for the same segment on this node exists")
+		}
+	}
+	for _, key := range channels {
+		if owner, ok := scheduler.channelOwners.Get(key); ok && owner != replacement {
+			return merr.WrapErrServiceInternal("task for the same channel on this node exists")
+		}
+	}
+	return nil
+}
+
+func (scheduler *taskScheduler) reserveTaskResources(task Task) error {
+	segments, channels := taskResourceKeys(task)
+	for _, key := range segments {
+		if owner, loaded := scheduler.segmentOwners.GetOrInsert(key, task); loaded && owner != task {
+			scheduler.releaseTaskResources(task)
+			return merr.WrapErrServiceInternal("task for the same segment on this node exists")
+		}
+	}
+	for _, key := range channels {
+		if owner, loaded := scheduler.channelOwners.GetOrInsert(key, task); loaded && owner != task {
+			scheduler.releaseTaskResources(task)
+			return merr.WrapErrServiceInternal("task for the same channel on this node exists")
+		}
+	}
+	return nil
+}
+
+func (scheduler *taskScheduler) releaseTaskResources(task Task) {
+	segments, channels := taskResourceKeys(task)
+	for _, key := range segments {
+		if owner, ok := scheduler.segmentOwners.Get(key); ok && owner == task {
+			scheduler.segmentOwners.Remove(key)
+		}
+	}
+	for _, key := range channels {
+		if owner, ok := scheduler.channelOwners.Get(key); ok && owner == task {
+			scheduler.channelOwners.Remove(key)
+		}
+	}
+}
+
+// Executor ownership lasts until the original callback returns, even if the
+// scheduler retires the task first. These keys deliberately omit replica IDs.
+// The executor already scopes ownership to one worker node. Leader actions keep
+// their existing task.Index exclusion and do not reserve segment-copy ownership.
+// A client callback returning on timeout does not fence work still running on a
+// remote QueryNode; that requires a separate wire-level generation contract.
+func actionResourceKeys(action Action) []string {
+	switch a := action.(type) {
+	case *SegmentAction:
+		scopes := segmentScopes(a.GetScope())
+		keys := make([]string, 0, len(scopes))
+		for _, scope := range scopes {
+			keys = append(keys, fmt.Sprintf("segment/%d/%d", a.SegmentID, scope))
+		}
+		return keys
+	case *ChannelAction:
+		return []string{"channel/" + a.ChannelName()}
+	default:
+		return nil
+	}
+}
+
+func (ex *Executor) reserveActionResources(task Task, step int) bool {
+	acquired := make([]string, 0, 2)
+	for _, key := range actionResourceKeys(task.Actions()[step]) {
+		if _, loaded := ex.executingActions.GetOrInsert(key, task); loaded {
+			// An existing slot may belong to an earlier callback of this same task.
+			// Roll back only the slots inserted by this admission attempt.
+			for _, key := range acquired {
+				ex.executingActions.Remove(key)
+			}
+			return false
+		}
+		acquired = append(acquired, key)
+	}
+	return true
+}
+
+func (ex *Executor) releaseActionResources(task Task, step int) {
+	for _, key := range actionResourceKeys(task.Actions()[step]) {
+		if owner, ok := ex.executingActions.Get(key); ok && owner == task {
+			ex.executingActions.Remove(key)
+		}
+	}
+}
+
+// A cleanup created before reassignment must not unload the copy now owned by
+// a live replica. ReleaseCollection removes load metadata before replica metadata,
+// so that case must still clean every physical copy.
+func orphanCleanupReassigned(m *meta.Meta, task Task, action Action) bool {
+	if task.ReplicaID() != -1 || action.Type() != ActionTypeReduce {
+		return false
+	}
+	switch a := action.(type) {
+	case *SegmentAction:
+		if a.GetScope() == querypb.DataScope_Streaming {
+			return false
+		}
+	case *ChannelAction:
+	default:
+		return false
+	}
+	return m.Exist(task.Context(), task.CollectionID()) &&
+		m.GetByCollectionAndNode(task.Context(), task.CollectionID(), action.Node()) != nil
+}

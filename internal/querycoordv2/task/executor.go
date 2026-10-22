@@ -66,9 +66,10 @@ type Executor struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	executingTasks    *typeutil.ConcurrentSet[string] // task index
-	channelTaskNum    atomic.Int32                    // channel task pool counter
-	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
+	executingTasks    *typeutil.ConcurrentSet[string]       // task index
+	executingActions  *typeutil.ConcurrentMap[string, Task] // worker-local RPC ownership
+	channelTaskNum    atomic.Int32                          // channel task pool counter
+	nonChannelTaskNum atomic.Int32                          // non-channel task pool counter
 }
 
 func NewExecutor(nodeID int64,
@@ -89,7 +90,8 @@ func NewExecutor(nodeID int64,
 		cluster:   cluster,
 		nodeMgr:   nodeMgr,
 
-		executingTasks: typeutil.NewConcurrentSet[string](),
+		executingTasks:   typeutil.NewConcurrentSet[string](),
+		executingActions: typeutil.NewConcurrentMap[string, Task](),
 	}
 }
 
@@ -150,11 +152,17 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		return false
 	}
 
+	if !ex.reserveActionResources(task, step) {
+		ex.executingTasks.Remove(task.Index())
+		return false
+	}
+
 	_, isChannel := task.Actions()[step].(*ChannelAction)
 	if isChannel {
 		cur := ex.channelTaskNum.Inc()
 		if cur > ex.GetChannelTaskCap() {
 			ex.channelTaskNum.Dec()
+			ex.releaseActionResources(task, step)
 			ex.executingTasks.Remove(task.Index())
 			log.Debug("channel task rejected: pool full",
 				zap.Int32("current", cur),
@@ -165,6 +173,7 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		cur := ex.nonChannelTaskNum.Inc()
 		if cur > ex.GetNonChannelTaskCap() {
 			ex.nonChannelTaskNum.Dec()
+			ex.releaseActionResources(task, step)
 			ex.executingTasks.Remove(task.Index())
 			log.Debug("non-channel task rejected: pool full",
 				zap.Int32("current", cur),
@@ -217,6 +226,7 @@ func (ex *Executor) removeTask(task Task, step int) {
 			zap.Error(task.Err()))
 	}
 
+	ex.releaseActionResources(task, step)
 	ex.executingTasks.Remove(task.Index())
 	if _, isChannel := task.Actions()[step].(*ChannelAction); isChannel {
 		ex.channelTaskNum.Dec()
@@ -363,6 +373,11 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	}()
 
 	dstNode := action.Node()
+
+	if orphanCleanupReassigned(ex.meta, task, action) {
+		task.Cancel(merr.WrapErrServiceInternal("orphan cleanup node reassigned to a replica"))
+		return
+	}
 
 	req := packReleaseSegmentRequest(task, action)
 	channel := ex.targetMgr.GetDmChannel(ctx, task.CollectionID(), task.Shard(), meta.CurrentTarget)
@@ -569,6 +584,12 @@ func (ex *Executor) unsubscribeChannel(task *ChannelTask, step int) error {
 	}()
 
 	ctx := task.Context()
+
+	if orphanCleanupReassigned(ex.meta, task, action) {
+		err = merr.WrapErrServiceInternal("orphan cleanup node reassigned to a replica")
+		task.Cancel(err)
+		return err
+	}
 
 	req := packUnsubDmChannelRequest(task, action)
 	log.Info("unsubscribe channel...")
