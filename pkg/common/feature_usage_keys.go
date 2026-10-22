@@ -64,7 +64,7 @@ var officialFeatureKeys = func() map[string]struct{} {
 		MmapEnabledKey, LocalFormatKey, LoadPriorityKey, PartitionKeyIsolationKey,
 		FieldSkipLoadKey, IndexOffsetCacheEnabledKey,
 		IndexNonEncoding, EnableDynamicSchemaKey, NamespaceShardingEnabledKey,
-		NamespaceModeKey, CollectionExternalSource, CollectionExternalSpec, RLSEnabledKey, RLSForceKey,
+		NamespaceModeKey, CollectionExternalSource, CollectionExternalSpec,
 		TimezoneKey, AllowInsertAutoIDKey, DisableFuncRuntimeCheck, MaxFieldIDKey,
 		QueryModeKey,
 		WarmupKey, WarmupScalarFieldKey, WarmupScalarIndexKey,

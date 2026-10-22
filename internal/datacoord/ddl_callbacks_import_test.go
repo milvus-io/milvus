@@ -53,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -170,7 +169,7 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	s := &Server{broker: fake, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
 	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
 	_, _, err := s.broadcastImport(ctx, 100, []int64{200, 100},
-		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "", "", false,
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "",
 		internalpb.ImportVersion_ImportVersionV2)
 	require.NoError(t, err)
 	require.True(t, called)
@@ -210,7 +209,7 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	partitionIDs := []int64{20, 10}
 	_, duplicated, err := server.broadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", "", false,
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "",
 		internalpb.ImportVersion_ImportVersionV2)
 	require.NoError(t, err)
 	require.False(t, duplicated)
@@ -224,7 +223,7 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	received = nil
 	_, _, err = server.broadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", "", false,
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "",
 		internalpb.ImportVersion_ImportVersionV2)
 	require.ErrorContains(t, err, "lost its shared L0 inventory")
 	require.Nil(t, received, "invalid source plans must fail before broadcast")
@@ -287,7 +286,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			type boundaryAllocator struct{ allocator.Allocator }
 			s := &Server{meta: &meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
 			_, _, err := s.broadcastImport(context.Background(), 100, []int64{10}, files,
-				opts, 1, []string{"v1"}, "", "", false,
+				opts, 1, []string{"v1"}, "",
 				internalpb.ImportVersion_ImportVersionV2)
 			if stage == "auto_id" {
 				require.NoError(t, err)
@@ -355,7 +354,7 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 				&commonpb.KeyValuePair{Key: importutilv2.AutoCommitKey, Value: "false"})
 			_, _, err := server.broadcastImport(ctx, 100, []int64{10},
 				[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-				options, 1000, []string{"target_v1"}, "", "", false,
+				options, 1000, []string{"target_v1"}, "",
 				internalpb.ImportVersion_ImportVersionV2)
 			require.NoError(t, err)
 			require.Equal(t, "false", received[importutilv2.AutoCommitKey])
@@ -639,8 +638,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		1000,
 		[]string{"v1"},
 		"",
-		"",
-		false,
 		internalpb.ImportVersion_ImportVersionV2,
 	)
 
@@ -690,8 +687,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		1000,
 		[]string{"v1"},
 		"",
-		"",
-		false,
 		internalpb.ImportVersion_ImportVersionV2,
 	)
 
@@ -751,8 +746,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		1000,
 		[]string{"v1"},
 		"",
-		"",
-		false,
 		internalpb.ImportVersion_ImportVersionV2,
 	)
 
@@ -817,8 +810,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		1000,
 		[]string{"v1"},
 		"",
-		"",
-		false,
 		internalpb.ImportVersion_ImportVersionV2,
 	)
 
@@ -882,8 +873,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		1000,
 		[]string{"v1"},
 		"",
-		"",
-		false,
 		internalpb.ImportVersion_ImportVersionV2,
 	)
 
@@ -951,14 +940,10 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{
 			{Key: "timeout", Value: "300s"},
-			{Key: importutilv2.RLSPrincipal, Value: "mallory"},
-			{Key: importutilv2.SkipRLS, Value: "true"},
 		},
 		1000,
 		[]string{"v1"},
 		"",
-		"alice",
-		false,
 		internalpb.ImportVersion_ImportVersionV2,
 	)
 
@@ -969,12 +954,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	s.NoError(err)
 	body, err := msg.Body(ctx)
 	s.NoError(err)
-	version, ok := mockBroadcastAPI.capturedMsg.Properties().Get(importRLSContextVersionProperty)
-	s.True(ok)
-	s.Equal(importRLSContextVersion, version)
-	s.Equal("alice", body.GetOptions()[importutilv2.RLSPrincipal])
-	_, hasSkipRLS := body.GetOptions()[importutilv2.SkipRLS]
-	s.False(hasSkipRLS)
 	s.Equal("canonical_collection", body.GetCollectionName())
 	s.Equal(int32(2), body.GetSchema().GetVersion())
 	s.Require().Len(body.GetSchema().GetFields(), 1)
@@ -2163,16 +2142,6 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 		return nil
 	}).Build()
 	defer saveJob.UnPatch()
-	var rlsPrincipal string
-	var skipRLS bool
-	resolve := mockey.Mock((*Server).resolveImportRLSPredicate).To(func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*planpb.Expr, error) {
-		// The real resolver consumes the request synchronously. Mockey does
-		// not change its escape analysis, so copy values while in is valid.
-		rlsPrincipal = in.GetRlsPrincipal()
-		skipRLS = in.GetSkipRls()
-		return nil, nil
-	}).Build()
-	defer resolve.UnPatch()
 
 	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
 	broadcastMsg := message.NewImportMessageBuilderV1().
@@ -2180,12 +2149,7 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 		WithBody(&msgpb.ImportMsg{
 			CollectionID: 100,
 			JobID:        1,
-			Options: map[string]string{
-				importutilv2.RLSPrincipal: "alice",
-				importutilv2.SkipRLS:      "true",
-			},
 		}).
-		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
 		WithBroadcast([]string{"vchannel1"}).
 		MustBuildBroadcast().
 		OverwriteBroadcastHeader(1)
@@ -2207,50 +2171,6 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
 	assert.Equal(t, []string{"vchannel1"}, saved.GetReadyVchannels())
 	assert.Equal(t, uint64(200), saved.GetDataTs())
-	require.Equal(t, 1, resolve.Times())
-	assert.Equal(t, "alice", rlsPrincipal)
-	assert.True(t, skipRLS)
-	assert.NotContains(t, funcutil.KeyValuePair2Map(saved.GetOptions()), importutilv2.RLSPrincipal)
-	assert.NotContains(t, funcutil.KeyValuePair2Map(saved.GetOptions()), importutilv2.SkipRLS)
-}
-
-func TestImportAckCallback_IgnoresUntrustedLegacyRLSOptions(t *testing.T) {
-	paramtable.Init()
-	type ackAllocator struct{ allocator.Allocator }
-	type ackHandler struct{ Handler }
-	type ackMeta struct{ ImportMeta }
-	allocate := mockey.Mock((*ackAllocator).AllocN).Return(int64(10), int64(11), nil).Build()
-	defer allocate.UnPatch()
-	get := mockey.Mock((*ackHandler).GetCollection).Return(
-		&collectionInfo{ID: 100, VChannelNames: []string{"vchannel1"}}, nil).Build()
-	defer get.UnPatch()
-	save := mockey.Mock((*ackMeta).AddJob).Return(nil).Build()
-	defer save.UnPatch()
-	resolve := mockey.Mock((*Server).resolveImportRLSPredicate).To(func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*planpb.Expr, error) {
-		assert.Empty(t, in.GetRlsPrincipal())
-		assert.False(t, in.GetSkipRls())
-		options := funcutil.KeyValuePair2Map(in.GetOptions())
-		assert.NotContains(t, options, importutilv2.RLSPrincipal)
-		assert.NotContains(t, options, importutilv2.SkipRLS)
-		return nil, nil
-	}).Build()
-	defer resolve.UnPatch()
-	server := &Server{allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: &ackMeta{}}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-	callbacks := &DDLCallbacks{Server: server}
-	for _, skipRLS := range []string{"true", "not-a-bool"} {
-		wal := message.NewImportMessageBuilderV1().
-			WithHeader(&message.ImportMessageHeader{CommitByCoordinator: true}).
-			WithBody(&msgpb.ImportMsg{
-				CollectionID: 100, JobID: 1,
-				Options: map[string]string{importutilv2.RLSPrincipal: "legacy", importutilv2.SkipRLS: skipRLS},
-			}).WithBroadcast([]string{"vchannel1"}).MustBuildBroadcast().OverwriteBroadcastHeader(1)
-		require.NoError(t, callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
-			Message: message.MustAsBroadcastImportMessageV1(wal),
-			Results: map[string]*message.AppendResult{"vchannel1": {TimeTick: 100}},
-		}))
-	}
-	require.Equal(t, 2, resolve.Times())
 }
 
 // TestUpdateImportAckCallback_V3JobUncommittedWithoutRangesFailsJob pins the V3

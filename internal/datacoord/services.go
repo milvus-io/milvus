@@ -53,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -2105,8 +2104,6 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		jobID,
 		in.GetChannelNames(),
 		interceptor.IdempotencyKeyFromContext(ctx),
-		in.GetRlsPrincipal(),
-		in.GetSkipRls(),
 		version,
 	)
 	if err != nil {
@@ -2164,27 +2161,6 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 
 	body := result.Message.MustBody()
 	options := funcutil.Map2KeyValuePair(body.GetOptions())
-	version, trustedRLSContext := result.Message.Properties().Get(importRLSContextVersionProperty)
-	trustedRLSContext = trustedRLSContext && version == importRLSContextVersion
-	var rlsPrincipal string
-	var skipRLS bool
-	var err error
-	if trustedRLSContext {
-		rlsPrincipal, skipRLS, err = importutilv2.GetRLSOptions(options)
-	}
-	if !trustedRLSContext || err != nil {
-		// Import options predate RLS and were client-controlled. Only a message
-		// marked after DataCoord sanitizes the options may carry authorized RLS
-		// context. Malformed marked context also fails closed without wedging the
-		// indefinitely retried ACK callback.
-		if err != nil {
-			mlog.Warn(ctx, "ignore malformed RLS context in import message", mlog.Err(err))
-		}
-		rlsPrincipal, skipRLS = "", false
-	}
-	options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
-		return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
-	})
 	files := importFilesFromMessage(body.GetFiles(), options)
 	if body.Schema != nil {
 		body.Schema.DbName = body.DbName
@@ -2287,17 +2263,9 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(options) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
-	var rlsPredicate *planpb.Expr
-	var rlsErr error
-	if !l0ImportDisabled {
-		rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, &internalpb.ImportRequestInternal{
-			CollectionID: body.GetCollectionID(), Schema: body.GetSchema(),
-			Options: options, RlsPrincipal: rlsPrincipal, SkipRls: skipRLS,
-		})
-	}
 
 	isBackup := importutilv2.IsBackup(options)
-	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil && rlsErr == nil {
+	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, options)
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2352,7 +2320,6 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 			DataTs:              result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 			AutoCommit:          importutilv2.IsAutoCommit(options),
 			CommitByCoordinator: result.Message.Header().GetCommitByCoordinator(),
-			RlsCheckPredicate:   rlsPredicate,
 			Version:             jobVersion,
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
@@ -2364,11 +2331,6 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
 			"into data segment deltalogs before restore, or set the config to true on this cluster " +
 			"to re-enable the legacy L0 import")(job)
-	} else if rlsErr != nil {
-		mlog.Warn(ctx, "RLS import check could not be prepared, creating the job in Failed state",
-			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", body.GetCollectionID()), mlog.Err(rlsErr))
-		UpdateJobState(internalpb.ImportJobState_Failed)(job)
-		UpdateJobReason(rlsErr.Error())(job)
 	}
 	if sourceErr != nil {
 		// ACK callbacks retry indefinitely. Persist malformed/lost source

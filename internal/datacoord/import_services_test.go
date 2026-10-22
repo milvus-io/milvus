@@ -43,12 +43,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
-	componenttypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -67,9 +64,6 @@ type ImportServicesSuite struct {
 
 func (s *ImportServicesSuite) SetupTest() {
 	paramtable.Init()
-	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
-	oldGate := gate.SwapTempValue("true")
-	s.T().Cleanup(func() { gate.SwapTempValue(oldGate) })
 	previous := streaming.WAL()
 	streaming.SetupNoopWALForTest()
 	s.T().Cleanup(func() { streaming.SetWALForTest(previous) })
@@ -721,7 +715,6 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 	type ackAllocator struct{ allocator.Allocator }
 	type ackHandler struct{ Handler }
 	type ackCatalog struct{ metastore.DataCoordCatalog }
-	type ackMixCoord struct{ componenttypes.MixCoord }
 
 	for _, tc := range []struct {
 		name    string
@@ -740,10 +733,6 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"nil_schema", nil},
 		{"l0_disabled", nil},
 		{"l0_enabled", nil},
-		{"rls_denied", nil},
-		{"rls_gate_disabled", nil},
-		{"rls_metadata_unavailable", nil},
-		{"rls_predicate", nil},
 		{"unsupported_version", nil},
 		{"unsupported_version_no_job_id", merr.ErrDataIntegrity},
 	} {
@@ -785,35 +774,6 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				body.Version, body.JobID = 99, 0
 			}
 			params := paramtable.Get()
-			gate := &params.ProxyCfg.RLSImportEnforcementEnabled
-			oldGate := gate.SwapTempValue(fmt.Sprint(tc.name != "rls_gate_disabled"))
-			defer gate.SwapTempValue(oldGate)
-			metadataResponse := &rootcoordpb.GetRLSMetadataResponse{
-				Status: merr.Success(), CollectionId: body.CollectionID,
-			}
-			var metadataErr error
-			if strings.HasPrefix(tc.name, "rls_") {
-				body.Schema.Properties = []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}}
-				body.Schema.Fields = []*schemapb.FieldSchema{{FieldID: 100, Name: "tenant", DataType: schemapb.DataType_VarChar}}
-				body.Options[importutilv2.RLSPrincipal] = "alice"
-				if tc.name == "rls_metadata_unavailable" {
-					metadataErr = merr.ErrNodeNotFound
-				}
-				if tc.name == "rls_predicate" {
-					metadataResponse.Policies = []*rootcoordpb.RLSPolicyInfo{{
-						CollectionId: body.CollectionID, PolicyId: 1, PolicyName: "tenant_check",
-						PolicyType: milvuspb.RowPolicyType_RowPolicyTypePermissive,
-						Actions:    []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Insert},
-						CheckExpr:  `tenant == "acme"`,
-					}}
-				}
-			}
-			getMetadata := mockey.Mock((*ackMixCoord).GetRLSMetadata).To(func(_ *ackMixCoord, _ context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
-				s.Equal(body.CollectionID, req.GetCollectionId())
-				s.Equal(rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES, req.GetKind())
-				return metadataResponse, metadataErr
-			}).Build()
-			defer getMetadata.UnPatch()
 			s.Require().NoError(params.Save(params.DataCoordCfg.EnableL0Import.Key, fmt.Sprint(tc.name == "l0_enabled")))
 			defer params.Reset(params.DataCoordCfg.EnableL0Import.Key)
 
@@ -838,7 +798,6 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			server := &Server{
 				allocator: &ackAllocator{}, handler: &ackHandler{},
 				importMeta: &importMeta{jobs: make(map[int64]ImportJob), catalog: &ackCatalog{}},
-				mixCoord:   &ackMixCoord{},
 			}
 			server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -846,7 +805,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{
 				CommitByCoordinator: tc.name == "provided_job_id",
 			}).
-				WithBody(body).WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
+				WithBody(body).
 				WithBroadcast([]string{"v1", "v2", control}).MustBuildBroadcast()
 			result := message.BroadcastResultImportMessageV1{
 				Message: message.MustAsBroadcastImportMessageV1(wal),
@@ -900,8 +859,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			s.Equal(uint64(300), saved.DataTs, "the control channel still contributes to the maximum tick")
 			s.False(saved.AutoCommit)
 			s.Equal(tc.name == "provided_job_id", saved.CommitByCoordinator)
-			expectedOptions := lo.OmitByKeys(body.Options, []string{importutilv2.RLSPrincipal, importutilv2.SkipRLS})
-			s.Equal(expectedOptions, funcutil.KeyValuePair2Map(saved.Options))
+			s.Equal(body.Options, funcutil.KeyValuePair2Map(saved.Options))
 			if body.Schema == nil {
 				s.Nil(saved.Schema)
 			} else {
@@ -917,22 +875,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				s.Equal(internalpb.ImportJobState_Failed, saved.State)
 				s.Contains(saved.Reason, "l0 import is disabled")
 				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
-			} else if strings.HasPrefix(tc.name, "rls_") && tc.name != "rls_predicate" {
-				s.Equal(internalpb.ImportJobState_Failed, saved.State)
-				switch tc.name {
-				case "rls_denied":
-					s.Contains(saved.Reason, "no applicable check policies")
-				case "rls_gate_disabled":
-					s.Contains(saved.Reason, "cluster upgrade completes")
-					s.Zero(getMetadata.Times())
-				case "rls_metadata_unavailable":
-					s.Contains(saved.Reason, "failed to get RLS policies")
-				}
 			} else {
 				s.Equal(internalpb.ImportJobState_Pending, saved.State)
-			}
-			if tc.name == "rls_predicate" {
-				s.NotNil(saved.GetRlsCheckPredicate())
 			}
 		})
 	}
@@ -1020,7 +964,7 @@ func (s *ImportServicesSuite) TestImportV2_MessageVersionIsAuthoritative() {
 	mockBroadcast := mockey.Mock((*Server).broadcastImport).To(func(
 		_ *Server, _ context.Context, _ int64, _ []int64, _ []*internalpb.ImportFile,
 		_ []*commonpb.KeyValuePair, _ int64, _ []string,
-		_ string, _ string, _ bool, version internalpb.ImportVersion,
+		_ string, version internalpb.ImportVersion,
 	) (int64, bool, error) {
 		capturedVersion = version
 		return 0, false, nil

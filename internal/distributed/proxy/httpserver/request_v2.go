@@ -450,8 +450,6 @@ func (req *ExportSnapshotReq) GetDbName() string { return req.DbName }
 type QueryReqV2 struct {
 	DbName         string   `json:"dbName"`
 	CollectionName string   `json:"collectionName" binding:"required"`
-	RlsPrincipal   string   `json:"rlsPrincipal"`
-	SkipRls        bool     `json:"skipRls"`
 	PartitionNames []string `json:"partitionNames"`
 	OutputFields   []string `json:"outputFields"`
 	Filter         string   `json:"filter"`
@@ -473,8 +471,6 @@ func (req *QueryReqV2) GetCollectionName() string { return req.CollectionName }
 type CollectionIDReq struct {
 	DbName           string      `json:"dbName"`
 	CollectionName   string      `json:"collectionName" binding:"required"`
-	RlsPrincipal     string      `json:"rlsPrincipal"`
-	SkipRls          bool        `json:"skipRls"`
 	PartitionName    string      `json:"partitionName"`
 	PartitionNames   []string    `json:"partitionNames"`
 	OutputFields     []string    `json:"outputFields"`
@@ -488,8 +484,6 @@ func (req *CollectionIDReq) GetCollectionName() string { return req.CollectionNa
 type CollectionFilterReq struct {
 	DbName         string                     `json:"dbName"`
 	CollectionName string                     `json:"collectionName" binding:"required"`
-	RlsPrincipal   string                     `json:"rlsPrincipal"`
-	SkipRls        bool                       `json:"skipRls"`
 	PartitionName  string                     `json:"partitionName"`
 	Filter         string                     `json:"filter" binding:"required"`
 	ExprParams     map[string]json.RawMessage `json:"exprParams"`
@@ -501,8 +495,6 @@ func (req *CollectionFilterReq) GetCollectionName() string { return req.Collecti
 type CollectionDataReq struct {
 	DbName         string                    `json:"dbName"`
 	CollectionName string                    `json:"collectionName" binding:"required"`
-	RlsPrincipal   string                    `json:"rlsPrincipal"`
-	SkipRls        bool                      `json:"skipRls"`
 	PartitionName  string                    `json:"partitionName"`
 	Data           []map[string]interface{}  `json:"data"`
 	PartialUpdate  bool                      `json:"partialUpdate"`
@@ -586,8 +578,6 @@ func parseFieldPartialUpdateOpV2(op string) (schemapb.FieldPartialUpdateOp_OpTyp
 type SearchReqV2 struct {
 	DbName            string                     `json:"dbName"`
 	CollectionName    string                     `json:"collectionName" binding:"required"`
-	RlsPrincipal      string                     `json:"rlsPrincipal"`
-	SkipRls           bool                       `json:"skipRls"`
 	Data              []interface{}              `json:"data"`
 	Ids               []json.RawMessage          `json:"ids"`
 	AnnsField         string                     `json:"annsField"`
@@ -667,8 +657,6 @@ type SubSearchReq struct {
 type HybridSearchReq struct {
 	DbName            string                `json:"dbName"`
 	CollectionName    string                `json:"collectionName" binding:"required"`
-	RlsPrincipal      string                `json:"rlsPrincipal"`
-	SkipRls           bool                  `json:"skipRls"`
 	PartitionNames    []string              `json:"partitionNames"`
 	Search            []SubSearchReq        `json:"search"`
 	Rerank            Rand                  `json:"rerank"`

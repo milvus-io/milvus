@@ -217,7 +217,7 @@ func TestSnapshotCMEKTargetOnlyNullableTextBothPhases(t *testing.T) {
 	// Only manifest/crypto dependencies and the final storage sync are mocked.
 	for _, read := range []func(importutilv2.Reader) error{
 		func(r importutilv2.Reader) error { return pre.readFileStat(r, 0) },
-		func(r importutilv2.Reader) error { return imp.importFile(r, nil, nil) },
+		func(r importutilv2.Reader) error { return imp.importFile(r, nil) },
 	} {
 		r, err := importutilv2.NewReader(context.Background(), nil, schema, file, options, 1024, &indexpb.StorageConfig{}, 1024)
 		require.NoError(t, err)
@@ -1159,7 +1159,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 	}
 	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
-	err = importTask.(*ImportTask).importFile(s.reader, nil, nil)
+	err = importTask.(*ImportTask).importFile(s.reader, nil)
 	s.NoError(err)
 }
 
@@ -1272,7 +1272,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 	}
 	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
-	err = importTask.(*ImportTask).importFile(s.reader, nil, nil)
+	err = importTask.(*ImportTask).importFile(s.reader, nil)
 	s.NoError(err)
 }
 
