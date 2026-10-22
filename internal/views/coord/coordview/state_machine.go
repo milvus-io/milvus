@@ -175,6 +175,33 @@ func (sm *CoordQueryViewStateMachine) QNReadySegments() map[int64][]int64 {
 	return sm.qnReadySegments
 }
 
+// reportMakesProgress compares a report with this node's last accepted report,
+// before OnNodeStateReported replaces it. Reports carry cumulative ready IDs.
+// State transitions of the whole view are tracked separately by the observer.
+func (sm *CoordQueryViewStateMachine) reportMakesProgress(report qviews.QueryViewAtWorkNode) bool {
+	previousState := sm.snState
+	readyIncreased := false
+	if qn, ok := report.(*qviews.QueryViewAtQueryNode); ok {
+		previousState = sm.qnStates[qn.NodeID()]
+		if sm.state == qviews.QueryViewStatePreparing {
+			readyCount := 0
+			for _, partition := range qn.ViewOfQueryNode().Partitions {
+				readyCount += len(partition.ReadySegmentIds)
+			}
+			readyIncreased = readyCount > len(sm.qnReadySegments[qn.NodeID()])
+		}
+	}
+	switch sm.state {
+	case qviews.QueryViewStatePreparing:
+		return readyIncreased || (previousState != report.State() &&
+			(report.State() == qviews.QueryViewStateReady || report.State() == qviews.QueryViewStateUp))
+	case qviews.QueryViewStateDropping:
+		return previousState != qviews.QueryViewStateDropped && report.State() == qviews.QueryViewStateDropped
+	default:
+		return false
+	}
+}
+
 // OnNodeStateReported is called when a work node (SN or QN) reports its
 // current state for this view via SyncQueryView response.
 func (sm *CoordQueryViewStateMachine) OnNodeStateReported(report qviews.QueryViewAtWorkNode) {

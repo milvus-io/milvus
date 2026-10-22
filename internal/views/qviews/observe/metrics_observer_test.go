@@ -340,7 +340,7 @@ func TestMetricsObserverCollectsViewStateMaxAgeSeconds(t *testing.T) {
 	err := testutil.CollectAndCompare(
 		metrics.QVViewStateMaxAgeSeconds,
 		strings.NewReader(`
-# HELP milvus_qv_view_state_max_age_seconds top QueryViews by active state age in seconds
+# HELP milvus_qv_view_state_max_age_seconds top QueryViews by seconds since last state or resource progress
 # TYPE milvus_qv_view_state_max_age_seconds gauge
 `),
 		"milvus_qv_view_state_max_age_seconds",
@@ -361,7 +361,7 @@ func TestMetricsObserverCollectsViewStateMaxAgeSeconds(t *testing.T) {
 	err = testutil.CollectAndCompare(
 		metrics.QVViewStateMaxAgeSeconds,
 		strings.NewReader(`
-# HELP milvus_qv_view_state_max_age_seconds top QueryViews by active state age in seconds
+# HELP milvus_qv_view_state_max_age_seconds top QueryViews by seconds since last state or resource progress
 # TYPE milvus_qv_view_state_max_age_seconds gauge
 milvus_qv_view_state_max_age_seconds{collection_id="11",component="coord",data_version="10/20",query_view_version="10/20/4",rank="1",replica_id="1",state="Preparing",vchannel="v1"} 30
 `),
@@ -425,6 +425,66 @@ func TestMetricsObserverLimitsViewStateMaxAgeSecondsToTopNPerComponent(t *testin
 	}
 }
 
+func TestMetricsObserverTracksTimeSinceProgress(t *testing.T) {
+	metrics.QVViewStates.Reset()
+	metrics.QVShardLoadStates.Reset()
+	metrics.QVViewReadyPercentBucket.Reset()
+	start := time.Unix(100, 0)
+	now := start
+	observer := newMetricsObserverWithNow(func() time.Time { return now })
+	view := testQueryViewKey()
+	observer.Observe(context.Background(), CoordViewCreatedEvent{
+		View:  view,
+		State: qviews.QueryViewStatePreparing,
+	})
+
+	now = start.Add(50 * time.Second)
+	anotherView := view
+	anotherView.QueryViewVersion.QueryVersion++
+	anotherView.ShardID.ReplicaID++
+	observer.Observe(context.Background(), CoordViewCreatedEvent{
+		CollectionID: 20,
+		View:         anotherView,
+		State:        qviews.QueryViewStatePreparing,
+	})
+
+	now = start.Add(100 * time.Second)
+	for i := 0; i < 3; i++ {
+		now = start.Add(time.Duration(100+i*25) * time.Second)
+		observer.Observe(context.Background(), CoordViewReportAppliedEvent{
+			ViewStateTransition: ViewStateTransition{
+				CollectionID: 10,
+				View:         view,
+				From:         qviews.QueryViewStatePreparing,
+				To:           qviews.QueryViewStatePreparing,
+			},
+			ReportedState:        qviews.QueryViewStatePreparing,
+			ResourceReadyPercent: 42,
+			ResourceProgress:     i == 0,
+		})
+	}
+	now = start.Add(200 * time.Second)
+	// Repeated scrapes must retain the oldest view and never duplicate candidates.
+	for i := 0; i < 2; i++ {
+		ages := observer.collectViewStateMaxAge()
+		if len(ages) != 2 {
+			t.Fatalf("topN metrics = %#v, want exactly two views", ages)
+		}
+		if ages[0].CollectionID != "20" || ages[0].Rank != "1" || ages[0].AgeSeconds != 150 {
+			t.Fatalf("oldest view = %#v, want collection 20 at rank 1 with age 150", ages[0])
+		}
+		if ages[1].CollectionID != "10" || ages[1].Rank != "2" || ages[1].AgeSeconds != 100 {
+			t.Fatalf("second view = %#v, want collection 10 at rank 2 with age 100", ages[1])
+		}
+	}
+	assertGaugeValue(t, metrics.QVViewStates, 2, "coord", qviews.QueryViewStatePreparing.String())
+	assertGaugeValue(t, metrics.QVShardLoadStates, 2, shardLoadStateLoading)
+	// Progress updates the readiness buckets even when the view stays Preparing.
+	assertGaugeValue(t, metrics.QVViewReadyPercentBucket, 1, "coord", qviews.QueryViewStatePreparing.String(), readyPercentLe0)
+	assertGaugeValue(t, metrics.QVViewReadyPercentBucket, 2, "coord", qviews.QueryViewStatePreparing.String(), readyPercentLe50)
+	assertGaugeValue(t, metrics.QVViewReadyPercentBucket, 2, "coord", qviews.QueryViewStatePreparing.String(), readyPercentLe75)
+}
+
 func TestMetricsObserverRefreshesTopNCandidateOnStateMove(t *testing.T) {
 	now := time.Unix(100, 0)
 	observer := newMetricsObserverWithNow(func() time.Time {
@@ -456,6 +516,36 @@ func TestMetricsObserverRefreshesTopNCandidateOnStateMove(t *testing.T) {
 	}
 	if metrics[0].State != qviews.QueryViewStateReady.String() || metrics[0].AgeSeconds != 3 {
 		t.Fatalf("topN metric after state move = %#v, want Ready age 3", metrics[0])
+	}
+}
+
+func TestMetricsObserverRenewsWorkerAgeForNewlyReadySegments(t *testing.T) {
+	start := time.Unix(100, 0)
+	now := start
+	observer := newMetricsObserverWithNow(func() time.Time { return now })
+	report := func(count int) {
+		observer.Observe(context.Background(), QueryNodeSegmentsReadyEvent{
+			ViewStateTransition: ViewStateTransition{
+				CollectionID: 10,
+				View:         testQueryViewKey(),
+				From:         qviews.QueryViewStatePreparing,
+				To:           qviews.QueryViewStatePreparing,
+			},
+			ReadySegmentCount: count,
+		})
+	}
+	report(0)
+	now = start.Add(100 * time.Second)
+	report(1)
+	now = start.Add(150 * time.Second)
+	// Worker callbacks contain deltas, so another single segment is progress.
+	report(1)
+	now = start.Add(190 * time.Second)
+	report(0)
+	now = start.Add(200 * time.Second)
+	ages := observer.collectViewStateMaxAge()
+	if len(ages) != 1 || ages[0].AgeSeconds != 50 {
+		t.Fatalf("worker age = %#v, want one view with age 50", ages)
 	}
 }
 

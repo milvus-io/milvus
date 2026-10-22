@@ -768,6 +768,7 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 		}
 
 		before := sm.State()
+		resourceProgress := sm.reportMakesProgress(resp)
 		sm.OnNodeStateReported(resp)
 		qvobserve.Observe(m.ctx, qvobserve.CoordViewReportAppliedEvent{
 			ViewStateTransition: qvobserve.ViewStateTransition{
@@ -779,6 +780,7 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 			Node:                 target.WorkNode(),
 			ReportedState:        resp.State(),
 			ResourceReadyPercent: resourceReadyPercent(resp),
+			ResourceProgress:     resourceProgress,
 		})
 		m.processStateMachine(sm)
 		event := m.consumeDirtyEventLocked()
