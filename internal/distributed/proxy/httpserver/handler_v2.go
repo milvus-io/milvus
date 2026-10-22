@@ -763,19 +763,6 @@ func (h *HandlersV2) checkAuthorizationV2(ctx context.Context, c *gin.Context, i
 	return nil
 }
 
-func (h *HandlersV2) checkAuthorizationHelper(ctx context.Context, c *gin.Context, req interface{}) error {
-	username, ok := c.Get(ContextUsername)
-	if !ok || username.(string) == "" {
-		return merr.ErrNeedAuthenticate
-	}
-	ctx, authErr := proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
-	if authErr != nil {
-		return authErr
-	}
-	c.Request = c.Request.WithContext(ctx)
-	return nil
-}
-
 func (h *HandlersV2) wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, ignoreErr bool, fullMethod string, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
 	return h.wrapperProxyWithLimit(ctx, c, req, checkAuth, ignoreErr, fullMethod, false, nil, handler)
 }
@@ -2095,6 +2082,42 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	})
 }
 
+// appendGroupParams validates the grouping knobs and appends them to params.
+//
+// The previous gate forwarded groupSize only when it was greater than zero,
+// which conflated three different requests: an absent groupSize (use the
+// server default), an explicit invalid one (0 or negative -- the server
+// rejects these, but it never saw them), and strictGroupSize on its own
+// (silently dropped because it rode behind the same gate). A knob that is
+// present is now either forwarded or refused; only absence means default.
+func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, groupSize *int32, strictGroupSize *bool) ([]*commonpb.KeyValuePair, error) {
+	// Trimmed with the same rule the proxy applies when it parses the field
+	// name back out. Without this, a groupingField of blanks counts as
+	// provided here, the proxy trims it to nothing, and the knobs it
+	// authorized are swallowed downstream -- the exact silence this function
+	// exists to remove.
+	groupByField = strings.TrimSpace(groupByField)
+	if groupByField == "" {
+		if groupSize != nil || strictGroupSize != nil {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"groupSize and strictGroupSize require groupingField")
+		}
+		return params, nil
+	}
+	params = append(params, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: groupByField})
+	if groupSize != nil {
+		if *groupSize <= 0 {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"groupSize must be a positive integer, got: %d", *groupSize)
+		}
+		params = append(params, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(*groupSize), 10)})
+	}
+	if strictGroupSize != nil {
+		params = append(params, &commonpb.KeyValuePair{Key: ParamStrictGroupSize, Value: strconv.FormatBool(*strictGroupSize)})
+	}
+	return params, nil
+}
+
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
@@ -2163,13 +2186,16 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
-		if httpReq.GroupByField != "" || httpReq.GroupSize != 0 || httpReq.StrictGroupSize {
+		if httpReq.GroupByField != "" || httpReq.GroupSize != nil || httpReq.StrictGroupSize != nil {
 			err := merr.WrapErrParameterInvalidMsg("groupingField/groupSize/strictGroupSize and searchAggregation cannot be used simultaneously")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
-		if searchParamsContainAny(httpReq.SearchParams, proxy.GroupByFieldKey, proxy.GroupByFieldsKey) {
-			err := merr.WrapErrParameterInvalidMsg("searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously")
+		if searchParamsContainAny(httpReq.SearchParams,
+			proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize) {
+			// wording kept compatible: the group_by_field(s) sentence is what
+			// clients and the REST e2e suite already pin on
+			err := merr.WrapErrParameterInvalidMsg("searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously, and neither can group_size/strict_group_size")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return nil, err
 		}
@@ -2194,6 +2220,54 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 
+	// The group knobs have the same two spellings, and the searchParams one is
+	// appended first, so it silently won any disagreement. Same rule: one
+	// spelling per request. Asked of the root keys only: generateSearchParams
+	// itself duplicates root keys into the params JSON, so nested copies are
+	// an artifact of the working spelling, not a spelling of their own.
+	if (httpReq.GroupByField != "" || httpReq.GroupSize != nil || httpReq.StrictGroupSize != nil) &&
+		searchParamsRootContainAny(httpReq.SearchParams,
+			proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize) {
+		err := merr.WrapErrParameterInvalidMsg(
+			"ambiguous grouping: use either the top-level groupingField/groupSize/strictGroupSize or the searchParams group keys, not both")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	// The rule that a size knob needs a grouping field holds for the legacy
+	// spelling too: group_size or strict_group_size in searchParams with no
+	// group field anywhere used to parse downstream into a grouping that never
+	// enabled, an ungrouped search reporting success. The field must be a
+	// working spelling -- a field name nested under params is inert.
+	groupingEnabled := httpReq.GroupByField != "" ||
+		searchParamsRootContainAny(httpReq.SearchParams, proxy.GroupByFieldKey, proxy.GroupByFieldsKey)
+	if !groupingEnabled &&
+		searchParamsRootContainAny(httpReq.SearchParams, proxy.GroupSizeKey, proxy.StrictGroupSize) {
+		err := merr.WrapErrParameterInvalidMsg(
+			"searchParams group_size/strict_group_size require a group field")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	// Group keys nested under searchParams.params never act -- the proxy reads
+	// only standalone pairs. When a working spelling enables grouping they are
+	// tolerated as the compatibility duplicates generateSearchParams itself
+	// produces; when they are the only grouping in the request, the caller
+	// asked for grouping and would silently not get it, so the request is
+	// refused rather than half-honored.
+	if !groupingEnabled {
+		if nested, ok := httpReq.SearchParams[Params].(map[string]interface{}); ok {
+			for _, key := range []string{proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize} {
+				if _, present := nested[key]; present {
+					err := merr.WrapErrParameterInvalidMsg(
+						"searchParams.params cannot carry %s; use the top-level grouping fields or searchParams.%s", key, key)
+					HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+					return nil, err
+				}
+			}
+		}
+	}
+
 	searchParams, err := generateSearchParams(httpReq.SearchParams)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, generate SearchParams failed", mlog.Err(err))
@@ -2205,12 +2279,10 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
-	if httpReq.GroupByField != "" {
-		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
-	}
-	if httpReq.GroupByField != "" && httpReq.GroupSize > 0 {
-		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
-		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamStrictGroupSize, Value: strconv.FormatBool(httpReq.StrictGroupSize)})
+	searchParams, err = appendGroupParams(searchParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
 	}
 	if len(httpReq.OrderByFields) > 0 {
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OrderByFieldsKey, Value: strings.Join(httpReq.OrderByFields, ",")})
@@ -2493,12 +2565,10 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			return nil, err
 		}
 	}
-	if httpReq.GroupByField != "" {
-		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
-	}
-	if httpReq.GroupByField != "" && httpReq.GroupSize > 0 {
-		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamGroupSize, Value: strconv.FormatInt(int64(httpReq.GroupSize), 10)})
-		req.RankParams = append(req.RankParams, &commonpb.KeyValuePair{Key: ParamStrictGroupSize, Value: strconv.FormatBool(httpReq.StrictGroupSize)})
+	req.RankParams, err = appendGroupParams(req.RankParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
 	}
 	if len(httpReq.FunctionScore.Functions) != 0 {
 		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {
@@ -3958,15 +4028,7 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 
 		for i, jobID := range jobIDs {
 			collection := collections[i]
-			if h.checkAuth {
-				err = h.checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
-					DbName:         dbName,
-					CollectionName: collection,
-				})
-				if err != nil {
-					continue
-				}
-			}
+			// Proxy has filtered jobs using their persisted resource identities.
 			jobDetail := make(map[string]interface{})
 			jobDetail["jobId"] = jobID
 			jobDetail["collectionName"] = collection
@@ -4030,9 +4092,6 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 	if err != nil {
 		return response, err
 	}
-	if err := h.checkImportPrivilege(ctx, c, dbName, response.GetCollectionName()); err != nil {
-		return nil, err
-	}
 
 	returnData := make(map[string]interface{})
 	returnData["jobId"] = jobIDGetter.GetJobID()
@@ -4078,32 +4137,18 @@ func (h *HandlersV2) getImportProgress(ctx context.Context, c *gin.Context, dbNa
 	}
 	c.Set(ContextRequest, req)
 
-	resp, err := h.wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/GetImportProgress", func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxy(ctx, c, req, false, true, "/milvus.proto.milvus.MilvusService/GetImportProgress", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
 	})
 	if err != nil {
+		httpStatus := http.StatusOK
+		if errors.Is(err, merr.ErrPrivilegeNotPermitted) {
+			httpStatus = http.StatusForbidden
+		}
+		HTTPAbortReturn(c, httpStatus, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 	return resp.(*internalpb.GetImportProgressResponse), nil
-}
-
-func (h *HandlersV2) checkImportPrivilege(ctx context.Context, c *gin.Context, dbName string, collectionName string) error {
-	if !h.checkAuth {
-		return nil
-	}
-
-	authErr := h.checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	if authErr != nil {
-		HTTPReturn(c, http.StatusForbidden, gin.H{
-			HTTPReturnCode:    merr.Code(authErr),
-			HTTPReturnMessage: authErr.Error(),
-		})
-		return authErr
-	}
-	return nil
 }
 
 func (h *HandlersV2) checkImportJobAuth(ctx context.Context, c *gin.Context, dbName string, jobID string) error {
@@ -4111,13 +4156,9 @@ func (h *HandlersV2) checkImportJobAuth(ctx context.Context, c *gin.Context, dbN
 		return nil
 	}
 
-	// Commit/abort requests only carry jobID. Import privilege is collection-scoped,
-	// so resolve the job's collection before checking PrivilegeImport.
-	response, err := h.getImportProgress(ctx, c, dbName, jobID)
-	if err != nil {
-		return err
-	}
-	return h.checkImportPrivilege(ctx, c, dbName, response.GetCollectionName())
+	// Proxy checks Import on the job's actual resource before returning progress.
+	_, err := h.getImportProgress(ctx, c, dbName, jobID)
+	return err
 }
 
 func (h *HandlersV2) restoreExternalSnapshot(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

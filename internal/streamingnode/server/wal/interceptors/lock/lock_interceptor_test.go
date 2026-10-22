@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -15,9 +16,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -27,7 +28,6 @@ const (
 
 func newTestInterceptor() *lockAppendInterceptor {
 	return &lockAppendInterceptor{
-		enableCAS:      true,
 		channel:        types.PChannelInfo{Name: testPChannelName},
 		vchannelLocker: lock.NewKeyLock[string](),
 		txnManager:     new(txn.TxnManager),
@@ -125,6 +125,8 @@ func TestAcquireLockGuard(t *testing.T) {
 		assert.True(t, interceptor.glock.TryRLock())
 		interceptor.glock.RUnlock()
 		assert.False(t, interceptor.vchannelLocker.TryLock(testVChannel))
+		assert.True(t, interceptor.vchannelLocker.TryRLock(testVChannel), "CAS commit must keep the shard lock shareable")
+		interceptor.vchannelLocker.RUnlock(testVChannel)
 		assert.True(t, interceptor.vchannelLocker.TryLock("other-vchannel"))
 		interceptor.vchannelLocker.Unlock("other-vchannel")
 		guard()
@@ -185,7 +187,7 @@ func TestAcquireLockGuard(t *testing.T) {
 	})
 }
 
-func TestPartialUpdateCASCommitWaitsForSameVChannelWriter(t *testing.T) {
+func TestPartialUpdateCASCommitSharesShardLockWithWriter(t *testing.T) {
 	interceptor := newTestInterceptor()
 	writer := newLockTestInsertMessage(testVChannel)
 	commit := newLockTestCASCommit(t, testVChannel)
@@ -214,18 +216,12 @@ func TestPartialUpdateCASCommitWaitsForSameVChannelWriter(t *testing.T) {
 
 	select {
 	case <-commitEntered:
+	case <-time.After(time.Second):
 		close(releaseWriter)
-		require.NoError(t, <-writerDone)
-		t.Fatal("CAS commit entered while a same-vchannel writer still held the read lock")
-	case <-time.After(20 * time.Millisecond):
+		t.Fatal("CAS commit still acquired an exclusive shard lock")
 	}
 	close(releaseWriter)
 	require.NoError(t, <-writerDone)
-	select {
-	case <-commitEntered:
-	case <-time.After(time.Second):
-		t.Fatal("CAS commit did not resume after the writer released the lock")
-	}
 	require.NoError(t, <-commitDone)
 }
 
@@ -339,49 +335,104 @@ func newLockTestCASCommit(t *testing.T, vchannel string) message.MutableMessage 
 	return msg
 }
 
-func TestCASDisabledCommitSharesVChannelLock(t *testing.T) {
+type testRowLock func(context.Context, message.MutableMessage) (context.Context, func(), error)
+
+func (f testRowLock) Acquire(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+	return f(ctx, msg)
+}
+
+type rowLockTestKey struct{}
+
+func newRowLockTestInterceptor(rowLock interceptors.MessageRowLock) *lockAppendInterceptor {
 	interceptor := newTestInterceptor()
-	interceptor.enableCAS = false
-	guard := interceptor.acquireLockGuard(context.Background(), newLockTestInsertMessage(testVChannel))
-	defer guard()
-	done := make(chan struct{})
-	commit := newLockTestCASCommit(t, testVChannel)
-	go func() {
-		unlock := interceptor.acquireLockGuard(context.Background(), commit)
-		unlock()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("disabled CAS commit blocked behind a shared writer")
-	}
+	interceptor.buildParam = &interceptors.InterceptorBuildParam{RowLock: rowLock}
+	return interceptor
 }
 
-func TestLockInterceptorCachesCASConfig(t *testing.T) {
-	paramtable.Init()
-	params := paramtable.Get()
-	key := params.StreamingCfg.PartialUpdateEnableCAS.Key
-	old := params.StreamingCfg.PartialUpdateEnableCAS.GetValue()
-	defer params.Save(key, old)
-	builder := NewInterceptorBuilder()
-	for _, value := range []string{"true", "false"} {
-		require.NoError(t, params.Save(key, value))
-		interceptor := builder.Build(&interceptors.InterceptorBuildParam{}).(*lockAppendInterceptor)
-		next := "true"
-		if value == "true" {
-			next = "false"
-		}
-		require.NoError(t, params.Save(key, next))
-		require.Equal(t, value == "true", interceptor.enableCAS)
-	}
+func TestRowLockIsHeldUnderShardLockAcrossAppend(t *testing.T) {
+	var interceptor *lockAppendInterceptor
+	acquired, released := false, false
+	interceptor = newRowLockTestInterceptor(testRowLock(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+		// The shard lifecycle lock is already held in shared mode.
+		require.False(t, interceptor.vchannelLocker.TryLock(testVChannel))
+		acquired = true
+		return context.WithValue(ctx, rowLockTestKey{}, true), func() {
+			released = true
+			require.False(t, interceptor.vchannelLocker.TryLock(testVChannel), "row lock released after the shard lock")
+		}, nil
+	}))
+	_, err := interceptor.DoAppend(context.Background(), newLockTestInsertMessage(testVChannel), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		require.True(t, acquired)
+		require.False(t, released, "row lock released before the downstream append returned")
+		require.Equal(t, true, ctx.Value(rowLockTestKey{}), "row-lock context did not reach downstream interceptors")
+		return nil, nil
+	})
+	require.NoError(t, err)
+	require.True(t, released)
+	require.True(t, interceptor.vchannelLocker.TryLock(testVChannel))
+	interceptor.vchannelLocker.Unlock(testVChannel)
 }
 
-func TestCASDisabledPreservesStructuralExclusiveLock(t *testing.T) {
+func TestRowLockFailureSkipsAppendAndReleasesShardLock(t *testing.T) {
+	expected := errors.New("row lock admission failed")
+	interceptor := newRowLockTestInterceptor(testRowLock(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+		return ctx, nil, expected
+	}))
+	_, err := interceptor.DoAppend(context.Background(), newLockTestCASCommit(t, testVChannel), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("rejected message reached the downstream append")
+		return nil, nil
+	})
+	require.ErrorIs(t, err, expected)
+	require.True(t, interceptor.vchannelLocker.TryLock(testVChannel))
+	interceptor.vchannelLocker.Unlock(testVChannel)
+}
+
+// Replicated messages are serialized by the replicate interceptor, which also
+// deduplicates them; they must reach it before any partial-update admission.
+func TestRowLockSkipsReplicatedMessages(t *testing.T) {
+	interceptor := newRowLockTestInterceptor(testRowLock(func(context.Context, message.MutableMessage) (context.Context, func(), error) {
+		t.Fatal("replicated message took a row lock")
+		return nil, nil, nil
+	}))
+	sourceID := walimplstest.NewTestMessageID(1)
+	msg := newLockTestCASCommit(t, testVChannel).WithReplicateHeader(&message.ReplicateHeader{
+		ClusterID:              "source",
+		MessageID:              sourceID,
+		LastConfirmedMessageID: sourceID,
+		VChannel:               testVChannel,
+	})
+	appended := false
+	_, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return nil, nil
+	})
+	require.NoError(t, err)
+	require.True(t, appended)
+}
+
+// The partial-update builder runs after the lock builder and installs the hook
+// on the shared build parameter, so the hook must be read at append time.
+func TestRowLockHookIsReadAtAppendTime(t *testing.T) {
+	param := &interceptors.InterceptorBuildParam{ChannelInfo: types.PChannelInfo{Name: testPChannelName}, TxnManager: new(txn.TxnManager)}
+	interceptor := NewInterceptorBuilder().Build(param).(*lockAppendInterceptor)
+	called := false
+	param.RowLock = testRowLock(func(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error) {
+		called = true
+		return ctx, func() {}, nil
+	})
+	_, err := interceptor.DoAppend(context.Background(), newLockTestInsertMessage(testVChannel), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		return nil, nil
+	})
+	require.NoError(t, err)
+	require.True(t, called)
+}
+
+// Structural exclusive messages keep the vchannel write lock, independent of
+// partial-update CAS.
+func TestManualFlushKeepsStructuralExclusiveLock(t *testing.T) {
 	patch := mockey.Mock((*txn.TxnManager).FailTxnAtVChannel).Return().Build()
 	defer patch.UnPatch()
 	interceptor := newTestInterceptor()
-	interceptor.enableCAS = false
 	msg := message.NewManualFlushMessageBuilderV2().
 		WithVChannel(testVChannel).
 		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).

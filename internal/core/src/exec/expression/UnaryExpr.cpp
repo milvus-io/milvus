@@ -749,37 +749,6 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 return static_cast<size_t>(row_id);
             };
 
-            // filtering by index, get candidates.
-            std::function<bool(const milvus::proto::plan::Array& /*val*/,
-                               int64_t /*offset*/)>
-                is_same;
-
-            if (segment_->is_chunked()) {
-                is_same = [this, reverse](const milvus::proto::plan::Array& val,
-                                          int64_t offset) -> bool {
-                    auto [chunk_idx, chunk_offset] =
-                        GetChunkByOffset(field_id_, offset);
-                    auto pw =
-                        GetChunkView<milvus::ArrayView>(field_id_, chunk_idx);
-                    auto chunk = pw.get();
-                    return chunk.first[chunk_offset].is_same_array(val) ^
-                           reverse;
-                };
-            } else {
-                auto size_per_chunk = segment_->size_per_chunk();
-                is_same = [this, size_per_chunk, reverse](
-                              const milvus::proto::plan::Array& val,
-                              int64_t offset) -> bool {
-                    auto chunk_idx = offset / size_per_chunk;
-                    auto chunk_offset = offset % size_per_chunk;
-                    auto pw =
-                        GetChunkData<milvus::ArrayView>(field_id_, chunk_idx);
-                    auto chunk = pw.get();
-                    auto array_view = chunk.data() + chunk_offset;
-                    return array_view->is_same_array(val) ^ reverse;
-                };
-            }
-
             // collect all candidates.
             std::unordered_set<size_t> candidates;
             std::unordered_set<size_t> tmp_candidates;
@@ -815,9 +784,55 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 }
             }
             TargetBitmap res(active_count_, reverse);
-            // run post-filter. The filter will only be executed once in the framework.
-            for (const auto& candidate : candidates) {
-                res[candidate] = is_same(val, candidate);
+            // The cached post-filter runs once for the complete candidate set.
+            if (candidates.empty()) {
+                return res;
+            }
+            if (segment_->is_chunked()) {
+                // Candidate order is immaterial to the result bitmap. Group
+                // sorted offsets so each touched chunk is pinned only once.
+                std::vector<int64_t> offsets(candidates.begin(),
+                                             candidates.end());
+                std::sort(offsets.begin(), offsets.end());
+                auto column = snapshot_
+                                  ? snapshot_->GetDataScanResources(field_id_)
+                                  : segment_->GetChunkedColumn(field_id_);
+                AssertInfo(column != nullptr,
+                           "ARRAY equality requires a data column");
+                for (size_t begin = 0; begin < offsets.size();) {
+                    const auto [chunk_id, first_offset] =
+                        column->GetChunkIDByOffset(offsets[begin]);
+                    const auto chunk_begin = offsets[begin] - first_offset;
+                    const auto chunk_end =
+                        chunk_begin + column->chunk_row_nums(chunk_id);
+                    FixedVector<int32_t> chunk_offsets;
+                    auto end = begin;
+                    while (end < offsets.size() && offsets[end] < chunk_end) {
+                        chunk_offsets.emplace_back(offsets[end] - chunk_begin);
+                        ++end;
+                    }
+                    auto views = column->ArrayViewsByOffsets(
+                        op_ctx_, chunk_id, chunk_offsets);
+                    const auto& [arrays, validity] = views.get();
+                    // Consume borrowed array payloads while this chunk is pinned.
+                    for (size_t i = 0; i < chunk_offsets.size(); ++i) {
+                        res[offsets[begin + i]] =
+                            validity[i] &&
+                            (arrays[i].is_same_array(val) ^ reverse);
+                    }
+                    begin = end;
+                }
+            } else {
+                auto size_per_chunk = segment_->size_per_chunk();
+                for (const auto& candidate : candidates) {
+                    auto chunk_idx = candidate / size_per_chunk;
+                    auto chunk_offset = candidate % size_per_chunk;
+                    auto pw =
+                        GetChunkData<milvus::ArrayView>(field_id_, chunk_idx);
+                    const auto& chunk = pw.get();
+                    res[candidate] =
+                        chunk.data()[chunk_offset].is_same_array(val) ^ reverse;
+                }
             }
             return res;
         },

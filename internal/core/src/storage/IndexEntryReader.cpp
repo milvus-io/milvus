@@ -28,6 +28,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -552,6 +553,45 @@ IndexEntryReader::ReadFooterAndDirectory() {
             entry_index_.emplace(std::move(name), std::move(meta));
         }
     }
+    AssertInfo(DefaultEntryStreamSliceSize() >= kMinStreamSliceSize &&
+                   IsStreamSliceSizeAligned(DefaultEntryStreamSliceSize()),
+               "Invalid positioned entry slice size");
+    auto record_positioned = [&](size_t bytes) {
+        const auto reserved =
+            SaturatingAdd(bytes, 2 * FileWriter::ALIGNMENT_MASK);
+        stream_load_info_.positioned_total_transient_bytes = SaturatingAdd(
+            stream_load_info_.positioned_total_transient_bytes, reserved);
+        stream_load_info_.positioned_max_task_transient_bytes = std::max(
+            stream_load_info_.positioned_max_task_transient_bytes, reserved);
+    };
+    for (const auto& [name, meta] : entry_index_) {
+        if (name == "index_null_offset" ||
+            name == "json_index_non_exist_offsets") {
+            stream_load_info_.retained_sidecar_bytes = SaturatingAdd(
+                stream_load_info_.retained_sidecar_bytes,
+                meta.encrypted ? meta.enc.original_size : meta.plain.size);
+        }
+        if (meta.encrypted) {
+            size_t offset = 0;
+            for (const auto& slice : meta.enc.slices) {
+                const auto bytes = std::min<size_t>(
+                    slice_size_, meta.enc.original_size - offset);
+                record_positioned(
+                    EncryptedStreamBudgetBytes(slice.size, bytes));
+                offset += bytes;
+            }
+        } else {
+            const auto slice_size = DefaultEntryStreamSliceSize();
+            const auto count =
+                PlainStreamSliceCount(meta.plain.size, slice_size);
+            for (size_t i = 0; i < count; ++i) {
+                record_positioned(SaturatingMultiply(
+                    PlainStreamSliceBytes(
+                        meta.plain.size, slice_size, count, i),
+                    kFileStreamBufferMultiplier));
+            }
+        }
+    }
 }
 
 std::vector<std::string>
@@ -941,18 +981,49 @@ IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
         state.writer = std::make_unique<PositionedFileWriter>(
             local_path, meta.plain.size, write_priority);
     }
+    state.write = [writer = state.writer.get()](
+                      size_t offset, const uint8_t* data, size_t bytes) {
+        writer->WriteAt(offset, data, bytes);
+    };
     return state;
 }
+
+// One failure domain per operation, including all entries in a bulk load.
+// Record the original exception before cancellation wakes admission waiters.
+struct IndexEntryReader::EntryStreamFailure {
+    void
+    RecordAndCancel(std::exception_ptr error) {
+        {
+            std::lock_guard lock(mutex);
+            if (first_error) {
+                return;
+            }
+            first_error = std::move(error);
+        }
+        cancellation.requestCancellation();
+    }
+
+    std::exception_ptr
+    FirstError() {
+        std::lock_guard lock(mutex);
+        return first_error;
+    }
+
+    std::mutex mutex;
+    std::exception_ptr first_error;
+    folly::CancellationSource cancellation;
+};
 
 void
 IndexEntryReader::SubmitEntryStreamDownloadTasks(
     const EntryMeta& meta,
     EntryStreamDownloadState& state,
-    std::vector<std::future<void>>& futures) {
+    std::vector<std::future<void>>& futures,
+    EntryStreamFailure& failure) {
     auto& pool = ThreadPools::GetThreadPool(priority_);
     auto input = input_;
-    auto* writer = state.writer.get();
-    auto cancellation_token = cancellation_token_;
+    const auto cancellation_token = folly::cancellation_token_merge(
+        cancellation_token_, failure.cancellation.getToken());
     futures.reserve(futures.size() + StreamDownloadTaskCount(meta));
 
     if (meta.encrypted) {
@@ -971,52 +1042,69 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
                        em.original_size);
             size_t remaining = em.original_size - output_offset;
             size_t plain_len = std::min(remaining, slice_size_);
-            auto budget_guard = std::make_shared<TransientBudgetGuard>(
-                EncryptedStreamBudgetBytes(slice.size, plain_len),
+            auto budget_guard = std::make_unique<TransientBudgetGuard>(
+                SaturatingAdd(EncryptedStreamBudgetBytes(slice.size, plain_len),
+                              2 * FileWriter::ALIGNMENT_MASK),
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 
+            ThrowIfCancelled(
+                cancellation_token,
+                "IndexEntryReader::SubmitEntryStreamDownloadTasks");
             futures.push_back(pool.Submit([input,
                                            cipher_plugin,
                                            ez_id,
                                            collection_id,
                                            edek,
                                            slice,
-                                           writer,
                                            output_offset,
                                            plain_len,
                                            i,
                                            &state,
+                                           &failure,
                                            cancellation_token,
-                                           budget_guard =
-                                               std::move(budget_guard)]() {
-                (void)budget_guard;
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesStreamToFiles");
+                                           budget_guard = std::move(
+                                               budget_guard)]() mutable {
+                auto reservation = std::move(budget_guard);
+                try {
+                    ThrowIfCancelled(
+                        cancellation_token,
+                        "IndexEntryReader::ReadEntriesStreamToFiles");
 
-                std::vector<uint8_t> cipher(slice.size);
-                size_t n = input->ReadAt(cipher.data(),
-                                         MILVUS_V3_MAGIC_SIZE + slice.offset,
-                                         slice.size);
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesStreamToFiles");
-                AssertInfo(n == slice.size, "Failed to read encrypted slice");
+                    std::vector<uint8_t> cipher(slice.size);
+                    size_t n =
+                        input->ReadAt(cipher.data(),
+                                      MILVUS_V3_MAGIC_SIZE + slice.offset,
+                                      slice.size);
+                    ThrowIfCancelled(
+                        cancellation_token,
+                        "IndexEntryReader::ReadEntriesStreamToFiles");
+                    AssertInfo(n == slice.size,
+                               "Failed to read encrypted slice");
 
-                auto dec =
-                    cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
-                auto plain = dec->Decrypt(cipher.data(), cipher.size());
+                    auto dec =
+                        cipher_plugin->GetDecryptor(ez_id, collection_id, edek);
+                    auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
-                AssertInfo(plain.size() == plain_len,
-                           "Decrypted size mismatch: expected {}, got {}",
-                           plain_len,
-                           plain.size());
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesStreamToFiles");
-                writer->WriteAt(output_offset, plain.data(), plain.size());
-                state.range_crcs[i] = {
-                    Crc32cValue(reinterpret_cast<const uint8_t*>(plain.data()),
-                                plain.size()),
-                    plain.size()};
+                    AssertInfo(plain.size() == plain_len,
+                               "Decrypted size mismatch: expected {}, got {}",
+                               plain_len,
+                               plain.size());
+                    ThrowIfCancelled(
+                        cancellation_token,
+                        "IndexEntryReader::ReadEntriesStreamToFiles");
+                    state.write(output_offset,
+                                reinterpret_cast<const uint8_t*>(plain.data()),
+                                plain.size());
+                    state.range_crcs[i] = {
+                        Crc32cValue(
+                            reinterpret_cast<const uint8_t*>(plain.data()),
+                            plain.size()),
+                        plain.size()};
+                } catch (...) {
+                    failure.RecordAndCancel(std::current_exception());
+                    throw;
+                }
             }));
         }
     } else {
@@ -1029,34 +1117,46 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
             size_t len =
                 PlainStreamSliceBytes(pm.size, slice_size, num_slices, seq);
             size_t src_offset = pm.offset + output_offset;
-            auto budget_guard = std::make_shared<TransientBudgetGuard>(
-                SaturatingMultiply(len, kFileStreamBufferMultiplier),
+            auto budget_guard = std::make_unique<TransientBudgetGuard>(
+                SaturatingAdd(
+                    SaturatingMultiply(len, kFileStreamBufferMultiplier),
+                    2 * FileWriter::ALIGNMENT_MASK),
                 cancellation_token,
                 "IndexEntryReader::ReadEntriesStreamToFiles");
 
+            ThrowIfCancelled(
+                cancellation_token,
+                "IndexEntryReader::SubmitEntryStreamDownloadTasks");
             futures.push_back(pool.Submit([input,
-                                           writer,
                                            output_offset,
                                            src_offset,
                                            len,
                                            seq,
                                            &state,
+                                           &failure,
                                            cancellation_token,
-                                           budget_guard =
-                                               std::move(budget_guard)]() {
-                (void)budget_guard;
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesStreamToFiles");
+                                           budget_guard = std::move(
+                                               budget_guard)]() mutable {
+                auto reservation = std::move(budget_guard);
+                try {
+                    ThrowIfCancelled(
+                        cancellation_token,
+                        "IndexEntryReader::ReadEntriesStreamToFiles");
 
-                std::vector<uint8_t> buf(len);
-                size_t n = input->ReadAt(
-                    buf.data(), MILVUS_V3_MAGIC_SIZE + src_offset, len);
-                ThrowIfCancelled(cancellation_token,
-                                 "IndexEntryReader::ReadEntriesStreamToFiles");
-                AssertInfo(n == len, "Failed to read entry slice");
+                    std::vector<uint8_t> buf(len);
+                    size_t n = input->ReadAt(
+                        buf.data(), MILVUS_V3_MAGIC_SIZE + src_offset, len);
+                    ThrowIfCancelled(
+                        cancellation_token,
+                        "IndexEntryReader::ReadEntriesStreamToFiles");
+                    AssertInfo(n == len, "Failed to read entry slice");
 
-                writer->WriteAt(output_offset, buf.data(), len);
-                state.range_crcs[seq] = {Crc32cValue(buf.data(), len), len};
+                    state.write(output_offset, buf.data(), len);
+                    state.range_crcs[seq] = {Crc32cValue(buf.data(), len), len};
+                } catch (...) {
+                    failure.RecordAndCancel(std::current_exception());
+                    throw;
+                }
             }));
         }
     }
@@ -1079,8 +1179,50 @@ IndexEntryReader::FinalizeEntryStreamDownload(EntryStreamDownloadState& state) {
                Crc32cToHex(state.expected_crc),
                Crc32cToHex(combined_crc));
 
-    state.writer->Finish();
-    state.writer.reset();
+    if (state.writer) {
+        state.writer->Finish();
+        state.writer.reset();
+    }
+}
+
+void
+IndexEntryReader::ReadEntryStreamAt(
+    const std::string& name,
+    std::function<void(size_t, const uint8_t*, size_t)> write) {
+    CheckCancelled("IndexEntryReader::ReadEntryStreamAt");
+    const auto slice_size = DefaultEntryStreamSliceSize();
+    AssertInfo(slice_size >= kMinStreamSliceSize &&
+                   IsStreamSliceSizeAligned(slice_size),
+               "Invalid positioned entry slice size: {}",
+               slice_size);
+    const auto it = entry_index_.find(name);
+    AssertInfo(it != entry_index_.end(), "Entry not found: {}", name);
+    const auto& meta = it->second;
+    const auto crc = meta.encrypted ? meta.enc.crc32 : meta.plain.crc32;
+    EntryStreamDownloadState state;
+    state.name = name;
+    state.expected_crc = crc;
+    state.range_crcs.resize(StreamDownloadTaskCount(meta));
+    state.write = std::move(write);
+    EntryStreamFailure failure;
+    std::vector<std::future<void>> futures;
+    std::exception_ptr first_error;
+    try {
+        SubmitEntryStreamDownloadTasks(meta, state, futures, failure);
+    } catch (...) {
+        first_error = std::current_exception();
+        failure.RecordAndCancel(first_error);
+    }
+    // Both submission failures and worker failures must drain before the caller
+    // can destroy its destination. Preserve the original exception and code.
+    DrainFutures(futures, first_error);
+    if (auto root_error = failure.FirstError()) {
+        first_error = root_error;
+    }
+    if (first_error) {
+        std::rethrow_exception(first_error);
+    }
+    FinalizeEntryStreamDownload(state);
 }
 
 void
@@ -1179,11 +1321,20 @@ IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
                                         io::Priority write_priority) {
     CheckCancelled("IndexEntryReader::ReadEntryStreamToFile");
     AssertInfo(HasEntry(name), "Entry not found: {}", name);
-    auto writer = FileWriter(local_path, write_priority);
-    ReadEntryStream(name, [&writer](const uint8_t* data, size_t len) {
-        writer.Write(data, len);
-    });
-    writer.Finish();
+    // Construct before the cleanup scope: an open failure must not unlink an
+    // existing destination that this writer never acquired.
+    PositionedFileWriter writer(local_path, GetEntrySize(name), write_priority);
+    try {
+        ReadEntryStreamAt(name,
+                          [&](size_t offset, const uint8_t* data, size_t len) {
+                              writer.WriteAt(offset, data, len);
+                          });
+        writer.Finish();
+    } catch (...) {
+        // ReadEntryStreamAt drains workers before returning the original error.
+        ::unlink(local_path.c_str());
+        throw;
+    }
 }
 
 void
@@ -1197,6 +1348,7 @@ IndexEntryReader::ReadEntriesStreamToFiles(
 
     std::vector<EntryStreamDownloadState> states;
     states.reserve(name_path_pairs.size());
+    EntryStreamFailure failure;
     std::vector<std::future<void>> all_futures;
 
     try {
@@ -1212,11 +1364,15 @@ IndexEntryReader::ReadEntriesStreamToFiles(
         all_futures.reserve(total_task_count);
         for (size_t i = 0; i < name_path_pairs.size(); i++) {
             const auto& meta = entry_index_.at(name_path_pairs[i].first);
-            SubmitEntryStreamDownloadTasks(meta, states[i], all_futures);
+            SubmitEntryStreamDownloadTasks(
+                meta, states[i], all_futures, failure);
         }
 
         std::exception_ptr first_error = nullptr;
         DrainFutures(all_futures, first_error);
+        if (auto root_error = failure.FirstError()) {
+            first_error = root_error;
+        }
         if (first_error) {
             std::rethrow_exception(first_error);
         }
@@ -1226,7 +1382,11 @@ IndexEntryReader::ReadEntriesStreamToFiles(
         }
     } catch (...) {
         auto first_error = std::current_exception();
+        failure.RecordAndCancel(first_error);
         DrainFutures(all_futures, first_error);
+        if (auto root_error = failure.FirstError()) {
+            first_error = root_error;
+        }
         for (auto& state : states) {
             state.writer.reset();
         }

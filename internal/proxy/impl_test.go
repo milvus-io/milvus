@@ -1869,7 +1869,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// normal case
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		mixCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, nil)
+		mixCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{Status: merr.Success()}, nil)
 		node.mixCoord = mixCoord
 		rsp, err = node.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{})
 		assert.NoError(t, err)
@@ -1890,7 +1890,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		node.setMetaCache(mc)
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		mixCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(nil, nil)
+		mixCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{Status: merr.Success()}, nil)
 		node.mixCoord = mixCoord
 		rsp, err = node.ListImports(ctx, &internalpb.ListImportsRequest{
 			CollectionName: "col",
@@ -2658,14 +2658,6 @@ func TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity(t *
 
 		var capturedNamespace *string
 		var capturedDBName string
-		var setSkipRuntimeRLS func(*queryTask, bool)
-		skipRuntimeRLSPatch := mockey.Mock((*queryTask).SetSkipRuntimeRLS).
-			To(func(task *queryTask, skip bool) {
-				require.True(t, skip)
-				setSkipRuntimeRLS(task, skip)
-			}).Origin(&setSkipRuntimeRLS).Build()
-		defer skipRuntimeRLSPatch.UnPatch()
-
 		var attachPredicateToRequeryPlan func(*planpb.PlanNode, *planpb.Expr) error
 		attachPredicatePatch := mockey.Mock(rls.AttachPredicateToRequeryPlan).
 			To(func(plan *planpb.PlanNode, predicate *planpb.Expr) error {
@@ -2735,7 +2727,6 @@ func TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity(t *
 		require.NotNil(t, predicate)
 		require.NotNil(t, capturedNamespace)
 		assert.Equal(t, namespace, *capturedNamespace)
-		assert.Equal(t, 1, skipRuntimeRLSPatch.Times())
 		assert.Equal(t, 1, attachPredicatePatch.Times())
 		assert.Equal(t, canonicalDBName, capturedDBName)
 		assert.Equal(t, schema.GetName(), capturedCollectionName)
@@ -3546,8 +3537,8 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	mockEnqueue := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, queued taskmodel.Task) error {
 		_ = queued.OnEnqueue()
 		addTask := queued.(*addCollectionFieldTask)
-		assert.Equal(t, externalSchema, addTask.oldSchema)
-		addTask.result = merr.Success()
+		assert.Equal(t, externalSchema, addTask.OldSchema())
+		addTask.SetResult(merr.Success())
 		return nil
 	}).Build()
 	defer mockEnqueue.UnPatch()
@@ -3651,9 +3642,9 @@ func TestProxy_AddCollectionField_TextValidation(t *testing.T) {
 				addTask := queued.(*addCollectionFieldTask)
 				err := addTask.PreExecute(context.Background())
 				if err != nil {
-					addTask.result = merr.Status(err)
+					addTask.SetResult(merr.Status(err))
 				} else {
-					addTask.result = merr.Success()
+					addTask.SetResult(merr.Success())
 				}
 				addTask.Notify(err)
 				return nil
@@ -3696,7 +3687,7 @@ func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
 			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				addTask := t.(*addCollectionFieldTask)
-				addTask.result = merr.Success()
+				addTask.SetResult(merr.Success())
 				return nil
 			}).Build()
 			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
@@ -3725,7 +3716,7 @@ func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
 			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				addTask := t.(*addCollectionFieldTask)
-				addTask.result = merr.Success()
+				addTask.SetResult(merr.Success())
 				return nil
 			}).Build()
 

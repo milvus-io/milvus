@@ -106,11 +106,11 @@ type walAdaptorImpl struct {
 
 // Metrics returns the metrics of the wal.
 func (w *walAdaptorImpl) Metrics() types.WALMetrics {
-	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(w.Channel().Name)
+	confirmedTimeTick := w.param.MVCCManager.GetConfirmedTimeTick()
 	recoveryMetrics := w.flusher.Metrics()
 	return types.RWWALMetrics{
 		ChannelInfo:      w.Channel(),
-		MVCCTimeTick:     currentMVCC.Timetick,
+		MVCCTimeTick:     confirmedTimeTick,
 		RecoveryTimeTick: recoveryMetrics.RecoveryTimeTick,
 	}
 }

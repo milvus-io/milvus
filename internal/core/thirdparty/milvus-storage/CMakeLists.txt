@@ -68,15 +68,14 @@ if ( NOT milvus-storage_POPULATED )
     # symbols happen to resolve through Arrow's transitive dependency on aws-sdk-cpp-s3,
     # but this is fragile (depends on Arrow package config). Explicitly link the S3
     # component so the symbols are always resolved in libmilvus-storage.so.
-    # Conan's cmake_find_package generator creates FindAWSSDK.cmake but it must be
-    # explicitly loaded to create the AWS::* targets.
-    find_package(AWSSDK REQUIRED)
+    # Use the same Conan CMakeDeps config as the root project.
+    find_package(AWSSDK REQUIRED CONFIG)
     if(TARGET AWS::aws-sdk-cpp-s3)
         target_link_libraries(milvus-storage PUBLIC AWS::aws-sdk-cpp-s3)
     elseif(TARGET AWS::s3)
         target_link_libraries(milvus-storage PUBLIC AWS::s3)
     else()
-        message(WARNING "Neither AWS::aws-sdk-cpp-s3 nor AWS::s3 target found after find_package(AWSSDK)")
+        message(FATAL_ERROR "Neither AWS::aws-sdk-cpp-s3 nor AWS::s3 target found after find_package(AWSSDK)")
     endif()
 
     # On macOS, aws-c-io uses Apple's Network.framework for socket operations
@@ -84,6 +83,8 @@ if ( NOT milvus-storage_POPULATED )
         target_link_libraries(milvus-storage PUBLIC "-framework Network")
     endif()
 endif()
+
+milvus_check_aws_runtime(milvus-storage)
 
 set( MILVUS_STORAGE_INCLUDE_DIR ${milvus-storage_SOURCE_DIR}/cpp/include CACHE INTERNAL "Path to milvus-storage include directory" )
 

@@ -719,7 +719,7 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 
 func GetPartitionIDs(ctx context.Context, metaCache Cache, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
 	for _, tag := range partitionNames {
-		if err := validatePartitionTag(tag, false); err != nil {
+		if err := ValidatePartitionTag(tag, false); err != nil {
 			return nil, err
 		}
 	}
@@ -844,6 +844,40 @@ func (g *groupByInfo) GetStrictCast() bool {
 // 1. Field exists in schema: use the field's ID, set jsonPath if it's a JSON field with brackets
 // 2. Field doesn't exist but dynamic field exists: use dynamic field's ID and set jsonPath
 // 3. Field doesn't exist and no dynamic field: return error
+// checkGroupByFieldType refuses a group-by field of a type the group-by
+// operator cannot hold as a key.
+//
+// The name used to resolve to a field id with no look at the type, so a
+// request grouping by a vector field was accepted here and either degenerated
+// into an ungrouped search or surfaced as an execution error deep in the
+// query, depending on the path. The supported list mirrors the switch in
+// SearchGroupByOperator.cpp: bool, the integer widths, timestamptz, varchar,
+// and json, whose inner value is checked at execution where the path is known.
+func checkGroupByFieldType(field *schemapb.FieldSchema) error {
+	switch field.GetDataType() {
+	case schemapb.DataType_Bool,
+		schemapb.DataType_Int8, schemapb.DataType_Int16,
+		schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_Timestamptz,
+		schemapb.DataType_VarChar,
+		schemapb.DataType_JSON:
+		// DataType_String is deliberately absent: the executor's switch has a
+		// VARCHAR case and no STRING case, so admitting it here would only
+		// move the failure back into the execution layer.
+		return nil
+	case schemapb.DataType_BinaryVector:
+		// The executor's own words for this case, kept verbatim: clients pin
+		// on them, and moving the check earlier should not change what the
+		// caller reads.
+		return merr.WrapErrParameterInvalidMsg(
+			"not support search_group_by operation based on binary vector column")
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"unsupported data type for group by: field %s is a %s",
+			field.GetName(), field.GetDataType().String())
+	}
+}
+
 func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchema) (groupByFieldId int64, jsonPath string, err error) {
 	if groupByFieldName == "" {
 		return -1, "", nil
@@ -868,6 +902,9 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 		// Extract field name (part before the first '[')
 		fieldName := strings.Split(groupByFieldName, "[")[0]
 		if field, exists := fieldNameMap[fieldName]; exists {
+			if err := checkGroupByFieldType(field); err != nil {
+				return -1, "", err
+			}
 			// Field exists in schema
 			groupByFieldId = field.FieldID
 			// If the field is JSON type, set jsonPath to the full groupByFieldName
@@ -891,6 +928,9 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 	} else {
 		// Case 1: Regular field name (no brackets)
 		if field, exists := fieldNameMap[groupByFieldName]; exists {
+			if err := checkGroupByFieldType(field); err != nil {
+				return -1, "", err
+			}
 			groupByFieldId = field.FieldID
 		} else {
 			// Field not found
@@ -932,6 +972,7 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 
 	// Resolve each name to fieldId (and optional jsonPath).
 	// Multi-field + jsonPath is rejected because this layer carries a single jsonPath.
+	jsonGroupFields := 0
 	for _, name := range groupByFieldNames {
 		fieldId, jsonPath, err := parseGroupByField(name, schema)
 		if err != nil {
@@ -939,6 +980,17 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		}
 		ret.groupByFieldIds = append(ret.groupByFieldIds, fieldId)
 		ret.groupByFieldNames = append(ret.groupByFieldNames, name)
+		// The plan carries a single json_path/json_type, and the executor
+		// asserts at most one JSON group-by field; two bare JSON fields used
+		// to pass here (neither produces a jsonPath) and fail only deep in
+		// execution.
+		if field := typeutil.GetFieldByID(schema, fieldId); field != nil && typeutil.IsJSONType(field.GetDataType()) {
+			jsonGroupFields++
+			if jsonGroupFields > 1 {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					fmt.Sprintf("at most one JSON field can be grouped by, field:%s", name))
+			}
+		}
 		if jsonPath != "" {
 			if len(groupByFieldNames) > 1 {
 				return nil, merr.WrapErrParameterInvalidMsg(

@@ -85,6 +85,9 @@ ScalarIndexStreamMemoryOverhead(
     if (scalar_version < 3) {
         return index_size_in_bytes;
     }
+    if (file_stream && stream_load_info.has_value()) {
+        return stream_load_info->positioned_total_transient_bytes;
+    }
     size_t total_transient_bytes;
     size_t max_task_transient_bytes;
     if (encrypted && stream_load_info.has_value()) {
@@ -730,9 +733,8 @@ IndexFactory::ScalarIndexLoadResourceImpl(
              ? stream_load_info->encrypted
              : milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
                    nullptr);
-    auto file_stream = index_type == milvus::index::INVERTED_INDEX_TYPE ||
-                       index_type == milvus::index::NGRAM_INDEX_TYPE ||
-                       index_type == milvus::index::RTREE_INDEX_TYPE;
+    auto file_stream = index_type != milvus::index::BITMAP_INDEX_TYPE &&
+                       index_type != milvus::index::HYBRID_INDEX_TYPE;
     auto stream_memory_overhead =
         ScalarIndexStreamMemoryOverhead(index_size_in_bytes,
                                         scalar_version,
@@ -921,18 +923,38 @@ IndexFactory::ScalarIndexLoadResource(
     auto use_shared_group =
         scalar_version >= 3 &&
         resolved_index_type != milvus::index::BITMAP_INDEX_TYPE &&
-        resolved_index_type != milvus::index::HYBRID_INDEX_TYPE;
-    if (use_shared_memory_overhead_group != nullptr) {
-        *use_shared_memory_overhead_group = use_shared_group;
+        resolved_index_type != milvus::index::HYBRID_INDEX_TYPE &&
+        resolved_index_type != milvus::index::RTREE_INDEX_TYPE;
+    auto request = ScalarIndexLoadResourceImpl(field_type,
+                                               index_version,
+                                               index_size_in_bytes,
+                                               resolved_params,
+                                               mmap_enable,
+                                               num_rows,
+                                               inspected_stream_load_info);
+    if (scalar_version >= 3 && inspected_stream_load_info.has_value() &&
+        inspected_stream_load_info->retained_sidecar_bytes != 0 &&
+        resolved_index_type != milvus::index::BITMAP_INDEX_TYPE &&
+        resolved_index_type != milvus::index::HYBRID_INDEX_TYPE) {
+        // ReadEntry's payload and the destination offset vector coexist outside
+        // the downloading worker while the family / JSON wrapper initializes.
+        const auto staging = storage::SaturatingMultiply(
+            inspected_stream_load_info->retained_sidecar_bytes, size_t{2});
+        request.max_memory_cost = std::max<uint64_t>(
+            request.max_memory_cost,
+            SaturatingAdd(request.final_memory_cost,
+                          SaturatingAdd(inspected_stream_load_info
+                                            ->positioned_total_transient_bytes,
+                                        staging)));
+        use_shared_group = false;
     }
-
-    return ScalarIndexLoadResourceImpl(field_type,
-                                       index_version,
-                                       index_size_in_bytes,
-                                       resolved_params,
-                                       mmap_enable,
-                                       num_rows,
-                                       inspected_stream_load_info);
+    if (use_shared_memory_overhead_group != nullptr) {
+        *use_shared_memory_overhead_group =
+            use_shared_group && inspected_stream_load_info.has_value() &&
+            request.max_memory_cost - request.final_memory_cost <=
+                inspected_stream_load_info->positioned_total_transient_bytes;
+    }
+    return request;
 }
 
 IndexBasePtr

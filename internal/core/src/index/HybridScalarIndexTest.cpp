@@ -973,6 +973,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
                                     counting_fs);
     ctx.set_for_loading_index(true);
 
+    std::optional<storage::EntryStreamLoadInfo> info;
     auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
         this->type_,
         0,
@@ -981,14 +982,16 @@ TYPED_TEST_P(HybridIndexTestInverted,
         false,
         this->nb_,
         this->index_files_,
-        ctx);
+        ctx,
+        &info);
 
     auto validity_bitmap_bytes = TargetBitmap(this->nb_).size_in_bytes();
     auto resident_bytes = index_size + validity_bitmap_bytes;
     EXPECT_EQ(request.final_memory_cost, resident_bytes);
     EXPECT_EQ(request.final_disk_cost, 0);
     EXPECT_EQ(request.max_memory_cost,
-              std::max<uint64_t>(stream_overhead, resident_bytes));
+              std::max<uint64_t>(info->positioned_total_transient_bytes,
+                                 resident_bytes));
     EXPECT_EQ(request.max_disk_cost, index_size);
     EXPECT_FALSE(request.has_raw_data);
     EXPECT_EQ(counting_fs->OpenInputFileCount(), 1);
@@ -1049,9 +1052,12 @@ TYPED_TEST_P(HybridIndexTestInverted,
         ctx,
         std::move(config));
 
-    auto max_task_overhead =
-        storage::SaturatingMultiply(storage::MaxEntryStreamTaskBytes(),
-                                    storage::kFileStreamBufferMultiplier);
+    storage::MemFileManagerImpl manager(ctx);
+    auto input = manager.OpenInputStream(this->index_files_.front());
+    auto directory_reader =
+        storage::IndexEntryReader::Open(input, input->Size());
+    const auto max_task_overhead = directory_reader->GetStreamLoadInfo()
+                                       .positioned_max_task_transient_bytes;
     ASSERT_TRUE(translator.meta()->loading_overhead_config.has_value());
     ASSERT_TRUE(translator.meta()->loading_overhead_config->memory.has_value());
     EXPECT_EQ(translator.meta()->loading_overhead_config->memory->group,
@@ -1193,9 +1199,67 @@ TYPED_TEST_P(HybridIndexTestInverted,
     auto resident_bytes = index_size + validity_bitmap_bytes;
     EXPECT_EQ(request.final_memory_cost, resident_bytes);
     EXPECT_EQ(request.final_disk_cost, 0);
-    EXPECT_EQ(request.max_memory_cost,
-              std::max<uint64_t>(stream_load_info->total_transient_bytes,
-                                 resident_bytes));
+    EXPECT_EQ(
+        request.max_memory_cost,
+        std::max<uint64_t>(stream_load_info->positioned_total_transient_bytes,
+                           resident_bytes));
+}
+
+TYPED_TEST_P(HybridIndexTestInverted, OffsetSidecarStagingIsRequestLocal) {
+    const auto collection_id = this->field_meta_.collection_id;
+    auto cipher =
+        std::make_shared<milvus::test::CollectionBoundPlannerCipherPlugin>(
+            collection_id);
+    auto& plugins = storage::PluginLoader::GetInstance();
+    plugins.addPluginForTest(cipher);
+    auto cleanup = folly::makeGuard([&] { plugins.unload("CipherPlugin"); });
+    storage::FileManagerContext ctx(
+        this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
+    ctx.set_for_loading_index(true);
+    storage::MemFileManagerImpl manager(ctx);
+    const auto path =
+        manager.GetRemoteIndexObjectPrefix() + "/null_offset_staging";
+    const std::vector<uint8_t> nulls(2 * storage::kStreamSliceAlignment, 0);
+    {
+        storage::IndexEntryEncryptedLocalWriter writer(
+            path,
+            this->fs_,
+            cipher,
+            7,
+            collection_id,
+            this->chunk_manager_->GetRootPath(),
+            storage::kStreamSliceAlignment);
+        writer.WriteEntry("index_null_offset", nulls.data(), nulls.size());
+        writer.WriteEntry(
+            INDEX_NON_EXIST_OFFSET_FILE_NAME, nulls.data(), nulls.size());
+        writer.Finish();
+    }
+    const auto file_size = this->fs_->GetFileInfo(path).ValueOrDie().size();
+    for (const auto& type : std::vector<std::string>{
+             INVERTED_INDEX_TYPE, ASCENDING_SORT, MARISA_TRIE}) {
+        SCOPED_TRACE(type);
+        std::map<std::string, std::string> params{
+            {INDEX_TYPE, type}, {SCALAR_INDEX_ENGINE_VERSION, "3"}};
+        std::optional<storage::EntryStreamLoadInfo> info;
+        bool shared = true;
+        const auto request =
+            index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+                DataType::JSON,
+                0,
+                file_size,
+                params,
+                true,
+                this->nb_,
+                {path},
+                ctx,
+                &info,
+                &shared);
+        ASSERT_TRUE(info.has_value());
+        EXPECT_EQ(info->retained_sidecar_bytes, 2 * nulls.size());
+        EXPECT_FALSE(shared);
+        EXPECT_GE(request.max_memory_cost - request.final_memory_cost,
+                  info->positioned_total_transient_bytes + 4 * nulls.size());
+    }
 }
 
 TYPED_TEST_P(HybridIndexTestInverted, ScalarV3LoadingRequiresStreamLoadInfo) {
@@ -1443,6 +1507,7 @@ REGISTER_TYPED_TEST_SUITE_P(
     ResourceEstimateUsesInternalInvertedIndexType,
     ScalarIndexLoadingOverheadUsesBudgetAndSingleTaskBounds,
     EncryptedFileAwareResourceEstimateUsesFullOverhead,
+    OffsetSidecarStagingIsRequestLocal,
     ScalarV3LoadingRequiresStreamLoadInfo);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,

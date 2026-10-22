@@ -685,7 +685,7 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	// analysis of searchWithAggPipe makes these unreachable, but surfacing
 	// them as service-internal errors is cheaper than a process-level panic
 	// if a future refactor breaks the wire.
-	if len(inputs) == 0 {
+	if len(inputs) < 2 {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator: missing inputs (pipeline wire)")
 	}
 	reducedList, ok := inputs[0].([]*milvuspb.SearchResults)
@@ -697,7 +697,11 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	if len(reducedList) == 0 || reducedList[0] == nil || reducedList[0].GetResults() == nil {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator received empty reduced results")
 	}
-	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx)
+	metrics, ok := inputs[1].([]string)
+	if !ok || len(metrics) != 1 {
+		return nil, merr.WrapErrServiceInternal("aggregateOperator: expected one search metric (pipeline wire)")
+	}
+	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx, metrics[0])
 	nqAggResults, err := computer.Compute(ctx)
 	if err != nil {
 		return nil, err
@@ -1287,7 +1291,7 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		partitionIDs:       t.GetPartitionIDs(),
 		node:               t.node,
 		namespace:          t.request.Namespace,
-		planNamespace:      namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace),
+		planNamespace:      NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace),
 	}, nil
 }
 
@@ -3000,7 +3004,7 @@ var searchWithAggPipe = &pipelineDef{
 		},
 		{
 			name:    "agg",
-			inputs:  []string{"reduced"},
+			inputs:  []string{"reduced", "metrics"},
 			outputs: []string{pipelineOutput},
 			opName:  aggOp,
 		},

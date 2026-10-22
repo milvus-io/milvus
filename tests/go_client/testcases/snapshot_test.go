@@ -1278,7 +1278,7 @@ func requireSnapshotL0Delete(t *testing.T, ctx context.Context, mc *miniogo.Clie
 		require.NoError(t, err)
 		return data
 	}
-	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(read(metadataURI))
+	metadata, err := snapshotio.ParseSnapshotMetadata(read(metadataURI))
 	require.NoError(t, err)
 	var segments []*datapb.SegmentDescription
 	for _, manifest := range metadata.GetManifestList() {

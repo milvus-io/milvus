@@ -7572,7 +7572,7 @@ func (s *SearchPipelineSuite) TestAggregateOperatorRun() {
 	// aggregateOp consumes the single reduced *milvuspb.SearchResults produced
 	// upstream by searchReduceOp.
 	reduced := &milvuspb.SearchResults{Status: merr.Success(), Results: data}
-	outputs, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{reduced})
+	outputs, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{reduced}, []string{"IP"})
 	s.NoError(err)
 	s.Len(outputs, 1)
 
