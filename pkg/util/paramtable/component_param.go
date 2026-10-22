@@ -811,7 +811,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Version:      "2.0.0",
 		DefaultValue: strconv.Itoa(DefaultMiddlePriorityThreadCoreCoefficient),
 		Doc: "Thread-to-core ratio for each of the independent middle priority " +
-			"and search fanout pools; both follow maxThreadsSize",
+			"and search fanout pools; both follow maxThreadsSize.",
 		Export: true,
 	}
 	p.MiddlePriorityThreadCoreCoefficient.Init(base.mgr)
