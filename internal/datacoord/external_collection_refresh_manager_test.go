@@ -175,7 +175,7 @@ func mockRefreshSnapshotReads(t *testing.T, read func() ([]byte, error)) {
 		if err != nil {
 			return nil, err
 		}
-		return snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
+		return snapshotio.ParseSnapshotMetadata(data)
 	}
 	metadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).To(func(string, string, *indexpb.StorageConfig, packed.ExternalSpecContext) (*datapb.SnapshotMetadata, error) {
 		return parse()
@@ -198,7 +198,6 @@ func TestRefreshMilvusTableInvalidMetadataFailsJob(t *testing.T) {
 	}{
 		{"truncated_json", `{"corrupt manifest`, false, false, "failed to parse metadata JSON"},
 		{"empty_metadata", "", false, false, "failed to parse metadata JSON"},
-		{"unsupported_version", `{"format_version":99999}`, false, false, "snapshot format version 99999 is too new"},
 		{"corrupted_between_validation_and_explore", `{"corrupt manifest`, true, false, "failed to parse metadata JSON"},
 		{"failed_state_persistence_retried", `{"corrupt manifest`, false, true, "failed to parse metadata JSON"},
 	} {
@@ -353,7 +352,6 @@ func TestCreateTasksForJobSnapshotErrorCodes(t *testing.T) {
 		wantErr error
 	}{
 		{"corrupt_metadata", `{`, merr.ErrDataIntegrity},
-		{"unsupported_version", `{"format_version":99999}`, merr.ErrOperationNotSupported},
 	} {
 		for _, failDuringExplore := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/explore=%t", tc.name, failDuringExplore), func(t *testing.T) {
@@ -426,7 +424,7 @@ func TestRefreshMilvusTableMetadataReadTimeoutRetries(t *testing.T) {
 }
 
 func TestCreateTasksForJobInvalidMetadataRedactsSource(t *testing.T) {
-	_, metadataErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(`{"corrupt manifest`))
+	_, metadataErr := snapshotio.ParseSnapshotMetadata([]byte(`{"corrupt manifest`))
 	require.ErrorIs(t, metadataErr, merr.ErrDataIntegrity)
 	// Source validation rejects userinfo before reading. Inject only the
 	// dependency's real parse error here to test diagnostic redaction in isolation.
