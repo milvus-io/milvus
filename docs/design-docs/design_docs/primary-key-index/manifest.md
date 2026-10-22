@@ -16,11 +16,11 @@ are complete. The manifest records this state.
 This document describes the manifest service. The service runs in DataCoord.
 It is the only durable writer of the manifests. It does these tasks:
 
-- It records the owner of each pchannel: a claim stores the pchannel term.
 - It applies edits (flush, compaction) to the manifest of one vchannel.
 - It stores each manifest version as an object and points to it from the meta
   kv (etcd or TiKV).
-- It fences an old owner of a pchannel by its pchannel term.
+- It fences an old owner of a pchannel by the pchannel term that the
+  streaming coordinator records.
 - It deletes the manifest bodies and SST files that no manifest needs (GC).
 
 ## Scope
@@ -36,7 +36,7 @@ In scope:
 Out of scope (future work):
 
 - The streaming node side that uploads SSTs and commits flushes (snapshot).
-- The streaming node recovery that claims a pchannel and replays the WAL.
+- The streaming node recovery that reads the manifests and replays the WAL.
 - Compaction of SSTs. The edit rule and the GC input exist, but no task uses
   them.
 - Cleanup of all primary key index objects after a collection drop.
@@ -71,10 +71,6 @@ message ManifestPointer {
   int64 version = 1;
   string body_key = 2; // complete object key of the manifest body
 }
-
-message PChannelClaim {
-  int64 pchannel_term = 1; // term of the current owner of the pchannel
-}
 ```
 
 Rules of the model:
@@ -106,13 +102,18 @@ Rules of the model:
 
 | Store | Key | Value |
 |---|---|---|
-| Meta kv | `<metaRoot>/pkindex-meta/claim/<pchannel>` | `PChannelClaim` |
 | Meta kv | `<metaRoot>/pkindex-meta/manifest/<collectionID>/<vchannel>` | `ManifestPointer` |
 | Object storage | `<rootPath>/pk_index/<collectionID>/<vchannel>/manifest/<version>-<uuid>.pb` | `Manifest` body |
 | Object storage | `<rootPath>/pk_index/<collectionID>/<vchannel>/sst/<id>.sst` | SST file |
 
-- The meta keys come from `ClaimKey` and `PointerKey` in
+- The pointer keys come from `PointerKey` in
   `internal/datacoord/pkindex/manifest`.
+- A flush also reads `<metaRoot>/streamingcoord-meta/pchannel/<pchannel>`, the
+  `PChannelMeta` of the streaming coordinator. The manifest service does not
+  write this key. Its name comes from `BuildPChannelInfoPath` in
+  `internal/metastore/kv/streamingcoord`, which the streaming coordinator
+  catalog also uses. In MixCoord, DataCoord and the streaming coordinator use
+  the same meta kv and the same meta root path.
 - `pk_index` is `common.PKIndexPath`. No other storage prefix starts with it, so
   the existing orphan scans do not see these objects.
 - `sst_base_path` is `<rootPath>/pk_index/<collectionID>/<vchannel>/sst`. The
@@ -121,8 +122,6 @@ Rules of the model:
   keys of the primary key index. The writer of the SSTs, the manifest writer
   and GC all use it, so they cannot disagree. The first version records the
   value, and readers and GC use the recorded value.
-- A claim record stays for the life of the pchannel. The set of pchannels is
-  fixed, so GC does not delete claim records.
 - The writer never overwrites a body. Each body key has a new UUID. Two writers
   that commit the same version at the same time write two different objects.
   The conditional pointer write selects one of them. The body of the other
@@ -137,28 +136,6 @@ to the current version. The edit rules are private functions of the manifest
 writer in `internal/datacoord/pkindex/manifest`. They do not change the
 current version.
 
-### Claim
-
-Recovery claims a pchannel once each time it opens the pchannel, with
-`ClaimPChannel(pchannel, pchannel_term)`. One claim covers all vchannels of the
-pchannel. The claim does not change any manifest. The service rejects a name
-that is not a pchannel name, for example a vchannel name, with
-`ServiceInternal`: a claim on such a name would create a record that no flush
-checks.
-
-| Condition | Result |
-|---|---|
-| No claim record | Create the record on the condition `KeyNotExist(claim key)` |
-| Claim term > recorded term | Raise the record on the condition `ValueEqual(claim key, loaded value)` |
-| Claim term = recorded term | No write. Success |
-| Claim term < recorded term | `ErrFenced` |
-
-A claim always reads the record from the meta kv, not from the cache.
-
-The claim happens at open, not at the first flush. This closes a window: after
-a new owner takes the pchannel and before its first flush, a late flush from
-the old owner would otherwise succeed.
-
 ### Flush
 
 The snapshot side commits a flush with `CommitFlush`. A flush carries the
@@ -166,13 +143,21 @@ vchannel, the term, the primary key data type, the new SSTs (newest first), and
 the new checkpoint. The pchannel of the flush is the pchannel part of the
 vchannel name.
 
-The flush term is first checked against the claim record of the pchannel:
+The flush term is first checked against `channel.term` of the pchannel meta.
+The manager reads the meta from the meta kv on every flush. It keeps the
+stored bytes for the condition of the pointer write, and it compares the
+decoded term:
 
 | Condition | Result |
 |---|---|
-| No claim record | `ErrNotClaimed` |
-| Flush term < recorded term | `ErrFenced` |
-| Flush term > recorded term | `ErrNotClaimed`. The caller must claim first |
+| No pchannel meta | `ErrTermNotAssigned` |
+| Flush term < meta term | `ErrFenced` |
+| Flush term > meta term, also after one more read | `ErrTermNotAssigned` |
+| Flush term = meta term | Continue with the edit |
+
+The streaming coordinator increases the term when it assigns the pchannel. It
+stores the new term before the streaming node gets the assignment, so a
+correct streaming node never sends a term above the stored term.
 
 Then the flush is applied to the manifest:
 
@@ -197,7 +182,7 @@ Notes:
 - A flush with no SSTs only moves the checkpoint.
 - The duplicate check runs only when the checkpoint moves forward.
 - The pointer write of a flush is in the same meta kv transaction as a
-  condition on the claim record. See "Commit Steps and Crash Windows".
+  condition on the pchannel meta. See "Commit Steps and Crash Windows".
 
 ### Compaction
 
@@ -247,13 +232,14 @@ Manager (holds the vchannel lock)
   4. Write the pointer in one meta kv transaction:
        first version: on the condition KeyNotExist(pointer key)
        later version: on the condition ValueEqual(pointer key, loaded value)
-       a flush also: on the condition ValueEqual(claim key, claim of the
-       flush term); the transaction does not write the claim key
+       a flush also: on the condition ValueEqual(pchannel meta key, bytes
+       that the flush term was checked against); the transaction does not
+       write the pchannel meta key
   5. On an error in step 4, read the pointer again, with a new context
      (no cancel from the caller, 5 s timeout).
        It names the new body: the commit took effect.
-       Otherwise: forget the cache entries of the vchannel and of the
-       pchannel, and return a retryable error.
+       Otherwise: forget the cache entry of the vchannel, and return a
+       retryable error.
   6. Put the new version in the cache and return it.
 ```
 
@@ -266,21 +252,27 @@ The pointer value is the deterministic encoding of `ManifestPointer`. The body
 key has a UUID, so each version has a unique pointer value. `ValueEqual` thus
 fails when any other writer committed in between.
 
-The claim condition keeps fencing in the meta kv when the cache of the claim
-record is stale, for example when two DataCoords are live at the same time and
-the other one raised the record.
+The pchannel meta condition makes the term check and the pointer write one
+atomic step. In one term, the streaming coordinator changes the value of the
+pchannel meta only when it marks the pchannel assigned or unavailable. A new
+term changes the value too. If the value changes between the check and the
+write, the condition fails and the flush gets a retryable error. The retry
+reads the pchannel meta again and checks the term again. A failed condition
+of the pointer or of the pchannel meta takes the same path: the caller
+retries. The manager has no retry loop of its own.
 
 - **etcd.** The condition is a compare in the transaction. etcd evaluates it
   atomically with the writes.
 - **TiKV.** TiKV transactions are optimistic and check conflicts only on the
-  keys that they write or lock. A read of the claim key at the start timestamp
-  does not see a claim that commits later, and an optimistic lock of the key
-  makes every two flushes of the pchannel conflict. When a value predicate
+  keys that they write or lock. A read of the pchannel meta key at the start
+  timestamp does not see an assignment that commits later, and an optimistic
+  lock of the key makes every two flushes of the pchannel conflict. When a value predicate
   targets a key that the call does not write, the TiKV meta kv makes the
   transaction pessimistic. It takes a pessimistic lock (`LockKeys`) on every
   predicate key at a fresh timestamp and evaluates the predicates on the
-  locked values. A claim that commits before the lock is seen by the
-  predicate. A claim that starts while the lock is held waits for the flush.
+  locked values. A pchannel meta write that commits before the lock is seen
+  by the predicate. A pchannel meta write that starts while the lock is held
+  waits for the flush.
   Flushes of different vchannels of one pchannel wait for each other on the
   lock instead of failing. A waiter that wakes after another writer committed
   takes the lock again at a newer timestamp, until the request times out. A
@@ -288,9 +280,6 @@ the other one raised the record.
   its locks. The same rule applies to every caller of the TiKV meta kv with
   this predicate shape. One existing caller has it: the recovery snapshot of
   the streaming node guards on an unchanged checkpoint key.
-
-A claim write that returns an error is decided in the same way: the manager
-reads the claim record back.
 
 Crash windows:
 
@@ -300,20 +289,16 @@ Crash windows:
 | After step 3, before step 4 | An unreferenced body | GC deletes it after `grace` while its version is above the current version. After a later commit reaches its version, GC deletes it by the body retention rules |
 | During step 4, result unknown | Pointer is old or new | Step 5 reads the pointer and decides |
 | After step 4, before the reply | New version is committed | A flush retry with the same term is idempotent |
-| During a claim write, result unknown | Record is old or new | The manager reads the record and decides |
 
 Cache rules:
 
-- The cache entry of a vchannel, and of a pchannel claim record, is filled on
-  its first use. DataCoord does not load all pointers at start.
-- The manager forgets the entries after a failed write. The next edit reads
-  them again.
-- A flush whose term is above the cached claim term reads the claim record
-  again before it returns `ErrNotClaimed`, because a claim through another
-  DataCoord can have raised it. A cached term can only be at or below the
-  stored term, so a flush term below the cached term is fenced without a read.
-- The cached claim term only goes up. A concurrent read of an older record
-  does not lower it.
+- The cache entry of a vchannel is filled on its first use. DataCoord does
+  not load all pointers at start.
+- The manager forgets the entry after a failed write. The next edit reads it
+  again.
+- The manager does not cache the pchannel meta. Each flush reads it, because
+  the condition of the write needs its current bytes. A flush occurs once for
+  each vchannel handover, so the read is rare.
 - `GetRecoveryManifests` never uses the cache. It reads the pointers from the
   meta kv.
 - The conditional writes keep the commits correct when the cache is stale.
@@ -354,10 +339,12 @@ The term is `PChannelInfo.term`. The streaming coordinator increases it each
 time it assigns the pchannel to a streaming node. The term does not depend on
 the WAL backend.
 
-- The term is recorded once for each pchannel, in the claim record. A recovery
-  of a pchannel with many vchannels makes one claim, and no manifest changes.
-- A claim or a flush with a term below the recorded term gets `ErrFenced`.
-- A flush with a term above the recorded term gets `ErrNotClaimed`.
+- The streaming coordinator records the term once for each pchannel, in the
+  pchannel meta. The manifest service reads it there and keeps no term record
+  of its own. A recovery of a pchannel with many vchannels writes nothing to
+  the manifest service before its first flush.
+- A flush with a term below the meta term gets `ErrFenced`.
+- A flush with a term above the meta term gets `ErrTermNotAssigned`.
 - A fenced caller is not the owner of the pchannel. It must stop the writes on
   that pchannel and must not retry.
 - The checkpoint rule alone rejects most late flushes. The term also rejects a
@@ -385,19 +372,18 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 |---|---|---|---|
 | Service has no manager yet | Service start | `ServiceNotReady` | Yes |
 | `collection_id` is not positive, or `vchannel` is empty, `.`, `..`, or contains `/` | Request check, `CommitFlush`, each target of `GetRecoveryManifests` | `ServiceInternal` | No (caller bug) |
-| `pchannel` is empty, `.`, `..`, contains `/`, or is not a pchannel name | Request check, `ClaimPChannel` | `ServiceInternal` | No (caller bug) |
 | No targets, more than 10000 targets, or a repeated target | Request check, `GetRecoveryManifests` | `ServiceInternal` | No (caller bug) |
-| `pchannel_term` is not positive | Request check, `ClaimPChannel`, `CommitFlush` | `ServiceInternal` | No (caller bug) |
+| `pchannel_term` is not positive | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | The `vchannel` name has no pchannel part | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `pk_data_type` is not `Int64` or `VarChar` | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `checkpoint_time_tick` is 0 | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
-| `ErrFenced` | Claim, flush | `ChannelNotAvailable` | No. Stop the writes on the pchannel |
+| `ErrFenced` | Flush | `ChannelNotAvailable` | No. Stop the writes on the pchannel |
 | Meta kv or object storage failure (`ErrUnavailable`) | Load, write, read-back, walk | `ServiceUnavailable` | Yes |
 | Object storage failure that a retry does not fix: permission denied, bucket not found, invalid credentials, entity too large | Load, write | Its own code (`IoPermissionDenied`, `IoBucketNotFound`, `IoInvalidCredentials`, `IoEntityTooLarge`) | No |
-| Pointer or claim write failed and the read-back does not show the new value | Commit step 5, claim | `ServiceUnavailable` | Yes |
+| Pointer write failed, for example on a failed condition, and the read-back does not show the new value | Commit step 5 | `ServiceUnavailable` | Yes |
 | Missing body object (`ErrCorrupted`) | Load | `DataIntegrity` | No |
-| Body, pointer or claim record does not decode, or has no body key, version 0 or term 0, or versions differ (`ErrCorrupted`) | Load | `DataIntegrity` | No |
-| `ErrNotClaimed`, `ErrNoManifest`, `ErrCheckpointRegressed`, `ErrDuplicateSST`, `ErrStaleEdit`, `ErrSchemaMismatch` | Edits | `ServiceInternal` | No (caller bug) |
+| Body, pointer or pchannel meta does not decode, or has no body key, version 0 or term 0, or versions differ (`ErrCorrupted`) | Load | `DataIntegrity` | No |
+| `ErrTermNotAssigned`, `ErrNoManifest`, `ErrCheckpointRegressed`, `ErrDuplicateSST`, `ErrStaleEdit`, `ErrSchemaMismatch` | Edits | `ServiceInternal` | No (caller bug) |
 | Error with no category | Any | `ServiceInternal` | No |
 
 Notes:
@@ -417,8 +403,8 @@ Notes:
   fails a request check is a caller bug or a version mismatch, so it gets
   `ServiceInternal`, not `ParameterInvalid`, which marks a user input error.
 - The edit errors are caller bugs. A correct caller does not send them.
-  `ErrNotClaimed` from a flush means that the caller did not claim the
-  pchannel with its term first.
+  `ErrTermNotAssigned` from a flush means that the streaming coordinator has no
+  pchannel meta at the flush term.
 - The client uses `merr.CheckRPCCall`, so the caller receives the merr code.
   The client translates a connection failure or a gRPC transport error that has
   no merr code to `ServiceUnavailable` and keeps the cause. It returns a
@@ -536,7 +522,7 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
 ## Known Limits and Follow-ups
 
 - **Streaming node side.** The snapshot side (SST upload, flush commit, handoff)
-  and recovery (pchannel claim, `GetRecoveryManifests`, WAL replay from the checkpoint)
+  and recovery (`GetRecoveryManifests`, WAL replay from the checkpoint)
   are not in this work.
 - **Compaction.** No compaction task exists. DataCoord passes no in-flight
   output source to GC yet. A compaction task must add one before it uploads
@@ -564,10 +550,9 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
   objects. The committed manifest can then refer to deleted files.
 - **Stale cache.** After a DataCoord failover, an old DataCoord can keep a stale
   cache entry. It refreshes the entry only after a failed pointer write.
-- **Two live coordinators.** The manager does not read the meta kv again for a
-  flush that changes nothing. When two DataCoords are live at the same time, a
-  flush retry that changes nothing can succeed on a stale cache for a fenced
-  owner. The first flush from that owner that changes the manifest fails the
-  claim condition of the write. The manager then forgets the cache entries and
-  returns a retryable error. The retry reads the claim record again and gets
-  `ErrFenced`. The fenced owner does not write bad data.
+- **Fenced retry that changes nothing.** A flush that changes nothing does not
+  write, so it has no condition on the pchannel meta. The term check before it
+  reads the meta kv, so a fenced owner gets `ErrFenced`. The only gap is a
+  term change between that read and the return. The fenced owner does not
+  write bad data: its next flush that changes the manifest fails the term
+  check or the condition of the write.

@@ -27,9 +27,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 var (
@@ -57,6 +60,9 @@ type FakeMetaStore struct {
 	// LoadErr is returned only by the next Load of that key.
 	LoadErr    error
 	LoadErrKey string
+	// AfterLoad is called by the next Load after it reads, without the
+	// store lock held.
+	AfterLoad func()
 	// MultiLoadErr is returned by the next MultiLoad.
 	MultiLoadErr error
 	// ListErr is returned by the next List.
@@ -77,12 +83,18 @@ func (p *FakeMetaStore) Load(ctx context.Context, key string) (string, bool, err
 		return "", false, err
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	hook := p.AfterLoad
+	p.AfterLoad = nil
 	if err := p.LoadErr; err != nil && (p.LoadErrKey == "" || p.LoadErrKey == key) {
 		p.LoadErr, p.LoadErrKey = nil, ""
+		p.mu.Unlock()
 		return "", false, err
 	}
 	v, ok := p.kv[key]
+	p.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return v, ok, nil
 }
 
@@ -146,6 +158,25 @@ func (p *FakeMetaStore) Put(key, value string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.kv[key] = value
+}
+
+// PutPChannelMeta writes the streamingcoord pchannel meta of pchannel with term
+// and state, without a predicate.
+func (p *FakeMetaStore) PutPChannelMeta(pchannel string, term int64, state streamingpb.PChannelMetaState) {
+	b, err := proto.Marshal(&streamingpb.PChannelMeta{
+		Channel: &streamingpb.PChannelInfo{Name: pchannel, Term: term},
+		State:   state,
+	})
+	if err != nil {
+		panic(err)
+	}
+	p.Put(streamingcoord.BuildPChannelInfoPath(pchannel), string(b))
+}
+
+// AssignPChannel writes the streamingcoord pchannel meta of pchannel in the
+// assigned state at term, without a predicate.
+func (p *FakeMetaStore) AssignPChannel(pchannel string, term int64) {
+	p.PutPChannelMeta(pchannel, term, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED)
 }
 
 // List returns all keys with prefix and their values.

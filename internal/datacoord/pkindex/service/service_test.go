@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -46,10 +47,6 @@ func newService() (*Service, *manifest.FakeMetaStore, *manifest.FakeObjectStore)
 	return s, p, st
 }
 
-func claimReq(term int64) *pkindexpb.ClaimPChannelRequest {
-	return &pkindexpb.ClaimPChannelRequest{Pchannel: pch, PchannelTerm: term}
-}
-
 func flushReq(vchannel string, term int64, sst int64, tick uint64) *pkindexpb.CommitFlushRequest {
 	return &pkindexpb.CommitFlushRequest{
 		CollectionId: 1, Vchannel: vchannel, PchannelTerm: term, PkDataType: schemapb.DataType_Int64,
@@ -63,12 +60,6 @@ func getReq(vchannels ...string) *pkindexpb.GetRecoveryManifestsRequest {
 		req.Targets = append(req.Targets, &pkindexpb.ManifestTarget{CollectionId: 1, Vchannel: v})
 	}
 	return req
-}
-
-// claim claims pch for term on s and requires success.
-func claim(t *testing.T, s *Service, term int64) {
-	resp, err := s.ClaimPChannel(context.Background(), claimReq(term))
-	require.NoError(t, merr.CheckRPCCall(resp, err))
 }
 
 // statusErr turns the status of a response back into the error a client sees.
@@ -89,18 +80,15 @@ func TestNotReady(t *testing.T) {
 	get, err := s.GetRecoveryManifests(ctx, getReq(vch))
 	require.NoError(t, err)
 	assertCode(t, get.GetStatus(), merr.Code(merr.ErrServiceNotReady), true)
-	c, err := s.ClaimPChannel(ctx, claimReq(1))
-	require.NoError(t, err)
-	assertCode(t, c.GetStatus(), merr.Code(merr.ErrServiceNotReady), true)
 	flush, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 1))
 	require.NoError(t, err)
 	assertCode(t, flush.GetStatus(), merr.Code(merr.ErrServiceNotReady), true)
 }
 
 func TestFlow(t *testing.T) {
-	s, _, _ := newService()
+	s, p, _ := newService()
 	ctx := context.Background()
-	claim(t, s, 2)
+	p.AssignPChannel(pch, 2)
 
 	flush, err := s.CommitFlush(ctx, flushReq(vch, 2, 7, 9))
 	require.NoError(t, merr.CheckRPCCall(flush, err))
@@ -128,7 +116,7 @@ func TestFlow(t *testing.T) {
 func TestRecoveryManifestsItemStatus(t *testing.T) {
 	s, p, _ := newService()
 	ctx := context.Background()
-	claim(t, s, 1)
+	p.AssignPChannel(pch, 1)
 	_, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 1))
 	require.NoError(t, err)
 	p.Put(manifest.PointerKey(1, "p_1v1"), "\xff")
@@ -173,49 +161,45 @@ func TestRecoveryManifestsInvalidTargets(t *testing.T) {
 }
 
 func TestFenced(t *testing.T) {
-	s, _, _ := newService()
+	s, p, _ := newService()
 	ctx := context.Background()
-	claim(t, s, 2)
+	p.AssignPChannel(pch, 2)
 
 	fenced, err := s.CommitFlush(ctx, flushReq(vch, 1, 8, 10))
 	require.NoError(t, err)
 	assertCode(t, fenced.GetStatus(), merr.Code(merr.ErrChannelNotAvailable), false)
 	assert.True(t, errors.Is(statusErr(fenced.GetStatus()), merr.ErrChannelNotAvailable))
-
-	oldClaim, err := s.ClaimPChannel(ctx, claimReq(1))
-	require.NoError(t, err)
-	assertCode(t, oldClaim.GetStatus(), merr.Code(merr.ErrChannelNotAvailable), false)
 }
 
-func TestNotClaimed(t *testing.T) {
-	s, _, _ := newService()
+func TestTermNotAssigned(t *testing.T) {
+	s, p, _ := newService()
 	ctx := context.Background()
 	resp, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 1))
 	require.NoError(t, err)
 	assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 
-	claim(t, s, 1)
+	p.AssignPChannel(pch, 1)
 	resp, err = s.CommitFlush(ctx, flushReq(vch, 2, 1, 1))
 	require.NoError(t, err)
 	assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 }
 
 func TestCheckpointRegressed(t *testing.T) {
-	s, _, _ := newService()
+	s, p, _ := newService()
 	ctx := context.Background()
-	claim(t, s, 1)
+	p.AssignPChannel(pch, 1)
 	_, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 9))
 	require.NoError(t, err)
-	claim(t, s, 2)
+	p.AssignPChannel(pch, 2)
 	resp, err := s.CommitFlush(ctx, flushReq(vch, 2, 2, 5))
 	require.NoError(t, err)
 	assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 }
 
 func TestDuplicateSST(t *testing.T) {
-	s, _, _ := newService()
+	s, p, _ := newService()
 	ctx := context.Background()
-	claim(t, s, 1)
+	p.AssignPChannel(pch, 1)
 	_, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 9))
 	require.NoError(t, err)
 	resp, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 10))
@@ -224,9 +208,9 @@ func TestDuplicateSST(t *testing.T) {
 }
 
 func TestSchemaMismatch(t *testing.T) {
-	s, _, _ := newService()
+	s, p, _ := newService()
 	ctx := context.Background()
-	claim(t, s, 1)
+	p.AssignPChannel(pch, 1)
 	_, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 9))
 	require.NoError(t, err)
 	req := flushReq(vch, 1, 2, 10)
@@ -246,21 +230,21 @@ func TestMetaStoreUnavailable(t *testing.T) {
 	require.Len(t, get.GetEntries(), 1)
 	assertCode(t, get.GetEntries()[0].GetStatus(), merr.Code(merr.ErrServiceUnavailable), true)
 
-	p.WriteErr = errors.New("etcd down")
-	c, err := s.ClaimPChannel(ctx, claimReq(1))
-	require.NoError(t, err)
-	assertCode(t, c.GetStatus(), merr.Code(merr.ErrServiceUnavailable), true)
-
-	claim(t, s, 1)
-	p.WriteErr = errors.New("etcd down")
+	p.AssignPChannel(pch, 1)
+	p.LoadErr = errors.New("etcd down")
 	flush, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 1))
+	require.NoError(t, err)
+	assertCode(t, flush.GetStatus(), merr.Code(merr.ErrServiceUnavailable), true)
+
+	p.WriteErr = errors.New("etcd down")
+	flush, err = s.CommitFlush(ctx, flushReq(vch, 1, 1, 1))
 	require.NoError(t, err)
 	assertCode(t, flush.GetStatus(), merr.Code(merr.ErrServiceUnavailable), true)
 }
 
 func TestObjectStoreUnavailable(t *testing.T) {
-	s, _, st := newService()
-	claim(t, s, 1)
+	s, p, st := newService()
+	p.AssignPChannel(pch, 1)
 	st.WriteErr = errors.New("object storage down")
 	resp, err := s.CommitFlush(context.Background(), flushReq(vch, 1, 1, 1))
 	require.NoError(t, err)
@@ -270,7 +254,7 @@ func TestObjectStoreUnavailable(t *testing.T) {
 func TestMissingBody(t *testing.T) {
 	s, p, _ := newService()
 	ctx := context.Background()
-	claim(t, s, 1)
+	p.AssignPChannel(pch, 1)
 	_, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 1))
 	require.NoError(t, err)
 
@@ -284,7 +268,7 @@ func TestMissingBody(t *testing.T) {
 
 func TestEmptyPointer(t *testing.T) {
 	s, p, st := newService()
-	claim(t, s, 1)
+	p.AssignPChannel(pch, 1)
 	p.Put(manifest.PointerKey(1, vch), "")
 	st.ReadErr = errors.New("object name cannot be empty")
 	flush, err := s.CommitFlush(context.Background(), flushReq(vch, 1, 1, 1))
@@ -292,12 +276,9 @@ func TestEmptyPointer(t *testing.T) {
 	assertCode(t, flush.GetStatus(), merr.Code(merr.ErrDataIntegrity), false)
 }
 
-func TestCorruptClaimRecord(t *testing.T) {
+func TestCorruptPChannelMeta(t *testing.T) {
 	s, p, _ := newService()
-	p.Put(manifest.ClaimKey(pch), "\xff")
-	c, err := s.ClaimPChannel(context.Background(), claimReq(1))
-	require.NoError(t, err)
-	assertCode(t, c.GetStatus(), merr.Code(merr.ErrDataIntegrity), false)
+	p.Put(streamingcoord.BuildPChannelInfoPath(pch), "\xff")
 	flush, err := s.CommitFlush(context.Background(), flushReq(vch, 1, 1, 1))
 	require.NoError(t, err)
 	assertCode(t, flush.GetStatus(), merr.Code(merr.ErrDataIntegrity), false)
@@ -312,7 +293,7 @@ func TestToMerr(t *testing.T) {
 	}{
 		{"fenced", manifest.ErrFenced, merr.Code(merr.ErrChannelNotAvailable), false},
 		{"wrapped fenced", errors.Wrap(manifest.ErrFenced, "context"), merr.Code(merr.ErrChannelNotAvailable), false},
-		{"not claimed", manifest.ErrNotClaimed, merr.Code(merr.ErrServiceInternal), false},
+		{"term not assigned", manifest.ErrTermNotAssigned, merr.Code(merr.ErrServiceInternal), false},
 		{"no manifest", manifest.ErrNoManifest, merr.Code(merr.ErrServiceInternal), false},
 		{"checkpoint regressed", manifest.ErrCheckpointRegressed, merr.Code(merr.ErrServiceInternal), false},
 		{"duplicate sst", manifest.ErrDuplicateSST, merr.Code(merr.ErrServiceInternal), false},
@@ -340,9 +321,9 @@ func TestToMerrFencedKeepsCause(t *testing.T) {
 }
 
 func TestInvalidTarget(t *testing.T) {
-	s, _, _ := newService()
+	s, p, _ := newService()
 	ctx := context.Background()
-	claim(t, s, 1)
+	p.AssignPChannel(pch, 1)
 	cases := []struct {
 		name         string
 		collectionID int64
@@ -374,29 +355,9 @@ func TestInvalidTarget(t *testing.T) {
 	}
 }
 
-func TestInvalidClaim(t *testing.T) {
-	s, _, _ := newService()
-	cases := map[string]*pkindexpb.ClaimPChannelRequest{
-		"empty pchannel":    {Pchannel: "", PchannelTerm: 1},
-		"slash in pchannel": {Pchannel: "a/b", PchannelTerm: 1},
-		"dot dot pchannel":  {Pchannel: "..", PchannelTerm: 1},
-		"vchannel name":     {Pchannel: "by-dev-dml_0_449v0", PchannelTerm: 1},
-		"control channel":   {Pchannel: "by-dev-dml_0_vcchan", PchannelTerm: 1},
-		"zero term":         {Pchannel: pch, PchannelTerm: 0},
-		"negative term":     {Pchannel: pch, PchannelTerm: -1},
-	}
-	for name, req := range cases {
-		t.Run(name, func(t *testing.T) {
-			resp, err := s.ClaimPChannel(context.Background(), req)
-			require.NoError(t, err)
-			assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
-		})
-	}
-}
-
 func TestInvalidFlush(t *testing.T) {
-	s, _, _ := newService()
-	claim(t, s, 1)
+	s, p, _ := newService()
+	p.AssignPChannel(pch, 1)
 	cases := map[string]func(*pkindexpb.CommitFlushRequest){
 		"vchannel names no pchannel": func(r *pkindexpb.CommitFlushRequest) { r.Vchannel = "p" },
 		"pchannel name as vchannel":  func(r *pkindexpb.CommitFlushRequest) { r.Vchannel = "by-dev-dml_0" },
@@ -423,10 +384,9 @@ func TestInvalidFlush(t *testing.T) {
 func TestValidFlush(t *testing.T) {
 	for _, pkType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_VarChar} {
 		t.Run(pkType.String(), func(t *testing.T) {
-			s, _, _ := newService()
+			s, p, _ := newService()
 			ctx := context.Background()
-			c, err := s.ClaimPChannel(ctx, &pkindexpb.ClaimPChannelRequest{Pchannel: "by-dev-dml_0", PchannelTerm: 1})
-			require.NoError(t, merr.CheckRPCCall(c, err))
+			p.AssignPChannel("by-dev-dml_0", 1)
 			req := flushReq("by-dev-dml_0_449v0", 1, 1, 1)
 			req.PkDataType = pkType
 			resp, err := s.CommitFlush(ctx, req)

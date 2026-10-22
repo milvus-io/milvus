@@ -67,10 +67,10 @@ func newEnv(t *testing.T, cfg Config) *env {
 	return e
 }
 
-// claim claims the pchannel of vchannel for term 1 and commits an empty
-// first flush at checkpoint 1, which creates version 1.
-func (e *env) claim(t *testing.T, vchannel string) {
-	require.NoError(t, e.mgr.ClaimPChannel(context.Background(), funcutil.ToPhysicalChannel(vchannel), 1))
+// create assigns the pchannel of vchannel at term 1 in the pchannel meta and
+// commits an empty first flush at checkpoint 1, which creates version 1.
+func (e *env) create(t *testing.T, vchannel string) {
+	e.pointers.AssignPChannel(funcutil.ToPhysicalChannel(vchannel), 1)
 	flushWith(t, e.mgr, vchannel, 1)
 }
 
@@ -148,7 +148,7 @@ func (e *env) writeBody(t *testing.T, key string, m *pkindexpb.Manifest) {
 func TestSSTSweep(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")
+	e.create(t, "v")
 	e.upload(t, "v", 1, 2, 3, 4, 5)
 	e.flush(t, "v", 10, 2, 1)
 	_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
@@ -175,7 +175,7 @@ func TestSSTSweep(t *testing.T) {
 func TestBodyRetention(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")
+	e.create(t, "v")
 	for i := int64(1); i <= 5; i++ {
 		e.upload(t, "v", i)
 		e.flush(t, "v", uint64(i*10), i)
@@ -194,7 +194,7 @@ func TestBodyRetention(t *testing.T) {
 func TestBodyRetentionKeepsRecentBodies(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")        // version 1
+	e.create(t, "v")       // version 1
 	e.flush(t, "v", 10, 1) // version 2
 	e.flush(t, "v", 20, 2) // version 3
 	e.now = e.now.Add(2 * time.Hour)
@@ -216,7 +216,7 @@ func TestBodyRetentionKeepsRecentBodies(t *testing.T) {
 func TestKeepsCASLosersWithinRetainedVersions(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")
+	e.create(t, "v")
 	e.flush(t, "v", 10, 1)
 	e.upload(t, "v", 9)
 	loser := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "loser")
@@ -231,7 +231,7 @@ func TestKeepsCASLosersWithinRetainedVersions(t *testing.T) {
 func TestGCDoesNotDependOnManagerCache(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")
+	e.create(t, "v")
 	e.upload(t, "v", 1, 2, 3, 4, 5)
 	e.flush(t, "v", 10, 1) // version 2, in the cache of e.mgr
 
@@ -264,7 +264,7 @@ func TestGCDoesNotDependOnManagerCache(t *testing.T) {
 func TestOrphanBodyAfterGrace(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")
+	e.create(t, "v")
 	e.upload(t, "v", 9, 10)
 	// bodies of commits that never swapped the pointer
 	oldOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "old")
@@ -284,7 +284,7 @@ func TestOrphanBodyAfterGrace(t *testing.T) {
 func TestCompactionCommittedBetweenReads(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")
+	e.create(t, "v")
 	t0 := e.now
 	e.upload(t, "v", 1, 2, 3)
 	e.flush(t, "v", 10, 2, 1)
@@ -322,7 +322,7 @@ func TestUnreadableCurrentBodySkipsVChannel(t *testing.T) {
 			e := newEnv(t, testConfig)
 			ctx := context.Background()
 			for _, vch := range []string{"bad", "good"} {
-				e.claim(t, vch)
+				e.create(t, vch)
 				for i := int64(1); i <= 3; i++ {
 					e.upload(t, vch, i)
 					e.flush(t, vch, uint64(i*10), i)
@@ -347,7 +347,7 @@ func TestUnreadableCurrentBodySkipsVChannel(t *testing.T) {
 func TestUndecodableRetainedBodySkipsSSTSweep(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")        // version 1
+	e.create(t, "v")       // version 1
 	e.flush(t, "v", 10, 1) // version 2
 	e.flush(t, "v", 20, 2) // version 3
 	e.upload(t, "v", 1, 2, 9)
@@ -372,7 +372,7 @@ func TestUndecodableRetainedBodySkipsSSTSweep(t *testing.T) {
 func TestForeignObjectsAreKept(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")
+	e.create(t, "v")
 	foreign := []string{
 		pkindex.SSTBasePath(testRoot, 1, "v") + "/x.tmp",
 		pkindex.SSTBasePath(testRoot, 1, "v") + "/sub/7.sst",
@@ -394,8 +394,8 @@ func TestVChannelsAreIndependent(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
 	// "v" is a string prefix of "v1"
-	e.claim(t, "v")
-	e.claim(t, "v1")
+	e.create(t, "v")
+	e.create(t, "v1")
 	e.upload(t, "v", 1, 5)
 	e.upload(t, "v1", 1, 2, 6)
 	e.flush(t, "v", 10, 1)
@@ -445,7 +445,7 @@ func TestStartRunsRounds(t *testing.T) {
 	cfg := testConfig
 	cfg.Interval = 10 * time.Millisecond
 	e := newEnv(t, cfg)
-	e.claim(t, "v")
+	e.create(t, "v")
 	e.upload(t, "v", 9)
 	e.now = e.now.Add(3 * time.Hour)
 
@@ -464,7 +464,7 @@ func TestCurrentBodyIsAlwaysKept(t *testing.T) {
 	cfg.RetainVersions = 0
 	cfg.RetainDuration = 0
 	e := newEnv(t, cfg)
-	e.claim(t, "v")
+	e.create(t, "v")
 	e.upload(t, "v", 1)
 	e.flush(t, "v", 10, 1)
 	e.now = e.now.Add(3 * time.Hour)
@@ -495,7 +495,7 @@ func TestLayoutMismatchSkipsVChannel(t *testing.T) {
 			e := newEnv(t, testConfig)
 			ctx := context.Background()
 			for _, vch := range []string{"bad", "good", "other"} {
-				e.claim(t, vch)
+				e.create(t, vch)
 				for i := int64(1); i <= 3; i++ {
 					e.upload(t, vch, i)
 					e.flush(t, vch, uint64(i*10), i)
@@ -534,7 +534,7 @@ func TestLayoutMismatchSkipsVChannel(t *testing.T) {
 
 func TestInFlightErrorIsUnavailable(t *testing.T) {
 	e := newEnv(t, testConfig)
-	e.claim(t, "v")
+	e.create(t, "v")
 	e.upload(t, "v", 9)
 	e.now = e.now.Add(3 * time.Hour)
 	e.inFlight = func(context.Context, int64, string) ([]int64, error) {
@@ -548,8 +548,8 @@ func TestInFlightErrorIsUnavailable(t *testing.T) {
 
 func TestRunOnceStopsWhenContextDone(t *testing.T) {
 	e := newEnv(t, testConfig)
-	e.claim(t, "v")
-	e.claim(t, "w")
+	e.create(t, "v")
+	e.create(t, "w")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	calls := 0
@@ -566,7 +566,7 @@ func TestRunOnceStopsWhenContextDone(t *testing.T) {
 func TestRemoveFailureRecoversNextRound(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")
+	e.create(t, "v")
 	e.upload(t, "v", 9)
 	e.now = e.now.Add(3 * time.Hour)
 
@@ -581,7 +581,7 @@ func TestRemoveFailureRecoversNextRound(t *testing.T) {
 func TestRetainedBodyReadFailureSkipsSSTSweep(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
-	e.claim(t, "v")        // version 1
+	e.create(t, "v")       // version 1
 	e.flush(t, "v", 10, 1) // version 2
 	e.flush(t, "v", 20, 2) // version 3
 	e.upload(t, "v", 1, 2, 9)

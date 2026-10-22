@@ -19,7 +19,6 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	PKIndexCoordService_ClaimPChannel_FullMethodName        = "/milvus.proto.pkindex.PKIndexCoordService/ClaimPChannel"
 	PKIndexCoordService_CommitFlush_FullMethodName          = "/milvus.proto.pkindex.PKIndexCoordService/CommitFlush"
 	PKIndexCoordService_GetRecoveryManifests_FullMethodName = "/milvus.proto.pkindex.PKIndexCoordService/GetRecoveryManifests"
 )
@@ -28,7 +27,6 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type PKIndexCoordServiceClient interface {
-	ClaimPChannel(ctx context.Context, in *ClaimPChannelRequest, opts ...grpc.CallOption) (*ClaimPChannelResponse, error)
 	CommitFlush(ctx context.Context, in *CommitFlushRequest, opts ...grpc.CallOption) (*CommitFlushResponse, error)
 	// Returns the manifest pointer of each vchannel; the caller reads the body
 	// from object storage.
@@ -41,15 +39,6 @@ type pKIndexCoordServiceClient struct {
 
 func NewPKIndexCoordServiceClient(cc grpc.ClientConnInterface) PKIndexCoordServiceClient {
 	return &pKIndexCoordServiceClient{cc}
-}
-
-func (c *pKIndexCoordServiceClient) ClaimPChannel(ctx context.Context, in *ClaimPChannelRequest, opts ...grpc.CallOption) (*ClaimPChannelResponse, error) {
-	out := new(ClaimPChannelResponse)
-	err := c.cc.Invoke(ctx, PKIndexCoordService_ClaimPChannel_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *pKIndexCoordServiceClient) CommitFlush(ctx context.Context, in *CommitFlushRequest, opts ...grpc.CallOption) (*CommitFlushResponse, error) {
@@ -74,7 +63,6 @@ func (c *pKIndexCoordServiceClient) GetRecoveryManifests(ctx context.Context, in
 // All implementations should embed UnimplementedPKIndexCoordServiceServer
 // for forward compatibility
 type PKIndexCoordServiceServer interface {
-	ClaimPChannel(context.Context, *ClaimPChannelRequest) (*ClaimPChannelResponse, error)
 	CommitFlush(context.Context, *CommitFlushRequest) (*CommitFlushResponse, error)
 	// Returns the manifest pointer of each vchannel; the caller reads the body
 	// from object storage.
@@ -85,9 +73,6 @@ type PKIndexCoordServiceServer interface {
 type UnimplementedPKIndexCoordServiceServer struct {
 }
 
-func (UnimplementedPKIndexCoordServiceServer) ClaimPChannel(context.Context, *ClaimPChannelRequest) (*ClaimPChannelResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ClaimPChannel not implemented")
-}
 func (UnimplementedPKIndexCoordServiceServer) CommitFlush(context.Context, *CommitFlushRequest) (*CommitFlushResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CommitFlush not implemented")
 }
@@ -104,24 +89,6 @@ type UnsafePKIndexCoordServiceServer interface {
 
 func RegisterPKIndexCoordServiceServer(s grpc.ServiceRegistrar, srv PKIndexCoordServiceServer) {
 	s.RegisterService(&PKIndexCoordService_ServiceDesc, srv)
-}
-
-func _PKIndexCoordService_ClaimPChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ClaimPChannelRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PKIndexCoordServiceServer).ClaimPChannel(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PKIndexCoordService_ClaimPChannel_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PKIndexCoordServiceServer).ClaimPChannel(ctx, req.(*ClaimPChannelRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _PKIndexCoordService_CommitFlush_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -167,10 +134,6 @@ var PKIndexCoordService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.pkindex.PKIndexCoordService",
 	HandlerType: (*PKIndexCoordServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "ClaimPChannel",
-			Handler:    _PKIndexCoordService_ClaimPChannel_Handler,
-		},
 		{
 			MethodName: "CommitFlush",
 			Handler:    _PKIndexCoordService_CommitFlush_Handler,
