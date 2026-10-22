@@ -351,7 +351,8 @@ func TestBroadcastSnapshotImportLargeMetadataReference(t *testing.T) {
 			require.Less(t, proto.Size(captured[0]), 32)
 			before := start.Times()
 			_, _, err = server.broadcastImport(ctx, 100, []int64{10}, files,
-				snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", "", false)
+				snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", "", false,
+				internalpb.ImportVersion_ImportVersionV2)
 			require.ErrorIs(t, err, merr.ErrIoFailed)
 			require.Equal(t, before+1, start.Times(), "metadata size must not reject a small WAL reference")
 		})
@@ -1677,7 +1678,7 @@ func TestSnapshotPartitionMappingTasksAndRecovery(t *testing.T) {
 	}
 	segments := make(map[int64]*SegmentInfo)
 	allocateSegment := mockey.Mock(AllocImportSegment).To(func(_ context.Context, _ allocator.Allocator, _ *meta,
-		_, _, collection, partition int64, channel string, _ uint64, _ datapb.SegmentLevel, _ int64,
+		_, _, collection, partition int64, channel string, _ uint64, _ datapb.SegmentLevel, _ int64, _ int32,
 	) (*SegmentInfo, error) {
 		next++
 		segment := NewSegmentInfo(&datapb.SegmentInfo{ID: next, CollectionID: collection, PartitionID: partition, InsertChannel: channel})

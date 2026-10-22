@@ -229,6 +229,17 @@ type DataCoordCatalog interface {
 	SavePreImportTask(ctx context.Context, task *datapb.PreImportTask) error
 	ListPreImportTasks(ctx context.Context) ([]*datapb.PreImportTask, error)
 	DropPreImportTask(ctx context.Context, taskID int64) error
+
+	// Import V3 control-plane records.
+	SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error
+	ListReshardTasks(ctx context.Context) ([]*datapb.ReshardTask, error)
+	DropReshardTask(ctx context.Context, taskID int64) error
+	SaveImportTaskV3(ctx context.Context, task *datapb.ImportTaskV3) error
+	ListImportTasksV3(ctx context.Context) ([]*datapb.ImportTaskV3, error)
+	DropImportTaskV3(ctx context.Context, taskID int64) error
+	SavePreImportTaskV3(ctx context.Context, task *datapb.PreImportTaskV3) error
+	ListPreImportTasksV3(ctx context.Context) ([]*datapb.PreImportTaskV3, error)
+	DropPreImportTaskV3(ctx context.Context, taskID int64) error
 	SaveImportTask(ctx context.Context, task *datapb.ImportTaskV2) error
 	ListImportTasks(ctx context.Context) ([]*datapb.ImportTaskV2, error)
 	DropImportTask(ctx context.Context, taskID int64) error

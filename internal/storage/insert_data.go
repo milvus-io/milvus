@@ -196,8 +196,22 @@ type FieldData interface {
 	GetNullable() bool
 }
 
+// NewFieldData creates an empty FieldData whose cap is expressed in rows;
+// vector columns scale it by their per-row element count, except nullable
+// columns, which reserve only cap: a nullable column missing from the source
+// only appends ValidData (see AppendNullableDefaultFieldsData), so a
+// dim-scaled Data reservation would stay invisible to GetMemorySize and never
+// trigger spill.
 func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
 	typeParams := fieldSchema.GetTypeParams()
+	// nullableDataCap keeps the master row-count reservation for nullable
+	// vector columns; non-nullable columns keep the dim-scaled reservation.
+	nullableDataCap := func(scaled int) int {
+		if fieldSchema.GetNullable() {
+			return cap
+		}
+		return scaled
+	}
 	switch dataType {
 	case schemapb.DataType_Float16Vector:
 		dim, err := GetDimFromParams(typeParams)
@@ -205,7 +219,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &Float16VectorFieldData{
-			Data:     make([]byte, 0, cap),
+			Data:     make([]byte, 0, nullableDataCap(cap*dim*2)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -219,7 +233,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &BFloat16VectorFieldData{
-			Data:     make([]byte, 0, cap),
+			Data:     make([]byte, 0, nullableDataCap(cap*dim*2)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -233,7 +247,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &FloatVectorFieldData{
-			Data:     make([]float32, 0, cap),
+			Data:     make([]float32, 0, nullableDataCap(cap*dim)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -247,7 +261,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &BinaryVectorFieldData{
-			Data:     make([]byte, 0, cap),
+			Data:     make([]byte, 0, nullableDataCap(cap*dim/8)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -269,7 +283,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &Int8VectorFieldData{
-			Data:     make([]int8, 0, cap),
+			Data:     make([]int8, 0, nullableDataCap(cap*dim)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -1345,7 +1359,7 @@ func (data *FloatVectorFieldData) AppendRows(dataRows interface{}, validDataRows
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]float32", dataRows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/data.Dim); err != nil {
@@ -1409,7 +1423,7 @@ func (data *Int8VectorFieldData) AppendRows(dataRows interface{}, validDataRows 
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]int8", dataRows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v)/data.Dim); err != nil {
@@ -1559,7 +1573,7 @@ func (data *FloatVectorFieldData) AppendDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]float32", rows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	data.Data = append(data.Data, v...)
@@ -1609,7 +1623,7 @@ func (data *Int8VectorFieldData) AppendDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]int8", rows, "Wrong rows type")
 	}
-	if len(v)%(data.Dim) != 0 {
+	if len(v)%data.Dim != 0 {
 		return merr.WrapErrParameterInvalid(data.Dim, len(v), "Wrong vector size")
 	}
 	data.Data = append(data.Data, v...)

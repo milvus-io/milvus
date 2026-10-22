@@ -112,33 +112,12 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 		}
 	}
 
-	// Configure CMEK encryption if plugin context is provided
-	if storagePluginContext != nil {
-		var cKey *C.char
-		var cMeta *C.char
-
-		encKey := C.CString(storagePluginContext.EncryptionKey)
-		defer C.free(unsafe.Pointer(encKey))
-
-		// Prepare plugin context for FFI call to retrieve encryption parameters
-		var pluginContext C.CPluginContext
-		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
-		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
-		pluginContext.key = encKey
-
-		// Get encryption key and metadata from cipher plugin via FFI
-		status := C.GetEncParams(&pluginContext, &cKey, &cMeta)
-		if err := ConsumeCStatusIntoError(&status); err != nil {
-			return nil, err
-		}
-
-		// Set encryption properties for the writer
-		extra[PropertyWriterEncEnable] = "true"
-		extra[PropertyWriterEncKey] = C.GoString(cKey)
-		C.free(unsafe.Pointer(cKey))
-		extra[PropertyWriterEncMeta] = C.GoString(cMeta)
-		C.free(unsafe.Pointer(cMeta))
-		extra[PropertyWriterEncAlgo] = "AES_GCM_V1"
+	encryptionProperties, err := writerEncryptionProperties(storagePluginContext)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range encryptionProperties {
+		extra[key] = value
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extra)
