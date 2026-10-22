@@ -717,7 +717,7 @@ func TestProxy_SearchPreservesFunctionFailedStatus(t *testing.T) {
 
 		functionErr := merr.WrapErrFunctionFailedMsg("py_udf: injected transform_query failure")
 		var enqueueCalls atomic.Int32
-		mockey.Mock((*scheduler.BaseTaskQueue).Enqueue).To(func(_ *scheduler.BaseTaskQueue, queued taskmodel.Task) error {
+		mockey.Mock((*scheduler.DqTaskQueue).Enqueue).To(func(_ *scheduler.DqTaskQueue, queued taskmodel.Task) error {
 			enqueueCalls.Add(1)
 			require.NoError(t, queued.OnEnqueue())
 			queued.Notify(functionErr)
