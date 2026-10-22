@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <azure/identity/default_azure_credential.hpp>
 #include <azure/identity/managed_identity_credential.hpp>
 #include <azure/identity/workload_identity_credential.hpp>
 #include <algorithm>
@@ -85,6 +86,17 @@ AzureBlobChunkManager::AzureBlobChunkManager(
     bool useIAM) {
     requestTimeoutMs_ = requestTimeoutMs;
     if (useIAM) {
+        const char* client_secret_env = std::getenv("AZURE_CLIENT_SECRET");
+        const bool has_client_secret = client_secret_env != nullptr &&
+                                       std::strlen(client_secret_env) > 0;
+        if (has_client_secret) {
+            auto credential =
+                std::make_shared<Azure::Identity::DefaultAzureCredential>();
+            client_ =
+                std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
+                    "https://" + access_key_id + ".blob." + address + "/",
+                    credential);
+        } else {
         const char* federated_token_file =
             std::getenv("AZURE_FEDERATED_TOKEN_FILE");
         const bool has_federated_token = federated_token_file != nullptr &&
@@ -124,6 +136,7 @@ AzureBlobChunkManager::AzureBlobChunkManager(
                     "https://" + access_key_id + ".blob." + address + "/",
                     credential);
         }
+        } // end else (no client secret)
     } else {
         client_ = std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
             Azure::Storage::Blobs::BlobServiceClient::
