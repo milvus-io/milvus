@@ -40,8 +40,11 @@ content version and is not copied from the source cluster.
 Add validates the name and object existence, acquires ExclusiveCluster, then
 checks existing metadata. An identical name and path reuse the existing ID and
 skip the size admission check. A different path under the same name is rejected
-before broadcasting. A new resource obeys `common.fileResource.maxFileSize`,
-then receives an ID. The request broadcasts the resolved resource record.
+before broadcasting. When a new resource needs size admission, the request
+releases the guard for object-storage I/O, then reacquires it and rechecks current
+metadata. A concurrent identical registration reuses its ID; otherwise the new
+resource obeys the current `common.fileResource.maxFileSize` and receives an ID.
+The request broadcasts the resolved resource record while holding the guard.
 
 Remove acquires ExclusiveCluster and checks whether the named resource is
 referenced. A resource in use is a request error returned before creating a

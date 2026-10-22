@@ -241,3 +241,52 @@ func TestFileResourceRejectsMalformedMetadata(t *testing.T) {
 	}
 	require.ErrorIs(t, callback.removeFileResourceV2AckCallback(ctx, removeFileResourceTestResult(0, "dictionary")), merr.ErrServiceInternal)
 }
+
+func TestFileResourceSizeAdmissionReleasesGuardAndRechecksIdentity(t *testing.T) {
+	Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+	t.Cleanup(func() { Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key) })
+	meta, catalog := fileResourceTestMeta(t)
+	resource := &internalpb.FileResourceInfo{Id: 789, Name: "dictionary", Path: "dict/custom.txt"}
+	catalog.EXPECT().SaveFileResource(mock.Anything, resource, uint64(1)).Return(nil).Once()
+	guardHeld := false
+	storage := mock_storage.NewMockChunkManager(t)
+	storage.EXPECT().Exist(mock.Anything, resource.Path).Return(true, nil).Once()
+	storage.EXPECT().Size(mock.Anything, resource.Path).
+		RunAndReturn(func(ctx context.Context, _ string) (int64, error) {
+			require.False(t, guardHeld, "storage I/O must not hold the cluster DDL guard")
+			// Another request registers the resource while size admission is in flight.
+			require.NoError(t, meta.AddFileResource(ctx, resource))
+			return 1000, nil
+		}).Once()
+	tso := newMockTsoAllocator()
+	tso.GenerateTSOF = func(uint32) (uint64, error) {
+		t.Fatal("a concurrent registration must retain its resource ID")
+		return 0, nil
+	}
+	core := newTestCore(withMeta(meta), withStorage(storage), withTsoAllocator(tso))
+	api := mock_broadcaster.NewMockBroadcastAPI(t)
+	api.EXPECT().Close().Run(func() {
+		require.True(t, guardHeld, "each guard must be released exactly once")
+		guardHeld = false
+	}).Return().Twice()
+	api.EXPECT().Broadcast(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			require.True(t, guardHeld)
+			got := message.MustAsBroadcastAddFileResourceMessageV2(msg).MustBody().GetResource()
+			require.True(t, proto.Equal(resource, got))
+			return &types.BroadcastAppendResult{}, nil
+		}).Once()
+	patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).
+		To(func(_ context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			require.False(t, guardHeld)
+			require.Equal(t, []message.ResourceKey{message.NewExclusiveClusterResourceKey()}, keys)
+			guardHeld = true
+			return api, nil
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	require.NoError(t, core.broadcastAddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+		Name: resource.Name,
+		Path: resource.Path,
+	}))
+	require.False(t, guardHeld)
+}

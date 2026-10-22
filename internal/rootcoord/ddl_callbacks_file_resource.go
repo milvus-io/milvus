@@ -45,48 +45,67 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 	if err != nil {
 		return err
 	}
-	defer broadcaster.Close()
+	defer func() {
+		if broadcaster != nil {
+			broadcaster.Close()
+		}
+	}()
 
-	resources, _ := c.meta.ListFileResource(ctx)
-	var resource *internalpb.FileResourceInfo
-	for _, existing := range resources {
-		if existing.GetName() != req.GetName() {
-			continue
+	var size int64
+	sizeChecked := false
+	for {
+		resources, _ := c.meta.ListFileResource(ctx)
+		var resource *internalpb.FileResourceInfo
+		for _, existing := range resources {
+			if existing.GetName() != req.GetName() {
+				continue
+			}
+			if existing.GetPath() != req.GetPath() {
+				return merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())
+			}
+			resource = existing
+			break
 		}
-		if existing.GetPath() != req.GetPath() {
-			return merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())
-		}
-		resource = existing
-		break
-	}
-	if resource == nil {
-		if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
-			size, err := c.storage.Size(ctx, req.GetPath())
+		if resource == nil {
+			if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
+				if !sizeChecked {
+					// Storage admission must not block unrelated DDL.
+					broadcaster.Close()
+					broadcaster = nil
+					size, err = c.storage.Size(ctx, req.GetPath())
+					if err != nil {
+						return err
+					}
+					broadcaster, err = broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+					if err != nil {
+						return err
+					}
+					sizeChecked = true
+					continue
+				}
+				if size < 0 {
+					return merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)
+				}
+				if size > maxFileSize {
+					return merr.WrapErrParameterTooLarge("file resource", fmt.Sprintf(
+						"size %d exceeds common.fileResource.maxFileSize %d", size, maxFileSize))
+				}
+			}
+			id, err := c.tsoAllocator.GenerateTSO(1)
 			if err != nil {
 				return err
 			}
-			if size < 0 {
-				return merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)
-			}
-			if size > maxFileSize {
-				return merr.WrapErrParameterTooLarge("file resource", fmt.Sprintf(
-					"size %d exceeds common.fileResource.maxFileSize %d", size, maxFileSize))
-			}
+			resource = &internalpb.FileResourceInfo{Id: int64(id), Name: req.GetName(), Path: req.GetPath()}
 		}
-		id, err := c.tsoAllocator.GenerateTSO(1)
-		if err != nil {
-			return err
-		}
-		resource = &internalpb.FileResourceInfo{Id: int64(id), Name: req.GetName(), Path: req.GetPath()}
-	}
 
-	msg := message.NewAddFileResourceMessageBuilderV2().
-		WithHeader(&message.AddFileResourceMessageHeader{}).
-		WithBody(&message.AddFileResourceMessageBody{Resource: resource}).
-		WithControlChannelBroadcast().
-		MustBuildBroadcast()
-	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+		msg := message.NewAddFileResourceMessageBuilderV2().
+			WithHeader(&message.AddFileResourceMessageHeader{}).
+			WithBody(&message.AddFileResourceMessageBody{Resource: resource}).
+			WithControlChannelBroadcast().
+			MustBuildBroadcast()
+		_, err = broadcaster.Broadcast(ctx, msg)
+		return err
+	}
 }
 
 func (c *Core) broadcastRemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (bool, error) {
