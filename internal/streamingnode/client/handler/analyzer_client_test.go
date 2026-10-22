@@ -309,6 +309,7 @@ func TestValidateAnalyzerDiscovery(t *testing.T) {
 
 func TestValidateAnalyzerBusinessFailuresDoNotRetry(t *testing.T) {
 	for _, failure := range []error{
+		merr.WrapErrParameterInvalidMsg("file resource never_added_resource not found"),
 		merr.SegcoreError(int32(merr.CodePathNotExist), "dictionary file not found"),
 		merr.SegcoreError(int32(merr.CodeFileReadFailed), "dictionary file access denied"),
 		merr.ErrServiceUnavailable,
@@ -325,6 +326,9 @@ func TestValidateAnalyzerBusinessFailuresDoNotRetry(t *testing.T) {
 			require.Nil(t, resp)
 			require.Error(t, err)
 			require.Equal(t, 1, call.Times(), "even retriable business failures must not enter readiness backoff")
+			if merr.Code(failure) == merr.Code(merr.ErrParameterInvalid) {
+				require.EqualError(t, err, failure.Error(), "parameter errors must pass through without extra context")
+			}
 			require.Equal(t, merr.GetErrorType(failure), merr.GetErrorType(err))
 			require.Equal(t, merr.IsRetryableErr(failure), merr.IsRetryableErr(err))
 			if merr.GetErrorType(failure) == merr.InputError {

@@ -74,7 +74,8 @@ func (hc *handlerClientImpl) ValidateAnalyzer(ctx context.Context, req *streamin
 	// Retriable native I/O errors must not keep a collection DDL lock held while
 	// we repeatedly validate the same configuration.
 	if err := merr.Error(resp.GetStatus()); err != nil {
-		if merr.GetErrorType(err) == merr.InputError {
+		// Already-normalized parameter errors need no additional wrapper.
+		if merr.GetErrorType(err) == merr.InputError && merr.Code(err) != merr.Code(merr.ErrParameterInvalid) {
 			return nil, merr.WrapErrParameterInvalidErr(err, "analyzer validation failed")
 		}
 		return nil, err

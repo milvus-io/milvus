@@ -27,7 +27,7 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer:
 		resources, err := fileresource.Acquire(ctx, nil, source.InlineAnalyzer.GetAnalyzerParams())
 		if err != nil {
-			return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.Wrap(err, "acquire analyzer file resources"))}, nil
+			return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err)}, nil
 		}
 		defer resources.Close()
 		results, err := analyzer.Run(ctx, source.InlineAnalyzer.GetAnalyzerParams(), req.GetPlaceholder(), req.GetWithDetail(), req.GetWithHash(), resources.ExtraInfo())
@@ -67,7 +67,7 @@ func (hs *handlerServiceImpl) ValidateAnalyzer(ctx context.Context, req *streami
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return &streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(merr.Wrap(err, "acquire analyzer file resources"))}, nil
+		return &streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
 	defer resources.Close()
 	resourceIDs := typeutil.NewSet[int64]()
