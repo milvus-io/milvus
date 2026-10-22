@@ -1531,6 +1531,13 @@ func getFieldValue(fd *schemapb.FieldData, rowIdx int) (any, bool) {
 		}
 		return data[rowIdx], false
 
+	case *schemapb.ScalarField_TimestamptzData:
+		data := scalars.GetTimestamptzData().GetData()
+		if rowIdx >= len(data) {
+			return nil, true
+		}
+		return data[rowIdx], false
+
 	case *schemapb.ScalarField_FloatData:
 		data := scalars.GetFloatData().GetData()
 		if rowIdx >= len(data) {
@@ -1657,7 +1664,7 @@ func compareValues(a, b any, dataType schemapb.DataType) int {
 		}
 		return 0
 
-	case schemapb.DataType_Int64:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 		va := a.(int64)
 		vb := b.(int64)
 		if va < vb {

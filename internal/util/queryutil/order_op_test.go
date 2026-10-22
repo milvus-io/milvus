@@ -766,3 +766,28 @@ func TestOrderByLimitOperator_NullsFirst_PartialSort(t *testing.T) {
 	assert.Equal(t, int64(4), ids[1]) // NULL, pk=4 (tie-breaker)
 	assert.Equal(t, int64(3), ids[2]) // value=100
 }
+
+func TestOrderByLimitOperator_TimestamptzGroupTieBreaker(t *testing.T) {
+	op := NewOrderByLimitOperatorWithPositions([]*orderby.OrderByField{
+		orderby.NewOrderByField(201, "region", schemapb.DataType_Int64),
+		orderby.NewOrderByField(202, "event_time", schemapb.DataType_Timestamptz),
+	}, []int{0, 1}, 1)
+	result := &internalpb.RetrieveResults{FieldsData: []*schemapb.FieldData{
+		makeInt64Field(201, "region", []int64{1, 1}),
+		{
+			FieldId:   202,
+			FieldName: "event_time",
+			Type:      schemapb.DataType_Timestamptz,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimestamptzData{
+					TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{200, 100}},
+				},
+			}},
+		},
+	}}
+
+	outputs, err := op.Run(context.Background(), nil, result)
+	require.NoError(t, err)
+	sorted := outputs[0].(*internalpb.RetrieveResults)
+	assert.Equal(t, []int64{100}, sorted.GetFieldsData()[1].GetScalars().GetTimestamptzData().GetData())
+}
