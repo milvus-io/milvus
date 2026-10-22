@@ -52,6 +52,11 @@ func WithExtraAppendResult(ctx context.Context, r *ExtraAppendResult) context.Co
 	return context.WithValue(ctx, extraAppendResultValue, r)
 }
 
+// GetExtraAppendResult gets the result attached by the WAL append adaptor.
+func GetExtraAppendResult(ctx context.Context) *ExtraAppendResult {
+	return ctx.Value(extraAppendResultValue).(*ExtraAppendResult)
+}
+
 // ModifyAppendResultExtra modify extra in context
 func ModifyAppendResultExtra[M protoreflect.ProtoMessage](ctx context.Context, modifier func(old M) (new M)) {
 	result := ctx.Value(extraAppendResultValue)
