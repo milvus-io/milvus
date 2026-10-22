@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -30,11 +30,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
 
-func createTestFlushAllTask(t *testing.T) (*flushAllTask, *mocks.MockMixCoordClient, context.Context) {
+func createTestFlushAllTask(t *testing.T) (*FlushAllTask, *mocks.MockMixCoordClient, context.Context) {
 	ctx := context.Background()
 	mixCoord := mocks.NewMockMixCoordClient(t)
 
-	task := &flushAllTask{
+	task := &FlushAllTask{
 		baseTask:  baseTask{},
 		Condition: NewTaskCondition(ctx),
 		FlushAllRequest: &milvuspb.FlushAllRequest{
@@ -109,7 +109,7 @@ func TestFlushAllTaskOnEnqueue(t *testing.T) {
 	defer mixCoord.AssertExpectations(t)
 
 	// Test with nil Base
-	task := &flushAllTask{
+	task := &FlushAllTask{
 		baseTask:        baseTask{},
 		Condition:       NewTaskCondition(ctx),
 		FlushAllRequest: &milvuspb.FlushAllRequest{},
@@ -147,8 +147,8 @@ func TestFlushAllTaskPostExecute(t *testing.T) {
 }
 
 func TestFlushAllTaskImplementsTaskInterface(t *testing.T) {
-	// Verify that flushAllTask implements the task interface
-	var _ taskmodel.Task = (*flushAllTask)(nil)
+	// Verify that FlushAllTask implements the task interface
+	var _ taskmodel.Task = (*FlushAllTask)(nil)
 
 	task, mixCoord, _ := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
@@ -170,7 +170,7 @@ func TestFlushAllTaskImplementsTaskInterface(t *testing.T) {
 
 func TestFlushAllTaskNilHandling(t *testing.T) {
 	// Test behavior with nil values
-	task := &flushAllTask{
+	task := &FlushAllTask{
 		FlushAllRequest: &milvuspb.FlushAllRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Flush,
@@ -199,13 +199,13 @@ func TestFlushAllTaskConstantValues(t *testing.T) {
 	assert.Equal(t, "FlushAllTask", FlushAllTaskName)
 
 	// Test task name method returns correct constant
-	task := &flushAllTask{}
+	task := &FlushAllTask{}
 	assert.Equal(t, FlushAllTaskName, task.Name())
 }
 
 func TestFlushAllTaskBaseTaskMethods(t *testing.T) {
 	// Test baseTask methods
-	task := &flushAllTask{
+	task := &FlushAllTask{
 		baseTask: baseTask{},
 	}
 

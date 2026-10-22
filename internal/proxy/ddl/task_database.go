@@ -1,4 +1,4 @@
-package proxy
+package ddl
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 )
 
-type createDatabaseTask struct {
+type CreateDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.CreateDatabaseRequest
@@ -25,39 +25,39 @@ type createDatabaseTask struct {
 	result   *commonpb.Status
 }
 
-func (cdt *createDatabaseTask) TraceCtx() context.Context {
+func (cdt *CreateDatabaseTask) TraceCtx() context.Context {
 	return cdt.ctx
 }
 
-func (cdt *createDatabaseTask) ID() UniqueID {
+func (cdt *CreateDatabaseTask) ID() UniqueID {
 	return cdt.Base.MsgID
 }
 
-func (cdt *createDatabaseTask) SetID(uid UniqueID) {
+func (cdt *CreateDatabaseTask) SetID(uid UniqueID) {
 	cdt.Base.MsgID = uid
 }
 
-func (cdt *createDatabaseTask) Name() string {
+func (cdt *CreateDatabaseTask) Name() string {
 	return CreateDatabaseTaskName
 }
 
-func (cdt *createDatabaseTask) Type() commonpb.MsgType {
+func (cdt *CreateDatabaseTask) Type() commonpb.MsgType {
 	return cdt.Base.MsgType
 }
 
-func (cdt *createDatabaseTask) BeginTs() Timestamp {
+func (cdt *CreateDatabaseTask) BeginTs() Timestamp {
 	return cdt.Base.Timestamp
 }
 
-func (cdt *createDatabaseTask) EndTs() Timestamp {
+func (cdt *CreateDatabaseTask) EndTs() Timestamp {
 	return cdt.Base.Timestamp
 }
 
-func (cdt *createDatabaseTask) SetTs(ts Timestamp) {
+func (cdt *CreateDatabaseTask) SetTs(ts Timestamp) {
 	cdt.Base.Timestamp = ts
 }
 
-func (cdt *createDatabaseTask) OnEnqueue() error {
+func (cdt *CreateDatabaseTask) OnEnqueue() error {
 	if cdt.Base == nil {
 		cdt.Base = commonpbutil.NewMsgBase()
 	}
@@ -66,7 +66,7 @@ func (cdt *createDatabaseTask) OnEnqueue() error {
 	return nil
 }
 
-func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
+func (cdt *CreateDatabaseTask) PreExecute(ctx context.Context) error {
 	err := ValidateDatabaseName(cdt.GetDbName())
 	if err != nil {
 		return err
@@ -78,18 +78,18 @@ func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (cdt *createDatabaseTask) Execute(ctx context.Context) error {
+func (cdt *CreateDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	cdt.result, err = cdt.mixCoord.CreateDatabase(ctx, cdt.CreateDatabaseRequest)
 	err = merr.CheckRPCCall(cdt.result, err)
 	return err
 }
 
-func (cdt *createDatabaseTask) PostExecute(ctx context.Context) error {
+func (cdt *CreateDatabaseTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type dropDatabaseTask struct {
+type DropDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.DropDatabaseRequest
@@ -98,39 +98,39 @@ type dropDatabaseTask struct {
 	result   *commonpb.Status
 }
 
-func (ddt *dropDatabaseTask) TraceCtx() context.Context {
+func (ddt *DropDatabaseTask) TraceCtx() context.Context {
 	return ddt.ctx
 }
 
-func (ddt *dropDatabaseTask) ID() UniqueID {
+func (ddt *DropDatabaseTask) ID() UniqueID {
 	return ddt.Base.MsgID
 }
 
-func (ddt *dropDatabaseTask) SetID(uid UniqueID) {
+func (ddt *DropDatabaseTask) SetID(uid UniqueID) {
 	ddt.Base.MsgID = uid
 }
 
-func (ddt *dropDatabaseTask) Name() string {
+func (ddt *DropDatabaseTask) Name() string {
 	return DropCollectionTaskName
 }
 
-func (ddt *dropDatabaseTask) Type() commonpb.MsgType {
+func (ddt *DropDatabaseTask) Type() commonpb.MsgType {
 	return ddt.Base.MsgType
 }
 
-func (ddt *dropDatabaseTask) BeginTs() Timestamp {
+func (ddt *DropDatabaseTask) BeginTs() Timestamp {
 	return ddt.Base.Timestamp
 }
 
-func (ddt *dropDatabaseTask) EndTs() Timestamp {
+func (ddt *DropDatabaseTask) EndTs() Timestamp {
 	return ddt.Base.Timestamp
 }
 
-func (ddt *dropDatabaseTask) SetTs(ts Timestamp) {
+func (ddt *DropDatabaseTask) SetTs(ts Timestamp) {
 	ddt.Base.Timestamp = ts
 }
 
-func (ddt *dropDatabaseTask) OnEnqueue() error {
+func (ddt *DropDatabaseTask) OnEnqueue() error {
 	if ddt.Base == nil {
 		ddt.Base = commonpbutil.NewMsgBase()
 	}
@@ -139,11 +139,11 @@ func (ddt *dropDatabaseTask) OnEnqueue() error {
 	return nil
 }
 
-func (ddt *dropDatabaseTask) PreExecute(ctx context.Context) error {
+func (ddt *DropDatabaseTask) PreExecute(ctx context.Context) error {
 	return ValidateDatabaseName(ddt.GetDbName())
 }
 
-func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
+func (ddt *DropDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	ddt.result, err = ddt.mixCoord.DropDatabase(ctx, ddt.DropDatabaseRequest)
 
@@ -157,11 +157,11 @@ func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 	return err
 }
 
-func (ddt *dropDatabaseTask) PostExecute(ctx context.Context) error {
+func (ddt *DropDatabaseTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type listDatabaseTask struct {
+type ListDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.ListDatabasesRequest
@@ -170,61 +170,61 @@ type listDatabaseTask struct {
 	result   *milvuspb.ListDatabasesResponse
 }
 
-func (ldt *listDatabaseTask) TraceCtx() context.Context {
+func (ldt *ListDatabaseTask) TraceCtx() context.Context {
 	return ldt.ctx
 }
 
-func (ldt *listDatabaseTask) ID() UniqueID {
+func (ldt *ListDatabaseTask) ID() UniqueID {
 	return ldt.Base.MsgID
 }
 
-func (ldt *listDatabaseTask) SetID(uid UniqueID) {
+func (ldt *ListDatabaseTask) SetID(uid UniqueID) {
 	ldt.Base.MsgID = uid
 }
 
-func (ldt *listDatabaseTask) Name() string {
+func (ldt *ListDatabaseTask) Name() string {
 	return ListDatabaseTaskName
 }
 
-func (ldt *listDatabaseTask) Type() commonpb.MsgType {
+func (ldt *ListDatabaseTask) Type() commonpb.MsgType {
 	return ldt.Base.MsgType
 }
 
-func (ldt *listDatabaseTask) BeginTs() Timestamp {
+func (ldt *ListDatabaseTask) BeginTs() Timestamp {
 	return ldt.Base.Timestamp
 }
 
-func (ldt *listDatabaseTask) EndTs() Timestamp {
+func (ldt *ListDatabaseTask) EndTs() Timestamp {
 	return ldt.Base.Timestamp
 }
 
-func (ldt *listDatabaseTask) SetTs(ts Timestamp) {
+func (ldt *ListDatabaseTask) SetTs(ts Timestamp) {
 	ldt.Base.Timestamp = ts
 }
 
-func (ldt *listDatabaseTask) OnEnqueue() error {
+func (ldt *ListDatabaseTask) OnEnqueue() error {
 	ldt.Base = commonpbutil.NewMsgBase()
 	ldt.Base.MsgType = commonpb.MsgType_ListDatabases
 	ldt.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
-func (ldt *listDatabaseTask) PreExecute(ctx context.Context) error {
+func (ldt *ListDatabaseTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (ldt *listDatabaseTask) Execute(ctx context.Context) error {
+func (ldt *ListDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	ctx = AppendUserInfoForRPC(ctx)
 	ldt.result, err = ldt.mixCoord.ListDatabases(ctx, ldt.ListDatabasesRequest)
 	return merr.CheckRPCCall(ldt.result, err)
 }
 
-func (ldt *listDatabaseTask) PostExecute(ctx context.Context) error {
+func (ldt *ListDatabaseTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type alterDatabaseTask struct {
+type AlterDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterDatabaseRequest
@@ -233,39 +233,39 @@ type alterDatabaseTask struct {
 	result   *commonpb.Status
 }
 
-func (t *alterDatabaseTask) TraceCtx() context.Context {
+func (t *AlterDatabaseTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *alterDatabaseTask) ID() UniqueID {
+func (t *AlterDatabaseTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *alterDatabaseTask) SetID(uid UniqueID) {
+func (t *AlterDatabaseTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *alterDatabaseTask) Name() string {
+func (t *AlterDatabaseTask) Name() string {
 	return AlterDatabaseTaskName
 }
 
-func (t *alterDatabaseTask) Type() commonpb.MsgType {
+func (t *AlterDatabaseTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *alterDatabaseTask) BeginTs() Timestamp {
+func (t *AlterDatabaseTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterDatabaseTask) EndTs() Timestamp {
+func (t *AlterDatabaseTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterDatabaseTask) SetTs(ts Timestamp) {
+func (t *AlterDatabaseTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *alterDatabaseTask) OnEnqueue() error {
+func (t *AlterDatabaseTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -274,7 +274,7 @@ func (t *alterDatabaseTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
+func (t *AlterDatabaseTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 {
 		// Check the validation of timezone
 		userDefinedTimezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Properties)
@@ -286,7 +286,7 @@ func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterDatabaseTask) Execute(ctx context.Context) error {
+func (t *AlterDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 
 	req := &rootcoordpb.AlterDatabaseRequest{
@@ -306,11 +306,11 @@ func (t *alterDatabaseTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterDatabaseTask) PostExecute(ctx context.Context) error {
+func (t *AlterDatabaseTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type describeDatabaseTask struct {
+type DescribeDatabaseTask struct {
 	baseTask
 	Condition
 	*milvuspb.DescribeDatabaseRequest
@@ -319,39 +319,39 @@ type describeDatabaseTask struct {
 	result   *milvuspb.DescribeDatabaseResponse
 }
 
-func (t *describeDatabaseTask) TraceCtx() context.Context {
+func (t *DescribeDatabaseTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *describeDatabaseTask) ID() UniqueID {
+func (t *DescribeDatabaseTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *describeDatabaseTask) SetID(uid UniqueID) {
+func (t *DescribeDatabaseTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *describeDatabaseTask) Name() string {
+func (t *DescribeDatabaseTask) Name() string {
 	return AlterDatabaseTaskName
 }
 
-func (t *describeDatabaseTask) Type() commonpb.MsgType {
+func (t *DescribeDatabaseTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *describeDatabaseTask) BeginTs() Timestamp {
+func (t *DescribeDatabaseTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *describeDatabaseTask) EndTs() Timestamp {
+func (t *DescribeDatabaseTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *describeDatabaseTask) SetTs(ts Timestamp) {
+func (t *DescribeDatabaseTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *describeDatabaseTask) OnEnqueue() error {
+func (t *DescribeDatabaseTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -360,11 +360,11 @@ func (t *describeDatabaseTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *describeDatabaseTask) PreExecute(ctx context.Context) error {
+func (t *DescribeDatabaseTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *describeDatabaseTask) Execute(ctx context.Context) error {
+func (t *DescribeDatabaseTask) Execute(ctx context.Context) error {
 	req := &rootcoordpb.DescribeDatabaseRequest{
 		Base:   t.GetBase(),
 		DbName: t.GetDbName(),
@@ -392,6 +392,6 @@ func (t *describeDatabaseTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *describeDatabaseTask) PostExecute(ctx context.Context) error {
+func (t *DescribeDatabaseTask) PostExecute(ctx context.Context) error {
 	return nil
 }
