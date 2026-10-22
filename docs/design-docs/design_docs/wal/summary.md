@@ -676,8 +676,10 @@ when a WAL opens) limits resident encoded-buffer capacity per PChannel. Zero
 disables residency. LRU access ordering is shared by read and write admissions;
 eviction drops only the payload, retaining the complete index for future loads.
 An object larger than the budget bypasses residency without evicting the whole
-working set. No subscriber cursor pins the cache, and no cache worker/timer or
-per-VChannel goroutine is introduced. Slow consumers fall back to object reads.
+working set. No subscriber cursor pins cache residency. Each cold chunk load
+owns a temporary goroutine, shared by all its waiters; there is no persistent
+cache worker or per-VChannel cache goroutine. Slow consumers fall back to object
+reads.
 
 This is a cache-buffer budget, not a total-process memory limit. Metadata,
 pending/sealed source records, delivery batches, section decoding and buffers
@@ -687,11 +689,26 @@ An evicted buffer stays valid for readers that already acquired it. Total node
 residency scales with its number of PChannels; node-wide budgeting and scan-
 resistant admission remain future tuning work.
 
-A canceled loader cannot fail unrelated subscribers with its cancellation:
-remaining waiters retry loading with their own contexts. Other load errors are
-returned without caching them. No detached loader survives its calling read.
-I/O never holds the Manager or cache lock. Cache insertion and membership changes
-preserve the existing pending/sealed/durable snapshot boundary.
+Each cold load owns a context independent of every caller's cancellation and
+deadline. The first caller and subsequent callers are equal waiters on its
+result. Canceling a waiter removes only that reference; only the final waiter
+cancels the underlying load. The final waiter joins storage cleanup before
+returning, preserving its snapshot's local GC pin until object I/O has stopped.
+A new caller arriving during abandoned-load cleanup waits for that cleanup before
+starting a replacement. The old task cannot overwrite a new task's result.
+
+Temporary failures retry within that same shared load, retaining one exponential
+backoff sequence even when waiters join or cancel. All remaining waiters receive
+the same successful payload, including when residency is disabled or the object
+is oversized. Known permanent storage failures and malformed objects terminate
+the load and return the error to all remaining waiters; errors are not cached.
+Generic I/O, unclassified failures and operation-local timeouts retain the
+existing retry policy. Download slots are released between attempts during
+backoff; the read snapshot remains pinned while the shared load is needed.
+
+I/O and backoff never hold the Manager state mutex or cache mutex. Cache insertion
+and membership changes preserve the existing pending/sealed/durable snapshot
+boundary.
 
 GC removes the leaf with its manifest reference and discards its resident buffer.
 An in-flight old snapshot can finish under the existing read pin, but cannot
@@ -712,6 +729,16 @@ Validation must count actual chunk reads for empty ranges, page boundaries,
 same/cross-VChannel sharing and write admission; also cover eviction, disabled
 and oversized caches, concurrent cancellation/failure, out-of-order upload,
 equivalent write retries, GC during loading and restart without payload preload.
+
+Each retained immutable chunk index also keeps its successful footer-validation
+fingerprint independently of resident payload bytes. Eviction or disabled
+payload caching preserves that fingerprint; retirement discards both. Every
+reload still validates framing and hashes the footer. Only an unchanged digest
+and object size can reuse semantic validation against the same manifest index.
+Changed footer encodings undergo full decoding and index comparison. In-flight
+reads cannot repopulate retired cache state. Canceling one waiter does not
+cancel the shared load or discard its validation result while other waiters
+remain. A terminal object error is returned to every remaining waiter.
 
 ### 5.5 TransformLog Adaptor
 

@@ -1749,8 +1749,8 @@ streaming:
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
   walWriteAheadBuffer:
-    capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
-    keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
+    capacity: 64m # WAB cache capacity. Capacity/keepalive eviction only removes records consumed by RecoveryStorage and preserves the durable catchup anchor. Also scales walRateLimit.writeAheadBuffer.slowdownRatio.
+    keepalive: 30s # WAB cache TTL. Expired records are evictable only after RecoveryStorage consumes them; the durable catchup anchor is retained.
   walReadAheadBuffer:
     # The buffer length (pending message count) of read ahead buffer of each wal scanner can be used, 128 by default.
     # Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.
