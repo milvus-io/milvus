@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -169,6 +170,27 @@ func TestFreshTimeTickTypeUsesAFreshBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, freshCalls)
 	require.Equal(t, 1, allocateCalls)
+}
+
+// TestFreshTimeTickTypeRefusesABarrier: a fresh time tick and a barrier are
+// mutually exclusive, so a FreshTimeTick message carrying a barrier is refused
+// before anything is allocated or appended.
+func TestFreshTimeTickTypeRefusesABarrier(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+
+	splitMsg := message.NewSplitShardMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.SplitShardMessageHeader{CollectionId: 1}).
+		WithBody(&message.SplitShardMessageBody{}).
+		MustBuildMutable().
+		WithBarrierTimeTick(10)
+
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := impl.DoAppend(ctx, splitMsg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("a refused message must not be appended")
+		return nil, nil
+	})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
 func appendOK(context.Context, message.MutableMessage) (message.MessageID, error) {
