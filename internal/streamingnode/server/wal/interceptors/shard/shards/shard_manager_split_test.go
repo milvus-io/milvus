@@ -316,6 +316,23 @@ func TestShardManagerRecoverSplittedVChannelSeedsOnlyTheTombstone(t *testing.T) 
 	assert.Equal(t, SplitFence{TimeTick: 2000, TaskID: 100}, m.GetSplitFence(1, "v1"))
 }
 
+// TestShardManagerReleaseSplitFence: once the fenced vchannel is gone its
+// tombstone goes too, leaving the state a restart would rebuild; releasing a
+// vchannel with no tombstone changes nothing.
+func TestShardManagerReleaseSplitFence(t *testing.T) {
+	m := newTestShardManagerWithSplitFence(t, 2000)
+
+	m.ReleaseSplitFence("v-never-fenced")
+	assert.Equal(t, SplitFence{TimeTick: 2000, TaskID: 100}, m.GetSplitFence(1, "v1"))
+
+	m.ReleaseSplitFence("v1")
+	assert.Zero(t, m.GetSplitFence(1, "v1"))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrCollectionNotFound)
+
+	m.ReleaseSplitFence("v1")
+	assert.Zero(t, m.GetSplitFence(1, "v1"))
+}
+
 // TestShardManagerRecoverSkipsSegmentsOfAFencedVChannel: the fence flushes
 // every segment of the source in the same message, so a growing one still in
 // the snapshot means the meta was persisted in parts. It cannot be rebuilt --

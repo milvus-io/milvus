@@ -142,6 +142,7 @@ func (impl *shardInterceptor) initOpTable() {
 			collectionID: func(msg message.MutableMessage) int64 {
 				return message.MustAsMutableAlterCollectionMessageV2(msg).Header().GetCollectionId()
 			},
+			withoutEffect: impl.appendAlterCollectionWithoutEffect,
 		},
 		message.MessageTypeTruncateCollection: {
 			collectionID: func(msg message.MutableMessage) int64 {
@@ -429,6 +430,26 @@ func (impl *shardInterceptor) appendDropCollectionWithoutEffect(ctx context.Cont
 	}
 	collectionID := message.MustAsMutableDropCollectionMessageV1(msg).Header().GetCollectionId()
 	function.GetManager().Release(collectionID, WALFunctionRunnerKey(msg.VChannel()))
+	// The drop is the fenced source's end: nothing routes to it any more.
+	impl.shardManager.ReleaseSplitFence(msg.VChannel())
+	return msgID, nil
+}
+
+// appendAlterCollectionWithoutEffect appends an AlterCollection addressed to a
+// vchannel this pchannel does not hold. When it is the routing commit that
+// retires that vchannel -- a fenced source's adoption -- the source is gone
+// once it lands, so its fence tombstone goes with it.
+func (impl *shardInterceptor) appendAlterCollectionWithoutEffect(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	msgID, err := appendOp(ctx, msg)
+	if err != nil {
+		return msgID, err
+	}
+	alterMsg := message.MustAsMutableAlterCollectionMessageV2(msg)
+	header := alterMsg.Header()
+	if messageutil.IsShardSplitRouting(header) &&
+		messageutil.RetiresVChannel(header, alterMsg.MustBody().GetUpdates(), msg.VChannel()) {
+		impl.shardManager.ReleaseSplitFence(msg.VChannel())
+	}
 	return msgID, nil
 }
 

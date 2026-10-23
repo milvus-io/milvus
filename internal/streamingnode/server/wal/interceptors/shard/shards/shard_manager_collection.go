@@ -232,6 +232,22 @@ func (m *shardManagerImpl) SplitShard(msg message.MutableSplitShardMessageV2) {
 		mlog.Int64s("segmentIDs", segmentIDs))
 }
 
+// ReleaseSplitFence forgets the fence tombstone of a vchannel that is gone.
+func (m *shardManagerImpl) ReleaseSplitFence(vchannel string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	fence, ok := m.fencedVChannels[vchannel]
+	if !ok {
+		return
+	}
+	delete(m.fencedVChannels, vchannel)
+	m.Logger().Info(m.ctx, "split fence tombstone released, the fenced vchannel is gone",
+		mlog.FieldVChannel(vchannel),
+		mlog.Int64("splitTaskID", fence.TaskID),
+		mlog.Uint64("fencedTimeTick", fence.TimeTick))
+}
+
 // CreateCollection creates a new partition manager when create collection message is written into wal.
 // After CreateCollection is called, the ddl and dml on the collection can be applied.
 func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectionMessageV1) {
