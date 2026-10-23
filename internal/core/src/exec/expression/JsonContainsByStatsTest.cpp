@@ -1500,7 +1500,9 @@ class ShreddedOnlyGroupBySegment : public segcore::ChunkedSegmentSealedImpl {
     }
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId, int64_t) const override {
+    get_chunk_by_offset(FieldId,
+                        int64_t,
+                        milvus::OpContext* = nullptr) const override {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "valid shredded group-by must not access raw JSON");
     }
