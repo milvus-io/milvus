@@ -103,7 +103,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 			m.txnManager,
 			timetick,
 			m.metrics,
-		)
+		).withCollectionInfo(collectionInfo)
 	}
 	logger.Info(context.TODO(), "collection created in segment assignment service", mlog.Int64s("partitionIDs", partitionIDs))
 	m.updateMetrics()

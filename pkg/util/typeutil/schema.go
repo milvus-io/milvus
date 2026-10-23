@@ -135,6 +135,48 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	return estimateSizeBy(schema, custom)
 }
 
+// SegmentRowOverhead is the per-row size of the RowID and Timestamp system
+// columns (one int64 each).
+const SegmentRowOverhead = 16
+
+// EstimateRowWidth returns the estimated bytes one row of the schema takes in a
+// segment, system columns included, or 0 when the schema cannot be estimated.
+// The schema a client sends has no system fields; the one RootCoord stores and
+// hands to DataCoord and the StreamingNode carries RowID and Timestamp as
+// ordinary int64 fields, which EstimateSizePerRecord already counts. The system
+// columns are counted exactly once either way.
+func EstimateRowWidth(schema *schemapb.CollectionSchema) int64 {
+	if schema == nil {
+		return 0
+	}
+	size, err := EstimateSizePerRecord(schema)
+	if err != nil || size <= 0 {
+		return 0
+	}
+	width := int64(size)
+	for _, f := range schema.GetFields() {
+		switch f.GetFieldID() {
+		case common.RowIDField, common.TimeStampField:
+			width -= 8
+		}
+	}
+	return width + SegmentRowOverhead
+}
+
+// RowCappedSegmentSize caps a segment size target in bytes at maxRows rows of
+// rowWidth bytes: min(baseSize, maxRows x rowWidth). A collection whose rows are
+// at least baseSize / maxRows wide keeps baseSize. maxRows <= 0 or an unknown
+// rowWidth (0) disables the cap.
+func RowCappedSegmentSize(baseSize, rowWidth, maxRows int64) int64 {
+	if maxRows <= 0 || rowWidth <= 0 {
+		return baseSize
+	}
+	if capped := rowWidth * maxRows; capped > 0 && capped < baseSize {
+		return capped
+	}
+	return baseSize
+}
+
 func EstimateMaxSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	return estimateSizeBy(schema, max)
 }
