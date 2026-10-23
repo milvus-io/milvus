@@ -5,11 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -17,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -120,6 +124,77 @@ func requireCommitAckerError(t *testing.T, impl *timeTickAppendInterceptor, expe
 		}
 	}
 	t.Fatal("commit acker did not retain the inner append error")
+}
+
+// TestFreshTimeTickTypeUsesAFreshBatch verifies that the interceptor routes a
+// FreshTimeTick message type (SplitShard) through AckManager.AllocateFresh,
+// never through the plain Allocate, and that every other message type keeps
+// using plain Allocate.
+func TestFreshTimeTickTypeUsesAFreshBatch(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+
+	var freshCalls, allocateCalls int
+	var originFresh func(*ack.AckManager, context.Context) (*ack.Acker, error)
+	mFresh := mockey.Mock((*ack.AckManager).AllocateFresh).To(func(ta *ack.AckManager, ctx context.Context) (*ack.Acker, error) {
+		freshCalls++
+		return originFresh(ta, ctx)
+	}).Origin(&originFresh).Build()
+	defer mFresh.UnPatch()
+
+	var originAllocate func(*ack.AckManager, context.Context) (*ack.Acker, error)
+	mAllocate := mockey.Mock((*ack.AckManager).Allocate).To(func(ta *ack.AckManager, ctx context.Context) (*ack.Acker, error) {
+		allocateCalls++
+		return originAllocate(ta, ctx)
+	}).Origin(&originAllocate).Build()
+	defer mAllocate.UnPatch()
+
+	splitMsg := message.NewSplitShardMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.SplitShardMessageHeader{CollectionId: 1}).
+		WithBody(&message.SplitShardMessageBody{}).
+		MustBuildMutable()
+
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := impl.DoAppend(ctx, splitMsg, appendOK)
+	require.NoError(t, err)
+	require.Equal(t, 1, freshCalls)
+	require.Equal(t, 0, allocateCalls)
+
+	insertMsg := message.NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&message.InsertMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable()
+
+	_, err = impl.DoAppend(ctx, insertMsg, appendOK)
+	require.NoError(t, err)
+	require.Equal(t, 1, freshCalls)
+	require.Equal(t, 1, allocateCalls)
+}
+
+// TestFreshTimeTickTypeRefusesABarrier: a fresh time tick and a barrier are
+// mutually exclusive, so a FreshTimeTick message carrying a barrier is refused
+// before anything is allocated or appended.
+func TestFreshTimeTickTypeRefusesABarrier(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+
+	splitMsg := message.NewSplitShardMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.SplitShardMessageHeader{CollectionId: 1}).
+		WithBody(&message.SplitShardMessageBody{}).
+		MustBuildMutable().
+		WithBarrierTimeTick(10)
+
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := impl.DoAppend(ctx, splitMsg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("a refused message must not be appended")
+		return nil, nil
+	})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func appendOK(context.Context, message.MutableMessage) (message.MessageID, error) {
+	return walimplstest.NewTestMessageID(1), nil
 }
 
 func newTestTimeTickAppendInterceptor(t *testing.T) *timeTickAppendInterceptor {
