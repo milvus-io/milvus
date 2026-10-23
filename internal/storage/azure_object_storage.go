@@ -252,6 +252,14 @@ func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, 
 func (AzureObjectStorage *AzureObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcContainer, srcObjectName, dstContainer, dstObjectName string) error {
 	srcURL := AzureObjectStorage.sourceCopyURL(srcContainer, srcObjectName)
 	dstBlobClient := AzureObjectStorage.NewContainerClient(dstContainer).NewBlockBlobClient(dstObjectName)
+	// General object copies retain overwrite semantics. Only snapshot copies
+	// own immutable destinations and may reuse a previous completed copy.
+	return startAzureCopy(ctx, dstBlobClient, srcURL, dstObjectName, &blob.StartCopyFromURLOptions{})
+}
+
+func (AzureObjectStorage *AzureObjectStorage) copySnapshotObjectCrossBucket(ctx context.Context, srcContainer, srcObjectName, dstContainer, dstObjectName string) error {
+	srcURL := AzureObjectStorage.sourceCopyURL(srcContainer, srcObjectName)
+	dstBlobClient := AzureObjectStorage.NewContainerClient(dstContainer).NewBlockBlobClient(dstObjectName)
 	return startOrResumeAzureCopy(ctx, dstBlobClient, srcURL, dstObjectName)
 }
 
@@ -273,13 +281,20 @@ func (AzureObjectStorage *AzureObjectStorage) sourceCopyURL(srcContainer, srcObj
 // failed/aborted copies are not overwritten or treated as successful.
 func startOrResumeAzureCopy(ctx context.Context, dstBlobClient *blockblob.Client, srcURL, dstObjectName string) error {
 	ifNoneMatch := azcore.ETag("*")
-	response, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{
+	return startAzureCopy(ctx, dstBlobClient, srcURL, dstObjectName, &blob.StartCopyFromURLOptions{
 		AccessConditions: &blob.AccessConditions{
 			ModifiedAccessConditions: &blob.ModifiedAccessConditions{IfNoneMatch: &ifNoneMatch},
 		},
 	})
-	if err != nil {
-		if !bloberror.HasCode(err, bloberror.PendingCopyOperation, bloberror.ConditionNotMet, bloberror.TargetConditionNotMet) {
+}
+
+func startAzureCopy(ctx context.Context, dstBlobClient *blockblob.Client, srcURL, dstObjectName string, options *blob.StartCopyFromURLOptions) error {
+	response, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, options)
+	if err != nil && !bloberror.HasCode(err, bloberror.PendingCopyOperation) {
+		// Azurite reports BlobAlreadyExists for conditional creation. A
+		// conflict only permits polling; source, ID and status still validate
+		// the existing copy before it can be reported as successful.
+		if options.AccessConditions == nil || !bloberror.HasCode(err, bloberror.ConditionNotMet, bloberror.TargetConditionNotMet, bloberror.BlobAlreadyExists) {
 			return mapObjectStorageError(dstObjectName, err)
 		}
 	}

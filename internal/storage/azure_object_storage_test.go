@@ -309,6 +309,7 @@ func TestStartOrResumeAzureCopy(t *testing.T) {
 		statuses []blob.CopyStatusType
 		wantErr  string
 	}{
+		{"joins existing blob conflict", bloberror.BlobAlreadyExists, "source", []blob.CopyStatusType{blob.CopyStatusTypeSuccess}, ""},
 		{"joins destination condition conflict", bloberror.ConditionNotMet, "source", []blob.CopyStatusType{blob.CopyStatusTypePending, blob.CopyStatusTypeSuccess}, ""},
 		{"reuses completed copy", bloberror.ConditionNotMet, "source", []blob.CopyStatusType{blob.CopyStatusTypeSuccess}, ""},
 		{"joins target condition conflict", bloberror.TargetConditionNotMet, "source", []blob.CopyStatusType{blob.CopyStatusTypeSuccess}, ""},
@@ -714,6 +715,19 @@ func TestAzureObjectStorage(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, value, srcData)
 
+			// Snapshot retries reuse a completed copy through the real provider.
+			manager := &RemoteChunkManager{client: testCM, bucketName: config.BucketName}
+			destination := testCM.NewContainerClient(config.BucketName).NewBlockBlobClient(dstKey)
+			before, err := destination.GetProperties(ctx, nil)
+			require.NoError(t, err)
+			require.NotNil(t, before.CopyID)
+			for range 2 {
+				require.NoError(t, manager.CopyCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey))
+			}
+			after, err := destination.GetProperties(ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, before.CopyID, after.CopyID)
+
 			// Clean up
 			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
 			assert.NoError(t, err)
@@ -745,8 +759,9 @@ func TestAzureObjectStorage(t *testing.T) {
 			err = testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(srcValue), int64(len(srcValue)))
 			require.NoError(t, err)
 
-			// Copy (should overwrite)
-			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
+			// Ordinary Copy must overwrite, unlike immutable snapshot copies.
+			manager := &RemoteChunkManager{client: testCM, bucketName: config.BucketName}
+			err = manager.Copy(ctx, srcKey, dstKey)
 			assert.NoError(t, err)
 
 			// Verify destination has new content

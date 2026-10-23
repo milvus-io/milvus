@@ -206,7 +206,8 @@ File permits bound files, not HTTP requests: multipart can multiply requests by
 ten. GCP/Azure retain their provider copy paths; other size accounting uses the
 existing destination-size fallback.
 
-Azure uses destination `If-None-Match: *`. Condition/pending conflicts join an
+Azure snapshot copies use destination `If-None-Match: *`; ordinary object copies
+retain overwrite semantics. Condition/pending conflicts join an
 existing copy only after validating source identity, CopyID and status; completed
 same-source copies are reusable, failed/aborted copies fail. Parallel ranges
 require upgraded copy workers and immutable sources/job-owned destinations.

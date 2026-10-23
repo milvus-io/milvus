@@ -59,6 +59,11 @@ type sizedObjectStorage interface {
 	CopyObjectCrossBucketAndGetSize(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error)
 }
 
+// snapshotObjectStorage keeps immutable retry semantics out of ordinary Copy.
+type snapshotObjectStorage interface {
+	copySnapshotObjectCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error
+}
+
 type ObjectStorage interface {
 	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
@@ -465,7 +470,7 @@ func ToMilvusIoError(fileName string, err error) error {
 }
 
 func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
-	_, err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, mcm.bucketName, dstFilePath, false)
+	_, err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, mcm.bucketName, dstFilePath, false, false)
 	if err != nil {
 		mlog.Warn(ctx, "failed to copy object", mlog.String("bucket", mcm.bucketName), mlog.String("src", srcFilePath), mlog.String("dst", dstFilePath), mlog.Err(err))
 		return err
@@ -483,7 +488,7 @@ func (mcm *RemoteChunkManager) CopyCrossBucketAndGetSize(ctx context.Context, sr
 }
 
 func (mcm *RemoteChunkManager) copyCrossBucket(ctx context.Context, srcBucket, srcFilePath, dstBucket, dstFilePath string, returnSize bool) (int64, error) {
-	size, err := mcm.copyObject(ctx, srcBucket, srcFilePath, dstBucket, dstFilePath, returnSize)
+	size, err := mcm.copyObject(ctx, srcBucket, srcFilePath, dstBucket, dstFilePath, returnSize, true)
 	if err != nil {
 		mlog.Warn(ctx, "failed to copy object across buckets",
 			mlog.String("srcBucket", srcBucket),
@@ -496,7 +501,7 @@ func (mcm *RemoteChunkManager) copyCrossBucket(ctx context.Context, srcBucket, s
 	return size, nil
 }
 
-func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string, returnSize bool) (int64, error) {
+func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string, returnSize, snapshot bool) (int64, error) {
 	start := timerecord.NewTimeRecorder("copyObject")
 
 	var size int64
@@ -504,7 +509,11 @@ func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObj
 	if client, ok := mcm.client.(sizedObjectStorage); ok && returnSize {
 		size, err = client.CopyObjectCrossBucketAndGetSize(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
 	} else {
-		err = mcm.client.CopyObjectCrossBucket(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
+		if client, ok := mcm.client.(snapshotObjectStorage); ok && snapshot {
+			err = client.copySnapshotObjectCrossBucket(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
+		} else {
+			err = mcm.client.CopyObjectCrossBucket(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
+		}
 		if err == nil && returnSize {
 			size, err = mcm.getObjectSize(ctx, dstBucket, dstObjectName)
 		}
