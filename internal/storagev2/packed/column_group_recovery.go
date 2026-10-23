@@ -18,8 +18,9 @@ package packed
 
 import (
 	"context"
-	"errors"
 	"strconv"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"

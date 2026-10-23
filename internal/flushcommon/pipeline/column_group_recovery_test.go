@@ -87,7 +87,8 @@ func TestInitMetaCacheRestoresV3ColumnGroupsAfterMetadataReload(t *testing.T) {
 		var saved *datapb.SegmentInfo
 		b := broker.NewMockBroker(t)
 		b.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *datapb.SaveBinlogPathsRequest) error {
-			saved = &datapb.SegmentInfo{ID: 10, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3,
+			saved = &datapb.SegmentInfo{
+				ID: 10, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3,
 				Level: datapb.SegmentLevel_L1, ManifestPath: req.GetManifestPath(), Stats: proto.Clone(req.GetStats()).(*datapb.Statistics),
 				NumOfRows: req.GetCheckPoints()[0].GetNumOfRows(),
 			}
@@ -149,7 +150,8 @@ func TestInitMetaCacheDoesNotIgnoreColumnGroupReadFailure(t *testing.T) {
 // Keep the constructor's Stats fallback covered independently of the V3 I/O
 // path: V2 recovery still has no manifest and retains its previous behavior.
 func TestLogicalSplitRestorationDoesNotRequireManifest(t *testing.T) {
-	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{StorageVersion: storage.StorageV2,
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		StorageVersion: storage.StorageV2,
 		Stats: &datapb.Statistics{LoadResource: &datapb.LoadResourceStatistics{
 			ColumnGroups: []*datapb.ColumnGroupStatistics{{GroupId: 101, FieldIds: []int64{101}}},
 		}},
