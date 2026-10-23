@@ -97,7 +97,7 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 
 func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.TargetObserver, collection int64) error {
 	// manual trigger update next target
-	ready, err := targetObserver.UpdateNextTarget(collection)
+	ready, err := targetObserver.UpdateNextTarget(ctx, collection)
 	if err != nil {
 		return merr.Wrapf(err, "failed to update next target, collection=%d", collection)
 	}

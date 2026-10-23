@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -304,19 +305,29 @@ func (ob *TargetObserver) init(ctx context.Context, collectionID int64) {
 
 // UpdateNextTarget updates the next target,
 // returns a channel which will be closed when the next target is ready,
-// or returns error if failed to pull target
-func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, error) {
-	notifier := make(chan error)
+// or returns error if failed to pull target or ctx is done
+func (ob *TargetObserver) UpdateNextTarget(ctx context.Context, collectionID int64) (chan struct{}, error) {
+	// Buffered and never closed: the schedule loop can reply after this
+	// function returned on ctx, and that reply must not block or panic.
+	notifier := make(chan error, 1)
 	readyCh := make(chan struct{})
-	defer close(notifier)
-
-	ob.updateChan <- targetUpdateRequest{
+	req := targetUpdateRequest{
 		CollectionID:  collectionID,
 		opType:        UpdateCollection,
 		Notifier:      notifier,
 		ReadyNotifier: readyCh,
 	}
-	return readyCh, <-notifier
+	select {
+	case ob.updateChan <- req:
+	case <-ctx.Done():
+		return nil, merr.Wrap(ctx.Err(), "send update next target request")
+	}
+	select {
+	case err := <-notifier:
+		return readyCh, err
+	case <-ctx.Done():
+		return nil, merr.Wrap(ctx.Err(), "wait update next target reply")
+	}
 }
 
 func (ob *TargetObserver) ReleaseCollection(collectionID int64) {

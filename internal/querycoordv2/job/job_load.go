@@ -201,7 +201,7 @@ func (job *LoadCollectionJob) Execute() error {
 	)
 
 	// 5. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
-	if _, err = job.targetObserver.UpdateNextTarget(req.GetCollectionId()); err != nil {
+	if _, err = job.targetObserver.UpdateNextTarget(job.ctx, req.GetCollectionId()); err != nil {
 		return err
 	}
 
