@@ -27,23 +27,25 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // The chain tests drive the primary key index interceptor through the production
 // interceptor chain, in the order of walmanager.newInterceptorBuilders.
 //
-// The switch of the interceptor is read when the WAL opens, and it is a process
-// wide config, so these tests must not run in parallel with each other.
+// The interceptor uses the index only when the streaming node resource has an
+// index manager. The resource and the switch are process wide, so these tests
+// must not run in parallel with each other.
 //
-// The index engine is the in-memory one that registers itself in an init() under
-// the "test" build tag. This package reaches it through the pkindex interceptor.
-// The index starts empty on every WAL open, so no test may assume that an entry
-// survives a reopen.
+// The index runs on the real engine in a temporary directory. There is no
+// recovery yet, so the index starts empty on every WAL open and no test may
+// assume that an entry survives a reopen.
 const (
 	pkChainCollectionID = int64(11)
 	pkChainPartitionID  = int64(12)
@@ -52,17 +54,23 @@ const (
 	pkChainLastProperty = "pkindex-chain-last"
 )
 
-// openPKIndexWAL turns the index on, opens a WAL whose chain contains the index
-// interceptor and creates the collection the chain tests write to.
+// openPKIndexWAL turns the index on, opens the index of the pchannel the way
+// the WAL recovery will (New, then Start), opens a WAL whose chain contains the
+// index interceptor and creates the collection the chain tests write to. The
+// observe of the recovery is not wired yet, so nothing writes the engine: the
+// decisions see the earlier writes through the in-flight set of the index.
 func openPKIndexWAL(t *testing.T, name string) wal.WAL {
 	setPKIndexEnabled(t, "true")
-	w := openChainWAL(t, name, pkindex.NewInterceptorBuilder())
+	mgr := snpkindex.NewManagerForTest(t, t.TempDir())
+	mgr.New(snpkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: name, Term: 1}}).Start()
+	w := openChainWALWithPKIndex(t, name, pkindex.NewInterceptorBuilder(), mgr)
 	appendPKChainCreateCollection(t, w, pkChainCollectionID, pkChainPartitionID)
 	return w
 }
 
 // setPKIndexEnabled sets the switch of the index and restores it after the test.
-// It must be called before the WAL opens, the builder reads the switch once.
+// It matches the switch to the index manager that the test gives to the WAL. The
+// builder does not read the switch: the index manager decides.
 func setPKIndexEnabled(t *testing.T, value string) {
 	paramtable.Init()
 	params := paramtable.Get()

@@ -22,13 +22,17 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -42,11 +46,13 @@ type txnSessions interface {
 }
 
 // appendInterceptor translates WAL messages into primary key index requests and
-// appends what the decider asks for. It holds no index logic of its own.
+// appends what the Authority asks for. It holds no index logic of its own.
 type appendInterceptor struct {
+	ch       *snpkindex.PChannelIndexManager
 	registry *registry
 	sessions txnSessions
 	metrics  *pkindexMetrics
+	onFatal  func(error) // marks the WAL unavailable
 }
 
 func (i *appendInterceptor) Name() string {
@@ -94,7 +100,7 @@ func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMes
 }
 
 func (i *appendInterceptor) Close() {
-	i.registry.close(context.TODO())
+	i.registry.close()
 }
 
 func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
@@ -120,7 +126,7 @@ func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg mess
 		// A duplicate CreateCollection finds the target of the existing collection
 		// in use, so only a target that this call created is removed.
 		if created {
-			i.registry.remove(ctx, msg.VChannel())
+			i.registry.drop(ctx, msg.VChannel())
 		}
 		return id, err
 	}
@@ -135,7 +141,7 @@ func (i *appendInterceptor) appendDropCollection(ctx context.Context, msg messag
 	if funcutil.IsControlChannel(msg.VChannel()) {
 		return id, nil
 	}
-	i.registry.remove(ctx, msg.VChannel())
+	i.registry.drop(ctx, msg.VChannel())
 	return id, nil
 }
 
@@ -307,24 +313,33 @@ func discard(ctx context.Context, intent *authority.WriteGuard, err error, tt ui
 	intent.DiscardUncertain(ctx, err, tt)
 }
 
-// decide calls the decider and classifies its error for the WAL.
+// decide asks the Authority of the vchannel and classifies its error for the WAL.
 func (i *appendInterceptor) decide(ctx context.Context, t *target, req authority.DecideRequest) (*authority.WriteGuard, error) {
 	start := time.Now()
-	intent, err := t.decider.Decide(ctx, req)
+	a := i.ch.Authority(req.VChannel)
+	if a == nil {
+		// The index closed between the lookup of the target and this call:
+		// the WAL closes, or a DropCollection raced with the write.
+		return nil, decideError(errors.Wrapf(engine.ErrClosed, "primary key index of vchannel %s is closed", req.VChannel))
+	}
+	intent, err := a.Decide(ctx, req)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, err
+		if errors.Is(err, pkroot.ErrCorrupted) {
+			// The index of this vchannel is wrong, and every later decision
+			// would be too. The WAL becomes unavailable, like on a fenced flush.
+			mlog.Error(ctx, "primary key index lookup found corrupted data, the WAL becomes unavailable",
+				mlog.FieldVChannel(req.VChannel), mlog.Err(err))
+			i.onFatal(err)
 		}
-		// The index failed, not the request, so the append stays retriable for the client.
-		return nil, status.NewInner("primary key index lookup failed: %v", err)
+		return nil, decideError(err)
 	}
 	switch {
 	case req.Kind == authority.KindCommitTxn:
-		// A commit probes the pending writes of its transaction, and the decider
+		// A commit probes the pending writes of its transaction, and the Authority
 		// does not expose how many keys that is. Without that number the hit and
 		// miss counters can not both be fed, and feeding only the hits would make
 		// the ratio of the two wrong. Only the duration and the lock wait are
-		// observed until the decider reports the size of the pending snapshot.
+		// observed until the Authority reports the size of the pending snapshot.
 		i.metrics.observeCommitDecide(time.Since(start), intent.LockWait())
 	case req.TxnID == 0 && (req.Kind == authority.KindInsert || req.Kind == authority.KindDelete):
 		d := intent.Decision()
@@ -342,14 +357,32 @@ func (i *appendInterceptor) decide(ctx context.Context, t *target, req authority
 // existed when a body of it was applied, and every end of a session removes it
 // from the manager. So a failed lookup means the transaction is over and no
 // CommitTxn or RollbackTxn will drop the set.
+// decideError translates the error of a decision for the client.
+func decideError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	// The index is closed. That happens when the WAL closes, and the client
+	// retries on the next owner of the channel.
+	if errors.Is(err, engine.ErrClosed) {
+		return status.NewOnShutdownError("primary key index is closed: %v", err)
+	}
+	// The index failed, not the request, so the append stays retriable for the client.
+	return status.NewInner("primary key index lookup failed: %v", err)
+}
+
 func (i *appendInterceptor) dropPendingOfEndedTxns() {
 	if i.sessions == nil {
 		return
 	}
-	i.registry.forEach(func(t *target) {
-		for _, txnID := range t.decider.PendingTxnIDs() {
+	i.registry.forEach(func(vchannel string, _ *target) {
+		a := i.ch.Authority(vchannel)
+		if a == nil {
+			return
+		}
+		for _, txnID := range a.PendingTxnIDs() {
 			if _, err := i.sessions.GetSessionOfTxn(message.TxnID(txnID)); err != nil {
-				t.decider.DropTxn(txnID)
+				a.DropTxn(txnID)
 			}
 		}
 	})

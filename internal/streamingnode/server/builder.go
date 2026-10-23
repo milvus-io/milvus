@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
@@ -67,15 +69,20 @@ func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
 
 // Build builds a streaming node server.
 func (b *ServerBuilder) Build() *Server {
+	// The index manager uses the same chunk manager as the resource. It reads the ID allocator from the resource only when a WAL
+	// opens, which is after resource.Init.
+	pkindex := newPKIndexComponents(context.TODO(), b.chunkManager)
 	resource.Init(
 		resource.OptETCD(b.etcdClient),
 		resource.OptChunkManager(b.chunkManager),
+		resource.OptPKIndexManager(pkindex.manager()),
 		resource.OptMixCoordClient(b.mixc),
 		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
 	)
 	s := &Server{
 		session:    b.session,
 		grpcServer: b.grpcServer,
+		pkindex:    pkindex,
 	}
 	s.init()
 	return s

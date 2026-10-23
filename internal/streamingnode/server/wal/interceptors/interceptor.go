@@ -41,6 +41,7 @@ type InterceptorBuildParam struct {
 	MVCCManager            *mvcc.MVCCManager            // The MVCC manager for the wal, can be used to get the latest mvcc timetick.
 	InitialRecoverSnapshot *recovery.RecoverySnapshot   // The initial recover snapshot for the wal, used to recover the wal state.
 	RecoveryStorage        recovery.RecoveryStorage     // The recovery storage owned by the wal lifecycle.
+	OnFatal                func(error)                  // OnFatal marks the WAL unavailable. It must not block.
 	TxnManager             *txn.TxnManager              // The transaction manager for the wal, used to manage the transactions.
 	ShardManager           shards.ShardManager          // The shard manager for the wal, used to manage the shards, segment assignment, partition.
 	ReplicateManager       replicates.ReplicatesManager // The replicates manager for the wal, used to manage the replicates.
