@@ -53,7 +53,11 @@ const validDataFieldsMetadataKey = "milvus.valid_data_fields"
 // FieldOrder returns the field ids recorded by the C++ export, in the order
 // the protobuf path would have emitted them.
 func FieldOrder(record arrow.Record) ([]int64, error) {
-	md := record.Schema().Metadata()
+	return FieldOrderOf(record.Schema().Metadata())
+}
+
+// FieldOrderOf is FieldOrder over a record's schema metadata.
+func FieldOrderOf(md arrow.Metadata) ([]int64, error) {
 	idx := md.FindKey(fieldOrderMetadataKey)
 	if idx < 0 {
 		return nil, merr.WrapErrServiceInternal(
@@ -106,7 +110,11 @@ func SchemaMetadataFingerprint(record arrow.Record) string {
 // would otherwise be indistinguishable from "no column had one", which is a
 // legal value, and silently strip every bitmap.
 func validDataFields(record arrow.Record) (map[int64]struct{}, error) {
-	md := record.Schema().Metadata()
+	return ValidDataFieldsOf(record.Schema().Metadata())
+}
+
+// ValidDataFieldsOf is validDataFields over a record's schema metadata.
+func ValidDataFieldsOf(md arrow.Metadata) (map[int64]struct{}, error) {
 	idx := md.FindKey(validDataFieldsMetadataKey)
 	if idx < 0 {
 		return nil, merr.WrapErrServiceInternal(

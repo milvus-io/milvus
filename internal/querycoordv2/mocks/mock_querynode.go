@@ -910,6 +910,124 @@ func (_c *MockQueryNodeServer_LoadSegments_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// Materialize provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) Materialize(_a0 context.Context, _a1 *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Materialize")
+	}
+
+	var r0 *internalpb.MaterializeResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) (*internalpb.MaterializeResults, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) *internalpb.MaterializeResults); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.MaterializeResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.QueryRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeServer_Materialize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Materialize'
+type MockQueryNodeServer_Materialize_Call struct {
+	*mock.Call
+}
+
+// Materialize is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.QueryRequest
+func (_e *MockQueryNodeServer_Expecter) Materialize(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_Materialize_Call {
+	return &MockQueryNodeServer_Materialize_Call{Call: _e.mock.On("Materialize", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_Materialize_Call) Run(run func(_a0 context.Context, _a1 *querypb.QueryRequest)) *MockQueryNodeServer_Materialize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.QueryRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_Materialize_Call) Return(_a0 *internalpb.MaterializeResults, _a1 error) *MockQueryNodeServer_Materialize_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_Materialize_Call) RunAndReturn(run func(context.Context, *querypb.QueryRequest) (*internalpb.MaterializeResults, error)) *MockQueryNodeServer_Materialize_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MaterializeSegments provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) MaterializeSegments(_a0 context.Context, _a1 *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MaterializeSegments")
+	}
+
+	var r0 *internalpb.MaterializeResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) (*internalpb.MaterializeResults, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) *internalpb.MaterializeResults); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.MaterializeResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.QueryRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeServer_MaterializeSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MaterializeSegments'
+type MockQueryNodeServer_MaterializeSegments_Call struct {
+	*mock.Call
+}
+
+// MaterializeSegments is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.QueryRequest
+func (_e *MockQueryNodeServer_Expecter) MaterializeSegments(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_MaterializeSegments_Call {
+	return &MockQueryNodeServer_MaterializeSegments_Call{Call: _e.mock.On("MaterializeSegments", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_MaterializeSegments_Call) Run(run func(_a0 context.Context, _a1 *querypb.QueryRequest)) *MockQueryNodeServer_MaterializeSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.QueryRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_MaterializeSegments_Call) Return(_a0 *internalpb.MaterializeResults, _a1 error) *MockQueryNodeServer_MaterializeSegments_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_MaterializeSegments_Call) RunAndReturn(run func(context.Context, *querypb.QueryRequest) (*internalpb.MaterializeResults, error)) *MockQueryNodeServer_MaterializeSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Query provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNodeServer) Query(_a0 context.Context, _a1 *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	ret := _m.Called(_a0, _a1)

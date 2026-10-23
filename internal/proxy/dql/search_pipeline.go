@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1379,6 +1380,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		node:           op.node,
 		internalTask:   true,
 		chMgr:          op.node.ChMgr(),
+		ids:            ids,
 	}
 	queryRunner, ok := op.node.(taskmodel.QueryRunner)
 	if !ok {
@@ -1400,6 +1402,10 @@ type organizeOperator struct {
 	primaryFieldSchema *schemapb.FieldSchema
 	schema             *schemapb.CollectionSchema
 	collectionID       int64
+	// copyFields turns off the fast path, which hands the fields input on as
+	// it is: set by the pipeline (markSharedOrganizeInputs) when another
+	// node also reads those fields, so the organized fields never alias them.
+	copyFields bool
 }
 
 func newOrganizeOperator(t *SearchTask, _ map[string]any) (operator, error) {
@@ -1454,6 +1460,14 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 		emptyFields := make([][]*schemapb.FieldData, len(idsList))
 		return []any{emptyFields}, nil
 	}
+	// Fast path: fields whose pk column already holds exactly the one ids
+	// list, in its order -- a Materialize requery's result (the fill follows
+	// the requested ids) -- are the answer as they are: no pk map and no
+	// second gather. Not where another node also reads fields (copyFields).
+	if !op.copyFields && len(idsList) == 1 && typeutil.GetSizeOfIDs(idsList[0]) > 0 &&
+		resultHasIDs(fields, op.primaryFieldSchema, idsList[0]) {
+		return []any{[][]*schemapb.FieldData{fields}}, nil
+	}
 	pkFieldData, err := typeutil.GetPrimaryFieldData(fields, op.primaryFieldSchema)
 	if err != nil {
 		return nil, err
@@ -1482,6 +1496,25 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 		}
 	}
 	return []any{allFieldData}, nil
+}
+
+// resultHasIDs reports whether the pk column of fields holds exactly ids, in
+// their order.
+func resultHasIDs(fields []*schemapb.FieldData, pkField *schemapb.FieldSchema, ids *schemapb.IDs) bool {
+	pk, err := typeutil.GetPrimaryFieldData(fields, pkField)
+	if err != nil {
+		return false
+	}
+	switch v := ids.GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		col := pk.GetScalars().GetLongData()
+		return col != nil && slices.Equal(col.GetData(), v.IntId.GetData())
+	case *schemapb.IDs_StrId:
+		col := pk.GetScalars().GetStringData()
+		return col != nil && slices.Equal(col.GetData(), v.StrId.GetData())
+	default:
+		return false
+	}
 }
 
 func PickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.FieldData, schema *schemapb.CollectionSchema, collectionID int64) ([]*schemapb.FieldData, error) {
@@ -2970,6 +3003,9 @@ func reorderFieldData(field *schemapb.FieldData, indices []int) error {
 	return nil
 }
 
+// mergeIDsFunc dedups the ids of every result, keeping each id's first
+// position, so the requery asks for them in search order (a Materialize
+// requery returns its rows in that order, see organizeOperator).
 func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	multipleMilvusResults := inputs[0].([]*milvuspb.SearchResults)
 	idInt64Type := false
@@ -2982,27 +3018,15 @@ func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, e
 
 	uniqueIDs := &schemapb.IDs{}
 	if idInt64Type {
-		idsSet := typeutil.NewSet[int64]()
-		for _, ids := range idsList {
-			if data := ids.GetIntId().GetData(); data != nil {
-				idsSet.Insert(data...)
-			}
-		}
 		uniqueIDs.IdField = &schemapb.IDs_IntId{
 			IntId: &schemapb.LongArray{
-				Data: idsSet.Collect(),
+				Data: lo.Uniq(lo.FlatMap(idsList, func(ids *schemapb.IDs, _ int) []int64 { return ids.GetIntId().GetData() })),
 			},
 		}
 	} else {
-		idsSet := typeutil.NewSet[string]()
-		for _, ids := range idsList {
-			if data := ids.GetStrId().GetData(); data != nil {
-				idsSet.Insert(data...)
-			}
-		}
 		uniqueIDs.IdField = &schemapb.IDs_StrId{
 			StrId: &schemapb.StringArray{
-				Data: idsSet.Collect(),
+				Data: lo.Uniq(lo.FlatMap(idsList, func(ids *schemapb.IDs, _ int) []string { return ids.GetStrId().GetData() })),
 			},
 		}
 	}
@@ -3024,7 +3048,9 @@ func newPipeline(pipeDef *pipelineDef, t *SearchTask) (*pipeline, error) {
 		}
 		nodes[i] = node
 	}
-	return &pipeline{name: pipeDef.name, nodes: nodes, traceEnabled: t.traceEnabled}, nil
+	p := &pipeline{name: pipeDef.name, nodes: nodes, traceEnabled: t.traceEnabled}
+	p.markSharedOrganizeInputs()
+	return p, nil
 }
 
 func (p *pipeline) AddNodes(t *SearchTask, nodes ...*nodeDef) error {
@@ -3035,7 +3061,30 @@ func (p *pipeline) AddNodes(t *SearchTask, nodes ...*nodeDef) error {
 		}
 		p.nodes = append(p.nodes, node)
 	}
+	p.markSharedOrganizeInputs()
 	return nil
+}
+
+// markSharedOrganizeInputs turns off the fast path of every organize node
+// whose fields input another node also reads (organizeOperator.copyFields).
+func (p *pipeline) markSharedOrganizeInputs() {
+	if !lo.ContainsBy(p.nodes, func(n *Node) bool {
+		_, ok := n.op.(*organizeOperator)
+		return ok
+	}) {
+		return
+	}
+	readers := make(map[string]int)
+	for _, n := range p.nodes {
+		for _, in := range n.inputs {
+			readers[in]++
+		}
+	}
+	for _, n := range p.nodes {
+		if op, ok := n.op.(*organizeOperator); ok && len(n.inputs) > 0 {
+			op.copyFields = readers[n.inputs[0]] > 1
+		}
+	}
 }
 
 func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {

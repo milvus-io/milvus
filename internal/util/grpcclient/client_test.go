@@ -646,6 +646,33 @@ func TestVerifySession(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrNodeNotFound)
 }
 
+func TestClientBase_CheckGrpcError_Unimplemented(t *testing.T) {
+	cases := []struct {
+		name       string
+		isNode     bool
+		retry      bool
+		reset      bool
+		forceReset bool
+	}{
+		// coord: the connection may point at a replaced coord; force reset.
+		{name: "coord", isNode: false, retry: false, reset: true, forceReset: true},
+		// node: an older node version; keep the shared connection.
+		{name: "node", isNode: true, retry: false, reset: false, forceReset: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base := ClientBase[*mockClient]{isNode: tc.isNode}
+			base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
+			retry, reset, forceReset, err := base.checkGrpcErr(context.Background(),
+				status.Error(codes.Unimplemented, "unknown method"))
+			assert.Equal(t, tc.retry, retry)
+			assert.Equal(t, tc.reset, reset)
+			assert.Equal(t, tc.forceReset, forceReset)
+			assert.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+		})
+	}
+}
+
 func TestClientBase_CheckGrpcError_ServerIDMismatch_Node(t *testing.T) {
 	base := ClientBase[*mockClient]{
 		isNode: true,

@@ -152,6 +152,10 @@ service QueryNode {
     }
     rpc QuerySegments(QueryRequest) returns (internal.RetrieveResults) {
     }
+    rpc Materialize(QueryRequest) returns (internal.MaterializeResults) {
+    }
+    rpc MaterializeSegments(QueryRequest) returns (internal.MaterializeResults) {
+    }
     rpc QueryStreamSegments(QueryRequest)
         returns (stream internal.RetrieveResults) {
     }
@@ -551,6 +555,7 @@ message QueryRequest {
     repeated int64 segmentIDs = 3;
     bool from_shard_leader = 4;
     DataScope scope = 5;  // All, Streaming, Historical
+    uint64 materialize_schema_fingerprint = 6; // schema the caller already holds; 0 = none
 }
 
 message SyncReplicaSegmentsRequest {

@@ -116,6 +116,14 @@ func (qn *qnServerWrapper) QuerySegments(ctx context.Context, in *querypb.QueryR
 	return qn.QueryNode.QuerySegments(ctx, in)
 }
 
+func (qn *qnServerWrapper) Materialize(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return qn.QueryNode.Materialize(ctx, in)
+}
+
+func (qn *qnServerWrapper) MaterializeSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return qn.QueryNode.MaterializeSegments(ctx, in)
+}
+
 func (qn *qnServerWrapper) QueryStreamSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 	streamer := streamrpc.NewInMemoryStreamer[*internalpb.RetrieveResults](ctx, 16)
 

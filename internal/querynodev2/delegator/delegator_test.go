@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -990,6 +991,78 @@ func (s *DelegatorSuite) TestQuery() {
 		})
 
 		s.Error(err)
+	})
+}
+
+func (s *DelegatorSuite) TestMaterialize() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	s.initSegments()
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+	}()
+
+	worker1 := &cluster.MockWorker{}
+	worker2 := &cluster.MockWorker{}
+	workers := map[int64]*cluster.MockWorker{1: worker1, 2: worker2}
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+		return workers[nodeID]
+	}, nil)
+	ok := func(src int64) *internalpb.MaterializeResults {
+		return &internalpb.MaterializeResults{Header: &internalpb.MaterializeHeader{Status: merr.Success(), SourceId: src}}
+	}
+	// the schema fingerprint must survive the per-worker request split; the
+	// worker sets the Materialize flag itself (MaterializeSegments)
+	checkFlag := func(_ context.Context, req *querypb.QueryRequest) {
+		s.Equal(uint64(42), req.GetMaterializeSchemaFingerprint())
+	}
+	worker1.EXPECT().MaterializeSegments(mock.Anything, mock.Anything).Run(checkFlag).Return(ok(1), nil)
+	worker2.EXPECT().MaterializeSegments(mock.Anything, mock.Anything).Run(checkFlag).Return(ok(2), nil)
+
+	newReq := func() *querypb.QueryRequest {
+		return &querypb.QueryRequest{
+			Req:                          &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
+			DmlChannels:                  []string{s.vchannelName},
+			MaterializeSchemaFingerprint: 42,
+		}
+	}
+
+	s.Run("normal", func() {
+		// one reply per sub-task: streaming and historical on node 1, historical on node 2
+		results, err := s.delegator.Materialize(context.Background(), newReq())
+		s.NoError(err)
+		s.Len(results, 3)
+	})
+
+	s.Run("worker unimplemented fails the request", func() {
+		worker2.ExpectedCalls = nil
+		worker2.EXPECT().MaterializeSegments(mock.Anything, mock.Anything).
+			Return(nil, merr.WrapErrServiceUnimplemented(errors.New("old worker")))
+		_, err := s.delegator.Materialize(context.Background(), newReq())
+		s.ErrorIs(err, merr.ErrServiceUnimplemented)
+	})
+
+	s.Run("partition_not_loaded", func() {
+		req := newReq()
+		req.Req.PartitionIDs = []int64{-1}
+		_, err := s.delegator.Materialize(context.Background(), req)
+		s.ErrorIs(err, merr.ErrPartitionNotLoaded)
+	})
+
+	s.Run("a failure releases the replies received", func() {
+		pool := &countingPool{}
+		worker1.ExpectedCalls = nil
+		worker1.EXPECT().MaterializeSegments(mock.Anything, mock.Anything).RunAndReturn(
+			func(context.Context, *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+				return receivedFrom(s.T(), pool, mres(1, "S", true, 1, strings.Repeat("a", 40000))), nil
+			})
+		worker2.ExpectedCalls = nil
+		worker2.EXPECT().MaterializeSegments(mock.Anything, mock.Anything).
+			Return(nil, merr.WrapErrServiceInternalMsg("worker failed"))
+		_, err := s.delegator.Materialize(context.Background(), newReq())
+		s.ErrorIs(err, merr.ErrServiceInternal)
+		s.NotZero(pool.gets.Load(), "worker 1 replied")
+		s.Zero(pool.outstanding(), "its receive buffers are returned to the pool")
 	})
 }
 

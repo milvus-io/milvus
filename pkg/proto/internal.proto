@@ -298,6 +298,39 @@ message RetrieveResults {
   uint64 feature_bits = 21;
 }
 
+// MaterializeResults is the reply of QueryNode.Materialize and
+// MaterializeSegments. The header carries everything that is not field
+// data; each body entry is exactly one encapsulated Arrow IPC RecordBatch
+// message whose schema is header.body_schema, or the schema the caller
+// named by header.schema_fingerprint when body_schema is empty.
+message MaterializeResults {
+  MaterializeHeader header = 1;
+  repeated bytes body = 2;
+}
+
+message MaterializeHeader {
+  common.Status status = 1;
+  // Encapsulated Arrow IPC Schema message of the body. Empty when the
+  // request named this schema's fingerprint (the caller already holds it).
+  bytes body_schema = 2;
+  // xxhash64 of the Schema message bytes; always set when the body is non-empty.
+  uint64 schema_fingerprint = 3;
+  int64 body_raw_size = 4;         // field data size after decompression
+  int64 source_id = 5;             // worker node; delegator cost rule
+  int64 all_retrieve_count = 6;
+  int64 scanned_remote_bytes = 7;
+  int64 scanned_total_bytes = 8;
+  CostAggregation cost_aggregation = 9;
+  uint64 mvcc_timestamp = 10;
+  // What Query's maxOutputSize guard charges for the rows in the body (the
+  // reduce's row size rule); a delegator relays the sum over its workers.
+  int64 result_size = 11;
+  // Execution features used for this request; see
+  // SearchResults.feature_bits. A delegator relays the OR over its workers
+  // and its own.
+  uint64 feature_bits = 12;
+}
+
 message LoadIndex {
   common.MsgBase base = 1;
   int64 segmentID = 2;

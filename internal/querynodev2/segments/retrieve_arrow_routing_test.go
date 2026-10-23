@@ -101,7 +101,7 @@ func TestShouldUseArrowTransport(t *testing.T) {
 			plan := &segcore.RetrievePlan{}
 			plan.SetIgnoreNonPk(tc.ignoreNonPk)
 
-			require.Equal(t, tc.want, shouldUseArrowTransport(req, plan), tc.why)
+			require.Equal(t, tc.want, shouldUseArrowTransport(req, plan, false), tc.why)
 		})
 	}
 }
@@ -111,4 +111,19 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func TestShouldUseArrowTransport_Materialize(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.Key)
+
+	plan := &segcore.RetrievePlan{}
+	req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{}}
+	require.True(t, shouldUseArrowTransport(req, plan, true), "Materialize forces Arrow regardless of zeroCopy")
+	require.False(t, shouldUseArrowTransport(req, plan, false))
+
+	var o retrieveOptions
+	WithArrowTransport()(&o)
+	require.True(t, o.forceArrow)
 }

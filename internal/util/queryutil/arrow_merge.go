@@ -48,6 +48,27 @@ func gatherColumns(sel *ArrowSelection, cols []int) (arrow.Record, error) {
 	return buildMergedArrowColumns(sel.Records, sel.Rows, cols)
 }
 
+// GatherArrowSelection gathers every column of the selection into one record,
+// rows in selection order. Materialize sends this record as is, so unlike
+// MaterializeArrowSelection there is no FieldData to write into. Nil for an
+// empty selection.
+func GatherArrowSelection(sel *ArrowSelection) (arrow.Record, error) {
+	tpl := sel.Template()
+	if tpl == nil || sel.Empty() {
+		return nil, nil
+	}
+	// The record goes out with the template's metadata, so every record must
+	// agree with it, as MaterializeArrowSelection requires.
+	if err := checkRecordsAgree(sel, tpl); err != nil {
+		return nil, err
+	}
+	cols := make([]int, tpl.NumCols())
+	for i := range cols {
+		cols[i] = i
+	}
+	return gatherColumns(sel, cols)
+}
+
 // buildMergedArrowColumns gathers the rows named by selectedRows out of the
 // per-segment Arrow records into a single record.
 //

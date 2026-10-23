@@ -30,6 +30,40 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// checkRecordsAgree verifies that every record of the selection agrees with
+// the template on the retrieve metadata and on the column count.
+//
+// Both metadata keys, not just the column count: the reading of the columns
+// comes from the template alone and is then applied to every record's rows,
+// so a disagreement would silently misinterpret the others. No divergence is
+// reachable today -- see SchemaMetadataFingerprint -- so this is defense in
+// depth over an assumption that is otherwise invisible here.
+//
+// The column count, because selectedSources' r.Column(col) is an unguarded
+// slice index on arrow-go's simpleRecord, so a short record panics the
+// QueryNode. buildMergedArrowColumns checks it too, but MaterializeArrowSelection
+// only reaches that for columns the one-pass path declined.
+func checkRecordsAgree(sel *ArrowSelection, template arrow.Record) error {
+	want := arrowconv.SchemaMetadataFingerprint(template)
+	for i, r := range sel.Records {
+		if r == nil {
+			continue
+		}
+		if got := arrowconv.SchemaMetadataFingerprint(r); got != want {
+			return merr.WrapErrServiceInternalMsg(
+				"arrow record[%d] disagrees with the template on retrieve "+
+					"metadata; columns cannot be reassembled from a single "+
+					"reading (template %q, record %q)", i, want, got)
+		}
+		if r.NumCols() != template.NumCols() {
+			return merr.WrapErrServiceInternalMsg(
+				"arrow column count mismatch: record[%d] has %d columns, expected %d",
+				i, r.NumCols(), template.NumCols())
+		}
+	}
+	return nil
+}
+
 // MaterializeArrowSelection turns an unmaterialized reduce result into
 // FieldsData, leaving `header` indistinguishable from what the protobuf path
 // would have produced.
@@ -57,23 +91,8 @@ func MaterializeArrowSelection(
 		return nil
 	}
 
-	// Every record must agree with the template on BOTH metadata keys, not just
-	// on column count. The reading below comes from the template alone and is
-	// then applied to every record's rows, so a disagreement would silently
-	// misinterpret the others. No divergence is reachable today -- see
-	// SchemaMetadataFingerprint -- so this is defense in depth over an
-	// assumption that is otherwise invisible here.
-	want := arrowconv.SchemaMetadataFingerprint(template)
-	for i, r := range sel.Records {
-		if r == nil {
-			continue
-		}
-		if got := arrowconv.SchemaMetadataFingerprint(r); got != want {
-			return merr.WrapErrServiceInternalMsg(
-				"arrow record[%d] disagrees with the template on retrieve "+
-					"metadata; columns cannot be reassembled from a single "+
-					"reading (template %q, record %q)", i, want, got)
-		}
+	if err := checkRecordsAgree(sel, template); err != nil {
+		return err
 	}
 
 	order, err := arrowconv.FieldOrder(template)
@@ -103,22 +122,6 @@ func MaterializeArrowSelection(
 		func(f *schemapb.FieldSchema) (int64, *schemapb.FieldSchema) {
 			return f.GetFieldID(), f
 		})
-
-	// Every record must have the same column count as the template. Without
-	// this, selectedSources' r.Column(col) is an unguarded slice index on
-	// arrow-go's simpleRecord, so a short record panics the QueryNode.
-	// buildMergedArrowColumns makes the same check, but only reaches it for
-	// columns the one-pass path declined.
-	for i, r := range sel.Records {
-		if r == nil {
-			continue
-		}
-		if r.NumCols() != template.NumCols() {
-			return merr.WrapErrServiceInternalMsg(
-				"arrow column count mismatch: record[%d] has %d columns, expected %d",
-				i, r.NumCols(), template.NumCols())
-		}
-	}
 
 	// Range-check every reference before any column indexes one directly.
 	// materializeColumn reads cols[ref.resultIdx].Value(int(ref.rowIdx)) with
