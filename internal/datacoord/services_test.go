@@ -6521,6 +6521,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		jsonStr := fmt.Sprintf(`{
           "success": true,
           "collectionId": 100,
+          "schemaVersion": 1,
           "segments": {
             "813": {
               "rowCount": 5,
@@ -6535,31 +6536,47 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, aPath, bPath)
 
-		// The broker is consulted after classification: replace field 100 with a
-		// different group there, so the commit sees an inspected pointer that has
-		// moved and must abort as stale instead of silently dropping the omitted
-		// add(100->a) and committing add(101->b) against the replacement.
+		// The broker is consulted twice: the first describe runs before
+		// classification (it supplies the schema the op-column validation reads);
+		// the schema re-check immediately before the batch commit is the second.
+		// Replace field 100 with a different group on that second consult, so
+		// classification still reads manifest v1 (where add(100->a) is an
+		// already-applied replay and is omitted), then the commit sees an
+		// inspected pointer that has moved and must abort as stale instead of
+		// silently dropping the omitted add(100->a) and committing add(101->b)
+		// against the replacement.
+		brokerCalls := 0
 		mockBroker := broker.NewMockBroker(t)
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
-				replace := &SegmentManifestCommit{
-					SegmentID:     813,
-					StorageConfig: cfg,
-					Mutation: ManifestMutation{
-						Type: ManifestMutationCommitUpdates,
-						Updates: &packed.ManifestUpdates{
-							DropColumns: []string{"100"},
-							ColumnGroups: []packed.ColumnGroupEntry{{
-								Columns: []string{"100"},
-								Format:  "parquet",
-								Files:   []packed.ColumnGroupFileEntry{{Path: cPath, StartIndex: 0, EndIndex: 5}},
-							}},
+				brokerCalls++
+				if brokerCalls > 1 {
+					replace := &SegmentManifestCommit{
+						SegmentID:     813,
+						StorageConfig: cfg,
+						Mutation: ManifestMutation{
+							Type: ManifestMutationCommitUpdates,
+							Updates: &packed.ManifestUpdates{
+								DropColumns: []string{"100"},
+								ColumnGroups: []packed.ColumnGroupEntry{{
+									Columns: []string{"100"},
+									Format:  "parquet",
+									Files:   []packed.ColumnGroupFileEntry{{Path: cPath, StartIndex: 0, EndIndex: 5}},
+								}},
+							},
 						},
-					},
+					}
+					require.NoError(t, m.CommitSegmentManifest(ctx, *replace))
 				}
-				require.NoError(t, m.CommitSegmentManifest(ctx, *replace))
 				return &milvuspb.DescribeCollectionResponse{
 					Status: merr.Success(), DbName: "default", CollectionName: "c",
+					Schema: &schemapb.CollectionSchema{
+						Version: 1,
+						Fields: []*schemapb.FieldSchema{
+							{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
+							{FieldID: 101, Name: "f101", DataType: schemapb.DataType_VarChar},
+						},
+					},
 				}, nil
 			}).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
