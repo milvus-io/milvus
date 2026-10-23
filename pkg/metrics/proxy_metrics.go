@@ -308,6 +308,15 @@ var (
 			Help:      "count of operation executed",
 		}, []string{nodeIDLabelName, pathLabelName})
 
+	// RestfulUnknownFieldRequests counts requests, not individual unknown keys.
+	RestfulUnknownFieldRequests = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "restful_unknown_field_requests_total",
+			Help:      "REST v2 requests with unknown API fields detected in warn or strict mode",
+		}, []string{nodeIDLabelName, functionLabelName, "policy"})
+
 	// RestfulReqLatency records the latency that for all requests.
 	RestfulReqLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -559,6 +568,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyReadReqSendBytes)
 
 	registry.MustRegister(RestfulFunctionCall)
+	registry.MustRegister(RestfulUnknownFieldRequests)
 	registry.MustRegister(RestfulReqLatency)
 
 	registry.MustRegister(RestfulReceiveBytes)
