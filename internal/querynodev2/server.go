@@ -107,13 +107,13 @@ type QueryNode struct {
 	stopOnce  sync.Once
 
 	// internal components
-	manager               *segments.Manager
-	clusterManager        cluster.Manager
-	pipelineManager       pipeline.Manager
-	subscribingChannels   *typeutil.ConcurrentSet[string]
-	unsubscribingChannels *typeutil.ConcurrentSet[string]
-	delegators            *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
-	serverID              int64
+	manager         *segments.Manager
+	clusterManager  cluster.Manager
+	pipelineManager pipeline.Manager
+	// Serializes channel watch/unwatch through mutation and delta publication.
+	channelOperations *channelOperations
+	delegators        *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
+	serverID          int64
 
 	// segment loader
 	loader segments.Loader
@@ -402,8 +402,7 @@ func (node *QueryNode) Init() error {
 			})
 		})
 		node.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
-		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
-		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
+		node.channelOperations = newChannelOperations()
 		node.manager = segments.NewManager()
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
