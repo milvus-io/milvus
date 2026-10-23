@@ -51,7 +51,7 @@ func publishBackgroundRows(c *balancercache.Cache, rows map[int64]int64) {
 	var placements []testSegmentPlacement
 	for node, count := range rows {
 		ids = append(ids, node)
-		segments[node] = &SegmentDataView{SegmentID: node, PartitionID: 1, RowNum: count}
+		segments[node] = &SegmentDataView{SegmentID: node, PartitionID: 1, LogicalSize: count}
 		placements = append(placements, placement(node, 1, node, coordview.SegmentStateUp))
 	}
 	version := qviews.DataVersion{StreamingVersion: 1}
@@ -62,23 +62,23 @@ func publishBackgroundRows(c *balancercache.Cache, rows map[int64]int64) {
 // withSegmentRows attaches retained exact-version footprints before publication.
 func withSegmentRows(stats *coordview.ShardStats, rows map[int64]int64) *coordview.ShardStats {
 	for id, count := range rows {
-		stats.Segments[id].RowNum = count
-		stats.Segments[id].HasRowNum = true
+		stats.Segments[id].LogicalSize = count
+		stats.Segments[id].LostStats = false
 	}
 	for _, view := range []*coordview.ViewPlacement{stats.UpPlacement, stats.PreparingPlacement} {
 		if view == nil {
 			continue
 		}
-		view.PartitionRows = make(map[int64]map[int64]int64)
-		view.UnknownRows = nil
+		view.PartitionSizes = make(map[int64]map[int64]int64)
+		view.LostStats = nil
 		for id, node := range view.Assignments {
-			if segment := stats.Segments[id]; segment.HasRowNum {
-				if view.PartitionRows[segment.PartitionID] == nil {
-					view.PartitionRows[segment.PartitionID] = make(map[int64]int64)
+			if segment := stats.Segments[id]; !segment.LostStats {
+				if view.PartitionSizes[segment.PartitionID] == nil {
+					view.PartitionSizes[segment.PartitionID] = make(map[int64]int64)
 				}
-				view.PartitionRows[segment.PartitionID][node] += segment.RowNum
+				view.PartitionSizes[segment.PartitionID][node] += segment.LogicalSize
 			} else {
-				view.UnknownRows = append(view.UnknownRows, id)
+				view.LostStats = append(view.LostStats, id)
 			}
 		}
 	}

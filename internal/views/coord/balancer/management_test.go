@@ -20,9 +20,9 @@ func TestManualBalance(t *testing.T) {
 	id := cacheShard(1, 10)
 	dv := qviews.DataVersion{StreamingVersion: 1}
 	publishTestData(c, 1, dv, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, RowNum: 10, ManifestVersion: 8, TransformStartAfterTimetick: 55},
-		102: {SegmentID: 102, RowNum: 20, ManifestVersion: 9, TransformStartAfterTimetick: 56},
-		201: {SegmentID: 201, RowNum: 1000, ManifestVersion: 10},
+		101: {SegmentID: 101, LogicalSize: 10, ManifestVersion: 8, TransformStartAfterTimetick: 55},
+		102: {SegmentID: 102, LogicalSize: 20, ManifestVersion: 9, TransformStartAfterTimetick: 56},
+		201: {SegmentID: 201, LogicalSize: 1000, ManifestVersion: 10},
 	}, &viewpb.DataViewOfShard{Vchannel: id.VChannel, Partitions: []*viewpb.DataViewOfPartition{
 		{PartitionId: 100, SegmentIds: []int64{101, 102}},
 		{PartitionId: 200, SegmentIds: []int64{201}},

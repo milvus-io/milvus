@@ -74,7 +74,7 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 				size:    shardTotalLoad(snap, shardID),
 			})
 		case actionMayOptimize:
-			if !snap.GetBalanceConfig().AutoBalance {
+			if !snap.GetBalanceConfig().OptimizationEnabled {
 				continue
 			}
 			optional = append(optional, balanceCandidate{
@@ -137,7 +137,7 @@ func initialProjectedRows(nodes map[int64]*BalanceNode) map[int64]int64 {
 		if node == nil {
 			continue
 		}
-		rows := node.TargetRowCount
+		rows := node.TargetLogicalSize
 		if rows < 0 {
 			rows = 0
 		}
@@ -150,7 +150,7 @@ func currentShardRows(snap balanceInput, shardID qviews.ShardID) map[int64]int64
 	if snap == nil {
 		return nil
 	}
-	return snap.CurrentRows(shardID)
+	return snap.CurrentSize(shardID)
 }
 
 func withoutRows(projected, remove map[int64]int64) map[int64]int64 {
@@ -216,7 +216,7 @@ func shardTotalLoad(snap *planningContext, shardID qviews.ShardID) int64 {
 	if collection == nil {
 		return 0
 	}
-	return collection.ShardLoadedRows(shardID.VChannel)
+	return collection.ShardLoadedSize(shardID.VChannel)
 }
 
 func flattenAssignments(view *viewpb.QueryViewOfShard) map[int64]int64 {

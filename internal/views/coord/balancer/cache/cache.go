@@ -53,7 +53,7 @@ func (c *CollectionEntry) RangeShards(fn func(*ShardEntry) bool) { c.shards.each
 type ShardEntry struct {
 	id                                     qviews.ShardID
 	stats                                  *coordview.ShardStats
-	rows                                   ShardRowStats
+	rows                                   ShardSizeStats
 	target                                 *coordview.ViewPlacement
 	targetRows                             map[int64]int64
 	upNodes, preparingNodes, residentNodes []int64
@@ -64,7 +64,7 @@ func (s *ShardEntry) Stats() *coordview.ShardStats { return s.stats }
 
 type nodeContribution struct {
 	shard qviews.ShardID
-	rows  NodeRowStats
+	rows  NodeSizeStats
 }
 
 // NodeEntry publishes totals and the exact contributions included in them.
@@ -75,7 +75,7 @@ type NodeEntry struct {
 }
 
 func (n *NodeEntry) Info() *api.BalanceNode { return &n.info }
-func (n *NodeEntry) Contribution(id qviews.ShardID) NodeRowStats {
+func (n *NodeEntry) Contribution(id qviews.ShardID) NodeSizeStats {
 	value, _ := n.contributions.get(shardKey(id))
 	return value.rows
 }
@@ -219,7 +219,7 @@ func (c *Cache) UpdateBalanceConfig(config *api.BalanceConfig) bool {
 		}
 		if c.config.CompareAndSwap(previous, &copy) {
 			policy := copy
-			policy.TickerInterval = previous.TickerInterval
+			policy.ReconcileInterval = previous.ReconcileInterval
 			if policy != *previous {
 				c.changed(api.TriggerScope{NodeChanged: true})
 			}
@@ -394,7 +394,7 @@ func (c *Cache) PublishDataView(id int64, data *api.CollectionDataView) {
 		for _, shard := range data.Shards {
 			for _, part := range shard.Partitions {
 				for _, seg := range part.Segments {
-					slot.rows[seg.SegmentID] = seg.RowNum
+					slot.rows[seg.SegmentID] = seg.LogicalSize
 				}
 			}
 		}
@@ -452,7 +452,7 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	if old != nil && old.stats == stats {
 		return
 	}
-	var previous ShardRowStats
+	var previous ShardSizeStats
 	if old != nil {
 		previous = old.rows
 		for segmentID := range old.stats.Segments {
@@ -463,7 +463,7 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	if stats != nil {
 		for segmentID, segment := range stats.Segments {
 			slot.uses[segmentID]++
-			if !segment.HasRowNum {
+			if segment.LostStats {
 				slot.unknown[id] = struct{}{}
 			}
 		}
@@ -519,23 +519,23 @@ func sameVersion(a, b *qviews.QueryViewVersion) bool {
 	return *a == *b
 }
 
-func shardRows(stats *coordview.ShardStats, fallback map[int64]int64) ShardRowStats {
-	rows := make(ShardRowStats)
+func shardRows(stats *coordview.ShardStats, fallback map[int64]int64) ShardSizeStats {
+	rows := make(ShardSizeStats)
 	if stats == nil {
 		return rows
 	}
 	for _, segment := range stats.Segments {
-		count := segment.RowNum
-		if !segment.HasRowNum {
+		count := segment.LogicalSize
+		if segment.LostStats {
 			count = fallback[segment.SegmentID]
 		}
 		for nodeID, state := range segment.Nodes {
 			entry := rows[nodeID]
 			switch state {
 			case coordview.SegmentStateUp:
-				entry.UpRowCount += count
+				entry.UpLogicalSize += count
 			case coordview.SegmentStatePreparing, coordview.SegmentStateReady:
-				entry.PendingRowCount += count
+				entry.PendingLogicalSize += count
 			}
 			rows[nodeID] = entry // Preserve zero-row and unrecoverable placements for node-loss scope.
 		}
@@ -543,10 +543,10 @@ func shardRows(stats *coordview.ShardStats, fallback map[int64]int64) ShardRowSt
 	return rows
 }
 
-func (c *Cache) replaceContributions(id qviews.ShardID, old, next ShardRowStats) {
+func (c *Cache) replaceContributions(id qviews.ShardID, old, next ShardSizeStats) {
 	for nodeID := range old {
 		if _, ok := next[nodeID]; !ok {
-			c.replaceNodeContribution(nodeID, id, NodeRowStats{}, false)
+			c.replaceNodeContribution(nodeID, id, NodeSizeStats{}, false)
 		}
 	}
 	for nodeID, rows := range next {
@@ -556,13 +556,13 @@ func (c *Cache) replaceContributions(id qviews.ShardID, old, next ShardRowStats)
 	}
 }
 
-func (c *Cache) replaceNodeContribution(nodeID int64, id qviews.ShardID, rows NodeRowStats, present bool) {
+func (c *Cache) replaceNodeContribution(nodeID int64, id qviews.ShardID, rows NodeSizeStats, present bool) {
 	slot := c.lockNode(nodeID)
 	defer c.finishNode(nodeID, slot)
 	next := *slot.value.Load()
 	previous := next.Contribution(id)
-	next.info.UpRowCount += rows.UpRowCount - previous.UpRowCount
-	next.info.PendingRowCount += rows.PendingRowCount - previous.PendingRowCount
+	next.info.UpLogicalSize += rows.UpLogicalSize - previous.UpLogicalSize
+	next.info.PendingLogicalSize += rows.PendingLogicalSize - previous.PendingLogicalSize
 	if present {
 		next.contributions = next.contributions.set(shardKey(id), nodeContribution{shard: id, rows: rows})
 	} else {

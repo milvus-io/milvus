@@ -66,6 +66,7 @@ func testShardStats(
 		segment := stats.Segments[p.segmentID]
 		if segment == nil {
 			segment = &coordview.SegmentStats{
+				LostStats:   true,
 				SegmentID:   p.segmentID,
 				PartitionID: p.partitionID,
 				Nodes:       make(map[int64]coordview.SegmentState),
@@ -90,11 +91,11 @@ func testShardStats(
 		}
 	}
 	if upVersion != nil {
-		stats.UpPlacement = &coordview.ViewPlacement{Assignments: make(map[int64]int64), PartitionRows: make(map[int64]map[int64]int64)}
+		stats.UpPlacement = &coordview.ViewPlacement{Assignments: make(map[int64]int64), PartitionSizes: make(map[int64]map[int64]int64)}
 		for _, p := range placements {
 			if p.state == coordview.SegmentStateUp {
 				stats.UpPlacement.Assignments[p.segmentID] = p.nodeID
-				stats.UpPlacement.UnknownRows = append(stats.UpPlacement.UnknownRows, p.segmentID)
+				stats.UpPlacement.LostStats = append(stats.UpPlacement.LostStats, p.segmentID)
 			}
 		}
 	}
@@ -104,18 +105,18 @@ func testShardStats(
 
 func withPreparingVersion(stats *coordview.ShardStats, version *qviews.QueryViewVersion) *coordview.ShardStats {
 	stats.PreparingVersion = version
-	stats.PreparingPlacement = &coordview.ViewPlacement{Assignments: make(map[int64]int64), PartitionRows: make(map[int64]map[int64]int64)}
+	stats.PreparingPlacement = &coordview.ViewPlacement{Assignments: make(map[int64]int64), PartitionSizes: make(map[int64]map[int64]int64)}
 	for id, segment := range stats.Segments {
 		for node, state := range segment.Nodes {
 			if state == coordview.SegmentStatePreparing || state == coordview.SegmentStateReady {
 				stats.PreparingPlacement.Assignments[id] = node
-				if segment.HasRowNum {
-					if stats.PreparingPlacement.PartitionRows[segment.PartitionID] == nil {
-						stats.PreparingPlacement.PartitionRows[segment.PartitionID] = make(map[int64]int64)
+				if !segment.LostStats {
+					if stats.PreparingPlacement.PartitionSizes[segment.PartitionID] == nil {
+						stats.PreparingPlacement.PartitionSizes[segment.PartitionID] = make(map[int64]int64)
 					}
-					stats.PreparingPlacement.PartitionRows[segment.PartitionID][node] += segment.RowNum
+					stats.PreparingPlacement.PartitionSizes[segment.PartitionID][node] += segment.LogicalSize
 				} else {
-					stats.PreparingPlacement.UnknownRows = append(stats.PreparingPlacement.UnknownRows, id)
+					stats.PreparingPlacement.LostStats = append(stats.PreparingPlacement.LostStats, id)
 				}
 			}
 		}

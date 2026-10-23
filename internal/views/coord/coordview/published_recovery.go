@@ -11,7 +11,7 @@ import (
 type PublishedRecovery struct {
 	View      *viewpb.QueryViewOfShard
 	Preparing *viewpb.QueryViewOfShard
-	Rows      map[int64]int64
+	Sizes     map[int64]int64
 }
 
 func (m *ShardViewManager) PublishedRecovery(targetSchema int32) *PublishedRecovery {
@@ -33,7 +33,7 @@ func (m *ShardViewManager) PublishedRecovery(targetSchema int32) *PublishedRecov
 	if source == nil {
 		return nil
 	}
-	snapshot := &PublishedRecovery{View: source.viewWithState(source.State()), Rows: make(map[int64]int64)}
+	snapshot := &PublishedRecovery{View: source.viewWithState(source.State()), Sizes: make(map[int64]int64)}
 	if preparing := m.preparingAtSchemaLocked(*m.publishedSchema); preparing != nil {
 		snapshot.Preparing = preparing.viewWithState(preparing.State())
 	}
@@ -42,7 +42,7 @@ func (m *ShardViewManager) PublishedRecovery(targetSchema int32) *PublishedRecov
 			for _, partition := range node.GetPartitions() {
 				for _, id := range partition.GetSegmentIds() {
 					if stats, ok := ref.Stats(id); ok {
-						snapshot.Rows[id] = stats.RowNum
+						snapshot.Sizes[id] = stats.LogicalSize
 					}
 				}
 			}

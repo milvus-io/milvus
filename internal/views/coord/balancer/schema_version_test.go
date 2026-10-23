@@ -91,7 +91,7 @@ func TestSchemaChangeRebuildsUpWithoutChangingLoadIdentity(t *testing.T) {
 	reader := newPlanningContext(c)
 	reader.schemaVersions = map[int64]int32{1: 2}
 	config := *c.GetBalanceConfig()
-	config.AutoBalance = false
+	config.OptimizationEnabled = false
 	c.UpdateBalanceConfig(&config)
 	reader.config = &config
 	plan := NewDefaultBalancePolicy().Plan(reader, []qviews.ShardID{id})

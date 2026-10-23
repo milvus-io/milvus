@@ -16,15 +16,15 @@ func TestConfigPublicationValidationAndOwnership(t *testing.T) {
 	c.SetNotifier(func(api.TriggerScope) { notifications++ })
 	original := c.GetBalanceConfig()
 	for _, mutate := range []func(*api.BalanceConfig){
-		func(v *api.BalanceConfig) { v.GlobalWeight = math.NaN() },
-		func(v *api.BalanceConfig) { v.FanoutPenaltyWeight = math.Inf(1) },
-		func(v *api.BalanceConfig) { v.MovePrice = -1 },
+		func(v *api.BalanceConfig) { v.ResourceGroupWeight = math.NaN() },
+		func(v *api.BalanceConfig) { v.FanoutWeight = math.Inf(1) },
+		func(v *api.BalanceConfig) { v.MoveCostPerUnit = -1 },
 		func(v *api.BalanceConfig) {
-			v.GlobalWeight, v.FanoutPenaltyWeight, v.ShardWeight, v.CollectionWeight = 0, 0, 0, 0
+			v.ResourceGroupWeight, v.FanoutWeight, v.ShardConcentrationWeight, v.CollectionConcentrationWeight = 0, 0, 0, 0
 		},
-		func(v *api.BalanceConfig) { v.AbsoluteToleranceRows = 0 },
-		func(v *api.BalanceConfig) { v.TargetRowsPerShardNode = -1 },
-		func(v *api.BalanceConfig) { v.TickerInterval = 0 },
+		func(v *api.BalanceConfig) { v.ResourceGroupAbsoluteTolerance = 0 },
+		func(v *api.BalanceConfig) { v.TargetLogicalSizePerNode = -1 },
+		func(v *api.BalanceConfig) { v.ReconcileInterval = 0 },
 	} {
 		value := *original
 		mutate(&value)
@@ -33,15 +33,15 @@ func TestConfigPublicationValidationAndOwnership(t *testing.T) {
 	}
 	require.Zero(t, notifications)
 	value := *original
-	value.TickerInterval += time.Minute
+	value.ReconcileInterval += time.Minute
 	require.True(t, c.UpdateBalanceConfig(&value))
 	require.Zero(t, notifications)
-	value.GlobalWeight = 2
+	value.ResourceGroupWeight = 2
 	require.True(t, c.UpdateBalanceConfig(&value))
 	require.Equal(t, 1, notifications)
-	value.GlobalWeight = 100
-	require.Equal(t, 2.0, c.GetBalanceConfig().GlobalWeight)
-	require.Equal(t, 1.0, original.GlobalWeight)
+	value.ResourceGroupWeight = 100
+	require.Equal(t, 2.0, c.GetBalanceConfig().ResourceGroupWeight)
+	require.Equal(t, 1.0, original.ResourceGroupWeight)
 	require.True(t, c.UpdateBalanceConfig(nil))
 	require.Equal(t, original, c.GetBalanceConfig())
 	require.False(t, c.UpdateBalanceConfig(nil))

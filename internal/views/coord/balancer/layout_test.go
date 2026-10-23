@@ -268,7 +268,7 @@ func TestReplicaLayoutSharedAcrossChannelsAndRGChange(t *testing.T) {
 	a := cacheShard(1, 10)
 	other := a
 	other.VChannel = "by-dev-rootcoord-dml_0_1v1"
-	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1}, map[int64]*SegmentDataView{1000: {SegmentID: 1000, PartitionID: 1, RowNum: 100}, 1001: {SegmentID: 1001, PartitionID: 1, RowNum: 100}},
+	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1}, map[int64]*SegmentDataView{1000: {SegmentID: 1000, PartitionID: 1, LogicalSize: 100}, 1001: {SegmentID: 1001, PartitionID: 1, LogicalSize: 100}},
 		shardDataView(a.VChannel, 1, 1000), shardDataView(other.VChannel, 1, 1001))
 	policy := NewDefaultBalancePolicy()
 	plan := policy.Plan(c, []qviews.ShardID{a})

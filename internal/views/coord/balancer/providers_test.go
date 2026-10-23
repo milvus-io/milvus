@@ -17,11 +17,13 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var _ api.DataViewPublisher = (dataview.Manager)(nil)
 
 func TestBalancerConsumesRealDataViewManager(t *testing.T) {
+	setBalanceParam(t, paramtable.Get(), paramtable.Get().QueryViewCfg.LogicalSizeSegmentBaseCost.Key, "100")
 	ctx := t.Context()
 	shardID := qviews.ShardID{ReplicaID: 10, VChannel: "by-dev-rootcoord-dml_0_1v0"}
 	for _, patch := range []*mockey.Mocker{
@@ -73,9 +75,11 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	require.NoError(t, controller.Reconcile(ctx))
 	stats := registry.Get(shardID).Stats()
 	require.Equal(t, qviews.FromProtoDataVersion(version), stats.PreparingVersion.DataVersion)
-	require.True(t, stats.Segments[101].HasRowNum)
-	require.Equal(t, int64(42), stats.Segments[101].RowNum)
-	require.Equal(t, int64(42), cache.GetNode(1).Info().PendingRowCount)
+	require.False(t, stats.Segments[101].LostStats)
+	require.Equal(t, int64(142), stats.Segments[101].LogicalSize)
+	require.Equal(t, int64(142), cache.GetNode(1).Info().PendingLogicalSize)
+	require.Equal(t, int64(142), cache.GetNode(1).Info().TargetLogicalSize)
+	require.Equal(t, int64(42), cache.GetCollection(1).DataView().TotalRows)
 }
 
 type testNodePublisher struct{}
@@ -108,12 +112,12 @@ func TestRecoveredLoadIdentityAvoidsRebuildButDetectsRealChanges(t *testing.T) {
 	stop := after.RegisterLoadConfigListener(cache.PublishLoadConfig)
 	defer stop()
 	config := *cache.GetBalanceConfig()
-	config.AutoBalance = false
+	config.OptimizationEnabled = false
 	cache.UpdateBalanceConfig(&config)
 	id := cacheShard(1, 10)
 	dv := qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}
 	publishTestNodes(cache, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
-	segment := &SegmentDataView{SegmentID: 1000, PartitionID: 1, RowNum: 100}
+	segment := &SegmentDataView{SegmentID: 1000, PartitionID: 1, LogicalSize: 100}
 	publishTestData(cache, 1, dv, map[int64]*SegmentDataView{1000: segment}, shardDataView(id.VChannel, 1, 1000))
 	cache.PublishShard(id, withSegmentRows(testShardStats(ver(1, 1, 1), oldVersion, placement(1000, 1, 1, coordview.SegmentStateUp)), map[int64]int64{1000: 100}))
 	policy := NewDefaultBalancePolicy()

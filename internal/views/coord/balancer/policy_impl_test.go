@@ -62,8 +62,8 @@ func TestDefaultBalancePolicy_MandatoryInitialLoadAllocatesLargestRowCountFirst(
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	publishTestData(c, collectionID, qviews.DataVersion{StreamingVersion: 1}, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
-		102: {SegmentID: 102, PartitionID: 1, RowNum: 800_000},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 100_000},
+		102: {SegmentID: 102, PartitionID: 1, LogicalSize: 800_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101, 102))
 	publishTestNodes(c,
 		&NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"},
@@ -84,10 +84,10 @@ func TestDefaultBalancePolicy_SmallShardStaysWithinOneNodeFanout(t *testing.T) {
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	publishTestData(c, collectionID, qviews.DataVersion{StreamingVersion: 1}, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 40_000},
-		102: {SegmentID: 102, PartitionID: 1, RowNum: 30_000},
-		103: {SegmentID: 103, PartitionID: 1, RowNum: 20_000},
-		104: {SegmentID: 104, PartitionID: 1, RowNum: 10_000},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 40_000},
+		102: {SegmentID: 102, PartitionID: 1, LogicalSize: 30_000},
+		103: {SegmentID: 103, PartitionID: 1, LogicalSize: 20_000},
+		104: {SegmentID: 104, PartitionID: 1, LogicalSize: 10_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101, 102, 103, 104))
 	publishTestNodes(c,
 		&NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"},
@@ -111,7 +111,7 @@ func TestDefaultBalancePolicy_TenSmallSegmentsConsolidate(t *testing.T) {
 	segmentIDs := make([]int64, 0, 10)
 	for i := int64(0); i < 10; i++ {
 		segmentID := int64(101) + i
-		segments[segmentID] = &SegmentDataView{SegmentID: segmentID, PartitionID: 1, RowNum: 10_000}
+		segments[segmentID] = &SegmentDataView{SegmentID: segmentID, PartitionID: 1, LogicalSize: 10_000}
 		segmentIDs = append(segmentIDs, segmentID)
 	}
 	publishTestData(c, collectionID, qviews.DataVersion{StreamingVersion: 1}, segments, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, segmentIDs...))
@@ -134,8 +134,8 @@ func TestDefaultBalancePolicy_EqualRowsUseSegmentIDOrder(t *testing.T) {
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	publishTestData(c, collectionID, qviews.DataVersion{StreamingVersion: 1}, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
-		102: {SegmentID: 102, PartitionID: 1, RowNum: 100_000},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 100_000},
+		102: {SegmentID: 102, PartitionID: 1, LogicalSize: 100_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 102, 101))
 	publishTestNodes(c,
 		&NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"},
@@ -157,11 +157,11 @@ func TestDefaultBalancePolicy_PredictedLoadCoordinatesAcrossShards(t *testing.T)
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	profile := DefaultBalanceConfig()
-	profile.AbsoluteToleranceRows = 1
+	profile.ResourceGroupAbsoluteTolerance = 1
 	c.UpdateBalanceConfig(profile)
 	publishTestData(c, collectionID, qviews.DataVersion{StreamingVersion: 1}, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 600},
-		201: {SegmentID: 201, PartitionID: 1, RowNum: 600},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 600},
+		201: {SegmentID: 201, PartitionID: 1, LogicalSize: 600},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101), shardDataView("by-dev-rootcoord-dml_0_1v1", 1, 201))
 	publishTestNodes(c,
 		&NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"},
@@ -184,13 +184,13 @@ func TestDefaultBalancePolicy_ReusedShardRowsAreNotDoubleCounted(t *testing.T) {
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	config := policyTestConfig()
-	config.AbsoluteToleranceRows = 1
-	config.CollectionWeight = 0
-	config.MovePrice = 10
+	config.ResourceGroupAbsoluteTolerance = 1
+	config.CollectionConcentrationWeight = 0
+	config.MoveCostPerUnit = 10
 	c.UpdateBalanceConfig(config)
 	publishTestData(c, collectionID, desiredVersion, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
-		201: {SegmentID: 201, PartitionID: 1, RowNum: 50_000},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 100_000},
+		201: {SegmentID: 201, PartitionID: 1, LogicalSize: 50_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101), shardDataView("by-dev-rootcoord-dml_0_1v1", 1, 201))
 	c.PublishShard(shardA, upStats(
 		qviews.DataVersion{StreamingVersion: 1},
@@ -219,7 +219,7 @@ func TestDefaultBalancePolicy_ReleasedShardRowsAreRemovedBeforeAllocation(t *tes
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	publishTestData(c, collectionID, qviews.DataVersion{StreamingVersion: 1}, map[int64]*SegmentDataView{
-		201: {SegmentID: 201, PartitionID: 1, RowNum: 50_000},
+		201: {SegmentID: 201, PartitionID: 1, LogicalSize: 50_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 201))
 	c.PublishShard(releaseShard, withSegmentRows(upStats(
 		qviews.DataVersion{StreamingVersion: 1},
@@ -247,7 +247,7 @@ func TestDefaultBalancePolicy_OptionalOptimizationRequiresMovement(t *testing.T)
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	publishTestData(c, collectionID, version, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 100},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 100},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101))
 	c.PublishShard(shardID, upStats(version, placement(101, 1, 1, coordview.SegmentStateUp)))
 	publishTestNodes(c,
@@ -269,10 +269,10 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	profile := DefaultBalanceConfig()
-	profile.AbsoluteToleranceRows = 1
+	profile.ResourceGroupAbsoluteTolerance = 1
 	c.UpdateBalanceConfig(profile)
 	publishTestData(c, collectionID, version, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 10},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 10},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101))
 	c.PublishShard(shardID, upStats(version, placement(101, 1, 1, coordview.SegmentStateUp)))
 	publishTestNodes(c,
@@ -295,7 +295,7 @@ func TestDefaultBalancePolicy_OptionalWithinToleranceStaysPut(t *testing.T) {
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	publishTestData(c, collectionID, version, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 10},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 10},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101))
 	c.PublishShard(shardID, upStats(version, placement(101, 1, 1, coordview.SegmentStateUp)))
 	publishTestNodes(c,
@@ -317,10 +317,10 @@ func TestDefaultBalancePolicy_LowBenefitScaleOutDoesNotOpenBeyondFanoutBudget(t 
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	publishTestData(c, collectionID, version, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 80_000},
-		102: {SegmentID: 102, PartitionID: 1, RowNum: 40_000},
-		103: {SegmentID: 103, PartitionID: 1, RowNum: 20_000},
-		104: {SegmentID: 104, PartitionID: 1, RowNum: 10_000},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 80_000},
+		102: {SegmentID: 102, PartitionID: 1, LogicalSize: 40_000},
+		103: {SegmentID: 103, PartitionID: 1, LogicalSize: 20_000},
+		104: {SegmentID: 104, PartitionID: 1, LogicalSize: 10_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101, 102, 103, 104))
 	c.PublishShard(shardID, upStats(
 		version,
@@ -351,7 +351,7 @@ func TestDefaultBalancePolicy_HighBenefitScaleOutUsesNewNodeWithinFanoutBudget(t
 	placements := make([]testSegmentPlacement, 0, 10)
 	for i := int64(0); i < 10; i++ {
 		segmentID := int64(101) + i
-		segments[segmentID] = &SegmentDataView{SegmentID: segmentID, PartitionID: 1, RowNum: 100_000}
+		segments[segmentID] = &SegmentDataView{SegmentID: segmentID, PartitionID: 1, LogicalSize: 100_000}
 		segmentIDs = append(segmentIDs, segmentID)
 		nodeID := int64(1)
 		if i >= 5 {
@@ -382,7 +382,7 @@ func TestDefaultBalancePolicy_LargeSegmentMovesWhenGainPaysItsCost(t *testing.T)
 	c := newTestCache(cfg)
 	c.UpdateBalanceConfig(DefaultBalanceConfig())
 	publishTestData(c, collectionID, version, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 1_000_000},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 1_000_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101))
 	c.PublishShard(shardID, upStats(
 		version,
@@ -409,8 +409,8 @@ func TestDefaultBalancePolicy_DefaultFanoutBudgetRejectsPureLoadOnlyOverflow(t *
 	c := newTestCache(cfg)
 	c.UpdateBalanceConfig(DefaultBalanceConfig())
 	publishTestData(c, collectionID, version, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 99_000},
-		102: {SegmentID: 102, PartitionID: 1, RowNum: 1_000},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 99_000},
+		102: {SegmentID: 102, PartitionID: 1, LogicalSize: 1_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101, 102))
 	c.PublishShard(shardID, upStats(
 		version,
@@ -441,7 +441,7 @@ func TestDefaultBalancePolicy_SmallSpreadShardConsolidates(t *testing.T) {
 	for i := int64(0); i < 10; i++ {
 		segmentID := int64(101) + i
 		nodeID := 1 + i%3
-		segments[segmentID] = &SegmentDataView{SegmentID: segmentID, PartitionID: 1, RowNum: 10_000}
+		segments[segmentID] = &SegmentDataView{SegmentID: segmentID, PartitionID: 1, LogicalSize: 10_000}
 		segmentIDs = append(segmentIDs, segmentID)
 		placements = append(placements, placement(segmentID, 1, nodeID, coordview.SegmentStateUp))
 	}
@@ -472,7 +472,7 @@ func TestDefaultBalancePolicy_AppliedOptionalCandidateIsStable(t *testing.T) {
 	for i := int64(0); i < 10; i++ {
 		segmentID := int64(101) + i
 		nodeID := 1 + i%3
-		segments[segmentID] = &SegmentDataView{SegmentID: segmentID, PartitionID: 1, RowNum: 10_000}
+		segments[segmentID] = &SegmentDataView{SegmentID: segmentID, PartitionID: 1, LogicalSize: 10_000}
 		segmentIDs = append(segmentIDs, segmentID)
 		placements = append(placements, placement(segmentID, 1, nodeID, coordview.SegmentStateUp))
 	}
@@ -508,8 +508,8 @@ func TestDefaultBalancePolicy_NodeLossPreservesSurvivingReusableSegments(t *test
 	c := newTestCache(cfg)
 	c.UpdateBalanceConfig(DefaultBalanceConfig())
 	publishTestData(c, collectionID, version, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
-		102: {SegmentID: 102, PartitionID: 1, RowNum: 100_000},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 100_000},
+		102: {SegmentID: 102, PartitionID: 1, LogicalSize: 100_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101, 102))
 	c.PublishShard(shardID, upStats(
 		version,
@@ -535,7 +535,7 @@ func TestDefaultBalancePolicy_MandatorySameAssignmentStillEmits(t *testing.T) {
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	publishTestData(c, collectionID, qviews.DataVersion{StreamingVersion: 2}, map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
+		101: {SegmentID: 101, PartitionID: 1, LogicalSize: 100_000},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101))
 	c.PublishShard(shardID, upStats(
 		qviews.DataVersion{StreamingVersion: 1},
@@ -556,9 +556,9 @@ func TestDefaultBalancePolicy_MandatorySameAssignmentStillEmits(t *testing.T) {
 
 func TestDefaultBalancePolicy_MandatoryPrecedesLargerOptionalShard(t *testing.T) {
 	config := DefaultBalanceConfig()
-	config.AbsoluteToleranceRows = 1
-	config.CollectionWeight = 0
-	config.MovePrice, config.FanoutPenaltyWeight = 0, 0
+	config.ResourceGroupAbsoluteTolerance = 1
+	config.CollectionConcentrationWeight = 0
+	config.MoveCostPerUnit, config.FanoutWeight = 0, 0
 	c := balancercache.New(config)
 	mandatory, optional := cacheShard(1, 10), cacheShard(2, 20)
 	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 1)
@@ -576,16 +576,16 @@ func TestDefaultBalancePolicy_MandatoryPrecedesLargerOptionalShard(t *testing.T)
 		require.Contains(t, plan.Prepares, mandatory)
 		require.Equal(t, map[int64]int64{1000: 2}, assignmentsFromBuilder(plan.Prepares[mandatory]))
 		require.NotContains(t, plan.Prepares, optional, "mandatory adds 100 rows on node 2 before optional evaluates its 60-vs-100 baseline")
-		require.Equal(t, int64(260), c.GetNode(1).Info().UpRowCount)
-		require.Zero(t, c.GetNode(2).Info().UpRowCount, "predictions must not be published as actual load")
+		require.Equal(t, int64(260), c.GetNode(1).Info().UpLogicalSize)
+		require.Zero(t, c.GetNode(2).Info().UpLogicalSize, "predictions must not be published as actual load")
 	}
 }
 
 func TestDefaultBalancePolicy_LargerShardPrecedesSmallerShard(t *testing.T) {
 	config := DefaultBalanceConfig()
-	config.AbsoluteToleranceRows = 1
-	config.CollectionWeight = 0
-	config.MovePrice, config.FanoutPenaltyWeight = 0, 0
+	config.ResourceGroupAbsoluteTolerance = 1
+	config.CollectionConcentrationWeight = 0
+	config.MoveCostPerUnit, config.FanoutWeight = 0, 0
 	c := balancercache.New(config)
 	small, large := cacheShard(1, 10), cacheShard(2, 20)
 	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 1)

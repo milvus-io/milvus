@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type Catalog interface {
@@ -98,6 +101,9 @@ type LoadableSegment struct {
 	// by the Coordinator. It is maintained in memory only (never persisted,
 	// never re-read from SegmentMeta) and exposed via DataViewRef.Stats.
 	RowNum int64
+	// Size is the insert_binlog_size statistic in bytes. A nonempty
+	// segment with no positive size uses the row-based estimate instead.
+	Size int64
 }
 
 type CreateCollectionDataViewEvent struct {
@@ -166,13 +172,18 @@ func newCollectionState(collectionID int64) *collectionState {
 }
 
 type dataViewManager struct {
-	publicationMu sync.Mutex
-	published     map[int64]*api.CollectionDataView
-	listeners     map[uint64]api.DataViewListener
-	nextListener  uint64
-	mu            sync.RWMutex
-	catalog       Catalog
-	states        map[int64]*collectionState
+	// Fixed at construction so one manager never mixes sizing modes.
+	useInsertBytes bool
+	bytesPerUnit   int64
+	// Last valid cost sampled while building a new DataView. No refresh mutates snapshots.
+	segmentBaseCost atomic.Int64
+	publicationMu   sync.Mutex
+	published       map[int64]*api.CollectionDataView
+	listeners       map[uint64]api.DataViewListener
+	nextListener    uint64
+	mu              sync.RWMutex
+	catalog         Catalog
+	states          map[int64]*collectionState
 	// dropped records Collections whose DataViews were removed by
 	// OnDropCollection. Late mutations (in-flight flush, queued recompute)
 	// consult it and no-op instead of resurrecting the state or persisting
@@ -209,12 +220,19 @@ func NewManager(catalog Catalog, project Projector) Manager {
 }
 
 func newManager(ctx context.Context, catalog Catalog, project Projector) *dataViewManager {
+	cfg := &paramtable.Get().QueryViewCfg
+	unit := cfg.LogicalSizeBytesPerUnit.GetAsSize()
+	if unit <= 0 {
+		unit = 64 * 1024
+	}
 	m := &dataViewManager{
-		catalog:   catalog,
-		states:    make(map[int64]*collectionState),
-		dropped:   make(map[int64]struct{}),
-		projector: project,
-		workerCtx: ctx,
+		useInsertBytes: cfg.LogicalSizeSource.GetValue() == "insertBytes",
+		bytesPerUnit:   unit,
+		catalog:        catalog,
+		states:         make(map[int64]*collectionState),
+		dropped:        make(map[int64]struct{}),
+		projector:      project,
+		workerCtx:      ctx,
 	}
 	m.queue = newDataViewRecomputeQueue(m)
 	return m
@@ -444,7 +462,7 @@ func (m *dataViewManager) OnBootstrapCollection(ctx context.Context, event Boots
 	if err := addSegments(view, event.Segments); err != nil {
 		return nil, err
 	}
-	if err := m.persistLockedWithStats(ctx, state, view, buildSegmentRowStats(event.Segments)); err != nil {
+	if err := m.persistLockedWithStats(ctx, state, view, buildSegmentStats(event.Segments)); err != nil {
 		return nil, err
 	}
 	return cloneDataVersion(view.GetDataVersion()), nil
@@ -492,8 +510,9 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 		// never overwrites a published value (a normally-published entry is
 		// never empty).
 		if entry := state.latest; entry != nil && len(entry.stats) == 0 {
-			if stats := buildSegmentRowStats(segments); len(stats) > 0 {
+			if stats := buildSegmentStats(segments); len(stats) > 0 {
 				updated := *entry
+				m.prepareLogicalSizes(stats)
 				updated.stats = stats
 				state.versions[protoVersionToStruct(entry.view.GetDataVersion())] = &updated
 				state.latest = &updated
@@ -503,7 +522,7 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 		return dataVersionFromView(base), nil
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
-	if err := m.persistLockedWithStats(ctx, state, next, buildSegmentRowStats(segments)); err != nil {
+	if err := m.persistLockedWithStats(ctx, state, next, buildSegmentStats(segments)); err != nil {
 		return nil, err
 	}
 	return cloneDataVersion(next.GetDataVersion()), nil
@@ -684,6 +703,7 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 				}
 				if stats, ok := entry.stats[segmentID]; ok {
 					segment.RowNum = stats.RowNum
+					segment.LogicalSize = stats.LogicalSize
 				}
 				segments = append(segments, segment)
 			}
@@ -722,6 +742,7 @@ func (m *dataViewManager) persistLockedWithStats(ctx context.Context, state *col
 		m.publishDataViewLocked(state)
 		return nil
 	}
+	m.prepareLogicalSizes(stats)
 	if err := m.catalog.SaveDataView(ctx, persisted); err != nil {
 		return err
 	}
@@ -824,9 +845,10 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 			stats[segmentID] = rows
 		}
 	}
-	for segmentID, rows := range buildSegmentRowStats(event.Segments) {
+	for segmentID, rows := range buildSegmentStats(event.Segments) {
 		stats[segmentID] = rows
 	}
+	m.prepareLogicalSizes(stats)
 
 	var once sync.Once
 	commit := func() {
@@ -1301,14 +1323,14 @@ func protoVersionToStruct(v *viewpb.DataVersion) qviews.DataVersion {
 	}
 }
 
-// buildSegmentRowStats extracts the per-segment footprint from a projection.
+// buildSegmentStats extracts the per-segment footprint from a projection.
 // It feeds versionEntry.stats at every publication point so a DataViewRef can
 // answer Stats for the exact version it references.
-func buildSegmentRowStats(segments []LoadableSegment) map[int64]SegmentStats {
+func buildSegmentStats(segments []LoadableSegment) map[int64]SegmentStats {
 	stats := make(map[int64]SegmentStats, len(segments))
 	for _, seg := range segments {
 		if seg.SegmentID != 0 {
-			stats[seg.SegmentID] = SegmentStats{RowNum: seg.RowNum}
+			stats[seg.SegmentID] = SegmentStats{RowNum: seg.RowNum, Size: seg.Size}
 		}
 	}
 	return stats
@@ -1381,5 +1403,31 @@ func (m *dataViewManager) publishDataViewDrop(collectionID int64) {
 	delete(m.published, collectionID)
 	for _, listener := range m.listeners {
 		listener(collectionID, nil)
+	}
+}
+
+// prepareLogicalSizes owns the cost model at the DataView boundary. stats is a
+// new, unpublished map: existing snapshots and refs are never changed. Sample
+// configuration once even when an incremental update carries over old segments.
+func (m *dataViewManager) prepareLogicalSizes(stats map[int64]SegmentStats) {
+	base := m.segmentBaseCost.Load()
+	value, err := strconv.ParseInt(paramtable.Get().QueryViewCfg.LogicalSizeSegmentBaseCost.GetValue(), 10, 64)
+	if err == nil && value >= 0 {
+		base = value
+		m.segmentBaseCost.Store(base)
+	}
+	for id, stat := range stats {
+		size := stat.RowNum
+		if m.useInsertBytes && stat.Size > 0 {
+			// Round up without adding the unit to Size, which could overflow.
+			// Missing size estimates RowNum*unit bytes, whose normalized
+			// value is RowNum; no multiplication is necessary.
+			size = stat.Size / m.bytesPerUnit
+			if stat.Size%m.bytesPerUnit != 0 {
+				size++
+			}
+		}
+		stat.LogicalSize = size + base
+		stats[id] = stat
 	}
 }

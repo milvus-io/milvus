@@ -10,20 +10,22 @@ import (
 func TestIncrementalProfileValidation(t *testing.T) {
 	require.True(t, DefaultBalanceConfig().Valid())
 	for _, change := range []func(*BalanceConfig){
-		func(c *BalanceConfig) { c.MovePrice = -1 },
-		func(c *BalanceConfig) { c.LoadPrice = math.NaN() },
-		func(c *BalanceConfig) { c.ShardWeight = math.Inf(1) },
+		func(c *BalanceConfig) { c.MoveCostPerUnit = -1 },
+		func(c *BalanceConfig) { c.LoadCostPerUnit = math.NaN() },
+		func(c *BalanceConfig) { c.ShardConcentrationWeight = math.Inf(1) },
 		func(c *BalanceConfig) {
-			c.GlobalWeight, c.ShardWeight, c.CollectionWeight, c.FanoutPenaltyWeight = 0, 0, 0, 0
+			c.ResourceGroupWeight, c.ShardConcentrationWeight, c.CollectionConcentrationWeight, c.FanoutWeight = 0, 0, 0, 0
 		},
-		func(c *BalanceConfig) { c.GlobalWeight, c.ShardWeight = math.MaxFloat64, math.MaxFloat64 },
-		func(c *BalanceConfig) { c.RelativeTolerance = 1 },
+		func(c *BalanceConfig) {
+			c.ResourceGroupWeight, c.ShardConcentrationWeight = math.MaxFloat64, math.MaxFloat64
+		},
+		func(c *BalanceConfig) { c.ResourceGroupRelativeTolerance = 1 },
 		func(c *BalanceConfig) { c.FanoutHysteresis = 1 },
-		func(c *BalanceConfig) { c.AbsoluteToleranceRows = 0 },
-		func(c *BalanceConfig) { c.TargetRowsPerShardNode = 0 },
-		func(c *BalanceConfig) { c.MinGainRows = 0 },
-		func(c *BalanceConfig) { c.MaxCandidateEvaluations = 0 },
-		func(c *BalanceConfig) { c.TickerInterval = 0 },
+		func(c *BalanceConfig) { c.ResourceGroupAbsoluteTolerance = 0 },
+		func(c *BalanceConfig) { c.TargetLogicalSizePerNode = 0 },
+		func(c *BalanceConfig) { c.MinScoreGain = 0 },
+		func(c *BalanceConfig) { c.MaxCandidateEvaluationsPerShard = 0 },
+		func(c *BalanceConfig) { c.ReconcileInterval = 0 },
 	} {
 		cfg := DefaultBalanceConfig()
 		change(cfg)

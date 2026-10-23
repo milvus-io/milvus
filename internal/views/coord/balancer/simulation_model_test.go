@@ -132,7 +132,7 @@ func (s *balanceSimulation) data(id int64, rows [][]int64, replaceIDs bool) {
 	for sh, values := range rows {
 		part := &PartitionDataView{PartitionID: 1}
 		for i, r := range values {
-			part.Segments = append(part.Segments, &SegmentDataView{SegmentID: id*1_000_000_000 + offset + int64(sh)*10_000 + int64(i), PartitionID: 1, RowNum: r})
+			part.Segments = append(part.Segments, &SegmentDataView{SegmentID: id*1_000_000_000 + offset + int64(sh)*10_000 + int64(i), PartitionID: 1, LogicalSize: r})
 		}
 		data.Shards = append(data.Shards, &ShardDataView{VChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv%d", id, sh), Partitions: []*PartitionDataView{part}})
 	}
@@ -176,13 +176,13 @@ func (s *balanceSimulation) publish(id qviews.ShardID) {
 		if view == nil {
 			return nil
 		}
-		p := &coordview.ViewPlacement{Assignments: map[int64]int64{}, PartitionRows: map[int64]map[int64]int64{1: {}}}
+		p := &coordview.ViewPlacement{Assignments: map[int64]int64{}, PartitionSizes: map[int64]map[int64]int64{1: {}}}
 		for seg, node := range view.assignments {
 			p.Assignments[seg] = node
-			p.PartitionRows[1][node] += view.rows[seg]
+			p.PartitionSizes[1][node] += view.rows[seg]
 			resident[node] = true
 			if stats.Segments[seg] == nil {
-				stats.Segments[seg] = &coordview.SegmentStats{SegmentID: seg, PartitionID: 1, RowNum: view.rows[seg], HasRowNum: true, Nodes: map[int64]coordview.SegmentState{}}
+				stats.Segments[seg] = &coordview.SegmentStats{SegmentID: seg, PartitionID: 1, LogicalSize: view.rows[seg], LostStats: false, Nodes: map[int64]coordview.SegmentState{}}
 			}
 			st := state
 			if state != coordview.SegmentStateUp && view.ready[seg] {
@@ -207,7 +207,7 @@ func (s *balanceSimulation) publish(id qviews.ShardID) {
 		version := v.up.version
 		stats.UpVersion = &version
 		stats.UpLoadInfoVersion = v.up.loadVersion
-		for node := range stats.UpPlacement.PartitionRows[1] {
+		for node := range stats.UpPlacement.PartitionSizes[1] {
 			stats.UpNodes = append(stats.UpNodes, node)
 		}
 	}
@@ -215,7 +215,7 @@ func (s *balanceSimulation) publish(id qviews.ShardID) {
 	if v.preparing != nil {
 		version := v.preparing.version
 		stats.PreparingVersion = &version
-		for node := range stats.PreparingPlacement.PartitionRows[1] {
+		for node := range stats.PreparingPlacement.PartitionSizes[1] {
 			stats.PreparingNodes = append(stats.PreparingNodes, node)
 		}
 	}
@@ -291,10 +291,10 @@ func (s *balanceSimulation) step(collections []int64, cap int, complete bool) *B
 			require.Contains(s.t, target, node)
 			require.True(s.t, s.nodes[node].Alive)
 			require.False(s.t, s.nodes[node].Stopping)
-			next.rows[seg] = info.RowNum
+			next.rows[seg] = info.LogicalSize
 			if old != nil {
 				if previous, exists := old.assignments[seg]; exists && previous != node {
-					s.counters.MovedRows += info.RowNum
+					s.counters.MovedRows += info.LogicalSize
 				}
 			}
 			key := coordview.ResourceKey{SegmentID: seg, PartitionID: info.PartitionID, DataVersion: next.version.DataVersion, LoadInfoVersion: next.loadVersion}
@@ -302,7 +302,7 @@ func (s *balanceSimulation) step(collections []int64, cap int, complete bool) *B
 			if resources != nil && resources.HasResource(key) {
 				next.ready[seg] = true
 			} else {
-				s.counters.LoadRows += info.RowNum
+				s.counters.LoadRows += info.LogicalSize
 			}
 		}
 		v.preparing = next
@@ -341,7 +341,7 @@ func (s *balanceSimulation) sample(check bool) simulationSample {
 		}
 		for group, count := range counts {
 			g := sample.Groups[group]
-			g.Demand += c.DataView().TotalRows * int64(min(count, len(g.Rows)))
+			g.Demand += c.DataView().LogicalSize * int64(min(count, len(g.Rows)))
 			sample.Groups[group] = g
 		}
 		for _, r := range c.LoadConfig().Replicas {
@@ -400,9 +400,9 @@ func (s *balanceSimulation) sample(check bool) simulationSample {
 				sample.FanoutMax = max(sample.FanoutMax, len(rows))
 				k := s.policy.fanouts[sid]
 				sample.ExcessFanout += max(0, len(rows)-k)
-				if sh.TotalRows > 0 && k > 0 {
+				if sh.LogicalSize > 0 && k > 0 {
 					for _, n := range rows {
-						sample.ShardMaxMean = math.Max(sample.ShardMaxMean, float64(n)*float64(k)/float64(sh.TotalRows))
+						sample.ShardMaxMean = math.Max(sample.ShardMaxMean, float64(n)*float64(k)/float64(sh.LogicalSize))
 					}
 				}
 				if check {
@@ -419,14 +419,14 @@ func (s *balanceSimulation) sample(check bool) simulationSample {
 					}
 				}
 			}
-			if c.DataView().TotalRows > 0 {
+			if c.DataView().LogicalSize > 0 {
 				for _, r := range replicaRows {
-					sample.CollectionMaxMean = math.Max(sample.CollectionMaxMean, float64(r)*float64(len(targets))/float64(c.DataView().TotalRows))
+					sample.CollectionMaxMean = math.Max(sample.CollectionMaxMean, float64(r)*float64(len(targets))/float64(c.DataView().LogicalSize))
 				}
 			}
 			if check {
 				for node, rows := range replicaRows {
-					require.Equal(s.t, rows, c.ReplicaRows(r.ReplicaID, node))
+					require.Equal(s.t, rows, c.ReplicaSize(r.ReplicaID, node))
 				}
 			}
 		}
@@ -443,7 +443,7 @@ func (s *balanceSimulation) sample(check bool) simulationSample {
 		sample.UnplacedRows += max(int64(0), g.Demand-sum)
 		if len(g.Rows) > 0 && g.Demand > 0 {
 			mean := float64(g.Demand) / float64(len(g.Rows))
-			tolerance := math.Max(float64(cfg.AbsoluteToleranceRows), cfg.RelativeTolerance*mean)
+			tolerance := math.Max(float64(cfg.ResourceGroupAbsoluteTolerance), cfg.ResourceGroupRelativeTolerance*mean)
 			for _, r := range g.Rows {
 				value := float64(r)
 				diff := value - mean
@@ -461,7 +461,7 @@ func (s *balanceSimulation) sample(check bool) simulationSample {
 				require.Equal(s.t, g.Demand, rg.Demand(len(g.Rows)))
 			}
 			for node, rows := range g.Rows {
-				require.Equal(s.t, rows, s.cache.GetNode(node).TargetRows())
+				require.Equal(s.t, rows, s.cache.GetNode(node).TargetSize())
 			}
 		}
 	}

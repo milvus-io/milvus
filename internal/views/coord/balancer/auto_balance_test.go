@@ -16,9 +16,9 @@ func optionalBalanceFixture() (*balancercache.Cache, qviews.ShardID) {
 	c.PublishShard(id, upStats(qviews.DataVersion{StreamingVersion: 1}, placement(1000, 1, 1, coordview.SegmentStateUp)))
 	publishBackgroundRows(c, map[int64]int64{1: 10000})
 	value := DefaultBalanceConfig()
-	value.AutoBalance = false
-	value.AbsoluteToleranceRows = 1
-	value.MovePrice, value.FanoutPenaltyWeight = 0, 0
+	value.OptimizationEnabled = false
+	value.ResourceGroupAbsoluteTolerance = 1
+	value.MoveCostPerUnit, value.FanoutWeight = 0, 0
 	c.UpdateBalanceConfig(value)
 	return c, id
 }
@@ -30,7 +30,7 @@ func TestAutoBalanceOnlyGatesOptionalOptimization(t *testing.T) {
 	require.Empty(t, plan.Prepares)
 	require.Empty(t, plan.Retries)
 	value := *c.GetBalanceConfig()
-	value.AutoBalance = true
+	value.OptimizationEnabled = true
 	c.UpdateBalanceConfig(&value)
 	plan = policy.Plan(c, []qviews.ShardID{id})
 	require.Contains(t, plan.Prepares, id)
@@ -70,8 +70,8 @@ func TestAutoBalanceDisabledStillMaintainsViews(t *testing.T) {
 func TestAutoBalanceDisabledStillConvergesReplicaIsolation(t *testing.T) {
 	c := replicaCache(2, 2)
 	value := DefaultBalanceConfig()
-	value.AutoBalance = false
-	value.AbsoluteToleranceRows = 1
+	value.OptimizationEnabled = false
+	value.ResourceGroupAbsoluteTolerance = 1
 	c.UpdateBalanceConfig(value)
 	a, b := cacheShard(1, 10), cacheShard(1, 11)
 	for _, id := range []qviews.ShardID{a, b} {

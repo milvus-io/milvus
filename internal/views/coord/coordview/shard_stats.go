@@ -49,8 +49,8 @@ type ShardStats struct {
 	// Segments lists every segment currently placed for this shard, keyed by
 	// segmentID. The value is node-level state: the same segment may appear on
 	// multiple nodes while views overlap, but one node has at most one state.
-	// Each segment also carries the published RowNum footprint (see
-	// SegmentStats.RowNum).
+	// Each segment also carries the published LogicalSize footprint (see
+	// SegmentStats.LogicalSize).
 	//
 	// Down view placements are reported as Ready because QueryNodes do not
 	// receive Down and the loaded segments are still more reusable than
@@ -58,14 +58,15 @@ type ShardStats struct {
 	Segments map[int64]*SegmentStats
 }
 
-// ViewPlacement is immutable after publication. Unknown rows can be completed
+// ViewPlacement is immutable after publication. Missing statistics can be completed
 // from the cache's retained footprint without confusing known zero with absent.
 type ViewPlacement struct {
 	Assignments map[int64]int64
-	// PartitionRows keeps exact per-view footprints by partition and node so
+	// PartitionSizes keeps exact per-view footprints by partition and node so
 	// a released partition can leave target accounting before view teardown.
-	PartitionRows map[int64]map[int64]int64
-	UnknownRows   []int64
+	PartitionSizes map[int64]map[int64]int64
+	// LostStats lists Segment IDs without a published footprint.
+	LostStats []int64
 }
 
 // ResourceKey identifies a compatible loading requirement within a collection.
@@ -111,9 +112,10 @@ type SegmentStats struct {
 	// a given segment.
 	Nodes map[int64]SegmentState
 
-	// RowNum is the published per-segment row-count footprint, read from a
-	// resident QueryView's DataViewRef. HasRowNum distinguishes an unknown
-	// footprint (for example after recovery) from a published zero row count.
-	RowNum    int64
-	HasRowNum bool
+	// RowNum and LogicalSize are one footprint from a retained DataViewRef.
+	// LostStats means the entire footprint is unavailable; zero values alone
+	// never indicate missing statistics.
+	RowNum      int64
+	LogicalSize int64
+	LostStats   bool
 }

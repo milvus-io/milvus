@@ -1,10 +1,10 @@
 package cache
 
-// ShardRowStats maps each QueryNode to the row-count load contributed by one shard.
-type ShardRowStats map[int64]NodeRowStats
+// ShardSizeStats maps each QueryNode to the row-count load contributed by one shard.
+type ShardSizeStats map[int64]NodeSizeStats
 
-// NodeRowStats splits a node's row-count load by placement state.
-type NodeRowStats struct {
-	UpRowCount      int64
-	PendingRowCount int64
+// NodeSizeStats splits a node's row-count load by placement state.
+type NodeSizeStats struct {
+	UpLogicalSize      int64
+	PendingLogicalSize int64
 }

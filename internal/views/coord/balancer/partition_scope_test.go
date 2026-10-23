@@ -19,8 +19,8 @@ func TestBalancePartitionScope(t *testing.T) {
 		cfg := cfgFor(1, 10, partitions, nil)
 		c := newTestCache(cfg)
 		publishTestData(c, 1, dv, map[int64]*SegmentDataView{
-			101: {SegmentID: 101, PartitionID: 1, RowNum: 100, ManifestVersion: 8},
-			201: {SegmentID: 201, PartitionID: 2, RowNum: 900, ManifestVersion: 9},
+			101: {SegmentID: 101, PartitionID: 1, LogicalSize: 100, ManifestVersion: 8},
+			201: {SegmentID: 201, PartitionID: 2, LogicalSize: 900, ManifestVersion: 9},
 		}, &viewpb.DataViewOfShard{Vchannel: id.VChannel, Partitions: []*viewpb.DataViewOfPartition{
 			{PartitionId: 1, SegmentIds: []int64{101}}, {PartitionId: 2, SegmentIds: []int64{201}},
 		}})
@@ -34,7 +34,7 @@ func TestBalancePartitionScope(t *testing.T) {
 			want[segment] = 1
 		}
 		require.Equal(t, want, assignmentsFromBuilder(plan.Prepares[id]))
-		require.Equal(t, int64(1000), c.GetCollection(1).DataView().TotalRows)
+		require.Equal(t, int64(1000), c.GetCollection(1).DataView().LogicalSize)
 
 		// A serving all-partition view must be replaced after a partial release.
 		c.PublishShard(id, upStats(dv, placement(101, 1, 1, coordview.SegmentStateUp), placement(201, 2, 1, coordview.SegmentStateUp)))
@@ -56,15 +56,15 @@ func TestUnloadedPartitionsDoNotAffectBalance(t *testing.T) {
 		}
 		shards := []*ShardDataView{
 			{VChannel: id.VChannel, Partitions: []*PartitionDataView{{PartitionID: 1, Segments: []*SegmentDataView{
-				{SegmentID: 101, RowNum: 40_000}, {SegmentID: 102, RowNum: 40_000},
+				{SegmentID: 101, LogicalSize: 40_000}, {SegmentID: 102, LogicalSize: 40_000},
 			}}}},
 			{VChannel: other.VChannel, Partitions: []*PartitionDataView{{PartitionID: 1, Segments: []*SegmentDataView{
-				{SegmentID: 103, RowNum: 1_000_000}, {SegmentID: 104, RowNum: 1_000_000},
+				{SegmentID: 103, LogicalSize: 1_000_000}, {SegmentID: 104, LogicalSize: 1_000_000},
 			}}}},
 		}
 		if extra {
 			shards[0].Partitions = append(shards[0].Partitions, &PartitionDataView{PartitionID: 2, Segments: []*SegmentDataView{
-				{SegmentID: 201, RowNum: 1_000_000_000},
+				{SegmentID: 201, LogicalSize: 1_000_000_000},
 			}})
 		}
 		c.PublishDataView(1, api.PrepareCollectionDataView(&CollectionDataView{CollectionID: 1, DataVersion: qviews.DataVersion{StreamingVersion: 1}, Shards: shards}))
@@ -130,7 +130,7 @@ func TestPublishedRecoveryRetainsHistoricalPartitions(t *testing.T) {
 		QueryNode: []*viewpb.QueryViewOfQueryNode{{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{
 			{PartitionId: 2, SegmentIds: []int64{201}, SegmentManifestVersions: []int64{9}},
 		}}},
-	}, Rows: map[int64]int64{201: 900}})
+	}, Sizes: map[int64]int64{201: 900}})
 	result := allocate(p, id, map[int64]int64{}, false)
 	require.NotNil(t, result)
 	require.Equal(t, map[int64]int64{201: 2}, result.assignments, "recovery must not use the newer partition scope")

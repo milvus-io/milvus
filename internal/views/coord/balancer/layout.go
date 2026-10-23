@@ -352,5 +352,5 @@ func resourceRows(c *balancercache.CollectionEntry, key coordview.ResourceKey) i
 	if segment == nil || segment.PartitionID != key.PartitionID {
 		return -1
 	}
-	return max(segment.RowNum, 0)
+	return max(segment.LogicalSize, 0)
 }

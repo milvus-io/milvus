@@ -15,7 +15,7 @@ type searchCursor struct{ next, remaining int }
 type placementScore struct{ global, local, fanout float64 }
 
 func (s placementScore) energy(c *BalanceConfig) float64 {
-	return c.GlobalWeight*s.global + s.local + c.FanoutPenaltyWeight*s.fanout
+	return c.ResourceGroupWeight*s.global + s.local + c.FanoutWeight*s.fanout
 }
 
 // Squaring distance after conversion avoids integer multiplication overflow.
@@ -52,10 +52,10 @@ func preferredFanout(previous, nodes, segments int, rows int64, cfg *BalanceConf
 		return 0
 	}
 	if previous == 0 {
-		return calculateFanoutBudget(nodes, segments, rows, cfg.TargetRowsPerShardNode)
+		return calculateFanoutBudget(nodes, segments, rows, cfg.TargetLogicalSizePerNode)
 	}
 	result := min(previous, cap)
-	scale, size := float64(cfg.TargetRowsPerShardNode), float64(rows)
+	scale, size := float64(cfg.TargetLogicalSizePerNode), float64(rows)
 	for result < cap && size > float64(result)*scale*(1+cfg.FanoutHysteresis) {
 		result++
 	}
@@ -101,26 +101,26 @@ func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]
 	if group := p.GetResourceGroup(replica.ResourceGroup); group != nil && len(rgNodes) > 0 {
 		ctx.mean = float64(group.Demand(len(rgNodes))) / float64(len(rgNodes))
 	}
-	ctx.tolerance = math.Max(float64(cfg.AbsoluteToleranceRows), cfg.RelativeTolerance*ctx.mean)
-	shardRows := c.ShardLoadedRows(id.VChannel)
+	ctx.tolerance = math.Max(float64(cfg.ResourceGroupAbsoluteTolerance), cfg.ResourceGroupRelativeTolerance*ctx.mean)
+	shardRows := c.ShardLoadedSize(id.VChannel)
 	if p.recovery != nil && p.recovery.shardID == id {
-		shardRows = p.recovery.shard.TotalRows
+		shardRows = p.recovery.shard.LogicalSize
 	}
 	ctx.fanout = preferredFanout(p.fanouts[id], len(nodes), len(entries), shardRows, cfg)
 	p.fanouts[id] = ctx.fanout
 	if ctx.fanout > 0 {
-		ctx.shardLimit = (1 + cfg.LocalTolerance) * float64(shardRows) / float64(ctx.fanout)
+		ctx.shardLimit = (1 + cfg.ConcentrationRelativeTolerance) * float64(shardRows) / float64(ctx.fanout)
 	}
-	collectionRows := float64(c.LoadedRows())
+	collectionRows := float64(c.LoadedSize())
 	if len(nodes) > 0 {
-		ctx.collectionLimit = (1 + cfg.LocalTolerance) * math.Max(float64(cfg.TargetRowsPerShardNode), collectionRows/float64(len(nodes)))
+		ctx.collectionLimit = (1 + cfg.ConcentrationRelativeTolerance) * math.Max(float64(cfg.TargetLogicalSizePerNode), collectionRows/float64(len(nodes)))
 	}
 	var old map[int64]int64
 	if entry := c.GetShard(id); entry != nil {
-		old = entry.TargetRows()
+		old = entry.TargetSize()
 	}
 	for _, n := range nodes {
-		ctx.collectionBase[n] = c.ReplicaRows(id.ReplicaID, n) + p.replicaDelta[id.ReplicaID][n] - old[n]
+		ctx.collectionBase[n] = c.ReplicaSize(id.ReplicaID, n) + p.replicaDelta[id.ReplicaID][n] - old[n]
 	}
 	for _, segment := range entries {
 		ctx.segments[segment.SegmentID] = segment
@@ -137,8 +137,8 @@ func (ctx *allocationContext) nodeScore(node int64, rows int64) placementScore {
 	r := float64(rows)
 	return placementScore{
 		global: bandPenalty(float64(ctx.base[node])+r, ctx.mean, ctx.tolerance),
-		local: ctx.config.ShardWeight*concentrationPenalty(r, ctx.shardLimit) +
-			ctx.config.CollectionWeight*concentrationPenalty(float64(ctx.collectionBase[node])+r, ctx.collectionLimit),
+		local: ctx.config.ShardConcentrationWeight*concentrationPenalty(r, ctx.shardLimit) +
+			ctx.config.CollectionConcentrationWeight*concentrationPenalty(float64(ctx.collectionBase[node])+r, ctx.collectionLimit),
 	}
 }
 
@@ -150,7 +150,7 @@ func (ctx *allocationContext) score() placementScore {
 		score.local += s.local
 	}
 
-	score.fanout = float64(max(0, ctx.opened-ctx.fanout)) * float64(ctx.config.TargetRowsPerShardNode)
+	score.fanout = float64(max(0, ctx.opened-ctx.fanout)) * float64(ctx.config.TargetLogicalSizePerNode)
 	return score
 }
 
@@ -166,14 +166,14 @@ func (ctx *allocationContext) evaluate(segments []*SegmentDataView, destination 
 			continue
 		}
 		if exists {
-			rows[old] -= segment.RowNum
+			rows[old] -= segment.LogicalSize
 			counts[old]--
-			cost += ctx.config.MovePrice * float64(segment.RowNum)
+			cost += ctx.config.MoveCostPerUnit * float64(segment.LogicalSize)
 		}
-		rows[destination] += segment.RowNum
+		rows[destination] += segment.LogicalSize
 		counts[destination]++
 		if !ctx.reusable[segment.SegmentID][destination] {
-			cost += ctx.config.LoadPrice * float64(segment.RowNum)
+			cost += ctx.config.LoadCostPerUnit * float64(segment.LogicalSize)
 		}
 	}
 	var global, local float64
@@ -191,21 +191,21 @@ func (ctx *allocationContext) evaluate(segments []*SegmentDataView, destination 
 			afterOpened++
 		}
 	}
-	fanout := float64(max(0, ctx.opened-ctx.fanout)-max(0, afterOpened-ctx.fanout)) * float64(ctx.config.TargetRowsPerShardNode)
-	return ctx.config.GlobalWeight*global + local + ctx.config.FanoutPenaltyWeight*fanout - cost, global
+	fanout := float64(max(0, ctx.opened-ctx.fanout)-max(0, afterOpened-ctx.fanout)) * float64(ctx.config.TargetLogicalSizePerNode)
+	return ctx.config.ResourceGroupWeight*global + local + ctx.config.FanoutWeight*fanout - cost, global
 }
 
 func (ctx *allocationContext) assign(segments []*SegmentDataView, node int64) {
 	for _, segment := range segments {
 		if previous, ok := ctx.assignments[segment.SegmentID]; ok {
-			ctx.rows[previous] -= segment.RowNum
+			ctx.rows[previous] -= segment.LogicalSize
 			ctx.counts[previous]--
 			if ctx.counts[previous] == 0 {
 				ctx.opened--
 			}
 		}
 		ctx.assignments[segment.SegmentID] = node
-		ctx.rows[node] += segment.RowNum
+		ctx.rows[node] += segment.LogicalSize
 		if ctx.counts[node] == 0 {
 			ctx.opened++
 		}
@@ -236,7 +236,7 @@ func (ctx *allocationContext) optimize(entries []*SegmentDataView, cursor *searc
 		cursor.remaining = total
 	}
 	cursor.next %= total
-	limit := min(cursor.remaining, int(ctx.config.MaxCandidateEvaluations))
+	limit := min(cursor.remaining, int(ctx.config.MaxCandidateEvaluationsPerShard))
 	for i := 0; i < limit; i++ {
 		index := cursor.next
 		group, destination := index/len(ctx.nodes), ctx.nodes[index%len(ctx.nodes)]
@@ -247,7 +247,7 @@ func (ctx *allocationContext) optimize(entries []*SegmentDataView, cursor *searc
 			segments = entries[group-len(groups) : group-len(groups)+1]
 		}
 		gain, global := ctx.evaluate(segments, destination)
-		if global >= -scoreEpsilon && gain > ctx.config.MinGainRows {
+		if global >= -scoreEpsilon && gain > ctx.config.MinScoreGain {
 			ctx.assign(segments, destination)
 		}
 		cursor.next = (cursor.next + 1) % total
@@ -262,12 +262,12 @@ func (ctx *allocationContext) migrationCost(original map[int64]int64) float64 {
 		if old, exists := original[segment]; exists && old == node {
 			continue
 		}
-		rows := float64(ctx.segments[segment].RowNum)
+		rows := float64(ctx.segments[segment].LogicalSize)
 		if _, exists := original[segment]; exists {
-			cost += ctx.config.MovePrice * rows
+			cost += ctx.config.MoveCostPerUnit * rows
 		}
 		if !ctx.reusable[segment][node] {
-			cost += ctx.config.LoadPrice * rows
+			cost += ctx.config.LoadCostPerUnit * rows
 		}
 	}
 	return cost

@@ -112,14 +112,14 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 
 	unwatch := b.watchBalanceConfig(ctx, paramtable.Get())
 	defer unwatch()
-	interval := DefaultBalanceConfig().TickerInterval
+	interval := DefaultBalanceConfig().ReconcileInterval
 	if b.cache != nil {
-		interval = b.cache.GetBalanceConfig().TickerInterval
+		interval = b.cache.GetBalanceConfig().ReconcileInterval
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	resetTicker := func() {
-		next := b.cache.GetBalanceConfig().TickerInterval
+		next := b.cache.GetBalanceConfig().ReconcileInterval
 		if next != interval {
 			interval = next
 			ticker.Reset(interval)

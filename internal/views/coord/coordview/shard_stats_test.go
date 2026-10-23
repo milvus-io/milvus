@@ -183,11 +183,13 @@ func TestStats_PartialReadySegments(t *testing.T) {
 	assert.Equal(t, ver, *stats.PreparingVersion)
 	require.Len(t, stats.Segments, 2)
 	assert.Equal(t, &SegmentStats{
+		LostStats:   true,
 		SegmentID:   1001,
 		PartitionID: 10,
 		Nodes:       map[int64]SegmentState{1: SegmentStateReady},
 	}, stats.Segments[1001])
 	assert.Equal(t, &SegmentStats{
+		LostStats:   true,
 		SegmentID:   1002,
 		PartitionID: 10,
 		Nodes:       map[int64]SegmentState{1: SegmentStatePreparing},
@@ -212,6 +214,7 @@ func TestStats_UnrecoverableIncludedByNode(t *testing.T) {
 	assert.Nil(t, stats.PreparingVersion)
 	require.Len(t, stats.Segments, 1)
 	assert.Equal(t, &SegmentStats{
+		LostStats:   true,
 		SegmentID:   1001,
 		PartitionID: 10,
 		Nodes:       map[int64]SegmentState{1: SegmentStateReady},
@@ -235,6 +238,7 @@ func TestStats_UnrecoverableSegmentWithoutReady(t *testing.T) {
 	assert.Nil(t, stats.PreparingVersion)
 	require.Len(t, stats.Segments, 1)
 	assert.Equal(t, &SegmentStats{
+		LostStats:   true,
 		SegmentID:   1001,
 		PartitionID: 10,
 		Nodes:       map[int64]SegmentState{1: SegmentStateUnrecoverable},

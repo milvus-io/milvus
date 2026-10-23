@@ -37,7 +37,7 @@ func TestBalancerWaitsForRecoveryWithoutLosingWork(t *testing.T) {
 	addShardWithPreparingView(t, registry, existing, map[int64]map[int64][]int64{1: {1: {1000}}})
 	before := registry.Get(existing).Stats().PreparingVersion
 	config := policyTestConfig()
-	config.TickerInterval = time.Hour
+	config.ReconcileInterval = time.Hour
 	c := balancercache.New(config)
 	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
 	b := NewDefaultBalancer(c, registry, nil, nil)
@@ -58,8 +58,8 @@ func TestBalancerWaitsForRecoveryWithoutLosingWork(t *testing.T) {
 		t.Fatal("controller did not wait for recovery")
 	}
 	params := paramtable.Get()
-	setBalanceParam(t, params, params.QueryViewCfg.BalancerAutoBalance.Key, "false")
-	require.False(t, c.GetBalanceConfig().AutoBalance, "configuration refresh is not blocked by recovery readiness")
+	setBalanceParam(t, params, params.QueryViewCfg.BalancerOptimizationEnabled.Key, "false")
+	require.False(t, c.GetBalanceConfig().OptimizationEnabled, "configuration refresh is not blocked by recovery readiness")
 	// No config has recovered yet: planning now would incorrectly release the
 	// existing view. Work arriving during the wait must also survive.
 	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{added}})

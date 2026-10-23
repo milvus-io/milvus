@@ -102,8 +102,9 @@ func TestDataViewReferenceSurvivesUntilDurableQueryViewRemoval(t *testing.T) {
 	publishInterfaceDataView(t, m, 1002, 7)
 	assertRetained()
 	stats := mgr.Stats().Segments[1001]
-	require.True(t, stats.HasRowNum)
+	require.False(t, stats.LostStats)
 	require.Equal(t, int64(42), stats.RowNum)
+	require.Equal(t, int64(42+16), stats.LogicalSize)
 
 	require.NoError(t, mgr.RequestRelease(t.Context()))
 	require.NoError(t, registry.flushScheduler.Flush(t.Context()))
@@ -156,7 +157,7 @@ func TestPublishedDataViewCollectedBeforeAddPreparing(t *testing.T) {
 	require.NoError(t, registry.flushScheduler.Flush(t.Context()))
 }
 
-func TestRecoveredQueryViewsUseEachRetainedVersionsRows(t *testing.T) {
+func TestRecoveredQueryViewsUseEachRetainedVersionsStats(t *testing.T) {
 	m := newInterfaceDataViews(t)
 	publishInterfaceDataView(t, m, 1002, 7)
 	old := testBuilder(1, 0, 1).Build()
@@ -166,9 +167,11 @@ func TestRecoveredQueryViewsUseEachRetainedVersionsRows(t *testing.T) {
 	require.NoError(t, m.GarbageCollect(t.Context(), testCollectionID, 1))
 	for range 20 {
 		stats := registry.Get(testShardID).Stats()
-		require.True(t, stats.Segments[1001].HasRowNum)
+		require.False(t, stats.Segments[1001].LostStats)
 		require.Equal(t, int64(42), stats.Segments[1001].RowNum)
-		require.True(t, stats.Segments[1002].HasRowNum)
+		require.Equal(t, int64(42+16), stats.Segments[1001].LogicalSize)
+		require.False(t, stats.Segments[1002].LostStats)
 		require.Equal(t, int64(7), stats.Segments[1002].RowNum)
+		require.Equal(t, int64(7+16), stats.Segments[1002].LogicalSize)
 	}
 }

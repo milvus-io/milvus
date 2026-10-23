@@ -1,18 +1,18 @@
 package cache
 
-// LoadedRows and ShardLoadedRows describe desired membership, including data
+// LoadedSize and ShardLoadedSize describe desired membership, including data
 // not placed yet. They never include partitions outside LoadConfig.
-func (c *CollectionEntry) LoadedRows() int64 {
+func (c *CollectionEntry) LoadedSize() int64 {
 	if c.loadsAllPartitions {
-		return c.data.TotalRows
+		return c.data.LogicalSize
 	}
 	return c.loadedRows
 }
 
-func (c *CollectionEntry) ShardLoadedRows(vchannel string) int64 {
+func (c *CollectionEntry) ShardLoadedSize(vchannel string) int64 {
 	if c.loadsAllPartitions {
 		if shard := c.data.Shard(vchannel); shard != nil {
-			return shard.TotalRows
+			return shard.LogicalSize
 		}
 		return 0
 	}
@@ -54,7 +54,7 @@ func (c *CollectionEntry) refreshLoadRows() {
 		var rows int64
 		for _, partition := range shard.Partitions {
 			if c.LoadsPartition(partition.PartitionID) {
-				rows += partition.TotalRows
+				rows += partition.LogicalSize
 			}
 		}
 		c.loadedShardRows[shard.VChannel] = rows
