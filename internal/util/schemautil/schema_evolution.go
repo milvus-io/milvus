@@ -54,6 +54,9 @@ func ValidateSchemaEvolution(oldSchema, newSchema *schemapb.CollectionSchema) er
 	if err := validateDroppedEvolutionFields(oldFields, newFields, newSchema); err != nil {
 		return err
 	}
+	if err := validateVectorFieldIntroduction(oldSchema, newSchema); err != nil {
+		return err
+	}
 	// Function-graph validation (single producer, output binding, alter-immutability,
 	// cascade) is owned by internal/util/function/validator (see #51360); this gate
 	// intentionally only enforces the non-function structural invariants below.
@@ -377,6 +380,23 @@ func validateDroppedEvolutionField(field *schemapb.FieldSchema, newSchema *schem
 		return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field %q", name)
 	}
 	return nil
+}
+
+// validateVectorFieldIntroduction rejects any schema change that turns a
+// collection created without a vector field into one with a vector field,
+// whether through a top-level field, a struct array sub-field or a function
+// output. Whether a collection has vectors is fixed at creation: load, index
+// readiness and segment sizing read it from the schema, and none of them
+// handles the transition on an existing collection.
+func validateVectorFieldIntroduction(oldSchema, newSchema *schemapb.CollectionSchema) error {
+	if typeutil.HasVectorField(oldSchema) || !typeutil.HasVectorField(newSchema) {
+		return nil
+	}
+	added := make([]string, 0, 1)
+	for _, field := range typeutil.GetVectorFieldSchemas(newSchema) {
+		added = append(added, field.GetName())
+	}
+	return merr.WrapErrParameterInvalidMsg("collection %s has no vector field, adding a vector field is not supported, field name(s) = %v", newSchema.GetName(), added)
 }
 
 // validateEvolutionClusteringKey allows a clustering-key field to be added

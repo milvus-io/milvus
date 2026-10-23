@@ -427,7 +427,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
 	}
 
-	if vectorFields == 0 {
+	if vectorFields == 0 && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("schema does not contain vector field")
 	}
 
@@ -783,6 +783,9 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 	vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
 	for _, subField := range structFieldSchema.GetFields() {
 		if typeutil.IsVectorType(subField.GetDataType()) {
+			if vectorFields == 0 {
+				return merr.WrapErrParameterInvalidMsg("collection %s has no vector field, adding a vector field is not supported, field name = %s", schema.GetName(), subField.GetName())
+			}
 			vectorFields++
 		}
 	}
@@ -943,6 +946,9 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 		}
 	}
 	if typeutil.IsVectorType(newFieldSchema.DataType) {
+		if !typeutil.HasVectorField(schema) {
+			return merr.WrapErrParameterInvalidMsg("collection %s has no vector field, adding a vector field is not supported, field name = %s", schema.GetName(), newFieldSchema.GetName())
+		}
 		vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
 		if vectorFields >= paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt() {
 			return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
@@ -1292,7 +1298,7 @@ func validateDropStructArrayField(schema *schemapb.CollectionSchema, sf *schemap
 			removedVectors++
 		}
 	}
-	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
 		return merr.WrapErrParameterInvalidMsg(
 			"cannot drop struct array field %s: it would leave no vector field in the collection",
 			sf.GetName())
@@ -1332,7 +1338,7 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 			removedVectors++
 		}
 	}
-	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
 		return merr.WrapErrParameterInvalidMsg(
 			"cannot drop function %s: it would leave no vector field in the collection",
 			functionName)
@@ -3108,10 +3114,14 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		err = merr.Error(indexResponse.GetStatus())
 	}
 	if err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
-			err = merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			return err
 		}
-		return err
+		// A collection with no vector field needs no index to be loaded.
+		if typeutil.HasVectorField(collSchema.CollectionSchema) {
+			return merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		}
+		indexResponse = &indexpb.DescribeIndexResponse{}
 	}
 
 	// not support multiple indexes on one field
@@ -3375,10 +3385,14 @@ func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 		err = merr.Error(indexResponse.GetStatus())
 	}
 	if err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
-			err = merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			return err
 		}
-		return err
+		// A collection with no vector field needs no index to be loaded.
+		if typeutil.HasVectorField(collSchema.CollectionSchema) {
+			return merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		}
+		indexResponse = &indexpb.DescribeIndexResponse{}
 	}
 
 	// not support multiple indexes on one field

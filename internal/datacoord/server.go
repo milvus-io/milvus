@@ -305,6 +305,10 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err := s.initMixCoord(); err != nil {
 		return err
 	}
+	if key := Params.DataCoordCfg.DVForceAllIndexReady.Key; paramtable.GetBaseTable().Get(key) != "" {
+		mlog.Warn(s.ctx, "config key is deprecated and ignored: a compaction output always waits for every index defined on the collection before it is published",
+			mlog.String("key", key))
+	}
 
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 
