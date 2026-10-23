@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFIFOQueue_Push(t *testing.T) {
@@ -124,4 +125,40 @@ func TestFIFOQueue_TaskIDs(t *testing.T) {
 	assert.Equal(t, 2, len(taskIDs))
 	assert.Equal(t, int64(1), taskIDs[0])
 	assert.Equal(t, int64(2), taskIDs[1])
+}
+
+func TestPriorityQueue_TaskIDsByPriorityPreservesQueue(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		ids  []int64
+	}{
+		{name: "empty"},
+		{name: "single", ids: []int64{1}},
+		{name: "heap traversal differs from priority", ids: []int64{1, 4, 2, 8, 5, 3}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			queue := NewPriorityQueuePolicy()
+			for _, id := range test.ids {
+				task := NewMockTask(t)
+				task.EXPECT().GetTaskID().Return(id)
+				queue.Push(task)
+			}
+			before := queue.TaskIDs()
+
+			snapshot := queue.TaskIDsByPriority()
+
+			assert.Equal(t, before, queue.TaskIDs(), "snapshot must not rearrange the original heap")
+			assert.Equal(t, len(test.ids), queue.TaskCount())
+			for _, id := range test.ids {
+				assert.NotNil(t, queue.Get(id), "task must remain available for cancellation")
+			}
+			popped := make([]int64, 0, len(test.ids))
+			for range test.ids {
+				task := queue.Pop()
+				require.NotNil(t, task)
+				popped = append(popped, task.GetTaskID())
+			}
+			assert.Equal(t, popped, snapshot, "snapshot must follow the same priority as Pop")
+		})
+	}
 }
