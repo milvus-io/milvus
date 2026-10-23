@@ -581,7 +581,7 @@ Five principles work around §2:
 - **StreamingNode (source).** It receives the fence on the normal append path
   by owning the source pchannel. Under the vchannel-exclusive lock the shard
   handler seals the growing segments (`FlushAndFenceSegmentAllocUntil`, so each
-  of them takes `SEGMENT_ASSIGNMENT_STATE_SEALED`), embeds their ids, and
+  of them takes `SEGMENT_ASSIGNMENT_STATE_FLUSHED`), embeds their ids, and
   force-fails active transactions. It installs the fence *before* it appends
   the fence record, and keeps it whatever the append returns (§6.1 step 3).
   Two things then happen, in the write path and in the recovery module:
@@ -1635,7 +1635,8 @@ children read their full views.
      DataCoord's **cached** collection, and rootcoord announces a changed list
      only through `BroadcastAlteredCollection`, whose cache-hit path ignored
      the request's list. Refreshing the cached list from that request is
-     therefore a correctness fix, not a convenience: without it a `Flush`
+     therefore a correctness fix, not a convenience (master now does it,
+     #53579): without it a `Flush`
      during the whole window would be broadcast to the pre-split list, the
      targets' growing segments would never be persisted, and `Flush` would
      still answer success. `FlushAll` is a pchannel-level broadcast and
@@ -2451,7 +2452,7 @@ fence landed on.
     Dropping a partition manager (at the fence, `DropCollection` or
     `DropPartition`) cancels its segment-alloc worker. The source's segments
     are sealed by the fence itself, twice over: the write path's
-    `FlushAndFenceSegmentAllocUntil` marks each of them `SEALED` as the fence
+    `FlushAndFenceSegmentAllocUntil` marks each of them `FLUSHED` as the fence
     is placed, and the source's recovery module flushes every segment created
     before the fence record when it observes it (§5).
 
@@ -2621,6 +2622,21 @@ feature:
   segment (§11).
 
 ## 11. Implementation Surface
+
+The table describes the whole six-layer stack, not one PR. What lives where:
+the write switch (this layer, L1) is everything under Common, RootCoord,
+StreamingCoord, StreamingNode and the `streaming` package, the Proxy row's
+secondary-side remap and gate, and on DataCoord only the two split RPCs, the
+task record and store, the append gate's record checker and the health-check
+skip of a delisted vchannel. The rest of the DataCoord row -- the drain
+function `splitDrainBlockReason`, the import guard
+(`refuseImportOnMovingShards`, `broadcastImport`), the split manager, the
+rewrite, the compaction freeze, the lineage view -- is the orchestration and
+rewrite layers (L3, L4); the Proxy write path is L2, the DataNode row L4, the
+QueryNode row L5 and the QueryCoord row L6. The vchannel-list refresh in
+`BroadcastAlteredCollection` is no longer this stack's change: master's
+metacache rewrite (#53579) adopts the request's vchannel list on every alter,
+which both split ack callbacks already call.
 
 **Implemented**, by component:
 
@@ -2926,11 +2942,27 @@ Other follow-ups:
   depend on the collection: recording the task for a dropping collection too,
   with its targets' channel marks and checkpoints cleaned up by the drop, or a
   landed-fence fact kept by the broadcaster itself.
+- **The targets of a split whose collection was dropped first stay alive on
+  StreamingNode.** The genesis replica builds each target's recovery module,
+  shard-manager registration and catalog row when it is appended, and the
+  SplitShard callback that finds the collection gone or `Dropping` applies no
+  routing. `DropCollection` broadcasts only to the vchannels the collection
+  lists, which never included those targets, so nothing drops them: they keep
+  their modules and keep reporting checkpoints for a collection that no longer
+  exists. It needs the drop to overtake the split's callback, which only a
+  rename in between makes possible, on a secondary. Closing it needs the drop
+  path to reach unlisted targets, from a record of the task the callback would
+  have to write for a dropping collection too (the same record the item above
+  needs).
 - **A retired source's channel mark stays "added".** `CommitShardSplit` marks
   the targets added, and nothing ever marks a retired source removed, because
   retirement never calls `DropVirtualChannel` (§6.5). Harmless: the mark only
   keeps the GC guard on, and a fenced source gets no new segments. Like every
-  channel mark on master, the key is never deleted.
+  channel mark on master, the key is never deleted. Its channel checkpoint row
+  stays too, frozen at the retire, since nothing reports it after its module
+  is dropped; DataCoord's `CheckHealth` therefore skips a vchannel its
+  collection no longer lists, and `BroadcastAlteredCollection` removes the
+  checkpoint gauge of a vchannel the new list delists.
 - **Post-image pchannel pairing is not checked.** `CheckPostImageShape` and
   `ApplyUpdates` do not verify that `physical_channel_names[i]` is
   `ToPhysicalChannel(virtual_channel_names[i])`; a planner post-image that
@@ -2940,12 +2972,14 @@ Other follow-ups:
   to have emptied `hash_routing.buckets`. Nothing routes by it (a `Splitting`
   shard is not routable), but it contradicts `CommitDelta`'s own stated
   invariant that a split strips the source's residues.
-- **A stale route to a retired source degrades after a restart.** The write
-  path's fence tombstones are never pruned in process, and after a restart
-  they are rebuilt only for vchannels the write-path snapshot still carries.
-  Once the retired source's row is collected, a proxy route that survived the
-  split's cache expiry is answered `ErrCollectionNotFound`, which the proxy
-  treats as unrecoverable, instead of `SHARD_FENCED` (refresh and retry).
+- **A stale route to a retired source is answered as unknown.** The write
+  path releases a source's fence tombstone once the routing commit that
+  retires it, or its collection's `DropCollection`, is appended, which is the
+  state a restart rebuilds anyway (the snapshot carries no row for a dropped
+  vchannel). A proxy route that survived the split's cache expiry is then
+  answered `ErrCollectionNotFound`, which the proxy treats as unrecoverable,
+  instead of `SHARD_FENCED` (refresh and retry). Before the retire, a stale
+  route still gets `SHARD_FENCED`.
 
 **Rollout.** `dataCoord.shardSplit.enable` is off by default, and with it off
 nothing issues a split, so the mixed-version cases below are the constraints
@@ -2964,8 +2998,9 @@ Wire changes:
   master's `UpdateImport`),
   `SplitShardMessageHeader`/`Body`, `SplitShardExtraResponse`,
   `AckedCheckpoint.extra` (field 4),
-  `VChannelMeta.split_fence_time_tick` (field 6) and `split_fence_task_id`
-  (field 7) -- field 5 is master's `transform_materialized_time_tick`, and
+  `VChannelMeta.split_fence_time_tick` (field 7) and `split_fence_task_id`
+  (field 8) -- field 5 is master's `transform_materialized_time_tick` and 6
+  its `segment_data_version_summary`, and
   `VChannelState` 4 is `reserved`, since a fenced source stays `NORMAL` --
   and the DataCoord split RPCs, whose
   `CheckShardSplitDrainedResponse` carries `recorded` (3), `source_vchannels`
@@ -3016,10 +3051,13 @@ What is not compatible is behavior:
 - An **old secondary proxy** neither remaps a replicated `SplitShard` nor gates
   it, so the secondary would create targets under primary names, in any order.
 - A **new secondary proxy with an old secondary StreamingCoord**: the append
-  gate's `WaitVChannelsAcked` comes back `Unimplemented`, the gate returns it
-  as it stands, and the replicate stream retries from its checkpoint into the
-  same answer, so that pchannel's replication stops until the coord is
-  upgraded.
+  gate's `WaitVChannelsAcked` comes back `Unimplemented`, the gate logs it
+  at Error naming the upgrade and returns it as it stands, and the replicate
+  stream retries from its checkpoint into the same answer, so that
+  pchannel's replication stops until the coord is upgraded. A replicated
+  append refused as a `ReplicateViolation` stalls the pchannel the same way;
+  it is logged at Error and counted by
+  `milvus_streaming_replicate_violation_total`.
 - An **un-upgraded secondary** has neither the delta-only judge nor the extra
   response. A routing commit that overtakes an earlier one there is applied
   instead of retried, and its SplitShard callback wedges as above. Every
@@ -3035,6 +3073,23 @@ What is not compatible is behavior:
   with a tick at or below `T_switch`.
 - **A split collection cannot be snapshotted** (§8.12).
 
+- **A secondary on this layer alone (L1) replicating a primary that runs the
+  whole stack.** L1's proxy still places rows by `hash(pk) % len(vchannels)`
+  and has no reaction to `SHARD_FENCED`. Once a replicated split's routing is
+  applied there, the list holds the fenced source and two `Creating` targets,
+  the divisor changes and every row moves: writes are misplaced and deletes
+  miss the rows they target. An L1-only build must never be the replication
+  target of a primary that can issue a split; the proxy write path (L2) must
+  be on every secondary first.
+- **There is no version gate in code.** Nothing refuses to issue a split
+  while an older StreamingNode, proxy or secondary is present: an old
+  StreamingNode appends the source replica without a fence or an `_ae`, so
+  the callback retries forever holding the key while the source keeps
+  accepting writes, and an old proxy does not know code 18 and retries to its
+  deadline. This layer has no issuer; an issuer-side refusal by session
+  version belongs with the issuer (L3), with function materialization's
+  version check as the precedent. Until then the rules here are operational.
+
 So: upgrade every secondary and every StreamingNode (and every other node)
 before any split is issued, and do not roll back across a split that has
 fenced.
@@ -3049,32 +3104,45 @@ whose write switch no longer exists; they are evidence about the read path, the
 handover and the rewrite, and no evidence at all about the fence, the target
 genesis, the retirement or the drain.
 
-**What has been run.** Per branch, not only on the full stack: `go build` over
-`./internal/...` and `pkg/`, `go vet` on every touched tree, and the unit
-tests of every package the layer touches, with `-tags dynamic,test
--gcflags="all=-N -l"`. The orchestration and rewrite layers were run against a
-C++ core built from this base commit; the write-switch, proxy write-path,
-read-path and handover layers were run against a borrowed core behind a header
-shim, which leaves three known environmental failures, two of them reproduced
-on the unmodified base commit in the same environment: four
-`querycoordv2/autoscale` `TestEstimateSegmentsLoadResource*` cases, which call
-a core symbol the borrowed core does not export; the root `internal/proxy`
-package, which dies on SIGQUIT with no failing test named (its split-specific
-tests pass when run by name); and, on the real core,
-`datanode/importv2 TestRepublishCopiedManifestIndexes_WritePlacementMatrix`,
-which writes to `/files`, and which the stack does not touch but whose
-pre-existence was argued from the diff rather than from a baseline run.
+**What has been run** on this layer as rebased onto master `9ed2c98321`
+(2026-10-23). `go build ./internal/... ./cmd/milvus/...` and `go vet -tags
+dynamic,test` over `./internal/...` and the `pkg` module. The unit tests of every package the
+layer touches, with `-tags dynamic,test -gcflags="all=-N -l"`, against a
+local etcd and a borrowed C++ core older than master, with link-time stubs
+(each `abort()`s) for the core symbols master added since; no stubbed symbol
+is on a tested path. All pass -- streamingcoord, the shard / timetick / redo
+interceptors, the vchannel recovery module and its L0 materializer, the WAL
+summary, rootcoord, metastore, routing, the secondary's replicate service and
+gate, the proxy's replicate stream and the `pkg` streaming message, metrics,
+merr and paramtable trees -- except failures that need services this
+environment does not run or that fail identically on the unmodified master
+commit: `internal/coordinator` and datacoord's
+`TestClusteringCompactionTaskSuite` (MinIO), the Kafka, Pulsar and Woodpecker
+WAL implementations, the root `internal/proxy` package (dies on SIGQUIT with
+no failing test named; every proxy test this layer adds or changes passes by
+name), and `vchannel/growingruntime` and `vchannel/segment` (fail on master
+in this environment).
 
-The rewrite layer's new behaviour is pinned by tests written
-RED first, including the L0-2 gate, the import guard and the fence-declared L0
-record (each of the last two was watched failing on the data loss it prevents
-before the fix existed); the fence's
-pending-partition-drop hole (§7) was found by audit and fixed with a test that
-was confirmed to fail without the fix.
+Every review fix comes with a test of the behavior it changes; the drain
+read-order test was also run against the unfixed code and fails there, the
+others assert the new outcome directly (the aborted-task roll-forward, the
+delisted-vchannel health check, the tombstone release, the rename-safe cache
+expiry) and were not separately run against the old code. The fence's pending-partition-drop hole (§7) was
+found by audit and fixed with a test that was confirmed to fail without the
+fix.
+
+The mocks of the interfaces this layer changes are generated by mockery
+(v2.53.6, header kept at the repository's v2.53.3) and merged into master's
+files method by method, because master carries hand edits in some of them
+(`IMetaTable.GetFileResourcesByNames`) that a wholesale regeneration would
+drop.
 
 **What has not been run.**
 
-- **No end-to-end run, on any cluster.** Nothing below "the unit tests pass"
+- **No end-to-end run of this implementation, on any cluster.** The
+  six-layer standalone runs described in earlier revisions of this PR
+  (including a restart between fence and adoption) were made before the
+  post-#53595 rewrite and say nothing about this code. Nothing below "the unit tests pass"
   has been exercised against a live streamingnode, datanode, querynode or
   querycoord: not a fence on a real WAL, not a target genesis, not a
   retirement, not a drain, not an adoption, not a handover, and not the whole
@@ -3097,10 +3165,10 @@ was confirmed to fail without the fix.
   stall it produces -- an L0 outside the recorded set -- has only been
   constructed in unit tests, never by a real import landing on a fenced
   source.
-- **The mocks are hand-edited, not regenerated.** `make generate-mockery`
-  cannot run on the toolchain used (the vendored mockery refuses
-  `pkg/proto/streamingpb/extends.go`), so a drift check in CI is the first
-  real test of them.
+- **The replication path is unit-tested only.** The secondary's remap, the
+  append gate, `WaitVChannelsAcked`, the replicated SplitShard callback and
+  the routing commit's ordering on a secondary have never run between two
+  live clusters.
 - **The two reserved read-path proto fields are declared but dead in the
   branch that owns them** (`VchannelInfo.split_target_channels`,
   `querypb.ChannelTarget.split_target_channels`): their producer and their
@@ -3124,7 +3192,7 @@ became of each piece.
 | The fenced-source exception in `GetFlushState` / `GetFlushAllState` | Nothing: a fenced source's checkpoint keeps advancing with its pchannel, so the flush-state check is master's (§6.3 step 3) |
 | The `AlterWAL` FLUSHING deadlock fix, and the metrics that watched for it (`milvus_wal_recovery_oldest_splitted_vchannel_age_seconds`, `milvus_wal_recovery_truncation_lag_seconds`) | The FLUSHING stage waits for the published global checkpoint, so the deadlock is structurally impossible (§8.4) |
 | `SplitShardParam.ControlChannel`, its two validations and the explicit control-channel append | `broadcaster_with_rk.go` adds the control channel to every broadcast, idempotently (§4, §6.1 step 2) |
-| `SealAllSegments` at the fence | `FlushAndFenceSegmentAllocUntil` plus the per-segment `SEGMENT_ASSIGNMENT_STATE_SEALED`, and the fence record is itself the seal record (§5) |
+| `SealAllSegments` at the fence | `FlushAndFenceSegmentAllocUntil` plus the per-segment `SEGMENT_ASSIGNMENT_STATE_FLUSHED`, and the fence record is itself the seal record (§5) |
 | Our changes under `internal/flushcommon/pipeline` (`flow_graph_dd_node.go`, `util/msg_handler.go` and the `MsgHandler` mock) | Nothing: the package has no importers upstream, so they were dead code |
 
 Three things moved rather than disappeared, and are worth naming because the
