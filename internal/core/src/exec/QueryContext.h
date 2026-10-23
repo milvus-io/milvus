@@ -308,12 +308,6 @@ class QueryContext : public Context {
         if (segment_->type() == SegmentType::Sealed) {
             return get_read_schema();
         }
-        if (read_snapshot_) {
-            auto schema = read_snapshot_->get_schema_snapshot();
-            AssertInfo(schema != nullptr,
-                       "query read snapshot must provide a non-null schema");
-            return schema;
-        }
         return segment_->get_schema_snapshot();
     }
 

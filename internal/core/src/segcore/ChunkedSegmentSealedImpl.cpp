@@ -1437,7 +1437,7 @@ ChunkedSegmentSealedImpl::GetStructElementOffsetsFromState(
 
 void
 ChunkedSegmentSealedImpl::PrepareStructElementOffsets(
-    const Schema& schema,
+    const SealedFieldLayout& schema,
     const SegmentLoadInfo& load_info,
     RuntimeResourceState& runtime,
     milvus::OpContext* op_ctx) {
@@ -1507,10 +1507,10 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
     explicit SealedReadSnapshot(
         std::shared_ptr<const PublishedSegmentState> state)
         : state_(std::move(state)) {
-        AssertInfo(state_ != nullptr && state_->schema != nullptr &&
+        AssertInfo(state_ != nullptr && state_->fields != nullptr &&
                        state_->runtime != nullptr,
                    "sealed read snapshot must hold a published state with a "
-                   "non-null schema and runtime");
+                   "non-null field layout and runtime");
     }
 
     int64_t
@@ -1587,11 +1587,6 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
     std::shared_ptr<const IStructElementOffsets>
     GetStructElementOffsets(FieldId field_id) const override {
         return GetStructElementOffsetsFromState(*state_, field_id);
-    }
-
-    SchemaPtr
-    get_schema_snapshot() const override {
-        return state_->schema;
     }
 
     // Plain (non-virtual) accessor so the enclosing segment's ToPublishedState

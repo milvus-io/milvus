@@ -248,7 +248,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     SetHasOffsetInput(input != nullptr);
 
     auto schema = segment_->type() == SegmentType::Growing
-                      ? segment_chunk_reader_.GetSchemaSnapshot()
+                      ? segment_->get_schema_snapshot()
                       : context.get_exec_context()
                             ->get_query_context()
                             ->get_read_schema();

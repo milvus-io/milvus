@@ -407,7 +407,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Complete mappings while the new runtime is still private, after every
     // column in the load/reopen batch has been staged. Queries only read them.
     static void
-    PrepareStructElementOffsets(const Schema& schema,
+    PrepareStructElementOffsets(const SealedFieldLayout& schema,
                                 const SegmentLoadInfo& load_info,
                                 RuntimeResourceState& runtime,
                                 milvus::OpContext* op_ctx);
@@ -1719,7 +1719,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 PublishMode publish_mode = PublishMode::Drain) {
             // All load futures have completed. Do the raw read before taking
             // the publication lease, so old queries can keep using their state.
-            segment_.PrepareStructElementOffsets(*staged_state_->schema,
+            segment_.PrepareStructElementOffsets(*staged_state_->fields,
                                                  *staged_state_->load_info,
                                                  *runtime_,
                                                  op_ctx);
