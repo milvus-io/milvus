@@ -63,7 +63,8 @@ class PhyColumnExpr : public Expr {
                         expr->GetColumn().data_type_,
                         active_count) {
         if (segment->is_chunked()) {
-            num_chunk_ = segment->num_chunk_data(expr_->GetColumn().field_id_);
+            num_chunk_ = segment_chunk_reader_.NumChunkData(
+                expr_->GetColumn().field_id_);
         } else {
             num_chunk_ = upper_div(segment_chunk_reader_.active_count_,
                                    segment_chunk_reader_.SizePerChunk());
