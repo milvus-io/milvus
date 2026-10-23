@@ -92,9 +92,10 @@ its load.
 With the predicate in place, the behaviour changes are:
 
 - **Create** accepts a schema with no vector field when the gate is on.
-- **Load** no longer requires an index. It fails only when a loaded vector
-  field has no index, so a collection with no vector field loads with no
-  index at all.
+- **Load** no longer requires an index. The Proxy fails a load only when a
+  loaded vector field has no index, and the QueryNode accepts a channel watch
+  or segment load with an empty index list when the schema has no vector
+  field, so such a collection loads with no index at all.
 - **Adding a vector** to such a collection is rejected. RootCoord's schema
   evolution entry makes the decision, for a vector field, a struct field with
   a vector sub-field, and a function with a vector output alike. The Proxy
@@ -336,6 +337,7 @@ evolution rows, which are from `3df0cbcdd68`.
 | `proxy/task.go:432` `createCollectionTask.PreExecute` | no vector → reject | reject only when the gate is off |
 | `proxy/util.go:1048` `validateLoadFieldsList`, `metacache/meta_cache.go:298` | at least one vector must be loaded | only if the schema has vectors |
 | `proxy/task.go:3141`, `:3410` load collection / partitions | `ErrIndexNotFound` fails the load | fail only if a loaded vector field has no index; QueryCoord already treats "no index" as an empty index list |
+| `querynodev2/services.go:206` `WatchDmChannels`, `:497` `LoadSegments` | an empty `IndexInfoList` returns `ErrIndexNotFound`, so the channel watch retries forever and the load times out after `loadTimeoutSeconds` | the check applies only when the schema has vector fields |
 | `httpserver/utils.go:3061` `anyToColumns` | REST insert needs a vector or function | check removed |
 | RootCoord `prepareAlterSchemaAddField` and the function-add path; Proxy `task.go:644` `addCollectionFieldTask`, `:1033` `alterCollectionSchemaTask` | a vector field, struct vector sub-field or vector-output function may be added | rejected when `HasVectorField` would turn from false to true (RootCoord decides, Proxy checks early) |
 | `proxy/task.go:1297`, `:1337` drop struct field / function | `removed >= vectorCount` blocks the drop; always true at 0, so every struct-field and function drop is blocked | `removed > 0 &&`, as RootCoord already does |
