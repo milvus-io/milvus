@@ -3652,8 +3652,8 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		// Mock ListSnapshots to return empty list
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
-				return []string{}, nil
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
+				return []*datapb.SnapshotSummary{}, nil
 			}).Build()
 		defer mockList.UnPatch()
 
@@ -3676,8 +3676,8 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		// Mock ListSnapshots to return list
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
-				return []string{"snapshot1", "snapshot2"}, nil
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
+				return []*datapb.SnapshotSummary{{Name: "snapshot1", CreateTs: 200, Description: "daily"}, {Name: "snapshot2", CreateTs: 100}}, nil
 			}).Build()
 		defer mockList.UnPatch()
 
@@ -3692,7 +3692,13 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.NoError(t, merr.Error(resp.GetStatus()))
-		assert.Len(t, resp.GetSnapshots(), 2)
+		assert.Equal(t, []string{"snapshot1", "snapshot2"}, resp.GetSnapshots())
+		require.Len(t, resp.GetSnapshotSummaries(), 2)
+		assert.Equal(t, int64(200), resp.GetSnapshotSummaries()[0].GetCreateTs())
+		assert.Equal(t, "daily", resp.GetSnapshotSummaries()[0].GetDescription())
+		for i, info := range resp.GetSnapshotSummaries() {
+			assert.Equal(t, resp.GetSnapshots()[i], info.GetName())
+		}
 	})
 
 	t.Run("list_error", func(t *testing.T) {
@@ -3700,7 +3706,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		// Mock ListSnapshots to return error
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
 				return nil, errors.New("failed to list snapshots")
 			}).Build()
 		defer mockList.UnPatch()
@@ -6105,11 +6111,11 @@ func TestServer_ListSnapshots_WithDbID(t *testing.T) {
 
 		var capturedCollectionID, capturedPartitionID, capturedDbID int64
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
 				capturedCollectionID = collectionID
 				capturedPartitionID = partitionID
 				capturedDbID = dbID
-				return []string{"snap1"}, nil
+				return []*datapb.SnapshotSummary{{Name: "snap1"}}, nil
 			}).Build()
 		defer mockList.UnPatch()
 
@@ -6136,10 +6142,10 @@ func TestServer_ListSnapshots_WithDbID(t *testing.T) {
 
 		var capturedCollectionID, capturedDbID int64
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
 				capturedCollectionID = collectionID
 				capturedDbID = dbID
-				return []string{"snap1", "snap2"}, nil
+				return []*datapb.SnapshotSummary{{Name: "snap1"}, {Name: "snap2"}}, nil
 			}).Build()
 		defer mockList.UnPatch()
 
@@ -6811,4 +6817,99 @@ func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing
 	server := &Server{importMeta: importMetaMock, meta: &meta{segments: segments, metaStore: store}}
 	segIDs := server.getImportSegmentIDsByVchannel(ctx, jobID, "vchan-0")
 	assert.Equal(t, []int64{101}, segIDs)
+}
+
+func TestServer_CreateSnapshot_DescriptionLength(t *testing.T) {
+	paramtable.Init()
+	limit := &paramtable.Get().ProxyCfg.MaxSnapshotDescriptionLength
+	for _, tc := range []struct {
+		name        string
+		limit       string
+		description string
+		rejected    bool
+	}{
+		{"empty", "1024", "", false},
+		{"default_boundary", "1024", strings.Repeat("a", 1024), false},
+		{"default_overflow", "1024", strings.Repeat("a", 1025), true},
+		{"configured_boundary", "6", "abcdef", false},
+		{"configured_overflow", "6", "abcdefg", true},
+		{"unicode_boundary", "6", "快照", false},
+		{"unicode_overflow", "6", "快照名", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := limit.SwapTempValue(tc.limit)
+			defer limit.SwapTempValue(previous)
+			called := false
+			// Stop accepted requests at the first dependency, before any external I/O.
+			patch := mockey.Mock((*snapshotManager).GetSnapshot).To(func(_ *snapshotManager, _ context.Context, _ int64, _ string) (*datapb.SnapshotInfo, error) {
+				called = true
+				return nil, merr.ErrServiceNotReady
+			}).Build()
+			defer patch.UnPatch()
+			server := &Server{snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil)}
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			status, err := server.CreateSnapshot(context.Background(), &datapb.CreateSnapshotRequest{Name: "backup", CollectionId: 100, Description: tc.description})
+			require.NoError(t, err)
+			if tc.rejected {
+				require.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
+				assert.Contains(t, status.GetReason(), "bytes")
+				assert.Equal(t, "true", status.GetExtraInfo()["is_input_error"])
+				assert.False(t, called, "reject direct RPC before metadata lookup or publication")
+			} else {
+				require.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
+				assert.True(t, called)
+			}
+		})
+	}
+}
+
+func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
+	for _, scenario := range []string{"collection_error", "collection_missing", "lock_error", "duplicate_after_lock", "broadcast_error"} {
+		t.Run(scenario, func(t *testing.T) {
+			calls := 0
+			lookup := mockey.Mock((*snapshotManager).GetSnapshot).To(func(_ *snapshotManager, _ context.Context, _ int64, _ string) (*datapb.SnapshotInfo, error) {
+				calls++
+				if scenario == "duplicate_after_lock" && calls == 2 {
+					return &datapb.SnapshotInfo{Name: "backup"}, nil
+				}
+				return nil, merr.WrapErrSnapshotNotFound("backup", "not found")
+			}).Build()
+			defer lookup.UnPatch()
+			collection := mockey.Mock((*embeddedHandler).GetCollection).To(func(_ *embeddedHandler, _ context.Context, _ int64) (*collectionInfo, error) {
+				if scenario == "collection_error" {
+					return nil, merr.ErrServiceNotReady
+				}
+				if scenario == "collection_missing" {
+					return nil, nil
+				}
+				return &collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "books"}, VChannelNames: []string{"p1_100v0"}}, nil
+			}).Build()
+			defer collection.UnPatch()
+			start := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				if scenario == "lock_error" {
+					return nil, merr.ErrServiceNotReady
+				}
+				return &embeddedBroadcastAPI{}, nil
+			}).Build()
+			defer start.UnPatch()
+			close := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+			defer close.UnPatch()
+			exists := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
+			defer exists.UnPatch()
+			publish := mockey.Mock((*embeddedBroadcastAPI).Broadcast).Return((*types2.BroadcastAppendResult)(nil), merr.ErrServiceNotReady).Build()
+			defer publish.UnPatch()
+			server := &Server{snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, broker: &embeddedBroker{}}
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			status, err := server.CreateSnapshot(context.Background(), &datapb.CreateSnapshotRequest{Name: "backup", CollectionId: 100, Description: "daily"})
+			require.NoError(t, err)
+			switch scenario {
+			case "collection_missing":
+				require.ErrorIs(t, merr.Error(status), merr.ErrCollectionNotFound)
+			case "duplicate_after_lock":
+				require.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
+			default:
+				require.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
+			}
+		})
+	}
 }

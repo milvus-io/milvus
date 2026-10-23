@@ -2005,6 +2005,8 @@ message ListSnapshotsRequest {
 message ListSnapshotsResponse {
   common.Status status = 1;
   repeated string snapshots = 2;
+  // Ordered by create_ts descending, then name ascending; aligned with snapshots.
+  repeated SnapshotSummary snapshot_summaries = 3;
 }
 
 message ExportSnapshotRequest {
@@ -2373,4 +2375,12 @@ message StreamingNodeBM25Resource {
   repeated FieldBinlog bm25_binlogs = 3;
   int64 storage_version = 4;
   string manifest_path = 5;
+}
+
+// SnapshotSummary contains list metadata without loading snapshot files.
+message SnapshotSummary {
+  string name = 1;
+  // Same Milvus timestamp and semantics as DescribeSnapshot.create_ts.
+  int64 create_ts = 2;
+  string description = 3;
 }

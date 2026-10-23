@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -166,7 +167,7 @@ type SnapshotManager interface {
 	//   - error: If snapshot not found or read fails
 	DescribeSnapshot(ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error)
 
-	// ListSnapshots returns a list of snapshot names for the specified collection/partition.
+	// ListSnapshots returns lightweight snapshot summaries for the specified collection/partition.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
@@ -174,9 +175,9 @@ type SnapshotManager interface {
 	//   - partitionID: Filter by partition ID (0 = all partitions)
 	//
 	// Returns:
-	//   - snapshots: List of snapshot names
+	//   - snapshots: Summaries ordered by create_ts descending, then name ascending
 	//   - error: If listing fails
-	ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error)
+	ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error)
 
 	// Restore operations
 
@@ -563,14 +564,14 @@ func (sm *snapshotManager) DescribeSnapshot(ctx context.Context, collectionID in
 	return snapshotData, nil
 }
 
-// ListSnapshots returns a list of snapshot names for the specified collection/partition.
+// ListSnapshots returns lightweight snapshot summaries for the specified collection/partition.
 //
 // Note: proxy/task_snapshot.go:438 hard-rejects empty collection_name before
 // the request reaches this layer, so collectionID is guaranteed to be non-zero
 // here. The db-level aggregation branch (collectionID==0 && dbID!=0) that used
 // to live here was unreachable via any public API and has been removed.
 // getDBCollectionIDs is still used by ListRestoreJobs for db-level job filtering.
-func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
+func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
 	mlog.Info(context.TODO(), "list snapshots request received")
 
 	snapshots, err := sm.snapshotMeta.ListSnapshots(ctx, collectionID, partitionID)
@@ -579,6 +580,15 @@ func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, part
 		return nil, err
 	}
 
+	slices.SortFunc(snapshots, func(a, b *datapb.SnapshotSummary) int {
+		if a.GetCreateTs() > b.GetCreateTs() {
+			return -1
+		}
+		if a.GetCreateTs() < b.GetCreateTs() {
+			return 1
+		}
+		return strings.Compare(a.GetName(), b.GetName())
+	})
 	return snapshots, nil
 }
 

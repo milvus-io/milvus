@@ -18,6 +18,8 @@ package milvusclient
 
 import (
 	"context"
+	"slices"
+	"strings"
 
 	"google.golang.org/grpc"
 
@@ -70,6 +72,51 @@ func (c *Client) ListSnapshots(ctx context.Context, opt ListSnapshotsOption, cal
 	})
 
 	return snapshots, err
+}
+
+// ListSnapshotSummaries returns lightweight metadata ordered by create_ts descending,
+// then name ascending. Older servers fall back to DescribeSnapshot per name.
+func (c *Client) ListSnapshotSummaries(ctx context.Context, opt ListSnapshotsOption, callOptions ...grpc.CallOption) ([]*milvuspb.SnapshotSummary, error) {
+	if opt == nil {
+		return nil, merr.WrapErrParameterInvalid("ListSnapshotsOption", "nil", "option cannot be nil")
+	}
+	req := opt.Request()
+	var summaries []*milvuspb.SnapshotSummary
+	err := c.callService(func(service milvuspb.MilvusServiceClient) error {
+		resp, err := service.ListSnapshots(ctx, req, callOptions...)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		summaries = resp.GetSnapshotSummaries()
+		if len(summaries) == 0 && len(resp.GetSnapshots()) > 0 {
+			summaries = make([]*milvuspb.SnapshotSummary, 0, len(resp.GetSnapshots()))
+			for _, name := range resp.GetSnapshots() {
+				info, err := service.DescribeSnapshot(ctx, &milvuspb.DescribeSnapshotRequest{
+					DbName: req.GetDbName(), CollectionName: req.GetCollectionName(), Name: name,
+				}, callOptions...)
+				if err = merr.CheckRPCCall(info, err); err != nil {
+					return err
+				}
+				summaries = append(summaries, &milvuspb.SnapshotSummary{
+					Name: name, CreateTs: info.GetCreateTs(), Description: info.GetDescription(),
+				})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(summaries, func(a, b *milvuspb.SnapshotSummary) int {
+		if a.GetCreateTs() > b.GetCreateTs() {
+			return -1
+		}
+		if a.GetCreateTs() < b.GetCreateTs() {
+			return 1
+		}
+		return strings.Compare(a.GetName(), b.GetName())
+	})
+	return summaries, nil
 }
 
 // DescribeSnapshot describes a snapshot by name

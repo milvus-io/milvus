@@ -114,6 +114,11 @@ func (cst *CreateSnapshotTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	maxDescriptionLength := paramtable.Get().ProxyCfg.MaxSnapshotDescriptionLength.GetAsInt()
+	if len(cst.req.GetDescription()) > maxDescriptionLength {
+		return merr.WrapErrParameterInvalidMsg("the length of a snapshot description must not exceed %d bytes", maxDescriptionLength)
+	}
+
 	// Validate compaction protection duration
 	maxCompactionProtectionSeconds := paramtable.Get().DataCoordCfg.SnapshotMaxCompactionProtectionSeconds.GetAsInt64()
 	if cst.req.GetCompactionProtectionSeconds() < 0 {
@@ -476,9 +481,16 @@ func (lst *ListSnapshotsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	summaries := make([]*milvuspb.SnapshotSummary, 0, len(result.GetSnapshotSummaries()))
+	for _, info := range result.GetSnapshotSummaries() {
+		summaries = append(summaries, &milvuspb.SnapshotSummary{
+			Name: info.GetName(), CreateTs: info.GetCreateTs(), Description: info.GetDescription(),
+		})
+	}
 	lst.result = &milvuspb.ListSnapshotsResponse{
-		Status:    result.GetStatus(),
-		Snapshots: result.GetSnapshots(),
+		SnapshotSummaries: summaries,
+		Status:            result.GetStatus(),
+		Snapshots:         result.GetSnapshots(),
 	}
 
 	return nil
