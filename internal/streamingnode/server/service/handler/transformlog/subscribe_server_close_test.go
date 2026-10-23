@@ -73,7 +73,9 @@ func TestSubscribeServerCreateFailureUnblocksCallbacks(t *testing.T) {
 			}).Build()
 			defer sendPatch.UnPatch()
 
-			logStream := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
+			manager := walsummary.NewManager(walsummary.ManagerConfig{})
+			manager.ObserveQueryBarrier("v1", 11)
+			logStream := walsummary.NewDispatchStream(manager)
 			executed := make(chan error, 1)
 			rpcReturned := make(chan struct{})
 			servePatch := mockey.Mock(streamingpb.UnimplementedStreamingNodeHandlerServiceServer.SubscribeTransform).To(func(_ streamingpb.UnimplementedStreamingNodeHandlerServiceServer, rpc streamingpb.StreamingNodeHandlerService_SubscribeTransformServer) error {
@@ -162,7 +164,9 @@ func TestSubscribeServerDataSendFailureStopsWorker(t *testing.T) {
 			defer sendPatch.UnPatch()
 			wire := newFakeSubscribeTransformServer(t.Context())
 			defer close(wire.recvCh)
-			logStream := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
+			manager := walsummary.NewManager(walsummary.ManagerConfig{})
+			manager.ObserveQueryBarrier("v", 10)
+			logStream := walsummary.NewDispatchStream(manager)
 			server := &SubscribeServer{stream: wire, logStream: logStream, subs: make(map[int64]wal.TransformLogSubscription)}
 			finished := make(chan error, 1)
 			go func() { finished <- server.Execute() }()

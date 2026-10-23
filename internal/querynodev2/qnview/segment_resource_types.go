@@ -33,6 +33,10 @@ type TransformLogGuard interface {
 type TransformRegistration interface {
 	WaitCatchup(ctx context.Context) error
 	WaitFailure(ctx context.Context) error
+	// OnFailure installs the owner's terminal-failure callback, including an
+	// already recorded failure. The callback must only schedule reconciliation;
+	// it must not wait for application or unregister the resource inline.
+	OnFailure(func(error))
 	WaitTransformVisible(ctx context.Context, timetick uint64) error
 	Unregister()
 }

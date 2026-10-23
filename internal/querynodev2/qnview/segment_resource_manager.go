@@ -526,13 +526,14 @@ func (r *segmentResource) catchup(base *segmentBase) {
 	r.wakeLocked()
 	m.mu.Unlock()
 	if err == nil {
-		err = reg.WaitFailure(base.ctx)
-		m.mu.Lock()
-		if base.ctx.Err() == nil {
-			base.catchupErr = err
-			r.wakeLocked()
-		}
-		m.mu.Unlock()
+		reg.OnFailure(func(err error) {
+			m.mu.Lock()
+			if base.ctx.Err() == nil {
+				base.catchupErr = err
+				r.wakeLocked()
+			}
+			m.mu.Unlock()
+		})
 	}
 }
 

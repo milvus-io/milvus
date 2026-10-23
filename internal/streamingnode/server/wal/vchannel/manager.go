@@ -485,13 +485,12 @@ func (m *PChannelRecoveryManager) AcquireStream(ctx context.Context, pchannel st
 		return nil, wal.ErrTransformLogVChannelUnavailable
 	default:
 	}
-	stream := walsummary.NewStream(m.config.SummaryManager)
+	stream := walsummary.NewDispatchStream(m.config.SummaryManager)
 	go func() {
 		select {
 		case <-ctx.Done():
 		case <-m.closeCh:
 		case <-stream.Done():
-			return
 		}
 		_ = stream.Close()
 	}()

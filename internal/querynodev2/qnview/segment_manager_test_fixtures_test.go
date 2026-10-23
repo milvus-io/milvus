@@ -85,6 +85,7 @@ type fakeTransformRegistration struct {
 	waitCh       chan struct{}
 	waitErr      error
 	unregistered bool
+	onFailure    func(error)
 }
 
 func newFakeTransformRegistration() *fakeTransformRegistration {
@@ -242,6 +243,10 @@ func (instantTransformRegistration) WaitCatchup(context.Context) error {
 }
 
 func (instantTransformRegistration) Unregister() {}
+
+func (instantTransformRegistration) OnFailure(func(error)) {}
+
+func (r *fakeTransformRegistration) OnFailure(callback func(error)) { r.onFailure = callback }
 
 type interleavingTransformLogBuffer struct {
 	mu                sync.Mutex

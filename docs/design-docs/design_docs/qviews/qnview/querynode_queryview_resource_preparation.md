@@ -477,7 +477,20 @@ can continue after this finite frontier is completed, using the same ordered
 registration until it joins synchronous live application. Each registration
 maintains an applied watermark, including certified empty intervals. A terminal
 failure remains observable after the catch-up result and invalidates dependent
-Views through reconciliation.
+Views through reconciliation. The registration delivers terminal failure through
+an owner callback, including failure recorded before installation. The callback
+runs outside registration locks and only schedules reconciliation. The temporary
+resource catch-up goroutine exits after installing it; no per-Segment failure
+waiter remains while the resource serves queries.
+
+Catchup uses bounded pages on a shared worker pool. A registration awaiting
+transport coverage parks its state and releases the worker. Arrivals schedule
+pending registrations under the same VChannel lock used for the final empty
+check and attachment to the live dispatch set. A queued/running bit coalesces
+work; parking clears it under that lock so an arrival cannot lose its wakeup.
+The live buffer dispatcher applies subsequent entries directly to registered
+physical instances. Each registration honors its exclusive cursor in both replay
+and live application, including when its base is newer than current coverage.
 
 Ready is a preparation boundary, not a promise of zero lag after future writes.
 Queries wait for their own Transform MVCC; that check must prove application

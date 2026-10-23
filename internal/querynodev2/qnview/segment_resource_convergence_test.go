@@ -221,21 +221,21 @@ func TestSegmentResourceRetriesBufferPreparation(t *testing.T) {
 func TestSegmentResourceInvalidatesAfterLiveTransformFailure(t *testing.T) {
 	mockey.PatchConvey("a registration failure after Ready still reaches its View", t, func() {
 		f := setupResourceTest(t, nil)
-		broken := make(chan struct{})
-		mockey.Mock((instantTransformRegistration).WaitFailure).To(func(_ instantTransformRegistration, ctx context.Context) error {
-			select {
-			case <-broken:
-				return merr.WrapErrServiceNotReadyMsg("live application failed")
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+		observer := make(chan func(error), 1)
+		reg := newFakeTransformRegistration()
+		close(reg.waitCh)
+		f.registerMock.UnPatch()
+		mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).Return(reg, nil).Build()
+		mockey.Mock((*fakeTransformRegistration).OnFailure).To(func(_ *fakeTransformRegistration, callback func(error)) {
+			observer <- callback
 		}).Build()
 		failed := make(chan struct{}, 1)
 		req := f.request(1, 1, 1)
 		req.OnUnrecoverable = func() { failed <- struct{}{} }
 		f.manager.Acquire(req)
 		f.await(t, 1)
-		close(broken)
+		callback := <-observer
+		callback(merr.WrapErrServiceNotReadyMsg("live application failed"))
 		select {
 		case <-failed:
 		case <-time.After(5 * time.Second):

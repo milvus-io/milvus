@@ -3,6 +3,7 @@ package transformlogbuffer
 import (
 	"context"
 	"io"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -25,7 +26,9 @@ type Buffer struct {
 	streamsByPChannel map[string]*streamState
 	channels          map[string]*vchannelBuffer
 
-	drainTasks chan *registration
+	drainMu    sync.Mutex
+	drainReady *sync.Cond
+	drainTasks []*registration
 }
 
 func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
@@ -36,8 +39,8 @@ func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
 		streams:           streams,
 		streamsByPChannel: make(map[string]*streamState),
 		channels:          make(map[string]*vchannelBuffer),
-		drainTasks:        make(chan *registration, 1024),
 	}
+	b.drainReady = sync.NewCond(&b.drainMu)
 	for i := 0; i < drainConcurrency; i++ {
 		go b.drainWorker()
 	}
@@ -92,22 +95,47 @@ func (b *Buffer) RegisterSegment(ctx context.Context, segment qnview.TransformSe
 	return buf.registerSegment(ctx, segment)
 }
 
-func (b *Buffer) scheduleDrain(ctx context.Context, reg *registration) error {
-	select {
-	case b.drainTasks <- reg:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+// scheduleDrainLocked coalesces runnable registrations. Caller holds the
+// VChannel lock; a worker never holds drainMu while acquiring that lock.
+// The queue contains at most one task per registration and never blocks dispatch.
+func (b *vchannelBuffer) scheduleDrainLocked(reg *registration) {
+	if reg.scheduled || b.pending[reg] != reg || b.err != nil || reg.ctx.Err() != nil {
+		return
 	}
+	reg.scheduled = true
+	owner := b.owner
+	owner.drainMu.Lock()
+	owner.drainTasks = append(owner.drainTasks, reg)
+	owner.drainReady.Signal()
+	owner.drainMu.Unlock()
 }
 
 func (b *Buffer) drainWorker() {
-	for reg := range b.drainTasks {
-		err := reg.buffer.drainRegistration(reg.ctx, reg)
-		if err != nil {
-			reg.buffer.removeRegistration(reg)
+	for {
+		b.drainMu.Lock()
+		for len(b.drainTasks) == 0 {
+			b.drainReady.Wait()
 		}
-		reg.finish(err)
+		reg := b.drainTasks[0]
+		b.drainTasks[0] = nil
+		b.drainTasks = b.drainTasks[1:]
+		b.drainMu.Unlock()
+		more, done, err := reg.buffer.drainRegistration(reg.ctx, reg)
+		reg.buffer.mu.Lock()
+		// A parked pass already cleared its bit under the producer lock. An
+		// arrival may now have scheduled a successor; do not clear that bit.
+		if more || done || err != nil {
+			reg.scheduled = false
+		}
+		if err != nil {
+			delete(reg.buffer.pending, reg)
+		} else if more {
+			reg.buffer.scheduleDrainLocked(reg)
+		}
+		reg.buffer.mu.Unlock()
+		if err != nil || done {
+			reg.finish(err)
+		}
 	}
 }
 
@@ -418,6 +446,10 @@ func (b *vchannelBuffer) registerSegment(ctx context.Context, segment qnview.Tra
 		b.mu.Unlock()
 		return nil, merr.WrapErrServiceInternalMsg("transform log buffer range starts from %d, cannot serve segment %d from %d", b.retentionStart, segment.ID(), startFrom)
 	}
+	if err := ctx.Err(); err != nil {
+		b.mu.Unlock()
+		return nil, err
+	}
 	reg := newRegistration(b, segment)
 	b.pending[reg] = reg
 	mlog.Debug(ctx, "querynode transform log buffer registered segment",
@@ -428,80 +460,59 @@ func (b *vchannelBuffer) registerSegment(ctx context.Context, segment qnview.Tra
 		mlog.Int("pendingSegments", len(b.pending)),
 		mlog.Int("liveSegments", len(b.live)),
 	)
+	b.scheduleDrainLocked(reg)
 	b.mu.Unlock()
-
-	if err := b.owner.scheduleDrain(ctx, reg); err != nil {
-		b.removeRegistration(reg)
-		reg.finish(err)
-		return nil, err
-	}
 	return reg, nil
 }
 
-func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registration) error {
-	for {
-		batch, frontier, done, notify, err := b.nextCatchupBatch(reg)
-		if err != nil || done {
-			return err
-		}
-		if len(batch) == 0 {
-			select {
-			case <-notify:
-				continue
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-		for _, entry := range batch {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-			mlog.Debug(ctx, "querynode transform log buffer drains entry to segment",
-				mlog.FieldPChannel(b.pchannel),
-				mlog.FieldVChannel(b.vchannel),
-				mlog.FieldSegmentID(reg.segment.ID()),
-				mlog.Uint64("timeTick", entry.GetTimeTick()),
-			)
-			if err := reg.apply(ctx, entry); err != nil {
-				return err
-			}
-		}
-		// Receipt through an empty interval is progress only after this batch
-		// has been applied to the concrete physical instance.
-		reg.publishProgress(frontier)
-	}
-}
-
-func (b *vchannelBuffer) nextCatchupBatch(reg *registration) ([]*streamingpb.TransformLogEntry, uint64, bool, <-chan struct{}, error) {
+// A pass applies a bounded page, then yields to other registrations. Waiting
+// for transport coverage retains state, not a worker. Dispatch and the empty
+// check/live attachment share b.mu, so no arriving entry can fall between them.
+func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registration) (more, done bool, err error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.err != nil {
-		return nil, 0, false, nil, b.err
+		err = b.err
+	} else if b.pending[reg] != reg || ctx.Err() != nil {
+		err = context.Canceled
 	}
-	if b.pending[reg] != reg {
-		return nil, 0, false, nil, context.Canceled
+	if err != nil {
+		b.mu.Unlock()
+		return false, false, err
 	}
 	if b.syncUp {
 		reg.setCatchupFrontier(b.visibleTimeTick)
 	}
-	batch := make([]*streamingpb.TransformLogEntry, 0)
-	for _, entry := range b.entries {
-		if entry.GetTimeTick() > reg.drainedTo.Load() {
-			batch = append(batch, entry)
-		}
+	first := sort.Search(len(b.entries), func(i int) bool {
+		return b.entries[i].GetTimeTick() > reg.drainedTo.Load()
+	})
+	end := min(first+256, len(b.entries))
+	batch := append([]*streamingpb.TransformLogEntry(nil), b.entries[first:end]...)
+	frontier := b.visibleTimeTick
+	if end < len(b.entries) {
+		frontier = batch[len(batch)-1].GetTimeTick()
 	}
 	if len(batch) == 0 {
 		if !b.syncUp {
-			return nil, 0, false, b.visibilityNotify, nil
+			// Clear before dropping the producer lock. An arrival now either
+			// schedules a successor or was included in this pass's observation.
+			reg.scheduled = false
+			b.mu.Unlock()
+			return false, false, nil
 		}
 		delete(b.pending, reg)
 		b.live[reg] = reg
-		reg.publishProgress(b.visibleTimeTick)
-		return nil, b.visibleTimeTick, true, nil, nil
+		reg.publishProgress(frontier)
+		b.mu.Unlock()
+		return false, true, nil
 	}
-	return batch, b.visibleTimeTick, false, nil, nil
+	b.mu.Unlock()
+	for _, entry := range batch {
+		if err := reg.apply(ctx, entry); err != nil {
+			return false, false, err
+		}
+	}
+	reg.publishProgress(frontier)
+	return true, false, nil
 }
 
 func (b *vchannelBuffer) waitTransformVisible(ctx context.Context, timetick uint64) error {
@@ -668,6 +679,9 @@ func (b *vchannelBuffer) onEntry(entry *streamingpb.TransformLogEntry) {
 		)
 		b.notifyVisibilityLocked()
 	}
+	for _, reg := range b.pending {
+		b.scheduleDrainLocked(reg)
+	}
 	b.mu.Unlock()
 }
 
@@ -686,6 +700,9 @@ func (b *vchannelBuffer) onSyncUp(timeTick uint64) {
 	)
 	for _, reg := range b.live {
 		reg.publishProgress(timeTick)
+	}
+	for _, reg := range b.pending {
+		b.scheduleDrainLocked(reg)
 	}
 	b.notifyVisibilityLocked()
 	b.mu.Unlock()
@@ -719,6 +736,8 @@ func (b *vchannelBuffer) notifyVisibilityLocked() {
 }
 
 type registration struct {
+	scheduled       bool        // protected by buffer.mu; queued or executing catchup
+	onFailure       func(error) // protected by errMu
 	applyMu         sync.Mutex
 	buffer          *vchannelBuffer
 	segment         qnview.TransformSegment
@@ -787,18 +806,34 @@ func (r *registration) Unregister() {
 		// Drain/application may already hold a reference copied from the live set.
 		r.applyMu.Lock()
 		r.applyMu.Unlock() //nolint:staticcheck // Wait for the last in-flight application before freeing the physical segment.
+		r.finish(context.Canceled)
 	})
 }
 
 func (r *registration) finish(err error) {
 	r.errMu.Lock()
-	if err != nil {
+	var callback func(error)
+	if err != nil && r.err == nil {
 		r.err = err
+		callback = r.onFailure
 		close(r.progressNotify)
 		r.progressNotify = make(chan struct{})
 	}
 	r.finishOnce.Do(func() { close(r.done) })
 	r.errMu.Unlock()
+	if callback != nil {
+		callback(err)
+	}
+}
+
+func (r *registration) OnFailure(callback func(error)) {
+	r.errMu.Lock()
+	r.onFailure = callback
+	err := r.err
+	r.errMu.Unlock()
+	if err != nil {
+		callback(err)
+	}
 }
 
 func (r *registration) setCatchupFrontier(tick uint64) {
@@ -851,6 +886,9 @@ func (r *registration) apply(ctx context.Context, entry *streamingpb.TransformLo
 	defer r.applyMu.Unlock()
 	if err := r.ctx.Err(); err != nil {
 		return err
+	}
+	if entry.GetTimeTick() <= r.drainedTo.Load() {
+		return nil
 	}
 	if err := r.segment.ApplyTransform(ctx, entry); err != nil {
 		return err

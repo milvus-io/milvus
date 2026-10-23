@@ -12,15 +12,15 @@ write path, or subscription acknowledgement protocol.
 ## Ownership and transport
 
 ```text
-RecoveryStorage -> WALSummary
-                       |
-                 walsummary.Stream
-                  /           \
-     SN bounded bootstrap     SubscribeTransform RPC
-                                     |
-                            QN VChannel transform buffer
-                                     |
-                            sealed-segment Delete application
+RecoveryStorage ordered PChannel observation
+  -> WALSummary publication + live Transform dispatch
+       -> DispatchStream (shared replay worker + callback worker per stream)
+          -> SubscribeTransform RPC
+             -> QN VChannel TransformLogBuffer
+                -> bounded catchup pages on the shared worker pool
+                -> synchronous live dispatch to caught-up physical segments
+
+SN Growing bootstrap: WALSummary -> bounded Stream -> QueryRuntime live events
 ```
 
 `PChannelRecoveryManager.AcquireStream` creates an independently closeable
@@ -30,9 +30,9 @@ stream or WALSummary. PChannel shutdown cancels acquired streams.
 
 The server gates subscription callbacks until the Create response is sent. If
 that send fails, it closes the callback handler before closing the subscription.
-Subscription Close waits for the reader worker, which may already be delivering
-an event or deliver a terminal error on cancellation; neither callback may wait
-for a Create response that will never succeed. The failed creation emits no
+Subscription Close joins in-flight delivery; a callback must not wait
+for a Create response that will never succeed. Terminal errors end the physical
+stream through Done/Error rather than appearing as transform events. The failed creation emits no
 subscription events, and RPC cleanup also closes the acquired stream.
 
 The handler client resolves the current PChannel assignment. Local consumers
@@ -87,6 +87,42 @@ live resource events come through the VChannel's ordered dispatch path. QN uses
 continuous subscriptions for sealed segments. Both use the same summary read
 and truncation semantics.
 
+## Catchup-to-dispatch continuity
+
+SN captures readable frontier H and registers its live observer while holding
+WALSummary's observation lock. RecoveryStorage is the single ordered producer:
+`observeModulesMessage -> Summary.ObserveMessage` publishes ordinary records;
+`observeQueryBarriers -> Summary.ObserveQueryBarrier` publishes scoped barriers.
+A Delete at or before H belongs to retained historical replay. A later Delete
+belongs to the registered suffix, then live dispatch. Registration cannot leave
+a gap between the two. The stream producer lock orders the final suffix,
+initial SyncUp and subsequent live events. Slow callbacks never run on the
+RecoveryStorage producer; only the bounded stream queue is updated there.
+
+QN appends received entries and selects live registrations under the VChannel
+buffer lock. A pending registration replays bounded pages without occupying a
+worker while waiting for SyncUp. The final empty-history check and move from
+pending to live share that same lock. An arriving Delete is therefore either
+included in pending replay or dispatched to the live registration. Application
+advances the instance's watermark only after the complete entry succeeds.
+View retention and pending replay pins protect the required history during this
+transition; catchup does not authorize trimming the shared View range.
+
+The catchup task's scheduled bit covers queued and executing work. Parking
+clears it under the producer lock; an arrival either belongs to that pass or
+queues its successor. Each page yields to the shared worker queue. No waiting
+worker is required for an idle pending channel, and caught-up segments consume
+only the existing buffer dispatch. The SegmentResource's temporary catchup
+wait ends at the finite readiness frontier; later failure is delivered by an
+installed callback (including failures preceding installation), not one waiting
+goroutine per Segment.
+
+These guarantees cover retained history and the subsequent live suffix. The
+existing FastForward policy for already GC'd history is unchanged and is not a
+proof of delivery of that discarded prefix. Stream overflow is a terminal
+attempt error, never successful progress over a dropped queue item; the client
+resumes from its last accepted cursor using the same retained-history contract.
+
 ## Persistence and retention
 
 WALSummary owns chunks, manifests, readable coverage, cache and GC. Its durable
@@ -120,7 +156,8 @@ retention requires recovered View references and coordinated publication.
 
 ## Key packages
 
-- `internal/streamingnode/server/wal/walsummary/stream.go`: bounded and live reads.
+- `internal/streamingnode/server/wal/walsummary/dispatch_stream.go`: remote replay and PChannel live dispatch.
+- `internal/streamingnode/server/wal/walsummary/stream.go`: bounded bootstrap and reader-only adaptor.
 - `internal/streamingnode/server/wal/vchannel/manager.go`: stream ownership.
 - `internal/streamingnode/server/service/handler/transformlog`: remote server.
 - `internal/streamingnode/client/handler/transformlog`: remote stream client.

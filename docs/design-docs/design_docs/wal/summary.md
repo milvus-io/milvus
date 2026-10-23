@@ -588,9 +588,11 @@ A change token is captured consistently with progress. Notifications wake
 consumers to recheck state, avoiding a missed update between reading and waiting;
 they do not carry record ownership or subscription delivery guarantees. The
 revised materializer re-evaluates admission after observation, L1 completion,
-and Summary backlog requests. Notifications alone do not force L0 output. Local
-subscriptions use progress notifications to follow the tail without adding
-another WAL observer.
+and Summary backlog requests. Notifications alone do not force L0 output.
+Local bounded subscriptions use progress notifications to await coverage.
+Remote continuous subscriptions replay a captured prefix, then receive the live
+suffix directly from this same ordered PChannel observation; they introduce no
+additional WAL scanner.
 
 For unbounded TransformLog subscriptions, distinguish **readable coverage** from
 **notification scope**. `ReadableThrough` remains the complete PChannel prefix;
@@ -618,8 +620,12 @@ The last subscription release removes it. Tokens are allocated only on reads and
 cleared on notification, coalescing messages until a reader captures another
 token. This adds O(active VChannels) notification metadata and no worker
 goroutines. Ordinary scoped notification is an O(1) lookup rather than a scan of
-all subscriptions; global barriers retain their necessary fan-out. Existing
-subscription goroutines and their bounded delivery buffers remain unchanged.
+all subscriptions; global barriers retain their necessary fan-out.
+The reader-only adaptor retains its subscription goroutines. Production remote
+continuous subscriptions instead use DispatchStream: snapshot capture and live
+observer registration share this observation lock, and subsequent PChannel
+observations forward immutable entries/progress without a waiting goroutine per
+subscription. See [TransformLog delivery](transform_log.md#4-catch-up-and-live-delivery).
 Consumers without the optional watch capability retain global notifications.
 
 Scope registration precedes the first read. Subsequent reads capture both state
