@@ -138,6 +138,7 @@ func TestNameGateFencedSourceDDLIsAppendedWithoutEffect(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			i, shardManager := newTestShardInterceptor(t)
 			shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v0").Return(shards.ErrVChannelFenced).Once()
+			shardManager.EXPECT().ReleaseSplitFence("v0").Maybe()
 
 			msgID, appended, extra, err := appendAndCapture(t, i, msg)
 			require.NoError(t, err)
@@ -177,6 +178,7 @@ func TestNameGateUnknownVChannelKeepsPreviousBehaviour(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			i, shardManager := newTestShardInterceptor(t)
 			shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v-unknown").Return(shards.ErrCollectionNotFound).Once()
+			shardManager.EXPECT().ReleaseSplitFence("v-unknown").Maybe()
 
 			msgID, appended, _, err := appendAndCapture(t, i, msg)
 			if msg.MessageType() == message.MessageTypeManualFlush {
@@ -330,6 +332,18 @@ func assertTargetUntouched(t *testing.T, m shards.ShardManager) {
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v0"), shards.ErrVChannelFenced)
 }
 
+// assertTargetUntouchedAndFenceReleased is assertTargetUntouched after the
+// fenced source's own end (its drop or its retire) was appended: the target is
+// as it was, and the source's tombstone is gone, so a stale route to it is
+// answered as for any vchannel this pchannel does not hold.
+func assertTargetUntouchedAndFenceReleased(t *testing.T, m shards.ShardManager) {
+	t.Helper()
+	assert.NoError(t, m.CheckIfVChannelCanBeWritten(1, "v1"))
+	assert.NoError(t, m.CheckIfPartitionExists(shards.PartitionUniqueKey{CollectionID: 1, PartitionID: 2}))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v0"), shards.ErrCollectionNotFound)
+	assert.Zero(t, m.GetSplitFence(1, "v0"))
+}
+
 // TestNameGateFencedSourceDoesNotTouchTheSplitTarget runs every gated DDL type,
 // addressed to the fenced source, against a real shard manager whose slot for
 // the same collection is held by the split target. Before the gate, ManualFlush
@@ -349,9 +363,39 @@ func TestNameGateFencedSourceDoesNotTouchTheSplitTarget(t *testing.T) {
 			if msg.MessageType() == message.MessageTypeManualFlush {
 				assertEmptyManualFlushExtra(t, extra, appended)
 			}
+			if msg.MessageType() == message.MessageTypeDropCollection {
+				assertTargetUntouchedAndFenceReleased(t, m)
+				return
+			}
 			assertTargetUntouched(t, m)
 		})
 	}
+
+	t.Run("Retire", func(t *testing.T) {
+		m := newTestShardManagerWithSplitTarget(t)
+		i := newTestShardInterceptorWithManager(t, m)
+		_, appended, _, err := appendAndCapture(t, i, newTestRetireAlterCollectionMutableMessage("v0", 1, []string{"v1", "v2"}))
+		require.NoError(t, err)
+		require.NotNil(t, appended)
+		assertTargetUntouchedAndFenceReleased(t, m)
+	})
+
+	t.Run("a failed retire append keeps the fence", func(t *testing.T) {
+		m := newTestShardManagerWithSplitTarget(t)
+		i := newTestShardInterceptorWithManager(t, m)
+		_, err := i.DoAppend(context.Background(), newTestRetireAlterCollectionMutableMessage("v0", 1, []string{"v1", "v2"}),
+			func(context.Context, message.MutableMessage) (message.MessageID, error) { return nil, assert.AnError })
+		require.ErrorIs(t, err, assert.AnError)
+		assertTargetUntouched(t, m)
+	})
+
+	t.Run("an ordinary alter keeps the fence", func(t *testing.T) {
+		m := newTestShardManagerWithSplitTarget(t)
+		i := newTestShardInterceptorWithManager(t, m)
+		_, _, _, err := appendAndCapture(t, i, gatedDDLMessages("v0", 1, 2)["AlterCollection"])
+		require.NoError(t, err)
+		assertTargetUntouched(t, m)
+	})
 
 	t.Run("Import", func(t *testing.T) {
 		m := newTestShardManagerWithSplitTarget(t)

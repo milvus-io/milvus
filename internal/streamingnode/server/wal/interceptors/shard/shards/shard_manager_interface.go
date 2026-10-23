@@ -51,6 +51,13 @@ type ShardManager interface {
 	// first fence.
 	SplitShard(msg message.MutableSplitShardMessageV2)
 
+	// ReleaseSplitFence forgets the fence tombstone of the named vchannel once
+	// the vchannel itself is gone -- its retire or its collection's drop was
+	// appended. A stale route to it is then answered as for any vchannel this
+	// pchannel does not hold, exactly as after a restart, which never seeds a
+	// tombstone for a dropped vchannel. A vchannel with no tombstone is a no-op.
+	ReleaseSplitFence(vchannel string)
+
 	CreateCollection(msg message.ImmutableCreateCollectionMessageV1)
 
 	// CreateVChannel registers a shard split target vchannel for DML and segment
