@@ -837,12 +837,28 @@ func stringFieldValue(field string, value gjson.Result, compatibilityMode bool) 
 // disagreeing with itself rather than being generous.
 //
 // A string is a vector only where the type has a base64 spelling for one.
+//
+// FloatVector gained its base64 spelling after this check was already refusing
+// its quoted array, and that refusal is kept. Base64 has no '[' in its
+// alphabet, so a string holding an array is never the base64 spelling and
+// still means what it meant before: the text of a vector.
 func checkVectorSpelling(field string, dataType schemapb.DataType, value gjson.Result) error {
-	if value.Type != gjson.String || vectorAcceptsBase64(dataType) {
+	if value.Type != gjson.String {
+		return nil
+	}
+	if vectorAcceptsBase64(dataType) &&
+		(dataType != schemapb.DataType_FloatVector || !isArrayText(value.Str)) {
 		return nil
 	}
 	return merr.WrapErrParameterInvalidMsg(
 		"field %s expects a vector, got the text of one: %s", field, value.Raw)
+}
+
+// isArrayText reports whether s is the text of a JSON array. Only the first
+// non-blank character is looked at, which is enough to tell an array from
+// base64 and does not walk a long base64 vector.
+func isArrayText(s string) bool {
+	return strings.HasPrefix(strings.TrimLeft(s, " \t\r\n"), "[")
 }
 
 // vectorAcceptsBase64 reports whether a vector of this type may arrive as a
@@ -853,9 +869,15 @@ func checkVectorSpelling(field string, dataType schemapb.DataType, value gjson.R
 // entry exempted it from the check below, where "null" decodes to a nil slice
 // without an error and was stored as an empty vector. The list has to say what
 // the decoders do, not what the type name suggests.
+//
+// FloatVector is listed because the insert branch, convertQueries2Placeholder,
+// encodeEmbListQuery and buildStructSubVectorField all read base64 for it. The
+// exemption this gives it from the "null" check is safe: "null" decodes to
+// three bytes, which is never the dim*4 bytes decodeBase64FloatVector demands.
 func vectorAcceptsBase64(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_BinaryVector,
+		schemapb.DataType_FloatVector,
 		schemapb.DataType_Float16Vector,
 		schemapb.DataType_BFloat16Vector:
 		return true
@@ -1096,6 +1118,22 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				case schemapb.DataType_FloatVector:
 					if dataString == "" {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName)
+					}
+					// A string is the base64 spelling of the vector, unless it
+					// holds an array. That only gets this far in compatibility
+					// mode, where checkVectorSpelling is skipped and the quoted
+					// array is still read as the array it always was.
+					if fieldValue.Type == gjson.String && !isArrayText(dataString) {
+						dim, err := getDim(field)
+						if err != nil {
+							return reallyDataArray, validDataMap, merr.WrapErrServiceInternalErr(err, "field %s has no dim in its schema", fieldName)
+						}
+						vectorArray, err := decodeBase64FloatVector(fieldValue, dim)
+						if err != nil {
+							return reallyDataArray, validDataMap, merr.Wrapf(err, "field %s", fieldName)
+						}
+						reallyData[fieldName] = vectorArray
+						break
 					}
 					var vectorArray []float32
 					err := json.UnmarshalFromString(dataString, &vectorArray)
@@ -2212,8 +2250,16 @@ func buildStructSubVectorField(sub *schemapb.FieldSchema, vals []gjson.Result) (
 	case schemapb.DataType_FloatVector:
 		packed := &schemapb.FloatArray{}
 		for _, v := range vals {
+			if v.Type == gjson.String {
+				row, err := decodeBase64FloatVector(v, dim)
+				if err != nil {
+					return nil, wrapStructSubParseError(sub, v, err.Error())
+				}
+				packed.Data = append(packed.Data, row...)
+				continue
+			}
 			if !v.IsArray() {
-				return nil, wrapStructSubParseError(sub, v, "expect float vector array")
+				return nil, wrapStructSubParseError(sub, v, "expect float vector array or base64 string")
 			}
 			var row []float32
 			if err := json.Unmarshal([]byte(v.Raw), &row); err != nil {
@@ -2301,6 +2347,27 @@ func buildStructSubVectorField(sub *schemapb.FieldSchema, vals []gjson.Result) (
 			"sub-field %s has unsupported vector element type %s",
 			sub.GetName(), sub.GetElementType())
 	}
+}
+
+// decodeBase64FloatVector reads the base64 spelling of a float vector: the
+// little-endian float32 bytes that Float32ArrayToBytes builds for a search
+// placeholder.
+//
+// The 16-bit floats leave their length check to the column builder, but this
+// one cannot wait: BytesToFloat32Vector drops a trailing partial float, so
+// dim*4+1 bytes would arrive there as a well-formed vector of dim floats.
+func decodeBase64FloatVector(v gjson.Result, dim int64) ([]float32, error) {
+	// Decoded as a JSON []byte rather than with the base64 package so that the
+	// accepted spelling is exactly the one the other base64 vectors accept.
+	var raw []byte
+	if err := json.UnmarshalFromString(v.Raw, &raw); err != nil {
+		return nil, merr.WrapErrParameterInvalidErr(err, "float vector is not valid base64")
+	}
+	if int64(len(raw)) != dim*4 {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"base64 float vector byte length mismatch: expect %d (dim %d), got %d", dim*4, dim, len(raw))
+	}
+	return typeutil.BytesToFloat32Vector(raw), nil
 }
 
 func decodeByteVectorElement(v gjson.Result, dim, bytesPerVec int64, isFloat16 bool) ([]byte, error) {
@@ -2433,9 +2500,17 @@ func encodeEmbListQuery(vecs []gjson.Result, elemType schemapb.DataType, dim int
 	case schemapb.DataType_FloatVector:
 		buf := make([]byte, 0, int(dim*4)*len(vecs))
 		for vIdx, v := range vecs {
+			if v.Type == gjson.String {
+				row, err := decodeBase64FloatVector(v, dim)
+				if err != nil {
+					return nil, merr.Wrapf(err, "search data[%d][%d]", qIdx, vIdx)
+				}
+				buf = append(buf, typeutil.Float32ArrayToBytes(row)...)
+				continue
+			}
 			if !v.IsArray() {
 				return nil, merr.WrapErrParameterInvalidMsg(
-					"search data[%d][%d] must be a float vector array", qIdx, vIdx)
+					"search data[%d][%d] must be a float vector array or base64 string", qIdx, vIdx)
 			}
 			var row []float32
 			if err := json.Unmarshal([]byte(v.Raw), &row); err != nil {
@@ -3623,18 +3698,20 @@ func serializeByteVectors(vectorStr string, dataType schemapb.DataType, dimensio
 
 // serializeFloatOrByteVectors serializes float32/float16/bfloat16 vectors.
 // `[[1, 2, 3], [4.0, 5.0, 6.0]] is float32 vector,
-// `["4z1jPgAAgL8=", "gD+AP4A/gD8="]` is float16/bfloat16 vector.
-func serializeFloatOrByteVectors(jsonResult gjson.Result, dataType schemapb.DataType, dimension int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
+// `["4z1jPgAAgL8=", "gD+AP4A/gD8="]` is float16/bfloat16 vector, or float32
+// when bytesLen is dimension*4. bytesLen is the encoded size of one vector,
+// which the base64 form is checked against.
+func serializeFloatOrByteVectors(jsonResult gjson.Result, dataType schemapb.DataType, dimension, bytesLen int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
 	firstElement := jsonResult.Get("0")
 
 	// Clients may send float32 vector because they are inconvenient of processing float16 or bfloat16.
 	// Float32 vector is an array in JSON format, like `[1.0, 2.0, 3.0]`, `[1, 2, 3]`, etc,
 	// while float16 or bfloat16 vector is a string in JSON format, like `"4z1jPgAAgL8="`, `"gD+AP4A/gD8="`, etc.
 	if firstElement.IsArray() {
-		return serializeFloatVectors(jsonResult.Raw, dataType, dimension, dimension*2, fpArrayToBytesFunc)
+		return serializeFloatVectors(jsonResult.Raw, dataType, dimension, bytesLen, fpArrayToBytesFunc)
 	} else if firstElement.Type == gjson.String || !firstElement.Exists() {
 		// consider corner case: `[]`
-		return serializeByteVectors(jsonResult.Raw, dataType, dimension, dimension*2)
+		return serializeByteVectors(jsonResult.Raw, dataType, dimension, bytesLen)
 	}
 	return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], jsonResult.Raw, "invalid type")
 }
@@ -3698,16 +3775,18 @@ func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimensi
 	switch dataType {
 	case schemapb.DataType_FloatVector:
 		valueType = commonpb.PlaceholderType_FloatVector
-		values, err = serializeFloatVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*4, typeutil.Float32ArrayToBytes)
+		// The base64 form is already the placeholder's byte layout, so it is
+		// passed through as the 16-bit floats' is, after its length check.
+		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, dimension*4, typeutil.Float32ArrayToBytes)
 	case schemapb.DataType_BinaryVector:
 		valueType = commonpb.PlaceholderType_BinaryVector
 		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension/8)
 	case schemapb.DataType_Float16Vector:
 		valueType = commonpb.PlaceholderType_Float16Vector
-		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, typeutil.Float32ArrayToFloat16Bytes)
+		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, dimension*2, typeutil.Float32ArrayToFloat16Bytes)
 	case schemapb.DataType_BFloat16Vector:
 		valueType = commonpb.PlaceholderType_BFloat16Vector
-		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, typeutil.Float32ArrayToBFloat16Bytes)
+		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, dimension*2, typeutil.Float32ArrayToBFloat16Bytes)
 	case schemapb.DataType_SparseFloatVector:
 		valueType = commonpb.PlaceholderType_SparseFloatVector
 		values, err = serializeSparseFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType)
