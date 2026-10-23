@@ -51,16 +51,15 @@ covering both the closing send and response. Expiry terminates the stream with
 `context.DeadlineExceeded`. RPC cancellation does not cancel the parent
 resumable stream, and subscription cleanup still runs once.
 
-Owner shutdown may arrive as a subscription cancellation event before the RPC
-ends. The resumable client consumes cancellation, shutdown, fencing, and stale
-owner errors internally: it cancels only that connection attempt, closes it
-outside the delivery callback, and resubscribes from each handler's last accepted
-Entry/SyncUp cursor. These events must not fail the shared QN buffer or its
-segment registrations. The client also recognizes the exact legacy UNKNOWN
-causes `context canceled` and `context deadline exceeded`; other UNKNOWN errors
-remain visible to subscribers. Invalid options and semantic/data failures are
-not suppressed. Explicit consumer Close terminates the resumable stream rather
-than reconnecting.
+An underlying read, subscription or transport failure ends the physical attempt
+through the stream's Done/Error, never a business-handler event. The resumable
+client closes that attempt outside delivery callbacks and recreates subscriptions
+from each handler's last accepted Entry/SyncUp cursor. Runtime failures are not
+classified or forwarded to the shared QN buffer; persistent failures remain
+observable in retry logs and block progress without fabricating coverage.
+Invalid subscription options are rejected before starting an attempt. Explicit
+consumer Close terminates the resumable stream rather than reconnecting. See
+[Resume and Failure](../wal/transform_log.md#5-resume-and-failure).
 
 ## Cursor and visibility contracts
 

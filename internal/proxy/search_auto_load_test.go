@@ -184,7 +184,7 @@ func TestSearchStopsBeforeExecutionWhenAutoLoadFails(t *testing.T) {
 			return merr.ErrIndexNotFound
 		}).Build()
 	searchMock := mockey.Mock((*Proxy).search).To(
-		func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, _, _ bool, _ *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, bool, error) {
+		func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, _, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
 			searchCalls++
 			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, false, nil
 		}).Build()
@@ -215,7 +215,7 @@ func TestHybridSearchStopsBeforeExecutionWhenAutoLoadFails(t *testing.T) {
 			return merr.ErrIndexNotFound
 		}).Build()
 	hybridSearchMock := mockey.Mock((*Proxy).hybridSearch).To(
-		func(_ *Proxy, _ context.Context, _ *milvuspb.HybridSearchRequest, _ bool, _ *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, error) {
+		func(_ *Proxy, _ context.Context, _ *milvuspb.HybridSearchRequest, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, error) {
 			hybridSearchCalls++
 			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, nil
 		}).Build()
@@ -868,7 +868,7 @@ func TestDQLAutoLoadRetryPreservesSearchFallbackAndRecall(t *testing.T) {
 			}).Build()
 			defer ready.UnPatch()
 			calls := 0
-			search := mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, optimized, recall bool, _ *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, bool, error) {
+			search := mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, _ *milvuspb.SearchRequest, optimized, recall bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
 				calls++
 				if calls == 1 {
 					require.True(t, optimized)
@@ -898,7 +898,7 @@ func TestDQLAutoLoadRetryPreservesInconsistentRequery(t *testing.T) {
 	node := &Proxy{metaCache: &MetaCache{}}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	calls := 0
-	search := mockey.Mock((*Proxy).hybridSearch).To(func(*Proxy, context.Context, *milvuspb.HybridSearchRequest, bool, *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, error) {
+	search := mockey.Mock((*Proxy).hybridSearch).To(func(*Proxy, context.Context, *milvuspb.HybridSearchRequest, bool, bool) (*milvuspb.SearchResults, bool, bool, error) {
 		calls++
 		if calls == 1 {
 			return &milvuspb.SearchResults{Status: merr.Status(merr.ErrInconsistentRequery)}, false, false, nil
