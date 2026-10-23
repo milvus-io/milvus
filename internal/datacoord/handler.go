@@ -149,7 +149,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel meta.RWChannel, partition
 	aliveStaged := h.s.meta.AliveStagedMembers(h.s.ctx, channel.GetCollectionID())
 
 	validSegmentInfos := make(map[int64]*meta.SegmentInfo)
-	indexedSegments := index.FilterInIndexedSegments(context.Background(), h, h.s.indexMeta, false, segments...)
+	indexedSegments := index.FilterInHandoffReadySegments(context.Background(), h, h.s.indexMeta, segments...)
 	indexed := typeutil.NewUniqueSet(lo.Map(indexedSegments, func(segment *meta.SegmentInfo, _ int) int64 { return segment.GetID() })...)
 	for _, s := range segments {
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {

@@ -2016,7 +2016,7 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 	checkpoint := &msgpb.MsgPosition{ChannelName: channelName, MsgID: []byte{1}, Timestamp: 10}
 	channelsMock := mockey.Mock((*Server).getChannelsByCollectionID).Return([]meta.RWChannel{channel}, nil).Build()
 	defer channelsMock.UnPatch()
-	indexMock := mockey.Mock(index.FilterInIndexedSegments).Return([]*meta.SegmentInfo(nil)).Build()
+	indexMock := mockey.Mock(index.FilterInHandoffReadySegments).Return([]*meta.SegmentInfo(nil)).Build()
 	defer indexMock.UnPatch()
 
 	for _, test := range []struct {
