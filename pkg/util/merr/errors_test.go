@@ -197,6 +197,34 @@ func (s *ErrSuite) TestOldCode() {
 	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterMissing).GetErrorCode())
 	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(ErrParameterTooLarge).GetErrorCode())
 	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(WrapErrParameterMissingMsg("collection names cannot be empty")).GetErrorCode())
+	// naming a request id nobody holds is a bad argument for legacy readers
+	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(WrapErrRequestNotFound(42)).GetErrorCode())
+}
+
+// TestRequestCanceled locks in the wire contract of an operator cancellation:
+// its own code (not the synthesized CanceledCode of context.Canceled, not the
+// segcore FollyCancel), non-retriable, and distinguishable from a not-found.
+func (s *ErrSuite) TestRequestCanceled() {
+	err := WrapErrRequestCanceled("root", "heavy query")
+	s.ErrorIs(err, ErrRequestCanceled)
+	s.Equal(Code(ErrRequestCanceled), Code(err))
+	s.NotEqual(CanceledCode, Code(err))
+	s.NotEqual(Code(ErrSegcoreFollyCancel), Code(err))
+	s.False(IsRetryableErr(err))
+	s.NotEqual(InputError, GetErrorType(err))
+	s.Contains(err.Error(), "root")
+	s.Contains(err.Error(), "heavy query")
+
+	status := Status(err)
+	s.Equal(Code(ErrRequestCanceled), status.GetCode())
+	s.False(status.GetRetriable())
+	s.ErrorIs(Error(status), ErrRequestCanceled)
+
+	notFound := WrapErrRequestNotFound(42)
+	s.ErrorIs(notFound, ErrRequestNotFound)
+	s.Equal(InputError, GetErrorType(notFound))
+	s.False(IsRetryableErr(notFound))
+	s.Contains(notFound.Error(), "42")
 }
 
 func (s *ErrSuite) TestCombine() {

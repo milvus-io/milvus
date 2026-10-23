@@ -1250,7 +1250,11 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode query return error", mlog.Err(err))
-		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		// A request that is already canceled or timed out fails here for
+		// that reason alone; the shard leader cache is still valid.
+		if ctx.Err() == nil {
+			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		}
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
