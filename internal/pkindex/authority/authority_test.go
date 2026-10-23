@@ -564,3 +564,38 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 
 	require.Equal(t, int64(1), misses.Load())
 }
+
+func TestRestorePendingFeedsTheCommitDecision(t *testing.T) {
+	ctx := context.Background()
+	d, eng := newTestAuthority(t)
+	seed(t, eng, 6, 1)
+	d.RestorePending(42, KindInsert, int64PKs(1, 2))
+	d.RestorePending(42, KindDelete, int64PKs(2))
+	require.Equal(t, 0, d.InflightLenForTest(), "a restored body gets no in-flight entry")
+
+	g, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v", TxnID: 42})
+	require.NoError(t, err)
+	require.Equal(t, int64PKs(1), g.Decision().CompanionDeletePKs, "pk 1 is in the engine, pk 2 is deleted by the transaction itself")
+	g.Apply(ctx, Applied{TimeTick: 20})
+	require.Equal(t, 2, d.InflightLenForTest(), "the commit registers both keys")
+	require.Empty(t, d.PendingTxnIDs())
+}
+
+func TestWantsTimeTickWhileDegradedOrUncertain(t *testing.T) {
+	ctx := context.Background()
+	d, _ := newTestAuthority(t)
+	require.False(t, d.WantsTimeTick(), "nothing to learn from a tick")
+
+	d.DegradeUntil(10)
+	require.True(t, d.WantsTimeTick(), "degraded until a tick the observe did not reach")
+	d.ObserveTimeTick(10)
+	require.False(t, d.WantsTimeTick())
+
+	g, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v", PKs: int64PKs(1)})
+	require.NoError(t, err)
+	g.DiscardUncertain(ctx, errors.New("unknown"), 20)
+	require.True(t, d.WantsTimeTick(), "a write with an unknown outcome waits for the tick")
+	d.ObserveTimeTick(20)
+	require.False(t, d.WantsTimeTick())
+	require.Equal(t, 0, d.InflightLenForTest())
+}

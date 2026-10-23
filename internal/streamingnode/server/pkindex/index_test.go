@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -123,8 +124,7 @@ func TestReopenedIndexStartsEmpty(t *testing.T) {
 	require.Empty(t, env.client.manifest("v0").Tables)
 
 	idx = env.add(ch, "v0")
-	assert.Empty(t, idx.EngineForTest().FrozenGenerations())
-	assert.NoDirExists(t, idx.CommittedDirForTest())
+	assert.Empty(t, idx.EngineForTest().FrozenGenerations(), "the engine directory is wiped at the open")
 	assert.Zero(t, segmentOf(t, idx, 1), "the old key is gone")
 
 	insert(t, ch, idx, 20, 3)
@@ -140,22 +140,25 @@ func inHeap(ch *PChannelIndexManager, idx *index.Index) bool {
 	return ch.acked.contains(idx)
 }
 
-// TestLeftoverInCommittedOnlyIsRemovedAtOpen checks that a file left in the
-// committed directory alone, such as a download that did not finish, is
-// removed at open, and the Index starts empty.
-func TestLeftoverInCommittedOnlyIsRemovedAtOpen(t *testing.T) {
+// TestLeftoverInCommittedOnlyIsKeptAtOpen checks that a file left in the
+// committed directory alone survives the open: the install checks the
+// committed directory against the manifest and removes what it does not
+// list, so a restart keeps the tables it already has.
+func TestLeftoverInCommittedOnlyIsKeptAtOpen(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	committed := filepath.Join(env.root, "v0", "committed")
 	require.NoError(t, os.MkdirAll(committed, 0o755))
-	// a download that did not finish, and no engine directory
 	leftover := filepath.Join(committed, "1001.sst.download-123")
 	require.NoError(t, os.WriteFile(leftover, []byte("partial"), 0o600))
 
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	assert.NoDirExists(t, committed)
+	assert.FileExists(t, leftover, "the open keeps the committed directory")
 	assert.Empty(t, idx.EngineForTest().FrozenGenerations())
 	assert.Zero(t, segmentOf(t, idx, 1))
+	idx.SetCommitted(index.ManifestView{Version: 1})
+	require.NoError(t, idx.Install(context.Background()))
+	assert.NoFileExists(t, leftover, "the install removes what the manifest does not list")
 	assert.Empty(t, env.fatalList())
 }
 
@@ -364,7 +367,7 @@ func TestNoCommitterDedupsButNeverHandsOver(t *testing.T) {
 	ch.step(farFuture)
 	assert.Empty(t, env.client.requestList())
 	assert.Zero(t, env.client.manifest("v0").Version, "no flush reached the manifest service")
-	assert.EqualValues(t, 20, ch.LastAcked(), "the Index does not hold LastAcked back")
+	assert.EqualValues(t, 20, ch.LastAcked(), "without a Committer the index never joins the heap: LastAcked follows lastObserved")
 	assert.Empty(t, env.fatalList())
 
 	ch.remove(context.Background(), "v0")
@@ -401,4 +404,249 @@ func TestNotReadyIndexDecidesDegraded(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64PKs(1), guard.Decision().CompanionDeletePKs, "ready: only the present key")
 	guard.Discard(ctx, nil)
+}
+
+func TestOpenKeepsCommittedDirAndWipesEngineDir(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	env := NewFakeEnv(t, root)
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	committed := idx.CommittedDirForTest()
+	require.NoError(t, os.MkdirAll(committed, 0o755))
+	kept := filepath.Join(committed, "7.sst")
+	require.NoError(t, os.WriteFile(kept, []byte("table"), 0o600))
+	idx.MarkReady(ctx)
+	insert(t, c, idx, 1, 5)
+	engineDir := filepath.Join(index.Dir(root, "v1"), "engine")
+	c.RemoveForTest(ctx, "v1") // keeps the files, like a restart
+	require.DirExists(t, engineDir)
+
+	idx, _, err = c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	assert.FileExists(t, kept)
+	idx.MarkReady(ctx)
+	g, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindDelete, VChannel: "v1", PKs: []authority.PK{authority.Int64PK(5)}})
+	require.NoError(t, err)
+	assert.Empty(t, g.Decision().PresentPKs, "the engine dir was wiped")
+	g.Discard(ctx, nil)
+	c.Close()
+}
+
+func TestResolveLocalRedownloadsATableWithTheWrongSize(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.MarkReady(ctx)
+	// a real table in the store, built by one handover
+	insert(t, c, idx, 1, 1, 2, 3)
+	c.ObserveTimeTick(12, WALTailSnapshot{})
+	p, err := idx.PrepareForTest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	ref := p.Request().AddTables[0]
+	key := pkroot.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID))
+	store := env.Manager.StoreForTest().(*index.FakeStore)
+	require.NoError(t, store.UploadFile(ctx, key, p.Local()[ref.ID]))
+	// corrupt the local copy: wrong size
+	local := index.CommittedPathForTest(idx.CommittedDirForTest(), ref.ID)
+	require.NoError(t, os.WriteFile(local, []byte("short"), 0o600))
+
+	view := index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 11, Tables: []index.TableRef{ref}}
+	require.NoError(t, idx.InstallIfNewerForTest(ctx, view, nil))
+	fi, err := os.Stat(local)
+	require.NoError(t, err)
+	assert.Equal(t, ref.Size, fi.Size())
+}
+
+func TestResolveLocalReusesATableWithTheRightSize(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.MarkReady(ctx)
+	insert(t, c, idx, 1, 1, 2, 3)
+	c.ObserveTimeTick(12, WALTailSnapshot{})
+	p, err := idx.PrepareForTest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	ref := p.Request().AddTables[0]
+	key := pkroot.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID))
+	store := env.Manager.StoreForTest().(*index.FakeStore)
+	require.NoError(t, store.UploadFile(ctx, key, p.Local()[ref.ID]))
+	// a download would fail, so the install must use the local file
+	store.FailDownloads(1)
+
+	view := index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 11, Tables: []index.TableRef{ref}}
+	require.NoError(t, idx.InstallIfNewerForTest(ctx, view, nil))
+}
+
+func TestApplySkipsWritesTheManifestCovers(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.SetCommitted(index.ManifestView{Version: 1, CheckpointTimeTick: 100})
+	assert.Equal(t, uint64(100), idx.LastCommittedTimeTick())
+
+	require.NoError(t, c.Apply(ctx, "v1", index.Write{Puts: []index.Put{{PK: authority.Int64PK(1), SegmentID: 7}}, TimeTick: 100}))
+	assert.False(t, idx.Dirty(), "a write at the checkpoint is committed already")
+	require.NoError(t, c.Apply(ctx, "v1", index.Write{Puts: []index.Put{{PK: authority.Int64PK(2), SegmentID: 7}}, TimeTick: 101}))
+	assert.True(t, idx.Dirty())
+	c.ObserveTimeTick(200, WALTailSnapshot{})
+	assert.Equal(t, uint64(100), c.LastAcked(), "the dirty index holds LastAcked at its checkpoint")
+}
+
+func TestApplyOfADeleteBeforeTheInstallWritesEveryTombstone(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.MarkReady(ctx)
+	// a committed table with pk 1 and 2, from a handover of another "life"
+	insert(t, c, idx, 1, 1, 2)
+	c.ObserveTimeTick(50, WALTailSnapshot{})
+	p, err := idx.PrepareForTest(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	ref := p.Request().AddTables[0]
+	store := env.Manager.StoreForTest().(*index.FakeStore)
+	require.NoError(t, store.UploadFile(ctx, pkroot.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID)), p.Local()[ref.ID]))
+	view := index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 50, Tables: []index.TableRef{ref}}
+	c.RemoveForTest(ctx, "v1")
+
+	// restart: empty engine, not ready, the delete of pk 1 is applied before the install
+	idx, _, err = c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.SetCommitted(view)
+	require.NoError(t, c.Apply(ctx, "v1", index.Write{Deletes: []authority.PK{authority.Int64PK(1)}, TimeTick: 60}))
+	require.NoError(t, idx.Install(ctx))
+	require.True(t, idx.Ready())
+
+	g, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindDelete, VChannel: "v1", PKs: []authority.PK{authority.Int64PK(1), authority.Int64PK(2)}})
+	require.NoError(t, err)
+	assert.Equal(t, []authority.PK{authority.Int64PK(2)}, g.Decision().PresentPKs, "pk 1 stays deleted after the install")
+	g.Discard(ctx, nil)
+}
+
+func TestInstallReconcilesTheCommittedDir(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	dir := idx.CommittedDirForTest()
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	stale := filepath.Join(dir, "99.sst")
+	partial := filepath.Join(dir, "5.sst.download-abc")
+	require.NoError(t, os.WriteFile(stale, []byte("x"), 0o600))
+	require.NoError(t, os.WriteFile(partial, []byte("x"), 0o600))
+	idx.SetCommitted(index.ManifestView{Version: 1, CheckpointTimeTick: 1})
+	require.NoError(t, idx.Install(ctx))
+	assert.NoFileExists(t, stale)
+	assert.NoFileExists(t, partial)
+	assert.True(t, idx.Ready())
+}
+
+func TestInstallWithoutAManifestOnlyMarksReady(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	require.False(t, idx.Ready())
+	require.NoError(t, idx.Install(ctx))
+	assert.True(t, idx.Ready())
+	assert.Equal(t, int64(0), idx.InstalledVersionForTest())
+}
+
+func TestInstallRetriesAfterAFailedDownload(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.MarkReady(ctx)
+	store := env.Manager.StoreForTest().(*index.FakeStore)
+	var refs []index.TableRef
+	for i, tt := range []uint64{50, 60} {
+		insert(t, c, idx, 1, int64(2*i+1), int64(2*i+2))
+		c.ObserveTimeTick(tt, WALTailSnapshot{})
+		p, err := idx.PrepareForTest(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, p)
+		for _, ref := range p.Request().AddTables {
+			require.NoError(t, store.UploadFile(ctx, pkroot.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID)), p.Local()[ref.ID]))
+			if i == 0 || ref.ID != refs[0].ID {
+				refs = append(refs, ref)
+			}
+		}
+		if i == 0 {
+			require.NoError(t, idx.InstallIfNewerForTest(ctx, index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: tt, Tables: refs}, p.Local()))
+		}
+	}
+	require.Len(t, refs, 2)
+	view := index.ManifestView{Version: 2, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 60, Tables: refs}
+	dir := idx.CommittedDirForTest()
+	c.RemoveForTest(ctx, "v1")
+
+	idx, _, err = c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	idx.SetCommitted(view)
+	for _, ref := range refs {
+		require.NoError(t, os.RemoveAll(index.CommittedPathForTest(dir, ref.ID)))
+	}
+	store.FailDownloads(1)
+	require.Error(t, idx.Install(ctx))
+	assert.False(t, idx.Ready())
+	assert.Equal(t, int64(0), idx.InstalledVersionForTest())
+
+	require.NoError(t, idx.Install(ctx))
+	assert.True(t, idx.Ready())
+	assert.Equal(t, int64(2), idx.InstalledVersionForTest())
+	for _, ref := range refs {
+		assert.FileExists(t, index.CommittedPathForTest(dir, ref.ID))
+	}
+	require.NoError(t, idx.Install(ctx))
+	assert.True(t, idx.Ready())
+}
+
+func TestApplyDeletesBeforeItPutsAndWritesEveryTombstone(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	t.Cleanup(c.Close)
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, schemapb.DataType_Int64)
+	require.NoError(t, err)
+	// the transaction of an insert hit: delete and put of the same key at one time tick, the put wins
+	require.NoError(t, c.Apply(ctx, "v1", index.Write{Deletes: []authority.PK{authority.Int64PK(2)}, Puts: []index.Put{{PK: authority.Int64PK(2), SegmentID: 7}}, TimeTick: 101}))
+	// a delete of a key the index does not hold writes a tombstone all the same
+	require.NoError(t, c.Apply(ctx, "v1", index.Write{Deletes: []authority.PK{authority.Int64PK(3)}, TimeTick: 102}))
+	// each put keeps its own segment
+	require.NoError(t, c.Apply(ctx, "v1", index.Write{Puts: []index.Put{{PK: authority.Int64PK(4), SegmentID: 8}, {PK: authority.Int64PK(5), SegmentID: 9}}, TimeTick: 103}))
+
+	idx.MarkReady(ctx)
+	g, err := idx.Authority().Decide(ctx, authority.DecideRequest{Kind: authority.KindDelete, VChannel: "v1", PKs: []authority.PK{authority.Int64PK(2), authority.Int64PK(3)}})
+	require.NoError(t, err)
+	assert.Equal(t, []authority.PK{authority.Int64PK(2)}, g.Decision().PresentPKs)
+	g.Discard(ctx, nil)
+	assert.Equal(t, int64(7), segmentOf(t, idx, 2))
+	assert.Equal(t, int64(8), segmentOf(t, idx, 4))
+	assert.Equal(t, int64(9), segmentOf(t, idx, 5))
+	vs, err := idx.EngineForTest().MultiGet(ctx, [][]byte{authority.Int64PK(3).Encode()})
+	require.NoError(t, err)
+	assert.Nil(t, vs[0], "the tombstone of pk 3 resolves to absent")
 }

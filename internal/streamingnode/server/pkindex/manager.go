@@ -150,14 +150,14 @@ type PChannelConfig struct {
 }
 
 // New creates the primary key index of a pchannel and registers it, so that
-// Get finds it until it closes. It does not start the handover driver.
+// Close closes it with the node. It does not start the handover driver.
 //
 // The owner, the WAL recovery, creates the indexes of the existing
 // collections with CreateCollection, recovers them, and then calls Start.
 // It closes the PChannelIndexManager when the WAL closes.
 //
-// After Close, New returns a closed PChannelIndexManager that Get does not
-// find: CreateCollection on it fails.
+// After Close, New returns a closed PChannelIndexManager, see
+// PChannelIndexManager.Closed: CreateCollection on it fails.
 func (m *Manager) New(cfg PChannelConfig) *PChannelIndexManager {
 	c := newPChannelIndexManager(m, cfg)
 	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -178,6 +178,19 @@ func (m *Manager) Get(pchannel string) *PChannelIndexManager {
 	defer m.mu.Unlock()
 	return m.channels[pchannel]
 }
+
+// Root returns the local root directory of the indexes of the node.
+func (m *Manager) Root() string { return m.cfg.Root }
+
+// Committer returns the Committer of the node, nil when it has none.
+func (m *Manager) Committer() Committer { return m.cfg.Committer }
+
+// Scheduler returns the node scheduler that runs the tasks of the indexes.
+func (m *Manager) Scheduler() nodescheduler.Scheduler { return m.cfg.Sched }
+
+// Params reads the params now. The config field is a function that the
+// Manager calls on every use.
+func (m *Manager) Params() Params { return m.cfg.Params() }
 
 // forget removes a closed PChannelIndexManager from the Manager.
 func (m *Manager) forget(c *PChannelIndexManager) {
@@ -233,6 +246,10 @@ type ManifestReader interface {
 	// refs. An item that fails has its own Err. The caller sends at most
 	// MaxRecoveryManifests refs in one call.
 	GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error)
+	// ReadManifest reads the manifest body at bodyKey, the BodyKey of a
+	// RecoveryManifest. A body that does not exist or does not decode returns
+	// an error marked pkroot.ErrCorrupted.
+	ReadManifest(ctx context.Context, bodyKey string) (index.ManifestView, error)
 }
 
 // MaxRecoveryManifests is the largest number of refs in one

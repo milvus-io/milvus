@@ -231,6 +231,13 @@ func (s *inflightSet) raiseObservedLocked(tt uint64) {
 	}
 }
 
+// hasUncertain reports whether the set holds writes with an unknown outcome.
+func (s *inflightSet) hasUncertain() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.uncertain) > 0
+}
+
 // removeUncertainLocked removes the writes with an unknown outcome whose time
 // tick observe passed.
 func (s *inflightSet) removeUncertainLocked() {

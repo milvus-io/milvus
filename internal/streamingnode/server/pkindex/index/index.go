@@ -69,6 +69,16 @@ type Index struct {
 	installMu        sync.Mutex
 	installedVersion int64
 	installedPaths   map[sst.ID]string
+	// recovered is the manifest of the vchannel at the open, set by
+	// SetCommitted and installed by Install. Nil when the vchannel had none.
+	recovered *ManifestView
+
+	// failWrites, when set, makes every engine write of Apply fail with it.
+	// Only the tests set it, see FailWritesForTest.
+	failWrites atomic.Pointer[error]
+	// onWrite, when set, runs before every engine write of Apply with the
+	// batch. Only the tests set it, see OnWriteForTest.
+	onWrite atomic.Pointer[func([]engine.Mutation)]
 }
 
 // Params are the parameters of an Index. The Channel refreshes them.
@@ -115,32 +125,30 @@ type Config struct {
 }
 
 // Open opens the engine of a vchannel and builds the Index on top of it. The
-// recovery of the pchannel marks it ready after the manifest lookup.
+// recovery of the pchannel marks it ready after the manifest lookup or the
+// install.
 //
-// The local directories of the vchannel may hold files from before this
-// open: a crash, or a close that kept them. The files are removed and the
-// Index starts empty; the recovery brings the committed table set back and
-// replays the WAL from its checkpoint. The engine dir and the committed dir are
-// checked together, because a table in committed/ is only useful with the
-// engine state that installed it, and both are rebuilt by the writes
-// since. A file in only one of the two directories, such as the temporary
-// file of a download that did not finish or the rest of a wipe that did not
-// finish, counts too.
+// The engine directory of the vchannel may hold files from before this open:
+// a crash, or a close that kept them. They are removed and the Index starts
+// empty; the recovery replays the WAL from its checkpoint. The committed
+// directory is kept: the install of the committed table set checks each file
+// against the manifest and downloads what is missing or differs, so a
+// restart does not download the tables it already has.
 func Open(ctx context.Context, cfg Config) (*Index, error) {
 	params := cfg.Params()
 	dir := Dir(cfg.Root, cfg.VChannel)
 	// engine.Destroy removes the engine dir, so the committed tables live outside it
 	engineDir := filepath.Join(dir, "engine")
 	committedDir := filepath.Join(dir, "committed")
-	leftover, err := hasLeftover(engineDir, committedDir)
+	leftover, err := hasLeftover(engineDir)
 	if err != nil {
 		return nil, err
 	}
 	if leftover {
-		if err := wipeLocal(engineDir, committedDir); err != nil {
+		if err := wipeLocal(engineDir); err != nil {
 			return nil, err
 		}
-		cfg.Logger.Info(ctx, "removed the local primary key index files from before this open, the index starts empty",
+		cfg.Logger.Info(ctx, "removed the local primary key index engine from before this open, the index starts empty",
 			mlog.FieldVChannel(cfg.VChannel))
 	}
 	eng, err := engine.Open(ctx, engine.Config{
@@ -305,7 +313,7 @@ func (idx *Index) installIfNewer(ctx context.Context, m ManifestView, local map[
 
 	tables := make([]engine.CommittedTable, 0, len(m.Tables))
 	for _, ref := range m.Tables {
-		path, err := idx.resolveLocal(ctx, m.SSTBasePath, ref.ID, local, known)
+		path, err := idx.resolveLocal(ctx, m.SSTBasePath, ref, local, known)
 		if err != nil {
 			return err
 		}
@@ -359,9 +367,13 @@ func (idx *Index) retireCoveredLocked(ctx context.Context, m ManifestView, gens 
 	return nil
 }
 
-// resolveLocal returns the local file of table id. It downloads the table
-// when no local file exists.
-func (idx *Index) resolveLocal(ctx context.Context, basePath string, id sst.ID, local, known map[sst.ID]string) (string, error) {
+// resolveLocal returns the local file of table ref. A file in the committed
+// dir is reused when its size is the size in the manifest, else it is
+// replaced by a download. The paths of local and known were installed by
+// this process under the same table ID, so they are reused without a size
+// check.
+func (idx *Index) resolveLocal(ctx context.Context, basePath string, ref TableRef, local, known map[sst.ID]string) (string, error) {
+	id := ref.ID
 	if p, ok := local[id]; ok {
 		return p, nil
 	}
@@ -369,9 +381,17 @@ func (idx *Index) resolveLocal(ctx context.Context, basePath string, id sst.ID, 
 		return p, nil
 	}
 	path := committedPath(idx.committedDir, id)
-	if _, err := os.Stat(path); err == nil {
+	fi, err := os.Stat(path)
+	switch {
+	case err == nil && fi.Size() == ref.Size:
 		return path, nil
-	} else if !os.IsNotExist(err) {
+	case err == nil:
+		idx.logger.Warn(ctx, "a local committed primary key index table has the wrong size, downloading it again",
+			mlog.Int64("sstID", int64(id)), mlog.Int64("localSize", fi.Size()), mlog.Int64("size", ref.Size))
+		if err := os.Remove(path); err != nil {
+			return "", pkroot.MarkIO(err, "remove committed sst %s", path)
+		}
+	case !os.IsNotExist(err):
 		return "", pkroot.MarkIO(err, "stat committed sst %s", path)
 	}
 	if err := os.MkdirAll(idx.committedDir, 0o755); err != nil {
