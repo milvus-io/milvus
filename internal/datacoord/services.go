@@ -2045,7 +2045,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	resp := &internalpb.ImportResponse{
 		Status: merr.Success(),
 	}
-	if err := importutilv2.ValidateImportSchema(in.GetSchema()); err != nil {
+	if err := importutilv2.ValidateImportSchema(in.GetSchema(), in.GetOptions()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -2282,7 +2282,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(options) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
-	unsupportedSchemaErr := importutilv2.ValidateImportSchema(body.GetSchema())
+	unsupportedSchemaErr := importutilv2.ValidateImportSchema(body.GetSchema(), options)
 
 	isBackup := importutilv2.IsBackup(options)
 	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil && unsupportedSchemaErr == nil {

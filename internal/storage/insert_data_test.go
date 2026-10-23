@@ -1226,7 +1226,10 @@ func TestArrayFieldDataTrackedAppend(t *testing.T) {
 		payload int
 	}{
 		schemapb.DataType_Array,
-		nestedArrayData(schemapb.DataType_Array, nestedArrayData(schemapb.DataType_Int16, nestedArrayIntData(1, 2), nestedArrayIntData(3))), 6,
+		nestedArrayData(schemapb.DataType_Array, nestedArrayData(schemapb.DataType_Int16, nestedArrayIntData(1, 2), nestedArrayIntData(3))),
+		// Six bytes of Int16 leaves plus the fixed cost of three inner arrays:
+		// the one at the outer level and the two below it.
+		6 + 3*nestedArrayElementOverhead,
 	})
 
 	for _, tt := range tests {

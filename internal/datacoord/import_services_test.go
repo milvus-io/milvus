@@ -229,15 +229,22 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_RejectsNativeListArrayBeforeAllocation() {
 	paramtable.Init()
-	for _, backup := range []bool{false, true} {
+	for _, tc := range []struct {
+		name    string
+		options []*commonpb.KeyValuePair
+		// kind is the import kind named in the rejection of a native-list
+		// target; empty means the import reads native-list sub-fields.
+		kind string
+	}{
+		{"file", nil, ""},
+		{"backup", []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}, "binlog import (backup restore)"},
+		{"snapshot", []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "source_type", Value: "snapshot"}}, "snapshot-source import"},
+	} {
 		for _, elementNullable := range []bool{false, true} {
-			s.Run(fmt.Sprintf("backup=%t/element_nullable=%t", backup, elementNullable), func() {
+			s.Run(fmt.Sprintf("%s/element_nullable=%t", tc.name, elementNullable), func() {
 				server := &Server{}
 				server.stateCode.Store(commonpb.StateCode_Healthy)
-				options := []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}}
-				if backup {
-					options = append(options, &commonpb.KeyValuePair{Key: "backup", Value: "true"})
-				}
+				options := append([]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}}, tc.options...)
 				resp, err := server.ImportV2(context.Background(), &internalpb.ImportRequestInternal{
 					Schema: &schemapb.CollectionSchema{
 						Fields: []*schemapb.FieldSchema{{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
@@ -249,14 +256,14 @@ func (s *ImportServicesSuite) TestImportV2_RejectsNativeListArrayBeforeAllocatio
 					Options: options,
 				})
 				s.Require().NoError(err)
-				if !elementNullable {
+				if !elementNullable || tc.kind == "" {
 					s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
 					s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
 					return
 				}
 				s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
-				s.Contains(resp.GetStatus().GetReason(), "not supported yet")
-				s.Contains(resp.GetStatus().GetReason(), "s.arr")
+				s.Contains(resp.GetStatus().GetReason(),
+					tc.kind+" into a collection with element-nullable or nested Array field s.arr is not supported")
 			})
 		}
 	}
@@ -772,6 +779,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"unsupported_version_no_job_id", merr.ErrDataIntegrity},
 		{"native_list_array", nil},
 		{"native_list_array_backup", nil},
+		{"native_list_array_snapshot", nil},
 	} {
 		s.Run(tc.name, func() {
 			ctx := context.Background()
@@ -809,16 +817,21 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				body.Version = 99
 			case "unsupported_version_no_job_id":
 				body.Version, body.JobID = 99, 0
-			case "native_list_array", "native_list_array_backup":
+			case "native_list_array", "native_list_array_backup", "native_list_array_snapshot":
 				body.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{
 					Name: "s", Fields: []*schemapb.FieldSchema{{
 						Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
 						ElementNullable: true,
 					}},
 				}}
-				if tc.name == "native_list_array_backup" {
+				switch tc.name {
+				case "native_list_array_backup":
 					// The job fails before binlog listing: server.meta is nil here.
 					body.Options["backup"] = "true"
+				case "native_list_array_snapshot":
+					body.Options["backup"] = "true"
+					body.Options["source_type"] = "snapshot"
+					body.Files[0].Paths = []string{"s3://source/root/snapshots/1/metadata/2.json"}
 				}
 			}
 			params := paramtable.Get()
@@ -919,16 +932,23 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				s.Equal(int64(1001+i), file.Id)
 				s.Equal(body.Files[i].Paths, file.Paths)
 			}
-			if tc.name == "l0_disabled" {
+			switch tc.name {
+			case "l0_disabled":
 				s.Equal(internalpb.ImportJobState_Failed, saved.State)
 				s.Contains(saved.Reason, "l0 import is disabled")
 				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
-			} else if strings.HasPrefix(tc.name, "native_list_array") {
+			case "native_list_array_backup", "native_list_array_snapshot":
+				// Only binlog-sourced imports reject a native-list target; the
+				// rejection is persisted as a terminal job because ACK callbacks
+				// retry forever.
+				kind := "binlog import (backup restore)"
+				if tc.name == "native_list_array_snapshot" {
+					kind = "snapshot-source import"
+				}
 				s.Equal(internalpb.ImportJobState_Failed, saved.State)
-				s.Contains(saved.Reason, "not supported yet")
-				s.Contains(saved.Reason, "s.arr")
+				s.Contains(saved.Reason, kind+" into a collection with element-nullable or nested Array field s.arr is not supported")
 				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
-			} else {
+			default:
 				s.Equal(internalpb.ImportJobState_Pending, saved.State)
 			}
 		})
