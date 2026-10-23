@@ -25,6 +25,9 @@
 
 namespace milvus::segcore {
 
+// shortcut: PK/filldata row counts ignore width/skew; retune with end-to-end data.
+inline constexpr int64_t kSearchFanoutMinRows = 16 * 1024;
+
 class ReduceHelper {
  public:
     explicit ReduceHelper(

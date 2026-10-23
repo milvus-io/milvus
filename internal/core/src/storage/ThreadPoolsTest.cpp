@@ -13,8 +13,13 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <memory>
+#include <stdexcept>
 
+#include "folly/CancellationToken.h"
+#include "folly/ScopeGuard.h"
 #include "gtest/gtest.h"
+#include "monitor/Monitor.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 
@@ -25,9 +30,201 @@ struct ThreadPoolsTestAccess {
     LockPoolMap() {
         return std::unique_lock<std::shared_mutex>(ThreadPools::mutex_);
     }
+
+    static std::unique_ptr<ThreadPool>
+    ExtractPool(ThreadPoolPriority priority) {
+        auto lock = LockPoolMap();
+        auto node = ThreadPools::thread_pool_map.extract(priority);
+        return node.empty() ? nullptr : std::move(node.mapped());
+    }
+
+    static void
+    RestorePool(ThreadPoolPriority priority, std::unique_ptr<ThreadPool> pool) {
+        auto lock = LockPoolMap();
+        ThreadPools::thread_pool_map.erase(priority);
+        if (pool) {
+            ThreadPools::thread_pool_map.emplace(priority, std::move(pool));
+        }
+    }
+
+    static bool
+    HasPool(ThreadPoolPriority priority) {
+        auto lock = LockPoolMap();
+        return ThreadPools::thread_pool_map.contains(priority);
+    }
 };
 
 }  // namespace milvus
+
+namespace {
+
+class SearchFanoutPoolTest : public testing::Test {
+ protected:
+    void
+    SetUp() override {
+        middle_ = milvus::ThreadPoolsTestAccess::ExtractPool(milvus::MIDDLE);
+        search_ =
+            milvus::ThreadPoolsTestAccess::ExtractPool(milvus::SEARCH_FANOUT);
+        milvus::InitCpuNum(2);
+        milvus::SetThreadPoolMaxThreadsSize(16);
+        milvus::SetMiddlePriorityThreadCoreCoefficient(1.0);
+    }
+
+    void
+    TearDown() override {
+        milvus::ThreadPoolsTestAccess::RestorePool(milvus::MIDDLE,
+                                                   std::move(middle_));
+        milvus::ThreadPoolsTestAccess::RestorePool(milvus::SEARCH_FANOUT,
+                                                   std::move(search_));
+        milvus::InitCpuNum(cpu_num_);
+        milvus::SetThreadPoolMaxThreadsSize(max_threads_);
+        milvus::SetMiddlePriorityThreadCoreCoefficient(coefficient_);
+    }
+
+ private:
+    const int cpu_num_ = milvus::CPU_NUM;
+    const int max_threads_ = milvus::THREAD_POOL_MAX_THREADS_SIZE.load();
+    const float coefficient_ =
+        milvus::MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load();
+    std::unique_ptr<milvus::ThreadPool> middle_;
+    std::unique_ptr<milvus::ThreadPool> search_;
+};
+
+}  // namespace
+
+TEST_F(SearchFanoutPoolTest, ResizeBeforeFirstUse) {
+    milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
+    EXPECT_FALSE(milvus::ThreadPoolsTestAccess::HasPool(milvus::MIDDLE));
+    EXPECT_FALSE(milvus::ThreadPoolsTestAccess::HasPool(milvus::SEARCH_FANOUT));
+    auto& search = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
+    auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
+    EXPECT_EQ(middle.GetMaxThreadNum(), 6);
+    EXPECT_EQ(search.GetMaxThreadNum(), 6);
+    EXPECT_NE(&middle, &search);
+}
+
+TEST_F(SearchFanoutPoolTest, SearchCreatedAfterMiddleResize) {
+    auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
+    EXPECT_EQ(middle.GetMaxThreadNum(), 2);
+    milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
+    EXPECT_EQ(middle.GetMaxThreadNum(), 6);
+    EXPECT_EQ(milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT)
+                  .GetMaxThreadNum(),
+              6);
+}
+
+TEST_F(SearchFanoutPoolTest, ResizeWithOnlySearchCreated) {
+    auto& search = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
+    EXPECT_EQ(search.GetMaxThreadNum(), 2);
+    milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
+    EXPECT_EQ(search.GetMaxThreadNum(), 6);
+    EXPECT_EQ(
+        milvus::ThreadPools::GetThreadPool(milvus::MIDDLE).GetMaxThreadNum(),
+        6);
+}
+
+TEST_F(SearchFanoutPoolTest, LiveResizeAndCapPreserveLoadWorkerCount) {
+    const auto load_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
+    auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
+    auto& search = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
+    for (const auto cap : {3, 0, 16}) {
+        milvus::SetThreadPoolMaxThreadsSize(cap);
+        milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
+        const auto expected = cap == 3 ? 3 : 6;
+        EXPECT_EQ(middle.GetMaxThreadNum(), expected);
+        EXPECT_EQ(search.GetMaxThreadNum(), expected);
+        EXPECT_EQ(
+            milvus::monitor::internal_storage_pool_capacity_middle.Value(),
+            expected);
+        EXPECT_EQ(milvus::monitor::internal_storage_pool_capacity_search_fanout
+                      .Value(),
+                  expected);
+        EXPECT_EQ(milvus::ThreadPools::GetLoadExecutorWorkers(), load_workers);
+    }
+    milvus::ThreadPools::ResizeThreadPool(milvus::SEARCH_FANOUT, 1.0);
+    EXPECT_EQ(middle.GetMaxThreadNum(), 2);
+    EXPECT_EQ(search.GetMaxThreadNum(), 2);
+    EXPECT_EQ(milvus::ThreadPools::GetLoadExecutorWorkers(), load_workers);
+}
+
+TEST_F(SearchFanoutPoolTest, InvalidResizeKeepsBothPoolsAndCoefficient) {
+    auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
+    auto& search = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
+    for (const auto ratio : {0.0f, -1.0f}) {
+        milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, ratio);
+        EXPECT_EQ(middle.GetMaxThreadNum(), 2);
+        EXPECT_EQ(search.GetMaxThreadNum(), 2);
+        EXPECT_EQ(milvus::MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load(), 1.0);
+    }
+}
+
+TEST_F(SearchFanoutPoolTest, ExecutesWhileMiddleIsBlockedWithSeparateMetrics) {
+    milvus::SetThreadPoolMaxThreadsSize(1);
+    auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
+    auto& search = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
+    ASSERT_NE(&middle, &search);
+    std::promise<void> started;
+    std::promise<void> unblock;
+    auto gate = unblock.get_future().share();
+    auto blocker = middle.Submit([&started, gate] {
+        started.set_value();
+        gate.wait();
+    });
+    auto release = folly::makeGuard([&] {
+        unblock.set_value();
+        blocker.wait();
+    });
+    ASSERT_EQ(started.get_future().wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    auto queued = middle.Submit([] { return 1; });
+    EXPECT_EQ(queued.wait_for(std::chrono::milliseconds(0)),
+              std::future_status::timeout);
+    const auto middle_submitted =
+        milvus::monitor::internal_storage_pool_task_submitted_total_middle
+            .Value();
+    const auto search_submitted =
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value();
+
+    auto task = search.Submit([] { return 42; });
+
+    ASSERT_EQ(task.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_EQ(task.get(), 42);
+    EXPECT_EQ(milvus::monitor::internal_storage_pool_task_submitted_total_middle
+                  .Value(),
+              middle_submitted);
+    EXPECT_EQ(
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value(),
+        search_submitted + 1);
+}
+
+TEST_F(SearchFanoutPoolTest, TaskErrorsAndCancellationDoNotStopWorkers) {
+    milvus::SetThreadPoolMaxThreadsSize(1);
+    auto& search = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
+    auto failed =
+        search.Submit([] { throw std::runtime_error("fanout failure"); });
+    EXPECT_THROW(failed.get(), std::runtime_error);
+    auto canceled = search.Submit([] { throw folly::FutureCancellation(); });
+    EXPECT_THROW(canceled.get(), folly::FutureCancellation);
+    auto next = search.Submit([] { return 42; });
+    ASSERT_EQ(next.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_EQ(next.get(), 42);
+}
+
+TEST_F(SearchFanoutPoolTest, CreationRacingResizeUsesLatestCoefficient) {
+    std::promise<void> start;
+    auto gate = start.get_future().share();
+    auto creating = std::async(std::launch::async, [gate] {
+        gate.wait();
+        return &milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
+    });
+    start.set_value();
+    milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
+    EXPECT_EQ(creating.get()->GetMaxThreadNum(), 6);
+}
 
 TEST(ThreadPool, ThreadNum) {
     auto& threadPool =
