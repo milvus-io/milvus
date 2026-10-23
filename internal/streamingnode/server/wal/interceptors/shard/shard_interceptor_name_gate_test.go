@@ -387,6 +387,45 @@ func TestNameGateStaleVChannelDoesNotTouchTheSplitTarget(t *testing.T) {
 	}
 }
 
+func newTestLocalManualFlushMessage(vchannel string, collectionID int64) message.MutableMessage {
+	return message.NewManualFlushMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithUnreplicable().
+		WithHeader(&messagespb.ManualFlushMessageHeader{CollectionId: collectionID, FlushTs: 300, SegmentIds: []int64{99}}).
+		WithBody(&messagespb.ManualFlushMessageBody{}).
+		MustBuildMutable().WithTimeTick(300)
+}
+
+// TestNameGateLocalFlushOfADroppedCollectionIsAppended: a cluster-local flush
+// that a drop overtook finds no registration for its collection at all. The
+// handler's exception for it (an empty flush, see handleManualFlushMessage)
+// must not be preempted by the gate.
+func TestNameGateLocalFlushOfADroppedCollectionIsAppended(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeWritten(int64(1), "v0").Return(shards.ErrCollectionNotFound).Once()
+	shardManager.EXPECT().CheckIfCollectionExists(int64(1)).Return(shards.ErrCollectionNotFound).Once()
+
+	msgID, appended, extra, err := appendAndCapture(t, i, newTestLocalManualFlushMessage("v0", 1))
+	require.NoError(t, err)
+	require.NotNil(t, appended)
+	assert.True(t, msgID.EQ(rmq.NewRmqID(1)))
+	assertEmptyManualFlushExtra(t, extra, appended)
+}
+
+// TestNameGateLocalFlushOfAStaleVChannelIsStillRefused: the collection is still
+// registered here, under the split target that took the slot, so the flush is
+// addressed to a vchannel this pchannel does not hold rather than to a dropped
+// collection, and stays refused.
+func TestNameGateLocalFlushOfAStaleVChannelIsStillRefused(t *testing.T) {
+	m := newTestShardManagerWithSplitTarget(t)
+	i := newTestShardInterceptorWithManager(t, m)
+
+	_, appended, _, err := appendAndCapture(t, i, newTestLocalManualFlushMessage("v-stale", 1))
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	assert.Nil(t, appended)
+	assertTargetUntouched(t, m)
+}
+
 // TestNameGateFencedSourceDMLIsStillShardFenced: the gate does not change DML:
 // Insert and Delete to the fenced source are rejected with SHARD_FENCED so the
 // proxy refreshes its route, and never appended.
