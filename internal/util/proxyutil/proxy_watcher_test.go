@@ -142,23 +142,9 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 	// error msg is "etcdserver: mvcc: required revision has been compacted"
 	etcdCli.Compact(ctx, 10)
 
-	// Open the watch only AFTER the compaction, from a revision that is already
-	// compacted. This guarantees the watch deterministically returns
-	// ErrCompacted on its first response, instead of racing the live event
-	// stream (a fast etcd can deliver revs 2..10 before the compaction takes
-	// effect, leaving the watch with no error and the test blocking forever).
-	eventCh := pm.etcdCli.Watch(
-		ctx,
-		path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
-		clientv3.WithPrefix(),
-		clientv3.WithCreatedNotify(),
-		clientv3.WithPrevKV(),
-		clientv3.WithRev(1),
-	)
-
-	assert.Panics(t, func() {
-		pm.startWatchEtcd(ctx, eventCh)
-	})
+	// Start from a compacted revision. Recovery then encounters the invalid
+	// snapshot above and must surface the permanent parsing failure.
+	assert.Error(t, pm.startWatchEtcd(ctx, 0))
 
 	for i := 1; i < 10; i++ {
 		k := path.Join(sessKey, typeutil.ProxyRole+strconv.FormatInt(int64(i), 10))
