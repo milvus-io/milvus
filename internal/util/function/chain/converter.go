@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/arrowconv"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -176,55 +177,6 @@ func exportChunkedValues[T any, A valueAccessor[T]](col *arrow.Chunked, colName 
 		}
 		for j := 0; j < chunk.Len(); j++ {
 			data = append(data, chunk.Value(j))
-		}
-	}
-	return data, nil
-}
-
-// exportValidData extracts validity (non-null) bitmap from a ChunkedArray.
-// Returns nil if all values are valid (non-null).
-func exportValidData(col *arrow.Chunked) []bool {
-	hasNull := false
-	for _, chunk := range col.Chunks() {
-		if chunk.NullN() > 0 {
-			hasNull = true
-			break
-		}
-	}
-	if !hasNull {
-		return nil
-	}
-
-	validData := make([]bool, 0, col.Len())
-	for _, chunk := range col.Chunks() {
-		for j := 0; j < chunk.Len(); j++ {
-			validData = append(validData, !chunk.IsNull(j))
-		}
-	}
-	return validData
-}
-
-// exportIntFieldData exports Int8/Int16/Int32 columns to int32 slice.
-// Handles multiple source types that map to the same Milvus int type.
-func exportIntFieldData(col *arrow.Chunked, name string) ([]int32, error) {
-	data := make([]int32, 0, col.Len())
-	for i := 0; i < len(col.Chunks()); i++ {
-		chunk := col.Chunk(i)
-		switch arr := chunk.(type) {
-		case *array.Int8:
-			for j := 0; j < arr.Len(); j++ {
-				data = append(data, int32(arr.Value(j)))
-			}
-		case *array.Int16:
-			for j := 0; j < arr.Len(); j++ {
-				data = append(data, int32(arr.Value(j)))
-			}
-		case *array.Int32:
-			for j := 0; j < arr.Len(); j++ {
-				data = append(data, arr.Value(j))
-			}
-		default:
-			return nil, merr.WrapErrServiceInternalMsg("column %s chunk %d type mismatch, expected int type", name, i)
 		}
 	}
 	return data, nil
@@ -722,9 +674,8 @@ func ToSearchResultData(df *DataFrame) (*schemapb.SearchResultData, error) {
 }
 
 // ToSearchResultDataWithOptions exports the DataFrame to SearchResultData with options.
-// Exported strings share the Arrow value buffers. Callers must provide immutable,
-// Go-managed string buffers that are not recycled on Release. QueryNode reduce
-// and Proxy rerank build these buffers with memory.DefaultAllocator.
+// Exported strings may share Arrow value buffers. Callers must provide immutable,
+// Go-managed string buffers that are not recycled on Release.
 func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemapb.SearchResultData, error) {
 	result := &schemapb.SearchResultData{
 		NumQueries: int64(df.NumChunks()),
@@ -799,6 +750,7 @@ func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemap
 			if err != nil {
 				return nil, err
 			}
+			omitAllValidScalarMask(fieldData)
 			result.GroupByFieldValues = append(result.GroupByFieldValues, fieldData)
 			continue
 		}
@@ -807,6 +759,7 @@ func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemap
 		if err != nil {
 			return nil, err
 		}
+		omitAllValidScalarMask(fieldData)
 		result.FieldsData = append(result.FieldsData, fieldData)
 	}
 
@@ -905,148 +858,62 @@ func exportElementIndices(df *DataFrame) (*schemapb.LongArray, error) {
 	return &schemapb.LongArray{Data: values}, nil
 }
 
-// exportFieldData exports a field from the DataFrame.
+// exportFieldData converts scalar columns using the DataFrame logical metadata
+// and infers nested computed layouts directly from Arrow.
 func exportFieldData(df *DataFrame, name string) (*schemapb.FieldData, error) {
 	col := df.Column(name)
 	if col == nil {
 		return nil, merr.WrapErrServiceInternalMsg("exportFieldData: column %s not found", name)
 	}
-
-	dataType, _ := df.FieldType(name)
-	fieldID, _ := df.FieldID(name)
-
-	fieldData := &schemapb.FieldData{
-		Type:      dataType,
-		FieldName: name,
-		FieldId:   fieldID,
+	dataType, ok := df.FieldType(name)
+	if col.DataType().ID() == arrow.LIST && dataType != schemapb.DataType_ArrayOfVector {
+		field, err := arrowconv.ArrowChunkedTypedColumnToFieldData(name, col)
+		if err != nil {
+			return nil, err
+		}
+		field.FieldId, _ = df.FieldID(name)
+		return field, nil
 	}
-
-	var err error
-
+	if !ok || dataType == schemapb.DataType_None {
+		var err error
+		dataType, err = ToMilvusType(col.DataType())
+		if err != nil {
+			return nil, err
+		}
+	}
+	// DataFrame has no vector dimensions or array element declarations. Keep
+	// those schema-dependent layouts outside this scalar/nested exporter.
 	switch dataType {
-	case schemapb.DataType_Bool:
-		var data []bool
-		data, err = exportChunkedValues[bool, *array.Boolean](col, name)
-		if err == nil {
-			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: data}},
-				},
-			}
-		}
-
-	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		var data []int32
-		data, err = exportIntFieldData(col, name)
-		if err == nil {
-			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: data}},
-				},
-			}
-		}
-
-	case schemapb.DataType_Int64:
-		var data []int64
-		data, err = exportChunkedValues[int64, *array.Int64](col, name)
-		if err == nil {
-			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: data}},
-				},
-			}
-		}
-
-	case schemapb.DataType_Timestamptz:
-		var data []int64
-		data, err = exportChunkedValues[int64, *array.Int64](col, name)
-		if err == nil {
-			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: data}},
-				},
-			}
-		}
-
-	case schemapb.DataType_Float:
-		var data []float32
-		data, err = exportChunkedValues[float32, *array.Float32](col, name)
-		if err == nil {
-			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: data}},
-				},
-			}
-		}
-
-	case schemapb.DataType_Double:
-		var data []float64
-		data, err = exportChunkedValues[float64, *array.Float64](col, name)
-		if err == nil {
-			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: data}},
-				},
-			}
-		}
-
-	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
-		var data []string
-		data, err = exportChunkedValues[string, *array.String](col, name)
-		if err == nil {
-			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: data}},
-				},
-			}
-		}
-
-	case schemapb.DataType_Geometry:
-		var data [][]byte
-		data, err = exportGeometryFieldData(col, name)
-		if err == nil {
-			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: data}},
-				},
-			}
-		}
-
+	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
+		schemapb.DataType_Int64, schemapb.DataType_Timestamptz, schemapb.DataType_Float, schemapb.DataType_Double,
+		schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Geometry:
 	default:
-		return nil, merr.WrapErrServiceInternalMsg("exportFieldData: unsupported type %s for column %s", dataType.String(), name)
+		return nil, merr.WrapErrServiceInternalMsg("exportFieldData: unsupported type %s for column %s", dataType, name)
 	}
-
-	if err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("exportFieldData: %v", err)
+	nullable := df.fieldNullables[name]
+	if !nullable && col.NullN() != 0 {
+		return nil, merr.WrapErrServiceInternalMsg("null non-nullable column %s", name)
 	}
-
-	// Export validity data for nullable fields
-	if df.fieldNullables[name] {
-		if validData := exportValidData(col); validData != nil {
-			typeutil.SetFieldDataValidData(fieldData, validData)
-		}
-	}
-
-	return fieldData, nil
+	fieldID, _ := df.FieldID(name)
+	return arrowconv.ArrowChunkedColumnToFieldData(col, &schemapb.FieldSchema{
+		Name: name, FieldID: fieldID, DataType: dataType, Nullable: nullable,
+	})
 }
 
-func exportGeometryFieldData(col *arrow.Chunked, name string) ([][]byte, error) {
-	data := make([][]byte, 0, col.Len())
-	for i := 0; i < len(col.Chunks()); i++ {
-		switch chunk := col.Chunk(i).(type) {
-		case *array.String:
-			for j := 0; j < chunk.Len(); j++ {
-				data = append(data, []byte(chunk.Value(j)))
+// omitAllValidScalarMask preserves Search's response convention. Conversion
+// itself always emits the same payload/validity for Search and Query.
+func omitAllValidScalarMask(field *schemapb.FieldData) {
+	switch field.Type {
+	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
+		schemapb.DataType_Int64, schemapb.DataType_Timestamptz, schemapb.DataType_Float, schemapb.DataType_Double,
+		schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Geometry:
+		for _, valid := range typeutil.GetFieldDataValidData(field) {
+			if !valid {
+				return
 			}
-		case *array.Binary:
-			for j := 0; j < chunk.Len(); j++ {
-				data = append(data, append([]byte(nil), chunk.Value(j)...))
-			}
-		default:
-			return nil, merr.WrapErrServiceInternalMsg("column %s chunk %d type mismatch", name, i)
 		}
+		typeutil.SetFieldDataValidData(field, nil)
 	}
-	return data, nil
 }
 
 // maxChunkSize returns the maximum chunk size in the DataFrame.
