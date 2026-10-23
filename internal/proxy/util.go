@@ -2415,6 +2415,11 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
 	case *milvuspb.AlterDatabaseRequest:
 		return util.InvalidDBID, map[int64][]int64{}, internalpb.RateType_DDLDB, 1, nil
+	case *milvuspb.CheckHealthRequest:
+		// CheckHealth is a lightweight liveness probe with no rate-limitable
+		// resource. Route it explicitly so it does not hit the default
+		// "not supported request type" warning on every call.
+		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
 	default: // TODO: support more request
 		if req == nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, merr.WrapErrParameterInvalidMsg("null request")
