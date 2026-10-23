@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Since #53595 a Flush is a ManualFlush broadcast to every vchannel the
@@ -58,15 +57,13 @@ import (
 // what this pins.
 func TestManualFlushFollowsASplitsVChannelList(t *testing.T) {
 	ctx := context.Background()
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(splitMgrCollection, &collectionInfo{
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	m.AddCollection(&collectionInfo{
 		ID:            splitMgrCollection,
 		Schema:        &schemapb.CollectionSchema{Name: "coll"},
 		VChannelNames: []string{splitMgrV0},
 	})
-	m, err := newMemoryMeta(t)
-	require.NoError(t, err)
-	m.collections = collections
 	svr := &Server{meta: m}
 	svr.handler = &ServerHandler{svr}
 	svr.stateCode.Store(commonpb.StateCode_Healthy)
@@ -81,9 +78,9 @@ func TestManualFlushFollowsASplitsVChannelList(t *testing.T) {
 		})
 
 	flushedVChannels := func(listed []string) []string {
-		coll := svr.meta.GetClonedCollectionInfo(splitMgrCollection)
+		coll := *svr.meta.GetCollection(splitMgrCollection)
 		coll.VChannelNames = listed
-		svr.meta.AddCollection(coll)
+		svr.meta.AddCollection(&coll)
 		broadcast = nil
 		_, err := svr.flushCollection(ctx, splitMgrCollection, nil, bapi)
 		require.NoError(t, err)
@@ -108,15 +105,13 @@ func TestManualFlushFollowsASplitsVChannelList(t *testing.T) {
 // position rather than with nothing.
 func TestFlushDuringASplitReportsTheTargets(t *testing.T) {
 	ctx := context.Background()
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(splitMgrCollection, &collectionInfo{
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	m.AddCollection(&collectionInfo{
 		ID:            splitMgrCollection,
 		Schema:        &schemapb.CollectionSchema{Name: "coll"},
 		VChannelNames: []string{splitMgrV0, splitMgrV1, splitMgrV2},
 	})
-	m, err := newMemoryMeta(t)
-	require.NoError(t, err)
-	m.collections = collections
 	svr := &Server{meta: m, shardSplitTasks: newShardSplitTasks()}
 	svr.handler = &ServerHandler{svr}
 	svr.stateCode.Store(commonpb.StateCode_Healthy)

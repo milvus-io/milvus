@@ -165,9 +165,9 @@ func TestPreemptedExecutingCompactionNeverCommits(t *testing.T) {
 	committed := atomic.NewBool(false)
 	mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Maybe()
 	mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+		func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, error) {
 			committed.Store(true)
-			return nil, nil, merr.WrapErrServiceInternal("must not commit")
+			return nil, merr.WrapErrServiceInternal("must not commit")
 		}).Maybe()
 	mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Maybe()

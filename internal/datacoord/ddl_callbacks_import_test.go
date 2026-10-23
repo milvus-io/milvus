@@ -1034,7 +1034,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_RefusesShardsASplitIsMoving()
 			_, _, err := server.broadcastImport(ctx, 100, []int64{1},
 				[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 				[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-				1000, tc.vchannels, "", "", false)
+				1000, tc.vchannels, "", internalpb.ImportVersion_ImportVersionV2)
 			if !tc.refused {
 				s.NoError(err)
 				s.NotNil(mockBroadcastAPI.capturedMsg)
