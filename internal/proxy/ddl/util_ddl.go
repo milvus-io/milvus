@@ -362,41 +362,6 @@ func validateElementType(dataType schemapb.DataType) error {
 	return merr.WrapErrParameterInvalidMsg("element type %s is not supported", dataType.String())
 }
 
-func validateArrayOfVectorFieldSchema(collectionName string, field *schemapb.FieldSchema) error {
-	if field.GetElementType() == schemapb.DataType_ArrayOfVector {
-		return merr.WrapErrParameterInvalidMsg("nested ArrayOfVector is not supported for field %s", field.GetName())
-	}
-	// ArrayOfVector: support FloatVector, Float16Vector, BFloat16Vector, Int8Vector, BinaryVector
-	if !typeutil.IsFixDimVectorType(field.GetElementType()) {
-		return merr.WrapErrParameterInvalidMsg("Unsupported element type %s of ArrayOfVector field %s, only fixed dimension vector types are supported", field.GetElementType().String(), field.Name)
-	}
-	if err := validateDimension(field); err != nil {
-		return err
-	}
-	if err := validateMaxCapacityPerRow(collectionName, field); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema) error {
-	if field.GetElementType() == schemapb.DataType_Array {
-		return merr.WrapErrParameterMissingMsg("type_schema should be specified for nested array field %s", field.GetName())
-	}
-	if err := validateElementType(field.GetElementType()); err != nil {
-		return err
-	}
-	if field.GetElementType() == schemapb.DataType_VarChar {
-		if err := validateMaxLengthPerRow(collectionName, field); err != nil {
-			return err
-		}
-	}
-	if err := validateMaxCapacityPerRow(collectionName, field); err != nil {
-		return err
-	}
-	return nil
-}
-
 func validateFieldType(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
 		switch field.GetDataType() {
