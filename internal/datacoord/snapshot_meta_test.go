@@ -473,7 +473,8 @@ func TestSnapshotMeta_ListSnapshots_Success(t *testing.T) {
 	defer cleanup()
 
 	// Act
-	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshotsInfos, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshots := snapshotSummaryNames(snapshotsInfos)
 
 	// Assert
 	assert.NoError(t, err)
@@ -500,7 +501,8 @@ func TestSnapshotMeta_ListSnapshots_AllCollections(t *testing.T) {
 	insertTestSnapshot(sm, snapshot2.SnapshotInfo, nil, nil)
 
 	// Act
-	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshotsInfos, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshots := snapshotSummaryNames(snapshotsInfos)
 
 	// Assert
 	assert.NoError(t, err)
@@ -518,7 +520,8 @@ func TestSnapshotMeta_ListSnapshots_EmptyResult(t *testing.T) {
 	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
-	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshotsInfos, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshots := snapshotSummaryNames(snapshotsInfos)
 
 	// Assert
 	assert.NoError(t, err)
@@ -1390,7 +1393,8 @@ func TestSnapshotMeta_ConcurrentOperations(t *testing.T) {
 	sm.rebuildAllSegmentProtection()
 
 	// These operations should work concurrently
-	snapshots, err := sm.ListSnapshots(ctx, 0, 0)
+	snapshotsInfos, err := sm.ListSnapshots(ctx, 0, 0)
+	snapshots := snapshotSummaryNames(snapshotsInfos)
 	blocked := sm.IsSegmentGCBlocked(100, 1001)
 
 	// Assert
@@ -1405,7 +1409,8 @@ func TestSnapshotMeta_EmptyMaps(t *testing.T) {
 	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
-	snapshots, err := sm.ListSnapshots(ctx, 100, 1)
+	snapshotsInfos, err := sm.ListSnapshots(ctx, 100, 1)
+	snapshots := snapshotSummaryNames(snapshotsInfos)
 	blocked := sm.IsSegmentGCBlocked(100, 1001)
 	snapshot, getErr := sm.GetSnapshot(ctx, int64(100), "nonexistent")
 
@@ -1442,7 +1447,8 @@ func TestSnapshotMeta_ListSnapshots_FilterByPartition(t *testing.T) {
 	defer cleanup()
 
 	// Act
-	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshotsInfos, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshots := snapshotSummaryNames(snapshotsInfos)
 
 	// Assert
 	assert.NoError(t, err)
@@ -1471,7 +1477,8 @@ func TestSnapshotMeta_ListSnapshots_FilterByCollection(t *testing.T) {
 	defer cleanup()
 
 	// Act
-	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshotsInfos, err := sm.ListSnapshots(ctx, collectionID, partitionID)
+	snapshots := snapshotSummaryNames(snapshotsInfos)
 
 	// Assert
 	assert.NoError(t, err)
@@ -3160,7 +3167,8 @@ func TestSnapshotMeta_DropSnapshotsByCollection_DeletesAllForCollection(t *testi
 	assert.False(t, exists, "snapshot 2 should be deleted")
 
 	// Verify collection 100 is gone from secondary indexes
-	names100, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	names100Infos, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	names100 := snapshotSummaryNames(names100Infos)
 	assert.NoError(t, err)
 	assert.Len(t, names100, 0, "collection 100 should have no snapshots")
 
@@ -3169,7 +3177,8 @@ func TestSnapshotMeta_DropSnapshotsByCollection_DeletesAllForCollection(t *testi
 	assert.True(t, exists, "snapshot 3 should remain")
 	assert.Equal(t, "snap_c", info3.GetName())
 
-	names200, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	names200Infos, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	names200 := snapshotSummaryNames(names200Infos)
 	assert.NoError(t, err)
 	assert.Len(t, names200, 1)
 	assert.Contains(t, names200, "snap_c")
@@ -3221,12 +3230,14 @@ func TestSnapshotMeta_SameNameDifferentCollections_BothSucceed(t *testing.T) {
 	assert.Equal(t, int64(200), info2.GetCollectionId())
 
 	// Both collections should list the snapshot
-	names100, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	names100Infos, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	names100 := snapshotSummaryNames(names100Infos)
 	assert.NoError(t, err)
 	assert.Len(t, names100, 1)
 	assert.Contains(t, names100, "my_snapshot")
 
-	names200, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	names200Infos, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	names200 := snapshotSummaryNames(names200Infos)
 	assert.NoError(t, err)
 	assert.Len(t, names200, 1)
 	assert.Contains(t, names200, "my_snapshot")
@@ -3386,14 +3397,16 @@ func TestSnapshotMeta_SameNameDifferentCollections(t *testing.T) {
 	assert.Equal(t, int64(2), info2After.GetId())
 
 	// Verify ListSnapshots for collection 100 only returns collection 100's remaining snapshot
-	names, err := sm.ListSnapshots(ctx, 100, 0)
+	namesInfos, err := sm.ListSnapshots(ctx, 100, 0)
+	names := snapshotSummaryNames(namesInfos)
 	require.NoError(t, err)
 	assert.Len(t, names, 1)
 	assert.Contains(t, names, "daily")
 	assert.NotContains(t, names, "backup")
 
 	// Verify ListSnapshots for collection 200 still has "backup"
-	names2, err := sm.ListSnapshots(ctx, 200, 0)
+	names2Infos, err := sm.ListSnapshots(ctx, 200, 0)
+	names2 := snapshotSummaryNames(names2Infos)
 	require.NoError(t, err)
 	assert.Len(t, names2, 1)
 	assert.Contains(t, names2, "backup")
@@ -3504,7 +3517,8 @@ func TestSnapshotMeta_ListSnapshots_AllCollections_MultipleCollections(t *testin
 	insertTestSnapshot(sm, snap4, nil, nil)
 
 	// Act: ListSnapshots with collectionID=0 (all collections)
-	names, err := sm.ListSnapshots(ctx, 0, 0)
+	namesInfos, err := sm.ListSnapshots(ctx, 0, 0)
+	names := snapshotSummaryNames(namesInfos)
 	require.NoError(t, err)
 
 	// Assert: all 4 snapshots from all 3 collections are returned
@@ -3515,24 +3529,28 @@ func TestSnapshotMeta_ListSnapshots_AllCollections_MultipleCollections(t *testin
 	assert.Contains(t, names, "snap_c300_1")
 
 	// Act: ListSnapshots with specific collectionID only returns that collection
-	names100, err := sm.ListSnapshots(ctx, 100, 0)
+	names100Infos, err := sm.ListSnapshots(ctx, 100, 0)
+	names100 := snapshotSummaryNames(names100Infos)
 	require.NoError(t, err)
 	assert.Len(t, names100, 2)
 	assert.Contains(t, names100, "snap_c100_1")
 	assert.Contains(t, names100, "snap_c100_2")
 
-	names200, err := sm.ListSnapshots(ctx, 200, 0)
+	names200Infos, err := sm.ListSnapshots(ctx, 200, 0)
+	names200 := snapshotSummaryNames(names200Infos)
 	require.NoError(t, err)
 	assert.Len(t, names200, 1)
 	assert.Contains(t, names200, "snap_c200_1")
 
-	names300, err := sm.ListSnapshots(ctx, 300, 0)
+	names300Infos, err := sm.ListSnapshots(ctx, 300, 0)
+	names300 := snapshotSummaryNames(names300Infos)
 	require.NoError(t, err)
 	assert.Len(t, names300, 1)
 	assert.Contains(t, names300, "snap_c300_1")
 
 	// Act: ListSnapshots with partition filter across all collections
-	namesP10, err := sm.ListSnapshots(ctx, 0, 10)
+	namesP10Infos, err := sm.ListSnapshots(ctx, 0, 10)
+	namesP10 := snapshotSummaryNames(namesP10Infos)
 	require.NoError(t, err)
 	assert.Len(t, namesP10, 2)
 	assert.Contains(t, namesP10, "snap_c100_1")
@@ -3669,7 +3687,8 @@ func TestSnapshotMeta_DropSnapshotsByCollection_WithMixedStates(t *testing.T) {
 	insertTestSnapshot(sm, snapOther, []int64{2001}, nil)
 
 	// Verify initial state: collection 100 has 3 snapshots
-	names100, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	names100Infos, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	names100 := snapshotSummaryNames(names100Infos)
 	require.NoError(t, err)
 	assert.Len(t, names100, 3)
 
@@ -3704,7 +3723,8 @@ func TestSnapshotMeta_DropSnapshotsByCollection_WithMixedStates(t *testing.T) {
 	assert.False(t, exists, "snap_c RefIndex should be removed")
 
 	// Collection 100 should have no snapshots listed
-	names100After, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	names100AfterInfos, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	names100After := snapshotSummaryNames(names100AfterInfos)
 	require.NoError(t, err)
 	assert.Len(t, names100After, 0, "collection 100 should have no snapshots")
 
@@ -3713,7 +3733,8 @@ func TestSnapshotMeta_DropSnapshotsByCollection_WithMixedStates(t *testing.T) {
 	assert.True(t, exists, "collection 200 snapshot should remain")
 	assert.Equal(t, "snap_other", info200.GetName())
 
-	names200, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	names200Infos, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	names200 := snapshotSummaryNames(names200Infos)
 	require.NoError(t, err)
 	assert.Len(t, names200, 1)
 	assert.Contains(t, names200, "snap_other")
@@ -3859,7 +3880,8 @@ func TestSnapshotMeta_DropSnapshotsByCollection_SnapshotAlreadyRemovedFromMemory
 	assert.False(t, exists, "snap_b should be removed")
 
 	// Collection 100 should have no snapshots
-	names, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	namesInfos, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	names := snapshotSummaryNames(namesInfos)
 	require.NoError(t, err)
 	assert.Len(t, names, 0)
 }
@@ -4688,4 +4710,43 @@ func TestSnapshotMeta_HasActivePins(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, has200, "collection 200 has an active pin")
 	})
+}
+
+func snapshotSummaryNames(infos []*datapb.SnapshotSummary) []string {
+	names := make([]string, len(infos))
+	for i, info := range infos {
+		names[i] = info.GetName()
+	}
+	return names
+}
+
+func TestSnapshotMeta_ListSnapshots_Summaries(t *testing.T) {
+	sm := createTestSnapshotMetaLoaded(t)
+	sm.reader = nil
+	sm.writer = nil
+	sm.catalog = nil
+	info := &datapb.SnapshotInfo{Id: 1, CollectionId: 100, PartitionIds: []int64{10}, Name: "backup", CreateTs: 9007199254740993, Description: "daily"}
+	insertTestSnapshot(sm, info, nil, nil)
+	// The unloaded reference index and nil storage reader cannot affect a list.
+	sm.snapshotID2RefIndex.Insert(int64(1), NewSnapshotRefIndex())
+	for _, collection := range []int64{100, 0} {
+		infos, err := sm.ListSnapshots(context.Background(), collection, 10)
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		assert.Equal(t, "backup", infos[0].GetName())
+		assert.Equal(t, info.GetCreateTs(), infos[0].GetCreateTs())
+		assert.Equal(t, "daily", infos[0].GetDescription())
+		infos[0].Name = "changed"
+		infos[0].Description = "changed"
+		assert.Equal(t, "backup", info.GetName())
+		assert.Equal(t, "daily", info.GetDescription())
+	}
+	infos, err := sm.ListSnapshots(context.Background(), 0, 99)
+	require.NoError(t, err)
+	assert.Empty(t, infos)
+	// A stale index entry is ignored without looking up snapshot storage.
+	sm.snapshotID2Info.Remove(int64(1))
+	infos, err = sm.ListSnapshots(context.Background(), 100, 0)
+	require.NoError(t, err)
+	assert.Empty(t, infos)
 }

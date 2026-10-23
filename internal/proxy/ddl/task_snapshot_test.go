@@ -24,6 +24,8 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -592,8 +594,9 @@ func TestListSnapshotsTask_Execute_Success(t *testing.T) {
 
 	// Mock MixCoord response
 	mockResponse := &datapb.ListSnapshotsResponse{
-		Status:    merr.Success(),
-		Snapshots: []string{"snapshot1", "snapshot2"},
+		Status:            merr.Success(),
+		Snapshots:         []string{"snapshot1", "snapshot2"},
+		SnapshotSummaries: []*datapb.SnapshotSummary{{Name: "snapshot1", CreateTs: 9007199254740993, Description: "daily"}, {Name: "snapshot2"}},
 	}
 	mockListSnapshots := mockey.Mock((*MixCoordMock).ListSnapshots).Return(mockResponse, nil).Build()
 	defer mockListSnapshots.UnPatch()
@@ -604,6 +607,12 @@ func TestListSnapshotsTask_Execute_Success(t *testing.T) {
 	assert.NotNil(t, task.result)
 	assert.True(t, merr.Ok(task.result.GetStatus()))
 	assert.Equal(t, []string{"snapshot1", "snapshot2"}, task.result.GetSnapshots())
+	require.Len(t, task.result.GetSnapshotSummaries(), 2)
+	assert.Equal(t, "snapshot1", task.result.GetSnapshotSummaries()[0].GetName())
+	assert.Equal(t, int64(9007199254740993), task.result.GetSnapshotSummaries()[0].GetCreateTs())
+	assert.Equal(t, "daily", task.result.GetSnapshotSummaries()[0].GetDescription())
+	assert.Zero(t, task.result.GetSnapshotSummaries()[1].GetCreateTs())
+	assert.Empty(t, task.result.GetSnapshotSummaries()[1].GetDescription())
 }
 
 // =========================== RestoreSnapshotTask Tests ===========================
@@ -1883,4 +1892,85 @@ func TestUnpinSnapshotDataTask_Execute_MixCoordError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "mixcoord unpin failed")
+}
+
+func TestListSnapshotsTask_Execute_Compatibility(t *testing.T) {
+	for _, scenario := range []string{"legacy", "empty", "rpc error", "status error"} {
+		t.Run(scenario, func(t *testing.T) {
+			client := NewMixCoordMock()
+			task := &ListSnapshotsTask{req: &milvuspb.ListSnapshotsRequest{CollectionName: "books"}, collectionID: 100, dbID: 10, mixCoord: client}
+			patch := mockey.Mock((*MixCoordMock).ListSnapshots).To(func(_ *MixCoordMock, _ context.Context, req *datapb.ListSnapshotsRequest, _ ...grpc.CallOption) (*datapb.ListSnapshotsResponse, error) {
+				assert.Equal(t, int64(100), req.GetCollectionId())
+				assert.Equal(t, int64(10), req.GetDbId())
+				if scenario == "rpc error" {
+					return nil, errors.New("rpc failed")
+				}
+				if scenario == "status error" {
+					return &datapb.ListSnapshotsResponse{Status: merr.Status(merr.ErrServiceNotReady)}, nil
+				}
+				resp := &datapb.ListSnapshotsResponse{Status: merr.Success()}
+				if scenario == "legacy" {
+					resp.Snapshots = []string{"backup"}
+				}
+				return resp, nil
+			}).Build()
+			defer patch.UnPatch()
+			err := task.Execute(context.Background())
+			if scenario == "rpc error" || scenario == "status error" {
+				require.Error(t, err)
+				assert.False(t, merr.Ok(task.result.GetStatus()))
+			} else {
+				require.NoError(t, err)
+				assert.Empty(t, task.result.GetSnapshotSummaries())
+				if scenario == "legacy" {
+					assert.Equal(t, []string{"backup"}, task.result.GetSnapshots())
+				}
+			}
+		})
+	}
+}
+
+func TestCreateSnapshotTask_PreExecute_DescriptionLength(t *testing.T) {
+	paramtable.Init()
+	limit := &paramtable.Get().ProxyCfg.MaxSnapshotDescriptionLength
+	for _, tc := range []struct {
+		name        string
+		limit       string
+		description string
+		rejected    bool
+	}{
+		{"empty", "1024", "", false},
+		{"default_boundary", "1024", strings.Repeat("a", 1024), false},
+		{"default_overflow", "1024", strings.Repeat("a", 1025), true},
+		{"configured_boundary", "6", "abcdef", false},
+		{"configured_overflow", "6", "abcdefg", true},
+		{"unicode_boundary", "6", "快照", false},
+		{"unicode_overflow", "6", "快照名", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := limit.SwapTempValue(tc.limit)
+			defer limit.SwapTempValue(previous)
+			called := false
+			patch := mockey.Mock((*MetaCache).GetCollectionID).To(func(_ *MetaCache, _ context.Context, _, _ string) (int64, error) {
+				called = true
+				return 100, nil
+			}).Build()
+			defer patch.UnPatch()
+			task := &CreateSnapshotTask{
+				baseTask: baseTask{MetaCache: &MetaCache{}},
+				req:      &milvuspb.CreateSnapshotRequest{Name: "backup", CollectionName: "books", Description: tc.description},
+			}
+			err := task.PreExecute(context.Background())
+			if tc.rejected {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), "bytes")
+				assert.Equal(t, "true", merr.Status(err).GetExtraInfo()["is_input_error"])
+				assert.False(t, called, "reject before metadata lookup")
+			} else {
+				require.NoError(t, err)
+				assert.True(t, called)
+				assert.Equal(t, int64(100), task.collectionID)
+			}
+		})
+	}
 }

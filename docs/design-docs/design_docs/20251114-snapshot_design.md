@@ -209,10 +209,11 @@ length to prevent allocations based on corrupt block headers.
       - Populate StorageV2 manifest paths if present
    d. Return complete SnapshotData
 
-2. ListSnapshots(collectionID) - List all snapshots for a collection
-   - List all files in metadata/ directory
-   - Parse each metadata file to extract SnapshotInfo
-   - Return list of SnapshotInfo
+2. ListSnapshots(collectionID) - List lightweight metadata for a collection
+   - Read SnapshotInfo from the DataCoord in-memory cache
+   - Project name, create_ts and description into detached summaries
+   - Sort summaries by create_ts descending, then name ascending
+   - Do not read object storage or wait for segment reference indexes
 ```
 
 **Performance Optimization**: The `includeSegments` parameter allows DataCoord to defer loading heavy segment data. During startup, only metadata is loaded (includeSegments=false), and full segment data is loaded on-demand when needed for restore operations.
@@ -236,7 +237,7 @@ type SnapshotManager interface {
     CreateSnapshot(ctx context.Context, collectionID int64, name, description string) (int64, error)
     DropSnapshot(ctx context.Context, name string) error
     DescribeSnapshot(ctx context.Context, name string) (*SnapshotData, error)
-    ListSnapshots(ctx context.Context, collectionID, partitionID int64) ([]string, error)
+    ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error)
 
     // Restore operations
     RestoreSnapshot(ctx context.Context, snapshotName string, targetCollectionID int64) (int64, error)
@@ -406,8 +407,9 @@ List:
 
 Describe:
   User Request -> Proxy DescribeSnapshot -> DataCoord
-    -> SnapshotMeta.GetSnapshot()
-    -> Return SnapshotInfo
+    -> SnapshotMeta.ReadSnapshotData(includeSegments=false)
+    -> Read metadata JSON from object storage (no segment manifests)
+    -> Return snapshot details
 
 Restore:
   User Request -> Proxy RestoreSnapshot -> RootCoord
@@ -858,6 +860,11 @@ message DropSnapshotResponse {
 2. Delete metadata file and all manifest files referenced in ManifestList from S3
 3. Remove reference relationships from memory
 
+Snapshot descriptions supplied to CreateSnapshot are limited by
+`proxy.maxSnapshotDescriptionLength` (default 1024 UTF-8 bytes), checked by
+both Proxy and DataCoord. Existing descriptions remain unchanged; this limit
+bounds newly created descriptions, not the total size of a list response.
+
 ### ListSnapshots
 
 **Function**: List all snapshots for specified collection
@@ -875,9 +882,32 @@ message ListSnapshotsRequest {
 ```protobuf
 message ListSnapshotsResponse {
   common.Status status = 1;
-  repeated string snapshots = 2;    // list of snapshot names
+  repeated string snapshots = 2;    // retained for existing clients
+  repeated SnapshotSummary snapshot_summaries = 3;
 }
 ```
+
+`SnapshotSummary` contains `name` (string, field 1), `create_ts` (int64,
+field 2), and `description` (string, field 3). Internal and public protocols
+have separate summary messages; Proxy explicitly maps between them.
+
+DataCoord reads only cached metadata and returns both lists from the same
+sorted result: `create_ts` descending, then `name` ascending. Each name at index
+`i` equals `snapshot_summaries[i].name`. The timestamp is unchanged from Describe;
+it is a Milvus hybrid timestamp, not Unix milliseconds or creation completion
+time. A zero timestamp is preserved. Existing snapshot visibility and concurrent
+list semantics remain unchanged; internal 2PC state is not exposed.
+
+REST retains its `data` array of names and adds a top-level `snapshotSummaries`
+array with `name`, `createTs`, and `description`. `createTs` uses the same int64
+formatting/header convention as DescribeSnapshot. Empty summaries are `[]`.
+
+Go SDK `ListSnapshotSummaries` and PyMilvus MilvusClient
+`list_snapshot_summaries` expose summaries without changing the existing
+name-list methods. On an older server that returns names without summaries,
+the new methods fall back to DescribeSnapshot per name and sort the result;
+this compatibility path still incurs N+1 requests. Errors are propagated
+without returning incomplete summaries. The new-server path uses one List RPC.
 
 ### DescribeSnapshot
 
