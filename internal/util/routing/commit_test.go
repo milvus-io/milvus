@@ -752,3 +752,21 @@ func TestJudgeCommitRefusesAMalformedPostImage(t *testing.T) {
 		require.NoError(t, CheckPostImageTiling(split1Image()))
 	})
 }
+
+// TestJudgeCommitRefusesAChangedShardBy: the routing key is set once. A
+// post-image that names another one for a collection that already carries a
+// key is a planning bug; one that names the same key, or none, is fine, and a
+// collection without a key may take one.
+func TestJudgeCommitRefusesAChangedShardBy(t *testing.T) {
+	changed := split1Image()
+	changed.ShardBy = "hash(other)"
+	requireIncoherent(t, JudgeCommit(initial(), changed, split1Delta), "cannot change it")
+
+	unset := split1Image()
+	unset.ShardBy = ""
+	require.NoError(t, JudgeCommit(initial(), unset, split1Delta))
+
+	keyless := initial()
+	keyless.ShardBy = ""
+	require.NoError(t, JudgeCommit(keyless, split1Image(), split1Delta))
+}
