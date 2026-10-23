@@ -76,7 +76,7 @@ func TestOrphanSegmentCleanupAfterNodeReassigned(t *testing.T) {
 			// An RG change assigns this node to a new replica. Its copy is now
 			// owned again, possibly reloaded without an observed absent report.
 			owner = utils.CreateTestReplica(20, collectionID, []int64{nodeID})
-			require.ErrorContains(t, scheduler.checkStale(cleanup, true), "reassigned")
+			require.ErrorContains(t, scheduler.checkStale(cleanup, true), "cleanup task no longer matches replica assignment")
 
 			// ReleaseCollection removes load metadata before replicas. Cleanup
 			// must continue even while the replica still contains this node.

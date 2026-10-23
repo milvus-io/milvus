@@ -365,7 +365,8 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	// Expect
 	suite.cluster.EXPECT().UnsubDmChannel(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
 
-	// Test unsubscribe channel task
+	// Normal replica cleanup may unsubscribe a channel from a member node.
+	// NilReplica cleanup is reserved for orphaned or released collections.
 	tasks := []Task{}
 	dmChannels := make([]*datapb.VchannelInfo, 0)
 	for _, channel := range suite.unsubChannels {
@@ -378,7 +379,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 			timeout,
 			WrapIDSource(0),
 			suite.collection,
-			meta.NilReplica,
+			suite.replica,
 			NewChannelAction(targetNode, ActionTypeReduce, channel),
 		)
 
@@ -1591,11 +1592,11 @@ func (suite *TaskSuite) TestRemoveByNodeWaitsForSchedule() {
 	suite.NoError(suite.scheduler.Add(task))
 	suite.AssertTaskNum(0, 1, 0, 1)
 
-	suite.scheduler.scheduleMu.Lock()
+	suite.scheduler.lifecycleMu.Lock()
 	locked := true
 	defer func() {
 		if locked {
-			suite.scheduler.scheduleMu.Unlock()
+			suite.scheduler.lifecycleMu.Unlock()
 		}
 	}()
 
@@ -1607,18 +1608,18 @@ func (suite *TaskSuite) TestRemoveByNodeWaitsForSchedule() {
 
 	select {
 	case <-done:
-		suite.FailNow("RemoveByNode should wait for scheduleMu")
+		suite.FailNow("RemoveByNode should wait for lifecycleMu")
 	case <-time.After(50 * time.Millisecond):
 	}
 	suite.AssertTaskNum(0, 1, 0, 1)
 
-	suite.scheduler.scheduleMu.Unlock()
+	suite.scheduler.lifecycleMu.Unlock()
 	locked = false
 
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		suite.FailNow("RemoveByNode blocked after scheduleMu was released")
+		suite.FailNow("RemoveByNode blocked after lifecycleMu was released")
 	}
 	suite.AssertTaskNum(0, 0, 0, 0)
 }
@@ -1860,7 +1861,7 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 
 	// new delegator distribution hasn't updated, block balance
 	suite.scheduler.preProcess(task)
-	suite.Equal(0, task.step)
+	suite.Equal(0, task.Step())
 
 	suite.dist.ChannelDistManager.Update(1, &meta.DmChannel{
 		VchannelInfo: &datapb.VchannelInfo{
@@ -1880,12 +1881,12 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 
 	// new delegator distribution updated, task step up
 	suite.scheduler.preProcess(task)
-	suite.Equal(1, task.step)
+	suite.Equal(1, task.Step())
 
 	suite.dist.ChannelDistManager.Update(2)
 	// old delegator removed
 	suite.scheduler.preProcess(task)
-	suite.Equal(2, task.step)
+	suite.Equal(2, task.Step())
 }
 
 func (suite *TaskSuite) TestGetTasksJSON() {
@@ -1934,13 +1935,15 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	nodeID := int64(1)
 	channelName := "channel-1"
 	segmentID := int64(1)
+	replica := utils.CreateTestReplica(11, coll, []int64{nodeID})
+	suite.Require().NoError(suite.meta.Put(ctx, replica))
 	// add segment task for collection
 	task1, err := NewSegmentTask(
 		ctx,
 		10*time.Second,
 		WrapIDSource(0),
 		coll,
-		suite.replica,
+		replica,
 		commonpb.LoadPriority_LOW,
 		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
 	)
@@ -1953,7 +1956,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		10*time.Second,
 		WrapIDSource(0),
 		coll,
-		suite.replica,
+		replica,
 		NewChannelAction(nodeID, ActionTypeGrow, channelName),
 	)
 	task2.SetID(2)
@@ -1965,12 +1968,14 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 	nodeID2 := int64(2)
 	channelName2 := "channel-2"
 	segmentID2 := int64(2)
+	replica2 := utils.CreateTestReplica(12, coll2, []int64{nodeID2})
+	suite.Require().NoError(suite.meta.Put(ctx, replica2))
 	task3, err := NewSegmentTask(
 		ctx,
 		10*time.Second,
 		WrapIDSource(0),
 		coll2,
-		suite.replica,
+		replica2,
 		commonpb.LoadPriority_LOW,
 		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical, 100),
 	)
@@ -1983,7 +1988,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		10*time.Second,
 		WrapIDSource(0),
 		coll2,
-		suite.replica,
+		replica2,
 		NewChannelAction(nodeID2, ActionTypeGrow, channelName2),
 	)
 	suite.NoError(err)
@@ -2034,7 +2039,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		10*time.Second,
 		WrapIDSource(0),
 		coll2,
-		suite.replica,
+		replica2,
 		NewChannelAction(nodeID2, ActionTypeGrow, channelName2),
 	)
 	suite.NoError(err)
@@ -2222,13 +2227,15 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 
 	coll := int64(1001)
 	nodeID := int64(1)
+	replica := utils.CreateTestReplica(11, coll, []int64{nodeID})
+	suite.Require().NoError(suite.meta.Put(ctx, replica))
 	// add segment task for collection
 	task1, err := NewSegmentTask(
 		ctx,
 		10*time.Second,
 		WrapIDSource(0),
 		coll,
-		suite.replica,
+		replica,
 		commonpb.LoadPriority_LOW,
 		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", 1, querypb.DataScope_Historical, 100),
 	)
@@ -2247,7 +2254,7 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 		10*time.Second,
 		WrapIDSource(0),
 		coll,
-		suite.replica,
+		replica,
 		commonpb.LoadPriority_LOW,
 		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", 1, querypb.DataScope_Historical, 100),
 	)
@@ -2404,10 +2411,23 @@ func TestChannelTaskDeltaDefensiveBranches(t *testing.T) {
 	delta.Sub(channelTask)
 	assert.Equal(t, 0, delta.Get(1, 100))
 
+	// Keep another reservation live while exercising a missing aggregate.
+	other, err := NewChannelTask(context.Background(), time.Second, WrapIDSource(0),
+		100, replica, NewChannelAction(2, ActionTypeGrow, "other"))
+	assert.NoError(t, err)
+	other.SetID(2)
+	delta.Add(other)
 	delta.taskIDRecords.Insert(channelTask.ID())
 	delete(delta.data, int64(1))
 	delta.Sub(channelTask)
 	assert.Equal(t, -1, delta.Get(1, 100))
+
+	// Retiring the final reservation reclaims even defensive aggregate entries.
+	delta.Sub(other)
+	assert.Zero(t, delta.Get(1, 100))
+	assert.Zero(t, delta.Get(2, 100))
+	assert.Empty(t, delta.data)
+	assert.Empty(t, delta.nodeTotalDelta)
 }
 
 func TestMockSchedulerGetSegmentTaskDeltaSnapshot(t *testing.T) {
