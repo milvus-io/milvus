@@ -23,7 +23,13 @@ FILE_COVERAGE_HTML="$PWD/go_coverage.html"
 set -e
 
 BASEDIR=$(dirname "$0")
-source $BASEDIR/setenv.sh
+source $BASEDIR/setenv.sh || exit 1
+
+if [[ "${MILVUS_ENABLE_TSAN}" == "ON" ]]; then
+    echo "ERROR: Go -race tests require a separate build without USE_TSAN" >&2
+    exit 1
+fi
+
 set -e
 
 echo "mode: atomic" > ${FILE_COVERAGE_INFO}

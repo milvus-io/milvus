@@ -20,9 +20,14 @@
 set -e
 
 BASEDIR=$(dirname "$0")
-source $BASEDIR/setenv.sh
+source $BASEDIR/setenv.sh || exit 1
 # setenv.sh disables errexit; restore fail-fast behavior for test commands.
 set -e
+
+if [[ "${MILVUS_ENABLE_TSAN}" == "ON" ]]; then
+    echo "ERROR: Go -race tests require a separate build without USE_TSAN" >&2
+    exit 1
+fi
 
 if [[ $(uname -s) == "Darwin" ]]; then
     export MallocNanoZone=0
