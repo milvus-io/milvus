@@ -2,7 +2,6 @@ package distance
 
 import (
 	"context"
-	"math"
 
 	"golang.org/x/sys/cpu"
 
@@ -15,8 +14,10 @@ func init() {
 		mlog.Info(context.TODO(), "Hook avx for go simd distance computation")
 		IPImpl = asm.IP
 		L2Impl = asm.L2
-		CosineImpl = func(a []float32, b []float32) float32 {
-			return asm.IP(a, b) / float32(math.Sqrt(float64(asm.IP(a, a))*float64((asm.IP(b, b)))))
-		}
+		// The AVX2 cosine hook accumulated squared norms in float32, which
+		// underflows to 0 for vectors with norm below ~1e-19 and returned
+		// NaN instead of staying scale-invariant (milvus-io/milvus#53903).
+		// Delegate to the float64-accumulating pure implementation.
+		CosineImpl = CosineImplPure
 	}
 }
