@@ -24,9 +24,9 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -43,15 +43,25 @@ import (
 )
 
 type Client struct {
-	conn             *grpc.ClientConn
-	service          milvuspb.MilvusServiceClient
+	connectionsMut sync.RWMutex
+	connections    []*clientConn
+	streamConn     *clientConn
+	nextConnection atomic.Uint64
+	closed         bool
+
+	closeMut     sync.Mutex
+	lifecycleMut sync.RWMutex
+	rotationCtx  context.Context
+	rotationStop context.CancelFunc
+	rotationWG   sync.WaitGroup
+
+	// Bound to the non-rotating connection before telemetry starts.
 	telemetryService milvuspb.ClientTelemetryServiceClient
 	config           *ClientConfig
 
 	// mutable status
-	stateMut   sync.RWMutex
-	currentDB  string
-	identifier string // Identifier for this connection
+	stateMut  sync.RWMutex
+	currentDB string
 
 	metadataHeaders map[string]string
 
@@ -61,14 +71,30 @@ type Client struct {
 	telemetry *ClientTelemetryManager
 }
 
+type clientConn struct {
+	conn    *grpc.ClientConn
+	service milvuspb.MilvusServiceClient
+
+	stateMut   sync.RWMutex
+	identifier string
+
+	inflight  atomic.Int64
+	retiring  atomic.Bool
+	drained   chan struct{}
+	drainOnce sync.Once
+}
+
 func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	if err := config.parse(); err != nil {
 		return nil, err
 	}
 
+	rotationCtx, rotationStop := context.WithCancel(context.Background())
 	c := &Client{
-		config:    config,
-		currentDB: config.DBName,
+		config:       config,
+		currentDB:    config.DBName,
+		rotationCtx:  rotationCtx,
+		rotationStop: rotationStop,
 	}
 
 	// Parse remote address.
@@ -76,13 +102,31 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 
 	// parse authentication parameters
 	c.parseAuthentication()
-	// Parse grpc options
-	options := c.dialOptions()
 
-	// Connect the grpc server.
-	if err := c.connect(ctx, addr, options...); err != nil {
-		return nil, err
+	// Independent ClientConns give an L4 load balancer multiple TCP connections
+	// to distribute across Proxy instances.
+	for i := 0; i < config.getConnectionPoolSize(); i++ {
+		connection, err := c.newConnection(ctx, addr)
+		if err != nil {
+			_ = c.Close(context.Background())
+			return nil, err
+		}
+		c.connections = append(c.connections, connection)
 	}
+
+	if config.ConnectionMaxAge > 0 {
+		connection, err := c.newConnection(ctx, addr)
+		if err != nil {
+			_ = c.Close(context.Background())
+			return nil, err
+		}
+		c.streamConn = connection
+	}
+	telemetryConn := c.connections[0]
+	if c.streamConn != nil {
+		telemetryConn = c.streamConn
+	}
+	c.telemetryService = milvuspb.NewClientTelemetryServiceClient(telemetryConn.conn)
 
 	c.collCache = NewCollectionCache(func(ctx context.Context, collName string) (*entity.Collection, error) {
 		return c.DescribeCollection(ctx, NewDescribeCollectionOption(collName))
@@ -91,11 +135,23 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	// Initialize and start telemetry manager
 	c.telemetry = NewClientTelemetryManager(c, config.TelemetryConfig)
 	c.telemetry.Start()
+	c.startConnectionRotation()
 
 	return c, nil
 }
 
 func (c *Client) dialOptions() []grpc.DialOption {
+	return c.dialOptionsWithInterceptors(c.MetadataUnaryInterceptor(), c.MetadataStreamInterceptor())
+}
+
+func (c *Client) dialOptionsForConnection(connection *clientConn) []grpc.DialOption {
+	return c.dialOptionsWithInterceptors(
+		c.metadataUnaryInterceptor(connection.getIdentifier),
+		c.metadataStreamInterceptor(connection.getIdentifier),
+	)
+}
+
+func (c *Client) dialOptionsWithInterceptors(unaryInterceptor grpc.UnaryClientInterceptor, streamInterceptor grpc.StreamClientInterceptor) []grpc.DialOption {
 	var options []grpc.DialOption
 	// Construct dial option.
 	if c.config.EnableTLSAuth {
@@ -124,11 +180,11 @@ func (c *Client) dialOptions() []grpc.DialOption {
 		))
 
 	options = append(options, grpc.WithChainUnaryInterceptor(
-		c.MetadataUnaryInterceptor(),
+		unaryInterceptor,
 	))
 
 	options = append(options, grpc.WithChainStreamInterceptor(
-		c.MetadataStreamInterceptor(),
+		streamInterceptor,
 	))
 
 	return options
@@ -149,22 +205,43 @@ func (c *Client) parseAuthentication() {
 	}
 }
 
-func (c *Client) Close(ctx context.Context) error {
-	// Stop telemetry manager first
+func (c *Client) Close(_ context.Context) error {
+	c.closeMut.Lock()
+	defer c.closeMut.Unlock()
+
+	c.connectionsMut.Lock()
+	if c.closed {
+		c.connectionsMut.Unlock()
+		return nil
+	}
+	c.closed = true
+	connections := c.connections
+	streamConn := c.streamConn
+	c.connections = nil
+	c.streamConn = nil
+	c.connectionsMut.Unlock()
+
+	if c.rotationStop != nil {
+		c.rotationStop()
+	}
+	// Close transports before waiting: active RPCs may hold lifecycleMut while
+	// a database switch and a rotation are waiting for that lock.
+	var firstErr error
+	for _, connection := range connections {
+		if err := connection.conn.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if streamConn != nil {
+		if err := streamConn.conn.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	c.rotationWG.Wait()
 	if c.telemetry != nil {
 		c.telemetry.Stop()
 	}
-
-	if c.conn == nil {
-		return nil
-	}
-	err := c.conn.Close()
-	if err != nil {
-		return err
-	}
-	c.conn = nil
-	c.service = nil
-	return nil
+	return firstErr
 }
 
 func (c *Client) usingDatabase(dbName string) {
@@ -179,36 +256,43 @@ func (c *Client) getCurrentDB() string {
 	return c.currentDB
 }
 
-func (c *Client) setIdentifier(identifier string) {
+func (c *clientConn) setIdentifier(identifier string) {
 	c.stateMut.Lock()
 	defer c.stateMut.Unlock()
 	c.identifier = identifier
 }
 
-func (c *Client) connect(ctx context.Context, addr string, options ...grpc.DialOption) error {
+func (c *clientConn) getIdentifier() string {
+	c.stateMut.RLock()
+	defer c.stateMut.RUnlock()
+	return c.identifier
+}
+
+func (c *Client) newConnection(ctx context.Context, addr string) (*clientConn, error) {
 	if addr == "" {
-		return errors.New("address is empty")
+		return nil, merr.WrapErrParameterInvalidMsg("address is empty")
 	}
+	connection := &clientConn{drained: make(chan struct{})}
+	options := c.dialOptionsForConnection(connection)
 	conn, err := grpc.DialContext(ctx, addr, options...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	c.conn = conn
-	c.service = milvuspb.NewMilvusServiceClient(c.conn)
-	c.telemetryService = milvuspb.NewClientTelemetryServiceClient(c.conn)
+	connection.conn = conn
+	connection.service = milvuspb.NewMilvusServiceClient(conn)
 
 	if !c.config.DisableConn {
-		err = c.connectInternal(ctx)
-		if err != nil {
-			return err
+		if err := c.connectConnection(ctx, connection); err != nil {
+			_ = conn.Close()
+			return nil, err
 		}
 	}
 
-	return nil
+	return connection, nil
 }
 
-func (c *Client) connectInternal(ctx context.Context) error {
+func (c *Client) connectConnection(ctx context.Context, connection *clientConn) error {
 	hostName, err := os.Hostname()
 	if err != nil {
 		return err
@@ -224,7 +308,7 @@ func (c *Client) connectInternal(ctx context.Context) error {
 		},
 	}
 
-	resp, err := c.service.Connect(ctx, req)
+	resp, err := connection.service.Connect(ctx, req)
 	if err != nil {
 		status, ok := status.FromError(err)
 		if ok {
@@ -246,25 +330,69 @@ func (c *Client) connectInternal(ctx context.Context) error {
 	}
 
 	c.config.setServerInfo(resp.GetServerInfo().GetBuildTags())
-	c.setIdentifier(strconv.FormatInt(resp.GetIdentifier(), 10))
-	if c.collCache != nil {
-		c.collCache.Reset()
-	}
+	connection.setIdentifier(strconv.FormatInt(resp.GetIdentifier(), 10))
 
 	return nil
 }
 
+func (c *Client) connectInternal(ctx context.Context) error {
+	connection := c.acquireConnection()
+	if connection == nil {
+		return merr.WrapErrServiceNotReady("SDK", 0, "not connected")
+	}
+	defer connection.release()
+	return c.connectConnection(ctx, connection)
+}
+
+// selectConnection returns the next connection. The caller must hold connectionsMut.
+func (c *Client) selectConnection() *clientConn {
+	if len(c.connections) == 0 {
+		return nil
+	}
+	idx := c.nextConnection.Add(1) - 1
+	return c.connections[idx%uint64(len(c.connections))]
+}
+
 func (c *Client) callService(fn func(milvusService milvuspb.MilvusServiceClient) error) error {
-	service := c.service
+	c.lifecycleMut.RLock()
+	defer c.lifecycleMut.RUnlock()
+
+	connection := c.acquireConnection()
+	if connection == nil {
+		return merr.WrapErrServiceNotReady("SDK", 0, "not connected")
+	}
+	defer connection.release()
+
+	return fn(connection.service)
+}
+
+func (c *Client) callStreamService(fn func(milvusService milvuspb.MilvusServiceClient) error) error {
+	c.lifecycleMut.RLock()
+	defer c.lifecycleMut.RUnlock()
+
+	// GetService releases connectionsMut before invoking any RPC. In particular,
+	// a stream waiting for a transport must not block Close from closing it.
+	service := c.GetService()
 	if service == nil {
 		return merr.WrapErrServiceNotReady("SDK", 0, "not connected")
 	}
-
-	return fn(c.service)
+	return fn(service)
 }
 
+// GetService returns a service bound to a non-rotating connection. Calls made
+// through it bypass pool selection and graceful unary draining.
 func (c *Client) GetService() milvuspb.MilvusServiceClient {
-	return c.service
+	c.connectionsMut.RLock()
+	defer c.connectionsMut.RUnlock()
+
+	connection := c.streamConn
+	if connection == nil && len(c.connections) > 0 {
+		connection = c.connections[0]
+	}
+	if connection == nil {
+		return nil
+	}
+	return connection.service
 }
 
 // GetTelemetry returns the telemetry manager for this client
