@@ -27,13 +27,31 @@ var _ inspector.TimeTickSyncOperator = &timeTickSyncOperator{}
 // NewTimeTickSyncOperator creates a new time tick sync operator.
 func newTimeTickSyncOperator(param *interceptors.InterceptorBuildParam) *timeTickSyncOperator {
 	metrics := metricsutil.NewTimeTickMetrics(param.ChannelInfo.Name)
+	var recovered []*ack.AckDetail
+	if param.InitialRecoverSnapshot != nil && param.InitialRecoverSnapshot.TxnBuffer != nil {
+		for id, builder := range param.InitialRecoverSnapshot.TxnBuffer.GetUncommittedMessageBuilder() {
+			session, err := param.TxnManager.GetSessionOfTxn(id)
+			if err != nil {
+				panic(err) // The manager and ACK state are built from the same startup snapshot.
+			}
+			begin, bodies := builder.Messages()
+			for _, msg := range append([]message.ImmutableMessage{begin}, bodies...) {
+				recovered = append(recovered, &ack.AckDetail{
+					Message: msg, TxnSession: session,
+					// The barrier fences every old-writer append, including its
+					// transient concurrency boundary that is not recorded in WAL.
+					EndTimestamp: param.LastTimeTickMessage.TimeTick(),
+				})
+			}
+		}
+	}
 	return &timeTickSyncOperator{
 		logger: resource.Resource().Logger().With(
 			mlog.FieldComponent("timetick-sync"),
 			mlog.Any("pchannel", param.ChannelInfo),
 		),
 		interceptorBuildParam: param,
-		ackManager:            ack.NewAckManager(param.LastTimeTickMessage.TimeTick(), param.LastConfirmedMessageID, metrics),
+		ackManager:            ack.NewAckManager(param.LastTimeTickMessage.TimeTick(), param.LastConfirmedMessageID, metrics, recovered...),
 		ackDetails:            ack.NewAckDetails(),
 		sourceID:              paramtable.GetNodeID(),
 		metrics:               metrics,
