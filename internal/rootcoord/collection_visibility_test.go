@@ -29,7 +29,8 @@ import (
 
 func TestCollectionVisibilityRoleReplacement(t *testing.T) {
 	meta := newMockMetaTable()
-	grants := []*milvuspb.GrantEntity{{Role: &milvuspb.RoleEntity{Name: "reader"},
+	grants := []*milvuspb.GrantEntity{{
+		Role:   &milvuspb.RoleEntity{Name: "reader"},
 		Object: &milvuspb.ObjectEntity{Name: "Global"}, ObjectName: "orders", DbName: "tenant_b",
 		Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "EmptyGroup"}},
 	}}

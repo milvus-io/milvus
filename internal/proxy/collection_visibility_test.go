@@ -73,8 +73,10 @@ func TestDescribeCollectionLocalVisibility(t *testing.T) {
 	_, err := node.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 		OpType: int32(typeutil.CacheRevokePrivilege),
 		OpKey:  funcutil.PolicyForPrivilege("reader", "Collection", "orders", "Query", "tenant_b"),
-		CollectionVisibility: &internalpb.CollectionVisibilitySnapshot{FormatVersion: 1,
-			Roles: []*internalpb.RoleCollectionVisibility{{Role: "reader"}}},
+		CollectionVisibility: &internalpb.CollectionVisibilitySnapshot{
+			FormatVersion: 1,
+			Roles:         []*internalpb.RoleCollectionVisibility{{Role: "reader"}},
+		},
 	})
 	require.NoError(t, err)
 	resp, err := node.DescribeCollection(ctx, req)
