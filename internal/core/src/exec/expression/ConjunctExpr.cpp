@@ -168,7 +168,33 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
     }
 
+    // Runtime ngram layout and compiler ordering are now fixed. Classify this
+    // narrow prefix once; ordinary conjunctions need no per-batch RTTI work.
+    if (!regex_prefix_checked_) {
+        regex_prefix_checked_ = true;
+        if (is_and_ && input_order_.size() >= 2) {
+            auto unwrap_unary = [](ExprPtr input) {
+                if (auto adapter =
+                        std::dynamic_pointer_cast<RawExprCacheAdapter>(input)) {
+                    input = adapter->wrapped_expr();
+                }
+                return dynamic_cast<PhyUnaryRangeFilterExpr*>(input.get());
+            };
+            auto* prefix = unwrap_unary(inputs_[input_order_[0]]);
+            auto* next = unwrap_unary(inputs_[input_order_[1]]);
+            if (prefix && next && next->IsRegexPrefilterConsumer()) {
+                numeric_prefix_ = prefix;
+                regex_successor_ = next;
+            }
+        }
+    }
+
     bool has_result = false;
+    const bool may_borrow_numeric_prefix =
+        is_and_ && context.get_offset_input() == nullptr &&
+        context.get_bitmap_input().empty();
+    EvalCtx::RegexWorkProvider prefix_provider;
+    bool have_prefix_provider = false;
     for (size_t i = 0; i < input_order_.size(); ++i) {
         size_t idx = input_order_[i];
 
@@ -178,7 +204,14 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
 
         VectorPtr input_result;
-        inputs_[idx]->Eval(context, input_result);
+        const auto* provider =
+            i == 1 && have_prefix_provider ? &prefix_provider : nullptr;
+        if (provider != nullptr || context.has_regex_work_provider()) {
+            EvalCtx::ScopedRegexWorkProvider stats_scope(context, provider);
+            inputs_[idx]->Eval(context, input_result);
+        } else {
+            inputs_[idx]->Eval(context, input_result);
+        }
 
         ColumnVectorPtr all_flat_result;
         if (!has_result) {
@@ -213,6 +246,27 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             return;
         }
         context.set_bitmap_input(std::move(active_rows));
+        // Only one immediate first numeric prefix is an exact whole-window
+        // source. A later combination, outer mask, NOT or nested expression
+        // requires another contract and deliberately stays unknown here.
+        if (i == 0 && may_borrow_numeric_prefix && numeric_prefix_ &&
+            regex_successor_->IsRegexPrefilterConsumer()) {
+            numeric_prefix_truth_ =
+                numeric_prefix_->GetComputedNumericPredicate();
+            if (numeric_prefix_truth_) {
+                prefix_provider = [this](size_t begin,
+                                         size_t remaining,
+                                         size_t batch) {
+                    if (!numeric_prefix_stats_ ||
+                        !numeric_prefix_stats_->Matches(
+                            numeric_prefix_truth_)) {
+                        numeric_prefix_stats_.emplace(numeric_prefix_truth_);
+                    }
+                    return numeric_prefix_stats_->Get(begin, remaining, batch);
+                };
+                have_prefix_provider = true;
+            }
+        }
     }
     ClearBitmapInput(context);
 }

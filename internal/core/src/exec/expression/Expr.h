@@ -756,6 +756,14 @@ class SegmentExpr : public Expr {
         return exec_path_;
     }
 
+    // Most index paths expose index results directly and use their own cache.
+    // A deferred candidate path may opt in when Eval always returns a fully
+    // rechecked predicate result with the same signature as a raw scan.
+    virtual bool
+    CanReadFromRawExprCache() const {
+        return GetExecPath() == ExprExecPath::RawData;
+    }
+
     const segcore::SegmentInternalInterface*
     GetSegment() const {
         return segment_;

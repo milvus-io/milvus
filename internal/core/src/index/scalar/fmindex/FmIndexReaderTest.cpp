@@ -20,10 +20,14 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "common/RegexQuery.h"
+#include "common/RegexIndexPlan.h"
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/fmindex/FMIndex.h"
+#include "index/scalar/fmindex/FmIndexReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
 #include "index/test_utils/ScalarTestData.h"
 
@@ -65,6 +69,72 @@ BuildFmReader(std::vector<std::string> values) {
     auto artifact =
         backend.Build(input.View(), {.row_count = data.values.size()});
     return backend.Open(std::move(artifact), {.row_count = data.values.size()});
+}
+
+TEST(FmIndexReaderTest, PreparedRegexPlansUseReaderPolicyAndExactRowDomain) {
+    std::vector<std::string> rows(512, std::string(500, 'x') + " COMMON");
+    rows[0] += " RARE RARE";
+    rows[1] = "RARE " + rows[1];  // False positive, retained for RE2 recheck.
+    rows[2] += " OTHER_TAG";
+    rows[7] += " RARE";  // A NULL payload must not enter the indexed text.
+    std::vector<std::string_view> docs(rows.begin(), rows.end());
+    docs[7] = {};
+    auto engine = std::make_shared<fmindex::FMIndex>();
+    engine->Build(docs, 8);
+    TargetBitmap nulls(rows.size(), false);
+    nulls.set(7);
+    const auto storage = FmIndexStorage::Create(nullptr,
+                                                std::move(engine),
+                                                std::move(nulls),
+                                                rows.size(),
+                                                DataType::VARCHAR,
+                                                true,
+                                                FmIndexStateOrigin::Builder);
+    const FmIndexReader reader(storage, 0.007);
+    const auto model = reader.GetRegexIndexCostModel();
+    EXPECT_EQ(model.rows, rows.size());
+    size_t bytes = 0;
+    for (const auto& doc : docs) {
+        bytes += doc.size();
+    }
+    EXPECT_EQ(model.text_bytes, bytes);
+    EXPECT_EQ(model.sa_sample_rate, 8u);
+    EXPECT_DOUBLE_EQ(model.cost_ratio, 0.007);
+
+    for (const auto& [pattern, occurrences, expected_rows] :
+         std::vector<std::tuple<std::string, double, size_t>>{
+             {"COMMON.*RARE", 3, 2},
+             {"COMMON.*RARE|OTHER_TAG.*", 4, 3},
+             {"COMMON.*ABSENT_54191", 0, 0}}) {
+        SCOPED_TRACE(pattern);
+        PartialRegexMatcher matcher(pattern);
+        const auto plan =
+            reader.PrepareRegexIndexPlan(matcher.RequiredIndexCondition());
+        ASSERT_NE(plan, nullptr);
+        EXPECT_TRUE(plan->Usable());
+        EXPECT_DOUBLE_EQ(plan->occurrences, occurrences);
+        EXPECT_DOUBLE_EQ(plan->estimated_rows, occurrences);
+        EXPECT_EQ(plan->empty_result, occurrences == 0);
+        const auto candidates = reader.ExecuteRegexIndexPlan(*plan);
+        ASSERT_EQ(candidates.size(), rows.size());
+        EXPECT_EQ(candidates.count(), expected_rows);
+        EXPECT_FALSE(candidates[7]);
+        for (size_t row = 0; row < rows.size(); ++row) {
+            if (row != 7 && matcher(rows[row])) {
+                EXPECT_TRUE(candidates[row]) << "missing row=" << row;
+            }
+        }
+    }
+
+    // Ratio is constructor policy shared by both routing APIs, independent of
+    // global segment configuration and fixed for this reader's lifetime.
+    const FmIndexReader disabled(storage, 0.0);
+    EXPECT_DOUBLE_EQ(disabled.GetRegexIndexCostModel().cost_ratio, 0.0);
+    EXPECT_FALSE(disabled.ShouldUseForOp(PatternOp::RegexMatch, "RARE.*"));
+    auto plan = disabled.PrepareRegexIndexPlan(
+        PartialRegexMatcher("RARE.*").RequiredIndexCondition());
+    ASSERT_NE(plan, nullptr);
+    EXPECT_FALSE(ShouldUseRegexIndexPlan(*plan, rows.size(), 128, 128));
 }
 
 TEST(FmIndexReaderTest, RepeatedOccurrencesMapToOneRow) {

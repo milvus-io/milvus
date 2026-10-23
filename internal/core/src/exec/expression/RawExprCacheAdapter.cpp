@@ -83,7 +83,7 @@ RawExprCacheAdapter::EnsureLookup() {
             auto& manager = ExprResCacheManager::Instance();
             if (segment == nullptr ||
                 !manager.CanCacheSegment(segment->type()) ||
-                input_->GetExecPath() != ExprExecPath::RawData) {
+                !input_->CanReadFromRawExprCache()) {
                 return;
             }
 
