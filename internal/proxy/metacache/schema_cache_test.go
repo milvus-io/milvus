@@ -75,7 +75,7 @@ func TestSchemaCacheReadWriteSelectors(t *testing.T) {
 	require.NoError(t, err)
 	cache.collections[1] = newCollectionInfo(&milvuspb.DescribeCollectionResponse{
 		CollectionID: 1, DbName: "default", VirtualChannelNames: []string{"p_1v0"},
-	}, published, false, "", false, false)
+	}, published, false, "")
 	write, err := cache.GetCollectionWriteInfo(t.Context(), "default", "", 1)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, write.Schema.GetVersion())
@@ -95,7 +95,7 @@ func TestSchemaCacheReadWriteSelectors(t *testing.T) {
 	cache.RemoveCollectionsByID(t.Context(), 1)
 	cache.collections[1] = newCollectionInfo(&milvuspb.DescribeCollectionResponse{
 		CollectionID: 1, DbName: "default", VirtualChannelNames: []string{"p_1v0"},
-	}, body, false, "", false, false)
+	}, body, false, "")
 	refreshed, err := cache.GetCollectionWriteInfo(t.Context(), "default", "", 1)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, refreshed.Schema.GetVersion())
