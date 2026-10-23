@@ -442,7 +442,7 @@ func TestStartOrResumeAzureCopyCompletedDestination(t *testing.T) {
 			}
 			first, second := newClient(), newClient()
 			if retry {
-				err := startOrResumeAzureCopy(ctx, first, source, "object")
+				_, err := startOrResumeAzureCopy(ctx, first, source, "object")
 				require.NoError(t, err)
 			} else {
 				done := make(chan error, 1)
@@ -450,7 +450,7 @@ func TestStartOrResumeAzureCopyCompletedDestination(t *testing.T) {
 				workers.Add(1)
 				go func() {
 					defer workers.Done()
-					err := startOrResumeAzureCopy(ctx, first, source, "object")
+					_, err := startOrResumeAzureCopy(ctx, first, source, "object")
 					done <- err
 				}()
 				defer func() { cancel(); workers.Wait() }()
@@ -459,14 +459,14 @@ func TestStartOrResumeAzureCopyCompletedDestination(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				err := startOrResumeAzureCopy(ctx, second, source, "object")
+				_, err := startOrResumeAzureCopy(ctx, second, source, "object")
 				close(releaseFirstPoll)
 				require.NoError(t, err)
 				require.NoError(t, <-done)
 			}
 			// A later task retry must also preserve the completed CopyID.
 			if !retry {
-				err := startOrResumeAzureCopy(ctx, second, source, "object")
+				_, err := startOrResumeAzureCopy(ctx, second, source, "object")
 				require.NoError(t, err)
 			}
 			mu.Lock()
