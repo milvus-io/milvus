@@ -69,6 +69,9 @@ message RefreshPolicyInfoCacheRequest {
   common.MsgBase base = 1;
   int32 opType = 2;
   string opKey = 3;
+  // Partial replacement for affected roles. Absent on legacy grant/revoke
+  // notifications: receivers must fall back to coordinator visibility checks.
+  internal.CollectionVisibilitySnapshot collection_visibility = 4;
 }
 
 // Deprecated: use ClusterLimiter instead it

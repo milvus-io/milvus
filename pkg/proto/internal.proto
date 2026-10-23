@@ -355,7 +355,9 @@ message ListPolicyResponse {
   repeated string policy_infos = 2;
   repeated string user_roles = 3;
   repeated milvus.PrivilegeGroupInfo privilege_groups = 4;
+  CollectionVisibilitySnapshot collection_visibility = 5;
 }
+
 
 message ShowConfigurationsRequest {
   common.MsgBase base = 1;
@@ -671,4 +673,22 @@ message BackupEzkRequest {
 message BackupEzkResponse {
   common.Status status = 1;
   string ezk = 2;
+}
+
+// A projection of raw grants, independent of expanded action policies. An
+// empty version-1 snapshot is supported and denies visibility to ordinary roles.
+message CollectionVisibilitySnapshot {
+  uint32 format_version = 1;
+  repeated RoleCollectionVisibility roles = 2;
+}
+
+// Replaces all visibility rules for this role, including when rules is empty.
+message RoleCollectionVisibility {
+  string role = 1;
+  repeated CollectionVisibilityRule rules = 2;
+}
+
+message CollectionVisibilityRule {
+  string db_name = 1;
+  string collection_name = 2;
 }

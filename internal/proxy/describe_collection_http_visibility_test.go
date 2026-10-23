@@ -32,8 +32,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -90,6 +93,56 @@ func TestConsoleDescribeCollectionVisibility(t *testing.T) {
 				require.NotEqual(t, http.StatusOK, w.Code)
 				require.NotContains(t, w.Body.String(), "orders")
 				require.NotContains(t, w.Body.String(), "fields")
+			}
+		})
+	}
+}
+
+func TestConsoleLocalCollectionVisibility(t *testing.T) {
+	for key, value := range map[string]string{
+		Params.CommonCfg.AuthorizationEnabled.Key:           "true",
+		Params.ProxyCfg.EnableLocalCollectionVisibility.Key: "true",
+	} {
+		require.NoError(t, Params.Save(key, value))
+		t.Cleanup(func() { Params.Reset(key) })
+	}
+	t.Cleanup(privilege.ResetPrivilegeCacheForTest)
+	for _, tc := range []struct {
+		name, db string
+		allow    bool
+		status   int
+	}{
+		{"allow", "tenant_b", true, http.StatusOK},
+		{"deny", "tenant_b", false, http.StatusForbidden},
+		{"missing resolved database", "", true, http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mix := mocks.NewMockMixCoordClient(t)
+			role := &internalpb.RoleCollectionVisibility{Role: "reader"}
+			if tc.allow {
+				role.Rules = []*internalpb.CollectionVisibilityRule{{DbName: "tenant_b", CollectionName: "orders"}}
+			}
+			mix.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+				Status: merr.Success(), UserRoles: []string{funcutil.EncodeUserRoleCache("alice", "reader")},
+				CollectionVisibility: &internalpb.CollectionVisibilitySnapshot{FormatVersion: 1, Roles: []*internalpb.RoleCollectionVisibility{role}},
+			}, nil).Once()
+			require.NoError(t, privilege.InitPrivilegeCache(context.Background(), mix))
+			mix.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, _ *milvuspb.DescribeCollectionRequest, _ ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+				md, _ := metadata.FromOutgoingContext(ctx)
+				require.Empty(t, md.Get(util.HeaderAuthorize), "lookup is internal; authorization follows locally")
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: tc.db, CollectionID: 77, Schema: &schemapb.CollectionSchema{Name: "orders"}}, nil
+			}).Once()
+			if tc.status == http.StatusOK {
+				mix.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{Status: merr.Success()}, nil).Once()
+			}
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/?db_name=tenant_b&collection_name=orders", nil)
+			ctx.Set("username", "alice")
+			describeCollection(&Proxy{mixCoord: mix})(ctx)
+			require.Equal(t, tc.status, recorder.Code)
+			if tc.status != http.StatusOK {
+				require.NotContains(t, recorder.Body.String(), "collection_id")
 			}
 		})
 	}

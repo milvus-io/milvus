@@ -1873,3 +1873,11 @@ func TestPartialUpdateRecoveryDecodeTimeoutConfig(t *testing.T) {
 	assert.NoError(t, params.Reset(item.Key))
 	assert.Equal(t, 5*time.Second, item.GetAsDurationByParse())
 }
+
+func TestProxyLocalCollectionVisibilityDefault(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	require.False(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
+	require.NoError(t, params.Save(params.ProxyCfg.EnableLocalCollectionVisibility.Key, "true"))
+	require.True(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
+}
