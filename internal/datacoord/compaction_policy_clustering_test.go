@@ -249,6 +249,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNoClusteringKe
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
+		Type:         datapb.CompactionType_ClusteringCompaction,
 		State:        datapb.CompactionTaskState_executing,
 	})
 
@@ -270,6 +271,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionCompacting() {
 		TriggerID:    1,
 		PlanID:       10,
 		CollectionID: 100,
+		Type:         datapb.CompactionType_ClusteringCompaction,
 		State:        datapb.CompactionTaskState_executing,
 	})
 
@@ -302,6 +304,7 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 			{datapb.CompactionTaskState_indexing, true, 1},
 			{datapb.CompactionTaskState_cleaned, false, 1},
 			{datapb.CompactionTaskState_meta_saved, true, 1},
+			{datapb.CompactionTaskState_statistic, true, 1},
 		}
 
 		for _, test := range tests {
@@ -315,6 +318,7 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 					TriggerID:    1,
 					PlanID:       10,
 					CollectionID: collID,
+					Type:         datapb.CompactionType_ClusteringCompaction,
 					State:        test.state,
 				})
 
@@ -324,6 +328,137 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 			})
 		}
 	})
+}
+
+func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompactingOtherTriggers() {
+	tests := []struct {
+		name         string
+		tasks        []*datapb.CompactionTask
+		isCompacting bool
+		triggerID    int64
+	}{
+		{
+			name: "only mix compaction is running",
+			tasks: []*datapb.CompactionTask{
+				{TriggerID: 1, Type: datapb.CompactionType_MixCompaction, State: datapb.CompactionTaskState_executing},
+			},
+		},
+		{
+			name: "newer mix compaction does not hide active clustering",
+			tasks: []*datapb.CompactionTask{
+				{TriggerID: 1, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_indexing},
+				{TriggerID: 2, Type: datapb.CompactionType_MixCompaction, State: datapb.CompactionTaskState_executing},
+			},
+			isCompacting: true,
+			triggerID:    1,
+		},
+		{
+			name: "newer completed clustering does not hide active clustering",
+			tasks: []*datapb.CompactionTask{
+				{TriggerID: 1, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_analyzing},
+				{TriggerID: 2, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_completed},
+			},
+			isCompacting: true,
+			triggerID:    1,
+		},
+		{
+			name: "all clustering tasks are terminal despite running mix compaction",
+			tasks: []*datapb.CompactionTask{
+				{TriggerID: 1, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_failed},
+				{TriggerID: 2, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_completed},
+				{TriggerID: 3, Type: datapb.CompactionType_MixCompaction, State: datapb.CompactionTaskState_executing},
+			},
+			triggerID: 2,
+		},
+		{
+			name: "unfinished partition keeps the clustering trigger active",
+			tasks: []*datapb.CompactionTask{
+				{TriggerID: 1, PartitionID: 10, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_completed},
+				{TriggerID: 1, PartitionID: 11, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_meta_saved},
+			},
+			isCompacting: true,
+			triggerID:    1,
+		},
+		{
+			name: "latest active clustering trigger is reused",
+			tasks: []*datapb.CompactionTask{
+				{TriggerID: 1, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_executing},
+				{TriggerID: 2, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_pipelining},
+			},
+			isCompacting: true,
+			triggerID:    2,
+		},
+		{
+			name: "mix task in the same trigger is not a clustering task",
+			tasks: []*datapb.CompactionTask{
+				{TriggerID: 1, Type: datapb.CompactionType_ClusteringCompaction, State: datapb.CompactionTaskState_completed},
+				{TriggerID: 1, Type: datapb.CompactionType_MixCompaction, State: datapb.CompactionTaskState_executing},
+			},
+			triggerID: 1,
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			compactionTaskMeta := newTestCompactionTaskMeta(s.T())
+			policy := newClusteringCompactionPolicy(&meta{compactionTaskMeta: compactionTaskMeta}, nil, nil)
+			for i, task := range test.tasks {
+				task.PlanID = int64(i + 10)
+				task.CollectionID = collID
+				s.Require().NoError(compactionTaskMeta.SaveCompactionTask(context.Background(), task))
+			}
+
+			compacting, triggerID := policy.collectionIsClusteringCompacting(collID)
+			s.Equal(test.isCompacting, compacting)
+			s.Equal(test.triggerID, triggerID)
+		})
+	}
+}
+
+func (s *ClusteringCompactionPolicySuite) TestManualClusteringCompactionRetriesAfterMixCompaction() {
+	ctx := context.Background()
+	label := &CompactionGroupLabel{CollectionID: 100, PartitionID: 10, Channel: "ch-1"}
+	collection := &collectionInfo{ID: label.CollectionID, Schema: newTestScalarClusteringKeySchema()}
+	s.handler.EXPECT().GetCollection(mock.Anything, collection.ID).Return(collection, nil)
+	for _, segmentID := range []int64{300, 301} {
+		segment := genTestSegmentInfo(label, segmentID, datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed)
+		segment.NumOfRows = 100
+		segment.Binlogs = genTestBinlogs(1, MB)
+		s.meta.segments.SetSegment(segmentID, segment)
+	}
+	mixTask := &datapb.CompactionTask{
+		TriggerID:     1,
+		PlanID:        10,
+		CollectionID:  collection.ID,
+		PartitionID:   label.PartitionID,
+		Channel:       label.Channel,
+		Type:          datapb.CompactionType_MixCompaction,
+		State:         datapb.CompactionTaskState_executing,
+		InputSegments: []int64{300},
+	}
+	s.Require().NoError(s.meta.compactionTaskMeta.SaveCompactionTask(ctx, mixTask))
+	s.meta.SetSegmentsCompacting(ctx, mixTask.InputSegments, true)
+
+	// A busy L2 segment prevents partial clustering, but its Mix trigger must
+	// never be returned as though the manual clustering request was accepted.
+	views, triggerID, err := s.clusteringCompactionPolicy.triggerOneCollection(ctx, collection.ID, true)
+	s.Require().NoError(err)
+	s.Empty(views)
+	s.NotEqual(mixTask.TriggerID, triggerID)
+
+	mixTask.State = datapb.CompactionTaskState_completed
+	s.Require().NoError(s.meta.compactionTaskMeta.SaveCompactionTask(ctx, mixTask))
+	s.meta.SetSegmentsCompacting(ctx, mixTask.InputSegments, false)
+
+	views, triggerID, err = s.clusteringCompactionPolicy.triggerOneCollection(ctx, collection.ID, true)
+	s.Require().NoError(err)
+	s.Require().Len(views, 1)
+	s.Positive(triggerID)
+	s.NotEqual(mixTask.TriggerID, triggerID)
+	s.Equal(triggerID, views[0].GetTriggerID())
+	s.Equal(label, views[0].GetGroupLabel())
+	s.Require().Len(views[0].GetSegmentsView(), 2)
+	s.ElementsMatch([]int64{300, 301}, []int64{views[0].GetSegmentsView()[0].ID, views[0].GetSegmentsView()[1].ID})
 }
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
