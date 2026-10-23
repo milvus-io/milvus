@@ -731,7 +731,7 @@ func TestAnUnsortedRewriteOutputIsSortedAndIndexedInTheWindow(t *testing.T) {
 	assert.False(t, needDoTextIndex(f.svr.meta.GetSegment(ctx, output), []int64{1}, false))
 	assert.False(t, needDoJSONKeyIndex(f.svr.meta.GetSegment(ctx, output), []int64{1}, false))
 
-	_, _, err := f.svr.meta.CompleteCompactionMutation(ctx, sortOf(output), &datapb.CompactionPlanResult{
+	_, err := f.svr.meta.CompleteCompactionMutation(ctx, sortOf(output), &datapb.CompactionPlanResult{
 		PlanID: 5000 + output,
 		Segments: []*datapb.CompactionSegment{{
 			SegmentID: sorted, NumOfRows: 2048, IsSorted: true, Channel: t1,

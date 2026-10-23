@@ -27,12 +27,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -44,12 +44,13 @@ const (
 // newHashSplitMutationMeta builds a meta holding one flushed source segment on
 // hsSource, the input of a rewrite.
 func newHashSplitMutationMeta(t *testing.T) *meta {
+	catalog := &datacoord.Catalog{MetaKv: NewMetaMemoryKV()}
+	store := metacache.NewMetaStore(catalog)
 	m := &meta{
-		ctx:         context.Background(),
-		catalog:     &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		channelCPs:  newChannelCps(),
+		ctx:       context.Background(),
+		catalog:   catalog,
+		metaStore: store,
+		segments:  NewSegmentsInfo(store),
 	}
 	m.segments.SetSegment(500, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:            500,
@@ -185,7 +186,9 @@ func TestHashSplitMutationCatalogFailureChangesNothing(t *testing.T) {
 	assert.Nil(t, outputs)
 
 	source := m.GetSegment(context.Background(), 500)
-	assert.Same(t, before, source, "the in-memory input is not replaced")
+	// The store wraps its proto afresh on every read; the proto is what a
+	// replacement would change.
+	assert.Same(t, before.SegmentInfo, source.SegmentInfo, "the in-memory input is not replaced")
 	assert.Equal(t, commonpb.SegmentState_Flushed, source.GetState())
 	assert.False(t, source.GetCompacted())
 	assert.Zero(t, source.GetDroppedAt())
@@ -475,7 +478,7 @@ func TestHashSplitMutationRewritesOnlyItsOwnOutputs(t *testing.T) {
 			outputs, err := m.CompleteCompactionMutation(context.Background(), hashSplitRewriteTask(), result)
 			assert.ErrorIs(t, err, merr.ErrIllegalCompactionPlan)
 			assert.Nil(t, outputs)
-			assert.Same(t, tc.existing, m.GetSegment(context.Background(), 601), "the existing segment is left alone")
+			assert.Same(t, tc.existing.SegmentInfo, m.GetSegment(context.Background(), 601).SegmentInfo, "the existing segment is left alone")
 			assert.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(context.Background(), 500).GetState())
 		})
 	}
@@ -538,7 +541,7 @@ func TestHashSplitMutationDropsATornCommitsOrphanOutputs(t *testing.T) {
 	for _, id := range []int64{701, 702} {
 		assert.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, id).GetState(), "segment %d", id)
 	}
-	assert.Same(t, other, m.GetSegment(ctx, 603))
+	assert.Same(t, other.SegmentInfo, m.GetSegment(ctx, 603).SegmentInfo)
 	// Rows on the targets: the new outputs only.
 	var rows int64
 	for _, ch := range []string{hsTgt0, hsTgt1} {

@@ -197,7 +197,7 @@ func TestDispatcherRefusesAPlanItCannotBuild(t *testing.T) {
 		{
 			name: "a collection datacoord does not hold",
 			mutate: func(_ *datapb.SplitShardTask, m *meta, _ *fakeAllocator, _ *fakeInspector) {
-				m.collections.Remove(splitMgrCollection)
+				m.DropCollection(splitMgrCollection)
 			},
 			errIs: merr.ErrCollectionNotFound,
 		},
