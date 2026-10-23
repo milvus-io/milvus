@@ -6368,6 +6368,7 @@ type dataCoordConfig struct {
 	GCInterval                             ParamItem `refreshable:"false"`
 	GCMissingTolerance                     ParamItem `refreshable:"false"`
 	GCDropTolerance                        ParamItem `refreshable:"false"`
+	PKIndexGCGrace                         ParamItem `refreshable:"false"`
 	GCRemoveConcurrent                     ParamItem `refreshable:"false"`
 	GCScanIntervalInHour                   ParamItem `refreshable:"false"`
 	GCSlowDownCPUUsageThreshold            ParamItem `refreshable:"false"`
@@ -7395,6 +7396,15 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Export:       true,
 	}
 	p.GCDropTolerance.Init(base.mgr)
+
+	p.PKIndexGCGrace = ParamItem{
+		Key:          "dataCoord.pkindex.gc.grace",
+		Version:      "3.1.0-beta",
+		DefaultValue: "86400",
+		Doc:          "Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second. The minimum is 600 (10 minutes); a lower value disables the garbage collection of primary key index files.",
+		Export:       true,
+	}
+	p.PKIndexGCGrace.Init(base.mgr)
 
 	p.GCRemoveConcurrent = ParamItem{
 		Key:          "dataCoord.gc.removeConcurrent",
@@ -9317,6 +9327,19 @@ type streamingConfig struct {
 	PartialUpdateVersionIndexMaxBytes  ParamItem `refreshable:"false"`
 	PartialUpdateRecoveryDecodeTimeout ParamItem `refreshable:"true"`
 
+	// primary key index, experimental.
+	PKIndexEnabled ParamItem `refreshable:"false"`
+
+	PKIndexDataDir             ParamItem `refreshable:"false"`
+	PKIndexBlockCacheSize      ParamItem `refreshable:"false"`
+	PKIndexMaxOpenFiles        ParamItem `refreshable:"false"`
+	PKIndexMemTableSize        ParamItem `refreshable:"false"`
+	PKIndexHandoverActiveBytes ParamItem `refreshable:"true"`
+	PKIndexHandoverTailBytes   ParamItem `refreshable:"true"`
+	PKIndexHandoverMaxBackoff  ParamItem `refreshable:"true"`
+
+	PKIndexRecoveryManifestReadConcurrency ParamItem `refreshable:"false"`
+
 	// memory usage control
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
@@ -9729,6 +9752,92 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 		Doc:          "Total time budget, per WAL open, for rebuilding the write sets of pending transactions. A transaction whose bodies are not decoded within the budget is marked incomplete, and its commit is rejected and replayed. The budget is checked before each body decode, so 0 or a negative value marks every pending transaction with an insert or delete body incomplete. Larger values can delay WAL open when decoding stalls. Applies to WALs opened afterwards.",
 	}
 	p.PartialUpdateRecoveryDecodeTimeout.Init(base.mgr)
+
+	p.PKIndexEnabled = ParamItem{
+		Key:       "streaming.pkindex.enabled",
+		Version:   "3.0.0",
+		Forbidden: true,
+		Doc: `Experimental. Whether the streaming node maintains a primary key index on the write path,
+so that an insert of an existing primary key also deletes the old row. Off by default.`,
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.PKIndexEnabled.Init(base.mgr)
+
+	p.PKIndexDataDir = ParamItem{
+		Key:          "streaming.pkindex.dataDir",
+		Version:      "3.0.0",
+		Forbidden:    true,
+		Doc:          "The local directory of primary key index data. Empty means <localStorage.path>/pkindex.",
+		DefaultValue: "",
+		Export:       true,
+	}
+	p.PKIndexDataDir.Init(base.mgr)
+
+	p.PKIndexBlockCacheSize = ParamItem{
+		Key:          "streaming.pkindex.blockCacheSize",
+		Version:      "3.0.0",
+		Forbidden:    true,
+		Doc:          "The size of the block cache that all primary key indexes on one streaming node share.",
+		DefaultValue: "512m",
+		Export:       true,
+	}
+	p.PKIndexBlockCacheSize.Init(base.mgr)
+
+	p.PKIndexMaxOpenFiles = ParamItem{
+		Key:          "streaming.pkindex.maxOpenFiles",
+		Version:      "3.0.0",
+		Forbidden:    true,
+		Doc:          "The maximum number of open files in the table cache that all primary key indexes on one streaming node share.",
+		DefaultValue: "4096",
+		Export:       true,
+	}
+	p.PKIndexMaxOpenFiles.Init(base.mgr)
+
+	p.PKIndexMemTableSize = ParamItem{
+		Key:          "streaming.pkindex.memTableSize",
+		Version:      "3.0.0",
+		Doc:          "The memtable size of the primary key index of one vchannel.",
+		DefaultValue: "4m",
+		Export:       true,
+	}
+	p.PKIndexMemTableSize.Init(base.mgr)
+
+	p.PKIndexHandoverActiveBytes = ParamItem{
+		Key:          "streaming.pkindex.handover.activeBytes",
+		Version:      "3.0.0",
+		Doc:          "A vchannel hands over its primary key index writes to object storage after this many bytes of writes.",
+		DefaultValue: "64m",
+		Export:       true,
+	}
+	p.PKIndexHandoverActiveBytes.Init(base.mgr)
+
+	p.PKIndexHandoverTailBytes = ParamItem{
+		Key:          "streaming.pkindex.handover.tailBytes",
+		Version:      "3.0.0",
+		Doc:          "When the unpublished WAL tail reaches this size, the vchannel with the oldest committed primary key index hands over. Keep it below streaming.walRecovery.tail.lowWatermark.",
+		DefaultValue: "2g",
+		Export:       true,
+	}
+	p.PKIndexHandoverTailBytes.Init(base.mgr)
+
+	p.PKIndexHandoverMaxBackoff = ParamItem{
+		Key:          "streaming.pkindex.handover.maxBackoff",
+		Version:      "3.0.0",
+		Doc:          "The maximum wait between two attempts of a failed primary key index handover.",
+		DefaultValue: "60s",
+		Export:       true,
+	}
+	p.PKIndexHandoverMaxBackoff.Init(base.mgr)
+
+	p.PKIndexRecoveryManifestReadConcurrency = ParamItem{
+		Key:          "streaming.pkindex.recovery.manifestReadConcurrency",
+		Version:      "3.0.0",
+		Doc:          "The number of manifest bodies the primary key index reads in parallel when a WAL opens.",
+		DefaultValue: "64",
+		Export:       true,
+	}
+	p.PKIndexRecoveryManifestReadConcurrency.Init(base.mgr)
 
 	p.FlushMemoryThreshold = ParamItem{
 		Key:     "streaming.flush.memoryThreshold",
