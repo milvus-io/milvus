@@ -70,6 +70,38 @@ func TestWALMaterializerAlterCollectionIsABoundaryOnlyWhenItRetires(t *testing.T
 	require.True(t, m.isL0Boundary(retires))
 }
 
+// TestWALMaterializerSplitShardIsABoundaryOnlyOnTheSource: the same broadcast
+// lands on the source, its targets and the control channel. Only the source's
+// replica is the fence; a target's is its genesis, which has nothing before it
+// to materialize.
+func TestWALMaterializerSplitShardIsABoundaryOnlyOnTheSource(t *testing.T) {
+	m, _, _ := testWALMaterializer(t, 0, 1<<20)
+	replica := func(source string, targets ...string) message.ImmutableMessage {
+		return message.NewSplitShardMessageBuilderV2().WithVChannel("v1").
+			WithHeader(&message.SplitShardMessageHeader{CollectionId: 1, SplitTaskId: 7, SourceVchannel: source, TargetVchannels: targets}).
+			WithBody(&message.SplitShardMessageBody{}).MustBuildMutable().
+			WithTimeTick(120).WithLastConfirmed(rmq.NewRmqID(119)).IntoImmutableMessage(rmq.NewRmqID(120))
+	}
+	require.True(t, m.isL0Boundary(replica("v1", "v2", "v3")))
+	require.False(t, m.isL0Boundary(replica("v0", "v1", "v2")))
+}
+
+// TestWALMaterializerTargetGenesisDoesNotCutTheBatch: observed on a target, the
+// split replica is not kept as a boundary, so queued deletes keep batching.
+func TestWALMaterializerTargetGenesisDoesNotCutTheBatch(t *testing.T) {
+	m, tasks, _ := testWALMaterializer(t, 0, 1<<20)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	walObserve(m, tracker, walDelete(100))
+	genesis := message.NewSplitShardMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.SplitShardMessageHeader{CollectionId: 1, SplitTaskId: 7, SourceVchannel: "v0", TargetVchannels: []string{"v1", "v2"}}).
+		WithBody(&message.SplitShardMessageBody{}).MustBuildMutable().
+		WithTimeTick(110).WithLastConfirmed(rmq.NewRmqID(109)).IntoImmutableMessage(rmq.NewRmqID(110))
+	walObserve(m, tracker, genesis)
+	require.Empty(t, *tasks, "a target's genesis must not force the queued deletes out")
+	require.Len(t, m.pending, 1)
+	require.Len(t, m.pendingBoundary, 1)
+}
+
 func TestWALMaterializerExplicitMessagesSplitQueuedDeletes(t *testing.T) {
 	for name, build := range map[string]func() message.MutableMessage{
 		"ManualFlush": func() message.MutableMessage {
