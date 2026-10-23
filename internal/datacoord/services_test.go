@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1431,6 +1432,29 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		// The request carries no creation timestamp, so it is the one field the
 		// cached entry still owns.
 		assert.Equal(t, uint64(42), coll.CreatedAt)
+	})
+
+	// A vchannel the request no longer lists (a shard split's retired source)
+	// stops reporting its checkpoint, so its gauge is removed here; the ones
+	// still listed keep theirs.
+	t.Run("delisted vchannel loses its checkpoint gauge", func(t *testing.T) {
+		nodeID := paramtable.GetStringNodeID()
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(nodeID, "ch-retired").Set(1)
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(nodeID, "ch-kept").Set(1)
+		defer metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(nodeID, "ch-kept")
+
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&collectionInfo{ID: 1, VChannelNames: []string{"ch-retired", "ch-kept"}})
+		s := &Server{meta: &meta{metaStore: ms}}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+			CollectionID: 1,
+			VChannels:    []string{"ch-kept", "ch-target"},
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.False(t, metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(nodeID, "ch-retired"), "the delisted vchannel's gauge must be gone")
+		assert.True(t, metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(nodeID, "ch-kept"), "a listed vchannel keeps its gauge")
 	})
 }
 

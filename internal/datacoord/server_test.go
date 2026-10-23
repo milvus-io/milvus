@@ -2881,7 +2881,7 @@ func Test_CheckHealth(t *testing.T) {
 		store := metacache.NewMetaStore(nil)
 		store.PutCollection(&collectionInfo{
 			ID:            449684528748778322,
-			VChannelNames: []string{"ch1", "ch2"},
+			VChannelNames: []string{"cluster-id-rootcoord-dm_3_449684528748778322v0", "cluster-id-rootcoord-dm_4_449684528748778322v1"},
 		})
 		return store
 	}
@@ -2913,6 +2913,46 @@ func Test_CheckHealth(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, false, resp.IsHealthy)
 		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	// A shard split's retired source is delisted by adoption and stops
+	// reporting, but its checkpoint row stays; it must not fail the check.
+	t.Run("delisted vchannel is skipped", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		store := newHealthStore()
+		store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
+				MsgID:     []byte{1, 2, 3, 4},
+			},
+			"cluster-id-rootcoord-dm_5_449684528748778322v2": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000 * time.Hour)),
+				MsgID:     []byte{1, 2, 3, 4},
+			},
+		})
+		svr.meta = &meta{metaStore: store}
+		resp, err := svr.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.True(t, resp.IsHealthy)
+		assert.Empty(t, resp.Reasons)
+	})
+
+	t.Run("collection without a vchannel list checks every vchannel", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		store := metacache.NewMetaStore(nil)
+		store.PutCollection(&collectionInfo{ID: 449684528748778322})
+		store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"cluster-id-rootcoord-dm_5_449684528748778322v2": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000 * time.Hour)),
+				MsgID:     []byte{1, 2, 3, 4},
+			},
+		})
+		svr.meta = &meta{metaStore: store}
+		resp, err := svr.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.False(t, resp.IsHealthy)
 	})
 
 	t.Run("ok", func(t *testing.T) {
