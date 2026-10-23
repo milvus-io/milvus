@@ -1929,10 +1929,10 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
     EXPECT_EQ(loaded_index.GetLogicalCount(), num_rows);
     EXPECT_EQ(loaded_index.GetValidCount(), 0);
     EXPECT_EQ(loaded_index.GetDim(), dim);
-    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
-                                          index_meta)
-                  .size(),
-              mmap_directory_count_before_load);
+    for (const auto& directory : CollectIdMapMmapDirectories(
+             local_chunk_manager->GetRootPath(), index_meta)) {
+        EXPECT_TRUE(boost::filesystem::is_empty(directory)) << directory;
+    }
 
     for (const auto& file : files) {
         cm_->Remove(file);
