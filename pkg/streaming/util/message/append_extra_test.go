@@ -51,6 +51,12 @@ func TestAppendExtraTravelsOnTheRecord(t *testing.T) {
 	properties["_ae"] = "not base64 !"
 	corrupted := message.NewImmutableMesasge(walimplstest.NewTestMessageID(1), record.Payload(), properties)
 	assert.Nil(t, message.AppendExtraOf(corrupted))
+	decoded, err := message.DecodeAppendExtra(corrupted)
+	assert.Error(t, err, "a reader that must tell a corrupted extra from none can")
+	assert.Nil(t, decoded)
+	decoded, err = message.DecodeAppendExtra(msg)
+	assert.NoError(t, err, "no extra at all is not an error")
+	assert.Nil(t, decoded)
 
 	// A MutableMessage that is not this package's implementation is left alone.
 	assert.NotPanics(t, func() {
