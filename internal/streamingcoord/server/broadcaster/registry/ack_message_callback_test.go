@@ -56,3 +56,21 @@ func TestMessageCallbackRegistration(t *testing.T) {
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 }
+
+func TestRetiredRLSMessagesDoNotWaitForCallbacks(t *testing.T) {
+	resetMessageAckCallbacks()
+	defer resetMessageAckCallbacks()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	alter := message.NewAlterRLSMetadataMessageBuilderV2().
+		WithHeader(&message.AlterRLSMetadataMessageHeader{}).
+		WithBody(&message.AlterRLSMetadataMessageBody{}).
+		WithBroadcast([]string{"v1"}).MustBuildBroadcast()
+	drop := message.NewDropRLSMetadataMessageBuilderV2().
+		WithHeader(&message.DropRLSMetadataMessageHeader{}).
+		WithBody(&message.DropRLSMetadataMessageBody{}).
+		WithBroadcast([]string{"v1"}).MustBuildBroadcast()
+	assert.NoError(t, CallMessageAckCallback(ctx, alter, nil))
+	assert.NoError(t, CallMessageAckCallback(ctx, drop, nil))
+}

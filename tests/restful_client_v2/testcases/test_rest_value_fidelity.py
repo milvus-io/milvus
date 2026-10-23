@@ -4,7 +4,6 @@ import time
 import pytest
 import requests
 from base.testbase import TestBase
-from utils.constant import CaseLabel
 from utils.utils import gen_collection_name
 
 # Verify PR #52261: the REST layer no longer rewrites the values a caller sends.
@@ -204,14 +203,14 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L0: A. Value fidelity =================
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_int8_int16_int32_precision(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, i8=42, i16=1234, i32=123456)])
         d = self._query(self._scalar_coll, f"id == {pk}", ["i8", "i16", "i32"])["data"][0]
         assert d["i8"] == 42 and d["i16"] == 1234 and d["i32"] == 123456
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_int64_bigint_roundtrip(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, i64=9007199254740993)])
@@ -237,7 +236,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert len(miss["data"]) == 0
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_int64_scientific_integer_forms(self):
         # 1e3 is an integer value and must be accepted exactly.
         pk = self._new_pk()
@@ -251,7 +250,7 @@ class TestRestValueFidelity(TestBase):
         d = self._query(self._scalar_coll, f"id == {pk}", ["i64"])["data"][0]
         assert d["i64"] == 1000
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_int64_decimal_that_is_integer(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -264,7 +263,7 @@ class TestRestValueFidelity(TestBase):
         d = self._query(self._scalar_coll, f"id == {pk}", ["i64"])["data"][0]
         assert d["i64"] == 9007199254740993
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_varchar_number_literal_kept(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -277,7 +276,7 @@ class TestRestValueFidelity(TestBase):
         d = self._query(self._scalar_coll, f"id == {pk}", ["s"])["data"][0]
         assert d["s"] == "1e300"
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_varchar_decimal_literal_kept(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -290,7 +289,7 @@ class TestRestValueFidelity(TestBase):
         d = self._query(self._scalar_coll, f"id == {pk}", ["s"])["data"][0]
         assert d["s"] == "1.50"
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_json_object_reads_back_as_json_text(self):
         # 2.6 defaults nativeJSONResponse to false: static JSON fields return
         # their stored JSON text, unlike dynamic fields.
@@ -300,28 +299,28 @@ class TestRestValueFidelity(TestBase):
         assert isinstance(d["j"], str), f"expected JSON text, got {d['j']!r}"
         assert json.loads(d["j"]) == {"j": "hello"}
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_json_string_reads_back_as_string(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, j="hello")])
         d = self._query(self._scalar_coll, f"id == {pk}", ["j"])["data"][0]
         assert d["j"] == json.dumps("hello"), f"got {d['j']!r}"
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_dynamic_field_bigint_top_level(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, dyn_big=9007199254740993)])
         d = self._query(self._scalar_coll, f"id == {pk}", ["dyn_big"])["data"][0]
         assert d["dyn_big"] == 9007199254740993
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_dynamic_field_bigint_nested(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, dyn_obj={"nested": {"x": 9007199254740993}})])
         d = self._query(self._scalar_coll, f"id == {pk}", ["dyn_obj"])["data"][0]
         assert d["dyn_obj"]["nested"]["x"] == 9007199254740993
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_dynamic_field_float_not_zero(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -334,7 +333,7 @@ class TestRestValueFidelity(TestBase):
         d = self._query(self._scalar_coll, f"id == {pk}", ["dyn_f"])["data"][0]
         assert d["dyn_f"] == 1e19 and d["dyn_f"] != 0
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_double_precision(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, f64=1.5)])
@@ -343,7 +342,7 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L0: C. exprParams (positive) =================
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_exprparams_bigint_exact_match(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, i64=9007199254740993)])
@@ -368,7 +367,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert len(miss["data"]) == 0
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_exprparams_int64_max_ok(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, i64=9223372036854775807)])
@@ -393,7 +392,7 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L0: P. Partial update =================
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_partial_update_null_clears_dynamic_field(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, tag="old", keep=9007199254740993)])
@@ -407,7 +406,7 @@ class TestRestValueFidelity(TestBase):
         assert d["tag"] is None, f"tag should be cleared, got {d.get('tag')!r}"
         assert d["keep"] == 9007199254740993, "untouched key must not be rewritten"
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_partial_update_preserves_untouched_keys(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, da=9007199254740993, db="keep")])
@@ -423,7 +422,7 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L0: D. id list =================
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_get_multiple_ids_exact(self):
         self._insert(self._varchar_coll, [self._row("alice"), self._row("carol")])
         rsp = self._get(self._varchar_coll, ["alice", "bob"])
@@ -431,13 +430,13 @@ class TestRestValueFidelity(TestBase):
         ids = [d["id"] for d in rsp["data"]]
         assert ids == ["alice"], f"should hit only alice, got {ids}"
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_get_id_with_quote(self):
         self._insert(self._varchar_coll, [self._row('a"b')])
         rsp = self._get(self._varchar_coll, ['a"b'])
         assert rsp["code"] == 0 and len(rsp["data"]) == 1, rsp
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_varchar_pk_numeric_id(self):
         self._insert(self._varchar_coll, [self._row("1000000")])
         rsp = self._get(self._varchar_coll, [1000000])
@@ -445,7 +444,7 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L0: G. gRPC/REST consistency =================
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_json_grpc_write_rest_read(self):
         from pymilvus import Collection
 
@@ -474,7 +473,7 @@ class TestRestValueFidelity(TestBase):
         assert isinstance(d["j"], str), f"expected JSON text, got {d['j']!r}"
         assert json.loads(d["j"]) == {"j": "hello"}, f"REST read of gRPC-written JSON mismatch: {d['j']!r}"
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_dynamic_bigint_grpc_write_rest_read(self):
         from pymilvus import Collection
 
@@ -505,7 +504,7 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L1: B. Rejection =================
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     @pytest.mark.parametrize("val", [128, -129])
     def test_int8_overflow_rejected(self, val):
         pk = self._new_pk()
@@ -515,7 +514,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, f"int8={val} should be rejected: {rsp}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     @pytest.mark.parametrize("val", [32768, -32769])
     def test_int16_overflow_rejected(self, val):
         pk = self._new_pk()
@@ -525,7 +524,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, f"int16={val} should be rejected: {rsp}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     @pytest.mark.parametrize("val", [2147483648, -2147483649])
     def test_int32_overflow_rejected(self, val):
         pk = self._new_pk()
@@ -535,7 +534,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, f"int32={val} should be rejected: {rsp}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     @pytest.mark.parametrize("val", [9223372036854775808, -9223372036854775809])
     def test_int64_overflow_rejected(self, val):
         pk = self._new_pk()
@@ -545,7 +544,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, f"int64={val} should be rejected: {rsp}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_int64_fraction_rejected(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -554,7 +553,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, rsp
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     @pytest.mark.parametrize("val", ["3.5e38", "3.4028236e38", "-3.5e38"])
     def test_float32_overflow_rejected(self, val):
         pk = self._new_pk()
@@ -564,7 +563,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, f"f32={val} should be rejected: {rsp}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_varchar_object_rejected(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -573,7 +572,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, rsp
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_json_duplicate_key_rejected(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -582,7 +581,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, rsp
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_json_oversized_integer_rejected(self):
         # 2^64 exceeds the 64-bit range and is rejected; uint64 max (2^64-1) is
         # within range and accepted (see the L0 positive case).
@@ -593,7 +592,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, rsp
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_json_uint64_max_accepted(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -602,7 +601,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] == 0, rsp
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_missing_required_field_rejected(self):
         # A missing non-nullable field without a default must be rejected (it
         # used to be stored as an empty value).
@@ -613,7 +612,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, f"missing required field should be rejected: {rsp}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_float_vector_string_rejected(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -622,7 +621,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, rsp
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_leading_zero_rejected(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -631,7 +630,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, rsp
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_array_null_element_rejected(self):
         pk = self._new_pk()
         rsp = self._raw_insert(self._array_coll, f'[{{"id":{pk:d},"arr":[true,null],"vec":[0.1,0.2]}}]')
@@ -639,7 +638,7 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L1: C. exprParams (negative) =================
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     @pytest.mark.parametrize("val", [9223372036854775808, 9223372036854775809, 18446744073709551615])
     def test_exprparams_beyond_int64_rejected(self, val):
         rsp = self.vector_client.vector_query(
@@ -647,7 +646,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, f"exprParams v={val} should be rejected: {rsp}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     @pytest.mark.parametrize("val", [None, [], {}])
     def test_exprparams_null_array_object_rejected(self, val):
         rsp = self.vector_client.vector_query(
@@ -657,7 +656,7 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L2: E. Vectors =================
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.L2
     def test_binary_vector_base64(self):
         name = gen_collection_name("rvf")
         payload = {
@@ -687,7 +686,7 @@ class TestRestValueFidelity(TestBase):
         rsp = self._raw_post("/v2/vectordb/entities/insert", raw)
         assert rsp["code"] == 0, rsp
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.L2
     def test_int8vector_quoted_null_rejected(self):
         # #52261 removed Int8Vector from vectorAcceptsBase64: a quoted "null"
         # used to decode to an empty vector (nil slice) and is now rejected.
@@ -713,14 +712,14 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L0: additional coverage =================
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_float_precision_roundtrip(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, f32=1.5)])
         d = self._query(self._scalar_coll, f"id == {pk}", ["f32"])["data"][0]
         assert d["f32"] == 1.5
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_bool_quoted_and_numeric(self):
         pk = self._new_pk()
         self._insert(self._scalar_coll, [self._row(pk, b="true")])
@@ -731,7 +730,7 @@ class TestRestValueFidelity(TestBase):
         d2 = self._query(self._scalar_coll, f"id == {pk2}", ["b"])["data"][0]
         assert d2["b"] is True
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_growing_vs_sealed_consistency(self):
         pk = self._new_pk()
         rsp = self.vector_client.vector_insert(
@@ -765,7 +764,7 @@ class TestRestValueFidelity(TestBase):
         assert d_g["j"] == d_s["j"]
         assert json.loads(d_g["j"]) == {"x": 1}
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_nullable_scalar_null_roundtrip(self):
         name = self._create_load(
             [
@@ -789,7 +788,7 @@ class TestRestValueFidelity(TestBase):
         d = self._query(name, "id == 1", ["ni", "ns"])["data"][0]
         assert d.get("ni") is None and d.get("ns") is None
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.L0
     def test_array_other_element_types(self):
         name = self._create_load(
             [
@@ -822,7 +821,7 @@ class TestRestValueFidelity(TestBase):
 
     # ================= L1: additional rejection =================
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_search_null_vector_rejected(self):
         # #52261 refuses a whole-value null query vector on the search path; it
         # used to decode to an empty vector and pass the required-field check.
@@ -831,7 +830,7 @@ class TestRestValueFidelity(TestBase):
         )
         assert rsp["code"] != 0, rsp
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_non_nullable_explicit_null_rejected(self):
         pk = self._new_pk()
         rsp = self._raw_insert(
@@ -842,7 +841,7 @@ class TestRestValueFidelity(TestBase):
 
     # ================= Struct Array sub-field value handling =================
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.L1
     def test_struct_array_subfield_value_handling(self):
         # Struct Array sub-fields flow through parseStructArrayRow ->
         # buildStructSubArrayScalar -> parseScalarArrayElements, the same value

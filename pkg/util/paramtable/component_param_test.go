@@ -23,10 +23,37 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
+
+func TestQueryNodeSparseInterimIndexAlgorithms(t *testing.T) {
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	params.Init(base)
+	cfg := &params.QueryNodeCfg
+	assert.Equal(t, "2.6.26", cfg.InterimIndexSparseIPAlgo.Version)
+	assert.Equal(t, "2.6.26", cfg.InterimIndexSparseBM25Algo.Version)
+	assert.False(t, cfg.InterimIndexSparseIPAlgo.Export)
+	assert.False(t, cfg.InterimIndexSparseBM25Algo.Export)
+	for _, name := range []string{"InterimIndexSparseIPAlgo", "InterimIndexSparseBM25Algo"} {
+		field, ok := reflect.TypeOf(cfg).Elem().FieldByName(name)
+		require.True(t, ok)
+		assert.Equal(t, "false", field.Tag.Get("refreshable"))
+	}
+	assert.Empty(t, cfg.InterimIndexSparseIPAlgo.GetValue())
+	assert.Empty(t, cfg.InterimIndexSparseBM25Algo.GetValue())
+	require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, " taat_naive "))
+	require.NoError(t, params.Save(cfg.InterimIndexSparseBM25Algo.Key, "daat_maxscore"))
+	assert.Equal(t, "TAAT_NAIVE", cfg.InterimIndexSparseIPAlgo.GetValue())
+	assert.Equal(t, "DAAT_MAXSCORE", cfg.InterimIndexSparseBM25Algo.GetValue())
+	require.NoError(t, params.Reset(cfg.InterimIndexSparseIPAlgo.Key))
+	assert.Empty(t, cfg.InterimIndexSparseIPAlgo.GetValue())
+	assert.Equal(t, "DAAT_MAXSCORE", cfg.InterimIndexSparseBM25Algo.GetValue())
+}
 
 func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()
@@ -265,38 +292,6 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, int64(10), Params.CheckWorkloadRequestNum.GetAsInt64())
 		assert.Equal(t, float64(0.1), Params.WorkloadToleranceFactor.GetAsFloat())
-
-		assert.Equal(t, 100, Params.RLSMaxPoliciesPerCollection.GetAsInt())
-		assert.Equal(t, 50, Params.RLSMaxTagsPerPrincipal.GetAsInt())
-		assert.Equal(t, 4096, Params.RLSMaxExpressionLength.GetAsInt())
-		assert.Equal(t, 16384, Params.RLSMaxCombinedExpressionLength.GetAsInt())
-		assert.Equal(t, 255, Params.RLSMaxPolicyNameLength.GetAsInt())
-		assert.Equal(t, 1024, Params.RLSMaxPolicyDescriptionLength.GetAsInt())
-		assert.Equal(t, 255, Params.RLSMaxPrincipalNameLength.GetAsInt())
-		assert.Equal(t, 128, Params.RLSMaxTagKeyLength.GetAsInt())
-		assert.Equal(t, 1024, Params.RLSMaxTagValueLength.GetAsInt())
-		assert.Equal(t, 1024, Params.RLSMaxArrayLiteralElements.GetAsInt())
-		assert.Equal(t, 65536, Params.RLSMaxPrincipalCacheEntries.GetAsInt())
-		assert.Equal(t, int64(64*1024*1024), Params.RLSMaxPrincipalCacheBytes.GetAsInt64())
-		assert.Equal(t, time.Hour, Params.RLSMetaRefreshInterval.GetAsDuration(time.Second))
-		params.Save(Params.RLSMaxPoliciesPerCollection.Key, "2")
-		assert.Equal(t, 2, Params.RLSMaxPoliciesPerCollection.GetAsInt())
-		params.Save(Params.RLSMaxPoliciesPerCollection.Key, "0")
-		assert.Equal(t, 100, Params.RLSMaxPoliciesPerCollection.GetAsInt())
-		params.Reset(Params.RLSMaxPoliciesPerCollection.Key)
-		params.Save(Params.RLSMaxPrincipalCacheEntries.Key, "2")
-		assert.Equal(t, 2, Params.RLSMaxPrincipalCacheEntries.GetAsInt())
-		params.Save(Params.RLSMaxPrincipalCacheEntries.Key, "0")
-		assert.Equal(t, 65536, Params.RLSMaxPrincipalCacheEntries.GetAsInt())
-		params.Reset(Params.RLSMaxPrincipalCacheEntries.Key)
-		params.Save(Params.RLSMaxPrincipalCacheBytes.Key, "1024")
-		assert.Equal(t, int64(1024), Params.RLSMaxPrincipalCacheBytes.GetAsInt64())
-		params.Save(Params.RLSMaxPrincipalCacheBytes.Key, "0")
-		assert.Equal(t, int64(64*1024*1024), Params.RLSMaxPrincipalCacheBytes.GetAsInt64())
-		params.Reset(Params.RLSMaxPrincipalCacheBytes.Key)
-		params.Save(Params.RLSMetaRefreshInterval.Key, "60")
-		assert.Equal(t, time.Minute, Params.RLSMetaRefreshInterval.GetAsDuration(time.Second))
-		params.Reset(Params.RLSMetaRefreshInterval.Key)
 
 		assert.Equal(t, int64(16), Params.DDLConcurrency.GetAsInt64())
 		assert.Equal(t, int64(16), Params.DCLConcurrency.GetAsInt64())

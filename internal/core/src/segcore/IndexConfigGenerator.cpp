@@ -49,14 +49,39 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     if (is_sparse) {
         const auto& index_params = index_meta_.GetIndexParams();
 
-        static const std::unordered_set<std::string>
-            sparse_growing_exclude_params = {
-                knowhere::meta::INDEX_TYPE,
-                knowhere::meta::METRIC_TYPE,
-                knowhere::indexparam::DROP_RATIO_BUILD};
-        for (const auto& [key, value] : index_params) {
-            if (sparse_growing_exclude_params.count(key) == 0) {
-                build_params_[key] = value;
+        // This allowlist is intentional: inherit only the algorithm and BM25
+        // scorer parameters. Persistent-index build options such as
+        // drop_ratio_build must not leak into growing or unindexed sealed
+        // interim indexes.
+        if (auto algo_it =
+                index_params.find(knowhere::indexparam::INVERTED_INDEX_ALGO);
+            algo_it != index_params.end()) {
+            build_params_[knowhere::indexparam::INVERTED_INDEX_ALGO] =
+                algo_it->second;
+        }
+
+        if (metric_type_ == knowhere::metric::BM25) {
+            build_params_[knowhere::meta::BM25_K1] =
+                index_params.at(knowhere::meta::BM25_K1);
+            build_params_[knowhere::meta::BM25_B] =
+                index_params.at(knowhere::meta::BM25_B);
+            build_params_[knowhere::meta::BM25_AVGDL] =
+                index_params.at(knowhere::meta::BM25_AVGDL);
+        }
+
+        const auto& algo = metric_type_ == knowhere::metric::BM25
+                               ? config.get_sparse_bm25_interim_index_algo()
+                               : config.get_sparse_ip_interim_index_algo();
+        if (!algo.empty()) {
+            build_params_[knowhere::indexparam::INVERTED_INDEX_ALGO] = algo;
+            // Knowhere 2.6 forces WAND for SPARSE_WAND_CC regardless of the
+            // algorithm parameter. Use the generic sparse index only when an
+            // explicit non-WAND override needs it; an empty override keeps the
+            // existing mapping and behavior.
+            if (index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND_CC &&
+                algo != "DAAT_WAND") {
+                index_type_ =
+                    knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC;
             }
         }
     }

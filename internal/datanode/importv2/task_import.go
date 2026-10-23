@@ -33,14 +33,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -145,15 +142,18 @@ func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 }
 
 func (t *ImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.ctx)
 	infos := make(map[int64]*datapb.ImportSegmentInfo)
 	for id, info := range t.segmentsInfo {
 		infos[id] = typeutil.Clone(info)
 	}
+	// Share the running task's context instead of deriving a new one. The
+	// goroutines started by Execute hold the original ctx, and taskManager
+	// cancels whatever the map entry carries; a derived context would make
+	// that cancellation a no-op on the work actually in flight.
 	return &ImportTask{
 		ImportTaskV2: typeutil.Clone(t.ImportTaskV2),
-		ctx:          ctx,
-		cancel:       cancel,
+		ctx:          t.ctx,
+		cancel:       t.cancel,
 		segmentsInfo: infos,
 		req:          t.req,
 		allocator:    t.allocator,
@@ -165,18 +165,6 @@ func (t *ImportTask) Clone() Task {
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
-	rlsPredicate := t.req.GetRlsCheckPredicate()
-	if rlsPredicate != nil && rlsPredicate.GetExpr() == nil {
-		err := merr.WrapErrDataIntegrityMsg("persisted import RLS predicate has no expression")
-		log.Ctx(t.ctx).Warn("invalid import RLS predicate", WrapLogFields(t, zap.Error(err))...)
-		t.manager.Update(t.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Failed),
-			UpdateReason(err.Error()))
-		return []*conc.Future[any]{conc.Go(func() (any, error) {
-			return nil, err
-		})}
-	}
-
 	bufferSize := t.GetBufferSize()
 	log.Info("start to import", WrapLogFields(t,
 		zap.Int64("bufferSize", bufferSize),
@@ -198,7 +186,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		}
 		defer reader.Close()
 		start := time.Now()
-		err = t.importFile(reader, rlsPredicate)
+		err = t.importFile(reader)
 		if err != nil {
 			log.Warn("do import failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -214,8 +202,12 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	for _, file := range req.GetFiles() {
 		file := file
 		f := GetExecPool().Submit(func() (any, error) {
-			// Use blocking allocation - this will wait until memory is available
-			GetMemoryAllocator().BlockingAllocate(t.GetTaskID(), bufferSize)
+			// Wait until memory is available. A canceled task leaves the wait
+			// without charging memory, so there is nothing to release.
+			if err := GetMemoryAllocator().BlockingAllocate(t.ctx, t.GetTaskID(), bufferSize); err != nil {
+				log.Warn("import task canceled while waiting for memory", WrapLogFields(t, zap.Error(err))...)
+				return err, err
+			}
 			defer func() {
 				GetMemoryAllocator().Release(t.GetTaskID(), bufferSize)
 				debug.FreeOSMemory()
@@ -228,7 +220,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (t *ImportTask) importFile(reader importutilv2.Reader, rlsPredicate *planpb.Expr) error {
+func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
@@ -255,11 +247,6 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, rlsPredicate *planpb
 		err = FillDynamicData(t.GetSchema(), data, rowNum)
 		if err != nil {
 			return err
-		}
-		if rlsPredicate != nil {
-			if err = rlsutil.ValidateInsertDataByPredicate(t.ctx, data.Data, rowNum, rlsPredicate, "import", "check"); err != nil {
-				return err
-			}
 		}
 		if !importutilv2.IsBackup(t.req.GetOptions()) {
 			err = RunEmbeddingFunction(t, data)

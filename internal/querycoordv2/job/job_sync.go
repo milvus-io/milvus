@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -74,27 +75,39 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	if collection == nil || collection.GetLoadType() == querypb.LoadType_LoadPartition {
 		return nil
 	}
+	// The partition may already exist: the CreatePartition ack callback adds it
+	// before the proxy request arrives.
+	if partition := job.meta.GetPartition(job.ctx, job.req.GetPartitionID()); partition == nil {
+		partition := &meta.Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID: req.GetCollectionID(),
+				PartitionID:  req.GetPartitionID(),
+				Status:       querypb.LoadStatus_Loaded,
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		}
+		err := job.meta.PutPartition(job.ctx, partition)
+		if err != nil {
+			msg := "failed to store partitions"
+			log.Warn(msg, zap.Error(err))
+			return merr.Wrapf(err, "%s", msg)
+		}
+	}
 
-	// check if partition already existed
-	if partition := job.meta.GetPartition(job.ctx, job.req.GetPartitionID()); partition != nil {
+	if req.GetSkipWaitReady() {
+		if _, err := job.targetObserver.UpdateNextTarget(job.ctx, req.GetCollectionID()); err != nil {
+			// A DropCollection already reached the channel level on this
+			// cluster, so the target can never include the partition. The
+			// release of the collection removes the partition from the load meta.
+			if errors.Is(err, merr.ErrChannelDroppedSentinel) {
+				log.Warn("skip target update of new partition: collection channel is dropped sentinel", zap.Error(err))
+				return nil
+			}
+			return merr.Wrapf(err, "failed to update next target, collection=%d", req.GetCollectionID())
+		}
+		job.targetObserver.TriggerUpdateCurrentTarget(req.GetCollectionID())
 		return nil
 	}
-
-	partition := &meta.Partition{
-		PartitionLoadInfo: &querypb.PartitionLoadInfo{
-			CollectionID: req.GetCollectionID(),
-			PartitionID:  req.GetPartitionID(),
-			Status:       querypb.LoadStatus_Loaded,
-		},
-		LoadPercentage: 100,
-		CreatedAt:      time.Now(),
-	}
-	err := job.meta.PutPartition(job.ctx, partition)
-	if err != nil {
-		msg := "failed to store partitions"
-		log.Warn(msg, zap.Error(err))
-		return merr.Wrapf(err, "%s", msg)
-	}
-
 	return WaitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
 }

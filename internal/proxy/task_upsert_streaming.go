@@ -131,6 +131,7 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 				}).
 				WithBody(deleteMsg.DeleteRequest).
 				WithVChannel(vchannel).
+				WithCipher(ez).
 				BuildMutable()
 			if err != nil {
 				return nil, err

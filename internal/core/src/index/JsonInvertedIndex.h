@@ -190,6 +190,9 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
 
  protected:
     void
+    MaterializeValidBitmap() override;
+
+    void
     LoadIndexMetas(const std::vector<std::string>& index_files,
                    const Config& config) override final;
 

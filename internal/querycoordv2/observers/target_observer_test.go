@@ -260,7 +260,7 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 	suite.broker.AssertExpectations(suite.T())
 
 	// Manually update next target
-	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
+	ready, err := suite.observer.UpdateNextTarget(suite.ctx, suite.collectionID)
 	suite.NoError(err)
 	suite.distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
 		VchannelInfo: &datapb.VchannelInfo{
@@ -348,7 +348,7 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 func (suite *TargetObserverSuite) TestTriggerRelease() {
 	ctx := suite.ctx
 	// Manually update next target
-	_, err := suite.observer.UpdateNextTarget(suite.collectionID)
+	_, err := suite.observer.UpdateNextTarget(suite.ctx, suite.collectionID)
 	suite.NoError(err)
 
 	// manually release partition
@@ -1080,4 +1080,35 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 func TestTargetObserver(t *testing.T) {
 	suite.Run(t, new(TargetObserverSuite))
 	suite.Run(t, new(TargetObserverCheckSuite))
+}
+
+func TestUpdateNextTargetReturnsOnContextDone(t *testing.T) {
+	t.Run("loop never takes the request", func(t *testing.T) {
+		ob := &TargetObserver{updateChan: make(chan targetUpdateRequest)}
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_, err := ob.UpdateNextTarget(ctx, 1)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("loop takes the request but never replies", func(t *testing.T) {
+		ob := &TargetObserver{updateChan: make(chan targetUpdateRequest, 1)}
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_, err := ob.UpdateNextTarget(ctx, 1)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+		// A reply that arrives after the caller left must not block the loop.
+		req := <-ob.updateChan
+		replied := make(chan struct{})
+		go func() {
+			req.Notifier <- nil
+			close(replied)
+		}()
+		select {
+		case <-replied:
+		case <-time.After(time.Second):
+			t.Fatal("late reply blocked the schedule loop")
+		}
+	})
 }

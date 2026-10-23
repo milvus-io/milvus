@@ -518,8 +518,6 @@ func (h *HandlersV1) query(c *gin.Context) {
 	req := &milvuspb.QueryRequest{
 		DbName:             httpReq.DbName,
 		CollectionName:     httpReq.CollectionName,
-		RlsPrincipal:       httpReq.RlsPrincipal,
-		SkipRls:            httpReq.SkipRls,
 		Expr:               httpReq.Filter,
 		OutputFields:       httpReq.OutputFields,
 		GuaranteeTimestamp: BoundedTimestamp,
@@ -592,8 +590,6 @@ func (h *HandlersV1) get(c *gin.Context) {
 	req := &milvuspb.QueryRequest{
 		DbName:             httpReq.DbName,
 		CollectionName:     httpReq.CollectionName,
-		RlsPrincipal:       httpReq.RlsPrincipal,
-		SkipRls:            httpReq.SkipRls,
 		OutputFields:       httpReq.OutputFields,
 		GuaranteeTimestamp: BoundedTimestamp,
 	}
@@ -673,8 +669,6 @@ func (h *HandlersV1) delete(c *gin.Context) {
 	req := &milvuspb.DeleteRequest{
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 	}
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
@@ -739,8 +733,6 @@ func (h *HandlersV1) insert(c *gin.Context) {
 		}
 		httpReq.DbName = singleInsertReq.DbName
 		httpReq.CollectionName = singleInsertReq.CollectionName
-		httpReq.RlsPrincipal = singleInsertReq.RlsPrincipal
-		httpReq.SkipRls = singleInsertReq.SkipRls
 		httpReq.Data = []map[string]interface{}{singleInsertReq.Data}
 	}
 	if httpReq.CollectionName == "" || httpReq.Data == nil {
@@ -754,8 +746,6 @@ func (h *HandlersV1) insert(c *gin.Context) {
 	req := &milvuspb.InsertRequest{
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		NumRows:        uint32(len(httpReq.Data)),
 	}
 	c.Set(ContextRequest, req)
@@ -843,8 +833,6 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		}
 		httpReq.DbName = singleUpsertReq.DbName
 		httpReq.CollectionName = singleUpsertReq.CollectionName
-		httpReq.RlsPrincipal = singleUpsertReq.RlsPrincipal
-		httpReq.SkipRls = singleUpsertReq.SkipRls
 		httpReq.Data = []map[string]interface{}{singleUpsertReq.Data}
 		httpReq.PartialUpdate = singleUpsertReq.PartialUpdate
 		httpReq.FieldOps = singleUpsertReq.FieldOps
@@ -860,8 +848,6 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 	req := &milvuspb.UpsertRequest{
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		NumRows:        uint32(len(httpReq.Data)),
 		PartialUpdate:  httpReq.PartialUpdate,
 	}
@@ -972,8 +958,6 @@ func (h *HandlersV1) search(c *gin.Context) {
 	req := &milvuspb.SearchRequest{
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		Dsl:            httpReq.Filter,
 		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
 			PlaceholderGroup: vectors2PlaceholderGroupBytes([][]float32{httpReq.Vector}),

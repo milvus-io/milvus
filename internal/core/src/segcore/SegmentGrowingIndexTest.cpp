@@ -10,6 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <map>
 #include <limits>
 
 #include "common/Utils.h"
@@ -18,12 +25,21 @@
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
 #include "segcore/ConcurrentVector.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/IndexConfigGenerator.h"
+#include "segcore/InsertRecord.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/segcore_init_c.h"
+#include "storage/FileManager.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -157,6 +173,279 @@ INSTANTIATE_TEST_SUITE_P(
                         knowhere::metric::COSINE,
                         knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
                         "FLOAT16")));
+
+TEST(SparseInterimIndexConfigTest, OverridesAreMetricSpecificAndOptional) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_interim_index_target_version(10);
+    for (const auto& metric : {knowhere::metric::IP, knowhere::metric::BM25}) {
+        for (const auto& origin :
+             {knowhere::IndexEnum::INDEX_SPARSE_WAND,
+              knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX}) {
+            FieldIndexMeta meta(FieldId(101),
+                                {{"index_type", origin},
+                                 {"metric_type", metric},
+                                 {"inverted_index_algo", "TAAT_NAIVE"},
+                                 {"inverted_index_codec", "block_maskedvbyte"},
+                                 {"drop_ratio_build", "0.2"},
+                                 {"bm25_k1", "1.2"},
+                                 {"bm25_b", "0.75"},
+                                 {"bm25_avgdl", "100"}},
+                                {});
+            for (auto type : {SegmentType::Growing, SegmentType::Sealed}) {
+                config.set_sparse_interim_index_algos("", "");
+                VecIndexConfig inherited(100, meta, config, type, true);
+                auto params = inherited.GetBuildBaseParams(
+                    DataType::VECTOR_SPARSE_U32_F32);
+                EXPECT_EQ(params["inverted_index_algo"], "TAAT_NAIVE");
+                EXPECT_FALSE(params.contains("drop_ratio_build"));
+                EXPECT_FALSE(params.contains("inverted_index_codec"));
+                for (const auto* key : {"bm25_k1", "bm25_b", "bm25_avgdl"}) {
+                    if (metric == knowhere::metric::BM25) {
+                        EXPECT_EQ(params[key], meta.GetIndexParams().at(key));
+                    } else {
+                        EXPECT_FALSE(params.contains(key));
+                    }
+                }
+                EXPECT_EQ(
+                    inherited.GetIndexType(),
+                    origin == knowhere::IndexEnum::INDEX_SPARSE_WAND
+                        ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
+                        : knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC);
+
+                // Setting the other metric must not change this metric's
+                // inherited algorithm or WAND index-type mapping.
+                config.set_sparse_interim_index_algos(
+                    metric == knowhere::metric::IP ? "" : "TAAT_NAIVE",
+                    metric == knowhere::metric::BM25 ? "" : "TAAT_NAIVE");
+                VecIndexConfig other_metric(100, meta, config, type, true);
+                EXPECT_EQ(other_metric.GetIndexType(),
+                          inherited.GetIndexType());
+                EXPECT_EQ(other_metric.GetBuildBaseParams(
+                              DataType::VECTOR_SPARSE_U32_F32),
+                          params);
+
+                for (const auto& [ip_algo, bm25_algo] :
+                     {std::pair{"TAAT_NAIVE", "DAAT_WAND"},
+                      std::pair{"DAAT_WAND", "DAAT_MAXSCORE"},
+                      std::pair{"DAAT_MAXSCORE", "TAAT_NAIVE"}}) {
+                    config.set_sparse_interim_index_algos(ip_algo, bm25_algo);
+                    VecIndexConfig overridden(100, meta, config, type, true);
+                    params = overridden.GetBuildBaseParams(
+                        DataType::VECTOR_SPARSE_U32_F32);
+                    const std::string algo =
+                        metric == knowhere::metric::IP ? ip_algo : bm25_algo;
+                    EXPECT_EQ(params["inverted_index_algo"], algo);
+                    EXPECT_EQ(
+                        overridden.GetIndexType(),
+                        origin == knowhere::IndexEnum::INDEX_SPARSE_WAND &&
+                                algo == "DAAT_WAND"
+                            ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
+                            : knowhere::IndexEnum::
+                                  INDEX_SPARSE_INVERTED_INDEX_CC);
+                    EXPECT_FALSE(params.contains("drop_ratio_build"));
+                    EXPECT_FALSE(params.contains("inverted_index_codec"));
+                    for (const auto* key :
+                         {"bm25_k1", "bm25_b", "bm25_avgdl"}) {
+                        if (metric == knowhere::metric::BM25) {
+                            EXPECT_EQ(params[key],
+                                      meta.GetIndexParams().at(key));
+                        } else {
+                            EXPECT_FALSE(params.contains(key));
+                        }
+                    }
+                    EXPECT_EQ(meta.GetIndexParams().at("inverted_index_algo"),
+                              "TAAT_NAIVE");
+                }
+            }
+        }
+    }
+}
+
+TEST(SparseInterimIndexConfigTest, UnsetAlgorithmAndDenseDefaultsArePreserved) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_interim_index_target_version(10);
+    config.set_sparse_interim_index_algos("", "");
+    FieldIndexMeta sparse_meta(
+        FieldId(101),
+        {{"index_type", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX},
+         {"metric_type", knowhere::metric::IP}},
+        {});
+    VecIndexConfig sparse(100, sparse_meta, config, SegmentType::Growing, true);
+    EXPECT_FALSE(sparse.GetBuildBaseParams(DataType::VECTOR_SPARSE_U32_F32)
+                     .contains("inverted_index_algo"));
+
+    config.set_sparse_interim_index_algos("DAAT_MAXSCORE", "DAAT_WAND");
+    FieldIndexMeta dense_meta(FieldId(102),
+                              {{"index_type", knowhere::IndexEnum::INDEX_HNSW},
+                               {"metric_type", knowhere::metric::IP}},
+                              {});
+    VecIndexConfig dense(100, dense_meta, config, SegmentType::Growing, false);
+    EXPECT_EQ(dense.GetIndexType(),
+              config.get_dense_vector_intermin_index_type());
+    EXPECT_FALSE(dense.GetBuildBaseParams(DataType::VECTOR_FLOAT)
+                     .contains("inverted_index_algo"));
+}
+
+TEST(SparseInterimIndexConfigTest, InvalidOverridesPreservePreviousSettings) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_interim_index_target_version(10);
+    config.set_sparse_interim_index_algos("DAAT_MAXSCORE", "DAAT_WAND");
+    for (const auto* invalid :
+         {"INVALID", "SINDI", "BLOCK_MAX_WAND", "BLOCK_MAX_MAXSCORE"}) {
+        for (const auto& algos : {std::pair{invalid, "TAAT_NAIVE"},
+                                  std::pair{"TAAT_NAIVE", invalid}}) {
+            auto status = SegcoreSetSparseInterimIndexAlgorithms(algos.first,
+                                                                 algos.second);
+            ASSERT_EQ(status.error_code, ConfigInvalid);
+            free(const_cast<char*>(status.error_msg));
+            EXPECT_EQ(config.get_sparse_ip_interim_index_algo(),
+                      "DAAT_MAXSCORE");
+            EXPECT_EQ(config.get_sparse_bm25_interim_index_algo(), "DAAT_WAND");
+        }
+    }
+}
+
+class SparseInterimIndexAlgorithmTest
+    : public ::testing::TestWithParam<std::tuple<std::string, std::string>> {};
+
+TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
+    const auto& [metric, algo] = GetParam();
+    // Keep build and query statistics aligned: this test covers algorithm
+    // overrides, not pruning behavior when corpus statistics change.
+    constexpr float avgdl = 100.0F;
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    InterimIndexConfigForTest options;
+    options.target_index_version = 10;
+    options.nlist = 1;
+    options.chunk_rows = 16;
+    ApplyInterimIndexConfigForTest(options, config);
+    config.set_sparse_interim_index_algos(
+        metric == knowhere::metric::IP ? algo : "TAAT_NAIVE",
+        metric == knowhere::metric::BM25 ? algo : "TAAT_NAIVE");
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_SPARSE_U32_F32, 2, metric);
+    schema->set_primary_field_id(pk);
+    FieldIndexMeta field_meta(
+        vec,
+        {{"index_type", knowhere::IndexEnum::INDEX_SPARSE_WAND},
+         {"metric_type", metric},
+         {"inverted_index_algo", "DAAT_MAXSCORE"},
+         {"drop_ratio_build", "0.5"},
+         {"bm25_k1", "1.2"},
+         {"bm25_b", "0.75"},
+         {"bm25_avgdl", std::to_string(avgdl)}},
+        {});
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        100, std::map<FieldId, FieldIndexMeta>{{vec, field_meta}});
+    auto make_data = [&](int64_t begin, int64_t count) {
+        auto data = DataGen(schema, count);
+        for (auto& field : *data.raw_->mutable_fields_data()) {
+            if (field.field_id() != vec.get()) {
+                continue;
+            }
+            auto* sparse =
+                field.mutable_vectors()->mutable_sparse_float_vector();
+            sparse->clear_contents();
+            sparse->set_dim(2);
+            for (int64_t i = 0; i < count; ++i) {
+                knowhere::sparse::SparseRow<float> row(2);
+                row.set_at(0, 0, static_cast<float>(begin + i + 1));
+                row.set_at(1, 1, 1.0F);
+                sparse->add_contents(row.data(), row.data_byte_size());
+            }
+        }
+        return data;
+    };
+
+    milvus::proto::plan::PlanNode node;
+    auto* anns = node.mutable_vector_anns();
+    anns->set_vector_type(milvus::proto::plan::VectorType::SparseFloatVector);
+    anns->set_placeholder_tag("$0");
+    anns->set_field_id(vec.get());
+    auto* info = anns->mutable_query_info();
+    info->set_topk(5);
+    info->set_metric_type(metric);
+    // QueryInfo defaults to 0 decimal places; compare unrounded BM25 scores.
+    info->set_round_decimal(-1);
+    info->set_search_params(R"({"drop_ratio_search":0})");
+    info->set_bm25_avgdl(avgdl);
+    auto placeholders = CreateSparseFloatPlaceholderGroup(1);
+    knowhere::sparse::SparseRow<float> query_row(1);
+    query_row.set_at(0, 0, 1.0F);
+    placeholders.mutable_placeholders(0)->set_values(
+        0, query_row.data(), query_row.data_byte_size());
+    auto check = [&](SegmentInternalInterface& segment, int64_t count) {
+        auto serialized = node.SerializeAsString();
+        auto plan = query::CreateSearchPlanByExpr(
+            schema, serialized.data(), serialized.size());
+        ASSERT_EQ(plan->plan_node_->search_info_.round_decimal_, -1);
+        auto parsed =
+            ParsePlaceholderGroup(plan.get(), placeholders.SerializeAsString());
+        auto result = segment.Search(plan.get(), parsed.get(), MAX_TIMESTAMP);
+        ASSERT_EQ(result->seg_offsets_.size(), 5);
+        for (int64_t i = 0; i < 5; ++i) {
+            EXPECT_EQ(result->seg_offsets_[i], count - 1 - i);
+            const float tf = count - i;
+            const float expected =
+                metric == knowhere::metric::IP
+                    ? tf
+                    : tf * 2.2F /
+                          (tf + 1.2F * (0.25F + 0.75F * (tf + 1) / avgdl));
+            EXPECT_NEAR(result->distances_[i], expected, 1e-4);
+        }
+    };
+
+    auto growing = CreateGrowingSegment(schema, index_meta, 1, config);
+    auto* growing_impl = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_impl, nullptr);
+    for (const auto& [begin, count] : {std::pair{0, 60}, std::pair{60, 40}}) {
+        auto data = make_data(begin, count);
+        auto offset = growing->PreInsert(count);
+        growing->Insert(offset,
+                        count,
+                        data.row_ids_.data(),
+                        data.timestamps_.data(),
+                        data.raw_);
+        ASSERT_TRUE(growing_impl->get_indexing_record().SyncDataWithIndex(vec))
+            << "algorithm must build an index instead of falling back";
+        auto pin = growing_impl->get_indexing_record()
+                       .get_vec_field_indexing(vec)
+                       .get_segment_indexing();
+        ASSERT_NE(pin.get(), nullptr);
+        // In 2.6 a SPARSE_WAND_CC index silently forces WAND, so verify the
+        // type as well as scores to catch an ineffective non-WAND override.
+        EXPECT_EQ(pin.get()->Type(),
+                  algo == "DAAT_WAND"
+                      ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
+                      : knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC);
+        EXPECT_EQ(pin.get()->Count(), begin + count);
+        check(*growing, begin + count);
+    }
+
+    auto sealed = CreateSealedSegment(schema, index_meta);
+    auto data = make_data(0, 100);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info =
+        PrepareInsertBinlog(kCollectionID, kPartitionID, kSegmentID, data, cm);
+    sealed->LoadFieldData(load_info);
+    ASSERT_TRUE(sealed->HasIndex(vec));
+    check(*sealed, 100);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MetricsAndAlgorithms,
+    SparseInterimIndexAlgorithmTest,
+    ::testing::Combine(
+        ::testing::Values(knowhere::metric::IP, knowhere::metric::BM25),
+        ::testing::Values("TAAT_NAIVE", "DAAT_WAND", "DAAT_MAXSCORE")));
 
 TEST_P(GrowingIndexTest, Correctness) {
     auto dim = 4;
