@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -12,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // handleSplitShardOnTarget handles the TARGET replica of a split broadcast: the
