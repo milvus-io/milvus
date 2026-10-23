@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -132,28 +131,13 @@ func collectSchemaFields(message protoreflect.Message, fields map[int64]struct{}
 	return result
 }
 
-func requestSchemaVersion(request proto.Message) int32 {
-	switch request := request.(type) {
-	case *internalpb.SearchRequest:
-		return request.GetSchemaVersion()
-	case *internalpb.RetrieveRequest:
-		return request.GetSchemaVersion()
-	default:
-		panic("unexpected QueryView request type")
-	}
-}
-
-// ValidateSchemaBinding requires a Phase 1 proof before executing any task,
-// including for schema version zero and an empty worker list.
+// ValidateSchemaBinding checks that execution only uses fields validated by
+// Phase 1. The selected QueryView supplies the schema; QueryPlanMVCC supplies
+// the execution frontiers without duplicating either in the field binding.
 func ValidateSchemaBinding(request proto.Message, mvcc *viewpb.QueryPlanMVCC, schema *schemapb.CollectionSchema) error {
 	binding := mvcc.GetSchemaBinding()
 	if binding == nil {
 		return viewerror.NewViewInvalidated("query plan is missing its schema binding")
-	}
-	if binding.GetSchemaVersion() != requestSchemaVersion(request) ||
-		binding.GetTransformingTimetick() != mvcc.GetTransformingTimetick() ||
-		binding.GetGrowingTimetick() != mvcc.GetGrowingTimetick() {
-		return viewerror.NewViewInvalidated("query schema/MVCC differs from its validated binding")
 	}
 	fields, err := ReferencedSchemaFields(request, schema)
 	if err != nil {

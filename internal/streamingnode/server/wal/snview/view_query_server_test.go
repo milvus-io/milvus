@@ -30,7 +30,7 @@ func TestPChannelViewQueryServerDelegatesToWALTaskProvider(t *testing.T) {
 		LegacyReq: &internalpb.SearchRequest{CollectionID: 10},
 		ShardId:   (&viewpb.ShardID{ReplicaId: 1, Vchannel: "p0_100v0"}),
 		Version:   testViewQueryVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 10, TransformingTimetick: 9, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 10, TransformingTimetick: 9}},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 10, TransformingTimetick: 9, SchemaBinding: &viewpb.QuerySchemaBinding{}},
 	}
 
 	resp, err := server.SearchOnView(newIncomingViewSyncContext(types.PChannelInfo{
@@ -59,7 +59,7 @@ func TestPChannelViewQueryServerDelegatesToWrappedWALTaskProvider(t *testing.T) 
 		LegacyReq: &internalpb.SearchRequest{CollectionID: 10},
 		ShardId:   (&viewpb.ShardID{ReplicaId: 1, Vchannel: "p0_100v0"}),
 		Version:   testViewQueryVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 10, TransformingTimetick: 9, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 10, TransformingTimetick: 9}},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 10, TransformingTimetick: 9, SchemaBinding: &viewpb.QuerySchemaBinding{}},
 	}
 
 	resp, err := server.SearchOnView(newIncomingViewSyncContext(types.PChannelInfo{
@@ -87,7 +87,7 @@ func TestPChannelViewQueryServerRejectsMismatchedPChannelMetadata(t *testing.T) 
 		LegacyReq: &internalpb.SearchRequest{CollectionID: 10},
 		ShardId:   (&viewpb.ShardID{ReplicaId: 1, Vchannel: "p0_100v0"}),
 		Version:   testViewQueryVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 10, TransformingTimetick: 9, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 10, TransformingTimetick: 9}},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 10, TransformingTimetick: 9, SchemaBinding: &viewpb.QuerySchemaBinding{}},
 	})
 
 	require.Error(t, err)

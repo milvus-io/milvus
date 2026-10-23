@@ -13,9 +13,11 @@ Planning holds a serving lease, fixes one MVCC, and waits for the runtime to
 observe its Growing and Transform frontiers before checking field-removal
 history. It then resolves the View's loaded partitions, optimizes against the
 exact read runtime, and validates all referenced fields, including fields needed
-by later stages. `QuerySchemaBinding` ties schema version and field IDs to these
-same two frontiers. Phase 2 requires this binding, including for schema version
-zero and empty results, and validates it when acquiring tasks.
+by later stages. `QuerySchemaBinding` carries only the validated field IDs.
+The selected QueryView supplies the schema, and QueryPlanMVCC supplies the two
+execution frontiers; the binding does not duplicate either. Phase 2 requires
+the field binding, including for empty results, and checks that execution
+references only validated fields.
 The lease is renewed just before a successful plan return.
 
 ## Three distinct timestamp contracts
