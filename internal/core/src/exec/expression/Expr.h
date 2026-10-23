@@ -1942,23 +1942,7 @@ class SegmentExpr : public Expr {
             "candidate mask size {} does not match Take input {}",
             candidate_mask == nullptr ? 0 : candidate_mask->size(),
             input->size());
-        EnsureDataTakeResources(skip_func);
-        if (data_take_column_ == nullptr) {
-            return -1;
-        }
-        const auto nullable = data_take_column_->IsNullable();
-        OffsetVector selected_offsets;
-        const OffsetVector* take_offsets = input;
-        if (has_candidate_mask) {
-            selected_offsets.reserve(input->size());
-            for (size_t i = 0; i < input->size(); ++i) {
-                if ((*candidate_mask)[i]) {
-                    selected_offsets.push_back((*input)[i]);
-                }
-            }
-            take_offsets = &selected_offsets;
-        }
-        if (take_offsets->empty()) {
+        if (has_candidate_mask && candidate_mask->none()) {
             for (size_t i = 0; i < input->size(); ++i) {
                 func.template operator()<FilterType::random>(nullptr,
                                                              ValidityView{},
@@ -1970,12 +1954,21 @@ class SegmentExpr : public Expr {
             }
             return input->size();
         }
+        EnsureDataTakeResources(skip_func);
+        if (data_take_column_ == nullptr) {
+            return -1;
+        }
+        const auto nullable = data_take_column_->IsNullable();
         const auto input_view = ChunkedColumnInterface::OffsetView::From(
-            take_offsets->data(), static_cast<int64_t>(take_offsets->size()));
+            input->data(), static_cast<int64_t>(input->size()));
         auto take = data_take_column_->Take(
             op_ctx_,
             ChunkedColumnInterface::TakeOptions{
-                input_view, DataTargetType<T>(), data_take_filter_});
+                input_view,
+                DataTargetType<T>(),
+                data_take_filter_,
+                TakePinPolicy::CurrentCell,
+                has_candidate_mask ? candidate_mask : nullptr});
         if (take == nullptr) {
             return -1;
         }
@@ -2007,7 +2000,6 @@ class SegmentExpr : public Expr {
                    items.Size(),
                    input_view.size);
         const T invalid_value{};
-        int64_t take_pos = 0;
         for (int64_t logical_pos = 0;
              logical_pos < static_cast<int64_t>(input->size());
              ++logical_pos) {
@@ -2024,7 +2016,7 @@ class SegmentExpr : public Expr {
                     values...);
                 continue;
             }
-            auto item = items[take_pos++];
+            auto item = items[logical_pos];
             const auto valid = item.is_valid;
             if (item.data_skipped) {
                 const auto validity = nullable
@@ -2074,10 +2066,6 @@ class SegmentExpr : public Expr {
                 valid_res + logical_pos,
                 values...);
         }
-        AssertInfo(take_pos == items.Size(),
-                   "consumed {} Take rows, expected {}",
-                   take_pos,
-                   items.Size());
         return input->size();
     }
 
