@@ -1636,6 +1636,50 @@ func (s *DelegatorSuite) TestSyncIndexMeta() {
 	s.delegator.(*shardDelegator).forgetIndexMetaWorker(2, infos[:1], 5)
 	expectSync(2, 14, nil)
 	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 14))
+
+	// Such a load does not wait for the RPCs of a sync in flight, and the sync
+	// then does not record the nodes it reached, so they get the list again.
+	infos = append(infos, &indexpb.IndexInfo{CollectionID: s.collectionID, FieldID: 103, IndexID: 3})
+	expectSync(1, 15, nil)
+	called, release := make(chan struct{}), make(chan struct{})
+	blocked := cluster.NewMockWorker(s.T())
+	blocked.EXPECT().SyncIndexMeta(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, *querypb.SyncIndexMetaRequest) (*commonpb.Status, error) {
+		close(called)
+		<-release
+		return merr.Success(), nil
+	}).Once()
+	workers[2] = blocked
+	done := make(chan error)
+	go func() { done <- s.delegator.SyncIndexMeta(ctx, infos, 15) }()
+	<-called
+	forgotten := make(chan struct{})
+	go func() {
+		s.delegator.(*shardDelegator).forgetIndexMetaWorker(2, infos[:1], 5)
+		close(forgotten)
+	}()
+	select {
+	case <-forgotten:
+	case <-time.After(10 * time.Second):
+		s.Fail("forgetIndexMetaWorker waited for the SyncIndexMeta RPCs")
+	}
+	close(release)
+	s.NoError(<-done)
+	expectSync(1, 16, nil)
+	expectSync(2, 16, nil)
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 16))
+
+	// A node of an older version without the RPC does not fail the sync and is
+	// not asked again.
+	infos = append(infos, &indexpb.IndexInfo{CollectionID: s.collectionID, FieldID: 104, IndexID: 4})
+	expectSync(1, 17, nil)
+	old := cluster.NewMockWorker(s.T())
+	old.EXPECT().SyncIndexMeta(mock.Anything, mock.Anything).
+		Return(nil, merr.WrapErrServiceUnimplemented(errors.New("unknown method SyncIndexMeta"))).Once()
+	workers[2] = old
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 17))
+	infos = append(infos, &indexpb.IndexInfo{CollectionID: s.collectionID, FieldID: 105, IndexID: 5})
+	expectSync(1, 18, nil)
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 18))
 }
 
 func (s *DelegatorSuite) nextSchemaVersion() int32 {
