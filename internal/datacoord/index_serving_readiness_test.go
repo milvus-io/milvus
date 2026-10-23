@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -149,24 +148,24 @@ func TestIndexServingReadinessRequestedIndexFrontier(t *testing.T) {
 		name         string
 		childVector  commonpb.IndexState
 		parentScalar commonpb.IndexState
-		forceAll     bool
 		wantIDs      []int64
 		want         commonpb.IndexState
 	}{
-		{name: "vector child ready cannot borrow scalar parents", childVector: commonpb.IndexState_Finished, parentScalar: commonpb.IndexState_Finished, wantIDs: []int64{3}, want: commonpb.IndexState_InProgress},
+		// Handoff waits for every index defined on the collection, scalar and
+		// vector. A child whose scalar index is still building does not replace
+		// parents that have both indexes; a child replaces its parents only when
+		// all of its indexes are built, and when neither side is ready the
+		// child stays in the frontier.
+		{name: "child with building scalar index keeps ready parents serving", childVector: commonpb.IndexState_Finished, parentScalar: commonpb.IndexState_Finished, wantIDs: []int64{1, 2}, want: commonpb.IndexState_Finished},
 		{name: "selected parents cover requested scalar", childVector: commonpb.IndexState_InProgress, parentScalar: commonpb.IndexState_Finished, wantIDs: []int64{1, 2}, want: commonpb.IndexState_Finished},
-		{name: "selected parents need same scalar index", childVector: commonpb.IndexState_InProgress, parentScalar: commonpb.IndexState_InProgress, wantIDs: []int64{1, 2}, want: commonpb.IndexState_InProgress},
-		{name: "force all indexes selects scalar ready parents", childVector: commonpb.IndexState_Finished, parentScalar: commonpb.IndexState_Finished, forceAll: true, wantIDs: []int64{1, 2}, want: commonpb.IndexState_Finished},
-		{name: "force all indexes rejects partial scalar parents", childVector: commonpb.IndexState_Finished, parentScalar: commonpb.IndexState_InProgress, forceAll: true, wantIDs: []int64{3}, want: commonpb.IndexState_InProgress},
+		{name: "no ready side keeps the child", childVector: commonpb.IndexState_InProgress, parentScalar: commonpb.IndexState_InProgress, wantIDs: []int64{3}, want: commonpb.IndexState_InProgress},
+		{name: "partial scalar parents cannot replace the child", childVector: commonpb.IndexState_Finished, parentScalar: commonpb.IndexState_InProgress, wantIDs: []int64{3}, want: commonpb.IndexState_InProgress},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s, _ := newIndexReadinessTestServer([]*datapb.SegmentInfo{
 				newIndexLineageSegment(1, 100, commonpb.SegmentState_Dropped), newIndexLineageSegment(2, 100, commonpb.SegmentState_Dropped),
 				newIndexLineageSegment(3, 150, commonpb.SegmentState_Flushed, 1, 2),
 			}, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_Finished, 3: test.childVector})
-			key := paramtable.Get().DataCoordCfg.DVForceAllIndexReady.Key
-			require.NoError(t, paramtable.Get().Save(key, fmt.Sprint(test.forceAll)))
-			t.Cleanup(func() { paramtable.Get().Reset(key) })
 			index := &model.Index{CollectionID: 1, FieldID: 20, IndexID: 20, IndexName: "scalar_index", CreateTime: 100}
 			s.meta.indexMeta.indexes[1][20] = index
 			addIndexServingTask(s, 1, 20, commonpb.IndexState_Finished)
