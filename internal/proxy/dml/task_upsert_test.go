@@ -1754,12 +1754,14 @@ func TestUpsertDeleteMessageCipher(t *testing.T) {
 			require.NoError(t, err)
 			cache := NewMockCache(t)
 			cache.EXPECT().GetPartitionID(mock.Anything, "db", "upsert_cipher", "_default").Return(int64(20), nil)
-			channels := channelmgr.NewMockChannelsMgr(t)
-			channels.EXPECT().GetVChannels(int64(10)).Return([]string{"test_10v0"}, nil)
+			// Execute takes the vchannels from the routing lookup, not from the
+			// channel manager (see resolveWriteRoute).
+			cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, "upsert_cipher", int64(10)).
+				Return(&collectionInfo{VChannels: []string{"test_10v0"}}, nil)
 			task := &UpsertTask{
 				baseTask: baseTask{MetaCache: cache},
 				ctx:      context.Background(), req: &milvuspb.UpsertRequest{Base: &commonpb.MsgBase{MsgID: 1}, CollectionName: "upsert_cipher"},
-				collectionID: 10, schema: schema, chMgr: channels, idAllocator: &allocator.IDAllocator{}, oldIDs: ids,
+				collectionID: 10, schema: schema, idAllocator: &allocator.IDAllocator{}, oldIDs: ids,
 				result: &milvuspb.MutationResult{IDs: ids},
 				upsertMsg: &msgstream.UpsertMsg{
 					InsertMsg: &msgstream.InsertMsg{BaseMsg: msgstream.BaseMsg{BeginTimestamp: 12345}, InsertRequest: &msgpb.InsertRequest{
