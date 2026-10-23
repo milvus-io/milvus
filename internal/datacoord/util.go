@@ -20,12 +20,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -242,22 +244,40 @@ func getFieldBinlogs(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBi
 	return nil
 }
 
+// mergeFieldBinlogs merges copies of newBinlogs into currentBinlogs. The
+// result never aliases newBinlogs: a later merge into it must not change the
+// caller's binlogs, so an update operator rerun from the same input (after a
+// segment version conflict) produces the same segment.
 func mergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	for _, newBinlog := range newBinlogs {
 		fieldBinlogs := getFieldBinlogs(newBinlog.GetFieldID(), currentBinlogs)
 		if fieldBinlogs == nil {
-			currentBinlogs = append(currentBinlogs, newBinlog)
+			currentBinlogs = append(currentBinlogs, proto.Clone(newBinlog).(*datapb.FieldBinlog))
 		} else {
 			if len(fieldBinlogs.ChildFields) == 0 {
-				fieldBinlogs.ChildFields = newBinlog.GetChildFields()
+				fieldBinlogs.ChildFields = slices.Clone(newBinlog.GetChildFields())
 			}
 			if fieldBinlogs.Format == "" {
 				fieldBinlogs.Format = newBinlog.GetFormat()
 			}
-			fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, newBinlog.Binlogs...)
+			for _, binlog := range newBinlog.GetBinlogs() {
+				fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, proto.Clone(binlog).(*datapb.Binlog))
+			}
 		}
 	}
 	return currentBinlogs
+}
+
+// cloneFieldBinlogs deep-copies binlogs.
+func cloneFieldBinlogs(binlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	if binlogs == nil {
+		return nil
+	}
+	cloned := make([]*datapb.FieldBinlog, 0, len(binlogs))
+	for _, binlog := range binlogs {
+		cloned = append(cloned, proto.Clone(binlog).(*datapb.FieldBinlog))
+	}
+	return cloned
 }
 
 // filterDuplicateFieldBinlogs removes FieldBinlog entries from newLogs whose (fieldID, logID)

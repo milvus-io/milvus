@@ -919,18 +919,23 @@ func Test_ChannelExists_LoadError(t *testing.T) {
 }
 
 func Test_parseBinlogKey(t *testing.T) {
-	catalog := NewCatalog(nil, "", "")
-
 	t.Run("parse segment id fail", func(t *testing.T) {
-		segmentID, err := catalog.parseBinlogKey("root/1/1/err/1")
+		segmentID, err := parseBinlogKey("root/1/1/err/1")
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), segmentID)
 	})
 
 	t.Run("test ok", func(t *testing.T) {
-		segmentID, err := catalog.parseBinlogKey("root/1/1/1/1")
+		segmentID, err := parseBinlogKey("root/1/1/1/1")
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), segmentID)
+	})
+
+	t.Run("key too short", func(t *testing.T) {
+		_, err := parseBinlogKey("1/2")
+		assert.Error(t, err)
+		_, err = parseBinlogKey("12")
+		assert.Error(t, err)
 	})
 }
 

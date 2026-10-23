@@ -471,6 +471,7 @@ func withStatsTaskMeta(stm *statsTaskMeta) testMetaOption {
 
 func createMeta(catalog metastore.DataCoordCatalog, opts ...testMetaOption) *meta {
 	mt := &meta{
+		catalog:   catalog,
 		metaStore: metacache.NewMetaStore(catalog),
 		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
 			1000: {

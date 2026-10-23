@@ -709,10 +709,21 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("datacoord catalog does not support DataView persistence")
 	}
+	// Segment writes go to an optimistic store over the catalog keys, each a
+	// compare-and-swap of the versions it was built from. Without a meta store
+	// client (a server assembled by unit tests) they go through the catalog.
+	marshaler := &SegmentInfoMarshaler{}
+	var segmentPersist OptimisticTxnPersist[string, *datapb.SegmentInfo]
+	switch {
+	case Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV && s.tikvCli != nil:
+		segmentPersist = NewOptimisticTxnTiKVPersist[string, *datapb.SegmentInfo](s.tikvCli, marshaler)
+	case Params.MetaStoreCfg.MetaStoreType.GetValue() != util.MetaStoreTypeTiKV && s.etcdCli != nil:
+		segmentPersist = NewOptimisticTxnEtcdPersist[string, *datapb.SegmentInfo](s.etcdCli, marshaler)
+	}
 	var recoveredMeta *meta
 	reloadEtcdFn := func() error {
 		var err error
-		recoveredMeta, err = newMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker)
+		recoveredMeta, err = newMetaWithPersist(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, segmentPersist, s.metaRootPath)
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {

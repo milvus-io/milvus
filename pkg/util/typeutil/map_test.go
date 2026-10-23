@@ -149,6 +149,18 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 	})
 }
 
+func (suite *MapUtilSuite) TestConcurrentMapCompareAndDelete() {
+	m := NewConcurrentMap[int, *int]()
+	v1, v2 := new(int), new(int)
+	m.Insert(1, v1)
+	suite.False(m.CompareAndDelete(1, v2))
+	suite.Equal(1, m.Len())
+	suite.True(m.CompareAndSwap(1, v1, v2))
+	suite.True(m.CompareAndDelete(1, v2))
+	suite.Equal(0, m.Len())
+	suite.False(m.Contain(1))
+}
+
 func TestMapUtil(t *testing.T) {
 	suite.Run(t, new(MapUtilSuite))
 }

@@ -114,3 +114,36 @@ func (b *Builder) CommitSaveIfValue(key, oldValue, newValue string) {
 func (b *Builder) CommitRemove(key string) {
 	b.ops = append(b.ops, op{key: key, kind: opDel, commit: true})
 }
+
+// Op is a read-only view of a recorded op. It lets an executor that runs the
+// ops inside its own transaction (DataCoord's optimistic segment store composes
+// them with versioned segment writes) honor the same ordering contract as
+// Commit: non-commit ops in recorded order, commit ops last.
+type Op struct {
+	Key          string
+	Value        string
+	Delete       bool
+	DeletePrefix bool
+	Commit       bool
+}
+
+// Ops returns the recorded ops in recorded order.
+func (b *Builder) Ops() []Op {
+	ops := make([]Op, 0, len(b.ops))
+	for _, o := range b.ops {
+		ops = append(ops, Op{
+			Key:          o.key,
+			Value:        o.value,
+			Delete:       o.kind == opDel,
+			DeletePrefix: o.kind == opDelPrefix,
+			Commit:       o.commit,
+		})
+	}
+	return ops
+}
+
+// Guarded reports whether the builder carries a conditional commit guard (see
+// CommitSaveIfValue).
+func (b *Builder) Guarded() bool {
+	return b.cond != nil
+}

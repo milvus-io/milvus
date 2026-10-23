@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestStore_PutSegmentAndGet(t *testing.T) {
@@ -230,27 +231,46 @@ func TestStore_RemoveSegmentDeletesEmptyIndexBuckets(t *testing.T) {
 	s.PutSegment(&datapb.SegmentInfo{ID: 2, CollectionID: 100, InsertChannel: "ch-0"})
 	s.PutSegment(&datapb.SegmentInfo{ID: 3, CollectionID: 200, InsertChannel: "ch-1"})
 
-	require.Len(t, s.segCollIdx, 2)
-	require.Len(t, s.segChanIdx, 2)
+	require.Equal(t, 2, bucketCount(s.segCollIdx))
+	require.Equal(t, 2, bucketCount(s.segChanIdx))
 
 	// Collection 200 / ch-1 lose their only segment: both buckets must go.
 	s.RemoveSegment(3)
-	_, collStillThere := s.segCollIdx[200]
+	_, collStillThere := s.segCollIdx.get(200)
 	assert.False(t, collStillThere, "an emptied collection bucket must be deleted, not left empty")
-	_, chanStillThere := s.segChanIdx["ch-1"]
+	_, chanStillThere := s.segChanIdx.get("ch-1")
 	assert.False(t, chanStillThere, "an emptied channel bucket must be deleted, not left empty")
 
 	// Collection 100 still holds segments 1 and 2, so its buckets stay.
-	assert.Len(t, s.segCollIdx[100], 2)
-	assert.Len(t, s.segChanIdx["ch-0"], 2)
+	assert.Equal(t, 2, bucketLen(s.segCollIdx, 100))
+	assert.Equal(t, 2, bucketLen(s.segChanIdx, "ch-0"))
 
 	// Dropping one of the two shrinks the bucket but must not delete it.
 	s.RemoveSegment(1)
-	assert.Len(t, s.segCollIdx[100], 1)
-	assert.Len(t, s.segChanIdx["ch-0"], 1)
+	assert.Equal(t, 1, bucketLen(s.segCollIdx, 100))
+	assert.Equal(t, 1, bucketLen(s.segChanIdx, "ch-0"))
 
 	// The last one takes the buckets with it.
 	s.RemoveSegment(2)
-	assert.Empty(t, s.segCollIdx)
-	assert.Empty(t, s.segChanIdx)
+	assert.Zero(t, bucketCount(s.segCollIdx))
+	assert.Zero(t, bucketCount(s.segChanIdx))
+}
+
+// bucketCount counts the buckets of an index by visiting them: the index's
+// Len is not maintained by CompareAndDelete.
+func bucketCount[K comparable](idx *segmentIndex[K]) int {
+	n := 0
+	idx.buckets.Range(func(K, *typeutil.ConcurrentMap[int64, struct{}]) bool {
+		n++
+		return true
+	})
+	return n
+}
+
+func bucketLen[K comparable](idx *segmentIndex[K], key K) int {
+	bucket, ok := idx.get(key)
+	if !ok {
+		return 0
+	}
+	return bucket.Len()
 }

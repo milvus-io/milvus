@@ -155,7 +155,7 @@ func newLocalManifestTestMeta(t *testing.T, catalog *catalogmocks.DataCoordCatal
 }
 
 func loadAndNormalize(ctx context.Context, mt *meta, collectionIDs []int64) error {
-	return mt.metaStore.LoadFromCatalog(ctx, collectionIDs, mt.segmentLoadNormalizer())
+	return mt.metaStore.LoadFromCatalog(ctx, collectionIDs, mt.store().ListSegments, mt.segmentLoadNormalizer())
 }
 
 func assertLocalManifestCatalogReadOnly(t *testing.T, catalog *catalogmocks.DataCoordCatalog) {
