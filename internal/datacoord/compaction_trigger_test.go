@@ -2763,6 +2763,70 @@ func (s *CompactionTriggerSuite) TestCollectionScopedSignalKeepsEarlyReturn() {
 	})
 }
 
+// TestHandleSignalStopsWhenInspectorFull checks that an automatic signal stops
+// planning, without an error, once the inspector is full, while a force
+// (manual) signal does not check it.
+func (s *CompactionTriggerSuite) TestHandleSignalStopsWhenInspectorFull() {
+	const mb = 1024 * 1024
+	setup := func() {
+		// Rebuild the fixture so the mocks verify their calls when the subtest ends.
+		s.SetupTest()
+		pt := paramtable.Get()
+		for key, value := range map[string]string{
+			pt.DataCoordCfg.IndexBasedCompaction.Key:                   "false",
+			pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key: "1",
+			pt.DataCoordCfg.SegmentMaxSize.Key:                         "100",
+			// Every segment qualifies for single compaction and exceeds the
+			// 100MB target size, so each one becomes its own plan.
+			pt.DataCoordCfg.SingleCompactionRatioThreshold.Key: "0",
+		} {
+			pt.Save(key, value)
+			s.T().Cleanup(func() { pt.Reset(key) })
+		}
+		for _, segment := range s.meta.segments.segments {
+			segment.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		}
+		// Every subtest plans a single group.
+		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(&collectionInfo{
+			ID: s.collectionID,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+			}},
+		}, nil).Once()
+		s.tr.allocator = newMockAllocator(s.T())
+	}
+
+	s.Run("automatic signal returns nil and plans no further group once full", func() {
+		setup()
+		// Segment 7 in another partition forms a second group.
+		segment := &SegmentInfo{SegmentInfo: s.genSeg(7, 60), lastFlushTime: time.Now()}
+		segment.PartitionID = s.partitionID + 1
+		segment.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		s.meta.segments.SetSegment(7, segment)
+		// The inspector is full once one task is submitted.
+		submitted := 0
+		s.inspector.EXPECT().isFull().RunAndReturn(func() bool { return submitted >= 1 })
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(func(*datapb.CompactionTask) error {
+			submitted++
+			return nil
+		})
+		s.NoError(s.tr.handleSignal(NewCompactionSignal()))
+		s.Equal(1, submitted)
+	})
+
+	s.Run("force signal does not check the inspector", func() {
+		setup()
+		// No isFull expectation is set, so a call would fail the test.
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(nil).Times(4)
+		s.NoError(s.tr.handleSignal(NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel).
+			WithSegmentIDs(1, 2, 3, 4).
+			WithIsForce(true)))
+	})
+}
+
 func TestCompactionTriggerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionTriggerSuite))
 }
