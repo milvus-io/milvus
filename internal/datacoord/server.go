@@ -352,7 +352,6 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err := s.initMixCoord(); err != nil {
 		return err
 	}
-
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 
 	s.broker = broker.NewCoordinatorBroker(s.mixCoord)
