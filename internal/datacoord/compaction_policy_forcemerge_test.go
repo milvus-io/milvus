@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestForceMergeCompactionPolicySuite(t *testing.T) {
@@ -221,7 +222,10 @@ func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_WithCollectio
 func (s *ForceMergeCompactionPolicySuite) TestTriggerOneCollection_TargetSizeTooSmall() {
 	ctx := context.Background()
 	collectionID := int64(1)
-	// Default configMaxSize is 1024 MB (SegmentMaxSize default), so 512 MB should fail
+	// The premise is the uncapped configMaxSize of 1024 MB (SegmentMaxSize default),
+	// so the row cap (dataCoord.segment.maxRows) is disabled for the test schema.
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SegmentMaxRows.Key, "0")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SegmentMaxRows.Key)
 	targetSize := int64(512) // 512 MB, smaller than default configMaxSize (1024 MB)
 
 	coll := &collectionInfo{

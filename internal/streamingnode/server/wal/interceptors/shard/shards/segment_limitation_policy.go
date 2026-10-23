@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // getSegmentLimitationPolicy returns the segment limitation policy.
@@ -25,7 +26,9 @@ type segmentLimitation struct {
 // SegmentLimitationPolicy is the interface to generate the limitation of the segment.
 type SegmentLimitationPolicy interface {
 	// GenerateLimitation generates the limitation of the segment.
-	GenerateLimitation(lv datapb.SegmentLevel) segmentLimitation
+	// rowWidth is the estimated bytes per row of the collection (0 when unknown);
+	// it caps the L1 size at dataCoord.segment.maxRows rows.
+	GenerateLimitation(lv datapb.SegmentLevel, rowWidth int64) segmentLimitation
 }
 
 // jitterSegmentLimitationPolicyExtraInfo is the extra info of the jitter segment limitation policy.
@@ -40,12 +43,12 @@ type jitterSegmentLimitationPolicyExtraInfo struct {
 type jitterSegmentLimitationPolicy struct{}
 
 // GenerateLimitation generates the limitation of the segment.
-func (p jitterSegmentLimitationPolicy) GenerateLimitation(lv datapb.SegmentLevel) segmentLimitation {
+func (p jitterSegmentLimitationPolicy) GenerateLimitation(lv datapb.SegmentLevel, rowWidth int64) segmentLimitation {
 	switch lv {
 	case datapb.SegmentLevel_L0:
 		return p.generateL0Limitation()
 	case datapb.SegmentLevel_L1:
-		return p.generateL1Limitation()
+		return p.generateL1Limitation(rowWidth)
 	default:
 		panic(fmt.Sprintf("invalid segment level: %s", lv))
 	}
@@ -74,12 +77,17 @@ func (p jitterSegmentLimitationPolicy) generateL0Limitation() segmentLimitation 
 	}
 }
 
-// generateL1Limitation generates the limitation of the L1 segment.
-func (p jitterSegmentLimitationPolicy) generateL1Limitation() segmentLimitation {
+// generateL1Limitation generates the limitation of the L1 segment. The size
+// target is the same per-collection value DataCoord uses for compaction and
+// import: maxSize capped at maxRows rows of the collection's row width.
+func (p jitterSegmentLimitationPolicy) generateL1Limitation(rowWidth int64) segmentLimitation {
 	// TODO: It's weird to set such a parameter into datacoord configuration.
 	// Refactor it in the future
 	jitterRatio := p.getJitterRatio()
-	maxSegmentSize := uint64(paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024)
+	maxSegmentSize := uint64(typeutil.RowCappedSegmentSize(
+		paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024,
+		rowWidth,
+		paramtable.Get().DataCoordCfg.SegmentMaxRows.GetAsInt64()))
 	proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
 	segmentSize := uint64(jitterRatio * float64(maxSegmentSize) * proportion)
 	return segmentLimitation{
