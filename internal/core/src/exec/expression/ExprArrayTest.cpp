@@ -562,24 +562,36 @@ class ArrayEqualityCountingSnapshot : public SegmentReadSnapshot {
     }
     mutable int64_t data_resource_reads = 0;
     int64_t
-    chunk_size(FieldId f, int64_t c) const override {
-        return snapshot_->chunk_size(f, c);
+    chunk_size(FieldId f, int64_t c, OpContext* ctx = nullptr) const override {
+        return snapshot_->chunk_size(f, c, ctx);
     }
     int64_t
-    num_rows_until_chunk(FieldId f, int64_t c) const override {
-        return snapshot_->num_rows_until_chunk(f, c);
+    num_rows_until_chunk(FieldId f,
+                         int64_t c,
+                         OpContext* ctx = nullptr) const override {
+        return snapshot_->num_rows_until_chunk(f, c, ctx);
     }
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId f, int64_t off) const override {
-        return snapshot_->get_chunk_by_offset(f, off);
+    get_chunk_by_offset(FieldId f,
+                        int64_t off,
+                        OpContext* ctx = nullptr) const override {
+        return snapshot_->get_chunk_by_offset(f, off, ctx);
     }
     int64_t
-    num_chunk_data(FieldId f) const override {
-        return snapshot_->num_chunk_data(f);
+    num_chunk_data(FieldId f, OpContext* ctx = nullptr) const override {
+        return snapshot_->num_chunk_data(f, ctx);
     }
     int64_t
     get_row_count() const override {
         return snapshot_->get_row_count();
+    }
+    std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field) const override {
+        return snapshot_->GetArrayOffsets(field);
+    }
+    SchemaPtr
+    get_schema_snapshot() const override {
+        return snapshot_->get_schema_snapshot();
     }
     std::shared_ptr<ChunkedColumnInterface>
     GetDataScanResources(FieldId field) const override {
