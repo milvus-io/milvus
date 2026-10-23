@@ -21,10 +21,56 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func TestInitSparseInterimIndexAlgorithms(t *testing.T) {
+	params := &paramtable.ComponentParam{}
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	cfg := &params.QueryNodeCfg
+	t.Cleanup(func() {
+		params.Reset(cfg.InterimIndexSparseIPAlgo.Key)
+		params.Reset(cfg.InterimIndexSparseBM25Algo.Key)
+		params.Reset(cfg.InterimIndexTargetIndexVersion.Key)
+		require.NoError(t, InitInterminIndexConfig(params))
+	})
+	for _, tc := range []struct {
+		name, ip, bm25, version string
+		wantErr                 bool
+	}{
+		{name: "inherit", version: "8"},
+		{name: "independent", ip: "taat_naive", bm25: "daat_wand", version: "8"},
+		{name: "maxscore", ip: "DAAT_WAND", bm25: "DAAT_MAXSCORE", version: "10"},
+		{name: "ip_maxscore", ip: "DAAT_MAXSCORE", bm25: "TAAT_NAIVE", version: "9"},
+		{name: "invalid_ip", ip: "INVALID", version: "10", wantErr: true},
+		{name: "invalid_bm25", bm25: "INVALID", version: "10", wantErr: true},
+		{name: "ip_sindi", ip: "SINDI", version: "10", wantErr: true},
+		{name: "bm25_sindi", bm25: "SINDI", version: "10", wantErr: true},
+		{name: "ip_block_wand", ip: "BLOCK_MAX_WAND", version: "10", wantErr: true},
+		{name: "bm25_block_wand", bm25: "BLOCK_MAX_WAND", version: "10", wantErr: true},
+		{name: "ip_block_maxscore", ip: "BLOCK_MAX_MAXSCORE", version: "10", wantErr: true},
+		{name: "bm25_block_maxscore", bm25: "BLOCK_MAX_MAXSCORE", version: "10", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, tc.ip))
+			require.NoError(t, params.Save(cfg.InterimIndexSparseBM25Algo.Key, tc.bm25))
+			require.NoError(t, params.Save(cfg.InterimIndexTargetIndexVersion.Key, tc.version))
+			err := InitInterminIndexConfig(params)
+			if tc.wantErr {
+				require.Error(t, err)
+				// 2.6 maps ConfigInvalid to the generic segcore sentinel.
+				assert.ErrorIs(t, err, merr.ErrSegcore)
+				assert.False(t, merr.IsRetryableErr(err))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
 
 func TestTracer(t *testing.T) {
 	paramtable.Init()
