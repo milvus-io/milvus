@@ -134,14 +134,32 @@ func (f *fakeRewriteDispatcher) cleanUpAfterCommit(planID int64) {
 	f.running.Remove(planID)
 }
 
+// setHashSourceCheckpoint moves the source's channel checkpoint to ts through
+// the store, the way datacoord's checkpoint updater does.
+func setHashSourceCheckpoint(t *testing.T, m *meta, ts uint64) {
+	t.Helper()
+	require.NoError(t, m.UpdateChannelCheckpoints(context.Background(), []*msgpb.MsgPosition{
+		splitTestPosition(hashSrcVChannel, ts),
+	}))
+}
+
 // newHashRewriteMeta builds a meta with flushed L1 sourceSegments on the source
 // and the source's checkpoint at its fence.
 func newHashRewriteMeta(t *testing.T, sourceSegments []int64) *meta {
+	return newHashRewriteMetaAt(t, sourceSegments, hashFenceTick)
+}
+
+// newHashRewriteMetaAt is newHashRewriteMeta with the source's checkpoint at
+// checkpointTs. A channel checkpoint only moves forward, so a test that starts
+// below the fence has to start there.
+func newHashRewriteMetaAt(t *testing.T, sourceSegments []int64, checkpointTs uint64) *meta {
 	t.Helper()
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
-	m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{ChannelName: hashSrcVChannel, Timestamp: hashFenceTick}
-	m.collections.Insert(splitMgrCollection, &collectionInfo{
+	require.NoError(t, m.UpdateChannelCheckpoints(context.Background(), []*msgpb.MsgPosition{
+		splitTestPosition(hashSrcVChannel, checkpointTs),
+	}))
+	m.AddCollection(&collectionInfo{
 		ID:            splitMgrCollection,
 		Schema:        splitTestSchema(false),
 		VChannelNames: []string{hashSrcVChannel},
@@ -377,15 +395,14 @@ func TestRewriteWaitsForFenceFlush(t *testing.T) {
 	// T_switch is recorded but the checkpoint has not reached it: the segments
 	// the fence sealed have not been reported yet, so nothing is rewritten and
 	// the drain does not pass even with nothing listed.
-	m := newHashRewriteMeta(t, nil)
-	m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick - 50}
+	m := newHashRewriteMetaAt(t, nil, hashFenceTick-50)
 	c := newRewriteCase(t, m, newHashTask(nil))
 
 	c.tick()
 	assert.Zero(t, c.rewriter.rounds, "the manager runs no round before the fence flushes")
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state())
 
-	m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick}
+	setHashSourceCheckpoint(t, m, hashFenceTick)
 	c.tick()
 	assert.Equal(t, 1, c.rewriter.rounds)
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, c.state())
@@ -637,7 +654,7 @@ func TestRewriteZeroOutputPlanDropsItsInputAndAdopts(t *testing.T) {
 
 	require.ElementsMatch(t, []int64{101}, c.tick().dispatched)
 	planID := c.dispatcher.dispatched[101]
-	outputs, _, err := m.CompleteCompactionMutation(context.Background(), &datapb.CompactionTask{
+	outputs, err := m.CompleteCompactionMutation(context.Background(), &datapb.CompactionTask{
 		PlanID:           planID,
 		CollectionID:     splitMgrCollection,
 		Type:             datapb.CompactionType_HashSplitCompaction,
@@ -708,15 +725,14 @@ func TestRewriteDoesNotRequeueAnAlreadyRewrittenSegment(t *testing.T) {
 // delete can still flush in after a plan was built. The manager calls no round
 // before the fence flushes, and a round holds the same rule itself.
 func TestRewriteRoundDispatchesNothingBeforeTheFenceFlushes(t *testing.T) {
-	m := newHashRewriteMeta(t, []int64{101, 102})
-	m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick - 1}
+	m := newHashRewriteMetaAt(t, []int64{101, 102}, hashFenceTick-1)
 	c := newRewriteCase(t, m, newHashTask([]int64{101, 102}))
 
 	assert.Empty(t, c.round(10).dispatched)
 	assert.Empty(t, c.dispatcher.dispatched)
 	assert.ElementsMatch(t, []int64{101, 102}, c.pending(), "the work list is untouched")
 
-	m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick}
+	setHashSourceCheckpoint(t, m, hashFenceTick)
 	assert.ElementsMatch(t, []int64{101, 102}, c.round(10).dispatched)
 }
 
@@ -733,14 +749,13 @@ func TestRewriteRoundDispatchesNothingBeforeTheFenceIsRecorded(t *testing.T) {
 // A round blocked on the fence still records what it learned, so the fence
 // flush does not wait for another re-scan and a restart does not lose it.
 func TestRewriteBlockedOnTheFenceStillRecordsNewWork(t *testing.T) {
-	m := newHashRewriteMeta(t, []int64{101})
-	m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick - 1}
+	m := newHashRewriteMetaAt(t, []int64{101}, hashFenceTick-1)
 	c := newRewriteCase(t, m, newHashTask(nil))
 
 	assert.Empty(t, c.round(10).dispatched)
 	assert.ElementsMatch(t, []int64{101}, c.pending())
 
-	m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick}
+	setHashSourceCheckpoint(t, m, hashFenceTick)
 	assert.ElementsMatch(t, []int64{101}, c.round(10).dispatched)
 }
 
@@ -867,9 +882,8 @@ func TestRewriteRetiresTheL0sOfASourceWithNoInput(t *testing.T) {
 // The retire waits for the fence too: before it, a segment that has not folded
 // these L0s can still appear on the source.
 func TestRewriteRoundDoesNotRetireL0sBeforeTheFenceFlushes(t *testing.T) {
-	m := newHashRewriteMeta(t, nil)
+	m := newHashRewriteMetaAt(t, nil, hashFenceTick-1)
 	setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
-	m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick - 1}
 	c := newRewriteCase(t, m, newHashTask(nil))
 
 	c.round(10)
@@ -1041,9 +1055,8 @@ func TestShardSplitRewriteIsScheduledWithCompactionOff(t *testing.T) {
 // and the post-#53595 segment states the gate now admits are handled.
 func TestRewriteRoundIsGatedOnTheFenceCheckpoint(t *testing.T) {
 	t.Run("no dispatch and no L0 retire below the gate", func(t *testing.T) {
-		m := newHashRewriteMeta(t, []int64{101})
+		m := newHashRewriteMetaAt(t, []int64{101}, hashFenceTick-1)
 		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
-		m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick - 1}
 		c := newRewriteCase(t, m, newHashTask([]int64{101}))
 		require.NotEmpty(t, c.manager.coordinator.fenceFlushBlockReason(c.task()))
 
@@ -1053,7 +1066,7 @@ func TestRewriteRoundIsGatedOnTheFenceCheckpoint(t *testing.T) {
 		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201))
 
 		// The gate opens, and the same round does both.
-		m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick}
+		setHashSourceCheckpoint(t, m, hashFenceTick)
 		require.Empty(t, c.manager.coordinator.fenceFlushBlockReason(c.task()))
 		assert.ElementsMatch(t, []int64{101}, c.round(10).dispatched)
 	})
@@ -1269,10 +1282,9 @@ func TestHashSplitRewriterReadsDataCoordImportMeta(t *testing.T) {
 // clears, before any plan is built.
 func TestRewriteRetiresOnlyTheL0sTheFenceDeclaredFinal(t *testing.T) {
 	t.Run("the set is recorded when the fence clears, before any dispatch", func(t *testing.T) {
-		m := newHashRewriteMeta(t, []int64{101})
+		m := newHashRewriteMetaAt(t, []int64{101}, hashFenceTick-1)
 		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
 		setSourceSegment(m, 202, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
-		m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick - 1}
 		c := newRewriteCase(t, m, newHashTask([]int64{101}))
 
 		c.round(10)
@@ -1280,7 +1292,7 @@ func TestRewriteRetiresOnlyTheL0sTheFenceDeclaredFinal(t *testing.T) {
 			"nothing is recorded below the fence gate, and nothing is dispatched either")
 		assert.Empty(t, c.dispatcher.dispatched)
 
-		m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick}
+		setHashSourceCheckpoint(t, m, hashFenceTick)
 		c.round(10)
 		fenced := c.task().GetSources()[0].GetFencedLevelZero()
 		require.NotNil(t, fenced)
