@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -98,7 +99,7 @@ func channelDiffWith(t *testing.T, describe func(*meta.MockBroker), window typeu
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr, metacache.NewMetaStore(nil))
 	ctx := context.Background()
 	require.NoError(t, m.PutCollection(ctx, utils.CreateTestCollection(1, 1)))
 	require.NoError(t, m.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1})))
@@ -293,7 +294,7 @@ func affinityLoads(t *testing.T, sourceReadOnly bool) map[string]int64 {
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr, metacache.NewMetaStore(nil))
 	ctx := context.Background()
 	require.NoError(t, m.PutCollection(ctx, utils.CreateTestCollection(1, 1)))
 	require.NoError(t, m.Put(ctx, replica))
@@ -461,7 +462,7 @@ func duplicatedDelegatorsReleased(t *testing.T, describeErr error) map[string]in
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr, metacache.NewMetaStore(nil))
 	ctx := context.Background()
 	require.NoError(t, m.PutCollection(ctx, utils.CreateTestCollection(1, 1)))
 	require.NoError(t, m.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2})))
