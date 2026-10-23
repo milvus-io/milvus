@@ -170,6 +170,9 @@ func (m *mockMix) SetProxyCreator(func(ctx context.Context, addr string, nodeID 
 func (m *mockMix) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 }
 
+func (m *mockMix) RegisterPKIndexCoordGRPCService(server *grpc.Server) {
+}
+
 func (m *mockMix) Register() error {
 	return nil
 }

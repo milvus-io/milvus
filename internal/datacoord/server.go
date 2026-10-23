@@ -37,6 +37,9 @@ import (
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	pkcompaction "github.com/milvus-io/milvus/internal/datacoord/pkindex/compaction"
+	pkindexgc "github.com/milvus-io/milvus/internal/datacoord/pkindex/gc"
+	pkindexservice "github.com/milvus-io/milvus/internal/datacoord/pkindex/service"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/dataview"
@@ -117,18 +120,21 @@ type Server struct {
 	segmentManager                      Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
-	idAllocator      *globalIDAllocator.GlobalIDAllocator
-	nodeManager      session.NodeManager
-	cluster2         session.Cluster
-	mixCoord         types.MixCoord
-	garbageCollector *garbageCollector
-	gcOpt            GcOption
-	handler          Handler
-	importMeta       ImportMeta
-	importInspector  ImportInspector
-	importChecker    ImportChecker
-	importCheckerV3  ImportChecker
-	importJobLock    *lock.KeyLock[int64]
+	idAllocator       *globalIDAllocator.GlobalIDAllocator
+	nodeManager       session.NodeManager
+	cluster2          session.Cluster
+	mixCoord          types.MixCoord
+	garbageCollector  *garbageCollector
+	gcOpt             GcOption
+	pkindexService    *pkindexservice.Service
+	pkindexGC         *pkindexgc.GC
+	pkindexCompaction *pkcompaction.Inspector
+	handler           Handler
+	importMeta        ImportMeta
+	importInspector   ImportInspector
+	importChecker     ImportChecker
+	importCheckerV3   ImportChecker
+	importJobLock     *lock.KeyLock[int64]
 
 	copySegmentMeta      CopySegmentMeta
 	copySegmentInspector CopySegmentInspector
@@ -229,6 +235,15 @@ func WithCatalog(catalog metastore.DataCoordCatalog) Option {
 	}
 }
 
+// WithPKIndexService returns an Option to set the primary key index manifest
+// service that datacoord gives its manager to. The caller registers the
+// service on its gRPC server.
+func WithPKIndexService(svc *pkindexservice.Service) Option {
+	return func(svr *Server) {
+		svr.pkindexService = svc
+	}
+}
+
 // CreateServer creates a `Server` instance
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
@@ -242,6 +257,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		pkindexService:      pkindexservice.New(),
 	}
 
 	for _, opt := range opts {
@@ -374,6 +390,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	mlog.Info(s.ctx, "init segment manager done")
 
 	s.initGarbageCollection(storageCli)
+
+	s.initPKIndex(storageCli)
+	mlog.Info(s.ctx, "init primary key index manifest service done")
 
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
 		commitImport:        s.broadcastCommitImportMessage,
@@ -854,6 +873,12 @@ func (s *Server) startServerLoop() {
 	// construction (bounded by s.ctx); nothing to do here.
 
 	s.garbageCollector.start()
+	if s.pkindexGC != nil {
+		s.pkindexGC.Start(s.serverLoopCtx)
+	}
+	if s.pkindexCompaction != nil {
+		s.pkindexCompaction.Start()
+	}
 
 	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
@@ -1176,6 +1201,14 @@ func (s *Server) Stop() error {
 	mlog.Info(s.ctx, "datacoord server shutdown")
 	s.garbageCollector.close()
 	mlog.Info(s.ctx, "datacoord garbage collector stopped")
+	if s.pkindexGC != nil {
+		s.pkindexGC.Close()
+		mlog.Info(s.ctx, "datacoord primary key index gc stopped")
+	}
+	if s.pkindexCompaction != nil {
+		s.pkindexCompaction.Close()
+		mlog.Info(s.ctx, "datacoord primary key index compaction inspector stopped")
+	}
 	if s.snapshotExportManager != nil {
 		s.snapshotExportManager.Close()
 		mlog.Info(s.ctx, "datacoord snapshot export manager stopped")

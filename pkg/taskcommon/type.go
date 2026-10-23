@@ -34,6 +34,8 @@ const (
 	// ExternalCopySegment is a fail-closed capability discriminator. Workers
 	// predating foreign-source copy support reject it before decoding the task.
 	ExternalCopySegment Type = "ExternalCopySegment"
+	// PKIndexCompaction merges the tables of a primary key index vchannel.
+	PKIndexCompaction Type = "PKIndexCompaction"
 )
 
 var TypeList = []Type{
@@ -49,4 +51,5 @@ var TypeList = []Type{
 	RefreshExternalCollection,
 	CopySegment,
 	ExternalCopySegment,
+	PKIndexCompaction,
 }
