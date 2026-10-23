@@ -33,7 +33,9 @@
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/memory_planner.h"
 #include "segcore/Utils.h"
+#include "storage/KeyRetriever.h"
 
 namespace milvus::index {
 
@@ -932,29 +934,29 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
-    auto result = milvus_storage::FileRowGroupReader::Make(fs, files[0]);
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: {}",
-               result.status().ToString());
-    auto file_reader = result.ValueOrDie();
-    std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
-        file_reader->file_metadata();
+
+    milvus::segcore::PreparedParquetFiles prepared_files;
+    prepared_files.reserve(files.size());
+    for (const auto& file : files) {
+        auto result = milvus_storage::PreparedParquetFile::Open(
+            fs, file, storage::GetReaderProperties());
+        AssertInfo(result.ok(),
+                   "[StorageV2] Failed to prepare file {}: {}",
+                   file,
+                   result.status().ToString());
+        prepared_files.push_back(std::move(result).ValueOrDie());
+    }
+
     milvus_storage::FieldIDList field_id_list =
-        metadata->GetGroupFieldIDList().GetFieldIDList(column_group_id);
+        prepared_files.front()->group_field_id_list().GetFieldIDList(
+            column_group_id);
     std::vector<FieldId> milvus_field_ids;
     for (int i = 0; i < field_id_list.size(); ++i) {
         milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
     }
 
-    for (const auto& file : files) {
-        auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
-        AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create file row group reader: " +
-                       result.status().ToString());
-        auto reader = result.ValueOrDie();
-        auto row_group_meta_vector =
-            reader->file_metadata()->GetRowGroupMetadataVector();
-        num_rows += row_group_meta_vector.row_num();
+    for (const auto& prepared : prepared_files) {
+        num_rows += prepared->row_group_metadata().row_num();
     }
 
     if (num_rows_ == 0) {
@@ -996,6 +998,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         GroupChunkType::JSON_KEY_STATS,
         field_meta_map,
         column_group_info,
+        fs,
         files,
         enable_mmap,
         mmap_config.GetMmapPopulate(),

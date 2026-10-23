@@ -32,9 +32,13 @@
 #include "common/OpContext.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/reader.h"
 
 namespace milvus::segcore {
+
+using PreparedParquetFiles =
+    std::vector<std::shared_ptr<milvus_storage::PreparedParquetFile>>;
 
 struct RowGroupBlock {
     int64_t offset;  // Start offset of the row group block
@@ -90,6 +94,8 @@ class ParallelDegreeSplitStrategy : public RowGroupSplitStrategy {
  * @param fs: the arrow filesystem pointer used to load
  * @param schema: schema of the data, if not provided, storage v2 will read all columns of the files.
  * @param priority: load priority
+ * @param prepared_files: contexts from metadata discovery, in remote_files order.
+ * If omitted, prepare each file once before splitting it into reader tasks.
  */
 void
 LoadWithStrategy(const std::vector<std::string>& remote_files,
@@ -100,7 +106,8 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  const milvus_storage::ArrowFileSystemPtr& fs,
                  const std::shared_ptr<arrow::Schema> schema = nullptr,
                  milvus::proto::common::LoadPriority priority =
-                     milvus::proto::common::LoadPriority::HIGH);
+                     milvus::proto::common::LoadPriority::HIGH,
+                 const PreparedParquetFiles& prepared_files = {});
 
 // ---- Cell-batch loading ----
 
@@ -167,13 +174,12 @@ size_t
 GetCellBatchConcurrency(milvus::proto::common::LoadPriority load_priority);
 
 /**
- * Creates a BatchReaderFactory that reads from Parquet files via FileRowGroupReader.
- * The returned factory owns a copy of remote_files, so the caller's vector
- * need not outlive the factory.
+ * Creates a BatchReaderFactory that reads from Parquet files via
+ * independent readers from caller-prepared files. The factory retains the file
+ * contexts across batch tasks; it shares plaintext footers but no reader state.
  */
 BatchReaderFactory
-MakeFileReaderFactory(std::vector<std::string> remote_files,
-                      milvus_storage::ArrowFileSystemPtr fs);
+MakeFileReaderFactory(PreparedParquetFiles prepared_files);
 
 /**
  * Creates a BatchReaderFactory that reads from a ChunkReader via batch
