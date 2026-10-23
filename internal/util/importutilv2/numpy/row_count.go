@@ -49,13 +49,19 @@ const maxHeaderLen = 1 << 16
 // Only the prefix is read, via ReadAt, so the reader's sequential offset is
 // untouched and npyio still decodes from the start.
 func validateHeaderPrefix(ra io.ReaderAt, path string) error {
+	// A caller that opens a reader rather than a named object has no path to
+	// report, so leave the location out of the message entirely.
+	pathSuffix := ""
+	if path != "" {
+		pathSuffix = ", path=" + path
+	}
 	var prefix [12]byte
 	n, err := ra.ReadAt(prefix[:], 0)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	if n < 10 || [6]byte(prefix[0:6]) != npyio.Magic {
-		return merr.WrapErrImportFailedMsg("not a numpy file, path=%s", path)
+		return merr.WrapErrImportFailedMsg("not a numpy file%s", pathSuffix)
 	}
 	var hdrLen, hdrOff int64
 	switch major := prefix[6]; major {
@@ -63,22 +69,22 @@ func validateHeaderPrefix(ra io.ReaderAt, path string) error {
 		hdrLen, hdrOff = int64(binary.LittleEndian.Uint16(prefix[8:10])), 10
 	case 2:
 		if n < 12 {
-			return merr.WrapErrImportFailedMsg("numpy v2 header truncated, path=%s", path)
+			return merr.WrapErrImportFailedMsg("numpy v2 header truncated%s", pathSuffix)
 		}
 		hdrLen, hdrOff = int64(binary.LittleEndian.Uint32(prefix[8:12])), 12
 	default:
-		return merr.WrapErrImportFailedMsg("unsupported numpy major version %d, path=%s", major, path)
+		return merr.WrapErrImportFailedMsg("unsupported numpy major version %d%s", major, pathSuffix)
 	}
 	if hdrLen <= 0 || hdrLen > maxHeaderLen {
-		return merr.WrapErrImportFailedMsg("numpy header length %d out of range (max %d), path=%s",
-			hdrLen, maxHeaderLen, path)
+		return merr.WrapErrImportFailedMsg("numpy header length %d out of range (max %d)%s",
+			hdrLen, maxHeaderLen, pathSuffix)
 	}
 	hdr := make([]byte, hdrLen)
 	if _, err := ra.ReadAt(hdr, hdrOff); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	if bytes.IndexByte(hdr, '\n') < 0 {
-		return merr.WrapErrImportFailedMsg("numpy header is not newline-terminated, path=%s", path)
+		return merr.WrapErrImportFailedMsg("numpy header is not newline-terminated%s", pathSuffix)
 	}
 	return nil
 }

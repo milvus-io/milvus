@@ -735,3 +735,153 @@ func TestNumpyValidateHeaderError(t *testing.T) {
 		})
 	}
 }
+
+// seqReader exposes only Read, hiding any random-access capability of the reader
+// it wraps, so the header check has to go through the panic guard instead.
+type seqReader struct {
+	io.Reader
+}
+
+// buildNpy assembles a .npy file from its parts so a test can declare a header
+// length that disagrees with the bytes actually present.
+func buildNpy(major byte, hdrLen []byte, hdr []byte, body []byte) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte{0x93, 'N', 'U', 'M', 'P', 'Y'})
+	buf.Write([]byte{major, 0})
+	buf.Write(hdrLen)
+	buf.Write(hdr)
+	buf.Write(body)
+	return buf.Bytes()
+}
+
+// npyHeader renders a dtype dict the way numpy does: padded out to a 64-byte
+// boundary and newline-terminated.
+func npyHeader(dict string) []byte {
+	hdr := []byte(dict)
+	pad := 64 - (10+len(hdr)+1)%64
+	hdr = append(hdr, make([]byte, pad)...)
+	return append(hdr, '\n')
+}
+
+func vecFieldSchema() *schemapb.FieldSchema {
+	return &schemapb.FieldSchema{
+		FieldID:    100,
+		Name:       "vec",
+		DataType:   schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+	}
+}
+
+// TestNewFieldReaderMalformedHeader covers the headers npyio mishandles. Each one
+// used to panic inside the parser, which pkg/util/conc re-panicked out of the
+// import worker; they must all come back as ordinary import errors instead.
+func TestNewFieldReaderMalformedHeader(t *testing.T) {
+	validHdr := npyHeader("{'descr': '<f4', 'fortran_order': False, 'shape': (2, 4), }")
+
+	// A header with no newline is what npyio slices on without checking, so its
+	// LastIndexByte returns -1 and the parser panics.
+	noNewline := []byte("{'descr': '<f4', 'fortran_order': False, 'shape': (1, 4), }")
+	noNewline = append(noNewline, make([]byte, 78-len(noNewline))...)
+
+	// A v2 length is a uint32, so a file can declare a header far larger than the
+	// 64 KiB any real one needs; npyio allocates it verbatim.
+	var hugeLen [4]byte
+	binary.LittleEndian.PutUint32(hugeLen[:], 1<<30)
+
+	tests := []struct {
+		name    string
+		data    []byte
+		wantSub string
+	}{
+		{
+			name:    "header without newline",
+			data:    buildNpy(1, []byte{byte(len(noNewline)), 0}, noNewline, make([]byte, 16)),
+			wantSub: "newline-terminated",
+		},
+		{
+			name:    "header shorter than declared",
+			data:    buildNpy(1, []byte{0xff, 0x7f}, validHdr, nil),
+			wantSub: "out of range",
+		},
+		{
+			name:    "header truncated before the newline",
+			data:    buildNpy(1, []byte{0xff, 0x7f}, []byte("{'descr': '<f4', 'fortran_order'"), nil),
+			wantSub: "newline-terminated",
+		},
+		{
+			name:    "unreasonable v2 header length",
+			data:    buildNpy(2, hugeLen[:], validHdr, nil),
+			wantSub: "out of range",
+		},
+		{
+			name:    "not a numpy file",
+			data:    []byte("this is not a numpy file at all"),
+			wantSub: "not a numpy file",
+		},
+		{
+			name:    "unsupported major version",
+			data:    buildNpy(9, []byte{10, 0}, make([]byte, 10), nil),
+			wantSub: "unsupported numpy major version",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fieldReader, err := NewFieldReader(bytes.NewReader(tt.data), vecFieldSchema(), common.DefaultTimezone)
+			assert.Error(t, err)
+			assert.Nil(t, fieldReader)
+			assert.Contains(t, err.Error(), tt.wantSub)
+		})
+	}
+}
+
+// TestNewFieldReaderMalformedHeaderNoRandomAccess repeats the missing-newline case
+// with a reader that offers no ReadAt, so only the panic guard stands between the
+// malformed header and the worker.
+func TestNewFieldReaderMalformedHeaderNoRandomAccess(t *testing.T) {
+	noNewline := []byte("{'descr': '<f4', 'fortran_order': False, 'shape': (1, 4), }")
+	noNewline = append(noNewline, make([]byte, 78-len(noNewline))...)
+	data := buildNpy(1, []byte{byte(len(noNewline)), 0}, noNewline, make([]byte, 16))
+
+	fieldReader, err := NewFieldReader(seqReader{bytes.NewReader(data)}, vecFieldSchema(), common.DefaultTimezone)
+	assert.Error(t, err)
+	assert.Nil(t, fieldReader)
+	assert.Contains(t, err.Error(), "read numpy header failed")
+}
+
+// TestNewFieldReaderHeaderPastEOF covers a header whose declared length runs past
+// the end of the file. npyio allocates the declared length, cannot fill it, and
+// then slices on a newline that never arrived, so the panic guard is the only
+// thing between this input and the import worker.
+func TestNewFieldReaderHeaderPastEOF(t *testing.T) {
+	hdr := npyHeader("{'descr': '<f4', 'fortran_order': False, 'shape': (2, 4), }")
+	data := buildNpy(1, []byte{0xff, 0x7f}, hdr, nil)
+
+	fieldReader, err := NewFieldReader(bytes.NewReader(data), vecFieldSchema(), common.DefaultTimezone)
+	assert.Error(t, err)
+	assert.Nil(t, fieldReader)
+}
+
+// TestNewFieldReaderValidHeader checks the prefix check leaves a well-formed file
+// readable: it inspects the header through ReadAt and must neither consume the
+// sequential offset nor reject a header numpy itself wrote.
+func TestNewFieldReaderValidHeader(t *testing.T) {
+	hdr := npyHeader("{'descr': '<f4', 'fortran_order': False, 'shape': (2, 4), }")
+	data := buildNpy(1, []byte{byte(len(hdr)), 0}, hdr, make([]byte, 2*4*4))
+
+	br := bytes.NewReader(data)
+	assert.NoError(t, validateHeaderPrefix(br, "vec.npy"))
+	off, err := br.Seek(0, io.SeekCurrent)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), off)
+
+	fieldReader, err := NewFieldReader(bytes.NewReader(data), vecFieldSchema(), common.DefaultTimezone)
+	assert.NoError(t, err)
+	assert.NotNil(t, fieldReader)
+
+	values, validData, err := fieldReader.Next(2)
+	assert.NoError(t, err)
+	assert.Nil(t, validData)
+	floats, ok := values.([]float32)
+	assert.True(t, ok)
+	assert.Equal(t, 8, len(floats))
+}

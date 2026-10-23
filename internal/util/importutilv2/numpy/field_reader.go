@@ -51,7 +51,17 @@ type FieldReader struct {
 }
 
 func NewFieldReader(reader io.Reader, field *schemapb.FieldSchema, timezone string) (*FieldReader, error) {
-	r, err := npyio.NewReader(reader)
+	// npyio's readHeader trusts the declared header length and slices on the last
+	// '\n' without checking that one exists, so a malformed header panics inside the
+	// parser. Reject such a file as an import error here: the reader is opened from a
+	// pool goroutine, where pkg/util/conc re-panics and takes the worker down, and a
+	// restarted job resumes the persisted task and reads the same file again.
+	if ra, ok := reader.(io.ReaderAt); ok {
+		if err := validateHeaderPrefix(ra, ""); err != nil {
+			return nil, err
+		}
+	}
+	r, err := newNpyReader(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -79,6 +89,19 @@ func NewFieldReader(reader io.Reader, field *schemapb.FieldSchema, timezone stri
 	}
 	cr.setByteOrder()
 	return cr, nil
+}
+
+// newNpyReader reads reader's header, turning a panic raised by npyio's header
+// parser into an import error. validateHeaderPrefix already rejects the headers
+// npyio mishandles, but it needs random access; this guard covers every other
+// reader, so no input can crash the worker.
+func newNpyReader(reader io.Reader) (r *npy.Reader, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			r, err = nil, merr.WrapErrImportFailed(fmt.Sprintf("read numpy header failed: %v", rec))
+		}
+	}()
+	return npyio.NewReader(reader)
 }
 
 func ReadN[T any](reader io.Reader, order binary.ByteOrder, n int64) ([]T, error) {
