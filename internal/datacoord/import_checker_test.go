@@ -35,6 +35,7 @@ import (
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -288,7 +289,19 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 
 	// test check IndexBuilding job — transitions to Uncommitted, segments keep is_importing=true
 	// until HandleCommitVchannel runs after the WAL commit fence.
+	s.checker.meta.indexMeta.indexes[job.GetCollectionID()] = map[UniqueID]*model.Index{
+		100: {
+			CollectionID: job.GetCollectionID(),
+			FieldID:      100,
+			IndexID:      100,
+			IndexName:    "import_idx",
+		},
+	}
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.WaitForIndex.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.WaitForIndex.Key)
+	drainBuildIndexChForTest()
 	s.checker.checkIndexBuildingJob(job)
+	assertBuildIndexEvents(s.T(), targetSegmentIDs...)
 	for _, t := range importTasks {
 		task := s.importMeta.GetTask(context.TODO(), t.GetTaskID())
 		for _, id := range task.(*importTask).GetSegmentIDs() {
