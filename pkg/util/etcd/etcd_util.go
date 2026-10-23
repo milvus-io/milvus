@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,25 +57,48 @@ import (
 //     token, so the watch owner must re-watch. Re-watching issues a unary
 //     request first, which goes through clientv3's unary retry interceptor and
 //     refreshes the auth token, so the new watch stream recovers.
+//   - transient availability/overload errors accepted by IsRetriableEtcdErr:
+//     stream setup can fail in getToken/Authenticate, which converts gRPC
+//     errors to EtcdError. clientv3's isHaltErr does not recognize their gRPC
+//     status and can terminate the watch instead of reconnecting it.
 //
-// Genuine authorization failures (permission denied, bad credentials) carry
-// different codes (PermissionDenied, InvalidArgument, FailedPrecondition) and
-// are deliberately NOT retriable. We match the etcd sentinels via errors.Is
-// rather than the raw gRPC Unauthenticated code: clientv3 maps watch errors
-// back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
-// source of Unauthenticated, so matching the sentinel is both sufficient and
-// narrower than trusting the code.
+// Genuine authorization failures (permission denied, bad credentials) are
+// deliberately NOT retriable. Match known etcd errors, including the
+// CancelReason transport forms below, rather than all Unauthenticated errors.
 //
-// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
-// genuinely persistent failure does not loop forever.
+// Callers must back off between recovery attempts and honor context cancellation.
 func IsRetriableWatchErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, rpctypes.ErrCompacted) ||
+	if errors.Is(err, rpctypes.ErrCompacted) ||
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
-		errors.Is(err, rpctypes.ErrAuthOldRevision)
+		errors.Is(err, rpctypes.ErrAuthOldRevision) ||
+		IsRetriableEtcdErr(err) {
+		return true
+	}
+	// A server-side watch cancellation loses the sentinel identity: etcd's
+	// serverWatchStream puts ErrGRPC*.Error() — the full "rpc error: code =
+	// Unauthenticated desc = ..." string — into WatchResponse.CancelReason, and
+	// clientv3 rebuilds it via errors.New / status.Error before v3rpc.Error,
+	// whose lookup table is keyed by the bare description only. The rebuilt
+	// error therefore never maps back to a sentinel and errors.Is above is
+	// false. Match the sentinel descriptions inside the message to cover this
+	// transport shape (including the substream path that nests it inside a
+	// FailedPrecondition status).
+	msg := err.Error()
+	for _, sentinel := range []error{
+		rpctypes.ErrGRPCCompacted,
+		rpctypes.ErrGRPCInvalidAuthToken,
+		rpctypes.ErrGRPCUserEmpty,
+		rpctypes.ErrGRPCAuthOldRevision,
+	} {
+		if strings.Contains(msg, rpctypes.ErrorDesc(sentinel)) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsRetriableEtcdErr reports whether an etcd error is transient and safe to
@@ -87,6 +111,9 @@ func IsRetriableWatchErr(err error) bool {
 // connection established yet). These are the errors that Session.Init /
 // Session.Register can legitimately observe during a cold start and should
 // backoff-and-retry rather than treat as fatal.
+// Member shutdown (ErrStopped) and Raft apply backlog (ErrTooManyRequests) can
+// also recover after failover or backoff. Match the overload sentinel rather
+// than all ResourceExhausted errors, which include a full database (ErrNoSpace).
 //
 // Genuine authorization failures, permission denials, data loss (corrupt
 // cluster) and other non-transient errors carry different codes and are
@@ -103,6 +130,8 @@ func IsRetriableEtcdErr(err error) bool {
 		errors.Is(err, rpctypes.ErrNoLeader) ||
 		errors.Is(err, rpctypes.ErrNotLeader) ||
 		errors.Is(err, rpctypes.ErrNotCapable) ||
+		errors.Is(err, rpctypes.ErrStopped) ||
+		errors.Is(err, rpctypes.ErrTooManyRequests) ||
 		errors.Is(err, rpctypes.ErrTimeout) ||
 		errors.Is(err, rpctypes.ErrTimeoutDueToLeaderFail) ||
 		errors.Is(err, rpctypes.ErrTimeoutDueToConnectionLost) ||
