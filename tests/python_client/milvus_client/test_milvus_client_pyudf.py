@@ -32,9 +32,6 @@ prefix = "pyudf"
 class TestMilvusClientPyUDF(TestMilvusClientV2Base):
     """End-to-end tests for PyUDF-backed FunctionChain reranking."""
 
-    # Identity cases also join rbac_serial to avoid the RBAC suite's global cleanup.
-    skip_global_role_cleanup = True
-
     dim = 2
     vector_field = "vector"
     scalar_field = "ts"
@@ -1985,7 +1982,7 @@ def create_udf(context):
         """target: Search and resource privileges; method: grant/revoke on same user; expected: isolation and recovery."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
         # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
-        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
+        # Run with --dist loadgroup to share the existing RBAC suite's worker.
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (root, name, resource):
             self._assert_pyudf_recovery(root, name, resource)
             user, role, password = (
@@ -2219,7 +2216,7 @@ def create_udf(context):
         """target: four public RPC auth gates; method: raw requests; expected: denial and intact assets."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
         # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
-        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
+        # Run with --dist loadgroup to share the existing RBAC suite's worker.
         from urllib.parse import urlparse
 
         from pymilvus.grpc_gen import milvus_pb2, milvus_pb2_grpc
@@ -2278,7 +2275,7 @@ def create_udf(context):
         """target: collection-scoped Search; method: A/B and revoke; expected: exact A, denied B, intact peer."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
         # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
-        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
+        # Run with --dist loadgroup to share the existing RBAC suite's worker.
         from urllib.parse import urlparse
 
         import requests
@@ -2395,7 +2392,7 @@ def create_udf(context):
         """target: management/execution separation; method: grant only resources; expected: Search denied."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
         # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
-        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
+        # Run with --dist loadgroup to share the existing RBAC suite's worker.
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (root, name, resource):
             self._assert_pyudf_recovery(root, name, resource)
             path = next(r.path for r in root.list_file_resources() if r.name == resource)
@@ -2499,7 +2496,7 @@ def create_udf(context):
         """target: error disclosure observation; method: synthetic canary; expected: classified error and peer recovery."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
         # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
-        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
+        # Run with --dist loadgroup to share the existing RBAC suite's worker.
         canary = cf.gen_unique_str("qa_synthetic_sensitive")
         module = (
             "CANARY = "
@@ -2563,7 +2560,7 @@ def create_udf(context):
         """target: database-scoped Search; method: identical names and separate grants; expected: exact scoped data."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
         # MinIO wheel storage, common.security.authorizationEnabled=true, and root credentials.
-        # Run with --dist loadgroup so rbac_serial excludes concurrent global RBAC cleanup.
+        # Run with --dist loadgroup to share the existing RBAC suite's worker.
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (root, name, resource):
             self._assert_pyudf_recovery(root, name, resource)
             db = cf.gen_unique_str("pyudf_sec_db")
