@@ -135,6 +135,16 @@ var (
 		Help: "Number of replicated appends currently waiting for the append-first replicas of their broadcast",
 	}, WALChannelLabelName)
 
+	// StreamingServiceClientReplicateViolations counts the replicated appends
+	// this cluster refused as a ReplicateViolation. The replicate stream retries
+	// such an append from its checkpoint forever and the refusal does not clear
+	// by itself, so a rising value means replication of every collection on the
+	// pchannel has stopped. Labeled by pchannel, like the gate's gauge.
+	StreamingServiceClientReplicateViolations = newStreamingServiceClientCounterVec(prometheus.CounterOpts{
+		Name: "replicate_violation_total",
+		Help: "Total number of replicated appends refused as a replicate violation",
+	}, WALChannelLabelName)
+
 	// StreamingCoord metrics
 	StreamingCoordPChannelInfo = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "pchannel_info",
@@ -698,6 +708,7 @@ func RegisterStreamingServiceClient(registry *prometheus.Registry) {
 		registry.MustRegister(StreamingServiceClientConsumeBytes)
 		registry.MustRegister(StreamingServiceClientRateLimitState)
 		registry.MustRegister(StreamingServiceClientReplicateGatedAppends)
+		registry.MustRegister(StreamingServiceClientReplicateViolations)
 	})
 }
 

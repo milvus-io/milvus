@@ -67,3 +67,21 @@ func TestBroadcasterAppendUnrecoverableIsACounter(t *testing.T) {
 	assert.Equal(t, "COUNTER", families[0].GetType().String())
 	StreamingCoordBroadcasterAppendUnrecoverableTotal.DeleteLabelValues("1", "SplitShard", "STREAMING_CODE_SHARD_FENCED")
 }
+
+// TestReplicateViolationsIsACounter guards the replicate violation counter's
+// exported name and type.
+func TestReplicateViolationsIsACounter(t *testing.T) {
+	r := prometheus.NewRegistry()
+	r.MustRegister(StreamingServiceClientReplicateViolations)
+
+	counter := StreamingServiceClientReplicateViolations.WithLabelValues("1", "test-violation-pchannel")
+	counter.Inc()
+	assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+
+	families, err := r.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 1)
+	assert.Equal(t, "milvus_streaming_replicate_violation_total", families[0].GetName())
+	assert.Equal(t, "COUNTER", families[0].GetType().String())
+	StreamingServiceClientReplicateViolations.DeleteLabelValues("1", "test-violation-pchannel")
+}

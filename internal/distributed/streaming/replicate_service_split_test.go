@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -493,6 +495,21 @@ func TestReplicateAppendReturnsTheGateErrorAsItStands(t *testing.T) {
 
 	_, err := rs.Append(context.Background(), replicaOf(splitShardBroadcastOnPrimary(), "p1_1v2"))
 	assert.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, appended, "a replica whose gate failed must not be appended")
+}
+
+// TestReplicateAppendReturnsAnUnimplementedGateAsItStands: an older
+// streamingcoord does not implement the gate. The error is returned unchanged
+// -- the stream retries until the coord is upgraded -- and nothing is appended.
+func TestReplicateAppendReturnsAnUnimplementedGateAsItStands(t *testing.T) {
+	appended := make(chan message.MutableMessage, 4)
+	rs, bs := newSplitReplicateService(t, appended)
+
+	unimplemented := grpcstatus.Error(codes.Unimplemented, "unknown method WaitVChannelsAcked")
+	bs.EXPECT().WaitVChannelsAcked(mock.Anything, mock.Anything, mock.Anything).Return(unimplemented).Maybe()
+
+	_, err := rs.Append(context.Background(), replicaOf(splitShardBroadcastOnPrimary(), "p1_1v2"))
+	assert.Equal(t, codes.Unimplemented, grpcstatus.Code(err))
 	assert.Empty(t, appended, "a replica whose gate failed must not be appended")
 }
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -205,6 +206,15 @@ func (s replicateService) waitAppendFirstReplicas(ctx context.Context, msg messa
 		if status.AsStreamingError(err).IsReplicateViolation() {
 			logger.Error(ctx, "replicated append gate refused: the append-first vchannels this header names are not "+
 				"vchannels of this cluster's broadcast task; the stream retries from its checkpoint but the refusal will not clear",
+				mlog.Duration("gatedFor", time.Since(start)), mlog.Err(err))
+			return err
+		}
+		if funcutil.IsGrpcErr(err, codes.Unimplemented) {
+			// An older streamingcoord without the append gate. The stream keeps
+			// retrying, which is right -- an upgraded coord answers -- but no
+			// retry clears it before that, so say so.
+			logger.Error(ctx, "replicated append gate is not implemented by this cluster's streamingcoord; "+
+				"upgrade it before replicating a shard split, the stream retries until then",
 				mlog.Duration("gatedFor", time.Since(start)), mlog.Err(err))
 			return err
 		}
