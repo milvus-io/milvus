@@ -22,6 +22,15 @@ const (
 	bufSize = 1024 * 1024
 )
 
+// Keep the existing fixture compatible with RPCs added by the proto dependency.
+func (*MilvusServiceServer) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return milvuspb.UnimplementedMilvusServiceServer{}.CancelRequests(ctx, req)
+}
+
+func (*MilvusServiceServer) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return milvuspb.UnimplementedMilvusServiceServer{}.ListRunningRequests(ctx, req)
+}
+
 type MockSuiteBase struct {
 	suite.Suite
 
