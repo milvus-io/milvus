@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -46,11 +47,13 @@ const (
 // newDroppedSegmentRaceServer builds a server whose collection holds one
 // indexed segment and one segment whose index task is still in progress.
 func newDroppedSegmentRaceServer(t *testing.T) *Server {
+	store := metacache.NewMetaStore(nil)
 	s := &Server{
 		meta: &meta{
 			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
-			segments:  NewSegmentsInfo(),
+			metaStore: store,
+			segments:  NewSegmentsInfo(store),
 		},
 	}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
