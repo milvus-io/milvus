@@ -34,21 +34,44 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	objectstore "github.com/milvus-io/milvus/pkg/v3/objectstorage/store"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestWaitAzureCopyComplete(t *testing.T) {
+	t.Run("unknown status", func(t *testing.T) {
+		client, _ := mockAzureCopyStatuses(t, []blob.CopyStatusType{"unknown"}, "source", "copy-id", "")
+		_, err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
+		require.ErrorContains(t, err, "unknown status")
+	})
+	for _, cancelInPoll := range []bool{true, false} {
+		t.Run(fmt.Sprintf("poll failure cancellation %t", cancelInPoll), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			defer cancel()
+			patch := mockey.Mock((*blockblob.Client).GetProperties).To(func(_ *blockblob.Client, _ context.Context, _ *blob.GetPropertiesOptions) (blob.GetPropertiesResponse, error) {
+				if cancelInPoll {
+					cancel()
+				}
+				return blob.GetPropertiesResponse{}, &azcore.ResponseError{ErrorCode: string(bloberror.ServerBusy)}
+			}).Build()
+			defer patch.UnPatch()
+			_, err := waitAzureCopyComplete(ctx, new(blockblob.Client), "dst", "source", "copy-id")
+			require.ErrorIs(t, err, ctx.Err())
+		})
+	}
+
 	t.Run("wait until success", func(t *testing.T) {
 		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending, blob.CopyStatusTypeSuccess}
 		client, calls := mockAzureCopyStatuses(t, statuses, "source", "copy-id", "")
 
-		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
+		_, err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
 		require.NoError(t, err)
 		require.Equal(t, 2, *calls)
 	})
@@ -57,7 +80,7 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 		statuses := []blob.CopyStatusType{blob.CopyStatusTypeFailed}
 		client, _ := mockAzureCopyStatuses(t, statuses, "source", "copy-id", "copy failed")
 
-		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
+		_, err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
 		require.Error(t, err)
 	})
 
@@ -65,7 +88,7 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 		statuses := []blob.CopyStatusType{blob.CopyStatusTypeAborted}
 		client, _ := mockAzureCopyStatuses(t, statuses, "source", "copy-id", "")
 
-		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
+		_, err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
 		require.Error(t, err)
 	})
 
@@ -73,7 +96,7 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := waitAzureCopyComplete(ctx, new(blockblob.Client), "dst", "source", "copy-id")
+		_, err := waitAzureCopyComplete(ctx, new(blockblob.Client), "dst", "source", "copy-id")
 		require.ErrorIs(t, err, context.Canceled)
 	})
 
@@ -83,7 +106,7 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
 		client, _ := mockAzureCopyStatuses(t, statuses, "source", "copy-id", "")
 
-		err := waitAzureCopyComplete(ctx, client, "dst", "source", "copy-id")
+		_, err := waitAzureCopyComplete(ctx, client, "dst", "source", "copy-id")
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 	})
 
@@ -91,7 +114,7 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
 		client, _ := mockAzureCopyStatuses(t, statuses, "other-source", "copy-id", "")
 
-		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "")
+		_, err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "copy source mismatch")
 	})
@@ -101,7 +124,7 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 		actual := "https://other-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=other"
 		client, _ := mockAzureCopyStatuses(t, statuses, actual, "copy-id", "")
 
-		err := waitAzureCopyComplete(context.Background(), client, "dst",
+		_, err := waitAzureCopyComplete(context.Background(), client, "dst",
 			"https://src-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=abc", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "https://src-account.blob.core.windows.net/src-container/srcobj")
@@ -113,7 +136,7 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
 		client, _ := mockAzureCopyStatuses(t, statuses, "source", "other-copy-id", "")
 
-		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
+		_, err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "copy ID mismatch")
 	})
@@ -127,7 +150,7 @@ func TestWaitAzureCopyComplete(t *testing.T) {
 			}).Build()
 		t.Cleanup(func() { patch.UnPatch() })
 
-		err := waitAzureCopyComplete(context.Background(), new(blockblob.Client), "dst", "source", "copy-id")
+		_, err := waitAzureCopyComplete(context.Background(), new(blockblob.Client), "dst", "source", "copy-id")
 		require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
 		assert.Equal(t, 1, calls)
 	})
@@ -142,7 +165,7 @@ func TestStartOrResumeAzureCopySourceIdentityIgnoresQuery(t *testing.T) {
 	bareSource := "https://src-account.blob.core.windows.net/src-container/src/obj"
 	client, calls := mockAzureCopyStatuses(t, []blob.CopyStatusType{status}, bareSource, copyID, "")
 
-	err := waitAzureCopyComplete(context.Background(), client, "dst",
+	_, err := waitAzureCopyComplete(context.Background(), client, "dst",
 		"https://src-account.blob.core.windows.net/src-container/src%2Fobj?sv=2024-08-04&sig=abc", copyID)
 	require.NoError(t, err)
 	require.Equal(t, 1, *calls)
@@ -190,10 +213,12 @@ func TestAzureObjectStorageCopyObjectCrossBucketSourceSAS(t *testing.T) {
 						echoedSource = echoedSource[:i]
 					}
 				}
+				size := int64(42)
 				return blob.GetPropertiesResponse{
-					CopyID:     &copyID,
-					CopySource: &echoedSource,
-					CopyStatus: &status,
+					ContentLength: &size,
+					CopyID:        &copyID,
+					CopySource:    &echoedSource,
+					CopyStatus:    &status,
 				}, nil
 			}).Build()
 		t.Cleanup(func() { pollPatch.UnPatch() })
@@ -272,15 +297,17 @@ func TestStartOrResumeAzureCopy(t *testing.T) {
 				if pollCalls == 1 {
 					return blob.GetPropertiesResponse{}, &azcore.ResponseError{ErrorCode: string(bloberror.ServerBusy)}
 				}
+				size := int64(42)
 				return blob.GetPropertiesResponse{
-					CopyID:     &copyID,
-					CopySource: &source,
-					CopyStatus: &status,
+					ContentLength: &size,
+					CopyID:        &copyID,
+					CopySource:    &source,
+					CopyStatus:    &status,
 				}, nil
 			}).Build()
 		t.Cleanup(func() { getPropertiesPatch.UnPatch() })
 
-		err := startOrResumeAzureCopy(context.Background(), new(blockblob.Client), "source", "dst")
+		_, err := startOrResumeAzureCopy(context.Background(), new(blockblob.Client), "source", "dst")
 		require.NoError(t, err)
 		assert.Equal(t, 1, startCalls)
 		assert.Equal(t, 2, pollCalls)
@@ -297,7 +324,7 @@ func TestStartOrResumeAzureCopy(t *testing.T) {
 		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending, blob.CopyStatusTypeSuccess}
 		client, _ := mockAzureCopyStatuses(t, statuses, "source", "existing-copy-id", "")
 
-		err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
+		_, err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
 		require.NoError(t, err)
 		assert.Equal(t, 1, startCalls)
 	})
@@ -328,7 +355,7 @@ func TestStartOrResumeAzureCopy(t *testing.T) {
 				}).Build()
 			t.Cleanup(func() { patch.UnPatch() })
 			client, calls := mockAzureCopyStatuses(t, scenario.statuses, scenario.source, "existing-copy-id", "")
-			err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
+			_, err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
 			if scenario.wantErr == "" {
 				require.NoError(t, err)
 			} else {
@@ -344,7 +371,7 @@ func TestStartOrResumeAzureCopy(t *testing.T) {
 			&azcore.ResponseError{ErrorCode: string(bloberror.AuthorizationFailure)}).Build()
 		t.Cleanup(func() { patch.UnPatch() })
 		client, calls := mockAzureCopyStatuses(t, nil, "source", "", "")
-		err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
+		_, err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
 		require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
 		require.Zero(t, *calls)
 	})
@@ -415,7 +442,7 @@ func TestStartOrResumeAzureCopyCompletedDestination(t *testing.T) {
 			}
 			first, second := newClient(), newClient()
 			if retry {
-				err := startOrResumeAzureCopy(ctx, first, source, "object")
+				_, err := startOrResumeAzureCopy(ctx, first, source, "object")
 				require.NoError(t, err)
 			} else {
 				done := make(chan error, 1)
@@ -423,7 +450,7 @@ func TestStartOrResumeAzureCopyCompletedDestination(t *testing.T) {
 				workers.Add(1)
 				go func() {
 					defer workers.Done()
-					err := startOrResumeAzureCopy(ctx, first, source, "object")
+					_, err := startOrResumeAzureCopy(ctx, first, source, "object")
 					done <- err
 				}()
 				defer func() { cancel(); workers.Wait() }()
@@ -432,14 +459,14 @@ func TestStartOrResumeAzureCopyCompletedDestination(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				err := startOrResumeAzureCopy(ctx, second, source, "object")
+				_, err := startOrResumeAzureCopy(ctx, second, source, "object")
 				close(releaseFirstPoll)
 				require.NoError(t, err)
 				require.NoError(t, <-done)
 			}
 			// A later task retry must also preserve the completed CopyID.
 			if !retry {
-				err := startOrResumeAzureCopy(ctx, second, source, "object")
+				_, err := startOrResumeAzureCopy(ctx, second, source, "object")
 				require.NoError(t, err)
 			}
 			mu.Lock()
@@ -474,7 +501,9 @@ func mockAzureCopyStatuses(
 				idx = len(statuses) - 1
 			}
 			status := statuses[idx]
+			size := int64(42)
 			return blob.GetPropertiesResponse{
+				ContentLength:         &size,
 				CopyID:                &copyID,
 				CopySource:            &source,
 				CopyStatus:            &status,
@@ -483,6 +512,43 @@ func mockAzureCopyStatuses(
 		}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
 	return new(blockblob.Client), &calls
+}
+
+func TestAzureCopyReturnsSizeWithoutStat(t *testing.T) {
+	positive, zero, negative := int64(42), int64(0), int64(-1)
+	for _, tc := range []struct {
+		name      string
+		length    *int64
+		size      int64
+		sizeError bool
+	}{
+		{"positive", &positive, 42, false}, {"empty", &zero, 0, false},
+		{"missing", nil, 0, true}, {"negative", &negative, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := service.NewClientWithNoCredential("https://account.blob.core.windows.net", nil)
+			require.NoError(t, err)
+			start := mockey.Mock((*blockblob.Client).StartCopyFromURL).Return(blob.StartCopyFromURLResponse{}, nil).Build()
+			defer start.UnPatch()
+			calls := 0
+			poll := mockey.Mock((*blockblob.Client).GetProperties).To(func(_ *blockblob.Client, _ context.Context, _ *blob.GetPropertiesOptions) (blob.GetPropertiesResponse, error) {
+				calls++
+				status, source := blob.CopyStatusTypeSuccess, "https://account.blob.core.windows.net/src/object"
+				return blob.GetPropertiesResponse{CopyStatus: &status, CopySource: &source, ContentLength: tc.length}, nil
+			}).Build()
+			defer poll.UnPatch()
+			store := NewObjectStore(&RemoteChunkManager{client: &AzureObjectStorage{Client: client}})
+			size, err := store.Copy(context.Background(), objectstore.CopyRequest{Source: objectstore.Object{Bucket: "src", Key: "object"}, Destination: objectstore.Object{Bucket: "dst", Key: "object"}})
+			require.Equal(t, tc.size, size)
+			require.Equal(t, 1, calls)
+			if tc.sizeError {
+				var sizeErr *objectstore.CopySizeError
+				require.ErrorAs(t, err, &sizeErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestAzureObjectStorage(t *testing.T) {
@@ -722,7 +788,12 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, before.CopyID)
 			for range 2 {
-				require.NoError(t, manager.CopyCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey))
+				size, err := NewObjectStore(manager).Copy(ctx, objectstore.CopyRequest{
+					Source:      objectstore.Object{Bucket: config.BucketName, Key: srcKey},
+					Destination: objectstore.Object{Bucket: config.BucketName, Key: dstKey},
+				})
+				require.NoError(t, err)
+				require.EqualValues(t, len(value), size)
 			}
 			after, err := destination.GetProperties(ctx, nil)
 			require.NoError(t, err)
@@ -1097,7 +1168,7 @@ func TestMapObjectStorageError_Azure_NewErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := mapObjectStorageError("test/path", tt.inputError)
+			result := objectstorage.ToMilvusIoError("test/path", tt.inputError)
 			assert.True(t, errors.Is(result, tt.expectedError),
 				"expected %v, got %v", tt.expectedError, result)
 		})

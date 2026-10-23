@@ -23,8 +23,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -77,7 +78,7 @@ func (m *snapshotExportManager) prepareExportGeneration(ctx context.Context, job
 		return nil, err
 	}
 	// Only metadata.json is read here. Native and Avro manifests stay on DataNode.
-	cfg := snapshotstorage.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
+	cfg := snapshotadapter.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
 	cfg.SkipBucketCheck = true
 	source, err := storage.NewRemoteChunkManager(ctx, cfg)
 	if err != nil {
@@ -182,14 +183,14 @@ func (m *snapshotExportManager) finalizeExportGeneration(ctx context.Context, jo
 	ctx, cancel := m.withJobDeadline(ctx, job.GetJobId())
 	defer cancel()
 	req := job.GetCopyRequest()
-	cfg := snapshotstorage.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
+	cfg := snapshotadapter.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
 	cfg.SkipBucketCheck = true
 	source, err := storage.NewRemoteChunkManager(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer closeExportStorageClient(source)
-	resolved, err := snapshotstorage.ResolveForeignStorage(ctx, cfg, snapshotstorage.DirectionExport, snapshotstorage.SnapshotExportAttemptURI(req), req.GetExternalSpec())
+	resolved, err := snapshotadapter.ResolveForeignStorage(ctx, cfg, snapshotstorage.DirectionExport, snapshotstorage.SnapshotExportAttemptURI(req), req.GetExternalSpec())
 	if err != nil {
 		return err
 	}
@@ -221,7 +222,7 @@ func (m *snapshotExportManager) finalizeExportGeneration(ctx context.Context, jo
 	return err
 }
 
-func closeExportStorageClient(cm storage.ChunkManager) {
+func closeExportStorageClient(cm snapshotstorage.ChunkManager) {
 	if remote, ok := cm.(*storage.RemoteChunkManager); ok {
 		if closer, ok := remote.UnderlyingObjectStorage().(io.Closer); ok {
 			closer.Close()

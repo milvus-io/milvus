@@ -110,7 +110,7 @@ directory from the output manifest base.
 
 ## Implementation and regression tests
 
-- Roots and writers: `internal/storagev2/loon_root.go`,
+- Roots and writers: `pkg/storagev2/config.go`,
   `internal/core/src/storage/loon_ffi/util.cpp`,
   `internal/storage/binlog_record_writer.go`.
 - Upgrade: `cmd/roles/local_layout.go`, `internal/storage/localmigrate/*_test.go`.
@@ -143,6 +143,11 @@ owns bundle layouts, credentials and relocation.
   PB delta/stats/BM25 supplements, never a segment-directory walk. Avro IndexFiles
   alone selects vector/scalar index artifacts, including an empty inventory.
   Missing references/read failures fail closed; they do not enable LIST fallback.
+- External Collection Restore also uses the pinned inventory. Before normalization,
+  it excludes native references carrying a valid URI scheme and preserves them
+  in the copied manifest. The manifest object and snapshot-selected indexes still
+  copy. This is reference provenance, not a bucket-equality test; no directory walk
+  supplies additional objects.
 - Validate raw external URI ownership before key deduplication. Destination
   keys remain literal. Per-segment source/destination conflicts fail before that
   segment writes; there is no task/job-wide preparation barrier.

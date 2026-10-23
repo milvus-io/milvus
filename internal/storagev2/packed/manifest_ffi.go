@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -62,9 +63,9 @@ const (
 const (
 	// ManifestDir is the segment-base-relative directory holding every
 	// manifest revision of that segment.
-	ManifestDir            = "_metadata"
-	manifestFileNamePrefix = "manifest-"
-	manifestFileNameSuffix = ".avro"
+	ManifestDir            = storagev2.ManifestDir
+	manifestFileNamePrefix = storagev2.ManifestFileNamePrefix
+	manifestFileNameSuffix = storagev2.ManifestFileNameSuffix
 )
 
 // Fragment represents a data fragment from an external data source.
@@ -605,12 +606,7 @@ func ManifestFilePath(manifestPath string) (string, error) {
 	if basePath == "" {
 		return "", merr.WrapErrServiceInternalMsg("manifest path %s has an empty base path", manifestPath)
 	}
-	return manifestObjectPath(basePath, version), nil
-}
-
-func manifestObjectPath(basePath string, version int64) string {
-	return fmt.Sprintf("%s/%s/%s%d%s", basePath, ManifestDir,
-		manifestFileNamePrefix, version, manifestFileNameSuffix)
+	return storagev2.ManifestObjectPath(basePath, version), nil
 }
 
 // IsManifestRevisionObject reports whether an object path names a manifest
@@ -639,7 +635,7 @@ func readColumnGroupsFromManifest(
 		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
 
-	manifestFilePath := manifestObjectPath(basePath, version)
+	manifestFilePath := storagev2.ManifestObjectPath(basePath, version)
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {

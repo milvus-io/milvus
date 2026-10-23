@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"golang.org/x/exp/mmap"
+
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 )
 
 type StatsLogType int64
@@ -43,10 +45,7 @@ type FileReader interface {
 }
 
 // ChunkObjectInfo is to store object info.
-type ChunkObjectInfo struct {
-	FilePath   string
-	ModifyTime time.Time
-}
+type ChunkObjectInfo = objectstorage.ChunkObjectInfo
 
 // ChunkManager is to manager chunks.
 // Include Read, Write, Remove chunks.

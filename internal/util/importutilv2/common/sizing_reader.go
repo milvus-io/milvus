@@ -21,6 +21,7 @@ import (
 	"io"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
@@ -45,7 +46,7 @@ type SizingReaderAt struct {
 func NewSizingReaderAt(ctx context.Context, cm storage.ChunkManager, path string) (*SizingReaderAt, error) {
 	size, err := cm.Size(ctx, path) // Size retries internally.
 	if err != nil {
-		return nil, storage.ToMilvusIoError(path, err)
+		return nil, objectstorage.ToMilvusIoError(path, err)
 	}
 	return &SizingReaderAt{
 		ctx:  ctx,
@@ -75,7 +76,7 @@ func (r *SizingReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	if err := retry.Handle(r.ctx, func() (bool, error) {
 		b, e := r.cm.ReadAt(r.ctx, r.path, off, int64(len(p)))
 		if e != nil {
-			ioErr := storage.ToMilvusIoError(r.path, e)
+			ioErr := objectstorage.ToMilvusIoError(r.path, e)
 			return !merr.IsNonRetryableErr(ioErr), ioErr
 		}
 		data = b

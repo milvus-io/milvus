@@ -31,11 +31,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
-	"github.com/milvus-io/milvus/internal/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -141,8 +141,8 @@ func (m *snapshotExportManager) Submit(
 	if proto.Size(input) > snapshotstorage.SnapshotExportMaxRequestBytes {
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot export target path and external spec exceed %d bytes", snapshotstorage.SnapshotExportMaxRequestBytes)
 	}
-	instanceCfg := snapshotstorage.InstanceConfigFromParamtable(Params)
-	if err := snapshotstorage.ValidateForeignStorageRequest(
+	instanceCfg := snapshotadapter.InstanceConfigFromParamtable(Params)
+	if err := snapshotadapter.ValidateForeignStorageRequest(
 		instanceCfg,
 		snapshotstorage.DirectionExport,
 		targetPath,
@@ -475,15 +475,15 @@ func (m *snapshotExportManager) executeSnapshotExportPublication(
 	}
 	// Publication is source-independent, including recovery after the deadline.
 	m.enqueueExportCleanup(job)
-	instanceCfg := snapshotstorage.InstanceConfigFromParamtable(Params)
+	instanceCfg := snapshotadapter.InstanceConfigFromParamtable(Params)
 	externalSpec := job.GetExternalSpec()
 	if req := job.GetCopyRequest(); req != nil {
 		// The worker prepared this target with the frozen job configuration.
 		// Only legacy Publishing records without a request use current settings.
-		instanceCfg = snapshotstorage.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
+		instanceCfg = snapshotadapter.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
 		externalSpec = req.GetExternalSpec()
 	}
-	resolved, err := snapshotstorage.ResolveForeignStorage(ctx, instanceCfg, snapshotstorage.DirectionExport, job.GetTargetS3Path(), externalSpec)
+	resolved, err := snapshotadapter.ResolveForeignStorage(ctx, instanceCfg, snapshotstorage.DirectionExport, job.GetTargetS3Path(), externalSpec)
 	if err != nil {
 		return classifySnapshotExportPublicationError(ctx, err)
 	}
@@ -502,7 +502,7 @@ func (m *snapshotExportManager) executeSnapshotExportPublication(
 func (m *snapshotExportManager) completeSnapshotExportPublication(
 	ctx context.Context,
 	job *datapb.ExportSnapshotJob,
-	targetCM storage.ChunkManager,
+	targetCM snapshotstorage.ChunkManager,
 	targetRoot string,
 ) error {
 	if err := validateSnapshotExportPublishingJob(ctx, job); err != nil {

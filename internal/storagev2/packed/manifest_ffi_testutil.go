@@ -87,3 +87,44 @@ func testManifestDeltaLogs(paths []*string, entries []uint32, count uint32) ([]*
 	runtime.KeepAlive(entries)
 	return logs, err
 }
+
+// Exercise the borrowed-handle bridge, including malformed native metadata.
+// The returned Go values must survive freeing all native string storage.
+func testManifestIndexProjection(fault string) ([]ManifestIndexInfo, error) {
+	value := C.CString("value")
+	defer C.free(unsafe.Pointer(value))
+	fileKeys, propertyKeys, propertyValues := []*C.char{value}, []*C.char{value}, []*C.char{value}
+	index := C.LoonIndexInfo{column_name: value, index_name: value, index_type: value, path: value,
+		index_file_keys: &fileKeys[0], num_index_file_keys: 1,
+		property_keys: &propertyKeys[0], property_values: &propertyValues[0], num_properties: 1}
+	manifest := C.LoonManifest{indexes: C.LoonIndexes{indexes: &index, num_indexes: 1}}
+	switch fault {
+	case "empty":
+		manifest.indexes.num_indexes = 0
+	case "indexes":
+		manifest.indexes.indexes = nil
+	case "column":
+		index.column_name = nil
+	case "type":
+		index.index_type = nil
+	case "path":
+		index.path = nil
+	case "file keys":
+		index.index_file_keys = nil
+	case "property keys":
+		index.property_keys = nil
+	case "property values":
+		index.property_values = nil
+	case "property key":
+		propertyKeys[0] = nil
+	case "property value":
+		propertyValues[0] = nil
+	case "file key":
+		fileKeys[0] = nil
+	case "minimal":
+		index.index_name, index.num_index_file_keys, index.num_properties = nil, 0, 0
+	}
+	result, err := manifestIndexInfos(&manifest, "test-manifest")
+	runtime.KeepAlive(&manifest)
+	return result, err
+}

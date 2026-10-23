@@ -13,10 +13,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -969,7 +969,7 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64
 
 func (sm *snapshotMeta) ReadExternalSnapshotDataWithChunkManager(
 	ctx context.Context,
-	cm storage.ChunkManager,
+	cm snapshotstorage.ChunkManager,
 	snapshotS3Location string,
 	includeSegments bool,
 ) (*snapshotstorage.SnapshotData, error) {
@@ -995,7 +995,7 @@ func (sm *snapshotMeta) ReadExternalSnapshotDataWithChunkManager(
 
 func (sm *snapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 	ctx context.Context,
-	cm storage.ChunkManager,
+	cm snapshotstorage.ChunkManager,
 	snapshotS3Location string,
 	includeSegments bool,
 ) (*snapshotstorage.SnapshotData, error) {

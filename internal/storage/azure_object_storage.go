@@ -33,6 +33,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	objectstore "github.com/milvus-io/milvus/pkg/v3/objectstorage/store"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -192,13 +193,13 @@ func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, buc
 
 func (AzureObjectStorage *AzureObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).UploadStream(ctx, reader, &azblob.UploadStreamOptions{})
-	return mapObjectStorageError(objectName, err)
+	return objectstorage.ToMilvusIoError(objectName, err)
 }
 
 func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
 	info, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).GetProperties(ctx, &blob.GetPropertiesOptions{})
 	if err != nil {
-		return 0, mapObjectStorageError(objectName, err)
+		return 0, objectstorage.ToMilvusIoError(objectName, err)
 	}
 	return *info.ContentLength, nil
 }
@@ -211,7 +212,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 		for pager.More() {
 			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
-				return mapObjectStorageError(prefix, err)
+				return objectstorage.ToMilvusIoError(prefix, err)
 			}
 			for _, blob := range pageResp.Segment.BlobItems {
 				if !walkFunc(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: *blob.Properties.LastModified}) {
@@ -226,7 +227,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 		for pager.More() {
 			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
-				return mapObjectStorageError(prefix, err)
+				return objectstorage.ToMilvusIoError(prefix, err)
 			}
 
 			for _, blob := range pageResp.Segment.BlobItems {
@@ -246,7 +247,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 
 func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).Delete(ctx, &blob.DeleteOptions{})
-	return mapObjectStorageError(objectName, err)
+	return objectstorage.ToMilvusIoError(objectName, err)
 }
 
 func (AzureObjectStorage *AzureObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcContainer, srcObjectName, dstContainer, dstObjectName string) error {
@@ -254,10 +255,12 @@ func (AzureObjectStorage *AzureObjectStorage) CopyObjectCrossBucket(ctx context.
 	dstBlobClient := AzureObjectStorage.NewContainerClient(dstContainer).NewBlockBlobClient(dstObjectName)
 	// General object copies retain overwrite semantics. Only snapshot copies
 	// own immutable destinations and may reuse a previous completed copy.
-	return startAzureCopy(ctx, dstBlobClient, srcURL, dstObjectName, &blob.StartCopyFromURLOptions{})
+	_, err := startAzureCopy(ctx, dstBlobClient, srcURL, dstObjectName, &blob.StartCopyFromURLOptions{})
+	return err
 }
 
-func (AzureObjectStorage *AzureObjectStorage) copySnapshotObjectCrossBucket(ctx context.Context, srcContainer, srcObjectName, dstContainer, dstObjectName string) error {
+// CopyObjectCrossBucketAndGetSize serves the immutable snapshot ObjectStore path.
+func (AzureObjectStorage *AzureObjectStorage) CopyObjectCrossBucketAndGetSize(ctx context.Context, srcContainer, srcObjectName, dstContainer, dstObjectName string) (int64, error) {
 	srcURL := AzureObjectStorage.sourceCopyURL(srcContainer, srcObjectName)
 	dstBlobClient := AzureObjectStorage.NewContainerClient(dstContainer).NewBlockBlobClient(dstObjectName)
 	return startOrResumeAzureCopy(ctx, dstBlobClient, srcURL, dstObjectName)
@@ -279,7 +282,7 @@ func (AzureObjectStorage *AzureObjectStorage) sourceCopyURL(srcContainer, srcObj
 // replacing a completed copy's ID while its original caller is still polling.
 // Existing destinations are reusable only after source and status validation;
 // failed/aborted copies are not overwritten or treated as successful.
-func startOrResumeAzureCopy(ctx context.Context, dstBlobClient *blockblob.Client, srcURL, dstObjectName string) error {
+func startOrResumeAzureCopy(ctx context.Context, dstBlobClient *blockblob.Client, srcURL, dstObjectName string) (int64, error) {
 	ifNoneMatch := azcore.ETag("*")
 	return startAzureCopy(ctx, dstBlobClient, srcURL, dstObjectName, &blob.StartCopyFromURLOptions{
 		AccessConditions: &blob.AccessConditions{
@@ -288,14 +291,14 @@ func startOrResumeAzureCopy(ctx context.Context, dstBlobClient *blockblob.Client
 	})
 }
 
-func startAzureCopy(ctx context.Context, dstBlobClient *blockblob.Client, srcURL, dstObjectName string, options *blob.StartCopyFromURLOptions) error {
+func startAzureCopy(ctx context.Context, dstBlobClient *blockblob.Client, srcURL, dstObjectName string, options *blob.StartCopyFromURLOptions) (int64, error) {
 	response, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, options)
 	if err != nil && !bloberror.HasCode(err, bloberror.PendingCopyOperation) {
 		// Azurite reports BlobAlreadyExists for conditional creation. A
 		// conflict only permits polling; source, ID and status still validate
 		// the existing copy before it can be reported as successful.
 		if options.AccessConditions == nil || !bloberror.HasCode(err, bloberror.ConditionNotMet, bloberror.TargetConditionNotMet, bloberror.BlobAlreadyExists) {
-			return mapObjectStorageError(dstObjectName, err)
+			return 0, objectstorage.ToMilvusIoError(dstObjectName, err)
 		}
 	}
 
@@ -312,7 +315,7 @@ func waitAzureCopyComplete(
 	dstObjectName string,
 	expectedSource string,
 	expectedCopyID string,
-) error {
+) (int64, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		timeoutCtx, cancel := context.WithTimeout(ctx, azureCopyDefaultTimeout)
 		defer cancel()
@@ -325,22 +328,22 @@ func waitAzureCopyComplete(
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, err
 		}
 
 		props, err := dstBlobClient.GetProperties(ctx, &blob.GetPropertiesOptions{})
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
+				return 0, ctxErr
 			}
-			mappedErr := mapObjectStorageError(dstObjectName, err)
+			mappedErr := objectstorage.ToMilvusIoError(dstObjectName, err)
 			if merr.IsNonRetryableErr(mappedErr) {
-				return mappedErr
+				return 0, mappedErr
 			}
 			// GetProperties is idempotent, so transient poll failures can be
 			// retried without replaying StartCopyFromURL.
 			if err := waitAzureCopyPoll(ctx, ticker); err != nil {
-				return err
+				return 0, err
 			}
 			continue
 		}
@@ -357,7 +360,7 @@ func waitAzureCopyComplete(
 				// Report credential-free identities only: the raw URLs may carry
 				// the source SAS in their query strings, and this error bubbles
 				// into snapshot job failure reasons and logs.
-				return merr.WrapErrIoFailedMsg(
+				return 0, merr.WrapErrIoFailedMsg(
 					"azure copy source mismatch for %s: expected %s, actual %s",
 					dstObjectName, expectedIdentity, actualIdentity)
 			}
@@ -369,30 +372,34 @@ func waitAzureCopyComplete(
 			if props.CopyID != nil {
 				actualCopyID = *props.CopyID
 			}
-			return merr.WrapErrIoFailedMsg(
+			return 0, merr.WrapErrIoFailedMsg(
 				"azure copy ID mismatch for %s: expected %s, actual %s",
 				dstObjectName, copyID, actualCopyID)
 		}
 		if props.CopyStatus == nil {
-			return merr.WrapErrIoFailedReason(fmt.Sprintf("azure copy status for %s is empty", dstObjectName))
+			return 0, merr.WrapErrIoFailedReason(fmt.Sprintf("azure copy status for %s is empty", dstObjectName))
 		}
 
 		switch *props.CopyStatus {
 		case blob.CopyStatusTypeSuccess:
-			return nil
+			// The successful poll already contains the destination size.
+			if props.ContentLength == nil || *props.ContentLength < 0 {
+				return 0, &objectstore.CopySizeError{Err: merr.WrapErrDataIntegrityMsg("Azure copy returned no valid size for %s", dstObjectName)}
+			}
+			return *props.ContentLength, nil
 		case blob.CopyStatusTypeFailed, blob.CopyStatusTypeAborted:
 			statusDescription := ""
 			if props.CopyStatusDescription != nil {
 				statusDescription = *props.CopyStatusDescription
 			}
-			return merr.WrapErrIoFailedReason(
+			return 0, merr.WrapErrIoFailedReason(
 				fmt.Sprintf("azure copy for %s finished with status %s: %s", dstObjectName, *props.CopyStatus, statusDescription))
 		case blob.CopyStatusTypePending:
 			if err := waitAzureCopyPoll(ctx, ticker); err != nil {
-				return err
+				return 0, err
 			}
 		default:
-			return merr.WrapErrIoFailedReason(
+			return 0, merr.WrapErrIoFailedReason(
 				fmt.Sprintf("azure copy for %s returned unknown status %s", dstObjectName, *props.CopyStatus))
 		}
 	}
