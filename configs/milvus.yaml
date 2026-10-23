@@ -614,8 +614,10 @@ queryCoord:
   checkBalanceInterval: 300
   autoBalanceInterval: 3000 # the interval for triggerauto balance
   checkIndexInterval: 10000
-  channelTaskTimeout: 120000 # 2 minutes
-  segmentTaskTimeout: 300000 # 5 minutes
+  channelTaskTimeout: 60000 # 1 minute: first attempt of a channel watch
+  channelTaskRetryTimeout: 300000 # 5 minutes: a watch that ended on its deadline is retried on the same node with this timeout; 0 keeps channelTaskTimeout
+  segmentTaskTimeout: 60000 # 1 minute: first attempt of a segment load; the pacer keeps loads from queueing on the node
+  segmentTaskRetryTimeout: 300000 # 5 minutes: a load that ended on its deadline is retried with this timeout; 0 keeps segmentTaskTimeout
   distPullInterval: 500
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
