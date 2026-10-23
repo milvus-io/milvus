@@ -3389,6 +3389,36 @@ func TestGetDataIterator(t *testing.T) {
 	}
 }
 
+// A literal null unmarshals into a map as nil with no error, and the merge
+// then wrote into a nil map and panicked. A row whose dynamic field holds null
+// is insertable, so merging over it has to work rather than crash the proxy.
+func TestMergeDynamicJSONNullDocuments(t *testing.T) {
+	t.Run("null base is repaired by the update", func(t *testing.T) {
+		merged, err := mergeDynamicJSON([]byte(`null`), []byte(`{"a":1}`))
+		assert.NoError(t, err)
+		assert.JSONEq(t, `{"a":1}`, string(merged))
+	})
+
+	t.Run("null update says nothing", func(t *testing.T) {
+		merged, err := mergeDynamicJSON([]byte(`{"a":1}`), []byte(`null`))
+		assert.NoError(t, err)
+		assert.JSONEq(t, `{"a":1}`, string(merged))
+	})
+
+	t.Run("non-object documents still error", func(t *testing.T) {
+		_, err := mergeDynamicJSON([]byte(`[1]`), []byte(`{"a":1}`))
+		assert.Error(t, err)
+		_, err = mergeDynamicJSON([]byte(`{"a":1}`), []byte(`"x"`))
+		assert.Error(t, err)
+	})
+
+	t.Run("large integers survive an untouched key", func(t *testing.T) {
+		merged, err := mergeDynamicJSON([]byte(`{"big":9007199254740993}`), []byte(`{"b":2}`))
+		assert.NoError(t, err)
+		assert.Contains(t, string(merged), "9007199254740993")
+	})
+}
+
 func TestUpdateFieldData(t *testing.T) {
 	const (
 		Dim                  = 8
@@ -6098,4 +6128,48 @@ func TestGetFieldByID_StructArraySubField(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_Float16Vector, subField.GetElementType())
 
 	assert.Nil(t, GetFieldByID(schema, 999))
+}
+
+// Decoding a dynamic field into map[string]interface{} rounds every number to
+// float64, so a partial update of one key silently rewrote the others.
+func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
+	merged, err := mergeDynamicJSON(
+		[]byte(`{"untouched":9007199254740993,"big":12345678901234567890,"tag":"old"}`),
+		[]byte(`{"tag":"new"}`))
+	require.NoError(t, err)
+	assert.Contains(t, string(merged), `"untouched":9007199254740993`)
+	assert.Contains(t, string(merged), `"big":12345678901234567890`)
+	assert.Contains(t, string(merged), `"tag":"new"`)
+}
+
+// Both production update layouts must preserve legacy rounding by default and
+// retain exact numbers only when the caller explicitly enables the backport.
+func TestDynamicUpdatePrecisionPolicy(t *testing.T) {
+	field := func(raw string) *schemapb.FieldData {
+		return &schemapb.FieldData{FieldId: 100, FieldName: "$meta", Type: schemapb.DataType_JSON, IsDynamic: true,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(raw)}}}}}}
+	}
+	for _, strict := range []bool{false, true} {
+		for _, column := range []bool{false, true} {
+			base := field(`{"keep":9007199254740993,"tag":"old"}`)
+			update := field(`{"tag":"new"}`)
+			var err error
+			if column {
+				err = UpdateFieldDataByColumn(base, update, []int64{0}, []int64{0}, strict)
+			} else {
+				err = UpdateFieldData([]*schemapb.FieldData{base}, []*schemapb.FieldData{update}, 0, 0, strict)
+			}
+			require.NoError(t, err)
+			raw := string(base.GetScalars().GetJsonData().GetData()[0])
+			if strict {
+				require.Contains(t, raw, "9007199254740993")
+			} else {
+				require.Contains(t, raw, "9007199254740992")
+			}
+			require.Contains(t, raw, `"tag":"new"`)
+		}
+	}
+	base := field(`{"keep":9007199254740993}`)
+	require.NoError(t, UpdateFieldDataByColumn(base, field(`{"tag":"new"}`), []int64{0}, []int64{0}))
+	require.Contains(t, string(base.GetScalars().GetJsonData().GetData()[0]), "9007199254740992")
 }
