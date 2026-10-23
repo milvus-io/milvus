@@ -32,7 +32,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -60,7 +59,6 @@ type GcOption struct {
 	dropTolerance    time.Duration        // dropped segment related key tolerance time
 	scanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
-	broker           broker.Broker
 	removeObjectPool *conc.Pool[struct{}]
 	dataViewGC       DataViewGarbageCollector
 
@@ -955,7 +953,7 @@ func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan 
 	logger.Info(ctx, "start recycleDataViews")
 	defer func() { logger.Info(ctx, "recycleDataViews done", mlog.Duration("timeCost", time.Since(start))) }()
 
-	for _, collection := range gc.meta.GetCollections() {
+	for _, collection := range gc.meta.GetAllCollections() {
 		if ctx.Err() != nil {
 			return
 		}
@@ -1484,7 +1482,6 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 	}
 
 	collectionID2GcStatus := make(map[int64]bool)
-	availability, _ := gc.option.broker.(broker.CollectionAvailability)
 	skippedCnt := 0
 
 	mlog.Info(ctx, "start to GC channel cp", mlog.Int("vchannelCPCnt", len(channelCPs)))
@@ -1506,27 +1503,16 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 		if ctx.Err() != nil {
 			return
 		}
-		// A positive resident lookup avoids schema conversion, task scheduling,
-		// per-collection timeouts and retaining live IDs for the entire sweep.
-		if availability != nil && availability.IsCollectionAvailable(collectionID) {
+		// A Dropping collection counts as dropped here: its checkpoints go as
+		// soon as GcConfirm sees its segment meta removed.
+		if gc.meta.GetCollection(collectionID).IsCreated() {
 			skippedCnt++
 			continue
 		}
 
 		_, ok := collectionID2GcStatus[collectionID]
 		if !ok {
-			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
-			cancel()
-			if err == nil && !has {
-				collectionID2GcStatus[collectionID] = gc.meta.metaStore.GcConfirm(ctx, collectionID, -1)
-			} else {
-				// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
-				mlog.Debug(ctx, "skip channel cp GC, the collection state is available",
-					mlog.Int64("collectionID", collectionID),
-					mlog.Bool("dropped", has), mlog.Err(err))
-				collectionID2GcStatus[collectionID] = false
-			}
+			collectionID2GcStatus[collectionID] = gc.meta.metaStore.GcConfirm(ctx, collectionID, -1)
 		}
 
 		// Skip to GC if all segments meta of the corresponding collection are not removed
@@ -2842,17 +2828,9 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 				setSnapshotActivePinsGauge(r.CollectionID, r.SnapshotName, r.ActivePins)
 			}
 
-			// Step 2: if the collection was dropped, cascade-delete orphan snapshots.
-			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
-			cancel()
-			if err != nil {
-				log.Warn(ctx, "failed to check collection existence for orphan snapshot cleanup",
-					mlog.Int64("collectionID", collectionID),
-					mlog.Err(err))
-				continue
-			}
-			if has {
+			// Step 2: if the collection was dropped, cascade-delete orphan
+			// snapshots. A Dropping collection counts as dropped.
+			if gc.meta.GetCollection(collectionID).IsCreated() {
 				// Collection still exists, not an orphan — expired pins already reaped above.
 				continue
 			}

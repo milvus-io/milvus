@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
@@ -223,6 +224,20 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.nodeMgr = session.NewNodeManager()
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.metaStore = metacache.NewMetaStore(nil)
+	metacachetest.Collections(suite.metaStore).PutDatabase(&metacache.DatabaseInfo{ID: 1, Name: util.DefaultDBName})
+	for _, collectionID := range suite.collections {
+		suite.metaStore.PutCollection(&metacache.CollectionInfo{
+			ID:            collectionID,
+			DatabaseName:  util.DefaultDBName,
+			DatabaseID:    1,
+			VChannelNames: suite.channels[collectionID],
+			Partitions:    suite.partitions[collectionID],
+			Schema: &schemapb.CollectionSchema{
+				Name:   fmt.Sprintf("collection_%d", collectionID),
+				Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102}},
+			},
+		})
+	}
 	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr, suite.metaStore)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
@@ -306,37 +321,6 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
-	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-		for _, collection := range suite.collections {
-			if collection == collectionID {
-				return &milvuspb.DescribeCollectionResponse{
-					DbName:              util.DefaultDBName,
-					DbId:                1,
-					CollectionID:        collectionID,
-					CollectionName:      fmt.Sprintf("collection_%d", collectionID),
-					VirtualChannelNames: suite.channels[collectionID],
-					Schema: &schemapb.CollectionSchema{
-						Fields: []*schemapb.FieldSchema{
-							{FieldID: 100},
-							{FieldID: 101},
-							{FieldID: 102},
-						},
-					},
-				}, nil
-			}
-		}
-		return &milvuspb.DescribeCollectionResponse{
-			Status: merr.Status(merr.ErrCollectionNotFound),
-		}, nil
-	}).Maybe()
-	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) ([]int64, error) {
-		partitionIDs, ok := suite.partitions[collectionID]
-		if !ok {
-			return nil, merr.WrapErrCollectionNotFound(collectionID)
-		}
-		return partitionIDs, nil
-	}).Maybe()
 	registry.ResetRegistration()
 	RegisterDDLCallbacks(suite.server)
 }
@@ -866,6 +850,8 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	ctx := context.Background()
 	suite.loadAll()
 	server := suite.server
+	// An existing collection that is not loaded.
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{}})
 
 	_, err := server.meta.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
@@ -2128,7 +2114,6 @@ func (suite *ServiceSuite) expectGetRecoverInfoForAllCollections() {
 }
 
 func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
-	suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
 	vChannels := []*datapb.VchannelInfo{}
 	for _, channel := range suite.channels[collection] {
 		vChannels = append(vChannels, &datapb.VchannelInfo{

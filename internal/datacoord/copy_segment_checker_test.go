@@ -75,7 +75,6 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 
 	s.alloc = allocator.NewMockAllocator(s.T())
 	s.broker = broker.NewMockBroker(s.T())
-	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker)
 	s.NoError(err)

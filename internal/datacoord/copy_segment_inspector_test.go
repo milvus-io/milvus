@@ -70,7 +70,6 @@ func (s *CopySegmentInspectorSuite) SetupTest() {
 	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	s.broker = broker.NewMockBroker(s.T())
-	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker)
 	s.NoError(err)

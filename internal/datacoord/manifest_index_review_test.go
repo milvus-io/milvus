@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -34,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -94,7 +92,7 @@ func TestManifestReadConcurrencyUsesStorageBudget(t *testing.T) {
 // Exercise the actual initMeta loop: healthy manifests are read once, a
 // transient read retries locally, and later recovery phases never replay newMeta.
 func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
-	for _, mode := range []string{"transient", "persistent", "invalid", "collection-reload", "dataview-reload", "dataview-failure"} {
+	for _, mode := range []string{"transient", "persistent", "invalid", "dataview-reload", "dataview-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			mockManifestIndexSubmissions(t)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -130,19 +128,6 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			}).Build()
 			defer reader.UnPatch()
 			b := broker.NewCoordinatorBroker(nil)
-			showIDs := mockey.Mock(mockey.GetMethod(b, "ShowCollectionIDs")).Return(&rootcoordpb.ShowCollectionIDsResponse{
-				Status: merr.Success(), DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{100}}},
-			}, nil).Build()
-			defer showIDs.UnPatch()
-			collectionLoads := 0
-			listDBs := mockey.Mock(mockey.GetMethod(b, "ListDatabases")).To(func(context.Context) (*milvuspb.ListDatabasesResponse, error) {
-				collectionLoads++
-				if mode == "collection-reload" && collectionLoads == 1 {
-					return nil, merr.WrapErrServiceUnavailable("collection reload failed")
-				}
-				return &milvuspb.ListDatabasesResponse{}, nil
-			}).Build()
-			defer listDBs.UnPatch()
 			viewLoads := 0
 			listViews := mockey.Mock((*datacoord.Catalog).ListAllDataViews).To(func(*datacoord.Catalog, context.Context) ([]*viewpb.DataViewOfCollection, error) {
 				viewLoads++
@@ -155,28 +140,29 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 				return nil, nil
 			}).Build()
 			defer listViews.UnPatch()
-			server := &Server{ctx: ctx, kv: kv, broker: b}
+			// The catalog initMeta would build, with collection 100 in the view.
+			svrCatalog := datacoord.NewCatalog(kv, cm.RootPath(), "")
+			server := &Server{
+				ctx: ctx, kv: kv, broker: b, catalog: svrCatalog,
+				metaStore: newMetaStoreWithCollections(svrCatalog, 100),
+			}
 			server.SetDataViewCollectionRecoveryValidator(func(context.Context, int64) (bool, error) {
 				return true, nil
 			})
 			err := server.initMeta(cm)
-			require.Equal(t, 1, showIDs.Times())
 			require.Equal(t, 1, reads[good])
-			if mode == "transient" || mode == "collection-reload" || mode == "dataview-reload" {
+			if mode == "transient" || mode == "dataview-reload" {
 				require.NoError(t, err)
 				require.NotNil(t, server.meta)
 				require.NotNil(t, server.dataViewManager)
-				wantReads, wantCollections, wantViews := 1, 1, 1
+				wantReads, wantViews := 1, 1
 				switch mode {
 				case "transient":
 					wantReads = 2
-				case "collection-reload":
-					wantCollections = 2
 				case "dataview-reload":
 					wantViews = 2
 				}
 				require.Equal(t, wantReads, reads[bad])
-				require.Equal(t, wantCollections, collectionLoads)
 				require.Equal(t, wantViews, viewLoads)
 			} else {
 				require.Error(t, err)

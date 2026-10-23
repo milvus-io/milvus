@@ -34,7 +34,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
 		return false, err
 	}
@@ -62,8 +62,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 		// all partitions are released, release the collection directly.
 		msg = message.NewDropLoadConfigMessageBuilderV2().
 			WithHeader(&message.DropLoadConfigMessageHeader{
-				DbId:         coll.DbId,
-				CollectionId: coll.CollectionID,
+				DbId:         coll.DatabaseID,
+				CollectionId: coll.ID,
 			}).
 			WithBody(&message.DropLoadConfigMessageBody{}).
 			WithControlChannelBroadcast().

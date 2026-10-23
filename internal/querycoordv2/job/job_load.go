@@ -53,7 +53,6 @@ type LoadCollectionJob struct {
 	undo               *UndoList
 	dist               *meta.DistributionManager
 	meta               *meta.Meta
-	broker             meta.Broker
 	targetMgr          meta.TargetManagerInterface
 	targetObserver     *observers.TargetObserver
 	collectionObserver *observers.CollectionObserver
@@ -67,7 +66,6 @@ func NewLoadCollectionJob(
 	result message.BroadcastResultAlterLoadConfigMessageV2,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
-	broker meta.Broker,
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
@@ -81,7 +79,6 @@ func NewLoadCollectionJob(
 		undo:               NewUndoList(ctx, meta, targetMgr, targetObserver),
 		dist:               dist,
 		meta:               meta,
-		broker:             broker,
 		targetMgr:          targetMgr,
 		targetObserver:     targetObserver,
 		collectionObserver: collectionObserver,
@@ -95,7 +92,7 @@ func (job *LoadCollectionJob) Execute() error {
 	req := job.result.Message.Header()
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
 
-	collInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionId())
+	collInfo, err := job.meta.GetCollectionInfo(req.GetCollectionId())
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		return nil
 	}
@@ -122,7 +119,7 @@ func (job *LoadCollectionJob) Execute() error {
 	// 2. create replica if not exist (may also remove redundant replicas)
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
 		CollectionID: req.GetCollectionId(),
-		Channels:     collInfo.GetVirtualChannelNames(),
+		Channels:     collInfo.VChannelNames,
 		Configs:      replicas,
 	}); err != nil {
 		return err

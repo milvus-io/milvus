@@ -224,12 +224,14 @@ func TestRestoreOrdinaryArraySortSoftwareGate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setJSONArrayIndexGate(t, tc.enabled)
 			tc.field.FieldID = 100
-			mockBroker := broker.NewMockBroker(t)
-			mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(
-				&milvuspb.DescribeCollectionResponse{DbName: "default", Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{tc.field}}}, nil).Once()
 			alloc := allocator.NewMockAllocator(t)
 			alloc.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
-			sm := &snapshotManager{broker: mockBroker, allocator: alloc, indexEngineVersionManager: jsonArrayVersionManager(t, tc.version)}
+			sm := &snapshotManager{
+				meta: newMetaWithCollections(&collectionInfo{
+					ID: 1, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{tc.field}},
+				}),
+				allocator: alloc, indexEngineVersionManager: jsonArrayVersionManager(t, tc.version),
+			}
 			broadcastStarted := false
 			err := sm.RestoreIndexes(context.Background(), &snapshotstorage.SnapshotData{Indexes: []*indexpb.IndexInfo{{
 				FieldID: 100, IndexName: "array_sort", IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT}},

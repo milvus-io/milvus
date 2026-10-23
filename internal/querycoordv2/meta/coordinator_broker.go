@@ -24,15 +24,12 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -41,15 +38,11 @@ import (
 )
 
 type Broker interface {
-	DescribeCollection(ctx context.Context, collectionID UniqueID) (*milvuspb.DescribeCollectionResponse, error)
-	GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
 	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) ([]*datapb.SegmentInfo, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
-	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
-	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error)
 }
 
 type CoordinatorBroker struct {
@@ -62,126 +55,6 @@ func NewCoordinatorBroker(
 	return &CoordinatorBroker{
 		mixCoord,
 	}
-}
-
-func (broker *CoordinatorBroker) DescribeCollection(ctx context.Context, collectionID UniqueID) (*milvuspb.DescribeCollectionResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
-	defer cancel()
-
-	req := &milvuspb.DescribeCollectionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-		),
-		// please do not specify the collection name alone after database feature.
-		CollectionID: collectionID,
-	}
-	resp, err := broker.mixCoord.DescribeCollection(ctx, req)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		mlog.Warn(ctx, "failed to get collection schema", mlog.Err(err))
-		return nil, err
-	}
-	return resp, nil
-}
-
-func (broker *CoordinatorBroker) DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
-	defer cancel()
-
-	req := &rootcoordpb.DescribeDatabaseRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-		),
-		DbName: dbName,
-	}
-	resp, err := broker.mixCoord.DescribeDatabase(ctx, req)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		mlog.Warn(ctx, "failed to describe database", mlog.Err(err))
-		return nil, err
-	}
-	return resp, nil
-}
-
-// try to get database level replica_num and resource groups, return (resource_groups, replica_num, error)
-func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error) {
-	collectionInfo, err := broker.DescribeCollection(ctx, collectionID)
-	if err != nil {
-		return nil, 0, err
-	}
-	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.GetProperties())
-	if err != nil {
-		mlog.Debug(context.TODO(), "failed to get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
-	} else if replicaNum > 0 {
-		mlog.Info(context.TODO(), "get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
-	}
-
-	rgs, err := common.CollectionLevelResourceGroups(collectionInfo.GetProperties())
-	if err != nil {
-		mlog.Debug(context.TODO(), "failed to get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
-	} else if len(rgs) > 0 {
-		mlog.Info(context.TODO(), "get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Strings("resource_groups", rgs))
-	}
-
-	if replicaNum <= 0 || len(rgs) == 0 {
-		dbInfo, err := broker.DescribeDatabase(ctx, collectionInfo.GetDbName())
-		if err != nil {
-			return nil, 0, err
-		}
-
-		if replicaNum <= 0 {
-			replicaNum, err = common.DatabaseLevelReplicaNumber(dbInfo.GetProperties())
-			if err != nil {
-				mlog.Debug(context.TODO(), "failed to get database level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
-			} else if replicaNum > 0 {
-				mlog.Info(context.TODO(), "get database level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
-			}
-		}
-
-		if len(rgs) == 0 {
-			rgs, err = common.DatabaseLevelResourceGroups(dbInfo.GetProperties())
-			if err != nil {
-				mlog.Debug(context.TODO(), "failed to get database level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
-			} else if len(rgs) > 0 {
-				mlog.Info(context.TODO(), "get database level load info", mlog.Int64("collectionID", collectionID), mlog.Strings("resource_groups", rgs))
-			}
-		}
-	}
-
-	if replicaNum <= 0 || len(rgs) == 0 {
-		if replicaNum <= 0 {
-			replicaNum = paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64()
-			if replicaNum > 0 {
-				mlog.Info(context.TODO(), "get cluster level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
-			}
-		}
-
-		if len(rgs) == 0 {
-			rgs = paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
-			if len(rgs) > 0 {
-				mlog.Info(context.TODO(), "get cluster level load info", mlog.Int64("collectionID", collectionID), mlog.Strings("resource_groups", rgs))
-			}
-		}
-	}
-
-	return rgs, replicaNum, nil
-}
-
-func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
-	defer cancel()
-	req := &milvuspb.ShowPartitionsRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
-		),
-		// please do not specify the collection name alone after database feature.
-		CollectionID: collectionID,
-	}
-	resp, err := broker.mixCoord.ShowPartitions(ctx, req)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		mlog.Warn(context.TODO(), "failed to get partitions", mlog.Err(err))
-		return nil, err
-	}
-
-	return resp.PartitionIDs, nil
 }
 
 func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error) {

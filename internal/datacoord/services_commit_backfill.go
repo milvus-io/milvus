@@ -22,7 +22,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -67,7 +67,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		}, nil
 	}
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, result.CollectionID)
+	coll, err := s.meta.getCollectionOrNotFound(result.CollectionID)
 	if err != nil {
 		log.Warn(ctx, "CommitBackfillResult failed to describe collection", mlog.Err(err), mlog.FieldCollectionID(result.CollectionID))
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
@@ -80,11 +80,11 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	// boundary, so broadcastBackfillBatch re-validates the version again while
 	// holding the resource keys — a drop/alter-function committing in the
 	// window between this check and the key acquisition is still caught.
-	if err := checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, coll); err != nil {
+	if err := checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, coll.Schema); err != nil {
 		log.Warn(ctx, "CommitBackfillResult rejected by schema version fence",
 			mlog.Err(err),
 			mlog.Int32("resultSchemaVersion", result.SchemaVersion),
-			mlog.Int32("collectionSchemaVersion", coll.GetSchema().GetVersion()))
+			mlog.Int32("collectionSchemaVersion", coll.Schema.GetVersion()))
 		return &datapb.CommitBackfillResultResponse{
 			Status:          merr.Status(err),
 			TotalSegments:   total,
@@ -151,14 +151,14 @@ const maxItemsPerBroadcast = 512
 // Broadcast call, so each batch needs its own broadcaster.
 func (s *Server) broadcastBackfillBatch(
 	ctx context.Context,
-	coll *milvuspb.DescribeCollectionResponse,
+	coll *collectionInfo,
 	collectionID int64,
 	expectedSchemaVersion int32,
 	items []*messagespb.BatchUpdateManifestItem,
 ) error {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(coll.GetDbName()),
-		message.NewSharedCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
+		message.NewSharedDBNameResourceKey(coll.DatabaseName),
+		message.NewSharedCollectionNameResourceKey(coll.DatabaseName, coll.Schema.GetName()),
 	)
 	if err != nil {
 		return err
@@ -173,11 +173,11 @@ func (s *Server) broadcastBackfillBatch(
 	// CommitBackfillResult runs outside this boundary; re-reading here closes
 	// the window where a schema change could slip in between the two.
 	if expectedSchemaVersion != 0 {
-		freshColl, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+		freshColl, err := s.meta.getCollectionOrNotFound(collectionID)
 		if err != nil {
 			return err
 		}
-		if err := checkBackfillSchemaVersion(collectionID, expectedSchemaVersion, freshColl); err != nil {
+		if err := checkBackfillSchemaVersion(collectionID, expectedSchemaVersion, freshColl.Schema); err != nil {
 			return err
 		}
 	}
@@ -407,14 +407,11 @@ func inferKind(entry *BackfillSegment) string {
 // committed against the current segments. Results that carry no version (0 —
 // produced before Spark stamped the schema version it read) are exempt from
 // the fence for backward compatibility.
-func checkBackfillSchemaVersion(collectionID int64, expectedSchemaVersion int32, coll *milvuspb.DescribeCollectionResponse) error {
+func checkBackfillSchemaVersion(collectionID int64, expectedSchemaVersion int32, schema *schemapb.CollectionSchema) error {
 	if expectedSchemaVersion == 0 {
 		return nil
 	}
-	currentVersion := int32(0)
-	if coll.GetSchema() != nil {
-		currentVersion = coll.GetSchema().GetVersion()
-	}
+	currentVersion := schema.GetVersion()
 	if expectedSchemaVersion != currentVersion {
 		return merr.WrapErrCollectionSchemaMisMatch(
 			collectionID,

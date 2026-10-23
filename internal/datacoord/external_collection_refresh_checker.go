@@ -355,7 +355,7 @@ func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCol
 // schema.GetExternalSource()/GetExternalSpec() into the CreateJobRequest, and
 // on the worker those drive the external filesystem endpoint, bucket and
 // credentials. The publish is a round trip (AlterCollection -> WAL ack ->
-// BroadcastAlteredCollection -> meta.AddCollection) while the scheduler ticks
+// RootCoord's ack callback -> collection view) while the scheduler ticks
 // every 100ms, so a nudge issued before the publish lands dispatches builds
 // against the PRE-refresh location. Those builds fail terminally, and nothing
 // retries them: createIndexesForSegment skips an index that already has a

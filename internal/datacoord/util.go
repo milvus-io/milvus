@@ -374,7 +374,9 @@ func CheckCheckPointsHealth(meta *meta) error {
 			mlog.RatedWarn(context.TODO(), rate.Limit(60), "can't parse collection id from vchannel, skip check cp lag", mlog.FieldVChannel(channel))
 			continue
 		}
-		if meta.GetCollection(collectionID) == nil {
+		// A dropped collection's checkpoints stop advancing but stay until GC
+		// removes the collection, so only Created collections are checked.
+		if !meta.GetCollection(collectionID).IsCreated() {
 			mlog.RatedWarn(context.TODO(), rate.Limit(60), "corresponding the collection doesn't exists, skip check cp lag", mlog.FieldVChannel(channel))
 			continue
 		}

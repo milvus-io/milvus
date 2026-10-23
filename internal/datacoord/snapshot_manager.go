@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
@@ -365,7 +366,7 @@ type snapshotManager struct {
 
 	// External services
 	handler Handler       // For generating snapshot data
-	broker  broker.Broker // For querying partition information
+	broker  broker.Broker // For creating collections and partitions via RootCoord
 
 	// Index engine version manager for compatibility checks during restore
 	indexEngineVersionManager IndexEngineVersionManager
@@ -401,7 +402,7 @@ type snapshotExportTarget struct {
 //   - copySegmentMeta: Copy segment job/task metadata manager
 //   - allocator: Allocator for all ID allocations (snapshot, job, segment)
 //   - handler: Handler for generating snapshot data
-//   - broker: Broker for coordinator communication
+//   - broker: Broker for creating collections and partitions via RootCoord
 //   - getChannelsFunc: Function to get channels by collection ID
 //
 // Returns:
@@ -611,11 +612,11 @@ func (sm *snapshotManager) validateCMEKCompatibility(
 	sourceEzID, hasSourceEz := hookutil.ParseEzIDFromProperties(snapshotData.Collection.Schema.Properties)
 
 	// Get target database properties first (needed for both encrypted and non-encrypted snapshots)
-	dbResp, err := sm.broker.DescribeDatabase(ctx, targetDbName)
+	db, err := metacache.GetDatabaseOrNotFound(sm.meta.metaStore, targetDbName)
 	if err != nil {
 		return merr.Wrapf(err, "failed to describe target database %s", targetDbName)
 	}
-	targetIsEncrypted := hookutil.IsDBEncrypted(dbResp.GetProperties())
+	targetIsEncrypted := hookutil.IsDBEncrypted(db.Properties)
 
 	// Case 1: Non-encrypted snapshot
 	if !hasSourceEz {
@@ -633,7 +634,7 @@ func (sm *snapshotManager) validateCMEKCompatibility(
 	}
 
 	// Extract target EZ ID and validate match
-	targetEzID, hasTargetEz := hookutil.ParseEzIDFromProperties(dbResp.GetProperties())
+	targetEzID, hasTargetEz := hookutil.ParseEzIDFromProperties(db.Properties)
 	if !hasTargetEz {
 		return merr.WrapErrParameterInvalidMsg(
 			"target database %s is marked as encrypted but has no encryption zone ID", targetDbName)
@@ -1034,18 +1035,17 @@ func (sm *snapshotManager) validateRestoreTargetAbsent(
 	targetDbName string,
 	targetCollectionName string,
 ) error {
-	_, err := sm.broker.DescribeCollectionByName(ctx, targetDbName, targetCollectionName)
-	if err == nil {
+	if _, err := metacache.GetDatabaseOrNotFound(sm.meta.metaStore, targetDbName); err != nil {
+		return merr.Wrap(err, "failed to validate restore target collection")
+	}
+	if sm.meta.GetCollectionByName(targetDbName, targetCollectionName) != nil {
 		return merr.WrapErrParameterInvalidMsg(
 			"target collection %s already exists in database %s",
 			targetCollectionName,
 			targetDbName,
 		)
 	}
-	if errors.Is(err, merr.ErrCollectionNotFound) {
-		return nil
-	}
-	return merr.Wrap(err, "failed to validate restore target collection")
+	return nil
 }
 
 func (sm *snapshotManager) ExportSnapshot(
@@ -1139,12 +1139,13 @@ func (sm *snapshotManager) RestoreCollection(
 		return 0, err
 	}
 
-	// Get the new collection ID by querying with collection name
-	resp, err := sm.broker.DescribeCollectionByName(ctx, targetDbName, targetCollectionName)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return 0, err
+	// Get the new collection ID by its name. CreateCollection returns once
+	// RootCoord has applied it, so the view already holds the collection.
+	coll := sm.meta.GetCollectionByName(targetDbName, targetCollectionName)
+	if coll == nil {
+		return 0, merr.WrapErrCollectionNotFoundWithDB(targetDbName, targetCollectionName)
 	}
-	collectionID := resp.GetCollectionID()
+	collectionID := coll.ID
 
 	// Create user partitions
 	if err := sm.restoreUserPartitions(ctx, snapshotData, targetCollectionName, targetDbName); err != nil {
@@ -1168,9 +1169,9 @@ func (sm *snapshotManager) RestoreIndexes(
 	snapshotName string,
 ) error {
 	// Get collection info for dbId
-	coll, err := sm.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := sm.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
-		return merr.Wrapf(err, "failed to describe collection %d", collectionID)
+		return merr.Wrapf(err, "failed to get collection %d", collectionID)
 	}
 
 	for _, indexInfo := range snapshotData.Indexes {
@@ -1199,7 +1200,7 @@ func (sm *snapshotManager) RestoreIndexes(
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
-		if err := checkOrdinaryArraySortIndex(typeutil.GetField(coll.GetSchema(), index.FieldID), GetIndexType(index.IndexParams), sm.indexEngineVersionManager); err != nil {
+		if err := checkOrdinaryArraySortIndex(typeutil.GetField(coll.Schema, index.FieldID), GetIndexType(index.IndexParams), sm.indexEngineVersionManager); err != nil {
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
@@ -1230,7 +1231,7 @@ func (sm *snapshotManager) RestoreIndexes(
 		// Broadcast CreateIndex message directly to DDL WAL
 		_, err = b.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 			WithHeader(&message.CreateIndexMessageHeader{
-				DbId:         coll.GetDbId(),
+				DbId:         coll.DatabaseID,
 				CollectionId: collectionID,
 				FieldId:      indexInfo.GetFieldID(),
 				IndexId:      indexID,
@@ -1525,21 +1526,15 @@ func (sm *snapshotManager) buildPartitionMapping(
 	collectionID int64,
 ) (map[int64]int64, error) {
 	// Get current partitions
-	currentPartitions, err := sm.broker.ShowPartitions(ctx, collectionID)
+	coll, err := sm.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
 		return nil, err
-	}
-
-	// Build partition name to ID mapping for target collection
-	currrentPartitionMap := make(map[string]int64)
-	for i, name := range currentPartitions.GetPartitionNames() {
-		currrentPartitionMap[name] = currentPartitions.GetPartitionIDs()[i]
 	}
 
 	// Build snapshot partition ID to target partition ID mapping with same name
 	partitionMapping := make(map[int64]int64)
 	for partitionName, partitionID := range snapshotData.Collection.GetPartitions() {
-		targetPartID, ok := currrentPartitionMap[partitionName]
+		targetPartID, ok := coll.LivePartitionID(partitionName)
 		if !ok {
 			return nil, merr.WrapErrDataIntegrityMsg(
 				"partition %s from snapshot not found in target collection", partitionName)
@@ -1903,7 +1898,7 @@ func (sm *snapshotManager) HasActivePins(ctx context.Context, collectionID int64
 // Used by ListSnapshots and ListRestoreJobs for database-level filtering.
 func (sm *snapshotManager) getDBCollectionIDs(dbID int64) map[int64]struct{} {
 	result := make(map[int64]struct{})
-	for _, coll := range sm.meta.GetCollections() {
+	for _, coll := range sm.meta.GetAllCollections() {
 		if coll.DatabaseID == dbID {
 			result[coll.ID] = struct{}{}
 		}

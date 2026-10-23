@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -53,7 +54,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -790,16 +790,7 @@ func (suite *ServerSuite) hackServer() {
 	)
 
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	suite.broker.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil).Maybe()
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(&milvuspb.DescribeCollectionResponse{
-			DbName:         util.DefaultDBName,
-			DbId:           1,
-			CollectionID:   collection,
-			CollectionName: "collection_" + strconv.FormatInt(collection, 10),
-			Schema:         &schemapb.CollectionSchema{},
-		}, nil).Maybe()
 		suite.expectGetRecoverInfo(collection)
 	}
 	mlog.Debug(suite.ctx, "server hacked")
@@ -833,6 +824,23 @@ func (suite *ServerSuite) hackBroker(server *Server) {
 	server.SetMixCoord(mockRootCoord)
 }
 
+// newMetaView returns a MetaStore whose collection view holds the suite's
+// collections, as RootCoord would publish them.
+func (suite *ServerSuite) newMetaView() metacache.MetaStore {
+	store := metacache.NewMetaStore(nil)
+	metacachetest.Collections(store).PutDatabase(&metacache.DatabaseInfo{ID: 1, Name: util.DefaultDBName})
+	for _, collection := range suite.collections {
+		store.PutCollection(&metacache.CollectionInfo{
+			ID:           collection,
+			DatabaseName: util.DefaultDBName,
+			DatabaseID:   1,
+			Partitions:   suite.partitions[collection],
+			Schema:       &schemapb.CollectionSchema{Name: "collection_" + strconv.FormatInt(collection, 10)},
+		})
+	}
+	return store
+}
+
 func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 	server, err := NewQueryCoord(context.Background())
 	if err != nil {
@@ -843,6 +851,7 @@ func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 	server.SetTiKVClient(suite.tikvCli)
 
 	server.SetQueryNodeCreator(session.DefaultQueryNodeCreator)
+	server.SetMetaView(suite.newMetaView())
 	suite.hackBroker(server)
 	registry.ResetRegistration()
 	err = server.Init()
@@ -1072,6 +1081,13 @@ func createSimpleTestServer() *Server {
 		nodeMgr: session.NewNodeManager(),
 	}
 	return server
+}
+
+func TestInitMetaRequiresMetaView(t *testing.T) {
+	server := createSimpleTestServer()
+	err := server.initMeta()
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.Nil(t, server.meta)
 }
 
 // Helper function to create a test session

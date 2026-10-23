@@ -126,7 +126,7 @@ func NewCollectionManager(catalog metastore.QueryCoordCatalog, metaView metacach
 
 // Recover recovers collections from kv store,
 // panics if failed
-func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
+func (m *CollectionManager) Recover(ctx context.Context) error {
 	start := time.Now()
 	collections, err := m.catalog.GetCollections(ctx)
 	if err != nil {
@@ -167,7 +167,7 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 			continue
 		}
 
-		err := m.upgradeLoadFields(ctx, collection, broker)
+		err := m.upgradeLoadFields(ctx, collection)
 		if err != nil {
 			if errors.Is(err, merr.ErrCollectionNotFound) {
 				mlog.Warn(ctx, "collection not found, skip upgrade logic and wait for release")
@@ -231,25 +231,24 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 	return nil
 }
 
-func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *querypb.CollectionLoadInfo, broker Broker) error {
+func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *querypb.CollectionLoadInfo) error {
 	// only fill load fields when value is nil
 	if collection.LoadFields != nil {
 		return nil
 	}
 
-	// invoke describe collection to get collection schema
-	resp, err := broker.DescribeCollection(context.Background(), collection.CollectionID)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
+	info, err := m.GetCollectionInfo(collection.CollectionID)
+	if err != nil {
 		return err
 	}
 
 	// fill all field id as legacy default behavior
-	collection.LoadFields = lo.FilterMap(resp.GetSchema().GetFields(), func(fieldSchema *schemapb.FieldSchema, _ int) (int64, bool) {
+	collection.LoadFields = lo.FilterMap(info.Schema.GetFields(), func(fieldSchema *schemapb.FieldSchema, _ int) (int64, bool) {
 		// load fields list excludes system fields
 		return fieldSchema.GetFieldID(), !common.IsSystemField(fieldSchema.GetFieldID())
 	})
 
-	for _, structArrayField := range resp.GetSchema().GetStructArrayFields() {
+	for _, structArrayField := range info.Schema.GetStructArrayFields() {
 		for _, field := range structArrayField.GetFields() {
 			collection.LoadFields = append(collection.LoadFields, field.GetFieldID())
 		}
@@ -276,18 +275,101 @@ func (m *CollectionManager) GetCollection(ctx context.Context, collectionID type
 
 // GetCollectionSchema proxies the shared metacache. QueryCoord keeps no schema
 // copy of its own -- that is the point: a second copy per loaded collection is
-// exactly the duplication this store exists to remove, and it would go stale
-// independently of DC's. Every schema-mutating DDL refreshes the store:
-// they all broadcast AlterCollectionMessageV2, whose ack calls DataCoord's
-// BroadcastAlteredCollection. A miss means the collection is not in the store
-// yet -- CreateCollection does not push, DataCoord fills it lazily on first
-// use -- and the caller is expected to fall back to DescribeCollection.
+// exactly the duplication this store exists to remove. The store reads
+// RootCoord's MetaTable, which publishes every DDL as its ack applies it, so a
+// miss means RootCoord has no such collection. The schema is shared and must
+// not be modified.
 func (m *CollectionManager) GetCollectionSchema(ctx context.Context, collectionID typeutil.UniqueID) *schemapb.CollectionSchema {
 	info, ok := m.metaView.GetCollection(collectionID)
 	if !ok {
 		return nil
 	}
-	return proto.Clone(info.Schema).(*schemapb.CollectionSchema)
+	return info.Schema
+}
+
+// GetCollectionInfo returns RootCoord's view of a Created collection, with a
+// miss or a Dropping collection reported as ErrCollectionNotFound, as the
+// public describe does. The returned info is shared and must not be
+// modified.
+func (m *CollectionManager) GetCollectionInfo(collectionID typeutil.UniqueID) (*metacache.CollectionInfo, error) {
+	info, _ := m.metaView.GetCollection(collectionID)
+	if !info.IsCreated() {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return info, nil
+}
+
+// GetDatabaseInfo returns RootCoord's view of database dbName, with a miss
+// reported as ErrDatabaseNotFound. The returned info is shared and must not
+// be modified.
+func (m *CollectionManager) GetDatabaseInfo(dbName string) (*metacache.DatabaseInfo, error) {
+	return metacache.GetDatabaseOrNotFound(m.metaView, dbName)
+}
+
+// GetCollectionLoadInfo returns the configured resource groups and replica
+// number of a collection, falling back from the collection's properties to
+// its database's and then to the cluster level.
+func (m *CollectionManager) GetCollectionLoadInfo(ctx context.Context, collectionID typeutil.UniqueID) ([]string, int64, error) {
+	collectionInfo, err := m.GetCollectionInfo(collectionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	replicaNum, err := common.CollectionLevelReplicaNumber(collectionInfo.PropertyPairs)
+	if err != nil {
+		mlog.Debug(ctx, "failed to get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
+	} else if replicaNum > 0 {
+		mlog.Info(ctx, "get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
+	}
+
+	rgs, err := common.CollectionLevelResourceGroups(collectionInfo.PropertyPairs)
+	if err != nil {
+		mlog.Debug(ctx, "failed to get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
+	} else if len(rgs) > 0 {
+		mlog.Info(ctx, "get collection level load info", mlog.Int64("collectionID", collectionID), mlog.Strings("resource_groups", rgs))
+	}
+
+	if replicaNum <= 0 || len(rgs) == 0 {
+		dbInfo, err := m.GetDatabaseInfo(collectionInfo.DatabaseName)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		if replicaNum <= 0 {
+			replicaNum, err = common.DatabaseLevelReplicaNumber(dbInfo.Properties)
+			if err != nil {
+				mlog.Debug(ctx, "failed to get database level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
+			} else if replicaNum > 0 {
+				mlog.Info(ctx, "get database level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
+			}
+		}
+
+		if len(rgs) == 0 {
+			rgs, err = common.DatabaseLevelResourceGroups(dbInfo.Properties)
+			if err != nil {
+				mlog.Debug(ctx, "failed to get database level load info", mlog.Int64("collectionID", collectionID), mlog.Err(err))
+			} else if len(rgs) > 0 {
+				mlog.Info(ctx, "get database level load info", mlog.Int64("collectionID", collectionID), mlog.Strings("resource_groups", rgs))
+			}
+		}
+	}
+
+	if replicaNum <= 0 || len(rgs) == 0 {
+		if replicaNum <= 0 {
+			replicaNum = paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64()
+			if replicaNum > 0 {
+				mlog.Info(ctx, "get cluster level load info", mlog.Int64("collectionID", collectionID), mlog.Int64("replica_num", replicaNum))
+			}
+		}
+
+		if len(rgs) == 0 {
+			rgs = paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+			if len(rgs) > 0 {
+				mlog.Info(ctx, "get cluster level load info", mlog.Int64("collectionID", collectionID), mlog.Strings("resource_groups", rgs))
+			}
+		}
+	}
+
+	return rgs, replicaNum, nil
 }
 
 func (m *CollectionManager) GetPartition(ctx context.Context, partitionID typeutil.UniqueID) *Partition {

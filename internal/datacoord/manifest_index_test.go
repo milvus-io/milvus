@@ -27,7 +27,6 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -43,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -526,12 +524,8 @@ func TestUnreadableManifestAbortsMetaBoot(t *testing.T) {
 	store.failReadsFrom()
 
 	b := broker.NewMockBroker(t)
-	b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-		Status:        merr.Success(),
-		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{restartCollID}}},
-	}, nil).Maybe()
 	_, err := newMeta(context.TODO(), catalog,
-		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), metacache.NewMetaStore(catalog), b)
+		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), newMetaStoreWithCollections(catalog, restartCollID), b)
 	require.Error(t, err, "startup must fail rather than come up with an incomplete indexMeta")
 }
 
@@ -656,12 +650,8 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 func bootMetaForRestart(t *testing.T, catalog metastore.DataCoordCatalog, collectionID int64) *meta {
 	t.Helper()
 	b := broker.NewMockBroker(t)
-	b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-		Status:        merr.Success(),
-		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{collectionID}}},
-	}, nil)
 	m, err := newMeta(context.TODO(), catalog,
-		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), metacache.NewMetaStore(catalog), b)
+		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), newMetaStoreWithCollections(catalog, collectionID), b)
 	require.NoError(t, err)
 	t.Cleanup(m.closeManifestCommitExecutor)
 	return m
