@@ -16,7 +16,9 @@ func NewQueryMVCCManager(_ uint64) *QueryMVCCManager {
 }
 
 // QueryMVCCManager is the manager that manages all the mvcc state of one wal.
-// It tracks the persisted query-plan frontiers of each recovered vchannel.
+// It tracks the query-plan frontiers of live vchannels. Recovery and
+// CreateCollection register them; DropCollection removes them. Progress messages
+// never register a channel, including scoped barriers pending across a Drop.
 type QueryMVCCManager struct {
 	mu                   sync.Mutex
 	vchannelMVCCs        map[string]QueryVChannelMVCC
@@ -62,7 +64,12 @@ func (cm *QueryMVCCManager) UpdateMVCC(msg interface {
 			channels = message.MustAsMutableMVCCBarrierMessageV2(msg).Header().GetVchannels()
 		}
 		for _, channel := range channels {
-			mvcc := cm.vchannelMVCCs[channel]
+			mvcc, live := cm.vchannelMVCCs[channel]
+			if !live {
+				// A pending scoped barrier may publish after DropCollection.
+				// Visibility progress must not register or revive a channel.
+				continue
+			}
 			mvcc.GrowingTimetick = max(mvcc.GrowingTimetick, tick)
 			mvcc.TransformingTimetick = max(mvcc.TransformingTimetick, tick)
 			mvcc.Confirmed = false
@@ -102,7 +109,17 @@ func (cm *QueryMVCCManager) UpdateMVCC(msg interface {
 		}
 		return
 	}
-	mvcc := cm.vchannelMVCCs[vchannel]
+	if msgType == message.MessageTypeDropCollection {
+		delete(cm.vchannelMVCCs, vchannel)
+		delete(cm.unconfirmedVChannels, vchannel)
+		return
+	}
+	mvcc, live := cm.vchannelMVCCs[vchannel]
+	// Only recovery initialization and CreateCollection register a channel.
+	// Late internal messages must not recreate a retired identity.
+	if !live && msgType != message.MessageTypeCreateCollection {
+		return
+	}
 	switch msgType {
 	case message.MessageTypeCreateCollection:
 		if tt <= max(mvcc.GrowingTimetick, mvcc.TransformingTimetick) {

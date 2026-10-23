@@ -116,6 +116,8 @@ func TestRetainedMVCCLifecycle(t *testing.T) {
 		cm.UpdateMVCC(createQueryTestMessage(t, 180, vc, message.MessageTypeFlush, false, true))
 	}
 	require.Empty(t, cm.vchannelMVCCTimestamps)
+	require.Empty(t, cm.query.vchannelMVCCs)
+	require.Empty(t, cm.query.unconfirmedVChannels)
 	require.Equal(t, VChannelMVCC{Timetick: 160}, cm.GetMVCCOfVChannel("p_0v0"))
 	cm.ApplyRecoveryBarrier("active", 100)
 	require.Equal(t, VChannelMVCC{Timetick: 100, Confirmed: true}, cm.GetMVCCOfVChannel("active"))

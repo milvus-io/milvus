@@ -2,6 +2,7 @@ package mvcc
 
 import (
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -238,11 +239,63 @@ func TestQueryMVCCBarrierScopesAndConfirmation(t *testing.T) {
 		cm.UpdateMVCC(builder.MustBuildMutable().WithTimeTick(150))
 		require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 200, TransformingTimetick: 150, Confirmed: false}, cm.GetQueryMVCCOfVChannel("v"))
 		require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 10, TransformingTimetick: 10, Confirmed: true}, cm.GetQueryMVCCOfVChannel("other"))
-		require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 150, TransformingTimetick: 150, Confirmed: true}, cm.GetQueryMVCCOfVChannel("v2"))
+		require.Equal(t, QueryVChannelMVCC{}, cm.GetQueryMVCCOfVChannel("v2"), "a barrier cannot register an unknown channel")
 		// Ordinary volatile TimeTicks must retain their original no-op semantics.
 		cm.UpdateMVCC(createQueryTestMessage(t, 300, "", message.MessageTypeTimeTick, false, false))
 		require.False(t, cm.GetQueryMVCCOfVChannel("v").Confirmed)
 		cm.UpdateMVCC(message.NewMVCCBarrierMessageBuilderV2().WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v", "v2"}}).WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(200))
 		require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 200, TransformingTimetick: 200, Confirmed: true}, cm.GetQueryMVCCOfVChannel("v"))
+	}
+}
+
+func TestQueryMVCCDropCollectionRetiresChannel(t *testing.T) {
+	for _, confirmed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(confirmed), func(t *testing.T) {
+			cm := NewQueryMVCCManager(0)
+			cm.ApplyRecoveryBarrier("live", 10)
+			cm.UpdateMVCC(createQueryTestMessage(t, 10, "dropped", message.MessageTypeCreateCollection, false, true))
+			cm.UpdateMVCC(createQueryTestMessage(t, 20, "dropped", message.MessageTypeInsert, false, true))
+			if confirmed {
+				cm.UpdateMVCC(createQueryTestMessage(t, 20, "", message.MessageTypeTimeTick, false, true))
+			}
+			cm.UpdateMVCC(createQueryTestMessage(t, 30, "dropped", message.MessageTypeDropCollection, false, true))
+			require.NotContains(t, cm.vchannelMVCCs, "dropped")
+			require.NotContains(t, cm.unconfirmedVChannels, "dropped")
+			// Neither a smaller delayed update nor a later internal message registers a channel.
+			for _, channel := range []string{"dropped", "unknown"} {
+				for _, kind := range []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeCommitTxn, message.MessageTypeFlush, message.MessageTypeCommitImport} {
+					for _, tick := range []uint64{15, 40} {
+						cm.UpdateMVCC(createQueryTestMessage(t, tick, channel, kind, false, true))
+					}
+				}
+			}
+			for _, persisted := range []bool{false, true} {
+				barrier := message.NewMVCCBarrierMessageBuilderV2().WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"dropped", "unknown", "live"}}).WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel()
+				if !persisted {
+					barrier.WithNotPersisted()
+				}
+				cm.UpdateMVCC(barrier.MustBuildMutable().WithTimeTick(50))
+			}
+			cm.UpdateMVCC(createQueryTestMessage(t, 60, "", message.MessageTypeFlushAll, false, true))
+			cm.UpdateMVCC(createQueryTestMessage(t, 60, "", message.MessageTypeTimeTick, false, true))
+			require.Equal(t, map[string]QueryVChannelMVCC{"live": {GrowingTimetick: 50, TransformingTimetick: 60, Confirmed: true}}, cm.vchannelMVCCs)
+			require.Empty(t, cm.unconfirmedVChannels)
+		})
+	}
+}
+
+func TestQueryMVCCDropRacesWithScopedBarrier(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		cm := NewQueryMVCCManager(0)
+		cm.ApplyRecoveryBarrier("v", 10)
+		barrier := message.NewMVCCBarrierMessageBuilderV2().WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v"}}).WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(30)
+		drop := createQueryTestMessage(t, 20, "v", message.MessageTypeDropCollection, false, true)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); cm.UpdateMVCC(barrier) }()
+		go func() { defer wg.Done(); cm.UpdateMVCC(drop) }()
+		wg.Wait()
+		require.Empty(t, cm.vchannelMVCCs)
+		require.Empty(t, cm.unconfirmedVChannels)
 	}
 }
