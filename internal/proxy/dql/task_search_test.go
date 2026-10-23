@@ -972,6 +972,18 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		return task
 	}
 
+	t.Run("collection without vector field", func(t *testing.T) {
+		collName := "test_no_vector_field" + funcutil.GenRandomStr()
+		registerColl(collName, constructCollectionSchemaByDataType(collName, map[string]schemapb.DataType{
+			testInt64Field: schemapb.DataType_Int64,
+			testFloatField: schemapb.DataType_Float,
+		}, testInt64Field, true))
+		task := getSearchTask(t, collName)
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "has no vector field, search is not supported")
+	})
+
 	t.Run("bad nq 0", func(t *testing.T) {
 		collName := "test_bad_nq0_error" + funcutil.GenRandomStr()
 		registerColl(collName, createColl(t, collName, nil))

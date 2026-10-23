@@ -132,7 +132,7 @@ func TestDDLCallbacksSchemaEvolutionRejectsGraphBreakingAlterCollectionSchemaDro
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 
 	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, &schemapb.FieldSchema{
 		Name:     "text_input",
@@ -161,7 +161,7 @@ func TestDDLCallbacksSchemaEvolutionRejectsGraphBreakingAlterCollectionSchemaDro
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
-	assertFieldExists(t, ctx, core, dbName, collectionName, "text_input", 101)
+	assertFieldExists(t, ctx, core, dbName, collectionName, "text_input", 102)
 }
 
 func TestDDLCallbacksSchemaEvolutionRejectsUnsafeDynamicEnable(t *testing.T) {

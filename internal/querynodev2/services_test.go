@@ -513,6 +513,18 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	err = merr.CheckRPCCall(status, err)
 	suite.ErrorIs(err, merr.ErrIndexNotFound)
 
+	// empty index on a collection with no vector field is not an error:
+	// such a collection has nothing that needs an index
+	noVectorReq := proto.Clone(req).(*querypb.WatchDmChannelsRequest)
+	noVectorReq.Schema = proto.Clone(schema).(*schemapb.CollectionSchema)
+	noVectorReq.Schema.Fields = lo.Filter(noVectorReq.Schema.Fields, func(f *schemapb.FieldSchema, _ int) bool {
+		return !typeutil.IsVectorType(f.GetDataType())
+	})
+	noVectorReq.Infos[0].ChannelName = suite.vchannel + "_no_vector"
+	status, err = suite.node.WatchDmChannels(ctx, noVectorReq)
+	err = merr.CheckRPCCall(status, err)
+	suite.NotErrorIs(err, merr.ErrIndexNotFound)
+
 	// node not healthy
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = suite.node.WatchDmChannels(ctx, req)

@@ -2199,6 +2199,26 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 			expectErr:        false,
 		},
 		{
+			tag: "load_fields_without_vector",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					dynamicField,
+					clusteringKeyField,
+				},
+				Functions: []*schemapb.FunctionSchema{},
+			},
+			loadFields:       []string{"pk", "part_key", "clustering_key"},
+			skipDynamicField: false,
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 4, common.StartOfUserFieldID + 5},
+			expectErr:        false,
+		},
+		{
 			tag: "load_fields_skip_dynamic",
 			schema: &schemapb.CollectionSchema{
 				EnableDynamicField: true,

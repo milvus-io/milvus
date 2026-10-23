@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -2783,4 +2784,31 @@ func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
 			require.NoError(t, m.UpdateIndexState(6200, commonpb.IndexState_Failed, "failed"))
 		})
 	}
+}
+
+// AllDenseWithDiskIndex compares the dense vector fields with the ones that
+// carry a disk index; with no dense vector field both counts are 0 and the
+// collection must not be given the DiskANN segment size.
+func TestAllDenseWithDiskIndex_NoDenseVectorField(t *testing.T) {
+	m := newSegmentIndexMeta(nil)
+	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+
+	scalarOnly := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		pk, {FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32},
+	}}
+	assert.False(t, m.AllDenseWithDiskIndex(1, scalarOnly))
+
+	sparseOnly := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		pk, {FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+	}}
+	assert.False(t, m.AllDenseWithDiskIndex(1, sparseOnly))
+
+	dense := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		pk, {FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	}}
+	assert.False(t, m.AllDenseWithDiskIndex(1, dense))
+	m.indexes[1] = map[UniqueID]*model.Index{
+		10: {CollectionID: 1, FieldID: 101, IndexID: 10, IndexName: "disk", IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "DISKANN"}}},
+	}
+	assert.True(t, m.AllDenseWithDiskIndex(1, dense))
 }

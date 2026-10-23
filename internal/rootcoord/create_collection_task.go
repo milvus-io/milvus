@@ -179,6 +179,12 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
+	// The Proxy rejects this earlier so the client gets the error first; RootCoord
+	// decides, so the gate holds even when proxies carry different configs.
+	if !typeutil.HasVectorField(schema) && !Params.CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg("schema does not contain vector field")
+	}
+
 	// Validate default
 	if err := timestamptz.CheckAndRewriteTimestampTzDefaultValue(schema); err != nil {
 		return err
