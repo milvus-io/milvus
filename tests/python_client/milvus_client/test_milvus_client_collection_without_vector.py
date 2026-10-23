@@ -133,3 +133,42 @@ class TestMilvusClientCollectionWithoutVector(TestMilvusClientV2Base):
         described = self.describe_collection(client, collection_name)[0]
         assert "vec" not in [f["name"] for f in described["fields"]]
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_without_vector_scalar_struct_array(self):
+        """
+        target: a struct array field with only scalar sub-fields does not make a vector collection
+        method: create with a primary key and a struct array of scalars, insert, load with no index, query
+        expected: the collection loads with no index, struct values are returned, search is rejected
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(pk_field, DataType.INT64, is_primary=True, auto_id=False)
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("tag", DataType.VARCHAR, max_length=32)
+        struct_schema.add_field("score", DataType.INT32)
+        schema.add_field(
+            "items", DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=struct_schema, max_capacity=4
+        )
+        self.create_collection(client, collection_name, schema=schema)
+
+        rows = [{pk_field: i, "items": [{"tag": f"t{i}", "score": i}]} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+        assert self._count(client, collection_name) == default_nb
+        res = self.query(client, collection_name, filter=f"{pk_field} == 7", output_fields=["items"])[0]
+        assert len(res) == 1 and res[0]["items"][0]["score"] == 7
+
+        error = {ct.err_code: 1100, ct.err_msg: no_vector_search_msg}
+        self.search(
+            client,
+            collection_name,
+            [[0.1] * 8],
+            anns_field="items[tag]",
+            limit=1,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        self.drop_collection(client, collection_name)
