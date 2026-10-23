@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/util/metrics"
@@ -47,6 +48,10 @@ type CollectionTarget struct {
 	// metaView resolves segment details on demand from the shared metacache
 	// store instead of keeping full proto copies.
 	metaView metacache.MetaView
+	// segment2Channel is the inverse of channel2SegmentIDs: the channel this
+	// target attributes each of its segments to. It is what the pull said, and
+	// it is what a resolved proto reports as its InsertChannel (see attributed).
+	segment2Channel map[int64]string
 
 	// windowTargets are the channels this target's pull listed that may be
 	// shard-split targets not yet adopted at pull time: every listed channel the
@@ -78,6 +83,7 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 	segmentIDs := make(map[int64]struct{}, len(segments))
 	channel2SegmentIDs := make(map[string]map[int64]struct{}, len(dmChannels))
 	partition2SegmentIDs := make(map[int64]map[int64]struct{}, len(partitionIDs))
+	segment2Channel := make(map[int64]string, len(segments))
 
 	for id, seg := range segments {
 		segmentIDs[id] = struct{}{}
@@ -87,6 +93,7 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 			channel2SegmentIDs[channel] = make(map[int64]struct{})
 		}
 		channel2SegmentIDs[channel][id] = struct{}{}
+		segment2Channel[id] = channel
 
 		partitionID := seg.GetPartitionID()
 		if partition2SegmentIDs[partitionID] == nil {
@@ -103,6 +110,7 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		partitions:           typeutil.NewSet(partitionIDs...),
 		version:              time.Now().UnixNano(),
 		metaView:             metaView,
+		segment2Channel:      segment2Channel,
 	}
 }
 
@@ -118,6 +126,12 @@ func newCollectionTargetFromGrouping(
 	lackSegmentInfo bool,
 	metaView metacache.MetaView,
 ) *CollectionTarget {
+	segment2Channel := make(map[int64]string, len(segmentIDs))
+	for channel, ids := range channel2SegmentIDs {
+		for id := range ids {
+			segment2Channel[id] = channel
+		}
+	}
 	return &CollectionTarget{
 		segmentIDs:           segmentIDs,
 		channel2SegmentIDs:   channel2SegmentIDs,
@@ -127,6 +141,7 @@ func newCollectionTargetFromGrouping(
 		version:              time.Now().UnixNano(),
 		lackSegmentInfo:      lackSegmentInfo,
 		metaView:             metaView,
+		segment2Channel:      segment2Channel,
 	}
 }
 
@@ -195,14 +210,41 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget, metaView metacache
 	return ct
 }
 
+// attributed returns the segment under the channel this target attributes it
+// to. The shared store resolves the channel datacoord's segment meta records,
+// which the recovery info a target is pulled from overrides inside a shard
+// split's lineage window: a split target's flushed segment is attributed to
+// the split source while the source is listed, so that the source delegator
+// loads and serves it (datacoord's splitAttributedInsertChannel). Every
+// consumer that routes by a target segment's InsertChannel -- the segment
+// checker's load plans, the leader checker's grow actions, the distribution
+// handler's routing entry, the readiness and load-progress exclusions --
+// relied on the pulled proto carrying that attribution; a proto resolved live
+// would carry the recorded channel instead and route a window's segment to a
+// delegator that does not exist yet. The attribution is restored on a copy,
+// since the store's proto is shared. Outside a lineage window the recorded
+// channel and the attribution agree, and the proto is returned as is.
+func (p *CollectionTarget) attributed(info *datapb.SegmentInfo) *datapb.SegmentInfo {
+	channel, ok := p.segment2Channel[info.GetID()]
+	if !ok || channel == info.GetInsertChannel() {
+		return info
+	}
+	attributed := proto.Clone(info).(*datapb.SegmentInfo)
+	attributed.InsertChannel = channel
+	return attributed
+}
+
 // resolveSegments resolves a set of segment IDs into their full protos from
-// the shared metacache store.
+// the shared metacache store, each under the channel this target attributes
+// it to.
 func (p *CollectionTarget) resolveSegments(ids map[int64]struct{}) []*datapb.SegmentInfo {
 	if len(ids) == 0 {
 		return nil
 	}
 	segs := p.metaView.GetSegmentsByIDs(lo.Keys(ids))
-	return lo.Values(segs)
+	return lo.MapToSlice(segs, func(_ int64, seg *datapb.SegmentInfo) *datapb.SegmentInfo {
+		return p.attributed(seg)
+	})
 }
 
 // segmentPartitions inverts the partition grouping once, so persisting a
@@ -281,7 +323,11 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 }
 
 func (p *CollectionTarget) GetAllSegments() map[int64]*datapb.SegmentInfo {
-	return p.metaView.GetSegmentsByIDs(lo.Keys(p.segmentIDs))
+	segs := p.metaView.GetSegmentsByIDs(lo.Keys(p.segmentIDs))
+	for id, seg := range segs {
+		segs[id] = p.attributed(seg)
+	}
+	return segs
 }
 
 // GetSegment resolves a single segment by ID from the shared metacache
@@ -290,7 +336,11 @@ func (p *CollectionTarget) GetSegment(id int64) (*datapb.SegmentInfo, bool) {
 	if _, ok := p.segmentIDs[id]; !ok {
 		return nil, false
 	}
-	return p.metaView.GetSegment(id)
+	seg, ok := p.metaView.GetSegment(id)
+	if !ok {
+		return nil, false
+	}
+	return p.attributed(seg), true
 }
 
 func (p *CollectionTarget) GetChannelSegments(channel string) []*datapb.SegmentInfo {
