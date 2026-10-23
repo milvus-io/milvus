@@ -1213,12 +1213,26 @@ type publishedIndexMeta struct {
 	version int64
 	// workers holds the nodes known to have applied infos.
 	workers typeutil.UniqueSet
+	// epoch changes when infos changes, when nodes leave workers and when a
+	// load may have given a node an older list. SyncIndexMeta sends its RPCs
+	// without holding indexMetaMu, so it adds the nodes it reached to workers
+	// only if epoch did not change meanwhile.
+	epoch uint64
+	// unsupported holds the nodes whose QueryNode has no SyncIndexMeta RPC: an
+	// older version during a rolling upgrade.
+	unsupported typeutil.UniqueSet
 }
 
 // SyncIndexMeta publishes a collection index list to every node that serves
 // this shard: the nodes of the online sealed segments and the delegator node,
 // which serves the growing ones. A node that already has the same list is
 // skipped, so a target sync with an unchanged list sends no RPC.
+//
+// A node of an older version that has no SyncIndexMeta RPC does not fail the
+// sync. It keeps the index lists that come with its loads, as before this RPC
+// existed, and is not asked again: the call failed with Unimplemented, which
+// makes the client reset its connection to the node, and an upgraded node
+// comes back as a new process with a new node ID.
 func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, version int64) error {
 	log := sd.getLogger(ctx).With(zap.Int64("indexInfoVersion", version))
 	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
@@ -1226,29 +1240,7 @@ func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*index
 	}
 	defer sd.lifetime.Done()
 
-	sd.indexMetaMu.Lock()
-	defer sd.indexMetaMu.Unlock()
-
-	if version < sd.indexMeta.version {
-		return nil
-	}
-	if sd.indexMeta.workers == nil || !sameIndexInfos(sd.indexMeta.infos, indexInfos) {
-		sd.indexMeta.infos = indexInfos
-		sd.indexMeta.workers = typeutil.NewUniqueSet()
-	}
-	sd.indexMeta.version = version
-
-	sealed, _, distVersion := sd.distribution.PinOnlineSegments()
-	sd.distribution.Unpin(distVersion)
-	nodes := typeutil.NewUniqueSet(paramtable.GetNodeID())
-	for _, item := range sealed {
-		if len(item.Segments) > 0 {
-			nodes.Insert(item.NodeID)
-		}
-	}
-	// Forget the nodes that left the shard; they get the list again if they come back.
-	sd.indexMeta.workers = sd.indexMeta.workers.Intersection(nodes)
-	targets := nodes.Complement(sd.indexMeta.workers).Collect()
+	targets, epoch := sd.indexMetaSyncTargets(indexInfos, version)
 	if len(targets) == 0 {
 		return nil
 	}
@@ -1260,6 +1252,7 @@ func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*index
 		IndexInfoVersion: version,
 	}
 	synced := make([]bool, len(targets))
+	unsupported := make([]bool, len(targets))
 	group, gctx := errgroup.WithContext(ctx)
 	for i, nodeID := range targets {
 		group.Go(func() error {
@@ -1270,6 +1263,10 @@ func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*index
 			nodeReq := typeutil.Clone(req)
 			nodeReq.GetBase().TargetID = nodeID
 			if err := merr.CheckRPCCall(worker.SyncIndexMeta(gctx, nodeReq)); err != nil {
+				if errors.Is(err, merr.ErrServiceUnimplemented) {
+					unsupported[i] = true
+					return nil
+				}
 				return merr.Wrapf(err, "failed to sync index meta to node %d", nodeID)
 			}
 			synced[i] = true
@@ -1277,17 +1274,73 @@ func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*index
 		})
 	}
 	err := group.Wait()
+
+	var syncedNodes, unsupportedNodes []int64
+	sd.indexMetaMu.Lock()
 	for i, nodeID := range targets {
-		if synced[i] {
-			sd.indexMeta.workers.Insert(nodeID)
+		if unsupported[i] {
+			sd.indexMeta.unsupported.Insert(nodeID)
+			unsupportedNodes = append(unsupportedNodes, nodeID)
 		}
+		if synced[i] {
+			if sd.indexMeta.epoch == epoch {
+				sd.indexMeta.workers.Insert(nodeID)
+			}
+			syncedNodes = append(syncedNodes, nodeID)
+		}
+	}
+	sd.indexMetaMu.Unlock()
+
+	if len(unsupportedNodes) > 0 {
+		log.Warn("nodes do not support SyncIndexMeta, they keep the index meta of their loads until they are upgraded",
+			zap.Int64s("nodes", unsupportedNodes))
 	}
 	if err != nil {
 		log.Warn("failed to sync index meta", zap.Int64s("nodes", targets), zap.Error(err))
 		return err
 	}
-	log.Info("synced index meta", zap.Int64s("nodes", targets), zap.Int("indexNum", len(indexInfos)))
+	log.Info("synced index meta", zap.Int64s("nodes", syncedNodes), zap.Int("indexNum", len(indexInfos)))
 	return nil
+}
+
+// indexMetaSyncTargets records indexInfos as the published list and returns
+// the nodes that serve this shard but are not known to have it, together with
+// the epoch to check before they are recorded as having it.
+func (sd *shardDelegator) indexMetaSyncTargets(indexInfos []*indexpb.IndexInfo, version int64) ([]int64, uint64) {
+	sd.indexMetaMu.Lock()
+	defer sd.indexMetaMu.Unlock()
+
+	if version < sd.indexMeta.version {
+		return nil, 0
+	}
+	if sd.indexMeta.unsupported == nil {
+		sd.indexMeta.unsupported = typeutil.NewUniqueSet()
+	}
+	if sd.indexMeta.workers == nil || !sameIndexInfos(sd.indexMeta.infos, indexInfos) {
+		sd.indexMeta.infos = indexInfos
+		sd.indexMeta.workers = typeutil.NewUniqueSet()
+		sd.indexMeta.epoch++
+	}
+	sd.indexMeta.version = version
+
+	sealed, _, distVersion := sd.distribution.PinOnlineSegments()
+	sd.distribution.Unpin(distVersion)
+	nodes := typeutil.NewUniqueSet(paramtable.GetNodeID())
+	for _, item := range sealed {
+		if len(item.Segments) > 0 {
+			nodes.Insert(item.NodeID)
+		}
+	}
+	// Forget the nodes that left the shard. A node that left may release the
+	// collection, and WatchDmChannels can then create it there again with an
+	// older list (see QueryNode.WatchDmChannels), so the node gets the list
+	// again when it comes back.
+	if workers := sd.indexMeta.workers.Intersection(nodes); workers.Len() < sd.indexMeta.workers.Len() {
+		sd.indexMeta.workers = workers
+		sd.indexMeta.epoch++
+	}
+	targets := nodes.Complement(sd.indexMeta.workers).Complement(sd.indexMeta.unsupported).Collect()
+	return targets, sd.indexMeta.epoch
 }
 
 // forgetIndexMetaWorker drops a node from the published set after it applied
@@ -1299,6 +1352,8 @@ func (sd *shardDelegator) forgetIndexMetaWorker(nodeID int64, indexInfos []*inde
 	defer sd.indexMetaMu.Unlock()
 	if sd.indexMeta.workers != nil && version < sd.indexMeta.version && !sameIndexInfos(sd.indexMeta.infos, indexInfos) {
 		sd.indexMeta.workers.Remove(nodeID)
+		// A SyncIndexMeta in flight may have reached the node before this load.
+		sd.indexMeta.epoch++
 	}
 }
 

@@ -42,16 +42,20 @@ import (
 
 func TestListIndexesVersionTakenBeforeList(t *testing.T) {
 	broker := meta.NewMockBroker(t)
-	var versionDuringList int64
+	allocated := false
+	broker.EXPECT().AllocTimestamp(mock.Anything).RunAndReturn(func(context.Context) (uint64, error) {
+		allocated = true
+		return 100, nil
+	}).Once()
 	broker.EXPECT().ListIndexes(mock.Anything, int64(1)).RunAndReturn(func(context.Context, int64) ([]*indexpb.IndexInfo, error) {
-		versionDuringList = nextIndexInfoVersion()
+		assert.True(t, allocated)
 		return []*indexpb.IndexInfo{{IndexID: 10}}, nil
-	})
+	}).Once()
 
 	infos, version, err := ListIndexesWithVersion(context.Background(), broker, 1)
 	require.NoError(t, err)
 	assert.Len(t, infos, 1)
-	assert.Less(t, version, versionDuringList)
+	assert.EqualValues(t, 100, version)
 }
 
 func TestSpawnReplicasWithRG(t *testing.T) {
