@@ -3,6 +3,8 @@ import yaml
 
 
 def pytest_addoption(parser):
+    parser.addoption("--strict-validation", action="store_true", default=False,
+                     help="Run value-fidelity tests; requires proxy.http.strictValidation=true on the server")
     parser.addoption("--endpoint", action="store", default="http://127.0.0.1:19530", help="endpoint")
     parser.addoption("--token", action="store", default="root:Milvus", help="token")
     parser.addoption("--minio_host", action="store", default="127.0.0.1", help="minio host")

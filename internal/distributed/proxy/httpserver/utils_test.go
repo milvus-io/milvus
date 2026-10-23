@@ -602,6 +602,8 @@ func TestPrintCollectionDetails(t *testing.T) {
 }
 
 func TestPrimaryField(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	primaryField := generatePrimaryField(schemapb.DataType_Int64, false)
 	field, ok := getPrimaryField(coll)
@@ -629,6 +631,8 @@ func TestPrimaryField(t *testing.T) {
 }
 
 func TestAnyToColumns(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	t.Run("insert with dynamic field", func(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		req := InsertReq{}
@@ -1075,6 +1079,8 @@ func TestAnyToColumns(t *testing.T) {
 }
 
 func TestCheckAndSetData(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	t.Run("integer range validation", func(t *testing.T) {
 		tests := []struct {
 			name              string
@@ -1288,6 +1294,8 @@ func TestInsertWithInt64(t *testing.T) {
 }
 
 func TestInsertWithNullableField(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	arrayFieldName := "array-int64"
 	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
@@ -1576,6 +1584,8 @@ func TestPartialUpdateWithNullableExplicitNull(t *testing.T) {
 }
 
 func TestInsertWithDefaultValueField(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	arrayFieldName := "array-int64"
 	coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
@@ -2024,6 +2034,8 @@ func TestBuildQueryResp(t *testing.T) {
 }
 
 func TestBuildQueryRespDynamicFieldLargeIntPrecision(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	t.Run("dynamic field integers above 2^53 keep exact precision", func(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			Type:      schemapb.DataType_JSON,
@@ -3036,6 +3048,8 @@ func TestConvertToExtraParams(t *testing.T) {
 }
 
 func TestGenerateExpressionTemplate(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	var mixedAns [][]byte
 
 	val, _ := json.Marshal(1)
@@ -3372,6 +3386,8 @@ func TestParseUsernamePassword(t *testing.T) {
 }
 
 func TestConvertIDsToSchemapbIDs(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	int64PkField := &schemapb.FieldSchema{
 		FieldID:      common.StartOfUserFieldID,
 		Name:         "id",
@@ -3677,6 +3693,8 @@ func TestStructArrayFieldSchemaGetProto(t *testing.T) {
 }
 
 func TestParseStructArrayRowScalar(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := buildStructArrayTestSchema().GetStructArrayFields()[0]
 	raw := `[{"sub_int": 1, "sub_vec": [0.1, 0.2, 0.3, 0.4]},
 	         {"sub_int": 2, "sub_vec": [0.5, 0.6, 0.7, 0.8]}]`
@@ -3696,18 +3714,24 @@ func TestParseStructArrayRowScalar(t *testing.T) {
 }
 
 func TestParseStructArrayRowMissingField(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := buildStructArrayTestSchema().GetStructArrayFields()[0]
 	_, err := parseStructArrayRow(`[{"sub_int": 1}]`, schema, false)
 	assert.Error(t, err)
 }
 
 func TestParseStructArrayRowNotArray(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := buildStructArrayTestSchema().GetStructArrayFields()[0]
 	_, err := parseStructArrayRow(`{"sub_int": 1}`, schema, false)
 	assert.Error(t, err)
 }
 
 func TestBuildStructArrayFieldDataRoundTrip(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := buildStructArrayTestSchema().GetStructArrayFields()[0]
 	r1, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1, 0.2, 0.3, 0.4]},
 	                                 {"sub_int": 2, "sub_vec": [0.5, 0.6, 0.7, 0.8]}]`, schema, false)
@@ -3862,6 +3886,8 @@ func TestPrintStructArrayFieldsV2(t *testing.T) {
 }
 
 func TestParseJSONInteger(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name    string
 		raw     string
@@ -3921,6 +3947,8 @@ func TestParseJSONInteger(t *testing.T) {
 }
 
 func TestStructArrayScalarSubFieldTypes(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name        string
 		elementType schemapb.DataType
@@ -4010,6 +4038,8 @@ func TestStructArrayScalarSubFieldTypes(t *testing.T) {
 }
 
 func TestStructArrayNarrowIntegerSubFieldValidation(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name        string
 		elementType schemapb.DataType
@@ -4256,6 +4286,8 @@ func TestStructArrayFieldDataErrorPaths(t *testing.T) {
 }
 
 func TestExtractStructArrayRowErrorPaths(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	empty, err := extractStructArrayRow(&schemapb.FieldData{
 		Type: schemapb.DataType_ArrayOfStruct,
 		Field: &schemapb.FieldData_StructArrays{
@@ -4438,6 +4470,8 @@ func TestStructArrayCheckAndSetPartialUpdate(t *testing.T) {
 }
 
 func TestStructArrayFieldDataValueCount(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := buildStructArrayTestSchema().GetStructArrayFields()[0]
 	row, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2,0.3,0.4]}]`, schema, false)
 	require.NoError(t, err)
@@ -4534,6 +4568,8 @@ func TestPrintStructArrayFieldsV2QualifiedSubFields(t *testing.T) {
 }
 
 func TestCheckAndSetDataStructArrayRows(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := buildStructArrayTestSchema()
 	body := []byte(`{"data": [
 		{
@@ -4596,6 +4632,8 @@ func TestCheckAndSetDataStructArrayRows(t *testing.T) {
 }
 
 func TestParseStructArrayRowQualifiedSchemaNames(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := &schemapb.StructArrayFieldSchema{
 		Name: "my_struct",
 		Fields: []*schemapb.FieldSchema{
@@ -4680,6 +4718,8 @@ func insertOneInt64Value(t *testing.T, value string) ([]map[string]interface{}, 
 // not all digits, so a decimal or exponent form lost precision before reaching
 // json.Number and was then accepted as a valid int64.
 func TestCheckAndSetDataInt64FieldParsesRawLiteral(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name     string
 		value    string
@@ -4711,6 +4751,8 @@ func TestCheckAndSetDataInt64FieldParsesRawLiteral(t *testing.T) {
 }
 
 func TestCheckAndSetDataInt64FieldRejectsNonIntegers(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name  string
 		value string
@@ -4737,6 +4779,8 @@ func TestCheckAndSetDataInt64FieldRejectsNonIntegers(t *testing.T) {
 // strconv's base detection, so "010" meant 8 in a narrow integer field and 10
 // in an Int64 field.
 func TestCheckAndSetDataQuotedIntegerIsDecimal(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	narrowSchema := func(dataType schemapb.DataType) *schemapb.CollectionSchema {
 		vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 		vectorField.Name = "vector"
@@ -4782,6 +4826,8 @@ func TestCheckAndSetDataQuotedIntegerIsDecimal(t *testing.T) {
 // proxy.http.compatibilityMode restores the previous integer handling,
 // including the two's complement wraparound this PR removes.
 func TestCheckAndSetDataIntegerCompatibilityMode(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
 	paramtable.Get().Save(key, "true")
@@ -4832,6 +4878,8 @@ func TestCheckAndSetDataIntegerCompatibilityMode(t *testing.T) {
 // proxy.http.compatibilityMode restores the behavior a client saw before a
 // missing non-nullable field was rejected: the value was silently stored empty.
 func TestCheckAndSetDataCompatibilityModeSwitch(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
 
@@ -4922,6 +4970,8 @@ func insertOneJSONValue(t *testing.T, value string) []byte {
 // That unquotes JSON strings and renders numbers through float64, producing
 // bytes that are not a JSON document at all. Keep the original token instead.
 func TestCheckAndSetDataJSONFieldKeepsRawToken(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name     string
 		value    string
@@ -4959,6 +5009,8 @@ func TestCheckAndSetDataJSONFieldKeepsRawToken(t *testing.T) {
 // A JSON document handed over as a JSON string keeps being unwrapped so that
 // clients relying on that input form are not broken.
 func TestCheckAndSetDataJSONFieldUnwrapsEncodedDocument(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name     string
 		value    string
@@ -5004,6 +5056,8 @@ func insertOneDynamicValue(t *testing.T, value string) ([]map[string]interface{}
 // discarded its error and yielded 0, so anything it could not parse -- 1e300,
 // 1e19, integers beyond int64 -- was silently stored as 0.
 func TestCheckAndSetDataDynamicFieldKeepsNumberLiteral(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name     string
 		value    string
@@ -5043,6 +5097,8 @@ func TestCheckAndSetDataDynamicFieldKeepsNumberLiteral(t *testing.T) {
 // them would turn every query touching that path into an error. Reject at
 // insert time instead.
 func TestCheckAndSetDataDynamicFieldRejectsUnrepresentableNumber(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name  string
 		value string
@@ -5067,6 +5123,8 @@ func TestCheckAndSetDataDynamicFieldRejectsUnrepresentableNumber(t *testing.T) {
 // a dynamic field: simdjson reports BIGINT_ERROR beyond that, so storing it
 // would make every query touching the field fail instead of the insert.
 func TestCheckAndSetDataJSONFieldRejectsUnrepresentableNumber(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name  string
 		value string
@@ -5093,6 +5151,8 @@ func TestCheckAndSetDataJSONFieldRejectsUnrepresentableNumber(t *testing.T) {
 // checked only the top level, so an oversized integer one brace deep was
 // stored and made the row unreadable all the same.
 func TestCheckAndSetDataJSONFieldRejectsNestedUnreadableNumbers(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	// nested numbers used to be left unchecked; they are now covered by the same
 	// walk the duplicate-key scan makes
 	body := []byte(fmt.Sprintf(
@@ -5106,6 +5166,8 @@ func TestCheckAndSetDataJSONFieldRejectsNestedUnreadableNumbers(t *testing.T) {
 // gjson's Value() decodes a whole subtree into Go values, so every nested
 // number went through float64 even after the top-level literal was preserved.
 func TestCheckAndSetDataDynamicFieldKeepsNestedLiterals(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name     string
 		value    string
@@ -5141,6 +5203,8 @@ func TestCheckAndSetDataDynamicFieldKeepsNestedLiterals(t *testing.T) {
 // proxy.http.compatibilityMode restores the previous handling for both the
 // JSON field and the dynamic field, including the values that were destroyed.
 func TestCheckAndSetDataJSONAndDynamicCompatibilityMode(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
 	paramtable.Get().Save(key, "true")
@@ -5190,6 +5254,8 @@ func TestCheckAndSetDataJSONAndDynamicCompatibilityMode(t *testing.T) {
 // of nesting, so a value nested to the per-document limit fails only once it
 // is wrapped, and the previous handling stored that wrapper unexamined.
 func TestDynamicWrapperCheckHonorsCompatibilityMode(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 
 	// passes the per-value depth check on its own, fails once the wrapper's
@@ -5243,6 +5309,8 @@ func insertOneStringValue(t *testing.T, value string) ([]map[string]interface{},
 // gjson's String() renders a number through float64 with the 'f' verb, so the
 // stored text was not the text the caller wrote.
 func TestCheckAndSetDataStringFieldKeepsNumberLiteral(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name     string
 		value    string
@@ -5275,6 +5343,8 @@ func TestCheckAndSetDataStringFieldKeepsNumberLiteral(t *testing.T) {
 // 1e300 used to be stored as its full decimal expansion: five bytes in, 301
 // bytes stored, and a max_length error that named a size the caller never sent.
 func TestCheckAndSetDataStringFieldDoesNotExpandExponents(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	rows, err := insertOneStringValue(t, `1e300`)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
@@ -5282,6 +5352,8 @@ func TestCheckAndSetDataStringFieldDoesNotExpandExponents(t *testing.T) {
 }
 
 func TestCheckAndSetDataStringFieldRejectsStructures(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name  string
 		value string
@@ -5307,6 +5379,8 @@ func TestCheckAndSetDataStringFieldRejectsStructures(t *testing.T) {
 // proxy.http.compatibilityMode restores the previous String() rendering for a
 // string field, including accepting an object as its text.
 func TestCheckAndSetDataStringFieldCompatibilityMode(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
 	paramtable.Get().Save(key, "true")
@@ -5341,6 +5415,8 @@ func TestCheckAndSetDataStringFieldCompatibilityMode(t *testing.T) {
 // these used to be normalized by the decode and re-encode round trip, and the
 // normalized form is what a client got back.
 func TestCheckAndSetDataDynamicFieldDocumentFidelity(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name  string
 		value string
@@ -5379,6 +5455,8 @@ func TestCheckAndSetDataDynamicFieldDocumentFidelity(t *testing.T) {
 
 // The same fidelity requirement for a declared JSON field.
 func TestCheckAndSetDataJSONFieldDocumentFidelity(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	values := []string{
 		`{"z":1,"m":2,"a":3}`,
 		`{"a":"x\/y"}`,
@@ -5411,6 +5489,8 @@ func TestCheckAndSetDataJSONFieldDocumentFidelity(t *testing.T) {
 // keeping the token verbatim would make the value unreadable. These documents
 // therefore fall back to the decoded form.
 func TestCheckAndSetDataLoneSurrogateFallsBack(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	replacement := "�"
 
 	t.Run("a valid pair is kept verbatim", func(t *testing.T) {
@@ -5454,6 +5534,8 @@ func TestCheckAndSetDataLoneSurrogateFallsBack(t *testing.T) {
 }
 
 func TestHasLoneSurrogate(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		raw  string
 		want bool
@@ -5487,6 +5569,8 @@ func TestHasLoneSurrogate(t *testing.T) {
 // would read the document back, parse it with their own library and disagree
 // with what a Milvus filter matches, so the document is rejected.
 func TestCheckAndSetDataRejectsDuplicateKeys(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name  string
 		value string
@@ -5543,6 +5627,8 @@ func TestCheckAndSetDataRejectsDuplicateKeys(t *testing.T) {
 }
 
 func TestCheckEngineCompatible(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name     string
 		document string
@@ -5597,6 +5683,8 @@ func TestCheckEngineCompatible(t *testing.T) {
 // pushing the document to a very different size -- the tokenizer has no size
 // regimes, and this pins that it never grows one.
 func TestCheckEngineCompatibleSizeIndifferent(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	pad := `"` + strings.Repeat("x", 1024) + `"`
 	for name, tc := range map[string]struct {
 		small    string
@@ -5635,6 +5723,8 @@ func TestCheckEngineCompatibleSizeIndifferent(t *testing.T) {
 // 10000, which leaves 9997 levels once the request envelope is accounted for.
 // The walk has to survive everything the binder lets past it.
 func TestCheckEngineCompatibleHandlesDeepNestingWithoutPanicking(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	// the walk is recursive and the binder allows 9997 levels, so it has to
 	// survive whatever gets past the binder
 	for _, depth := range []int{100, 1000, 5000, 9997} {
@@ -5652,6 +5742,8 @@ func TestCheckEngineCompatibleHandlesDeepNestingWithoutPanicking(t *testing.T) {
 // value ever reaches the JSON branch, so it must not be confused with a
 // document whose text is the four letters n-u-l-l.
 func TestCheckAndSetDataJSONFieldNullVersusNullDocument(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	t.Run("a JSON null is a missing value, not a document", func(t *testing.T) {
 		body := []byte(fmt.Sprintf(
 			`{"data": {"%s": 1, "vector": [0.1, 0.2], "json_field": null}}`, FieldBookID))
@@ -5696,6 +5788,8 @@ func rawParams(t *testing.T, params map[string]string) map[string]json.RawMessag
 // An expression template parameter used to be handed over already decoded into
 // interface{}, so every number had been through float64.
 func TestGenerateExpressionTemplateKeepsIntegersExact(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name string
 		raw  string
@@ -5731,6 +5825,8 @@ func TestGenerateExpressionTemplateKeepsIntegersExact(t *testing.T) {
 // null, an empty array and an object all reached a panic, so the caller got a
 // 500 from a plain parameter mistake.
 func TestGenerateExpressionTemplateRejectsInsteadOfPanicking(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	tests := []struct {
 		name    string
 		raw     string
@@ -5758,6 +5854,8 @@ func TestGenerateExpressionTemplateRejectsInsteadOfPanicking(t *testing.T) {
 }
 
 func TestGenerateExpressionTemplateArrays(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	t.Run("integer array stays exact", func(t *testing.T) {
 		values, err := generateExpressionTemplate(rawParams(t, map[string]string{
 			"v": `[1, 9007199254740993, -7]`,
@@ -5807,6 +5905,8 @@ func TestGenerateExpressionTemplateArrays(t *testing.T) {
 // into an error -- but an id that is absent, or null, still is one: on the
 // delete endpoints it means the caller named neither a filter nor an id.
 func TestCheckGetPrimaryKeyEmptyVersusAbsent(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	for _, pk := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_VarChar} {
 		t.Run(pk.String(), func(t *testing.T) {
 			coll := generateCollectionSchema(pk, false, true)
@@ -5838,6 +5938,8 @@ func TestCheckGetPrimaryKeyEmptyVersusAbsent(t *testing.T) {
 // so a quote in an id was parsed as syntax. A caller naming one id could match
 // several rows, which on the delete endpoint removed rows they never named.
 func TestCheckGetPrimaryKeyIsNotInjectable(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	varcharColl := generateCollectionSchema(schemapb.DataType_VarChar, false, true)
 
 	t.Run("a quote and comma stay one id", func(t *testing.T) {
@@ -5880,6 +5982,8 @@ func TestCheckGetPrimaryKeyIsNotInjectable(t *testing.T) {
 }
 
 func TestCheckGetPrimaryKeyTyping(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	int64Coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
 	varcharColl := generateCollectionSchema(schemapb.DataType_VarChar, false, true)
 
@@ -5933,6 +6037,8 @@ func rawIDs(raws ...string) []json.RawMessage {
 // integer or string element; a boolean or float element silently became false
 // or 0.
 func TestCheckAndSetDataRejectsNullArrayElements(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	elementTypes := map[string]schemapb.DataType{
 		"bool":    schemapb.DataType_Bool,
 		"int32":   schemapb.DataType_Int32,
@@ -5977,6 +6083,8 @@ func TestCheckAndSetDataRejectsNullArrayElements(t *testing.T) {
 // nothing about the field, the second says it should be null. Collapsing them
 // meant a partial update could not clear a dynamic field.
 func TestCheckAndSetDataDynamicExplicitNull(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := dynamicFieldTestSchema()
 
 	t.Run("an explicit null is carried", func(t *testing.T) {
@@ -6035,6 +6143,8 @@ func jsonRespFieldData(docs ...string) *schemapb.FieldData {
 // that difference, and degrades the whole response rather than part of it when a
 // row written before the insert path was fixed does not hold a document.
 func TestBuildQueryRespNativeJSON(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	key := paramtable.Get().HTTPCfg.NativeJSONResponse.Key
 
@@ -6094,6 +6204,8 @@ func TestBuildQueryRespNativeJSON(t *testing.T) {
 // the whole array down the JSON branch, where the value was compared as a
 // double, so 9223372036854775809 matched the row holding ...808.
 func TestTemplateArrayChecksEveryElement(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	t.Run("an oversized integer after a float is rejected", func(t *testing.T) {
 		_, err := templateValueFromJSON("v", gjson.Parse(`[1.5, 9223372036854775809]`), 0, maxExprParamsDepthCeiling)
 		require.Error(t, err)
@@ -6125,6 +6237,8 @@ func TestTemplateArrayChecksEveryElement(t *testing.T) {
 // drops a string node's quotes -- while search reads the raw element. The row
 // could be written with a spelling that could not look it up again.
 func TestCheckAndSetDataRejectsStringWrappedVector(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 
 	schemaFor := func(dataType schemapb.DataType, dim string) *schemapb.CollectionSchema {
@@ -6215,6 +6329,8 @@ func TestCheckAndSetDataRejectsStringWrappedVector(t *testing.T) {
 // decoder consumes, so an array handed over as a JSON string had no elements to
 // look at and every null in it reached the decoder.
 func TestCheckAndSetDataRejectsNullInStringWrappedArray(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	vectorField.Name = "vector"
 	schema := &schemapb.CollectionSchema{
@@ -6246,6 +6362,8 @@ func TestCheckAndSetDataRejectsNullInStringWrappedArray(t *testing.T) {
 // A null in a vector reached the decoder the same way and became 0, which is a
 // coordinate the caller never sent.
 func TestCheckAndSetDataRejectsNullVectorElements(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	vectorField.Name = "vector"
 	schema := &schemapb.CollectionSchema{
@@ -6282,6 +6400,8 @@ func TestCheckAndSetDataRejectsNullVectorElements(t *testing.T) {
 // round-trips exactly. Decoding with UseNumber keeps every literal as written,
 // so there is nothing left to predict.
 func TestJSONDocumentForStorageKeepsNumbersThroughNormalization(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	for _, tt := range []struct {
 		name     string
 		document string
@@ -6313,6 +6433,8 @@ func TestJSONDocumentForStorageKeepsNumbersThroughNormalization(t *testing.T) {
 // Two dynamic keys that differ only in a lone surrogate escape both decode to
 // U+FFFD, so building the map collapsed them and one field vanished silently.
 func TestCheckAndSetDataRejectsLoneSurrogateDynamicKeys(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := dynamicFieldTestSchema()
 
 	t.Run("colliding keys are rejected", func(t *testing.T) {
@@ -6355,6 +6477,8 @@ func TestCheckAndSetDataRejectsLoneSurrogateDynamicKeys(t *testing.T) {
 // with U+FFFD, so the caller would get bytes the row does not hold, reported as
 // a document rather than degraded.
 func TestBuildQueryRespNativeJSONInvalidUTF8Degrades(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	key := paramtable.Get().HTTPCfg.NativeJSONResponse.Key
 	paramtable.Get().Save(key, "true")
@@ -6378,6 +6502,8 @@ func TestBuildQueryRespNativeJSONInvalidUTF8Degrades(t *testing.T) {
 // the Unmarshal this replaced returned an error. A dynamic field holding two
 // documents would have had the second one dropped without a word.
 func TestBuildQueryRespDynamicFieldRejectsTrailingContent(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	dynamicData := func(values ...string) *schemapb.FieldData {
 		data := make([][]byte, 0, len(values))
 		for _, value := range values {
@@ -6450,6 +6576,8 @@ func TestBuildQueryRespDynamicFieldRejectsTrailingContent(t *testing.T) {
 // it more often than not. That is why the REST e2e suite caught it and the unit
 // tests did not; the value below is one that actually triggers it.
 func TestCheckAndSetDataAcceptsBase64BinaryVector(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	binaryField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
 	binaryField.Name = "binary_vector"
 	schema := &schemapb.CollectionSchema{
@@ -6481,6 +6609,8 @@ func TestCheckAndSetDataAcceptsBase64BinaryVector(t *testing.T) {
 // is mixed because of the string, so it was carried as raw JSON and the planner
 // compared the inner integer as a double, matching ...808.
 func TestTemplateArrayChecksNestedIntegers(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	for _, tt := range []struct {
 		name     string
 		value    string
@@ -6515,6 +6645,8 @@ func TestTemplateArrayChecksNestedIntegers(t *testing.T) {
 // The element scan could not catch it: the parsed value is not an array, so it
 // has no elements to look at.
 func TestCheckAndSetDataRejectsNullValuedArrayAndVector(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	vectorField.Name = "vector"
 
@@ -6573,6 +6705,8 @@ func TestCheckAndSetDataRejectsNullValuedArrayAndVector(t *testing.T) {
 // top-level vector check never reaches, so a null coordinate there still became
 // a 0 the caller never sent.
 func TestCheckAndSetDataRejectsNullStructSubVectorElements(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	schema := buildStructArrayTestSchema()
 
 	t.Run("a null coordinate is rejected", func(t *testing.T) {
@@ -6606,6 +6740,8 @@ func TestCheckAndSetDataRejectsNullStructSubVectorElements(t *testing.T) {
 // coordinate decodes to 0 and then passes the dimension check, so the search ran
 // against a point the caller never asked for.
 func TestSearchVectorRejectsNullCoordinates(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 
 	t.Run("float vector", func(t *testing.T) {
@@ -6660,6 +6796,8 @@ func TestSearchVectorRejectsNullCoordinates(t *testing.T) {
 // null searched for "", and an object searched for its own JSON text. Insert
 // applies the same rule to a VarChar field.
 func TestTextQueryMustBeAString(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 
 	for _, tt := range []struct {
@@ -6703,6 +6841,8 @@ func TestTextQueryMustBeAString(t *testing.T) {
 // caller never sent, which the gRPC path refuses. The float32 range check has
 // to run before the cast destroys the evidence.
 func TestFloatInsertRejectsFloat32Overflow(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	vectorField.Name = "vector"
 	schema := &schemapb.CollectionSchema{
@@ -6751,6 +6891,8 @@ func TestFloatInsertRejectsFloat32Overflow(t *testing.T) {
 // float32 rounding midpoint it stores a value none of those paths produce, so
 // the row could not be found with the literal that wrote it.
 func TestFloatInsertSpeaksTheQueryDialect(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	const literal = "1.000000059604644775390625000001"
 
 	double, err := strconv.ParseFloat(literal, 64)
@@ -6791,6 +6933,8 @@ func TestFloatInsertSpeaksTheQueryDialect(t *testing.T) {
 // arrays and objects both count, the bound is read once per request, and a
 // configuration past the ceiling is read as the ceiling.
 func TestTemplateDepthBound(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 
 	nest := func(depth int, core string) string {
@@ -6854,6 +6998,8 @@ func TestTemplateDepthBound(t *testing.T) {
 // integer rather than only the part of it that actually rounds, which buys a
 // check that reads the literal instead of expanding it.
 func TestTemplateWholeNumberCheckIgnoresSpelling(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	for _, tt := range []struct {
 		value    string
 		rejected bool
@@ -6903,6 +7049,8 @@ func TestTemplateWholeNumberCheckIgnoresSpelling(t *testing.T) {
 // vectors. Int8 vectors, the embedding-list form used by ArrayOfVector, and the
 // v1 search endpoint each decoded a null to 0 by their own route.
 func TestVectorNullRejectedOnEveryQueryEntryPoint(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 
 	t.Run("int8 search vector", func(t *testing.T) {
@@ -6950,6 +7098,8 @@ func TestVectorNullRejectedOnEveryQueryEntryPoint(t *testing.T) {
 // a whole dim-24 binary vector. Refusing every vector spelled "null" refused
 // that too.
 func TestBase64NullIsAValidBinaryVector(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	binaryField := &schemapb.FieldSchema{
 		Name:       "bv",
 		DataType:   schemapb.DataType_BinaryVector,
@@ -6983,6 +7133,8 @@ func TestBase64NullIsAValidBinaryVector(t *testing.T) {
 }
 
 func TestJSONFieldDocumentRoundTrips(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	params := paramtable.Get()
 	key := params.HTTPCfg.NativeJSONResponse.Key

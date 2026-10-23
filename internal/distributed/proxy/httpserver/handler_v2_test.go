@@ -2928,6 +2928,8 @@ func TestAllowInt64(t *testing.T) {
 }
 
 func TestNarrowIntegerOverflowV2(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -2956,6 +2958,8 @@ func TestNarrowIntegerOverflowV2(t *testing.T) {
 }
 
 func TestStructArrayIntegerExponentV2(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -2984,6 +2988,8 @@ func TestStructArrayIntegerExponentV2(t *testing.T) {
 }
 
 func TestStructArrayExactInt64V2(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
@@ -3776,6 +3782,8 @@ func TestTruncateCollection(t *testing.T) {
 }
 
 func TestSearchByPK(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	// disable rate limit
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -3992,6 +4000,8 @@ func TestRequestHandlerFuncAllowsIdempotencyKeyHeaderInCORS(t *testing.T) {
 // PostgreSQL's json.sql spends about twenty five cases on this shape of input;
 // here it only has to be established that none of them get through.
 func TestInsertMalformedBodyNeverReachesProxy(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 
 	malformed := []struct {

@@ -17,6 +17,7 @@
 package paramtable
 
 type httpConfig struct {
+	StrictValidation      ParamItem `refreshable:"false"`
 	Enabled               ParamItem `refreshable:"false"`
 	EnableV1              ParamItem `refreshable:"false"`
 	DebugMode             ParamItem `refreshable:"false"`
@@ -84,6 +85,18 @@ managementMetricsOnly takes precedence on the metrics port.`,
 		Export:       true,
 	}
 	p.AcceptTypeAllowInt64.Init(base.mgr)
+
+	p.StrictValidation = ParamItem{
+		Key:          "proxy.http.strictValidation",
+		DefaultValue: "false",
+		Version:      "2.6.26",
+		Doc: `Enable the REST value handling fixes, including exact numbers, input validation,
+expression parameters and JSON responses. False preserves the pre-backport behavior.
+Also controls precision-preserving dynamic-field partial updates in the shared proxy path (REST and gRPC).
+Restart all proxies to apply; use the same value on every proxy.`,
+		Export: true,
+	}
+	p.StrictValidation.Init(base.mgr)
 
 	p.CompatibilityMode = ParamItem{
 		Key:          "proxy.http.compatibilityMode",

@@ -1584,7 +1584,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 	}
 }
 
-func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int64) error {
+// UpdateFieldData preserves legacy JSON merging unless preserveJSONNumbers is true.
+func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int64, preserveJSONNumbers ...bool) error {
 	// Create a map for quick lookup of update fields by field ID
 	updateFieldMap := make(map[string]*schemapb.FieldData)
 	for _, fieldData := range update {
@@ -1670,7 +1671,7 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 					if baseFieldData.GetIsDynamic() {
 						// dynamic field is a json with only 1 level nested struct,
 						// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
-						newJSON, err := mergeDynamicJSON(baseData.Data[baseIdx], updateData.Data[updateIdx])
+						newJSON, err := mergeDynamicJSONWithPolicy(baseData.Data[baseIdx], updateData.Data[updateIdx], preserveJSONNumbers)
 						if err != nil {
 							return err
 						}
@@ -1847,7 +1848,8 @@ func UpdateArrayFieldByColumnWithOp(
 	return nil
 }
 
-func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, updateIndices []int64) error {
+// UpdateFieldDataByColumn preserves legacy JSON merging unless preserveJSONNumbers is true.
+func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, updateIndices []int64, preserveJSONNumbers ...bool) error {
 	if base == nil || update == nil || len(baseIndices) == 0 {
 		return nil
 	}
@@ -1923,7 +1925,7 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 				// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
 				for i, baseIdx := range baseIndices {
 					updateIdx := updateIndices[i]
-					newJSON, err := mergeDynamicJSON(baseData[baseIdx], updateData[updateIdx])
+					newJSON, err := mergeDynamicJSONWithPolicy(baseData[baseIdx], updateData[updateIdx], preserveJSONNumbers)
 					if err != nil {
 						return err
 					}
@@ -2226,6 +2228,29 @@ func countValid(validData []bool) int {
 		}
 	}
 	return validCount
+}
+
+// mergeDynamicJSONWithPolicy defaults to the pre-backport float64 conversion.
+// Callers opt in explicitly to avoid a global policy in this shared utility.
+func mergeDynamicJSONWithPolicy(base, update []byte, preserveJSONNumbers []bool) ([]byte, error) {
+	if len(preserveJSONNumbers) > 0 && preserveJSONNumbers[0] {
+		return mergeDynamicJSON(base, update)
+	}
+	var baseMap, updateMap map[string]interface{}
+	if err := json.Unmarshal(base, &baseMap); err != nil {
+		return nil, merr.Wrap(err, "failed to unmarshal base json")
+	}
+	if err := json.Unmarshal(update, &updateMap); err != nil {
+		return nil, merr.Wrap(err, "failed to unmarshal update json")
+	}
+	for k, v := range updateMap {
+		baseMap[k] = v
+	}
+	merged, err := json.Marshal(baseMap)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to marshal merged json")
+	}
+	return merged, nil
 }
 
 // mergeDynamicJSON merges an update document over a base document without

@@ -870,6 +870,8 @@ func TestInsertForDataType(t *testing.T) {
 }
 
 func TestNarrowIntegerOverflowV1(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -899,6 +901,8 @@ func TestNarrowIntegerOverflowV1(t *testing.T) {
 }
 
 func TestStructArrayIntegerExponentV1(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -928,6 +932,8 @@ func TestStructArrayIntegerExponentV1(t *testing.T) {
 }
 
 func TestStructArrayExactInt64V1(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)

@@ -6141,3 +6141,35 @@ func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
 	assert.Contains(t, string(merged), `"big":12345678901234567890`)
 	assert.Contains(t, string(merged), `"tag":"new"`)
 }
+
+// Both production update layouts must preserve legacy rounding by default and
+// retain exact numbers only when the caller explicitly enables the backport.
+func TestDynamicUpdatePrecisionPolicy(t *testing.T) {
+	field := func(raw string) *schemapb.FieldData {
+		return &schemapb.FieldData{FieldId: 100, FieldName: "$meta", Type: schemapb.DataType_JSON, IsDynamic: true,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(raw)}}}}}}
+	}
+	for _, strict := range []bool{false, true} {
+		for _, column := range []bool{false, true} {
+			base := field(`{"keep":9007199254740993,"tag":"old"}`)
+			update := field(`{"tag":"new"}`)
+			var err error
+			if column {
+				err = UpdateFieldDataByColumn(base, update, []int64{0}, []int64{0}, strict)
+			} else {
+				err = UpdateFieldData([]*schemapb.FieldData{base}, []*schemapb.FieldData{update}, 0, 0, strict)
+			}
+			require.NoError(t, err)
+			raw := string(base.GetScalars().GetJsonData().GetData()[0])
+			if strict {
+				require.Contains(t, raw, "9007199254740993")
+			} else {
+				require.Contains(t, raw, "9007199254740992")
+			}
+			require.Contains(t, raw, `"tag":"new"`)
+		}
+	}
+	base := field(`{"keep":9007199254740993}`)
+	require.NoError(t, UpdateFieldDataByColumn(base, field(`{"tag":"new"}`), []int64{0}, []int64{0}))
+	require.Contains(t, string(base.GetScalars().GetJsonData().GetData()[0]), "9007199254740992")
+}

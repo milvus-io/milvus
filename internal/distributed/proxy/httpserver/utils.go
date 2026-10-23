@@ -190,6 +190,10 @@ const primaryKeyTemplateVar = "__pk_ids"
 // Passing the ids as a template value removes the text entirely: nothing the
 // caller sends is parsed as expression syntax.
 func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) (string, map[string]*schemapb.TemplateValue, error) {
+	if !strictValidationEnabled() {
+		filter, err := legacyCheckGetPrimaryKey(coll, idResult)
+		return filter, nil, err
+	}
 	primaryField, ok := getPrimaryField(coll)
 	if !ok {
 		return "", nil, merr.WrapErrParameterInvalidMsg("collection: %s has no primary field", coll.Name)
@@ -310,6 +314,15 @@ func primaryKeyInt64(element gjson.Result) (int64, error) {
 // then passes a fractional-part check. For a VarChar key the float was
 // formatted with %v, so the id 1000000 was searched for as "1e+06".
 func convertIDsToSchemapbIDs(ids []json.RawMessage, pkField *schemapb.FieldSchema) (*schemapb.IDs, error) {
+	if !strictValidationEnabled() {
+		values := make([]interface{}, len(ids))
+		for i, raw := range ids {
+			if err := legacyJSONUnmarshal(raw, &values[i]); err != nil {
+				return nil, err
+			}
+		}
+		return legacyConvertIDsToSchemapbIDs(values, pkField)
+	}
 	if len(ids) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("ids array cannot be empty")
 	}
@@ -884,6 +897,10 @@ func nullElementIn(value gjson.Result) (int, bool) {
 }
 
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
+	if !strictValidationEnabled() {
+		return legacyCheckAndSetData(body, collSchema, partialUpdate)
+	}
+
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
 	// Escape hatch for clients that relied on the previous value handling.
@@ -1523,6 +1540,10 @@ func subShortName(sub *schemapb.FieldSchema) string {
 }
 
 func parseStructArrayRow(rawJSON string, structSchema *schemapb.StructArrayFieldSchema, compatibilityMode bool) (structArrayRow, error) {
+	if !strictValidationEnabled() {
+		return legacyParseStructArrayRow(rawJSON, structSchema)
+	}
+
 	if rawJSON == "" {
 		return nil, merr.WrapErrParameterInvalidMsg("missing struct array field: %s", structSchema.GetName())
 	}
@@ -1768,6 +1789,10 @@ func parseRESTInteger(value gjson.Result, bitSize int) (int64, string, bool) {
 }
 
 func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, compatibilityMode bool) (*schemapb.ScalarField, error) {
+	if !strictValidationEnabled() {
+		return legacyBuildStructSubArrayScalar(sub, vals)
+	}
+
 	switch sub.GetElementType() {
 	case schemapb.DataType_Bool:
 		arr := make([]bool, 0, len(vals))
@@ -1882,6 +1907,10 @@ func buildStructSubArrayScalar(sub *schemapb.FieldSchema, vals []gjson.Result, c
 }
 
 func buildStructSubVectorField(sub *schemapb.FieldSchema, vals []gjson.Result) (*schemapb.VectorField, error) {
+	if !strictValidationEnabled() {
+		return legacyBuildStructSubVectorField(sub, vals)
+	}
+
 	dim, err := getDim(sub)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(
@@ -2114,6 +2143,10 @@ func embListPlaceholderType(elemType schemapb.DataType) (commonpb.PlaceholderTyp
 }
 
 func encodeEmbListQuery(vecs []gjson.Result, elemType schemapb.DataType, dim int64, qIdx int) ([]byte, error) {
+	if !strictValidationEnabled() {
+		return legacyEncodeEmbListQuery(vecs, elemType, dim, qIdx)
+	}
+
 	// Same rule as a plain search vector: a null coordinate decodes to 0 and
 	// then passes the dimension check, so the search runs against a point the
 	// caller never sent. nullElementIn ignores anything that is not an array, so
@@ -2624,6 +2657,10 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 }
 
 func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool, partialUpdate bool) ([]*schemapb.FieldData, error) {
+	if !strictValidationEnabled() {
+		return legacyAnyToColumns(rows, validDataMap, sch, inInsert, partialUpdate)
+	}
+
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []*schemapb.FieldData{}, merr.WrapErrParameterInvalidMsg("no row need to be convert to columns")
@@ -3183,6 +3220,10 @@ func rejectNullCoordinates(vectorStr string, dataType schemapb.DataType) error {
 }
 
 func serializeFloatVectors(vectorStr string, dataType schemapb.DataType, dimension, bytesLen int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
+	if !strictValidationEnabled() {
+		return legacySerializeFloatVectors(vectorStr, dataType, dimension, bytesLen, fpArrayToBytesFunc)
+	}
+
 	if err := rejectNullCoordinates(vectorStr, dataType); err != nil {
 		return nil, err
 	}
@@ -3238,6 +3279,10 @@ func serializeFloatOrByteVectors(jsonResult gjson.Result, dataType schemapb.Data
 }
 
 func serializeSparseFloatVectors(vectors []gjson.Result, dataType schemapb.DataType) ([][]byte, error) {
+	if !strictValidationEnabled() {
+		return legacySerializeSparseFloatVectors(vectors, dataType)
+	}
+
 	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 	values := make([][]byte, 0, len(vectors))
 	for _, vector := range vectors {
@@ -3268,6 +3313,10 @@ func serializeSparseFloatVectors(vectors []gjson.Result, dataType schemapb.DataT
 }
 
 func serializeInt8Vectors(vectorStr string, dataType schemapb.DataType, dimension int64, int8ArrayToBytesFunc func([]int8) []byte) ([][]byte, error) {
+	if !strictValidationEnabled() {
+		return legacySerializeInt8Vectors(vectorStr, dataType, dimension, int8ArrayToBytesFunc)
+	}
+
 	if err := rejectNullCoordinates(vectorStr, dataType); err != nil {
 		return nil, err
 	}
@@ -3290,6 +3339,10 @@ func serializeInt8Vectors(vectorStr string, dataType schemapb.DataType, dimensio
 }
 
 func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimension int64) (*commonpb.PlaceholderValue, error) {
+	if !strictValidationEnabled() {
+		return legacyConvertQueries2Placeholder(body, dataType, dimension)
+	}
+
 	var valueType commonpb.PlaceholderType
 	var values [][]byte
 	var err error
@@ -3546,6 +3599,10 @@ func (accessor *fieldDataRowAccessor) rowIndex(rowIdx int64) (int64, bool, error
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
 ) ([]map[string]interface{}, error) {
+	if !strictValidationEnabled() {
+		return legacyBuildQueryResp(rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema)
+	}
+
 	nativeJSON := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
 	jsonFieldNames := make(map[string]struct{})
 	jsonAllValid := true
@@ -4452,6 +4509,17 @@ const maxExprParamsDepthCeiling = 1024
 // gated by compatibilityMode: this is a resource bound, not a value rule, and
 // the previous handling it would restore is a stack overflow.
 func generateExpressionTemplate(params map[string]json.RawMessage) (map[string]*schemapb.TemplateValue, error) {
+	if !strictValidationEnabled() {
+		values := make(map[string]interface{}, len(params))
+		for name, raw := range params {
+			var value interface{}
+			if err := legacyJSONUnmarshal(raw, &value); err != nil {
+				return nil, err
+			}
+			values[name] = value
+		}
+		return legacyGenerateExpressionTemplate(values), nil
+	}
 	maxDepth := paramtable.Get().HTTPCfg.MaxExprParamsDepth.GetAsInt()
 	if maxDepth > maxExprParamsDepthCeiling {
 		maxDepth = maxExprParamsDepthCeiling

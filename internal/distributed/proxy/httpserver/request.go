@@ -99,6 +99,9 @@ type SingleUpsertReq struct {
 type FloatVectorQuery []float32
 
 func (v *FloatVectorQuery) UnmarshalJSON(data []byte) error {
+	if !strictValidationEnabled() {
+		return legacyJSONUnmarshal(data, (*[]float32)(v))
+	}
 	var elements []*float32
 	if err := json.Unmarshal(data, &elements); err != nil {
 		return err
@@ -127,6 +130,9 @@ func (v *FloatVectorQuery) UnmarshalJSON(data []byte) error {
 type Int64ListQuery []int64
 
 func (v *Int64ListQuery) UnmarshalJSON(data []byte) error {
+	if !strictValidationEnabled() {
+		return legacyJSONUnmarshal(data, (*[]int64)(v))
+	}
 	var elements []*int64
 	if err := json.Unmarshal(data, &elements); err != nil {
 		return err
@@ -153,6 +159,9 @@ func (v *Int64ListQuery) UnmarshalJSON(data []byte) error {
 type Base64VectorQuery []byte
 
 func (v *Base64VectorQuery) UnmarshalJSON(data []byte) error {
+	if !strictValidationEnabled() {
+		return legacyJSONUnmarshal(data, (*[]byte)(v))
+	}
 	var decoded *[]byte
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err

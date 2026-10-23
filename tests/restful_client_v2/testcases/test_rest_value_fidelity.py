@@ -44,6 +44,8 @@ class TestRestValueFidelity(TestBase):
 
     @pytest.fixture(scope="class", autouse=True)
     def _shared_collections(self, request):
+        if not request.config.getoption("--strict-validation"):
+            pytest.skip("requires server proxy.http.strictValidation=true and --strict-validation")
         endpoint = request.config.getoption("--endpoint")
         token = request.config.getoption("--token")
 

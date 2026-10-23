@@ -130,6 +130,9 @@ func (f *FieldData) makePbFloat16OrBfloat16Array(raw json.RawMessage, serializeF
 // only possible answer, and compatibilityMode restores the zero for a client
 // that has not been corrected yet.
 func rejectNullInFieldPayload(dataType schemapb.DataType, fieldName string, raw json.RawMessage) error {
+	if !strictValidationEnabled() {
+		return nil
+	}
 	if len(raw) == 0 {
 		// absent; the typed decoder reports its own error
 		return nil

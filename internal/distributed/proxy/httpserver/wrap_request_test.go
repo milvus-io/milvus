@@ -407,11 +407,15 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 }
 
 func Test_vector2Bytes(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	ret := vector2Bytes([]FloatVectorQuery{{1.1, 1.2}})
 	assert.NotEmpty(t, ret)
 }
 
 func Test_binaryVector2Bytes(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	ret := binaryVector2Bytes([]Base64VectorQuery{
 		[]byte("somebytes"),
 	})
@@ -475,6 +479,8 @@ func TestVectorsArray_AsPbVectorArray(t *testing.T) {
 // empty string -- and was stored, searched or measured as a value the caller
 // never sent.
 func TestLowLevelAPIRejectsNull(t *testing.T) {
+	setStrictValidationForTest(t, true)
+
 	t.Run("insert field payloads", func(t *testing.T) {
 		for name, tt := range map[string]struct {
 			dtype schemapb.DataType
