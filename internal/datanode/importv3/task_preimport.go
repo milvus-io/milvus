@@ -203,7 +203,7 @@ func (t *preImportTask) countFile(ctx context.Context, file *internalpb.ImportFi
 		if err := importv2.CheckRowsEqual(t.req.GetSchema(), data); err != nil {
 			return nil, err
 		}
-		if err := importv2.CheckStructArrayConsistency(t.req.GetSchema(), data); err != nil {
+		if err := importv2.NormalizeStructArrayFields(t.req.GetSchema(), data); err != nil {
 			return nil, err
 		}
 		rows := data.GetRowNum()

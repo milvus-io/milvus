@@ -28,13 +28,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// ValidateImportSchema rejects array formats that bulk import cannot read yet.
-// Call it before accepting an import job so every file format, including
-// binlog backup imports, receives the same error.
-func ValidateImportSchema(schema *schemapb.CollectionSchema) error {
+// ValidateImportSchema rejects target schemas that the requested import source
+// cannot fill. File imports (JSON, CSV, Parquet) read element-nullable and
+// nested Array struct sub-fields; binlog imports (backup restore), including
+// snapshot-source imports, copy source binlogs and cannot fill them, so they
+// are rejected before the job is accepted. NumPy imports into a collection
+// with struct fields are rejected separately because the check needs the
+// file types.
+func ValidateImportSchema(schema *schemapb.CollectionSchema, options Options) error {
+	if !IsBackup(options) && !IsSnapshotSource(options) {
+		return nil
+	}
+	kind := "binlog import (backup restore)"
+	if IsSnapshotSource(options) {
+		kind = "snapshot-source import"
+	}
 	check := func(field *schemapb.FieldSchema, name string) error {
 		if typeutil.IsNativeListArrayField(field) {
-			return merr.WrapErrParameterInvalidMsg("bulk import of element-nullable or nested Array field %s is not supported yet", name)
+			return merr.WrapErrParameterInvalidMsg("%s into a collection with element-nullable or nested Array field %s is not supported", kind, name)
 		}
 		return nil
 	}
