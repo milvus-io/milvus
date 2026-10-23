@@ -1,6 +1,10 @@
 package packed
 
 import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"fmt"
 	"math"
 	"path"
 	"testing"
@@ -8,6 +12,9 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/rand"
@@ -326,11 +333,7 @@ func TestPackedFFIWriter(t *testing.T) {
 		pt.Reset(pt.LocalStorageCfg.Path.Key)
 	})
 
-	const (
-		numRows = 5000
-		dim     = 768
-		batch   = 10
-	)
+	const dim = 768
 
 	// Create schema: int64 primary key + 768-dim float vector
 	schema := arrow.NewSchema([]arrow.Field{
@@ -348,74 +351,131 @@ func TestPackedFFIWriter(t *testing.T) {
 		},
 	}, nil)
 
-	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_test/1")
-	version := int64(0)
-
-	for i := 0; i < batch; i++ {
-		// Build record batch with 5000 rows
-		b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
-		defer b.Release()
-
-		pkBuilder := b.Field(0).(*array.Int64Builder)
-		vectorBuilder := b.Field(1).(*array.FixedSizeBinaryBuilder)
-
-		for i := 0; i < numRows; i++ {
-			// Append primary key
-			pkBuilder.Append(int64(i))
-
-			// Generate random float vector and convert to bytes
-			vectorBytes := make([]byte, dim*4)
-			for j := 0; j < dim; j++ {
-				floatVal := rand.Float32()
-				bits := math.Float32bits(floatVal)
-				common.Endian.PutUint32(vectorBytes[j*4:], bits)
+	for _, firstNUL := range []int{-1, 0, 16, 24, 31} {
+		name := "plaintext"
+		if firstNUL >= 0 {
+			name = fmt.Sprintf("first_nul_%d", firstNUL)
+		}
+		t.Run(name, func(t *testing.T) {
+			numRows, batch := 5000, 10
+			var key []byte
+			var properties map[string]string
+			if firstNUL >= 0 {
+				numRows, batch = 2, 1
+				key = bytes.Repeat([]byte{'k'}, 32)
+				key[firstNUL] = 0
+				properties = map[string]string{
+					PropertyWriterFormat:    "parquet",
+					PropertyWriterEncEnable: "true",
+					PropertyWriterEncKey:    base64.StdEncoding.EncodeToString(key),
+					PropertyWriterEncMeta:   "17_23_fixture-edek",
+					PropertyWriterEncAlgo:   "AES_GCM_V1",
+				}
 			}
-			vectorBuilder.Append(vectorBytes)
-		}
+			basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_test", name)
+			version := int64(0)
 
-		rec := b.NewRecord()
-		defer rec.Release()
+			for i := 0; i < batch; i++ {
+				// Build a record batch for this writer mode.
+				b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+				defer b.Release()
 
-		require.Equal(t, int64(numRows), rec.NumRows())
+				pkBuilder := b.Field(0).(*array.Int64Builder)
+				vectorBuilder := b.Field(1).(*array.FixedSizeBinaryBuilder)
 
-		// // Setup storage config for local filesystem
-		// storageConfig := &indexpb.StorageConfig{
-		// 	RootPath:    dir,
-		// 	StorageType: "local",
-		// }
+				for i := 0; i < numRows; i++ {
+					// Append primary key
+					pkBuilder.Append(int64(i))
 
-		// Define column groups: pk and vector in the same group
-		columnGroups := []storagecommon.ColumnGroup{
-			{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID},
-		}
+					// Generate random float vector and convert to bytes
+					vectorBytes := make([]byte, dim*4)
+					for j := 0; j < dim; j++ {
+						floatVal := rand.Float32()
+						bits := math.Float32bits(floatVal)
+						common.Endian.PutUint32(vectorBytes[j*4:], bits)
+					}
+					vectorBuilder.Append(vectorBytes)
+				}
 
-		// Create FFI packed writer
-		cfg := CreateStorageConfig()
-		pw, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
-		require.NoError(t, err)
+				rec := b.NewRecord()
+				defer rec.Release()
 
-		// Write record batch
-		err = pw.WriteRecordBatch(rec)
-		require.NoError(t, err)
+				require.Equal(t, int64(numRows), rec.NumRows())
 
-		// Close writer to obtain column groups, commit via manifest update.
-		out, err := pw.Close()
-		require.NoError(t, err)
+				// Define column groups: pk and vector in the same group
+				columnGroups := []storagecommon.ColumnGroup{
+					{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID},
+				}
 
-		manifest, err := CommitManifestUpdates(basePath, version, cfg,
-			&ManifestUpdates{NewFiles: out})
-		out.Destroy()
-		require.NoError(t, err)
-		require.NotEmpty(t, manifest)
+				// Create FFI packed writer
+				cfg := CreateStorageConfig()
+				pw, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil, properties)
+				require.NoError(t, err)
+				defer pw.Destroy()
 
-		p, pv, err := UnmarshalManifestPath(manifest)
-		require.NoError(t, err)
-		assert.Equal(t, p, basePath)
-		assert.Equal(t, pv, version+1)
-		version = pv
+				// Write record batch
+				err = pw.WriteRecordBatch(rec)
+				require.NoError(t, err)
 
-		t.Logf("Successfully wrote %d rows with %d-dim float vectors, manifest: %s", numRows, dim, manifest)
+				// Close writer to obtain column groups, commit via manifest update.
+				out, err := pw.Close()
+				require.NoError(t, err)
+				defer out.Destroy()
+
+				if key != nil {
+					assertPackedWriterParquetReadback(t, out, key, rec)
+				}
+
+				manifest, err := CommitManifestUpdates(basePath, version, cfg,
+					&ManifestUpdates{NewFiles: out})
+				require.NoError(t, err)
+				require.NotEmpty(t, manifest)
+
+				p, pv, err := UnmarshalManifestPath(manifest)
+				require.NoError(t, err)
+				assert.Equal(t, p, basePath)
+				assert.Equal(t, pv, version+1)
+				version = pv
+
+				t.Logf("Successfully wrote %d rows with %d-dim float vectors, manifest: %s", numRows, dim, manifest)
+			}
+		})
 	}
+}
+
+// Read with Arrow Go and the complete binary key, independently of Loon's reader.
+func assertPackedWriterParquetReadback(t *testing.T, output WriterOutput, key []byte, expected arrow.Record) {
+	t.Helper()
+	require.IsType(t, &ColumnGroups{}, output)
+	groups, err := output.(*ColumnGroups).ColumnGroupEntries()
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.NotEmpty(t, groups[0].Files)
+	var rows int64
+	for _, object := range groups[0].Files {
+		props := parquet.NewReaderProperties(memory.DefaultAllocator)
+		props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(string(key)))
+		reader, err := file.OpenParquetFile(object.Path, false, file.WithReadProps(props))
+		require.NoError(t, err)
+		defer reader.Close()
+		arrowReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+		require.NoError(t, err)
+		table, err := arrowReader.ReadTable(context.Background())
+		require.NoError(t, err)
+		defer table.Release()
+		want := expected.NewSlice(object.StartIndex, object.EndIndex)
+		defer want.Release()
+		require.Equal(t, want.NumRows(), table.NumRows())
+		require.Equal(t, want.NumCols(), table.NumCols())
+		for column := 0; column < int(want.NumCols()); column++ {
+			values, err := array.Concatenate(table.Column(column).Data().Chunks(), memory.DefaultAllocator)
+			require.NoError(t, err)
+			defer values.Release()
+			require.True(t, array.Equal(want.Column(column), values), "column %d differs after decrypting %s", column, object.Path)
+		}
+		rows += table.NumRows()
+	}
+	require.Equal(t, expected.NumRows(), rows)
 }
 
 func TestFFIPackedWriter_CloseThenCommitUpdates(t *testing.T) {
