@@ -572,3 +572,21 @@ func TestNewGcpNativeClientTLSVersion(t *testing.T) {
 		t.Logf("NewGcpObjectStorageClient(SslTLSMinVersion=<empty>): success (default behavior)")
 	})
 }
+
+func TestNewAzureClientDefaultAzureCredentialPath(t *testing.T) {
+	t.Setenv("AZURE_CLIENT_SECRET", "fake-secret")
+	t.Setenv("AZURE_CLIENT_ID", "00000000-0000-0000-0000-000000000001")
+	t.Setenv("AZURE_TENANT_ID", "00000000-0000-0000-0000-000000000002")
+
+	cfg := &Config{
+		Address:         "core.windows.net",
+		BucketName:      "container",
+		AccessKeyID:     "testaccount",
+		UseIAM:          true,
+		SkipBucketCheck: true,
+	}
+
+	client, err := NewAzureObjectStorageClient(context.Background(), cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "https://testaccount.blob.core.windows.net/", client.URL())
+}
