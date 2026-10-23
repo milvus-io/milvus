@@ -202,9 +202,6 @@ message QueryPlanMVCC {
     // Latest timetick of the transforming stream. StreamingNode and QueryNode
     // wait for transform visibility up to this timetick before execution.
     uint64 transforming_timetick = 2;
-    // Complete WAL prefix certified together with these executor frontiers.
-    // Used for partial-update CAS, not as an executor wait/read timestamp.
-    uint64 read_proof_timetick = 4;
 }
 
 // QueryPlanService generates shard-level query plans.
@@ -244,9 +241,6 @@ message GetQueryPlanRequest {
         internal.SearchRequest legacy_search_request = 5;
         internal.RetrieveRequest legacy_retrieve_request = 6;
     }
-    // Request a complete WAL read certificate at or after this timestamp.
-    // Only valid with consistency-based MVCC, not explicit snapshot modes.
-    uint64 read_proof_after = 9;
 }
 
 message GetMVCCTimestampRequest {

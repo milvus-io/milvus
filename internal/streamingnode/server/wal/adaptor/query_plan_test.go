@@ -2,16 +2,12 @@ package adaptor
 
 import (
 	"context"
-	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
@@ -19,8 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -154,38 +148,6 @@ func TestQueryPlanWaitsForFixedMVCCBeforePlanning(t *testing.T) {
 	require.Nil(t, plan)
 	require.Equal(t, 1, calls)
 	require.True(t, released)
-}
-
-func TestQueryPlanReadProofKeepsDualMVCC(t *testing.T) {
-	resource.InitForTest(t)
-	mockey.PatchConvey("CAS certificate is not an executor timestamp", t, func() {
-		manager := mvcc.NewMVCCManager(0)
-		manager.ApplyRecoveryBarrier("v", 10)
-		insert := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.FormatInt(int64(message.MessageTypeInsert), 10), "_vc": "v"}).WithTimeTick(20).IntoImmutableMessage(nil)
-		tick := message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(100).IntoImmutableMessage(nil)
-		manager.PublishReadProof([]message.ImmutableMessage{insert}, tick)
-		channel := types.PChannelInfo{AccessMode: types.AccessModeRW}
-		mockey.Mock((*roWALAdaptorImpl).Channel).To(func(*roWALAdaptorImpl) types.PChannelInfo { return channel }).Build()
-		mockey.Mock(mockey.GetMethod(resource.Resource().TimeTickInspector(), "TriggerSync")).Return().Build()
-		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
-		req := &viewpb.GetQueryPlanRequest{ReadProofAfter: 90, Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}}
-		plan, err := w.resolveQueryPlanMVCC(t.Context(), req, "v")
-		require.NoError(t, err)
-		require.EqualValues(t, 20, plan.GrowingTimetick)
-		require.EqualValues(t, 10, plan.TransformingTimetick)
-		require.EqualValues(t, 100, plan.ReadProofTimetick)
-		req.ReadProofAfter = 200
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		_, err = w.resolveQueryPlanMVCC(ctx, req, "v")
-		require.ErrorIs(t, err, context.Canceled)
-		channel.AccessMode = types.AccessModeRO
-		_, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
-		require.Error(t, err)
-		req.Mvcc = &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 100}
-		_, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
-		require.Error(t, err)
-	})
 }
 
 func TestQueryPlanRequiresServingViewBeforeResolvingMVCC(t *testing.T) {

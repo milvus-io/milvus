@@ -212,7 +212,7 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	impl.interceptorBuildParam.WriteAheadBuffer.Append(msgs, tsMsg)
 	impl.lastPublishedTick = ts
 
-	impl.MVCCManager().PublishReadProof(msgs, tsMsg)
+	impl.MVCCManager().QueryMVCC().Publish(msgs, tsMsg)
 	return nil
 }
 

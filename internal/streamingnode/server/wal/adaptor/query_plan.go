@@ -6,6 +6,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -16,27 +17,47 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (w *walAdaptorImpl) GetLatestQueryPlanMVCC(ctx context.Context, vchannel string) (*viewpb.QueryPlanMVCC, error) {
+	return w.getQueryPlanMVCC(ctx, vchannel, true, 0)
+}
+
+func (w *walAdaptorImpl) getQueryPlanMVCC(ctx context.Context, vchannel string, strong bool, minimum uint64) (*viewpb.QueryPlanMVCC, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
-	currentMVCC := w.param.MVCCManager.GetQueryMVCCOfVChannel(vchannel)
+	callerCtx := ctx
+	ctx, cancel := contextutil.MergeContext(ctx, w.availableCtx)
+	defer cancel()
+	manager := w.param.MVCCManager.QueryMVCC()
+	minimum = max(minimum, manager.Minimum(vchannel, strong))
+	currentMVCC, ready := manager.Snapshot(vchannel, minimum)
+	if !ready {
+		resource.Resource().TimeTickInspector().TriggerSync(w.Channel(), false)
+		var err error
+		currentMVCC, err = manager.WaitSnapshot(ctx, vchannel, minimum)
+		if err != nil {
+			if errors.Is(err, context.Canceled) && callerCtx.Err() == nil && w.availableCtx.Err() != nil {
+				return nil, viewerror.NewOnShutdownError("query mvcc WAL is unavailable")
+			}
+			if errors.Is(err, merr.ErrChannelNotFound) {
+				return nil, viewerror.NewViewNotFound("query mvcc for vchannel %s is unavailable", vchannel)
+			}
+			return nil, err
+		}
+	}
 	if currentMVCC.GrowingTimetick == 0 && currentMVCC.TransformingTimetick == 0 {
 		return nil, viewerror.NewViewNotFound("query mvcc for vchannel %s is unavailable", vchannel)
-	}
-	if !currentMVCC.Confirmed {
-		// if the mvcc is not confirmed, trigger a sync operation to make it confirmed as soon as possible.
-		resource.Resource().TimeTickInspector().TriggerSync(w.rwWALImpls.Channel(), false)
 	}
 	mlog.Debug(ctx, "query view latest mvcc resolved",
 		mlog.FieldVChannel(vchannel),
 		mlog.Uint64("growingTimeTick", currentMVCC.GrowingTimetick),
 		mlog.Uint64("transformingTimeTick", currentMVCC.TransformingTimetick),
-		mlog.Bool("confirmed", currentMVCC.Confirmed),
+		mlog.Uint64("minimumPrefix", minimum),
 	)
 	return &viewpb.QueryPlanMVCC{
 		GrowingTimetick:      currentMVCC.GrowingTimetick,
@@ -211,24 +232,6 @@ func (w *walAdaptorImpl) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMV
 }
 
 func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.GetQueryPlanRequest, vchannel string) (*viewpb.QueryPlanMVCC, error) {
-	if req.GetReadProofAfter() != 0 {
-		if _, ok := req.GetMvcc().(*viewpb.GetQueryPlanRequest_ConsistencyLevel); !ok {
-			return nil, viewerror.NewUnknownError("WAL read proof requires consistency-based MVCC")
-		}
-		if w.Channel().AccessMode != types.AccessModeRW {
-			return nil, viewerror.NewNotPrimaryError("WAL read proof requires the primary WAL")
-		}
-		resource.Resource().TimeTickInspector().TriggerSync(w.Channel(), false)
-		frontier, proof, err := w.param.MVCCManager.WaitReadProof(ctx, vchannel, req.GetReadProofAfter())
-		if err != nil {
-			return nil, err
-		}
-		return &viewpb.QueryPlanMVCC{
-			GrowingTimetick:      frontier.GrowingTimetick,
-			TransformingTimetick: frontier.TransformingTimetick,
-			ReadProofTimetick:    proof,
-		}, nil
-	}
 	switch mvcc := req.GetMvcc().(type) {
 	case *viewpb.GetQueryPlanRequest_BarrierMvcc:
 		if w.Channel().AccessMode != types.AccessModeRW {
@@ -237,8 +240,8 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 		if mvcc.BarrierMvcc == 0 {
 			return nil, viewerror.NewUnknownError("query barrier timestamp is zero")
 		}
-		current := w.param.MVCCManager.GetQueryMVCCOfVChannel(vchannel)
-		if !current.Confirmed || current.GrowingTimetick < mvcc.BarrierMvcc || current.TransformingTimetick < mvcc.BarrierMvcc {
+		current, ready := w.param.MVCCManager.QueryMVCC().Snapshot(vchannel, 0)
+		if !ready || current.GrowingTimetick < mvcc.BarrierMvcc || current.TransformingTimetick < mvcc.BarrierMvcc {
 			// Wait for the allocator before registering shared sync work. An
 			// unallocated future timestamp must only hold this request, not the
 			// PChannel's ordinary or persisted TimeTick sync. GetQueryPlan merges
@@ -260,7 +263,13 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 		if w.Channel().AccessMode != types.AccessModeRW {
 			return nil, viewerror.NewNotPrimaryError("wal %s is not primary", w.Channel().String())
 		}
-		return w.GetLatestQueryPlanMVCC(ctx, vchannel)
+		strong := mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Strong || mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Session
+		var minimum uint64
+		if mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Bounded {
+			// Proxy supplies the bounded-staleness lower bound in the legacy request.
+			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
+		}
+		return w.getQueryPlanMVCC(ctx, vchannel, strong, minimum)
 	default:
 		return nil, viewerror.NewUnknownError("query plan request misses mvcc source")
 	}

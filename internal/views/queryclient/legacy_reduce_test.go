@@ -190,8 +190,8 @@ func TestLegacyBarrierMVCCSurvivesShardRetry(t *testing.T) {
 	})
 }
 
-func TestLegacyRetryDiscardsLateResultsAndRetainsEmptyShardProof(t *testing.T) {
-	mockey.PatchConvey("a failed shard is drained before replanning and only the successful proof survives", t, func() {
+func TestLegacyRetryDiscardsLateResultsAndRetainsEmptyShardSnapshot(t *testing.T) {
+	mockey.PatchConvey("a failed shard is drained before replanning and only the successful snapshot survives", t, func() {
 		id := qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}
 		var attempts atomic.Int32
 		started := make(chan struct{})
@@ -199,13 +199,11 @@ func TestLegacyRetryDiscardsLateResultsAndRetainsEmptyShardProof(t *testing.T) {
 		service := &fakeViewQueryServiceClient{}
 		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 			attempt := attempts.Add(1)
-			require.EqualValues(t, 200, req.GetReadProofAfter())
 			require.Equal(t, commonpb.ConsistencyLevel_Strong, req.GetConsistencyLevel())
 			require.EqualValues(t, 3, req.GetLegacyRetrieveRequest().GetSchemaVersion())
 			plan := legacyQueryPlan(id, qviews.NewQueryNode(1))
 			plan.Mvcc = &viewpb.QueryPlanMVCC{
-				GrowingTimetick: 100, TransformingTimetick: 90,
-				ReadProofTimetick: uint64(attempt+1) * 100,
+				GrowingTimetick: uint64(attempt+1) * 100, TransformingTimetick: 90,
 			}
 			if attempt == 1 {
 				plan.WorkNodes = append(plan.WorkNodes, &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{Pchannel: "p"}}})
@@ -229,14 +227,13 @@ func TestLegacyRetryDiscardsLateResultsAndRetainsEmptyShardProof(t *testing.T) {
 		}).Build()
 		client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 2}, planClient, service, &legacyResolver{vchannels: []string{id.VChannel}})
 		result, err := client.Legacy().Query(t.Context(), &LegacyQueryRequest{
-			Req:            &internalpb.RetrieveRequest{CollectionID: 1, SchemaVersion: 3, ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
-			ReadProofAfter: 200,
+			Req: &internalpb.RetrieveRequest{CollectionID: 1, SchemaVersion: 3, ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
 		})
 		require.NoError(t, err)
 		require.EqualValues(t, 2, attempts.Load())
 		require.Empty(t, result.Results, "the failed attempt's late result must be discarded")
-		require.Len(t, result.Plans, 1, "empty results still carry the successful shard certificate")
-		require.EqualValues(t, 300, result.Plans[0].Mvcc.GetReadProofTimetick())
-		require.EqualValues(t, 100, result.Plans[0].Mvcc.GetGrowingTimetick())
+		require.Len(t, result.Plans, 1, "empty results still carry the successful shard snapshot")
+		require.EqualValues(t, 300, result.Plans[0].Mvcc.GetGrowingTimetick())
+		require.EqualValues(t, 90, result.Plans[0].Mvcc.GetTransformingTimetick())
 	})
 }

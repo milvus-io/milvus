@@ -51,12 +51,11 @@ type ShardSearchRequest struct {
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
 type ShardQueryRequest struct {
-	ReadProofAfter uint64
-	VChannel       string
-	Req            *internalpb.RetrieveRequest
-	MVCC           *viewpb.QueryPlanMVCC
-	BarrierMVCC    uint64
-	Reducer        reducer.RetrieveResultReducer
+	VChannel    string
+	Req         *internalpb.RetrieveRequest
+	MVCC        *viewpb.QueryPlanMVCC
+	BarrierMVCC uint64
+	Reducer     reducer.RetrieveResultReducer
 }
 
 // Search executes Phase 1 + Phase 2 for a single shard's search.
@@ -103,10 +102,9 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 		barrierMVCC:      req.BarrierMVCC,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
-				CollectionId:   req.Req.CollectionID,
-				ShardId:        targetShardID.IntoProto(),
-				PartitionIds:   req.Req.PartitionIDs,
-				ReadProofAfter: req.ReadProofAfter,
+				CollectionId: req.Req.CollectionID,
+				ShardId:      targetShardID.IntoProto(),
+				PartitionIds: req.Req.PartitionIDs,
 				Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{
 					LegacyRetrieveRequest: req.Req,
 				},

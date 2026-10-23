@@ -26,9 +26,30 @@ the corresponding request is planned/executed against the selected resources.
 
 | Input | Meaning | Retry behavior |
 | --- | --- | --- |
-| Consistency level | Sample query frontiers from the primary WAL | May sample again when replanning |
+| Consistency level | Obtain paired frontiers from a complete published primary-WAL prefix | May select a new prefix when replanning |
 | Explicit `QueryPlanMVCC` | Caller fixes Growing and Transform frontiers | Preserve both frontiers |
 | `BarrierMVCC=B` | Establish WAL coverage for a scalar snapshot B | Re-establish coverage if needed, execute Growing=B and Transform=B |
+
+`QueryMVCCManager` owns one executable frontier map, the complete published
+prefix position, and pending freshness bounds. Successful append callbacks only
+raise the pending bounds. After WAB publication, the serialized sync operator
+applies successful ACK messages in TimeTick order and atomically publishes both
+frontiers with the prefix position. A pair is never assembled from append-time
+maxima sampled at different stages.
+
+Strong/Session fixes its minimum once from the completed query-relevant writes
+of this VChannel and global publication operations. Later appends do not move
+that attempt's target. Eventually may reuse the current completed snapshot;
+Bounded also requires the prefix to cover the request's GuaranteeTimestamp.
+An adequate snapshot returns without sync. Otherwise ordinary TimeTick sync is
+triggered and the query waits under caller and WAL-owner cancellation. Pure
+Growing writes do not increase TransformMVCC or QueryNode's wait target.
+
+ACK publication can precede the deferred append callback. Callbacks at or below
+the published prefix are ignored; newer callbacks retain only a pending bound.
+Only ordered publication changes channel membership, so delayed Create/Drop
+callbacks cannot register or revive channels. Recovery initializes live channels
+at its complete opening fence before append admission opens.
 
 Explicit MVCC and BarrierMVCC are mutually exclusive. A barrier is useful for
 Iterator snapshot continuation; an ACK published later than B does not change
@@ -42,32 +63,20 @@ required frontiers before executing.
 This extraction does not enable the Proxy Iterator path or extend historical
 retention.
 
-`ReadProofAfter` is a separate, consistency-based CAS read contract. SN waits for
-a complete published ACK prefix at least that new, then atomically samples that
-prefix's Growing/Transform frontiers and `ReadProofTimetick`. The proof is not
-`max(Growing, Transform)`, and query consumers do not wait to apply the proof
-timestamp itself. Idle confirmations can refresh the proof while both executor
-frontiers remain unchanged. Explicit MVCC/barrier requests cannot request this
-certificate.
+Internal partial-update CAS reads use the ordinary Strong snapshot. Their
+channel ReadTs is max(GrowingMVCC, TransformMVCC): both frontiers come from one
+complete prefix and there are no later query-visible channel changes inside
+that prefix. No extra certificate or requirement that ReadTs reach BeginTs is
+needed. The write path still checks conflicts and retained-history bounds;
+old reads outside the history window fail instead of bypassing validation.
+The client retains successful shard snapshots even for empty results.
 
-The sync operator publishes read-proof state after WAB publication. Successful
-ACK messages are projected in order; transaction bodies do not advance visible
-frontiers before commit. Append-time query frontiers and proof frontiers remain
-separate, so a later acknowledged write cannot contaminate an older certified
-prefix. Recovery initializes frontier state but cannot inherit the previous
-WAL owner's volatile certificate. The client retains each successful shard's
-proof, including empty shards; integration callers must validate those proofs
-before using the read for CAS.
-
-DropCollection removes the VChannel's query frontiers and pending-confirmation
-marker. Only CreateCollection and recovery initialization register channels;
-late scoped barriers and ordinary progress updates cannot recreate them.
-The read-proof projection applies the same retirement when its published ACK
-prefix reaches Drop, preserving certificates for earlier prefixes. Proof waits
-fail when the channel is absent from both projections; a live channel whose
-Create has not yet reached the proof projection still waits for publication.
-This retires MVCC bookkeeping, while View admission and resource lifetimes
-remain governed by their own lifecycle.
+DropCollection removes the channel when its complete prefix is published.
+Pending bounds covered by that prefix are discarded. Scoped barriers update
+only existing channels and cannot revive a dropped channel. A Strong waiter
+covering Drop returns a channel-unavailable error; an unpublished Create waits
+for its prefix. MVCC retirement does not replace View admission or resource
+lifetime management.
 
 ## Exact read resources and shared physical resources
 
@@ -99,9 +108,8 @@ request. Optimized, replaced or deliberately cleared fields remain authoritative
 Hybrid sub-request count/index checks prevent accidental cross-request reuse.
 Restoration occurs before per-node cloning and dispatch.
 
-The added fields are `QueryPlanMVCC.read_proof_timetick`,
-`GetQueryPlanRequest.read_proof_after`,
-`QueryPlan.reused_payloads`, and `StreamingFieldAnalyzer.read_schema_version`.
+The added fields are `QueryPlan.reused_payloads` and
+`StreamingFieldAnalyzer.read_schema_version`.
 This master-based extraction also synchronizes the query-facing schema contracts:
 `QueryViewMeta.schema_version`, Search/RetrieveRequest.schema_version,
 required_fields /
@@ -119,5 +127,5 @@ activation and mixed-version acceptance require integration validation.
 - `internal/streamingnode/server/wal/snview/{handler,query_lease,query_task_provider}.go`
 - `internal/streamingnode/server/wal/vchannel/queryresource/read_schema.go`
 - `internal/streamingnode/server/wal/vchannel/{schema,query_resource_module}.go`
-- `internal/streamingnode/server/wal/interceptors/timetick/mvcc/read_proof.go`
+- `internal/streamingnode/server/wal/interceptors/timetick/mvcc/query_mvcc.go`
 - `internal/streamingnode/server/wal/interceptors/timetick/timetick_sync_operator.go`

@@ -69,7 +69,7 @@ by the current client error formatter. Caller cancellation and deadlines retain
 their existing meaning.
 
 The [plan contract](query_plan.md) describes View-based schema identity,
-fixed snapshots, CAS certificates and payload reuse. Component tests
+fixed snapshots, Strong snapshots for CAS and payload reuse. Component tests
 inject query workers and exercise barrier cancellation and fixed-snapshot
 planning. Scoped barrier production and delivery have their own WAL tests; these
 checks do not prove production Proxy/QN integration or cluster-level recovery.
