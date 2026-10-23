@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // readProofManager projects only published, complete ACK prefixes. Append-time
@@ -71,6 +72,14 @@ func (cm *MVCCManager) WaitReadProof(ctx context.Context, channel string, minimu
 		frontier := m.frontiers.GetQueryMVCCOfVChannel(channel)
 		through, changed := m.through, m.changed
 		m.mu.Unlock()
+		if frontier.GrowingTimetick == 0 && frontier.TransformingTimetick == 0 {
+			// A newly created channel may still be awaiting proof publication.
+			// Once neither projection has it, no future proof can serve it.
+			current := cm.GetQueryMVCCOfVChannel(channel)
+			if current.GrowingTimetick == 0 && current.TransformingTimetick == 0 {
+				return QueryVChannelMVCC{}, 0, merr.WrapErrChannelNotFound(channel)
+			}
+		}
 		if through >= minimum && max(frontier.GrowingTimetick, frontier.TransformingTimetick) <= through &&
 			(frontier.GrowingTimetick != 0 || frontier.TransformingTimetick != 0) {
 			return frontier, through, nil

@@ -59,6 +59,16 @@ WAL owner's volatile certificate. The client retains each successful shard's
 proof, including empty shards; integration callers must validate those proofs
 before using the read for CAS.
 
+DropCollection removes the VChannel's query frontiers and pending-confirmation
+marker. Only CreateCollection and recovery initialization register channels;
+late scoped barriers and ordinary progress updates cannot recreate them.
+The read-proof projection applies the same retirement when its published ACK
+prefix reaches Drop, preserving certificates for earlier prefixes. Proof waits
+fail when the channel is absent from both projections; a live channel whose
+Create has not yet reached the proof projection still waits for publication.
+This retires MVCC bookkeeping, while View admission and resource lifetimes
+remain governed by their own lifecycle.
+
 ## Exact read resources and shared physical resources
 
 `queryresource.ReadRuntime` binds resources by

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestReadProofUsesCompletePublishedPrefix(t *testing.T) {
@@ -89,4 +90,56 @@ func TestReadProofWaitsForPublicationAndCancels(t *testing.T) {
 	stop()
 	_, _, err = replacement.WaitReadProof(canceled, "v", 100)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestReadProofDropAndLateBarrier(t *testing.T) {
+	cm := NewMVCCManager(10)
+	cm.ApplyRecoveryBarrier("v", 10)
+	cm.ApplyRecoveryBarrier("live", 10)
+	confirmation := func(tick uint64) message.ImmutableMessage {
+		return createQueryTestMessage(t, tick, "", message.MessageTypeTimeTick, false, false).IntoImmutableMessage(nil)
+	}
+	cm.PublishReadProof(nil, confirmation(10))
+	drop := createQueryTestMessage(t, 20, "v", message.MessageTypeDropCollection, false, true)
+	cm.UpdateMVCC(drop)
+	// Append-time retirement must not rewrite an already published proof prefix.
+	frontier, proof, err := cm.WaitReadProof(t.Context(), "v", 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 10, frontier.GrowingTimetick)
+	require.EqualValues(t, 10, proof)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, _, err := cm.WaitReadProof(ctx, "v", 30); done <- err }()
+	// The Drop and a pending scoped barrier can be published in the same prefix.
+	barrier := message.NewMVCCBarrierMessageBuilderV2().WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v", "live"}}).WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(30)
+	cm.UpdateMVCC(barrier)
+	cm.PublishReadProof([]message.ImmutableMessage{drop.IntoImmutableMessage(nil)}, barrier.IntoImmutableMessage(nil))
+	require.ErrorIs(t, <-done, merr.ErrChannelNotFound)
+	require.NotContains(t, cm.readProof.frontiers.vchannelMVCCs, "v")
+	require.NotContains(t, cm.readProof.frontiers.unconfirmedVChannels, "v")
+	_, _, err = cm.WaitReadProof(ctx, "v", 30)
+	require.ErrorIs(t, err, merr.ErrChannelNotFound)
+	frontier, proof, err = cm.WaitReadProof(ctx, "live", 30)
+	require.NoError(t, err)
+	require.EqualValues(t, 30, frontier.GrowingTimetick)
+	require.EqualValues(t, 30, proof)
+}
+
+func TestReadProofWaitsForNewChannelPublication(t *testing.T) {
+	cm := NewMVCCManager(10)
+	create := createQueryTestMessage(t, 20, "v", message.MessageTypeCreateCollection, false, true)
+	cm.UpdateMVCC(create)
+	// Missing proof state alone does not mean the channel was dropped.
+	canceled, stop := context.WithCancel(t.Context())
+	stop()
+	_, _, err := cm.WaitReadProof(canceled, "v", 30)
+	require.ErrorIs(t, err, context.Canceled)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, _, err := cm.WaitReadProof(ctx, "v", 30); done <- err }()
+	tick := createQueryTestMessage(t, 30, "", message.MessageTypeTimeTick, false, false).IntoImmutableMessage(nil)
+	cm.PublishReadProof([]message.ImmutableMessage{create.IntoImmutableMessage(nil)}, tick)
+	require.NoError(t, <-done)
 }
