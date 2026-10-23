@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"google.golang.org/grpc"
 
 	pkindexgc "github.com/milvus-io/milvus/internal/datacoord/pkindex/gc"
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
@@ -32,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -143,9 +141,4 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 		s.pkindexGC = gc
 	}
 	s.pkindexService.SetManager(manifest.New(meta, store, rootPath))
-}
-
-// RegisterPKIndexCoordGRPCService registers the primary key index manifest service on server.
-func (s *Server) RegisterPKIndexCoordGRPCService(server *grpc.Server) {
-	pkindexpb.RegisterPKIndexCoordServiceServer(server, s.pkindexService)
 }
