@@ -523,27 +523,10 @@ Existing QueryCoord compatibility RPCs remain available and delegate to shared
 Coordinator QueryView infrastructure. Internal callback wiring does not use
 those RPCs as a message bus.
 
-Enable strict schema publication/routing only when participating Proxy, Coord,
-SN and QN support its contracts. A mixed deployment must retain its supported
-legacy behavior or reject unsupported evolution before broadcast; an old worker
-must not acknowledge strict readiness by ignoring new requirements. Public
-DescribeCollection continues returning the published read schema and does not
-reveal a partially prepared target.
-
-The coordinator checks the registered Proxy/SN/QN schema protocol capability
-before admitting a schema-changing ALTER into the WAL. Missing capability in an
-old session is unsupported; discovery failures remain retriable and do not
-admit the broadcast. Metadata-only ALTER and replay of already persisted
-messages do not run this new-admission check.
-
-Each worker sync stream also attests the protocol in its initial gRPC metadata.
-The coordinator checks that attestation before accepting the first view response
-on every new stream, including reconnects and pchannel migrations. A response
-from a worker lacking the protocol cannot satisfy a pending Ready/Up obligation.
-This second check covers worker changes after the admission snapshot; it does
-not turn session discovery into a cluster-wide upgrade transaction. Deployment
-must retain capable Proxy/Coord participants while strict-schema serving is in
-use; downgrading them during an admitted evolution is unsupported.
+QueryView schema publication and routing assume participants implement the
+same unreleased QueryView contracts. No session capability flag or stream
+attestation is required. Public DescribeCollection continues returning the
+published read schema and does not reveal a partially prepared target.
 
 ## 11. Implementation sequence and validation
 

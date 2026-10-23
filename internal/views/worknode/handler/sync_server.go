@@ -4,10 +4,7 @@ import (
 	"context"
 	"io"
 
-	"google.golang.org/grpc/metadata"
-
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -37,9 +34,6 @@ func (s *ViewSyncServer) SyncQueryView(stream viewpb.ViewSyncService_SyncQueryVi
 // close response so the server recv loop can exit.
 func (s *ViewSyncServer) SyncQueryViewUntil(stream viewpb.ViewSyncService_SyncQueryViewServer, closeSignal <-chan struct{}) error {
 	ctx := stream.Context()
-	if err := stream.SendHeader(metadata.Pairs(common.QueryViewSchemaProtocolHeader, common.QueryViewSchemaProtocol)); err != nil {
-		return err
-	}
 	pending := newPendingReports()
 
 	closeWatcherDone := make(chan struct{})

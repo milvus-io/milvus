@@ -135,9 +135,8 @@ type SessionRaw struct {
 	IndexNonEncoding         bool               `json:"IndexNonEncoding,omitempty"`
 	LeaseID                  *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
-	HostName                string            `json:"HostName,omitempty"`
-	ServerLabels            map[string]string `json:"ServerLabels,omitempty"`
-	QueryViewSchemaProtocol string            `json:"QueryViewSchemaProtocol,omitempty"`
+	HostName     string            `json:"HostName,omitempty"`
+	ServerLabels map[string]string `json:"ServerLabels,omitempty"`
 }
 
 func (s *SessionRaw) GetAddress() string {
@@ -324,7 +323,6 @@ func (s *Session) Init(serverName, address string, exclusive bool) {
 	}
 	s.ServerID = serverID
 	s.ServerLabels = getServerLabelsFromEnv(serverName)
-	s.QueryViewSchemaProtocol = common.QueryViewSchemaProtocol
 	s.versionKey = path.Join(s.metaRoot, DefaultServiceRoot, serverVersionKey)
 
 	s.SetLogger(mlog.With(
