@@ -3594,6 +3594,7 @@ type queryCoordConfig struct {
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+	ForceReleaseRefusedSegmentAfter   ParamItem `refreshable:"true"`
 
 	AutoscalePrecheckEnabled ParamItem `refreshable:"true"`
 	AutoscaleEnabled         ParamItem `refreshable:"true"`
@@ -4308,6 +4309,18 @@ Set to 0 to disable the penalty period.`,
 		Export:       true,
 	}
 	p.ResourceExhaustionCleanupInterval.Init(base.mgr)
+
+	p.ForceReleaseRefusedSegmentAfter = ParamItem{
+		Key:          "queryCoord.forceReleaseRefusedSegmentAfter",
+		Version:      "3.0.0",
+		DefaultValue: "600",
+		Doc: `Seconds a delegator may keep refusing to release a sealed segment it still serves before QueryCoord releases it by force.
+The forced release fires only when the replica cannot make progress otherwise: nothing has been loaded since the refusal began,
+the current target has not moved, and every node of the replica is marked resource exhausted while segments are waiting to be loaded.
+Set to 0 to disable the forced release.`,
+		Export: true,
+	}
+	p.ForceReleaseRefusedSegmentAfter.Init(base.mgr)
 
 	p.AutoscalePrecheckEnabled = ParamItem{
 		Key:          "queryCoord.autoscale.precheckEnabled",

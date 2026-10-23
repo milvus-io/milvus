@@ -28,12 +28,16 @@ import (
 type DistributionManager struct {
 	SegmentDistManager SegmentDistManagerInterface
 	ChannelDistManager ChannelDistManagerInterface
+	// ReleaseRefusals are the sealed segments the delegators currently refuse to release, fed by
+	// the task scheduler and read by the segment checker to decide a forced release.
+	ReleaseRefusals *ReleaseRefusalTracker
 }
 
 func NewDistributionManager(nodeManager *session.NodeManager) *DistributionManager {
 	return &DistributionManager{
 		SegmentDistManager: NewSegmentDistManager(),
 		ChannelDistManager: NewChannelDistManager(nodeManager),
+		ReleaseRefusals:    NewReleaseRefusalTracker(),
 	}
 }
 

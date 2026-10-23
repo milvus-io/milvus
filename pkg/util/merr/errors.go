@@ -136,6 +136,10 @@ var (
 	// the query coordinator will mark the node as resource exhausted and apply a
 	// penalty period during which the node won't receive new loading tasks.
 	ErrSegmentRequestResourceFailed = newMilvusError("segment request resource failed", 605, false)
+	// ErrSegmentReleaseRefused is returned by a delegator asked to release a sealed segment that
+	// is still in its readable snapshot. The query coordinator records the refusal and, when it
+	// lasts while the replica cannot make progress, releases the segment by force.
+	ErrSegmentReleaseRefused = newMilvusError("segment release refused", 606, false)
 
 	// Index related
 	ErrIndexNotFound     = newMilvusError("index not found", 700, false)

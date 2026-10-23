@@ -20,6 +20,7 @@ import (
 	"context"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -1329,6 +1330,133 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 	suite.Len(addedTasks, 0)
+}
+
+// seedRefusedRelease sets up a replica on nodes 1 and 2 whose delegator (node 2) holds segment 2,
+// which is in no target and has been refused for an hour, while segment 1 of the next target is
+// still waiting to be loaded. It returns the function that runs the checker and collects the
+// reduce task for segment 2, if any.
+func (suite *SegmentCheckerTestSuite) seedRefusedRelease(ctx context.Context) func() *task.SegmentTask {
+	checker := suite.checker
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	for _, nodeID := range []int64{1, 2} {
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID, Address: "localhost", Hostname: "localhost"}))
+		checker.meta.HandleNodeUp(ctx, nodeID)
+	}
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		[]*datapb.VchannelInfo{{CollectionID: 1, ChannelName: "test-insert-channel"}},
+		[]*datapb.SegmentInfo{{ID: 1, PartitionID: 1, InsertChannel: "test-insert-channel"}}, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "test-insert-channel"},
+		Node:         2,
+		Version:      1,
+		View:         &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
+
+	currentVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
+	checker.dist.ReleaseRefusals.Refused(1, 1, 2, 1, currentVersion, time.Now().Add(-time.Hour))
+
+	var addedTasks []task.Task
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+	return func() *task.SegmentTask {
+		addedTasks = nil
+		suite.Len(checker.Check(ctx), 0)
+		for _, t := range addedTasks {
+			segmentTask, ok := t.(*task.SegmentTask)
+			if ok && segmentTask.SegmentID() == 2 && segmentTask.Actions()[0].Type() == task.ActionTypeReduce {
+				return segmentTask
+			}
+		}
+		return nil
+	}
+}
+
+// A release the delegator has refused for longer than the limit is forced once the replica is
+// stuck: a segment waits to be loaded and every node of the replica is out of resources. The
+// forced task outranks the ordinary release it replaces. Without the resource exhaustion, with
+// progress since the refusal, with a refusal younger than the limit, or with the fallback turned
+// off, the ordinary release is issued as before.
+func (suite *SegmentCheckerTestSuite) TestForceReleaseRefusedSegment() {
+	ctx := context.Background()
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ForceReleaseRefusedSegmentAfter.Key, "60")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ForceReleaseRefusedSegmentAfter.Key)
+	check := suite.seedRefusedRelease(ctx)
+	tracker := suite.checker.dist.ReleaseRefusals
+
+	// only node 1 is out of resources: node 2 could still load, not forced
+	suite.nodeMgr.MarkResourceExhaustion(1, time.Minute)
+	release := check()
+	suite.Require().NotNil(release)
+	suite.False(release.IsForceRelease())
+	suite.Equal(task.TaskPriorityNormal, release.Priority())
+
+	// every node is out of resources: forced
+	suite.nodeMgr.MarkResourceExhaustion(2, time.Minute)
+	release = check()
+	suite.Require().NotNil(release)
+	suite.True(release.IsForceRelease())
+	suite.Equal(task.TaskPriorityHigh, release.Priority())
+	suite.EqualValues(1, release.Actions()[0].Node(), "released on the node that holds it")
+
+	// the replica loaded something since the refusal began: not forced
+	tracker.LoadSucceeded(1, time.Now())
+	release = check()
+	suite.Require().NotNil(release)
+	suite.False(release.IsForceRelease())
+
+	// a fresh refusal under a new target version: not forced until it has lasted
+	tracker.Refused(1, 1, 2, 1, 12345, time.Now())
+	release = check()
+	suite.Require().NotNil(release)
+	suite.False(release.IsForceRelease())
+
+	// the refusal has lasted (progress and the fresh refusal forgotten) but the fallback is off
+	tracker.RemoveReplica(1)
+	tracker.Refused(1, 1, 2, 1, suite.checker.targetMgr.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget), time.Now().Add(-time.Hour))
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ForceReleaseRefusedSegmentAfter.Key, "0")
+	release = check()
+	suite.Require().NotNil(release)
+	suite.False(release.IsForceRelease())
+
+	// and on again: forced
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ForceReleaseRefusedSegmentAfter.Key, "60")
+	release = check()
+	suite.Require().NotNil(release)
+	suite.True(release.IsForceRelease())
+}
+
+// A refused segment that is not waiting on any load is left to the ordinary release: nothing
+// is stuck, and a refusal whose segment left the distribution is forgotten.
+func (suite *SegmentCheckerTestSuite) TestForceReleaseNeedsPendingLoads() {
+	ctx := context.Background()
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ForceReleaseRefusedSegmentAfter.Key, "60")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ForceReleaseRefusedSegmentAfter.Key)
+	check := suite.seedRefusedRelease(ctx)
+	suite.nodeMgr.MarkResourceExhaustion(1, time.Minute)
+	suite.nodeMgr.MarkResourceExhaustion(2, time.Minute)
+
+	// segment 1 of the next target is loaded: nothing waits, not forced
+	suite.checker.dist.SegmentDistManager.Update(1,
+		utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"),
+		utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
+	release := check()
+	suite.Require().NotNil(release)
+	suite.False(release.IsForceRelease())
+
+	// segment 2 left the distribution some other way: its refusal is dropped
+	suite.checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
+	suite.Nil(check())
+	_, ok := suite.checker.dist.ReleaseRefusals.Get(1, 2)
+	suite.False(ok)
 }
 
 func TestSegmentCheckerSuite(t *testing.T) {
