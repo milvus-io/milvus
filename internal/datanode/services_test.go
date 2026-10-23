@@ -19,12 +19,17 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
+	"path"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -43,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1047,6 +1053,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesForeignSo
 	mNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
 		func(
 			parentCtx context.Context,
+			copyPermits chan struct{},
 			gotReq *datapb.CopySegmentRequest,
 			manager importv2.TaskManager,
 			gotSourceCM storage.ChunkManager,
@@ -1157,6 +1164,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesSameBucke
 	mockNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
 		func(
 			parentCtx context.Context,
+			copyPermits chan struct{},
 			gotReq *datapb.CopySegmentRequest,
 			_ importv2.TaskManager,
 			gotSourceCM storage.ChunkManager,
@@ -1217,11 +1225,12 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotUsesRawCredential
 
 	foreignSpec := `{"extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"foreign-ak","access_key_value":"foreign-sk"}}`
 	req := &datapb.CopySegmentRequest{
-		JobID:         100,
-		TaskID:        202,
-		TaskSlot:      1,
-		StorageConfig: targetStorageConfig,
-		ExternalSpec:  foreignSpec,
+		CopyConcurrency: 3,
+		JobID:           100,
+		TaskID:          202,
+		TaskSlot:        1,
+		StorageConfig:   targetStorageConfig,
+		ExternalSpec:    foreignSpec,
 		Sources: []*datapb.CopySegmentSource{{
 			CollectionId:   111,
 			PartitionId:    222,
@@ -1251,6 +1260,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotUsesRawCredential
 	mNewTask := mockey.Mock(importv2.NewCopySegmentTask).To(
 		func(
 			parentCtx context.Context,
+			copyPermits chan struct{},
 			gotReq *datapb.CopySegmentRequest,
 			manager importv2.TaskManager,
 			gotSourceCM storage.ChunkManager,
@@ -1261,6 +1271,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotUsesRawCredential
 			targetBucket string,
 		) importv2.Task {
 			sourceStorageConfig = gotSourceStorageConfig
+			s.Equal(3, cap(copyPermits))
 			s.Same(req, gotReq)
 			s.NotNil(gotSourceCM)
 			s.Same(targetCM, gotTargetCM)
@@ -1895,4 +1906,492 @@ func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
 
 	assert.NotContains(t, logs.String(), accessKey)
 	assert.Contains(t, logs.String(), "audit-bucket")
+}
+
+// The executor tests use real plan decoding and worker execution. Only object
+// storage resolution/copy are replaced; no Import scheduler is started.
+type snapshotWholeCopyStorage struct{}
+
+func (*snapshotWholeCopyStorage) CopyCrossBucketAndGetSize(context.Context, string, string, string, string) (int64, error) {
+	return 0, merr.ErrServiceInternal
+}
+
+func (c *snapshotWholeCopyStorage) CopyCrossBucket(ctx context.Context, sourceBucket, sourcePath, targetBucket, targetPath string) error {
+	_, err := c.CopyCrossBucketAndGetSize(ctx, sourceBucket, sourcePath, targetBucket, targetPath)
+	return err
+}
+
+func snapshotExportRangeRequest(t *testing.T, count int, sourceErrors ...error) (*datapb.SnapshotExportCopyRequest, storage.ChunkManager) {
+	t.Helper()
+	root := t.TempDir()
+	sourceRoot := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(sourceRoot))
+	snapshot := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "snapshot"}, Collection: &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "collection"}}}
+	segment := &datapb.SegmentDescription{SegmentId: 1001, PartitionId: 1}
+	logs := &datapb.FieldBinlog{FieldID: 1}
+	for i := 0; i < count; i++ {
+		file := filepath.Join(sourceRoot, "files", fmt.Sprint(i))
+		require.NoError(t, cm.Write(context.Background(), file, []byte("x")))
+		logs.Binlogs = append(logs.Binlogs, &datapb.Binlog{LogID: int64(i + 1), LogPath: file})
+	}
+	segment.Binlogs = []*datapb.FieldBinlog{logs}
+	snapshot.Segments = []*datapb.SegmentDescription{segment}
+	metadata, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(context.Background(), snapshot, sourceRoot, datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	require.NoError(t, err)
+	remote := &storage.RemoteChunkManager{}
+	var sourceErr error
+	if len(sourceErrors) > 0 {
+		sourceErr = sourceErrors[0]
+	}
+	create := mockey.Mock(storage.NewRemoteChunkManager).Return(remote, sourceErr).Build()
+	read := mockey.Mock((*storage.RemoteChunkManager).Read).To(func(_ *storage.RemoteChunkManager, ctx context.Context, key string) ([]byte, error) {
+		return cm.Read(ctx, key)
+	}).Build()
+	size := mockey.Mock((*storage.RemoteChunkManager).Size).To(func(_ *storage.RemoteChunkManager, ctx context.Context, key string) (int64, error) {
+		return cm.Size(ctx, key)
+	}).Build()
+	rootMock := mockey.Mock((*storage.RemoteChunkManager).RootPath).Return(sourceRoot).Build()
+	t.Cleanup(func() { rootMock.UnPatch(); size.UnPatch(); read.UnPatch(); create.UnPatch() })
+	req := &datapb.SnapshotExportCopyRequest{ClusterId: "cluster", JobId: 1, TaskId: 2, GenerationId: 100, SegmentEnd: 1, SnapshotId: 1, CollectionId: 100, SnapshotMetadataPath: metadata, DeadlineTime: uint64(time.Now().Add(time.Minute).UnixMilli()), SourceStorageConfig: &indexpb.StorageConfig{BucketName: "source"}, TargetUri: root}
+	return req, cm
+}
+
+func TestSnapshotExportRangeTask_ContinuousExecution(t *testing.T) {
+	req, cm := snapshotExportRangeRequest(t, 600)
+	req.CopyConcurrency = 2
+	targetStore := &snapshotWholeCopyStorage{}
+	var active, maximum, copied, initializations atomic.Int64
+	unblock := make(chan struct{})
+	started := make(chan struct{}, 1)
+	defer mockey.Mock((*snapshotWholeCopyStorage).CopyCrossBucketAndGetSize).To(func(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+		src := srcObject
+		n := active.Add(1)
+		defer active.Add(-1)
+		for old := maximum.Load(); n > old && !maximum.CompareAndSwap(old, n); old = maximum.Load() {
+		}
+		if filepath.Base(src) == "0" {
+			started <- struct{}{}
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-unblock:
+			}
+		}
+		copied.Add(1)
+		return int64(1), nil
+	}).Build().UnPatch()
+	defer mockey.Mock(snapshotstorage.ResolveForeignStorage).To(func(context.Context, *objectstorage.Config, snapshotstorage.Direction, string, string) (*snapshotstorage.ResolvedForeignStorage, error) {
+		initializations.Add(1)
+		return &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: targetStore, ForeignBucket: "target"}, nil
+	}).Build().UnPatch()
+	e := newSnapshotExportExecutor(context.Background())
+	defer e.close()
+	require.NoError(t, e.create(req))
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("copy did not start: %s", e.query(req.ClusterId, req.TaskId).GetReason())
+	}
+	require.NoError(t, e.create(req))
+	// No coordinator queries, checkpoints or batch acknowledgments are needed.
+	require.Eventually(t, func() bool { return copied.Load() == 599 }, time.Second*3, time.Millisecond)
+	require.EqualValues(t, 1, e.slots())
+	require.LessOrEqual(t, maximum.Load(), int64(2))
+	require.EqualValues(t, 1, initializations.Load())
+	changed := proto.Clone(req).(*datapb.SnapshotExportCopyRequest)
+	changed.SnapshotId++
+	require.ErrorIs(t, e.create(changed), merr.ErrDataIntegrity)
+	close(unblock)
+	require.Eventually(t, func() bool { return e.query(req.ClusterId, 2).GetState() == datapb.ImportTaskStateV2_Completed }, time.Second, time.Millisecond)
+	require.EqualValues(t, 601, e.query(req.ClusterId, 2).GetCopiedFiles())
+	require.EqualValues(t, 600, e.query(req.ClusterId, 2).GetCopiedBytes())
+	require.NoError(t, e.drop(context.Background(), req.ClusterId, 2))
+	require.ErrorIs(t, merr.Error(e.query(req.ClusterId, 2).GetStatus()), merr.ErrImportSysFailed)
+}
+
+func TestSnapshotExportRangeTask_CancelAndShutdown(t *testing.T) {
+	req, cm := snapshotExportRangeRequest(t, 2)
+	req.TaskSlot = 16
+	targetStore := &snapshotWholeCopyStorage{}
+	entered := make(chan struct{}, 2)
+	drain := make(chan struct{})
+	defer mockey.Mock((*snapshotWholeCopyStorage).CopyCrossBucketAndGetSize).To(func(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+		entered <- struct{}{}
+		<-ctx.Done()
+		<-drain
+		return 0, ctx.Err()
+	}).Build().UnPatch()
+	defer mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: targetStore, ForeignBucket: "target"}, nil).Build().UnPatch()
+	e := newSnapshotExportExecutor(context.Background())
+	require.NoError(t, e.create(req))
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("copy did not start: %s", e.query(req.ClusterId, req.TaskId).GetReason())
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, e.drop(ctx, req.ClusterId, 2), context.Canceled)
+	require.EqualValues(t, 16, e.slots(), "retiring work retains its slot until copy calls return")
+	closed := make(chan struct{})
+	go func() { e.close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("shutdown did not join running copies")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(drain)
+	<-closed
+	require.Error(t, e.create(req))
+	require.Zero(t, e.slots())
+}
+
+func TestSnapshotExportRangeTask_StorageFailuresAndRPC(t *testing.T) {
+	for _, scenario := range []string{"source client", "initialization", "corrupt source", "copy", "success"} {
+		t.Run(scenario, func(t *testing.T) {
+			var sourceErr error
+			if scenario == "source client" {
+				sourceErr = merr.ErrIoPermissionDenied
+			}
+			req, cm := snapshotExportRangeRequest(t, 1, sourceErr)
+			targetStore := &snapshotWholeCopyStorage{}
+			var calls atomic.Int64
+			defer mockey.Mock((*snapshotWholeCopyStorage).CopyCrossBucketAndGetSize).To(func(_ context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+				calls.Add(1)
+				if scenario == "copy" {
+					return 0, merr.ErrIoTooManyRequests
+				}
+				return int64(1), nil
+			}).Build().UnPatch()
+			var resolveErr error
+			if scenario == "initialization" {
+				resolveErr = merr.ErrIoPermissionDenied
+			}
+			defer mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: targetStore, ForeignBucket: "target"}, resolveErr).Build().UnPatch()
+			if scenario == "corrupt source" {
+				require.NoError(t, cm.Write(context.Background(), req.SnapshotMetadataPath, []byte("corrupt")))
+			}
+			e := newSnapshotExportExecutor(context.Background())
+			defer e.close()
+			node := &DataNode{lifetime: lifetime.NewLifetime(commonpb.StateCode_Healthy), snapshotExportExecutor: e}
+			props := taskcommon.NewProperties(nil)
+			props.AppendClusterID(req.ClusterId)
+			props.AppendTaskID(req.TaskId)
+			props.AppendType(taskcommon.SnapshotExportCopy)
+			payload, err := proto.Marshal(req)
+			require.NoError(t, err)
+			status, err := node.CreateTask(context.Background(), &workerpb.CreateTaskRequest{Properties: props, Payload: payload})
+			require.NoError(t, merr.CheckRPCCall(status, err))
+			want := datapb.ImportTaskStateV2_Failed
+			if scenario == "success" {
+				want = datapb.ImportTaskStateV2_Completed
+			}
+			require.Eventually(t, func() bool { return e.query(req.ClusterId, req.TaskId).GetState() == want }, time.Second*2, time.Millisecond)
+			response, err := node.QueryTask(context.Background(), &workerpb.QueryTaskRequest{Properties: props})
+			require.NoError(t, merr.CheckRPCCall(response.GetStatus(), err))
+			result := &datapb.SnapshotExportCopyResponse{}
+			require.NoError(t, proto.Unmarshal(response.GetPayload(), result))
+			require.Equal(t, want, result.State)
+			if sourceErr != nil {
+				require.Contains(t, result.GetReason(), "permission")
+			}
+			if scenario == "source client" || scenario == "initialization" || scenario == "corrupt source" {
+				require.Zero(t, calls.Load())
+			}
+			status, err = node.DropTask(context.Background(), &workerpb.DropTaskRequest{Properties: props})
+			require.NoError(t, merr.CheckRPCCall(status, err))
+			status, err = node.DropTask(context.Background(), &workerpb.DropTaskRequest{Properties: props})
+			require.NoError(t, merr.CheckRPCCall(status, err))
+		})
+	}
+}
+
+func TestSnapshotExportRangeTask_DropBeforeCreateAndValidation(t *testing.T) {
+	req, _ := snapshotExportRangeRequest(t, 1)
+	e := newSnapshotExportExecutor(context.Background())
+	defer e.close()
+	require.NoError(t, e.drop(context.Background(), req.ClusterId, req.TaskId))
+	require.NoError(t, e.create(req))
+	for _, change := range []func(*datapb.SnapshotExportCopyRequest){
+		func(r *datapb.SnapshotExportCopyRequest) { r.TaskId = 0 }, func(r *datapb.SnapshotExportCopyRequest) { r.SnapshotMetadataPath = "" },
+		func(r *datapb.SnapshotExportCopyRequest) { r.GenerationId = 0 },
+		func(r *datapb.SnapshotExportCopyRequest) {
+			r.GenerationId = 1
+			r.SegmentStart = -1
+			r.SegmentEnd = 1
+		},
+		func(r *datapb.SnapshotExportCopyRequest) { r.GenerationId = 1; r.SegmentEnd = 0 }, func(r *datapb.SnapshotExportCopyRequest) { r.DeadlineTime = 1 },
+	} {
+		r := proto.Clone(req).(*datapb.SnapshotExportCopyRequest)
+		change(r)
+		require.Error(t, validateSnapshotExportRequest(r))
+	}
+}
+
+func TestSnapshotExportRangeTask_ExpiryAndAdmission(t *testing.T) {
+	admission := newSnapshotExportExecutor(context.Background())
+	require.Error(t, admission.create(nil))
+	admission.close()
+	node := NewDataNode(context.Background())
+	status, err := node.createSnapshotExportCopy(context.Background(), nil)
+	require.Error(t, merr.CheckRPCCall(status, err))
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	status, err = node.createSnapshotExportCopy(context.Background(), nil)
+	require.Error(t, merr.CheckRPCCall(status, err))
+	require.Error(t, merr.Error(node.querySnapshotExportCopy("cluster", 1).Status))
+	status, err = node.dropSnapshotExportCopy(context.Background(), "cluster", 1)
+	require.Error(t, merr.CheckRPCCall(status, err))
+	e := newSnapshotExportExecutor(context.Background())
+	defer e.close()
+	ctx, cancel := context.WithCancel(context.Background())
+	running := &snapshotExportExecution{req: &datapb.SnapshotExportCopyRequest{DeadlineTime: 1}, cancel: cancel, done: make(chan struct{})}
+	finished := &snapshotExportExecution{req: &datapb.SnapshotExportCopyRequest{DeadlineTime: 1}, cancel: func() {}, done: make(chan struct{})}
+	close(finished.done)
+	e.mu.Lock()
+	e.tasks[snapshotExportTaskKey{taskID: 1}], e.tasks[snapshotExportTaskKey{taskID: 2}] = running, finished
+	e.mu.Unlock()
+	require.EqualValues(t, 1, e.slots())
+	e.expire(time.Now())
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	e.mu.Lock()
+	require.Contains(t, e.tasks, snapshotExportTaskKey{taskID: 1}, "an expired but draining task must remain tracked")
+	require.NotContains(t, e.tasks, snapshotExportTaskKey{taskID: 2})
+	e.mu.Unlock()
+	close(running.done)
+	e.expire(time.Now())
+	e.mu.Lock()
+	require.Empty(t, e.tasks)
+	e.mu.Unlock()
+}
+
+func TestSnapshotExportRangeTask_ClientCleanupAndExpiryTimer(t *testing.T) {
+	req, cm := snapshotExportRangeRequest(t, 0)
+	defer mockey.Mock((*snapshotWholeCopyStorage).CopyCrossBucketAndGetSize).Return(int64(0), nil).Build().UnPatch()
+	defer mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: &snapshotWholeCopyStorage{}}, nil).Build().UnPatch()
+	defer mockey.Mock((*storage.RemoteChunkManager).UnderlyingObjectStorage).Return(&snapshotWholeClosingStorage{}).Build().UnPatch()
+	var closed atomic.Bool
+	defer mockey.Mock((*snapshotWholeClosingStorage).Close).To(func() error { closed.Store(true); return nil }).Build().UnPatch()
+	ticker := time.NewTicker(time.Hour)
+	ticks := make(chan time.Time, 1)
+	ticker.C = ticks
+	tickerCreated := make(chan struct{})
+	timer := mockey.Mock(time.NewTicker).To(func(time.Duration) *time.Ticker { close(tickerCreated); return ticker }).Build()
+	defer timer.UnPatch()
+	e := newSnapshotExportExecutor(context.Background())
+	<-tickerCreated
+	timer.UnPatch()
+	defer e.close()
+	e.mu.Lock()
+	finished := make(chan struct{})
+	close(finished)
+	e.tasks[snapshotExportTaskKey{taskID: 99}] = &snapshotExportExecution{req: &datapb.SnapshotExportCopyRequest{DeadlineTime: 1}, cancel: func() {}, done: finished}
+	e.mu.Unlock()
+	ticks <- time.Now()
+	require.Eventually(t, func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.tasks[snapshotExportTaskKey{taskID: 99}] == nil
+	}, time.Second, time.Millisecond)
+	require.NoError(t, e.create(req))
+	require.Eventually(t, func() bool { return e.query(req.ClusterId, req.TaskId).State == datapb.ImportTaskStateV2_Completed }, time.Second, time.Millisecond)
+	e.mu.Lock()
+	done := e.tasks[snapshotExportTaskKey{clusterID: req.ClusterId, taskID: req.TaskId}].done
+	e.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("export execution did not finish client cleanup")
+	}
+	require.True(t, closed.Load())
+}
+
+type snapshotWholeClosingStorage struct {
+	storage.ObjectStorage
+	io.Closer
+}
+
+func TestSnapshotExportRangeTask_IndependentConcurrency(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		limit int32
+		want  int
+	}{{"configured", 3, 6}, {"high concurrency", 64, 128}, {"legacy request", 0, 256}} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, cm := snapshotExportRangeRequest(t, 256)
+			req.CopyConcurrency = tc.limit
+			if tc.limit > 0 {
+				req.TaskSlot = 16
+			}
+			cfg := &Params.DataNodeCfg
+			Params.Save(cfg.ImportConcurrencyPerCPUCore.Key, "8")
+			defer Params.Reset(cfg.ImportConcurrencyPerCPUCore.Key)
+			targetStore := &snapshotWholeCopyStorage{}
+			started := make(chan struct{}, 1024)
+			copy := mockey.Mock((*snapshotWholeCopyStorage).CopyCrossBucketAndGetSize).To(func(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+				started <- struct{}{}
+				<-ctx.Done()
+				return 0, ctx.Err()
+			}).Build()
+			defer copy.UnPatch()
+			defer mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+				ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: targetStore, ForeignBucket: "target",
+			}, nil).Build().UnPatch()
+			e := newSnapshotExportExecutor(context.Background())
+			defer e.close()
+			require.NoError(t, e.create(req))
+			second := proto.Clone(req).(*datapb.SnapshotExportCopyRequest)
+			second.JobId++
+			second.TaskId++
+			require.NoError(t, e.create(second))
+			require.Equal(t, 2*max(req.TaskSlot, 1), e.slots())
+			for range tc.want {
+				select {
+				case <-started:
+				case <-time.After(3 * time.Second):
+					t.Fatal("copy workers did not reach the requested per-task limit")
+				}
+			}
+			select {
+			case <-started:
+				t.Fatal("tasks exceeded their individual limits")
+			case <-time.After(100 * time.Millisecond):
+			}
+		})
+	}
+}
+
+func TestSnapshotCopyBudgetsIndependentForExportAndRestore(t *testing.T) {
+	paramtable.Init()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	permits := make(chan struct{}, 1)
+	exportExecutor := newSnapshotExportExecutor(ctx)
+	defer exportExecutor.close()
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	sourcePath := path.Join(root, "insert_log/111/222/333/1/10001")
+	targetPath := path.Join(root, "insert_log/444/555/666/1/10001")
+	require.NoError(t, cm.Write(ctx, sourcePath, []byte("data")))
+	factory := &copySegmentStorageFactoryTarget{}
+	defer mockey.Mock((*copySegmentStorageFactoryTarget).NewChunkManager).Return(cm, nil).Build().UnPatch()
+	node := &DataNode{ctx: ctx, lifetime: lifetime.NewLifetime(commonpb.StateCode_Healthy),
+		storageFactory: factory, importTaskMgr: importv2.NewTaskManager(),
+		snapshotExportExecutor: exportExecutor}
+	req := &datapb.CopySegmentRequest{TaskID: 1, JobID: 1, TaskSlot: 1, CopyConcurrency: 1,
+		StorageConfig: &indexpb.StorageConfig{StorageType: "local", RootPath: root},
+		Sources: []*datapb.CopySegmentSource{{CollectionId: 111, PartitionId: 222, SegmentId: 333,
+			InsertBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: sourcePath}}}},
+		}},
+		Targets: []*datapb.CopySegmentTarget{{CollectionId: 444, PartitionId: 555, SegmentId: 666, TargetRootPath: root}},
+	}
+	status, err := node.copySegment(ctx, req, false)
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	started, release := make(chan struct{}), make(chan struct{})
+	defer mockey.Mock((*snapshotWholeCopyStorage).CopyCrossBucketAndGetSize).To(func(ctx context.Context, _, _, _, _ string) (int64, error) {
+		close(started)
+		select {
+		case <-release:
+			return 4, nil
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}).Build().UnPatch()
+	exportDone := make(chan error, 1)
+	go func() {
+		exportDone <- snapshotstorage.CopySnapshotExportPlan(ctx,
+			[]snapshotstorage.FileCopy{{SourcePath: sourcePath, DestinationPath: "export/data"}},
+			"", "", &snapshotWholeCopyStorage{}, permits, nil)
+	}()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	task := node.importTaskMgr.Get(req.GetTaskID())
+	futures := task.Execute()
+	require.Len(t, futures, 1)
+	restoreDone := make(chan error, 1)
+	go func() { _, err := futures[0].Await(); restoreDone <- err }()
+	select {
+	case err := <-restoreDone:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("restore waited for an unrelated export task")
+	}
+	exists, err := cm.Exist(ctx, targetPath)
+	require.NoError(t, err)
+	require.True(t, exists)
+	close(release)
+	require.NoError(t, <-exportDone)
+	content, err := cm.Read(ctx, targetPath)
+	require.NoError(t, err)
+	require.Equal(t, []byte("data"), content)
+	require.Empty(t, permits)
+}
+
+// Exercise registry isolation through the generic worker RPC boundary.
+func TestSnapshotExportRangeTask_ClusterIsolation(t *testing.T) {
+	req, _ := snapshotExportRangeRequest(t, 0)
+	defer mockey.Mock((*snapshotExportExecutor).execute).To(func(_ *snapshotExportExecutor, ctx context.Context, _ *snapshotExportExecution) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Build().UnPatch()
+	e := newSnapshotExportExecutor(context.Background())
+	defer e.close()
+	node := &DataNode{lifetime: lifetime.NewLifetime(commonpb.StateCode_Healthy), snapshotExportExecutor: e}
+	properties := func(cluster string) taskcommon.Properties {
+		p := taskcommon.NewProperties(nil)
+		p.AppendClusterID(cluster)
+		p.AppendTaskID(req.TaskId)
+		p.AppendType(taskcommon.SnapshotExportCopy)
+		return p
+	}
+	for _, cluster := range []string{"a", "b"} {
+		request := proto.Clone(req).(*datapb.SnapshotExportCopyRequest)
+		request.ClusterId = cluster
+		payload, err := proto.Marshal(request)
+		require.NoError(t, err)
+		status, err := node.CreateTask(context.Background(), &workerpb.CreateTaskRequest{Properties: properties(cluster), Payload: payload})
+		require.NoError(t, merr.CheckRPCCall(status, err))
+	}
+	query := func(cluster string) *workerpb.QueryTaskResponse {
+		response, err := node.QueryTask(context.Background(), &workerpb.QueryTaskRequest{Properties: properties(cluster)})
+		require.NoError(t, err)
+		return response
+	}
+	for _, cluster := range []string{"a", "b"} {
+		require.NoError(t, merr.Error(query(cluster).GetStatus()))
+	}
+	for _, cluster := range []string{"missing", "a", "a"} {
+		status, err := node.DropTask(context.Background(), &workerpb.DropTaskRequest{Properties: properties(cluster)})
+		require.NoError(t, merr.CheckRPCCall(status, err))
+		require.NoError(t, merr.Error(query("b").GetStatus()))
+		require.Equal(t, datapb.ImportTaskStateV2_InProgress, e.query("b", req.TaskId).GetState())
+	}
+	require.ErrorIs(t, merr.Error(query("a").GetStatus()), merr.ErrImportSysFailed)
+	require.ErrorIs(t, merr.Error(query("missing").GetStatus()), merr.ErrImportSysFailed)
+}
+
+func TestQuerySlotExportUsage(t *testing.T) {
+	paramtable.Init()
+	done := make(chan struct{})
+	node := &DataNode{
+		lifetime:           lifetime.NewLifetime(commonpb.StateCode_Healthy),
+		taskScheduler:      &index.TaskScheduler{TaskQueue: index.NewIndexBuildTaskQueue(nil)},
+		compactionExecutor: compactor.NewExecutor(),
+		importScheduler:    importv2.NewScheduler(importv2.NewTaskManager()),
+		snapshotExportExecutor: &snapshotExportExecutor{tasks: map[snapshotExportTaskKey]*snapshotExportExecution{
+			{clusterID: "test", taskID: 1}: {req: &datapb.SnapshotExportCopyRequest{TaskSlot: 2}, done: done},
+		}},
+	}
+	for _, used := range []int64{2, 0} {
+		resp, err := node.QuerySlot(context.Background(), nil)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Equal(t, max(index.CalculateNodeSlots()-used, 0), resp.GetAvailableSlots())
+		require.Equal(t, float64(used), testutil.ToFloat64(metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "exportUsed")))
+		if used != 0 {
+			close(done)
+		}
+	}
 }

@@ -20,11 +20,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/iskorotkov/avro/v2"
@@ -45,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // =========================== Test Helper Functions ===========================
@@ -431,16 +439,50 @@ func TestSnapshotWriter_StagedMetadataPublication(t *testing.T) {
 		)
 		snapshotData.SnapshotInfo.S3Location = metadataPath
 		stagingPath := snapshotstorage.GetSnapshotStagingMetadataPath(targetRoot)
-		preparedPath, totalBytes, err := writer.PrepareToRootWithStaging(
-			ctx,
-			snapshotData,
-			targetRoot,
-			datapb.SnapshotLayout_SnapshotLayoutSelfContained,
-			stagingPath,
-		)
+		preparedPath, totalBytes, err := writer.SaveToRootWithSize(ctx, snapshotData, targetRoot, datapb.SnapshotLayout_SnapshotLayoutSelfContained)
 		require.NoError(t, err)
 		require.Equal(t, metadataPath, preparedPath)
+		data, err := cm.Read(ctx, metadataPath)
+		require.NoError(t, err)
+		metadata, err := snapshotio.ParseSnapshotMetadata(data)
+		require.NoError(t, err)
+		require.NoError(t, cm.Remove(ctx, metadataPath))
+		err = writer.PrepareMetadataWithStaging(ctx, metadata, metadataPath, stagingPath)
+		require.NoError(t, err)
 		return cm, writer, stagingPath, metadataPath, totalBytes
+	}
+
+	for _, mode := range []string{"marshal failure", "invalid metadata", "empty staging", "same path", "read failure", "read mismatch"} {
+		t.Run("preparation/"+mode, func(t *testing.T) {
+			cm, writer, staging, final, _ := prepare(t)
+			data, err := cm.Read(context.Background(), staging)
+			require.NoError(t, err)
+			metadata, err := snapshotio.ParseSnapshotMetadata(data)
+			require.NoError(t, err)
+			want := merr.ErrServiceInternal
+			switch mode {
+			case "marshal failure":
+				metadata.SnapshotInfo.Name = string([]byte{0xff})
+			case "invalid metadata":
+				metadata.Collection = nil
+				want = merr.ErrDataIntegrity
+			case "empty staging":
+				staging = ""
+			case "same path":
+				staging = final
+			case "read failure":
+				want = merr.ErrServiceUnavailable
+				defer mockey.Mock((*storage.LocalChunkManager).Read).Return(nil, want).Build().UnPatch()
+			case "read mismatch":
+				want = merr.ErrDataIntegrity
+				defer mockey.Mock((*storage.LocalChunkManager).Read).Return([]byte("different"), nil).Build().UnPatch()
+			}
+			err = writer.PrepareMetadataWithStaging(context.Background(), metadata, final, staging)
+			require.ErrorIs(t, err, want)
+			exists, err := cm.Exist(context.Background(), final)
+			require.NoError(t, err)
+			require.False(t, exists, "preparation must never publish final metadata")
+		})
 	}
 
 	t.Run("normal and already published", func(t *testing.T) {
@@ -1366,128 +1408,6 @@ func TestSnapshot_CompleteWorkflow(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestListSnapshotDataFiles_CollectsReferencedFiles(t *testing.T) {
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = 0
-	segment.Binlogs = []*datapb.FieldBinlog{{
-		FieldID: 10,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/insert_log/100/10/1001/1",
-		}},
-	}}
-	segment.Statslogs = []*datapb.FieldBinlog{{
-		FieldID: 10,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/stats_log/100/10/1001/2",
-		}},
-	}}
-	segment.Deltalogs = []*datapb.FieldBinlog{{
-		FieldID: 10,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/delta_log/100/10/1001/3",
-		}},
-	}}
-	segment.Bm25Statslogs = []*datapb.FieldBinlog{{
-		FieldID: 11,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/bm25_stats_log/100/11/1001/4",
-		}},
-	}}
-	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{
-		BuildID: 7001,
-		IndexFilePaths: []string{
-			"files/index_files/100/10/1001/7001/index",
-		},
-	}}
-	segment.TextIndexFiles = map[int64]*datapb.TextIndexStats{
-		12: {
-			FieldID: 12,
-			BuildID: 7002,
-			Files: []string{
-				"files/text_index/100/12/1001/7002/posting",
-			},
-		},
-	}
-	segment.JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{
-		13: {
-			FieldID: 13,
-			BuildID: 7003,
-			Files: []string{
-				"files/json_index/100/13/1001/7003/key",
-			},
-		},
-	}
-
-	refs, err := snapshotstorage.ListSnapshotDataFiles(context.Background(), cm, snapshot, nil)
-	require.NoError(t, err)
-
-	byPath := make(map[string]snapshotstorage.SnapshotFileRef)
-	for _, ref := range refs {
-		byPath[ref.NormalizedPath] = ref
-		assert.Equal(t, int64(1001), ref.SegmentID)
-	}
-
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeInsertBinlog, byPath["files/insert_log/100/10/1001/1"].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStatsBinlog, byPath["files/stats_log/100/10/1001/2"].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeDeltaBinlog, byPath["files/delta_log/100/10/1001/3"].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeBM25StatsBinlog, byPath["files/bm25_stats_log/100/11/1001/4"].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeIndexFile, byPath["files/index_files/100/10/1001/7001/index"].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeTextIndexFile, byPath["files/text_index/100/12/1001/7002/posting"].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeJSONKeyIndexFile, byPath["files/json_index/100/13/1001/7003/key"].Type)
-	assert.Len(t, byPath, 7)
-}
-
-func TestListSnapshotDataFiles_StorageV2IncludesManifestObject(t *testing.T) {
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV2
-	segment.ManifestPath = "source/insert_log/100/10/1001/manifest.json"
-
-	refs, err := snapshotstorage.ListSnapshotDataFiles(context.Background(), cm, snapshot, nil)
-
-	require.NoError(t, err)
-	byPath := make(map[string]snapshotstorage.SnapshotFileRef, len(refs))
-	for _, ref := range refs {
-		byPath[ref.NormalizedPath] = ref
-	}
-	require.Contains(t, byPath, segment.GetManifestPath())
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV2Manifest, byPath[segment.GetManifestPath()].Type)
-}
-
-func TestRewriteSnapshotWithMapping_RewritesStorageV2ManifestAsObjectPath(t *testing.T) {
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV2
-	segment.ManifestPath = "source/insert_log/100/10/1001/manifest.json"
-	refs, err := snapshotstorage.ListSnapshotDataFiles(
-		context.Background(),
-		storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())),
-		snapshot,
-		nil,
-	)
-	require.NoError(t, err)
-	mappings := make(map[string]string, len(refs))
-	for _, ref := range refs {
-		mappings[ref.Path] = path.Join("bundle/files", ref.NormalizedPath)
-		mappings[ref.NormalizedPath] = path.Join("bundle/files", ref.NormalizedPath)
-	}
-	expectedManifest := mappings[segment.GetManifestPath()]
-
-	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(
-		snapshot,
-		mappings,
-		"bundle",
-		"s3://bucket/bundle/snapshots/100/metadata/1.json",
-	)
-
-	require.NoError(t, err)
-	assert.Equal(t, expectedManifest, rewritten.Segments[0].GetManifestPath())
-}
-
 func TestSnapshotFingerprintIsDeterministicAndContentSensitive(t *testing.T) {
 	left := createTestSnapshotData()
 	right := createTestSnapshotData()
@@ -1514,213 +1434,41 @@ func TestSnapshotFingerprintIsDeterministicAndContentSensitive(t *testing.T) {
 	changedFingerprint, err := snapshotstorage.SnapshotFingerprint(right)
 	require.NoError(t, err)
 	assert.NotEqual(t, leftFingerprint, changedFingerprint)
+	// Layout changes source path interpretation; format version does not change selection.
+	right.Layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
+	right.ManifestFormatVersion = 5
+	legacy, err := snapshotstorage.SnapshotFingerprint(right)
+	require.NoError(t, err)
+	require.NotEqual(t, changedFingerprint, legacy)
+	right.ManifestFormatVersion = 6
+	current, err := snapshotstorage.SnapshotFingerprint(right)
+	require.NoError(t, err)
+	require.Equal(t, legacy, current)
 }
 
-func TestRewriteSnapshotWithMapping_RemovesSourcePins(t *testing.T) {
-	snapshot := createTestSnapshotData()
-	snapshot.SnapshotInfo.PinIds = []int64{9001}
-	snapshot.SnapshotInfo.PinExpireAtMs = map[int64]int64{9001: time.Now().Add(time.Hour).UnixMilli()}
-	refs, err := snapshotstorage.ListSnapshotDataFiles(
-		context.Background(),
-		storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())),
-		snapshot,
-		nil,
-	)
-	require.NoError(t, err)
-	mappings := make(map[string]string, len(refs)*2)
-	for _, ref := range refs {
-		destination := path.Join("bundle/files", ref.NormalizedPath)
-		mappings[ref.Path] = destination
-		mappings[ref.NormalizedPath] = destination
-	}
-
-	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(
-		snapshot,
-		mappings,
-		"bundle",
-		"s3://bucket/bundle/snapshots/100/metadata/1.json",
-	)
-
-	require.NoError(t, err)
-	assert.Empty(t, rewritten.SnapshotInfo.GetPinIds())
-	assert.Empty(t, rewritten.SnapshotInfo.GetPinExpireAtMs())
-	assert.Equal(t, []int64{9001}, snapshot.SnapshotInfo.GetPinIds())
+func validateSnapshotDataFiles(ctx context.Context, snapshot *snapshotstorage.SnapshotData) error {
+	return snapshotstorage.ValidateExternalSnapshotDataFiles(ctx, "snapshots/100/metadata/1.json", snapshot)
 }
 
-func TestListSnapshotDataFiles_DoesNotLimitFileCount(t *testing.T) {
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	snapshot := &snapshotstorage.SnapshotData{Segments: []*datapb.SegmentDescription{{
-		SegmentId: 1,
-		Binlogs: []*datapb.FieldBinlog{{
-			FieldID: 1,
-			Binlogs: []*datapb.Binlog{
-				{LogPath: "files/insert_log/1/1/1/1/1"},
-				{LogPath: "files/insert_log/1/1/1/1/2"},
-			},
-		}},
-	}}}
-
-	refs, err := snapshotstorage.ListSnapshotDataFiles(
-		context.Background(),
-		cm,
-		snapshot,
-		nil,
-	)
-
-	require.NoError(t, err)
-	assert.Len(t, refs, 2)
-}
-
-func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *testing.T) {
-	tempDir := t.TempDir()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-	ctx := context.Background()
-
-	basePath := path.Join(tempDir, "files/insert_log/100/20/1001")
-	require.NoError(t, cm.Write(ctx, path.Join(basePath, "manifest"), []byte("manifest")))
-	require.NoError(t, cm.Write(ctx, path.Join(basePath, "_data/cg0.parquet"), []byte("data")))
-	deltaPath := path.Join(basePath, "_delta/7")
-	require.NoError(t, cm.Write(ctx, deltaPath, []byte("delta")))
-	pathlessDeltaPath := path.Join(basePath, "_delta/8")
-	require.NoError(t, cm.Write(ctx, pathlessDeltaPath, []byte("pathless delta")))
-	siblingPath := basePath + "0/manifest"
-	require.NoError(t, cm.Write(ctx, siblingPath, []byte("sibling")))
-
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV3
-	segment.ManifestPath = packed.MarshalManifestPath(basePath, 1)
-	segment.Binlogs = nil
-	segment.TextIndexFiles = map[int64]*datapb.TextIndexStats{
-		12: {
-			FieldID: 12,
-			BuildID: 7002,
-			Files: []string{
-				"files/text_index/100/12/1001/7002/posting",
-			},
-		},
-	}
-	segment.JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{
-		13: {
-			FieldID: 13,
-			BuildID: 7003,
-			Files: []string{
-				"files/json_index/100/13/1001/7003/key",
-			},
-		},
-	}
-	segment.Statslogs = nil
-	// StorageV3 delta metadata: one entry with a complete key and one
-	// compressed summary placeholder without a path (the manifest owns the
-	// physical file, which the manifest walk lists).
-	segment.Deltalogs = []*datapb.FieldBinlog{{
-		Binlogs: []*datapb.Binlog{
-			{LogPath: deltaPath},
-			{LogID: 8},
-		},
-	}}
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-
-	foreignStorageConfig := &indexpb.StorageConfig{
-		BucketName: "foreign-bucket",
-		RootPath:   "foreign-root",
-	}
-	getLobCalls := 0
-	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).To(
-		func(gotManifestPath string, gotStorageConfig *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
-			assert.Equal(t, segment.GetManifestPath(), gotManifestPath)
-			// Listing passes the caller's storage config through; the rewrite
-			// below calls again with its own config.
-			if getLobCalls == 0 {
-				assert.Same(t, foreignStorageConfig, gotStorageConfig)
-			}
-			getLobCalls++
-			// Manifest-expanded LOB paths are complete keys, so on local
-			// storage they are absolute like the manifest base.
-			return []packed.LobFileInfo{
-				{Path: path.Join(tempDir, "files/insert_log/100/20/lobs/30/_data/lob.vx"), FieldID: 30},
-			}, nil
-		}).Build()
-	defer mockGetLobFiles.UnPatch()
-
-	refs, err := snapshotstorage.ListSnapshotDataFiles(ctx, cm, snapshot, foreignStorageConfig)
-	require.NoError(t, err)
-
-	byPath := make(map[string]snapshotstorage.SnapshotFileRef)
-	for _, ref := range refs {
-		byPath[ref.NormalizedPath] = ref
-	}
-
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestRoot, byPath[basePath].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(basePath, "manifest")].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(basePath, "_data/cg0.parquet")].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3LOBFile, byPath[path.Join(tempDir, "files/insert_log/100/20/lobs/30/_data/lob.vx")].Type)
-	assert.NotContains(t, byPath, "files/text_index/100/12/1001/7002/posting")
-	assert.NotContains(t, byPath, "files/json_index/100/13/1001/7003/key")
-	assert.NotContains(t, byPath, siblingPath)
-	assert.Contains(t, byPath, deltaPath)
-	assert.Contains(t, byPath, pathlessDeltaPath)
-	assert.Len(t, byPath, 6)
-
-	// Rewriting keeps the pathless summary pathless instead of failing on a
-	// missing mapping for "".
-	mappings := make(map[string]string, len(refs)*2)
-	for _, ref := range refs {
-		destination := snapshotstorage.ExportedSnapshotPath(cm, ref.NormalizedPath, "bundle")
-		mappings[ref.Path] = destination
-		mappings[ref.NormalizedPath] = destination
-	}
-	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(
-		snapshot,
-		mappings,
-		"bundle",
-		"s3://bucket/bundle/snapshots/100/metadata/1.json",
-	)
-	require.NoError(t, err)
-	assert.Equal(t, mappings[deltaPath], rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
-	assert.Empty(t, rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogPath())
-	assert.Equal(t, int64(8), rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogID())
-}
-
-func validateSnapshotDataFiles(
-	ctx context.Context,
-	cm storage.ChunkManager,
-	snapshot *snapshotstorage.SnapshotData,
-	storageConfig *indexpb.StorageConfig,
-) error {
-	return snapshotstorage.ValidateExternalSnapshotDataFiles(
-		ctx,
-		cm,
-		"snapshots/100/metadata/1.json",
-		snapshot,
-		storageConfig,
-	)
-}
-
-func TestValidateSnapshotDataFiles_ReturnsMissingFile(t *testing.T) {
+func TestValidateSnapshotDataFiles_DefersMissingFileToCopy(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	missingPath := path.Join(tempDir, "files/insert_log/100/10/1001/missing")
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.Binlogs = []*datapb.FieldBinlog{{
-		FieldID: 10,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: missingPath,
-		}},
-	}}
-	segment.Statslogs = nil
-	segment.Deltalogs = nil
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-	segment.TextIndexFiles = nil
-	segment.JsonKeyIndexFiles = nil
+	snapshot := &snapshotstorage.SnapshotData{Segments: []*datapb.SegmentDescription{{
+		SegmentId: 1001,
+		Binlogs:   []*datapb.FieldBinlog{{FieldID: 10, Binlogs: []*datapb.Binlog{{LogPath: missingPath}}}},
+	}}}
 
-	err := validateSnapshotDataFiles(context.Background(), cm, snapshot, nil)
+	err := validateSnapshotDataFiles(context.Background(), snapshot)
+	require.NoError(t, err)
+	// Validation accepts the reference, but execution must still fail on the
+	// actual missing object rather than report a successful restore.
+	err = snapshotstorage.CopyFiles(context.Background(), []snapshotstorage.FileCopy{{SourcePath: missingPath}},
+		make(chan struct{}, 1), func(ctx context.Context, item snapshotstorage.FileCopy) error {
+			_, err := cm.Read(ctx, item.SourcePath)
+			return err
+		})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "snapshot file does not exist")
-	assert.Contains(t, err.Error(), missingPath)
 }
 
 func TestValidateSnapshotDataFiles_SucceedsWhenObjectsExist(t *testing.T) {
@@ -1745,132 +1493,65 @@ func TestValidateSnapshotDataFiles_SucceedsWhenObjectsExist(t *testing.T) {
 	segment.TextIndexFiles = nil
 	segment.JsonKeyIndexFiles = nil
 
-	err := validateSnapshotDataFiles(ctx, cm, snapshot, nil)
+	err := validateSnapshotDataFiles(ctx, snapshot)
 	require.NoError(t, err)
 }
 
-func TestValidateSnapshotDataFiles_StorageV3SucceedsWhenManifestObjectsExist(t *testing.T) {
-	tempDir := t.TempDir()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-	ctx := context.Background()
-	basePath := path.Join(tempDir, "files/insert_log/100/20/1001")
-	require.NoError(t, cm.Write(ctx, path.Join(basePath, "manifest"), []byte("manifest")))
-
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV3
-	segment.ManifestPath = packed.MarshalManifestPath(basePath, 1)
-	segment.Binlogs = nil
-	segment.Statslogs = nil
-	segment.Deltalogs = nil
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-	segment.TextIndexFiles = map[int64]*datapb.TextIndexStats{
-		10: {FieldID: 10, Files: []string{"stale/text/path"}},
-	}
-	segment.JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{
-		11: {FieldID: 11, Files: []string{"stale/json/path"}},
-	}
-
-	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{}, nil).Build()
-	defer mockGetLobFiles.UnPatch()
-
-	err := validateSnapshotDataFiles(ctx, cm, snapshot, nil)
-	require.NoError(t, err)
-}
-
-func TestValidateSnapshotDataFiles_StorageV3ManifestObjectsComeFromWalk(t *testing.T) {
-	tempDir := t.TempDir()
-	baseCM := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-	ctx := context.Background()
-	basePath := path.Join(tempDir, "files/insert_log/100/20/1001")
-	manifestPath := path.Join(basePath, "manifest")
-	require.NoError(t, baseCM.Write(ctx, manifestPath, []byte("manifest")))
-	cm := &existChunkManagerTarget{ChunkManager: baseCM}
-	mockExist := mockey.Mock((*existChunkManagerTarget).Exist).To(
-		func(_ *existChunkManagerTarget, ctx context.Context, filePath string) (bool, error) {
-			if filePath == manifestPath {
-				return false, nil
+// Job creation validates the references carried by Avro without inspecting the
+// native manifest or source objects. DataNode rejects invalid native references.
+func TestValidateSnapshotDataFiles_StorageV3MetadataOnly(t *testing.T) {
+	defer mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(func(*storage.LocalChunkManager, context.Context, string, bool, storage.ChunkObjectWalkFunc) error {
+		t.Error("job validation must not list objects")
+		return merr.ErrServiceInternal
+	}).Build().UnPatch()
+	defer mockey.Mock(packed.GetManifestLobFiles).To(func(string, *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
+		t.Error("job validation must not query native LOBs")
+		return nil, merr.ErrServiceInternal
+	}).Build().UnPatch()
+	defer mockey.Mock(packed.ReadManifestFiles).To(func(string, *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+		t.Error("job validation must not read native manifests")
+		return nil, merr.ErrServiceInternal
+	}).Build().UnPatch()
+	for _, tc := range []struct {
+		name, manifest, index string
+		rows                  int64
+		fail                  bool
+	}{
+		{"missing native manifest", "bundle/files/insert_log/100/20/1001", "", 100, false},
+		{"empty segment", "bundle/files/insert_log/100/20/1001", "", 0, false},
+		{"outside root", "other/insert_log/100/20/1001", "", 100, true},
+		{"foreign bucket", "s3://other/bundle/files/insert_log/100/20/1001", "", 100, true},
+		{"outside self-contained files", "bundle/insert_log/100/20/1001", "", 100, true},
+		{"foreign Avro index", "bundle/files/insert_log/100/20/1001", "s3://other/bundle/files/index_files/1", 100, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			segment := &datapb.SegmentDescription{SegmentId: 1001, StorageVersion: storage.StorageV3,
+				ManifestPath: packed.MarshalManifestPath(tc.manifest, 1), NumOfRows: tc.rows,
+				Binlogs:           []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "stale/insert"}}}},
+				TextIndexFiles:    map[int64]*datapb.TextIndexStats{10: {Files: []string{"stale/text"}}},
+				JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{11: {Files: []string{"stale/json"}}},
 			}
-			return baseCM.Exist(ctx, filePath)
-		},
-	).Build()
-	defer mockExist.UnPatch()
-
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV3
-	segment.ManifestPath = packed.MarshalManifestPath(basePath, 1)
-	segment.Binlogs = nil
-	segment.Statslogs = nil
-	segment.Deltalogs = nil
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-	segment.TextIndexFiles = nil
-	segment.JsonKeyIndexFiles = nil
-
-	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{}, nil).Build()
-	defer mockGetLobFiles.UnPatch()
-
-	err := validateSnapshotDataFiles(ctx, cm, snapshot, nil)
-	require.NoError(t, err)
-}
-
-func TestValidateSnapshotDataFiles_StorageV3AllowsEmptyManifestPrefixForEmptySegment(t *testing.T) {
-	tempDir := t.TempDir()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-	basePath := path.Join(tempDir, "files/insert_log/100/20/1001")
-	require.NoError(t, os.MkdirAll(basePath, os.ModePerm))
-
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV3
-	segment.ManifestPath = packed.MarshalManifestPath(basePath, 1)
-	segment.NumOfRows = 0
-	segment.Binlogs = nil
-	segment.Statslogs = nil
-	segment.Deltalogs = nil
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-	segment.TextIndexFiles = nil
-	segment.JsonKeyIndexFiles = nil
-
-	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{}, nil).Build()
-	defer mockGetLobFiles.UnPatch()
-
-	err := validateSnapshotDataFiles(context.Background(), cm, snapshot, nil)
-	require.NoError(t, err)
-}
-
-func TestValidateSnapshotDataFiles_StorageV3RejectsEmptyManifestPrefixForNonEmptySegment(t *testing.T) {
-	tempDir := t.TempDir()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-	basePath := path.Join(tempDir, "files/insert_log/100/20/1001")
-	require.NoError(t, os.MkdirAll(basePath, os.ModePerm))
-
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV3
-	segment.ManifestPath = packed.MarshalManifestPath(basePath, 1)
-	segment.NumOfRows = 100
-	segment.Binlogs = nil
-	segment.Statslogs = nil
-	segment.Deltalogs = nil
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-	segment.TextIndexFiles = nil
-	segment.JsonKeyIndexFiles = nil
-
-	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{}, nil).Build()
-	defer mockGetLobFiles.UnPatch()
-
-	err := validateSnapshotDataFiles(context.Background(), cm, snapshot, nil)
-	require.ErrorIs(t, err, merr.ErrDataIntegrity)
-	assert.Contains(t, err.Error(), "storage v3 segment 1001 has 100 rows but no manifest objects")
+			if tc.index != "" {
+				segment.IndexFiles = []*indexpb.IndexFilePathInfo{{IndexFilePaths: []string{tc.index}}}
+			}
+			snapshot := &snapshotstorage.SnapshotData{Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+				ManifestPaths: []string{"bundle/snapshots/100/manifests/1.avro"}, Segments: []*datapb.SegmentDescription{segment}}
+			err := snapshotstorage.ValidateExternalSnapshotDataFiles(context.Background(),
+				"s3://source/bundle/snapshots/100/metadata/1.json", snapshot)
+			if tc.fail {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, snapshotstorage.ValidateExternalSnapshotDataFiles(ctx, "", createTestSnapshotData()), context.Canceled)
+	require.ErrorIs(t, snapshotstorage.ValidateExternalSnapshotDataFiles(context.Background(), "", nil), merr.ErrServiceInternal)
 }
 
 func TestValidateSnapshotDataFiles_StorageV3RejectsEmptyManifestBasePath(t *testing.T) {
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	snapshot := createTestSnapshotData()
 	segment := snapshot.Segments[0]
 	segment.StorageVersion = storage.StorageV3
@@ -1883,245 +1564,9 @@ func TestValidateSnapshotDataFiles_StorageV3RejectsEmptyManifestBasePath(t *test
 	segment.TextIndexFiles = nil
 	segment.JsonKeyIndexFiles = nil
 
-	err := validateSnapshotDataFiles(context.Background(), cm, snapshot, nil)
+	err := validateSnapshotDataFiles(context.Background(), snapshot)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "storage v3 segment 1001 requires manifest base path")
-}
-
-func TestRewriteSnapshotWithMapping_RewritesAllReferencesStrictly(t *testing.T) {
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.Binlogs = []*datapb.FieldBinlog{{
-		FieldID: 10,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/insert_log/100/10/1001/1",
-		}},
-	}}
-	segment.Statslogs = []*datapb.FieldBinlog{{
-		FieldID: 10,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/stats_log/100/10/1001/2",
-		}},
-	}}
-	segment.Deltalogs = []*datapb.FieldBinlog{{
-		FieldID: 10,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/delta_log/100/10/1001/3",
-		}},
-	}}
-	segment.Bm25Statslogs = []*datapb.FieldBinlog{{
-		FieldID: 11,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/bm25_stats_log/100/11/1001/4",
-		}},
-	}}
-	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{
-		BuildID: 7001,
-		IndexFilePaths: []string{
-			"files/index_files/100/10/1001/7001/index",
-		},
-	}}
-	segment.TextIndexFiles = map[int64]*datapb.TextIndexStats{
-		12: {
-			FieldID: 12,
-			BuildID: 7002,
-			Files: []string{
-				"files/text_index/100/12/1001/7002/posting",
-			},
-		},
-	}
-	segment.JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{
-		13: {
-			FieldID: 13,
-			BuildID: 7003,
-			Files: []string{
-				"files/json_index/100/13/1001/7003/key",
-			},
-		},
-	}
-	segment.ManifestPath = ""
-
-	mappings := map[string]string{
-		"files/insert_log/100/10/1001/1":            "exports/files/insert_log/100/10/1001/1",
-		"files/stats_log/100/10/1001/2":             "exports/files/stats_log/100/10/1001/2",
-		"files/delta_log/100/10/1001/3":             "exports/files/delta_log/100/10/1001/3",
-		"files/bm25_stats_log/100/11/1001/4":        "exports/files/bm25_stats_log/100/11/1001/4",
-		"files/index_files/100/10/1001/7001/index":  "exports/files/index_files/100/10/1001/7001/index",
-		"files/text_index/100/12/1001/7002/posting": "exports/files/text_index/100/12/1001/7002/posting",
-		"files/json_index/100/13/1001/7003/key":     "exports/files/json_index/100/13/1001/7003/key",
-	}
-
-	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, mappings, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
-	require.NoError(t, err)
-	require.Len(t, rewritten.Segments, 1)
-
-	assert.Equal(t, datapb.SnapshotLayout_SnapshotLayoutSelfContained, rewritten.Layout)
-	assert.Equal(t, "s3://bucket/exports/snapshots/100/metadata/1.json", rewritten.SnapshotInfo.GetS3Location())
-	assert.Equal(t, "exports/files/insert_log/100/10/1001/1", rewritten.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
-	assert.Equal(t, "exports/files/stats_log/100/10/1001/2", rewritten.Segments[0].GetStatslogs()[0].GetBinlogs()[0].GetLogPath())
-	assert.Equal(t, "exports/files/delta_log/100/10/1001/3", rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
-	assert.Equal(t, "exports/files/bm25_stats_log/100/11/1001/4", rewritten.Segments[0].GetBm25Statslogs()[0].GetBinlogs()[0].GetLogPath())
-	assert.Equal(t, "exports/files/index_files/100/10/1001/7001/index", rewritten.Segments[0].GetIndexFiles()[0].GetIndexFilePaths()[0])
-	assert.Equal(t, "exports/files/text_index/100/12/1001/7002/posting", rewritten.Segments[0].GetTextIndexFiles()[12].GetFiles()[0])
-	assert.Equal(t, "exports/files/json_index/100/13/1001/7003/key", rewritten.Segments[0].GetJsonKeyIndexFiles()[13].GetFiles()[0])
-	assert.Equal(t, "files/insert_log/100/10/1001/1", snapshot.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
-}
-
-func TestRewriteSnapshotWithMapping_MissingMappingFails(t *testing.T) {
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.Binlogs = []*datapb.FieldBinlog{{
-		FieldID: 10,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/insert_log/100/10/1001/1",
-		}},
-	}}
-	segment.Statslogs = nil
-	segment.Deltalogs = nil
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-	segment.TextIndexFiles = nil
-	segment.JsonKeyIndexFiles = nil
-
-	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, map[string]string{}, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
-	require.Error(t, err)
-	assert.Nil(t, rewritten)
-	assert.Contains(t, err.Error(), "missing snapshot file mapping")
-	assert.Contains(t, err.Error(), "insert binlog segment 1001 field 10")
-	assert.Contains(t, err.Error(), "files/insert_log/100/10/1001/1")
-}
-
-func TestRewriteSnapshotWithMapping_StorageV3ClearsStaleInsertBinlogs(t *testing.T) {
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV3
-	segment.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/20/1001", 1)
-	segment.Binlogs = []*datapb.FieldBinlog{{
-		FieldID: 10,
-		Binlogs: []*datapb.Binlog{{
-			LogPath: "files/insert_log/100/10/1001/stale",
-		}},
-	}}
-	segment.Statslogs = nil
-	segment.Deltalogs = nil
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-	segment.TextIndexFiles = map[int64]*datapb.TextIndexStats{
-		10: {FieldID: 10, BuildID: 20, Files: []string{"stale/text/path"}},
-	}
-	segment.JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{
-		11: {FieldID: 11, BuildID: 21, Files: []string{"stale/json/path"}},
-	}
-
-	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{
-		{
-			Path:    "files/insert_log/100/20/lobs/30/_data/lob.vx",
-			FieldID: 30,
-		},
-	}, nil).Build()
-	defer mockGetLobFiles.UnPatch()
-
-	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, map[string]string{
-		"files/insert_log/100/20/1001":                 "exports/files/insert_log/100/20/1001",
-		"files/insert_log/100/20/lobs/30/_data/lob.vx": "exports/files/insert_log/100/20/lobs/30/_data/lob.vx",
-	}, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
-	require.NoError(t, err)
-	require.Len(t, rewritten.Segments, 1)
-
-	assert.Empty(t, rewritten.Segments[0].GetBinlogs())
-	rewrittenManifestRoot, rewrittenManifestVersion, err := packed.UnmarshalManifestPath(rewritten.Segments[0].GetManifestPath())
-	require.NoError(t, err)
-	assert.Equal(t, "exports/files/insert_log/100/20/1001", rewrittenManifestRoot)
-	assert.Equal(t, int64(1), rewrittenManifestVersion)
-	assert.Equal(t, []string{"stale/text/path"}, rewritten.Segments[0].GetTextIndexFiles()[10].GetFiles())
-	assert.Equal(t, []string{"stale/json/path"}, rewritten.Segments[0].GetJsonKeyIndexFiles()[11].GetFiles())
-	assert.Equal(t, "files/insert_log/100/10/1001/stale", snapshot.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
-}
-
-func TestRewriteSnapshotWithMapping_StorageV3IgnoresMalformedStaleInsertBinlogs(t *testing.T) {
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV3
-	segment.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/20/1001", 1)
-	segment.Binlogs = []*datapb.FieldBinlog{
-		nil,
-		{
-			FieldID: 10,
-			Binlogs: []*datapb.Binlog{
-				nil,
-			},
-		},
-	}
-	segment.Statslogs = nil
-	segment.Deltalogs = nil
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-	segment.TextIndexFiles = nil
-	segment.JsonKeyIndexFiles = nil
-
-	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{}, nil).Build()
-	defer mockGetLobFiles.UnPatch()
-
-	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, map[string]string{
-		"files/insert_log/100/20/1001": "exports/files/insert_log/100/20/1001",
-	}, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
-	require.NoError(t, err)
-	require.Len(t, rewritten.Segments, 1)
-	assert.Empty(t, rewritten.Segments[0].GetBinlogs())
-	assert.Len(t, snapshot.Segments[0].GetBinlogs(), 2)
-}
-
-func TestRewriteSnapshotWithMapping_MissingStorageV3LOBMappingFails(t *testing.T) {
-	snapshot := createTestSnapshotData()
-	segment := snapshot.Segments[0]
-	segment.StorageVersion = storage.StorageV3
-	segment.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/20/1001", 1)
-	segment.Binlogs = nil
-	segment.Statslogs = nil
-	segment.Deltalogs = nil
-	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
-	segment.TextIndexFiles = nil
-	segment.JsonKeyIndexFiles = nil
-
-	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{
-		{
-			Path:    "files/insert_log/100/20/lobs/30/_data/lob.vx",
-			FieldID: 30,
-		},
-	}, nil).Build()
-	defer mockGetLobFiles.UnPatch()
-
-	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, map[string]string{
-		"files/insert_log/100/20/1001": "exports/files/insert_log/100/20/1001",
-	}, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
-	require.Error(t, err)
-	assert.Nil(t, rewritten)
-	assert.Contains(t, err.Error(), "missing snapshot file mapping")
-	assert.Contains(t, err.Error(), "storage v3 lob file segment 1001 field 30")
-	assert.Contains(t, err.Error(), "files/insert_log/100/20/lobs/30/_data/lob.vx")
-}
-
-func TestRewriteSnapshotWithMapping_RejectsNilTopLevelEntries(t *testing.T) {
-	t.Run("nil top-level index info", func(t *testing.T) {
-		snapshot := createTestSnapshotData()
-		snapshot.Indexes = []*indexpb.IndexInfo{nil}
-
-		rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, nil, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
-		require.Error(t, err)
-		assert.Nil(t, rewritten)
-		assert.Contains(t, err.Error(), "snapshot index at index 0 cannot be nil")
-	})
-
-	t.Run("nil segment", func(t *testing.T) {
-		snapshot := createTestSnapshotData()
-		snapshot.Segments = []*datapb.SegmentDescription{nil}
-
-		rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(snapshot, nil, "exports", "s3://bucket/exports/snapshots/100/metadata/1.json")
-		require.Error(t, err)
-		assert.Nil(t, rewritten)
-		assert.Contains(t, err.Error(), "snapshot segment at index 0 cannot be nil")
-	})
 }
 
 func TestValidateSnapshotObjectPathForBucket(t *testing.T) {
@@ -2559,6 +2004,22 @@ func TestRebaseSelfContainedSnapshotMetadata_LeavesUnmatchedManifestPathUnchange
 	err := snapshotstorage.RebaseSelfContainedSnapshotMetadata(metadata, "export-root", "restored/x")
 	require.NoError(t, err)
 	assert.Equal(t, manifestPath, metadata.GetStoragev2ManifestList()[0].GetManifest())
+}
+
+func TestRebaseSelfContainedSnapshotMetadata_PreservesOptionalAndUnmatchedPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name, src, oldRoot, newRoot, want string
+	}{
+		{"empty_optional", "", "old", "new", ""},
+		{"unchanged_root_uri", "s3://bucket/old/files/data", "old", "old", "s3://bucket/old/files/data"},
+		{"unmatched_uri", "s3://bucket/other/files/data", "old", "new", "s3://bucket/other/files/data"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metadata := &datapb.SnapshotMetadata{ManifestList: []string{tc.src}}
+			require.NoError(t, snapshotstorage.RebaseSelfContainedSnapshotMetadata(metadata, tc.oldRoot, tc.newRoot))
+			assert.Equal(t, []string{tc.want}, metadata.GetManifestList())
+		})
+	}
 }
 
 func TestRebaseSelfContainedSnapshotData_RewritesSegmentReferences(t *testing.T) {
@@ -3506,6 +2967,1686 @@ func TestSnapshotMetadata_FormatVersion(t *testing.T) {
 	assert.Equal(t, int32(snapshotstorage.SnapshotFormatVersion), restored.GetFormatVersion())
 }
 
+func TestSnapshotExportWholePlan_ErrorRedaction(t *testing.T) {
+	req := &datapb.SnapshotExportCopyRequest{ExternalSpec: `{"extfs":{"access_key_id":"target-key","access_key_value":"target-secret","source_sas_token":"sig=a+b"}}`, SourceStorageConfig: &indexpb.StorageConfig{SecretAccessKey: "source-secret"}}
+	reason := snapshotstorage.SanitizeSnapshotExportReason(fmt.Errorf("source-secret target-key target-secret sig=a+b sig%%3Da%%2Bb"), req)
+	require.NotContains(t, reason, "source-secret")
+	require.NotContains(t, reason, "target-secret")
+	require.NotContains(t, reason, "target-key")
+	require.NotContains(t, reason, "sig=a+b")
+	require.NotContains(t, reason, "sig%3Da%2Bb")
+	require.Empty(t, snapshotstorage.SanitizeSnapshotExportReason(nil, req))
+	for _, message := range []string{strings.Repeat("x", 2000), "x" + strings.Repeat("复制失败🙂", 200)} {
+		reason := snapshotstorage.SanitizeSnapshotExportReason(fmt.Errorf("%s source-secret", message), req)
+		require.Equal(t, message+" <redacted>", reason)
+		encoded, err := proto.Marshal(&datapb.SnapshotExportCopyResponse{Reason: reason})
+		require.NoError(t, err)
+		var decoded datapb.SnapshotExportCopyResponse
+		require.NoError(t, proto.Unmarshal(encoded, &decoded))
+		require.Equal(t, reason, decoded.GetReason())
+	}
+}
+
+type snapshotWholePlanCopier struct{}
+
+func (*snapshotWholePlanCopier) CopyCrossBucketAndGetSize(context.Context, string, string, string, string) (int64, error) {
+	return 0, merr.ErrServiceInternal
+}
+
+func (c *snapshotWholePlanCopier) CopyCrossBucket(ctx context.Context, sourceBucket, sourcePath, targetBucket, targetPath string) error {
+	_, err := c.CopyCrossBucketAndGetSize(ctx, sourceBucket, sourcePath, targetBucket, targetPath)
+	return err
+}
+
+func mockSnapshotLocalCopy(t *testing.T, source, target storage.ChunkManager) *atomic.Int64 {
+	t.Helper()
+	copies := &atomic.Int64{}
+	patch := mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(ctx context.Context, _, src, _, dst string) (int64, error) {
+		copies.Add(1)
+		data, err := source.Read(ctx, src)
+		if err != nil {
+			return 0, err
+		}
+		return int64(len(data)), target.Write(ctx, dst, data)
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	return copies
+}
+
+// Persist the caller's snapshot and build matching worker inputs. Tests keep
+// file creation, fault injection, execution and publication assertions explicit.
+func snapshotExportFixture(t *testing.T, ctx context.Context, source, target storage.ChunkManager, snapshot *snapshotstorage.SnapshotData, cfg *indexpb.StorageConfig) (*datapb.SnapshotExportCopyRequest, *snapshotstorage.ResolvedForeignStorage) {
+	t.Helper()
+	metadata, _, err := snapshotstorage.NewSnapshotWriter(source).SaveToRootWithSize(ctx, snapshot, source.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	require.NoError(t, err)
+	req := &datapb.SnapshotExportCopyRequest{JobId: 1, TaskId: 1, GenerationId: 100,
+		SnapshotId: snapshot.SnapshotInfo.GetId(), CollectionId: snapshot.SnapshotInfo.GetCollectionId(), SegmentEnd: int64(len(snapshot.Segments)),
+		SnapshotMetadataPath: metadata, TargetUri: target.RootPath(), SourceStorageConfig: cfg}
+	return req, &snapshotstorage.ResolvedForeignStorage{ForeignCM: target, ForeignBucket: cfg.GetBucketName(), ForeignStorageConfig: cfg, Copier: &snapshotWholePlanCopier{}}
+}
+
+func TestSnapshotExportPreparation(t *testing.T) {
+	for _, mode := range []string{"success", "v2 metadata", "missing source", "wrong identity", "manifest read failure", "copy failure", "manifest encode failure", "missing data", "partial failure", "canceled", "cancel after decode"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			source := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			target := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			snapshot := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "snapshot"}, Collection: &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "collection"}}}
+			file := path.Join(source.RootPath(), "data")
+			require.NoError(t, source.Write(ctx, file, []byte("payload")))
+			snapshot.Segments = []*datapb.SegmentDescription{{SegmentId: 1001, PartitionId: 1, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: file}}}}}}
+			if mode == "v2 metadata" {
+				segment := snapshot.Segments[0]
+				segment.StorageVersion = storage.StorageV2
+				segment.ManifestPath = path.Join(source.RootPath(), "native-manifest")
+				require.NoError(t, source.Write(ctx, segment.ManifestPath, []byte("native metadata excluded from statistics")))
+			}
+			req, resolved := snapshotExportFixture(t, ctx, source, target, snapshot, &indexpb.StorageConfig{})
+			if mode == "partial failure" {
+				second := path.Join(source.RootPath(), "data2")
+				snapshot.Segments[0].Binlogs[0].Binlogs = append(snapshot.Segments[0].Binlogs[0].Binlogs, &datapb.Binlog{LogPath: second})
+				_, _, err := snapshotstorage.NewSnapshotWriter(source).SaveToRootWithSize(ctx, snapshot, source.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+				require.NoError(t, err)
+				require.NoError(t, target.Write(ctx, path.Join(snapshotstorage.SnapshotExportAttemptURI(req), "files/data"), []byte("payload")))
+			}
+			var copies atomic.Int64
+			defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+				src := srcObject
+				dst := dstObject
+				copies.Add(1)
+				if mode == "copy failure" || mode == "partial failure" && path.Base(src) == "data2" {
+					return 0, merr.ErrIoTooManyRequests
+				}
+				data, err := source.Read(ctx, src)
+				if err != nil {
+					return 0, err
+				}
+				return int64(len(data)), target.Write(ctx, dst, data)
+			}).Build().UnPatch()
+			switch mode {
+			case "manifest read failure":
+				defer mockey.Mock((*storage.LocalChunkManager).Read).To(func(_ context.Context, key string) ([]byte, error) {
+					if strings.HasSuffix(key, ".avro") {
+						return nil, merr.ErrIoPermissionDenied
+					}
+					return os.ReadFile(key)
+				}).Build().UnPatch()
+			case "cancel after decode":
+				var parse func([]byte, int) (*datapb.SegmentDescription, error)
+				defer mockey.Mock(snapshotio.ParseSegmentManifest).Origin(&parse).To(func(data []byte, version int) (*datapb.SegmentDescription, error) {
+					segment, err := parse(data, version)
+					cancel()
+					return segment, err
+				}).Build().UnPatch()
+			case "manifest encode failure":
+				defer mockey.Mock(snapshotio.MarshalSegmentManifest).Return(nil, merr.ErrServiceUnavailable).Build().UnPatch()
+			case "missing source":
+				req.SnapshotMetadataPath += ".missing"
+			case "wrong identity":
+				req.SnapshotId++
+			case "missing data":
+				require.NoError(t, source.Remove(ctx, path.Join(source.RootPath(), "data")))
+			case "canceled":
+				cancel()
+			}
+			var reported, reportedBytes int64
+			result, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, source, resolved, make(chan struct{}, 1), func(copied, copiedBytes, total int64) {
+				reported = copied
+				reportedBytes = copiedBytes
+			})
+			_, finalPath := snapshotstorage.GetSnapshotPaths(snapshotstorage.SnapshotExportAttemptURI(req), 100, 1)
+			exists, readErr := target.Exist(context.Background(), finalPath)
+			require.NoError(t, readErr)
+			require.False(t, exists, "DataNode must never publish final metadata")
+			if mode != "success" && mode != "v2 metadata" {
+				require.Error(t, err)
+				if mode == "cancel after decode" {
+					require.ErrorIs(t, err, context.Canceled)
+					require.Zero(t, copies.Load(), "cancellation before planning must prevent object copies")
+				}
+				if mode == "partial failure" {
+					data, readErr := target.Read(ctx, path.Join(snapshotstorage.SnapshotExportAttemptURI(req), "files/data"))
+					require.NoError(t, readErr)
+					require.Equal(t, "payload", string(data), "failed export must retain confirmed writes and existing objects")
+				}
+				if mode == "manifest read failure" {
+					require.Zero(t, copies.Load())
+					require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.EqualValues(t, copies.Load()+1, result.GetTotalFiles())
+			require.Equal(t, result.GetTotalFiles(), reported)
+			require.Equal(t, result.GetCopiedBytes(), reportedBytes)
+			require.EqualValues(t, len("payload"), result.GetCopiedBytes())
+			staged := snapshotstorage.GetSnapshotStagingMetadataPath(snapshotstorage.SnapshotExportAttemptURI(req))
+			exists, err = target.Exist(ctx, staged)
+			require.NoError(t, err)
+			require.False(t, exists, "range workers must not prepare staging metadata")
+			other := proto.Clone(req).(*datapb.SnapshotExportCopyRequest)
+			other.GenerationId++
+			require.NotEqual(t, snapshotstorage.SnapshotExportAttemptURI(req), snapshotstorage.SnapshotExportAttemptURI(other))
+		})
+	}
+}
+
+func TestSnapshotExportCopyTimeSizes(t *testing.T) {
+	for _, mode := range []string{"success", "data failure", "metadata failure", "negative size", "size overflow"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			a, b := path.Join(cm.RootPath(), "a"), path.Join(cm.RootPath(), "b")
+			snapshot := &snapshotstorage.SnapshotData{
+				SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100},
+				Collection:   &datapb.CollectionDescription{},
+				Segments: []*datapb.SegmentDescription{{SegmentId: 1, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{
+					{LogPath: a, LogSize: 999}, {LogPath: b, LogSize: 999},
+				}}}}},
+			}
+			snapshot.ManifestPaths = []string{path.Join(cm.RootPath(), "1.avro")}
+			snapshot.ManifestFormatVersion = snapshotstorage.SnapshotFormatVersion
+			// Referenced objects need not be accessed until their copy operation starts.
+			defer mockey.Mock((*storage.LocalChunkManager).Size).To(func(context.Context, string) (int64, error) {
+				t.Error("preparation must not query object sizes")
+				return 0, merr.ErrIoKeyNotFound
+			}).Build().UnPatch()
+			cfg := &indexpb.StorageConfig{Address: "s3.us-west-2.amazonaws.com", BucketName: "target", CloudProvider: objectstorage.CloudProviderAWS, Region: "us-west-2", UseSSL: true}
+			items, err := snapshotstorage.BuildSnapshotExportFilesForTest(ctx, cm, cm, "source", "target", snapshot, "s3://target/export", cfg, cfg)
+			require.NoError(t, err)
+			require.Len(t, items, 3)
+			var copied, completed int64
+			defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucket).To(func(_ *snapshotWholePlanCopier, _ context.Context, srcBucket, src, dstBucket, dst string) error {
+				require.Equal(t, snapshot.ManifestPaths[0], src)
+				require.Equal(t, "source", srcBucket)
+				require.Equal(t, "target", dstBucket)
+				if mode == "metadata failure" {
+					return merr.ErrIoPermissionDenied
+				}
+				return nil
+			}).Build().UnPatch()
+			copy := mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(_ *snapshotWholePlanCopier, _ context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+				src := srcObject
+				dst := dstObject
+				require.Equal(t, "source", srcBucket)
+				require.Equal(t, "target", dstBucket)
+				require.NotEqual(t, snapshot.ManifestPaths[0], src, "metadata uses unsized copy")
+				require.Contains(t, dst, "export/files/")
+				if mode == "negative size" {
+					return -1, nil
+				}
+				if mode == "size overflow" {
+					return math.MaxInt64, nil
+				}
+				if src == a {
+					return int64(7), nil
+				}
+				require.Equal(t, b, src)
+				require.EqualValues(t, 1, completed, "copy starts before querying later objects")
+				if mode == "data failure" {
+					return int64(100), merr.ErrIoKeyNotFound
+				}
+				return 0, nil // Empty objects count as successfully copied files.
+			}).Build()
+			defer copy.UnPatch()
+			err = snapshotstorage.CopySnapshotExportPlan(ctx, items, "source", "target", &snapshotWholePlanCopier{}, make(chan struct{}, 1), func(size int64) { copied += size; completed++ })
+			if mode == "negative size" || mode == "size overflow" {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				return
+			}
+			require.EqualValues(t, 7, copied)
+			if mode == "data failure" {
+				require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+				require.EqualValues(t, 1, completed)
+			} else if mode == "metadata failure" {
+				require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+				require.EqualValues(t, 2, completed, "failed metadata copies do not report completion")
+			} else {
+				require.NoError(t, err)
+				require.EqualValues(t, 3, completed)
+			}
+		})
+	}
+}
+
+func TestSnapshotExportRewrittenV6Manifests(t *testing.T) {
+	for _, version := range []int32{0, 1, 2, 3, 4, 5} {
+		for _, legacyBundle := range []bool{false, true} {
+			t.Run(fmt.Sprintf("version=%d/legacy_bundle=%t", version, legacyBundle), func(t *testing.T) {
+				ctx := context.Background()
+				root := t.TempDir()
+				sourceRoot := path.Join(root, "source")
+				source := storage.NewLocalChunkManager(objectstorage.RootPath(sourceRoot))
+				target := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+				dataRoot := sourceRoot
+				layout := datapb.SnapshotLayout_SnapshotLayoutReferenced
+				if legacyBundle {
+					dataRoot = path.Join(sourceRoot, "files")
+					layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
+				}
+				file := path.Join(dataRoot, "insert/data")
+				require.NoError(t, source.Write(ctx, file, []byte("payload")))
+				segment := &datapb.SegmentDescription{SegmentId: 1001, PartitionId: 1,
+					Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: file, LogID: 1}}}},
+				}
+				schema, err := snapshotio.ManifestSchemaByVersion(int(version))
+				require.NoError(t, err)
+				rawManifest, err := avro.Marshal(schema, snapshotio.SegmentToManifestEntry(segment))
+				require.NoError(t, err)
+				manifestDir, metadataPath := snapshotstorage.GetSnapshotPaths(sourceRoot, 100, 1)
+				manifestPath := snapshotstorage.GetSegmentManifestPath(manifestDir, 1001)
+				require.NoError(t, source.Write(ctx, manifestPath, rawManifest))
+				metadata := &datapb.SnapshotMetadata{FormatVersion: version, Layout: layout,
+					SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, S3Location: metadataPath, PinIds: []int64{10}},
+					Collection:   &datapb.CollectionDescription{}, ManifestList: []string{manifestPath}, SegmentIds: []int64{1001},
+				}
+				data, err := protojson.Marshal(metadata)
+				require.NoError(t, err)
+				require.NoError(t, source.Write(ctx, metadataPath, data))
+				if legacyBundle {
+					// Re-export uses the actual root after a legacy bundle moves.
+					movedSource := path.Join(root, "moved-source")
+					require.NoError(t, os.Rename(sourceRoot, movedSource))
+					_, metadataPath = snapshotstorage.GetSnapshotPaths(movedSource, 100, 1)
+				}
+				mockSnapshotLocalCopy(t, source, target)
+				for generation := 0; generation < 2; generation++ {
+					snapshot, err := snapshotstorage.NewSnapshotReader(source).ReadSnapshot(ctx, metadataPath, true)
+					require.NoError(t, err)
+					original := proto.Clone(snapshot.Segments[0])
+					destination := path.Join(root, fmt.Sprintf("export-%d", generation))
+					plan, err := snapshotstorage.BuildSnapshotExportPlanForTest(ctx, source, target, "bucket", "bucket", snapshot, destination, &indexpb.StorageConfig{}, nil)
+					require.NoError(t, err)
+					require.Len(t, plan.Items, 2, "data and generated Avro are both counted")
+					// The decoded records are sufficient; source Avro is not reread/copied.
+					require.NoError(t, source.Remove(ctx, snapshot.ManifestPaths[0]))
+					var copiedBytes atomic.Int64
+					require.NoError(t, snapshotstorage.CopySnapshotExportPlanForTest(ctx, plan, "bucket", "bucket", &snapshotWholePlanCopier{}, target, make(chan struct{}, 2), func(size int64) { copiedBytes.Add(size) }))
+					require.EqualValues(t, len("payload"), copiedBytes.Load())
+					err = snapshotstorage.PrepareSnapshotExportMetadataForTest(ctx, target, snapshot, plan.SnapshotExportPlan)
+					require.NoError(t, err)
+					require.True(t, proto.Equal(original, snapshot.Segments[0]), "export must not mutate the source segment")
+					staging := snapshotstorage.GetSnapshotStagingMetadataPath(destination)
+					staged, err := target.Read(ctx, staging)
+					require.NoError(t, err)
+					prepared, err := snapshotio.ParseSnapshotMetadata(staged)
+					require.NoError(t, err)
+					require.EqualValues(t, snapshotio.SnapshotFormatVersion, prepared.GetFormatVersion())
+					require.Empty(t, prepared.GetSnapshotInfo().GetPinIds())
+					_, err = snapshotstorage.NewSnapshotWriter(target).CommitStagedMetadata(ctx, staging, plan.MetadataURI, plan.MetadataURI)
+					require.NoError(t, err)
+					copiedManifest, err := target.Read(ctx, plan.ManifestPaths[0])
+					require.NoError(t, err)
+					require.NotEqual(t, rawManifest, copiedManifest)
+					written, err := snapshotio.ParseSegmentManifest(copiedManifest, snapshotio.SnapshotFormatVersion)
+					require.NoError(t, err)
+					require.Equal(t, path.Join(destination, "files/insert/data"), written.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+					moved := path.Join(root, fmt.Sprintf("moved-%d", generation))
+					require.NoError(t, os.Rename(destination, moved))
+					_, metadataPath = snapshotstorage.GetSnapshotPaths(moved, 100, 1)
+					restored, err := snapshotstorage.NewSnapshotReader(target).ReadSnapshot(ctx, metadataPath, true)
+					require.NoError(t, err)
+					resolved := restored.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath()
+					require.Equal(t, path.Join(moved, "files/insert/data"), resolved)
+					payload, err := target.Read(ctx, resolved)
+					require.NoError(t, err)
+					require.Equal(t, "payload", string(payload))
+				}
+			})
+		}
+	}
+}
+
+func manifestReadFixture(t *testing.T, count int) (*storage.LocalChunkManager, string, []string) {
+	t.Helper()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	snapshot := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}}
+	for i := 0; i < count; i++ {
+		snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{SegmentId: int64(i + 1)})
+		snapshot.SegmentIDs = append(snapshot.SegmentIDs, int64(i+1))
+	}
+	metadata, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(context.Background(), snapshot, cm.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	require.NoError(t, err)
+	manifestDir, _ := snapshotstorage.GetSnapshotPaths(cm.RootPath(), 100, 1)
+	paths := make([]string, count)
+	for i := range paths {
+		paths[i] = snapshotstorage.GetSegmentManifestPath(manifestDir, int64(i+1))
+	}
+	return cm, metadata, paths
+}
+
+type manifestReadResult struct {
+	snapshot *snapshotstorage.SnapshotData
+	err      error
+}
+
+func startManifestRead(ctx context.Context, reader *snapshotstorage.SnapshotReader, metadata string) <-chan manifestReadResult {
+	done := make(chan manifestReadResult, 1)
+	go func() {
+		snapshot, err := reader.ReadSnapshot(ctx, metadata, true)
+		done <- manifestReadResult{snapshot, err}
+	}()
+	return done
+}
+
+func TestSnapshotReader_ManifestReadsShareCopyPermits(t *testing.T) {
+	cm, metadata, _ := manifestReadFixture(t, 4)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	permits := make(chan struct{}, 2)
+	copyStarted, releaseCopy := make(chan struct{}), make(chan struct{})
+	readStarted, releaseReads := make(chan struct{}, 8), make(chan struct{})
+	var active, maximum atomic.Int64
+	enter := func() {
+		n := active.Add(1)
+		for old := maximum.Load(); n > old && !maximum.CompareAndSwap(old, n); old = maximum.Load() {
+		}
+	}
+	defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+		enter()
+		defer active.Add(-1)
+		close(copyStarted)
+		select {
+		case <-releaseCopy:
+			return int64(1), nil
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}).Build().UnPatch()
+	defer mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, key string) ([]byte, error) {
+		if strings.HasSuffix(key, ".avro") {
+			enter()
+			defer active.Add(-1)
+			readStarted <- struct{}{}
+			select {
+			case <-releaseReads:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return os.ReadFile(key)
+	}).Build().UnPatch()
+	copyDone := make(chan error, 1)
+	go func() {
+		copyDone <- snapshotstorage.CopySnapshotExportPlan(ctx, []snapshotstorage.FileCopy{{SourcePath: "source", DestinationPath: "target"}}, "source", "target", &snapshotWholePlanCopier{}, permits, nil)
+	}()
+	awaitSnapshotEvent(t, copyStarted)
+	reader := snapshotstorage.NewSnapshotReader(cm, snapshotstorage.WithManifestReadPermits(permits))
+	first, second := startManifestRead(ctx, reader, metadata), startManifestRead(ctx, reader, metadata)
+	awaitSnapshotEvent(t, readStarted)
+	assertSnapshotBlocked(t, readStarted)
+	close(releaseReads)
+	require.NoError(t, awaitSnapshotEvent(t, first).err)
+	require.NoError(t, awaitSnapshotEvent(t, second).err)
+	require.Len(t, permits, 1, "only the blocked copy still owns a permit")
+	close(releaseCopy)
+	require.NoError(t, awaitSnapshotEvent(t, copyDone))
+	require.EqualValues(t, 2, maximum.Load())
+	require.Zero(t, active.Load())
+	require.Empty(t, permits)
+}
+
+func TestSnapshotReader_ConcurrentManifestFailure(t *testing.T) {
+	for _, mode := range []string{"read failure", "decode failure", "cancel reading", "cancel waiting"} {
+		t.Run(mode, func(t *testing.T) {
+			cm, metadata, paths := manifestReadFixture(t, 50)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			permits := make(chan struct{}, 2)
+			if mode == "cancel waiting" {
+				permits <- struct{}{}
+				permits <- struct{}{}
+			}
+			started := make(chan struct{}, 2)
+			peerStarted := make(chan struct{})
+			var peerOnce sync.Once
+			var calls, active atomic.Int64
+			defer mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, key string) ([]byte, error) {
+				if !strings.HasSuffix(key, ".avro") {
+					return os.ReadFile(key)
+				}
+				calls.Add(1)
+				active.Add(1)
+				defer active.Add(-1)
+				if mode == "cancel reading" || mode == "cancel waiting" {
+					started <- struct{}{}
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
+				if key == paths[0] {
+					select {
+					case <-peerStarted:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+					if mode == "read failure" {
+						return nil, merr.ErrIoPermissionDenied
+					}
+					return []byte("invalid Avro"), nil
+				}
+				peerOnce.Do(func() { close(peerStarted) })
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}).Build().UnPatch()
+			done := startManifestRead(ctx, snapshotstorage.NewSnapshotReader(cm, snapshotstorage.WithManifestReadPermits(permits)), metadata)
+			if mode == "cancel reading" {
+				for i := 0; i < 2; i++ {
+					awaitSnapshotEvent(t, started)
+				}
+				cancel()
+			} else if mode == "cancel waiting" {
+				assertSnapshotBlocked(t, started)
+				cancel()
+			}
+			result := awaitSnapshotEvent(t, done)
+			require.Nil(t, result.snapshot)
+			switch mode {
+			case "read failure":
+				require.ErrorIs(t, result.err, merr.ErrIoPermissionDenied)
+				require.ErrorContains(t, result.err, paths[0])
+			case "decode failure":
+				require.ErrorIs(t, result.err, merr.ErrDataIntegrity)
+				require.ErrorContains(t, result.err, paths[0])
+			default:
+				require.ErrorIs(t, result.err, context.Canceled)
+			}
+			require.Zero(t, active.Load(), "all workers must exit before ReadSnapshot returns")
+			if mode == "cancel waiting" {
+				require.Zero(t, calls.Load())
+				require.Len(t, permits, 2, "other operations retain their permits")
+			} else {
+				require.EqualValues(t, 2, calls.Load())
+				require.Empty(t, permits)
+			}
+		})
+	}
+}
+
+func TestSnapshotReader_CancellationWaitsForManifestDecode(t *testing.T) {
+	cm, metadata, _ := manifestReadFixture(t, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	permits := make(chan struct{}, 1)
+	decoding, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	defer mockey.Mock(snapshotio.ParseSegmentManifest).To(func([]byte, int) (*datapb.SegmentDescription, error) {
+		close(decoding)
+		<-release
+		return &datapb.SegmentDescription{SegmentId: 1}, nil
+	}).Build().UnPatch()
+	done := startManifestRead(ctx, snapshotstorage.NewSnapshotReader(cm, snapshotstorage.WithManifestReadPermits(permits)), metadata)
+	awaitSnapshotEvent(t, decoding)
+	cancel()
+	assertSnapshotBlocked(t, done)
+	require.Len(t, permits, 1, "decode is included in the permit lifetime")
+	once.Do(func() { close(release) })
+	result := awaitSnapshotEvent(t, done)
+	require.ErrorIs(t, result.err, context.Canceled)
+	require.Nil(t, result.snapshot)
+	require.Empty(t, permits)
+}
+
+// Exercise native manifest serialization and LOB production, then read the
+// unchanged manifest after copying and relocating two generations of bundles.
+func TestSnapshotExportNativeManifestInventory(t *testing.T) {
+	for _, tc := range []struct {
+		marker   *bool
+		avroWins bool
+	}{{nil, false}, {nil, true}, {proto.Bool(false), false}, {proto.Bool(false), true}, {proto.Bool(true), false}, {proto.Bool(true), true}} {
+		t.Run(fmt.Sprintf("marker-%v/avro-wins-%t", tc.marker, tc.avroWins), func(t *testing.T) {
+			marker, avroWins := tc.marker, tc.avroWins
+			paramtable.Init()
+			ctx := context.Background()
+			root := t.TempDir()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(path.Join(root, "source")))
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: cm.RootPath()}
+			base := path.Join(cm.RootPath(), "insert_log/100/1/1001")
+			lobRoot := path.Join(cm.RootPath(), "insert_log/100/1/lobs/100")
+			schema := arrow.NewSchema([]arrow.Field{{Name: "100", Type: arrow.BinaryTypes.String, Metadata: arrow.NewMetadata([]string{packed.ArrowFieldIdMetadataKey}, []string{"100"})}}, nil)
+			writer, err := packed.NewFFISegmentWriter(schema, &packed.SegmentWriterConfig{
+				SegmentPath: base, WriterFormat: "parquet",
+				TextColumns: []packed.TextColumnConfig{{FieldID: 100, LobBasePath: lobRoot, InlineThreshold: 1,
+					MaxLobFileBytes: 1 << 20, FlushThresholdBytes: 1024}},
+			}, cfg, nil)
+			require.NoError(t, err)
+			builder := array.NewStringBuilder(memory.DefaultAllocator)
+			defer builder.Release()
+			text := strings.Repeat("snapshot-lob", 1024)
+			builder.Append(text)
+			values := builder.NewArray()
+			defer values.Release()
+			record := array.NewRecord(schema, []arrow.Array{values}, 1)
+			defer record.Release()
+			require.NoError(t, writer.Write(record))
+			output, err := writer.Close()
+			require.NoError(t, err)
+			defer output.Destroy()
+			stat := path.Join(base, "_stats/text.100/first")
+			delta := path.Join(base, "_delta/first")
+			indexRoot := path.Join(cm.RootPath(), "index_v1/100/1/1001/500/1")
+			indexRelative, err := packed.ManifestIndexRelativePath(base, indexRoot)
+			require.NoError(t, err)
+			for _, file := range []string{stat, delta, path.Join(indexRoot, "index.bin"), path.Join(base, "unreferenced")} {
+				require.NoError(t, cm.Write(ctx, file, []byte(file)))
+			}
+			manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{
+				NewFiles: output, DeltaLogs: []packed.DeltaLogEntry{{Path: delta, NumEntries: 1}},
+				Stats: []packed.StatEntry{{Key: "text.100", Files: []string{stat}}},
+				Indexes: []packed.ManifestIndexInfo{{Path: indexRelative, ColumnName: "100", IndexName: "idx", IndexType: "INVERTED",
+					FieldID: 100, IndexID: 10, BuildID: 500, IndexVersion: 1, NumRows: 1,
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+					IndexFileKeys:         []string{"index.bin"}}},
+			})
+			require.NoError(t, err)
+			_, version, err := packed.UnmarshalManifestPath(manifest)
+			require.NoError(t, err)
+			_, err = packed.CommitManifestUpdates(base, version, cfg, &packed.ManifestUpdates{
+				Stats: []packed.StatEntry{{Key: "text.100", Files: []string{path.Join(base, "unreferenced")}}},
+			})
+			require.NoError(t, err)
+			original, err := packed.ReadManifestFiles(manifest, cfg)
+			require.NoError(t, err)
+			require.NotEmpty(t, original.ColumnFiles)
+			require.NotEmpty(t, original.LobFiles)
+			manifestBytes, err := cm.Read(ctx, original.ManifestFile)
+			require.NoError(t, err)
+			legacyStat := path.Join(cm.RootPath(), "stats_log/100/1/1001/100/10")
+			avroIndex := path.Join(cm.RootPath(), "index_files/600/1/100/1001/legacy.idx")
+			for _, file := range []string{legacyStat, avroIndex} {
+				require.NoError(t, cm.Write(ctx, file, []byte(file)))
+			}
+			snapshot := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{},
+				Indexes: []*indexpb.IndexInfo{{IndexID: 10}},
+				Segments: []*datapb.SegmentDescription{{SegmentId: 1001, PartitionId: 1, StorageVersion: storage.StorageV3, ManifestHasIndex: marker, NumOfRows: 1, ManifestPath: manifest,
+					Binlogs:           []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "stale/insert"}}}},
+					Statslogs:         []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: legacyStat}}}},
+					TextIndexFiles:    map[int64]*datapb.TextIndexStats{100: {Files: []string{"manifest-owned/text"}}},
+					JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{101: {Files: []string{"manifest-owned/json"}}},
+					IndexFiles:        []*indexpb.IndexFilePathInfo{{IndexID: 10, BuildID: 600, IndexName: "idx", IndexFilePaths: []string{avroIndex}}},
+				}}}
+			if !avroWins {
+				snapshot.Segments[0].IndexFiles = nil
+			}
+			metadata, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, snapshot, cm.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			require.NoError(t, err)
+			mockSnapshotLocalCopy(t, cm, cm)
+			walk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).Return(merr.ErrServiceInternal).Build()
+			defer walk.UnPatch()
+			for generation := 0; generation < 2; generation++ {
+				source, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, metadata, true)
+				require.NoError(t, err)
+				bundle := path.Join(root, fmt.Sprintf("bundle-%d", generation))
+				before := proto.Clone(source.Segments[0])
+				plan, err := snapshotstorage.BuildSnapshotExportPlanForTest(ctx, cm, cm, "bucket", "bucket", source, bundle, cfg, cfg)
+				require.NoError(t, err)
+				require.True(t, proto.Equal(before, source.Segments[0]), "planning must not mutate the source segment")
+				var hasLegacyStat, hasAvroIndex bool
+				for _, item := range plan.Items {
+					hasLegacyStat = hasLegacyStat || strings.HasSuffix(item.SourcePath, "stats_log/100/1/1001/100/10")
+					hasAvroIndex = hasAvroIndex || strings.HasSuffix(item.SourcePath, "legacy.idx")
+					require.NotContains(t, item.SourcePath, "unreferenced")
+					require.NotContains(t, item.SourcePath, "manifest-2.avro")
+				}
+				require.True(t, hasLegacyStat)
+				require.Equal(t, avroWins, hasAvroIndex)
+				require.NoError(t, snapshotstorage.CopySnapshotExportPlanForTest(ctx, plan, "bucket", "bucket", &snapshotWholePlanCopier{}, cm, make(chan struct{}, 2), nil))
+				err = snapshotstorage.PrepareSnapshotExportMetadataForTest(ctx, cm, source, plan.SnapshotExportPlan)
+				require.NoError(t, err)
+				_, err = snapshotstorage.NewSnapshotWriter(cm).CommitStagedMetadata(ctx, snapshotstorage.GetSnapshotStagingMetadataPath(bundle), plan.MetadataURI, plan.MetadataURI)
+				require.NoError(t, err)
+				moved := path.Join(root, fmt.Sprintf("moved-%d", generation))
+				if generation == 0 {
+					// A nested destination must not apply the old root twice.
+					moved = path.Join(bundle, "nested")
+					temporary := path.Join(root, "relocating")
+					require.NoError(t, os.Rename(bundle, temporary))
+					require.NoError(t, os.MkdirAll(bundle, 0o755))
+					require.NoError(t, os.Rename(temporary, moved))
+				} else {
+					require.NoError(t, os.Rename(bundle, moved))
+				}
+				_, err = cm.Read(ctx, plan.MetadataURI)
+				require.Error(t, err, "old metadata must be unavailable after relocation")
+				_, metadata = snapshotstorage.GetSnapshotPaths(moved, 100, 1)
+				got, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, metadata, true)
+				require.NoError(t, err)
+				segment := got.Segments[0]
+				require.Empty(t, segment.GetBinlogs())
+				require.Equal(t, []string{"manifest-owned/text"}, segment.TextIndexFiles[100].Files)
+				require.Equal(t, []string{"manifest-owned/json"}, segment.JsonKeyIndexFiles[101].Files)
+				infos, _, err := packed.ExploreFilesReturnManifestPath(nil, "milvus-table", path.Join(root, "explore"), metadata,
+					&indexpb.StorageConfig{StorageType: "local", BucketName: root, RootPath: root}, packed.ExternalSpecContext{Spec: `{"format":"milvus-table"}`})
+				require.NoError(t, err)
+				require.Len(t, infos, 1)
+				require.Equal(t, segment.GetManifestPath(), infos[0].FilePath, "Restore and milvus-table resolve the same native entry point")
+				files, err := packed.ReadManifestFiles(got.Segments[0].GetManifestPath(), cfg)
+				require.NoError(t, err)
+				copiedManifest, err := cm.Read(ctx, files.ManifestFile)
+				require.NoError(t, err)
+				require.Equal(t, manifestBytes, copiedManifest)
+				paths := append(append(append([]string{}, files.ColumnFiles...), files.DeltaFiles...), files.StatsFiles...)
+				for _, lob := range files.LobFiles {
+					paths = append(paths, lob.Path)
+				}
+				for _, index := range files.Indexes {
+					exists, err := cm.Exist(ctx, path.Join(index.Path, index.IndexFileKeys[0]))
+					require.NoError(t, err)
+					require.False(t, exists, "native-only index must not be exported even when Avro is empty")
+				}
+				for _, file := range paths {
+					require.True(t, strings.HasPrefix(file, moved+"/files/"), file)
+					_, err := cm.Read(ctx, file)
+					require.NoError(t, err, file)
+				}
+				reader, err := packed.NewFFISegmentReader(got.Segments[0].GetManifestPath(), schema, []string{"100"}, 1024, cfg,
+					[]packed.TextColumnConfig{{FieldID: 100, LobBasePath: path.Join(moved, "files/insert_log/100/1/lobs/100")}})
+				require.NoError(t, err)
+				read, err := reader.ReadNext()
+				require.NoError(t, err)
+				require.Equal(t, text, read.Column(0).(*array.String).Value(0))
+				require.NoError(t, reader.Close())
+				if generation == 0 {
+					require.NoError(t, os.RemoveAll(cm.RootPath()))
+				}
+				if generation == 1 {
+					// A manifest reference to a missing object must fail copying; it
+					// must not disappear silently as it would from a directory walk.
+					missing := files.ColumnFiles[0]
+					if avroWins {
+						missing = got.Segments[0].IndexFiles[0].IndexFilePaths[0]
+					}
+					require.NoError(t, cm.Remove(ctx, missing))
+					req := &datapb.SnapshotExportCopyRequest{TaskId: 3, GenerationId: 100, SegmentEnd: 1, SnapshotId: 1, CollectionId: 100, SnapshotMetadataPath: metadata,
+						SourceStorageConfig: cfg, TargetUri: path.Join(root, "missing-object")}
+					result, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, cm,
+						&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: cfg, Copier: &snapshotWholePlanCopier{}}, make(chan struct{}, 2), nil)
+					require.Error(t, err)
+					require.Nil(t, result)
+					exists, err := cm.Exist(ctx, snapshotstorage.GetSnapshotStagingMetadataPath(snapshotstorage.SnapshotExportAttemptURI(req)))
+					require.NoError(t, err)
+					require.False(t, exists)
+				}
+			}
+		})
+	}
+}
+
+func TestSnapshotExportManifestInventoryValidation(t *testing.T) {
+	for _, mode := range []string{"native", "empty-nonempty-segment", "lob-outside-partition", "reference-outside-root", "frozen empty inventory"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			base := path.Join(cm.RootPath(), "insert_log/100/1/1001")
+			snapshot := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}, Indexes: []*indexpb.IndexInfo{{IndexID: 0}},
+				Segments: []*datapb.SegmentDescription{{SegmentId: 1001, StorageVersion: storage.StorageV3, ManifestHasIndex: proto.Bool(true), NumOfRows: 1, ManifestPath: packed.MarshalManifestPath(base, 1)}}}
+			if mode == "frozen empty inventory" {
+				snapshot.Segments[0].NumOfRows = 0
+			}
+			metadata, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, snapshot, cm.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			require.NoError(t, err)
+			files := &packed.ManifestFiles{ManifestFile: path.Join(base, "_metadata/manifest-1.avro")}
+			var readErr error
+			switch mode {
+			case "frozen empty inventory":
+				files = &packed.ManifestFiles{}
+			case "native":
+				readErr = merr.ErrServiceUnavailable
+			case "empty-nonempty-segment":
+				files.ManifestFile = ""
+			case "lob-outside-partition":
+				files.LobFiles = []packed.LobFileInfo{{Path: path.Join(cm.RootPath(), "insert_log/100/2/lobs/100/lob"), FieldID: 100}}
+			case "reference-outside-root":
+				files.ColumnFiles = []string{path.Join(path.Dir(cm.RootPath()), "outside/data")}
+			}
+			cfg := &indexpb.StorageConfig{BucketName: "source", RootPath: "frozen-root", AccessKeyID: "frozen-key"}
+			calls := 0
+			defer mockey.Mock(packed.ReadManifestFiles).To(func(_ string, config *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+				require.Same(t, cfg, config, "worker must use the frozen source configuration")
+				calls++
+				return files, readErr
+			}).Build().UnPatch()
+			var copies atomic.Int64
+			defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(_ context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+				copies.Add(1)
+				return int64(1), nil
+			}).Build().UnPatch()
+			req := &datapb.SnapshotExportCopyRequest{TaskId: 2, GenerationId: 100, SegmentEnd: 1, SnapshotId: 1, CollectionId: 100, SnapshotMetadataPath: metadata, SourceStorageConfig: cfg, TargetUri: path.Join(cm.RootPath(), "target")}
+			result, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, cm, &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: &snapshotWholePlanCopier{}}, make(chan struct{}, 2), nil)
+			require.Equal(t, 1, calls, "reuse the pinned native inventory for LOB validation")
+			if mode == "frozen empty inventory" {
+				require.NoError(t, err)
+				require.EqualValues(t, 1, result.GetTotalFiles(), "only generated Avro is counted")
+			} else {
+				require.Error(t, err)
+				require.Nil(t, result)
+			}
+			if readErr != nil {
+				require.ErrorIs(t, err, readErr)
+			}
+			require.Zero(t, copies.Load())
+		})
+	}
+}
+
+func TestSnapshotExportManifestInventoryConcurrency(t *testing.T) {
+	for _, mode := range []string{"shared-permits", "cancel", "failure"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			snapshot := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}}
+			for i := int64(1); i <= 2; i++ {
+				snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{SegmentId: i, StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath(path.Join(cm.RootPath(), fmt.Sprintf("insert_log/100/1/%d", i)), 1)})
+			}
+			metadata, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, snapshot, cm.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			require.NoError(t, err)
+			started, release := make(chan struct{}, 2), make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			defer unblock()
+			var calls atomic.Int64
+			read := mockey.Mock(packed.ReadManifestFiles).To(func(string, *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+				n := calls.Add(1)
+				started <- struct{}{}
+				if mode == "failure" && n == 2 {
+					return nil, merr.ErrServiceUnavailable
+				}
+				<-release
+				return &packed.ManifestFiles{}, nil
+			}).Build()
+			defer read.UnPatch()
+			var copies atomic.Int64
+			defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(_ context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+				copies.Add(1)
+				return int64(1), nil
+			}).Build().UnPatch()
+			permits := make(chan struct{}, 2)
+			if mode == "shared-permits" {
+				permits <- struct{}{}
+			}
+			done := make(chan error, 1)
+			go func() {
+				req := &datapb.SnapshotExportCopyRequest{TaskId: 2, GenerationId: 100, SegmentEnd: 2, SnapshotId: 1, CollectionId: 100, SnapshotMetadataPath: metadata, SourceStorageConfig: &indexpb.StorageConfig{}, TargetUri: path.Join(cm.RootPath(), "target")}
+				_, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, cm, &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: &snapshotWholePlanCopier{}}, permits, nil)
+				done <- err
+			}()
+			awaitSnapshotEvent(t, started)
+			if mode == "shared-permits" {
+				assertSnapshotBlocked(t, started)
+				<-permits
+			}
+			awaitSnapshotEvent(t, started)
+			if mode == "cancel" {
+				cancel()
+			}
+			assertSnapshotBlocked(t, done)
+			unblock()
+			err = awaitSnapshotEvent(t, done)
+			switch mode {
+			case "cancel":
+				require.ErrorIs(t, err, context.Canceled)
+			case "failure":
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			default:
+				require.NoError(t, err)
+			}
+			require.Empty(t, permits)
+			if mode != "shared-permits" {
+				require.Zero(t, copies.Load())
+			}
+		})
+	}
+}
+
+func TestCollectStorageV3DataFiles(t *testing.T) {
+	cfg := &indexpb.StorageConfig{BucketName: "source-bucket"}
+	manifest := packed.MarshalManifestPath("root/insert_log/1/2/3", 7)
+	logs := func(paths ...string) []*datapb.FieldBinlog {
+		logs := &datapb.FieldBinlog{}
+		for _, p := range paths {
+			logs.Binlogs = append(logs.Binlogs, &datapb.Binlog{LogPath: p})
+		}
+		return []*datapb.FieldBinlog{logs}
+	}
+	ctx := context.Background()
+	native := &packed.ManifestFiles{ManifestFile: "root/insert_log/1/2/3/_metadata/manifest-7.avro",
+		ColumnFiles: []string{"root/insert_log/1/2/3/_data/1"}, DeltaFiles: []string{"root/insert_log/1/2/3/_delta/2"},
+		StatsFiles: []string{"root/insert_log/1/2/3/_stats/text_index.100/a", "root/insert_log/1/2/3/_stats/json_stats.101/b"},
+		LobFiles:   []packed.LobFileInfo{{Path: "root/insert_log/1/2/lobs/100/_data/1", FieldID: 100}},
+		Indexes:    []packed.ManifestIndexInfo{{Path: "unselected-index-metadata"}}}
+	segment := &datapb.SegmentDescription{SegmentId: 3, StorageVersion: storage.StorageV3, NumOfRows: 1, ManifestPath: manifest,
+		Binlogs: logs("not-a-physical-v3-insert"), Deltalogs: logs("", native.DeltaFiles[0], "root/delta_log/1/2/3/3"),
+		Statslogs: logs("root/stats_log/1/2/3/100/4"), Bm25Statslogs: logs("root/bm25_stats/1/2/3/100/5"),
+		TextIndexFiles: map[int64]*datapb.TextIndexStats{100: {Files: []string{"stale-text-index"}}},
+		IndexFiles:     []*indexpb.IndexFilePathInfo{{IndexFilePaths: []string{"selected-index"}}}}
+	before := proto.Clone(segment)
+	defer mockey.Mock(packed.ReadManifestFiles).To(func(got string, gotCfg *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+		require.Equal(t, manifest, got)
+		require.Same(t, cfg, gotCfg)
+		return native, nil
+	}).Build().UnPatch()
+	got, err := snapshotstorage.CollectStorageV3DataFiles(ctx, segment, cfg)
+	require.True(t, proto.Equal(before, segment))
+	require.NoError(t, err)
+	require.Same(t, native, got.Manifest)
+	paths := make([]string, 0, len(got.Files))
+	for _, ref := range got.Files {
+		require.Equal(t, int64(3), ref.SegmentID)
+		paths = append(paths, ref.Path)
+	}
+	require.ElementsMatch(t, []string{native.ManifestFile, native.ColumnFiles[0], native.DeltaFiles[0], native.StatsFiles[0], native.StatsFiles[1], native.LobFiles[0].Path,
+		"root/delta_log/1/2/3/3", "root/stats_log/1/2/3/100/4", "root/bm25_stats/1/2/3/100/5"}, paths)
+}
+
+func TestCollectStorageV3DataFiles_EmptyPinnedManifest(t *testing.T) {
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	segment := &datapb.SegmentDescription{ManifestPath: packed.MarshalManifestPath(path.Join(cfg.RootPath, "insert_log/1/2/3"), 0)}
+	got, err := snapshotstorage.CollectStorageV3DataFiles(context.Background(), segment, cfg)
+	require.NoError(t, err)
+	require.Empty(t, got.Files)
+	segment.NumOfRows = 1
+	got, err = snapshotstorage.CollectStorageV3DataFiles(context.Background(), segment, cfg)
+	require.Error(t, err)
+	require.Nil(t, got)
+}
+
+func TestSnapshotExportCopyRejectsUnsizedCopier(t *testing.T) {
+	permits := make(chan struct{}, 1)
+	require.Error(t, snapshotstorage.CopySnapshotExportPlan(context.Background(), nil, "", "", nil, permits, nil))
+	require.Error(t, snapshotstorage.CopySnapshotExportPlan(context.Background(), nil, "", "", &struct{ storage.CrossBucketCopier }{}, permits, nil))
+}
+
+// snapshotShardChunkManager keeps object keys relative, like a remote bucket.
+type snapshotShardChunkManager struct {
+	storage.ChunkManager
+	mu      sync.Mutex
+	objects map[string][]byte
+}
+
+func (*snapshotShardChunkManager) RootPath() string { return "export" }
+func (s *snapshotShardChunkManager) Write(_ context.Context, key string, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.objects[key] = append([]byte(nil), data...)
+	return nil
+}
+func (s *snapshotShardChunkManager) Read(_ context.Context, key string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, ok := s.objects[key]
+	if !ok {
+		return nil, merr.WrapErrIoKeyNotFound(key)
+	}
+	return append([]byte(nil), data...), nil
+}
+func (s *snapshotShardChunkManager) Exist(_ context.Context, key string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.objects[key]
+	return ok, nil
+}
+
+func TestSnapshotExportShards_CopyAndFinalize(t *testing.T) {
+	ctx := context.Background()
+	source := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	target := &snapshotShardChunkManager{objects: make(map[string][]byte)}
+
+	shared := path.Join(source.RootPath(), "shared")
+	require.NoError(t, source.Write(ctx, shared, []byte("shared-data")))
+	snapshot := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}, SegmentIDs: []int64{1001, 1002}}
+	for _, id := range snapshot.SegmentIDs {
+		snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{SegmentId: id, PartitionId: 1, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: shared}}}}})
+	}
+	// Include a V3 segment so top-level native entry points survive range reads
+	// and finalization without rewriting either manifest format.
+	base := path.Join(source.RootPath(), "insert_log/100/1/1002")
+	native := path.Join(base, "manifest")
+	require.NoError(t, source.Write(ctx, native, []byte("native manifest")))
+	snapshot.Segments[1].StorageVersion = storage.StorageV3
+	snapshot.Segments[1].ManifestPath = packed.MarshalManifestPath(base, 1)
+	snapshot.Segments[1].Deltalogs = snapshot.Segments[1].Binlogs
+	snapshot.Segments[1].Binlogs = nil
+	defer mockey.Mock(packed.ReadManifestFiles).Return(&packed.ManifestFiles{ManifestFile: native}, nil).Build().UnPatch()
+
+	cfg := &indexpb.StorageConfig{Address: "s3.us-west-2.amazonaws.com", BucketName: "source", CloudProvider: objectstorage.CloudProviderAWS, Region: "us-west-2", UseSSL: true}
+	req, resolved := snapshotExportFixture(t, ctx, source, target, snapshot, cfg)
+	copied := mockSnapshotLocalCopy(t, source, target)
+	var tasks []*datapb.SnapshotExportCopyTask
+	var duplicateBytes int64
+	lateManifests := make(map[string][]byte)
+	for i := int64(0); i < 2; i++ {
+		req.TaskId = 10 + i
+		req.SegmentStart = i
+		req.SegmentEnd = i + 1
+		result, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, source, resolved, make(chan struct{}, 2), nil)
+		require.NoError(t, err)
+		require.NoError(t, snapshotstorage.ValidateSnapshotExportResult(req, result))
+		require.EqualValues(t, 2+i, result.TotalFiles)
+		for key := range target.objects {
+			require.NotContains(t, key, "/_shards/")
+		}
+		// A lost assignment and its replacement write the same keys. Keep the
+		// old OCF bytes to deliver after the replacement publishes metadata.
+		manifestDir, _ := snapshotstorage.GetSnapshotPaths(snapshotstorage.SnapshotExportAttemptURI(req), 100, 1)
+		manifestKey := snapshotstorage.GetSegmentManifestPath(manifestDir, snapshot.SegmentIDs[i])
+		oldBytes, err := target.Read(ctx, manifestKey)
+		require.NoError(t, err)
+		lateManifests[manifestKey] = oldBytes
+		req.TaskId += 100
+		retryResult, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, source, resolved, make(chan struct{}, 2), nil)
+		require.NoError(t, err)
+		require.NoError(t, snapshotstorage.ValidateSnapshotExportResult(req, retryResult))
+		require.Equal(t, result.CopiedBytes, retryResult.CopiedBytes)
+		require.Equal(t, result.CopiedFiles, retryResult.CopiedFiles)
+		newBytes, err := target.Read(ctx, manifestKey)
+		require.NoError(t, err)
+		require.NotEqual(t, oldBytes, newBytes, "V6 retries use fresh OCF sync markers")
+		oldSegment, err := snapshotio.ParseSegmentManifest(oldBytes, snapshotio.SnapshotFormatVersion)
+		require.NoError(t, err)
+		newSegment, err := snapshotio.ParseSegmentManifest(newBytes, snapshotio.SnapshotFormatVersion)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(oldSegment, newSegment))
+		result = retryResult
+		duplicateBytes += result.CopiedBytes
+		tasks = append(tasks, &datapb.SnapshotExportCopyTask{TaskId: req.TaskId, SegmentStart: i, SegmentEnd: i + 1, Result: result})
+		staged := snapshotstorage.GetSnapshotStagingMetadataPath(snapshotstorage.SnapshotExportAttemptURI(req))
+		exists, err := target.Exist(ctx, staged)
+		require.NoError(t, err)
+		require.False(t, exists, "shards cannot prepare metadata")
+	}
+	require.EqualValues(t, 6, copied.Load(), "Avro is generated separately from SDK copies")
+	dir, _ := snapshotstorage.GetSnapshotPaths(source.RootPath(), 100, 1)
+	for _, id := range snapshot.SegmentIDs {
+		require.NoError(t, source.Remove(ctx, snapshotstorage.GetSegmentManifestPath(dir, id)))
+	}
+	require.NoError(t, source.Remove(ctx, native))
+	req.TaskId = 20
+	result, err := snapshotstorage.FinalizeSnapshotExport(ctx, req, tasks, source, resolved)
+	require.NoError(t, err)
+	require.EqualValues(t, 5, result.TotalFiles, "counts sum successful shards, including shared destinations")
+	require.Equal(t, duplicateBytes, result.TotalBytes)
+	require.EqualValues(t, 2*len("shared-data"), result.TotalBytes, "metadata is excluded; the shared payload counts once per shard")
+	require.EqualValues(t, 6, copied.Load(), "finalization does not recopy files")
+	replayed, err := snapshotstorage.FinalizeSnapshotExport(ctx, req, tasks, source, resolved)
+	require.NoError(t, err)
+	require.Equal(t, result.TotalBytes, replayed.TotalBytes)
+	require.Equal(t, result.TotalFiles, replayed.TotalFiles)
+
+	data, err := target.Read(ctx, snapshotstorage.GetSnapshotStagingMetadataPath(snapshotstorage.SnapshotExportAttemptURI(req)))
+	require.NoError(t, err)
+	var staged datapb.SnapshotMetadata
+	require.NoError(t, protojson.Unmarshal(data, &staged))
+	require.Len(t, staged.ManifestList, 2)
+	require.EqualValues(t, snapshotio.SnapshotFormatVersion, staged.FormatVersion)
+	require.Len(t, staged.Storagev2ManifestList, 1)
+	_, err = snapshotstorage.NewSnapshotWriter(target).CommitStagedMetadata(ctx, snapshotstorage.GetSnapshotStagingMetadataPath(snapshotstorage.SnapshotExportAttemptURI(req)), result.MetadataURI, result.MetadataURI)
+	require.NoError(t, err)
+	restored, err := snapshotstorage.NewSnapshotReader(target).ReadSnapshot(ctx, snapshotstorage.NormalizeSnapshotObjectPath(result.MetadataURI), true)
+	require.NoError(t, err)
+	require.Len(t, restored.Segments, 2)
+	require.Equal(t, packed.MarshalManifestPath(path.Join(snapshotstorage.SnapshotExportAttemptURI(req), "files/insert_log/100/1/1002"), 1), restored.Segments[1].GetManifestPath())
+
+	for key, oldBytes := range lateManifests {
+		require.NoError(t, target.Write(ctx, key, oldBytes))
+	}
+	afterLateWrite, err := snapshotstorage.NewSnapshotReader(target).ReadSnapshot(ctx, snapshotstorage.NormalizeSnapshotObjectPath(result.MetadataURI), true)
+	require.NoError(t, err)
+	for i, segment := range restored.Segments {
+		require.True(t, proto.Equal(segment, afterLateWrite.Segments[i]), "late OCF writes must preserve Restore inputs")
+	}
+
+	for _, mode := range []string{"gap", "missing shard", "wrong task", "duplicate task", "wrong count", "unfinished result", "empty result", "negative size", "byte overflow", "count overflow", "active writer"} {
+		t.Run(mode, func(t *testing.T) {
+			broken := make([]*datapb.SnapshotExportCopyTask, len(tasks))
+			for i, task := range tasks {
+				broken[i] = proto.Clone(task).(*datapb.SnapshotExportCopyTask)
+			}
+			switch mode {
+			case "gap":
+				broken[0].SegmentStart = 1
+			case "missing shard":
+				broken = broken[:1]
+			case "wrong task":
+				broken[0].TaskId++
+			case "duplicate task":
+				broken[1].TaskId = broken[0].TaskId
+			case "wrong count":
+				broken[0].Result.TotalFiles++
+			case "unfinished result":
+				broken[0].Result.State = datapb.ImportTaskStateV2_InProgress
+			case "empty result":
+				broken[0].Result.TotalFiles, broken[0].Result.CopiedFiles = 0, 0
+			case "negative size":
+				broken[0].Result.CopiedBytes = -1
+			case "byte overflow":
+				broken[0].Result.CopiedBytes = math.MaxInt64
+			case "count overflow":
+				broken[0].Result.CopiedFiles = math.MaxInt64
+				broken[0].Result.TotalFiles = math.MaxInt64
+			case "active writer":
+				broken[0].NodeId = 7
+
+			}
+			_, err := snapshotstorage.FinalizeSnapshotExport(ctx, req, broken, source, resolved)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestDeduplicateFileCopies(t *testing.T) {
+	t.Run("source aliases and multiple destinations", func(t *testing.T) {
+		items := []snapshotstorage.FileCopy{
+			{SourcePath: "s3://bucket/files/lob", DestinationPath: "target/lob"},
+			{SourcePath: "files/lob", DestinationPath: "target/lob"},
+			{SourcePath: "files/lob", DestinationPath: "other/lob"},
+		}
+		unique, err := snapshotstorage.DeduplicateFileCopies(items)
+		require.NoError(t, err)
+		require.Equal(t, []snapshotstorage.FileCopy{
+			{SourcePath: "s3://bucket/files/lob", DestinationPath: "target/lob"},
+			{SourcePath: "files/lob", DestinationPath: "other/lob"},
+		}, unique)
+		require.Same(t, &items[0], &unique[0], "reuse the owned plan array")
+		require.Empty(t, items[2], "release references in the discarded tail")
+	})
+	t.Run("conflict returns no usable plan", func(t *testing.T) {
+		unique, err := snapshotstorage.DeduplicateFileCopies([]snapshotstorage.FileCopy{
+			{SourcePath: "files/one", DestinationPath: "target"},
+			{SourcePath: "files/two", DestinationPath: "target"},
+		})
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		require.Nil(t, unique)
+	})
+	t.Run("literal destination keys", func(t *testing.T) {
+		items := []snapshotstorage.FileCopy{
+			{SourcePath: "one", DestinationPath: "target/a"},
+			{SourcePath: "two", DestinationPath: "target//a"},
+			{SourcePath: "three", DestinationPath: "target/./a"},
+		}
+		unique, err := snapshotstorage.DeduplicateFileCopies(items)
+		require.NoError(t, err)
+		require.Len(t, unique, 3)
+	})
+	t.Run("empty", func(t *testing.T) {
+		unique, err := snapshotstorage.DeduplicateFileCopies(nil)
+		require.NoError(t, err)
+		require.Nil(t, unique)
+	})
+}
+
+func TestSnapshotMetadataFingerprint_ScopeAndLegacyValidation(t *testing.T) {
+	snapshot := createTestSnapshotData()
+	snapshot.ManifestFormatVersion = 5
+	snapshot.ManifestPaths = []string{"files/snapshots/100/manifests/1/1001.avro"}
+	snapshot.SegmentIDs = []int64{1001}
+	snapshot.BuildIDs = []int64{101}
+	snapshot.StorageManifests = []*datapb.StorageV2SegmentManifest{{SegmentId: 1001, Manifest: "files/native/manifest"}}
+
+	original, err := snapshotstorage.SnapshotMetadataFingerprint(snapshot)
+	require.NoError(t, err)
+	full, err := snapshotstorage.SnapshotFingerprint(snapshot)
+	require.NoError(t, err)
+	require.NotEqual(t, full, original)
+	require.NoError(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(snapshot, original))
+	require.NoError(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(snapshot, full), "old WAL full fingerprints remain valid")
+	require.NoError(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(nil, ""), "legacy absent fingerprints remain optional")
+
+	metadata := *snapshot
+	metadata.Segments = nil
+	withoutSegments, err := snapshotstorage.SnapshotMetadataFingerprint(&metadata)
+	require.NoError(t, err)
+	require.Equal(t, original, withoutSegments)
+	snapshot.Segments[0].NumOfRows++
+	require.NoError(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(snapshot, original), "Avro baseline is captured at job creation")
+	require.ErrorIs(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(snapshot, full), merr.ErrDataIntegrity)
+	require.ErrorIs(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(snapshot, "metadata-v2:unsupported"), merr.ErrDataIntegrity)
+
+	for _, tc := range []struct {
+		name    string
+		change  func(*snapshotstorage.SnapshotData)
+		invalid bool
+	}{
+		{"schema", func(s *snapshotstorage.SnapshotData) {
+			s.Collection = proto.Clone(s.Collection).(*datapb.CollectionDescription)
+			s.Collection.Schema.Name = "changed"
+		}, false},
+		{"indexes", func(s *snapshotstorage.SnapshotData) { s.Indexes = []*indexpb.IndexInfo{{IndexID: 999}} }, false},
+		{"manifests", func(s *snapshotstorage.SnapshotData) { s.ManifestPaths = []string{"files/other.avro"} }, false},
+		{"segment IDs", func(s *snapshotstorage.SnapshotData) { s.SegmentIDs = []int64{999} }, false},
+		{"build IDs", func(s *snapshotstorage.SnapshotData) { s.BuildIDs = []int64{999} }, false},
+		{"storage manifests", func(s *snapshotstorage.SnapshotData) {
+			s.StorageManifests = []*datapb.StorageV2SegmentManifest{{SegmentId: 1001, Manifest: "files/other"}}
+		}, false},
+		{"format", func(s *snapshotstorage.SnapshotData) { s.ManifestFormatVersion++ }, false},
+		{"layout", func(s *snapshotstorage.SnapshotData) { s.Layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained }, false},
+		{"missing info", func(s *snapshotstorage.SnapshotData) { s.SnapshotInfo = nil }, true},
+		{"missing collection", func(s *snapshotstorage.SnapshotData) { s.Collection = nil }, true},
+		{"nil storage mapping", func(s *snapshotstorage.SnapshotData) { s.StorageManifests = []*datapb.StorageV2SegmentManifest{nil} }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := *snapshot
+			tc.change(&changed)
+			if tc.invalid {
+				_, err := snapshotstorage.SnapshotMetadataFingerprint(&changed)
+				require.Error(t, err)
+				require.Error(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(&changed, original))
+			} else {
+				require.ErrorIs(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(&changed, original), merr.ErrDataIntegrity)
+			}
+		})
+	}
+	_, err = snapshotstorage.SnapshotMetadataFingerprint(nil)
+	require.Error(t, err)
+	require.Error(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(nil, original))
+}
+
+func TestSnapshotMetadataFingerprint_MetadataOnlyMatchesFullRead(t *testing.T) {
+	for _, mode := range []string{"referenced", "self-contained", "relocated legacy"} {
+		t.Run(mode, func(t *testing.T) {
+			cm, location, _ := manifestReadFixture(t, 2)
+			if mode != "referenced" {
+				raw, err := cm.Read(context.Background(), location)
+				require.NoError(t, err)
+				metadata := &datapb.SnapshotMetadata{}
+				require.NoError(t, protojson.Unmarshal(raw, metadata))
+				metadata.Layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
+				metadata.SnapshotInfo.S3Location = location
+				raw, err = protojson.Marshal(metadata)
+				require.NoError(t, err)
+				require.NoError(t, cm.Write(context.Background(), location, raw))
+				if strings.HasPrefix(mode, "relocated") {
+					moved := path.Join(t.TempDir(), "bundle")
+					require.NoError(t, os.Rename(cm.RootPath(), moved))
+					location = moved + strings.TrimPrefix(location, cm.RootPath())
+				}
+			}
+			reader := snapshotstorage.NewSnapshotReader(cm)
+			metadata, err := reader.ReadSnapshot(context.Background(), location, false)
+			require.NoError(t, err)
+			full, err := reader.ReadSnapshot(context.Background(), location, true)
+			require.NoError(t, err)
+			fingerprint, err := snapshotstorage.SnapshotMetadataFingerprint(metadata)
+			require.NoError(t, err)
+			require.NoError(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(full, fingerprint))
+		})
+	}
+}
+
+func TestSnapshotExportShards_MetadataOnlyFinalization(t *testing.T) {
+	for _, mode := range []string{"plain native", "reexport", "legacy IDs", "identity", "generation", "read failure", "canceled", "write failure", "native decode", "unknown native", "duplicate segment", "missing segment", "invalid path", "URI failure", "missing bundle root", "canceled after staging"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			source := &snapshotShardChunkManager{objects: make(map[string][]byte)}
+			target := &snapshotShardChunkManager{objects: make(map[string][]byte)}
+			data := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}, SegmentIDs: []int64{2, 1}, ManifestPaths: []string{"source/1.avro", "source/2.avro"}, ManifestFormatVersion: 5,
+				StorageManifests: []*datapb.StorageV2SegmentManifest{{SegmentId: 1, Manifest: "source/native"}}}
+			cfg := &indexpb.StorageConfig{}
+			req := &datapb.SnapshotExportCopyRequest{SnapshotId: 1, CollectionId: 100, GenerationId: 100, TargetUri: "destination"}
+			var readErr error
+			switch mode {
+			case "reexport", "missing bundle root":
+				data.Layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
+				data.MetadataPath = "old-bundle/snapshots/100/metadata/1.json"
+				data.StorageManifests[0].Manifest = packed.MarshalManifestPath("old-bundle/files/native", 7)
+				if mode == "missing bundle root" {
+					data.MetadataPath = "not-a-bundle.json"
+				}
+			case "legacy IDs":
+				data.SegmentIDs = nil
+			case "identity":
+				data.SnapshotInfo.Id = 9
+			case "generation":
+				req.GenerationId = 0
+			case "read failure":
+				readErr = merr.ErrServiceUnavailable
+			case "canceled":
+				cancel()
+			case "native decode":
+				data.StorageManifests[0].Manifest = "{broken"
+			case "unknown native":
+				data.StorageManifests[0].SegmentId = 9
+			case "duplicate segment":
+				data.SegmentIDs = []int64{1, 1}
+			case "missing segment":
+				data.SegmentIDs = []int64{1, 3}
+			case "invalid path":
+				data.ManifestPaths[0] = "source/one.avro"
+			case "URI failure":
+				cfg = nil
+			}
+			defer mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshot).Return(data, readErr).Build().UnPatch()
+			if mode == "write failure" {
+				defer mockey.Mock((*snapshotShardChunkManager).Write).Return(merr.ErrServiceUnavailable).Build().UnPatch()
+			}
+			if mode == "canceled after staging" {
+				var read func(*snapshotShardChunkManager, context.Context, string) ([]byte, error)
+				defer mockey.Mock((*snapshotShardChunkManager).Read).Origin(&read).To(func(cm *snapshotShardChunkManager, ctx context.Context, key string) ([]byte, error) {
+					data, err := read(cm, ctx, key)
+					cancel()
+					return data, err
+				}).Build().UnPatch()
+			}
+
+			tasks := []*datapb.SnapshotExportCopyTask{{TaskId: 1, SegmentEnd: 2, Result: &datapb.SnapshotExportCopyResponse{TaskId: 1, State: datapb.ImportTaskStateV2_Completed, TotalFiles: 2, CopiedFiles: 2}}}
+			result, err := snapshotstorage.FinalizeSnapshotExport(ctx, req, tasks, source, &snapshotstorage.ResolvedForeignStorage{ForeignCM: target, ForeignStorageConfig: cfg})
+			if mode != "plain native" && mode != "reexport" && mode != "legacy IDs" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			stagedBytes, err := target.Read(ctx, snapshotstorage.GetSnapshotStagingMetadataPath(snapshotstorage.SnapshotExportAttemptURI(req)))
+			require.NoError(t, err)
+			var top datapb.SnapshotMetadata
+			require.NoError(t, protojson.Unmarshal(stagedBytes, &top))
+			require.Len(t, top.ManifestList, 2)
+			require.Zero(t, result.TotalBytes)
+			if mode == "reexport" {
+				require.Equal(t, packed.MarshalManifestPath("destination/attempts/100/files/native", 7), top.Storagev2ManifestList[0].Manifest)
+
+			}
+		})
+	}
+}
+
+func TestSnapshotExportShards_BindAvroToMetadata(t *testing.T) {
+	for _, mode := range []string{"wrong identity", "missing native mapping", "invalid identity path", "duplicate Avro identity"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			snapshot := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}, Segments: []*datapb.SegmentDescription{{SegmentId: 1, NumOfRows: 1, StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath(path.Join(cm.RootPath(), "native"), 1)}}}
+			req, resolved := snapshotExportFixture(t, ctx, cm, cm, snapshot, &indexpb.StorageConfig{})
+			metadata := req.SnapshotMetadataPath
+			bytes, err := cm.Read(ctx, metadata)
+			require.NoError(t, err)
+			var top datapb.SnapshotMetadata
+			require.NoError(t, protojson.Unmarshal(bytes, &top))
+			if mode == "wrong identity" || mode == "invalid identity path" {
+				original, err := cm.Read(ctx, top.ManifestList[0])
+				require.NoError(t, err)
+				name := "2.avro"
+				if mode == "invalid identity path" {
+					name = "one.avro"
+				}
+				top.ManifestList[0] = path.Join(cm.RootPath(), name)
+				require.NoError(t, cm.Write(ctx, top.ManifestList[0], original))
+			} else {
+				top.Storagev2ManifestList = nil
+			}
+			if mode == "duplicate Avro identity" {
+				top.ManifestList = append(top.ManifestList, top.ManifestList[0])
+				req.SegmentEnd = 2
+			}
+			bytes, err = protojson.Marshal(&top)
+			require.NoError(t, err)
+			require.NoError(t, cm.Write(ctx, metadata, bytes))
+			_, err = snapshotstorage.ExecuteSnapshotExport(ctx, req, cm, resolved, make(chan struct{}, 1), nil)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		})
+	}
+}
+
+func TestSnapshotExportAvroWrites_ConcurrencyAndDrain(t *testing.T) {
+	for _, mode := range []string{"success", "write failure", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			source, metadata, _ := manifestReadFixture(t, 6)
+			target := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			req := &datapb.SnapshotExportCopyRequest{TaskId: 10, GenerationId: 100,
+				SnapshotId: 1, CollectionId: 100, SnapshotMetadataPath: metadata, TargetUri: target.RootPath(), SegmentEnd: 6}
+			permits := make(chan struct{}, 2)
+			started := make(chan struct{}, 6)
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			defer unblock()
+			fail := make(chan struct{})
+			failed := make(chan struct{})
+			var active, maximum atomic.Int64
+			writer := &snapshotAvroControlledWriter{ChunkManager: target}
+			writer.write = func(writeCtx context.Context, key string, data []byte) error {
+				n := active.Add(1)
+				defer active.Add(-1)
+				for old := maximum.Load(); n > old && !maximum.CompareAndSwap(old, n); old = maximum.Load() {
+				}
+				started <- struct{}{}
+				if mode == "write failure" && path.Base(key) == "1.avro" {
+					<-fail
+					close(failed)
+					return merr.ErrIoTooManyRequests
+				}
+				// Model a provider write that cannot stop immediately on cancellation.
+				<-release
+				if err := writeCtx.Err(); err != nil {
+					return err
+				}
+				return target.Write(writeCtx, key, data)
+			}
+
+			type outcome struct {
+				result *datapb.SnapshotExportCopyResponse
+				err    error
+			}
+			done := make(chan outcome, 1)
+			go func() {
+				result, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, source, &snapshotstorage.ResolvedForeignStorage{
+					ForeignCM: writer, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: &snapshotWholePlanCopier{},
+				}, permits, nil)
+				done <- outcome{result, err}
+			}()
+			for i := 0; i < 2; i++ {
+				awaitSnapshotEvent(t, started)
+			}
+			require.EqualValues(t, 2, active.Load())
+			require.Equal(t, 2, len(permits), "Avro writes consume the shared task permits")
+			if mode == "cancel" {
+				cancel()
+			} else if mode == "write failure" {
+				close(fail)
+				<-failed
+			}
+			if mode != "success" {
+				assertSnapshotBlocked(t, done)
+			}
+			unblock()
+			got := awaitSnapshotEvent(t, done)
+			require.Zero(t, active.Load())
+			require.Empty(t, permits)
+			require.EqualValues(t, 2, maximum.Load())
+			if mode == "success" {
+				require.NoError(t, got.err)
+				require.Equal(t, datapb.ImportTaskStateV2_Completed, got.result.GetState())
+				require.EqualValues(t, 6, got.result.GetCopiedFiles())
+				require.Zero(t, got.result.GetCopiedBytes())
+				manifestDir, _ := snapshotstorage.GetSnapshotPaths(snapshotstorage.SnapshotExportAttemptURI(req), 100, 1)
+				for i := int64(1); i <= 6; i++ {
+					data, err := target.Read(ctx, snapshotstorage.GetSegmentManifestPath(manifestDir, i))
+					require.NoError(t, err)
+					segment, err := snapshotio.ParseSegmentManifest(data, snapshotio.SnapshotFormatVersion)
+					require.NoError(t, err)
+					require.Equal(t, i, segment.GetSegmentId())
+				}
+			} else {
+				require.Nil(t, got.result)
+				if mode == "write failure" {
+					require.ErrorIs(t, got.err, merr.ErrIoTooManyRequests)
+				} else {
+					require.ErrorIs(t, got.err, context.Canceled)
+				}
+			}
+			exists, err := target.Exist(context.Background(), snapshotstorage.GetSnapshotStagingMetadataPath(snapshotstorage.SnapshotExportAttemptURI(req)))
+			require.NoError(t, err)
+			require.False(t, exists, "workers never publish staging, including on Avro failure")
+		})
+	}
+}
+
+// A controlled provider implementation avoids patching an Origin trampoline
+// while parallel callbacks execute, and can model delayed cancellation safely.
+type snapshotAvroControlledWriter struct {
+	storage.ChunkManager
+	write func(context.Context, string, []byte) error
+}
+
+func (w *snapshotAvroControlledWriter) Write(ctx context.Context, key string, data []byte) error {
+	return w.write(ctx, key, data)
+}
+
+// A segment reader can block after peers have already copied and written Avro.
+type snapshotSegmentControlledReader struct {
+	storage.ChunkManager
+	read func(context.Context, string) ([]byte, error)
+}
+
+func (r *snapshotSegmentControlledReader) Read(ctx context.Context, key string) ([]byte, error) {
+	return r.read(ctx, key)
+}
+
+func TestSnapshotExportSegmentPipeline(t *testing.T) {
+	// Initialize configuration before starting the bounded execution deadline.
+	paramtable.Init()
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("late-read-failure-%t", fail), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			source := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			target := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			shared := path.Join(source.RootPath(), "shared")
+			snapshot := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}}
+			for id := int64(1); id <= 2; id++ {
+				snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{SegmentId: id,
+					Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: shared}}}}})
+			}
+			require.NoError(t, source.Write(ctx, shared, []byte("shared")))
+			req, resolved := snapshotExportFixture(t, ctx, source, target, snapshot, &indexpb.StorageConfig{})
+			blocked, release, firstWritten := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			reader := &snapshotSegmentControlledReader{ChunkManager: source}
+			reader.read = func(ctx context.Context, key string) ([]byte, error) {
+				if path.Base(key) == "2.avro" {
+					close(blocked)
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+					if fail {
+						return nil, merr.ErrIoKeyNotFound
+					}
+				}
+				return source.Read(ctx, key)
+			}
+			writer := &snapshotAvroControlledWriter{ChunkManager: target}
+			writer.write = func(ctx context.Context, key string, data []byte) error {
+				err := target.Write(ctx, key, data)
+				if path.Base(key) == "1.avro" {
+					close(firstWritten)
+				}
+				return err
+			}
+			copies := mockSnapshotLocalCopy(t, source, target)
+			resolved.ForeignCM = writer
+			permits := make(chan struct{}, 2)
+			done := make(chan error, 1)
+			drained := make(chan struct{})
+			var result *datapb.SnapshotExportCopyResponse
+			go func() {
+				defer close(drained)
+				var err error
+				result, err = snapshotstorage.ExecuteSnapshotExport(ctx, req, reader, resolved, permits, nil)
+				done <- err
+			}()
+			defer func() {
+				unblock()
+				cancel()
+				<-drained
+			}()
+			awaitSnapshotEvent(t, blocked)
+			awaitSnapshotEvent(t, firstWritten)
+			require.EqualValues(t, 1, copies.Load())
+			select {
+			case <-done:
+				t.Fatal("task completed with an active segment")
+			default:
+			}
+			unblock()
+			err := <-done
+			require.Empty(t, permits)
+			if fail {
+				require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+				require.Nil(t, result)
+			} else {
+				require.NoError(t, err)
+				require.EqualValues(t, 2, copies.Load(), "shared objects may be copied by both segments")
+				require.EqualValues(t, 4, result.TotalFiles)
+				require.EqualValues(t, 2*len("shared"), result.CopiedBytes)
+			}
+		})
+	}
+}
+
+func TestSnapshotExportSegmentStatisticsOverflow(t *testing.T) {
+	ctx := context.Background()
+	source := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	target := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	snapshot := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100},
+		Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "test"}},
+		SegmentIDs:   []int64{1, 2},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 1, Binlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: source.RootPath() + "/data1"}}}}},
+			{SegmentId: 2, Binlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: source.RootPath() + "/data2"}}}}},
+		},
+	}
+	metadata, err := snapshotstorage.NewSnapshotWriter(source).Save(ctx, snapshot)
+	require.NoError(t, err)
+	copier := &snapshotWholePlanCopier{}
+	defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).Return(int64(math.MaxInt64), nil).Build().UnPatch()
+	result, err := snapshotstorage.ExecuteSnapshotExport(ctx, &datapb.SnapshotExportCopyRequest{
+		TaskId: 1, SnapshotId: 1, CollectionId: 100, SegmentEnd: 2,
+		SnapshotMetadataPath: metadata, TargetUri: target.RootPath(), GenerationId: 1,
+		SourceStorageConfig: &indexpb.StorageConfig{BucketName: "source"},
+	}, source, &snapshotstorage.ResolvedForeignStorage{
+		ForeignCM: target, ForeignBucket: "target", Copier: copier,
+		ForeignStorageConfig: &indexpb.StorageConfig{StorageType: "remote", CloudProvider: "aws", BucketName: "target", Address: "s3.us-west-2.amazonaws.com", Region: "us-west-2", UseSSL: true},
+	}, make(chan struct{}, 1), nil)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "statistics overflow")
+	require.Nil(t, result)
+}
+
+func TestSnapshotTaskCopyPermits(t *testing.T) {
+	for _, tc := range []struct {
+		limit int32
+		want  int
+	}{
+		{0, 128}, {-1, 128}, {3, 3}, {128, 128}, {300, 300},
+	} {
+		first, second := snapshotstorage.NewTaskCopyPermits(tc.limit), snapshotstorage.NewTaskCopyPermits(tc.limit)
+		require.Equal(t, tc.want, cap(first))
+		require.Equal(t, tc.want, cap(second))
+		first <- struct{}{}
+		require.Empty(t, second, "different tasks must not share permits")
+	}
+}
+
+func TestSnapshotReader_ManifestReadModes(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                    string
+		count                                                   int
+		permits                                                 chan struct{}
+		configured, metadataOnly, canceled, parallel, wantError bool
+	}{
+		{name: "default serial", count: 3},
+		{name: "serial canceled", count: 3, canceled: true, wantError: true},
+		{name: "nil permits", count: 3, configured: true},
+		{name: "single", count: 1, configured: true, permits: make(chan struct{}, 2)},
+		{name: "empty", configured: true, permits: make(chan struct{}, 2)},
+		{name: "metadata only", count: 3, configured: true, permits: make(chan struct{}, 2), metadataOnly: true},
+		{name: "unbuffered", count: 3, configured: true, permits: make(chan struct{}), wantError: true},
+		{name: "parallel ordered", count: 8, configured: true, permits: make(chan struct{}, 2), parallel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cm, metadata, paths := manifestReadFixture(t, tc.count)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var options []snapshotstorage.SnapshotReaderOption
+			if tc.configured {
+				options = []snapshotstorage.SnapshotReaderOption{snapshotstorage.WithManifestReadPermits(tc.permits)}
+			}
+			started, release := make(chan struct{}), make(chan struct{})
+			var mu sync.Mutex
+			var reads []string
+			var active, maximum, others atomic.Int64
+			defer mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, key string) ([]byte, error) {
+				if strings.HasSuffix(key, ".avro") {
+					n := active.Add(1)
+					defer active.Add(-1)
+					for old := maximum.Load(); n > old && !maximum.CompareAndSwap(old, n); old = maximum.Load() {
+					}
+					mu.Lock()
+					reads = append(reads, key)
+					mu.Unlock()
+					if tc.parallel && key == paths[0] {
+						close(started)
+						select {
+						case <-release:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					} else {
+						others.Add(1)
+					}
+				}
+				return os.ReadFile(key)
+			}).Build().UnPatch()
+			if tc.canceled {
+				cancel()
+			}
+			done := make(chan manifestReadResult, 1)
+			go func() {
+				got, err := snapshotstorage.NewSnapshotReader(cm, options...).ReadSnapshot(ctx, metadata, !tc.metadataOnly)
+				done <- manifestReadResult{got, err}
+			}()
+			if tc.parallel {
+				awaitSnapshotEvent(t, started)
+				require.Eventually(t, func() bool { return others.Load() == 7 }, time.Second, time.Millisecond)
+				close(release)
+			}
+			got := awaitSnapshotEvent(t, done)
+			if tc.wantError {
+				require.Error(t, got.err)
+				if tc.canceled {
+					require.ErrorIs(t, got.err, context.Canceled)
+				}
+				require.Nil(t, got.snapshot)
+				require.Empty(t, reads)
+				return
+			}
+			require.NoError(t, got.err)
+			if tc.metadataOnly || tc.count == 0 {
+				require.Empty(t, reads)
+				require.Empty(t, got.snapshot.Segments)
+			} else if tc.parallel {
+				require.EqualValues(t, 2, maximum.Load())
+				require.Equal(t, paths, got.snapshot.ManifestPaths)
+				for i, segment := range got.snapshot.Segments {
+					require.EqualValues(t, i+1, segment.GetSegmentId())
+				}
+			} else {
+				require.Equal(t, paths, reads)
+				require.EqualValues(t, 1, maximum.Load())
+			}
+			require.Empty(t, tc.permits)
+		})
+	}
+}
+
+func assertSnapshotBlocked[T any](t *testing.T, events <-chan T) {
+	t.Helper()
+	select {
+	case value := <-events:
+		t.Errorf("snapshot operation advanced before release: %v", value)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func awaitSnapshotEvent[T any](t *testing.T, events <-chan T) T {
+	t.Helper()
+	select {
+	case value := <-events:
+		return value
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for snapshot operation")
+		var zero T
+		return zero
+	}
+}
 func TestSnapshotReader_ReadSnapshot_LegacyVersion(t *testing.T) {
 	// Test reading legacy snapshot without FormatVersion field (version 0)
 	tempDir := t.TempDir()

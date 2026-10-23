@@ -24,6 +24,7 @@ import (
 	"hash"
 	"reflect"
 	"slices"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 
@@ -89,6 +90,55 @@ func SnapshotFingerprint(snapshot *SnapshotData) (string, error) {
 		return "", merr.Wrap(err, "failed to fingerprint snapshot indexes")
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// The prefix distinguishes new metadata-only WAL preflight fingerprints from
+// the unprefixed full fingerprints already persisted by earlier coordinators.
+const snapshotMetadataFingerprintPrefix = "metadata-v1:"
+
+// SnapshotMetadataFingerprint fixes the inputs used to create the target
+// collection without reading any Avro manifests. It is identical for metadata-
+// only and full reads, and also covers manifest decoding and relocation rules.
+// Jobs still persist SnapshotFingerprint after full validation for recovery.
+func SnapshotMetadataFingerprint(snapshot *SnapshotData) (string, error) {
+	if snapshot == nil {
+		return "", merr.WrapErrDataIntegrityMsg("snapshot cannot be nil")
+	}
+	metadata := *snapshot
+	metadata.Segments = nil
+	base, err := SnapshotFingerprint(&metadata)
+	if err != nil {
+		return "", err
+	}
+	hasher := sha256.New()
+	writeFingerprintBytes(hasher, []byte(snapshotMetadataFingerprintPrefix))
+	writeFingerprintBytes(hasher, []byte(base))
+	writeFingerprintUint64(hasher, uint64(snapshot.ManifestFormatVersion))
+	if err := writeFingerprintProtoSet(hasher, snapshot.StorageManifests); err != nil {
+		return "", merr.Wrap(err, "failed to fingerprint storage manifest mappings")
+	}
+	return snapshotMetadataFingerprintPrefix + hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// ValidateSnapshotPreflightFingerprint accepts both metadata-only preflight
+// fingerprints and legacy full fingerprints during WAL replay. Empty values
+// retain the behavior of older messages that did not carry a fingerprint.
+func ValidateSnapshotPreflightFingerprint(snapshot *SnapshotData, expected string) error {
+	if expected == "" {
+		return nil
+	}
+	fingerprint := SnapshotFingerprint
+	if strings.HasPrefix(expected, snapshotMetadataFingerprintPrefix) {
+		fingerprint = SnapshotMetadataFingerprint
+	}
+	actual, err := fingerprint(snapshot)
+	if err != nil {
+		return err
+	}
+	if actual != expected {
+		return merr.WrapErrDataIntegrityMsg("external snapshot changed after preflight validation")
+	}
+	return nil
 }
 
 func writeFingerprintProtoSet[T proto.Message](hasher hash.Hash, messages []T) error {

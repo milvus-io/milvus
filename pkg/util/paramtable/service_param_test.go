@@ -41,7 +41,7 @@ func TestMinioConfig_MultipartCopyThreshold(t *testing.T) {
 	assert.Equal(t, "minio.multipartCopyThreshold", params.MultipartCopyThreshold.Key)
 	assert.Equal(t, "3.0.3", params.MultipartCopyThreshold.Version)
 	assert.True(t, params.MultipartCopyThreshold.Export)
-	assert.Equal(t, int64(1024*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
+	assert.Equal(t, int64(500*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
 
 	for _, tc := range []struct {
 		name  string
@@ -55,12 +55,12 @@ func TestMinioConfig_MultipartCopyThreshold(t *testing.T) {
 		{name: "above_single_copy_limit", value: "5368709121", want: 5*1024*1024*1024 + 1},
 		{name: "ten_gib", value: "10737418240", want: 10 * 1024 * 1024 * 1024},
 		{name: "max_int64", value: "9223372036854775807", want: 1<<63 - 1},
-		{name: "zero", value: "0", want: 1024 * 1024 * 1024},
-		{name: "negative", value: "-1", want: 1024 * 1024 * 1024},
-		{name: "empty", value: "", want: 1024 * 1024 * 1024},
-		{name: "invalid", value: "invalid", want: 1024 * 1024 * 1024},
-		{name: "unit_suffix", value: "1GB", want: 1024 * 1024 * 1024},
-		{name: "overflow", value: "9223372036854775808", want: 1024 * 1024 * 1024},
+		{name: "zero", value: "0", want: 500 * 1024 * 1024},
+		{name: "negative", value: "-1", want: 500 * 1024 * 1024},
+		{name: "empty", value: "", want: 500 * 1024 * 1024},
+		{name: "invalid", value: "invalid", want: 500 * 1024 * 1024},
+		{name: "unit_suffix", value: "1GB", want: 500 * 1024 * 1024},
+		{name: "overflow", value: "9223372036854775808", want: 500 * 1024 * 1024},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NoError(t, base.Save(params.MultipartCopyThreshold.Key, tc.value))
@@ -68,7 +68,7 @@ func TestMinioConfig_MultipartCopyThreshold(t *testing.T) {
 		})
 	}
 	require.NoError(t, base.Reset(params.MultipartCopyThreshold.Key))
-	assert.Equal(t, int64(1024*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
+	assert.Equal(t, int64(500*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
 }
 
 // Every local storage key is a complete filesystem path that starts with

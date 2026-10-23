@@ -19,7 +19,10 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -4688,4 +4692,102 @@ func TestSnapshotMeta_HasActivePins(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, has200, "collection 200 has an active pin")
 	})
+}
+
+func TestSnapshotMeta_RestoreManifestReadsShareBudget(t *testing.T) {
+	for _, mode := range []string{"success", "cancel", "read error"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			data := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "snap"}, Collection: &datapb.CollectionDescription{}}
+			for i := 0; i < 32; i++ {
+				data.Segments = append(data.Segments, &datapb.SegmentDescription{SegmentId: int64(i + 1)})
+				data.SegmentIDs = append(data.SegmentIDs, int64(i+1))
+			}
+			metadata, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, data, cm.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			require.NoError(t, err)
+			defer mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).Return([]*datapb.SnapshotInfo{}, nil).Build().UnPatch()
+			sm, err := newSnapshotMeta(ctx, &kv_datacoord.Catalog{}, cm)
+			require.NoError(t, err)
+			defer sm.Close()
+			info := proto.Clone(data.SnapshotInfo).(*datapb.SnapshotInfo)
+			info.S3Location = metadata
+			defer mockey.Mock((*snapshotMeta).getSnapshotByName).Return(info, nil).Build().UnPatch()
+			started := make(chan struct{}, 64)
+			release := make(chan struct{})
+			var once sync.Once
+			defer once.Do(func() { close(release) })
+			var active, peak atomic.Int64
+			defer mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, key string) ([]byte, error) {
+				if !strings.HasSuffix(key, ".avro") {
+					return os.ReadFile(key)
+				}
+				n := active.Add(1)
+				defer active.Add(-1)
+				for old := peak.Load(); n > old; old = peak.Load() {
+					if peak.CompareAndSwap(old, n) {
+						break
+					}
+				}
+				started <- struct{}{}
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				if mode == "read error" {
+					return nil, merr.ErrIoPermissionDenied
+				}
+				return os.ReadFile(key)
+			}).Build().UnPatch()
+			type result struct {
+				data *snapshotstorage.SnapshotData
+				err  error
+			}
+			done := make(chan result, 2)
+			go func() { d, e := sm.ReadSnapshotData(ctx, 100, "snap", true); done <- result{d, e} }()
+			go func() {
+				d, e := sm.ReadExternalSnapshotDataWithChunkManager(ctx, cm, metadata, true)
+				done <- result{d, e}
+			}()
+			for i := 0; i < cap(snapshotManifestReadPermits); i++ {
+				select {
+				case <-started:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			select {
+			case <-started:
+				t.Fatal("named and external readers exceeded their shared budget")
+			case <-time.After(20 * time.Millisecond):
+			}
+			if mode == "cancel" {
+				cancel()
+			} else {
+				once.Do(func() { close(release) })
+			}
+			for i := 0; i < 2; i++ {
+				var r result
+				select {
+				case r = <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("readers failed to join")
+				}
+				switch mode {
+				case "success":
+					require.NoError(t, r.err)
+					require.Len(t, r.data.Segments, 32)
+				case "cancel":
+					require.ErrorIs(t, r.err, context.Canceled)
+				case "read error":
+					require.ErrorIs(t, r.err, merr.ErrIoPermissionDenied)
+				}
+			}
+			require.EqualValues(t, cap(snapshotManifestReadPermits), peak.Load())
+			require.Zero(t, active.Load())
+			require.Empty(t, snapshotManifestReadPermits)
+		})
+	}
 }

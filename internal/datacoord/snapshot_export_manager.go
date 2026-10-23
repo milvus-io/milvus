@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -28,23 +27,23 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/task"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
-	snapshotExportCheckpointBatchSize = 256
-	snapshotExportReconcileInterval   = time.Second
-	snapshotExportPinSafetyMargin     = 5 * time.Minute
-	snapshotExportFailureReasonLimit  = 1024
-	snapshotExportNamespaceSubPath    = "exports"
+	snapshotExportReconcileInterval = time.Second
+	snapshotExportPinSafetyMargin   = 5 * time.Minute
+	snapshotExportNamespaceSubPath  = "exports"
 )
 
 var (
@@ -65,6 +64,9 @@ type snapshotExportManager struct {
 	cancel          context.CancelFunc
 	meta            *snapshotExportMeta
 	snapshotManager *snapshotManager
+	scheduler       task.GlobalScheduler
+	cluster         session.SnapshotExportCluster
+	copyProgress    sync.Map
 
 	wakeCh    chan struct{}
 	startOnce sync.Once
@@ -132,6 +134,12 @@ func (m *snapshotExportManager) Submit(
 ) (int64, error) {
 	if strings.TrimSpace(targetPath) == "" {
 		return 0, merr.WrapErrParameterMissingMsg("target_s3_path is required")
+	}
+	// Reject oversized user fields before allocating or pinning a job. The full
+	// worker request is checked separately because it also carries server config.
+	input := &datapb.SnapshotExportCopyRequest{TargetUri: targetPath, ExternalSpec: externalSpec}
+	if proto.Size(input) > snapshotstorage.SnapshotExportMaxRequestBytes {
+		return 0, merr.WrapErrParameterInvalidMsg("snapshot export target path and external spec exceed %d bytes", snapshotstorage.SnapshotExportMaxRequestBytes)
 	}
 	instanceCfg := snapshotstorage.InstanceConfigFromParamtable(Params)
 	if err := snapshotstorage.ValidateForeignStorageRequest(
@@ -234,18 +242,26 @@ func (m *snapshotExportManager) GetJobInfo(jobID int64) (*datapb.ExportSnapshotJ
 		metadataURI = job.GetSnapshotMetadataUri()
 		totalBytes = job.GetTotalBytes()
 	}
+	copied, progress, total := job.GetCopiedFiles(), job.GetProgress(), job.GetTotalFiles()
+	if job.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting {
+		copied = 0
+		if len(job.GetCopyTasks()) > 0 {
+			copied, total = m.exportShardProgress(job)
+			progress = snapshotExportCopyProgress(copied, total)
+		}
+	}
 	return &datapb.ExportSnapshotJobInfo{
 		JobId:               job.GetJobId(),
 		SnapshotName:        job.GetSnapshotName(),
 		DbName:              job.GetDbName(),
 		CollectionName:      job.GetCollectionName(),
 		State:               job.GetState(),
-		Progress:            job.GetProgress(),
+		Progress:            progress,
 		Reason:              job.GetReason(),
 		StartTime:           job.GetStartTime(),
 		TimeCost:            timeCost,
-		TotalFiles:          job.GetTotalFiles(),
-		CopiedFiles:         job.GetCopiedFiles(),
+		TotalFiles:          total,
+		CopiedFiles:         copied,
 		SnapshotMetadataUri: metadataURI,
 		TotalBytes:          totalBytes,
 	}, nil
@@ -287,7 +303,6 @@ func (m *snapshotExportManager) reconcile() {
 		}
 	}
 
-	maxConcurrent := Params.DataCoordCfg.SnapshotExportMaxConcurrentJobs.GetAsInt()
 	for _, job := range m.meta.GetJobs() {
 		if isSnapshotExportTerminal(job.GetState()) {
 			continue
@@ -296,17 +311,17 @@ func (m *snapshotExportManager) reconcile() {
 			job.GetDeadlineTime() != 0 && now >= job.GetDeadlineTime() {
 			continue
 		}
-		if !m.tryStartJob(job.GetJobId(), maxConcurrent) {
-			continue
-		}
+		m.tryStartJob(job.GetJobId())
 	}
 }
 
-func (m *snapshotExportManager) tryStartJob(jobID int64, maxConcurrent int) bool {
+// Worker slots and DataNode copy permits bound resources across jobs. The
+// running registry only prevents duplicate runners for the same job.
+func (m *snapshotExportManager) tryStartJob(jobID int64) {
 	m.runningMu.Lock()
 	defer m.runningMu.Unlock()
-	if _, ok := m.running[jobID]; ok || len(m.running) >= maxConcurrent {
-		return false
+	if _, ok := m.running[jobID]; ok {
+		return
 	}
 	workerCtx, cancel := context.WithCancel(m.ctx)
 	m.running[jobID] = cancel
@@ -315,7 +330,6 @@ func (m *snapshotExportManager) tryStartJob(jobID int64, maxConcurrent int) bool
 		defer cancel()
 		m.runJob(workerCtx, jobID)
 	}()
-	return true
 }
 
 func (m *snapshotExportManager) runJob(ctx context.Context, jobID int64) {
@@ -409,6 +423,9 @@ func (m *snapshotExportManager) snapshotExportFailureReason(
 		uint64(time.Now().UnixMilli()) >= job.GetDeadlineTime() {
 		return "snapshot export job timed out"
 	}
+	if job.GetCopyRequest() != nil {
+		return snapshotstorage.SanitizeSnapshotExportReason(err, job.GetCopyRequest())
+	}
 	return sanitizeSnapshotExportReason(err, externalSpec)
 }
 
@@ -439,129 +456,14 @@ func (m *snapshotExportManager) executeSnapshotExport(
 	ctx context.Context,
 	job *datapb.ExportSnapshotJob,
 ) error {
-	jobID := job.GetJobId()
-	operationCtx, cancel := m.withJobDeadline(ctx, jobID)
-	defer cancel()
-	if err := ensureSnapshotExportCanAdvance(operationCtx, job); err != nil {
+	if err := m.copyOnWorker(ctx, job); err != nil {
 		return err
 	}
-
-	instanceCfg := snapshotstorage.InstanceConfigFromParamtable(Params)
-	resolved, err := snapshotstorage.ResolveForeignStorage(
-		operationCtx,
-		instanceCfg,
-		snapshotstorage.DirectionExport,
-		job.GetTargetS3Path(),
-		job.GetExternalSpec(),
-	)
-	if err != nil {
-		return err
+	latest, ok := m.meta.GetJob(job.GetJobId())
+	if !ok {
+		return errSnapshotExportJobStopped
 	}
-	targetRoot := strings.TrimSuffix(snapshotstorage.NormalizeSnapshotObjectPath(job.GetTargetS3Path()), "/")
-	releaseTarget, err := m.lockTarget(operationCtx, snapshotExportTarget{
-		bucket: strings.TrimSpace(resolved.ForeignBucket),
-		root:   strings.Trim(targetRoot, "/"),
-	})
-	if err != nil {
-		return err
-	}
-	defer releaseTarget()
-
-	snapshot, err := m.snapshotManager.ReadSnapshotData(operationCtx, job.GetCollectionId(), job.GetSnapshotName())
-	if err != nil {
-		return err
-	}
-	plan, err := buildSnapshotExportPlan(
-		operationCtx,
-		m.snapshotManager.snapshotMeta.chunkManager,
-		resolved.ForeignCM,
-		instanceCfg.BucketName,
-		resolved.ForeignBucket,
-		snapshot,
-		job.GetTargetS3Path(),
-		resolved.ForeignStorageConfig,
-	)
-	if err != nil {
-		return err
-	}
-
-	job, err = m.persistOrValidatePlan(operationCtx, jobID, plan)
-	if err != nil {
-		return err
-	}
-	copyConcurrency := Params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt()
-	for cursor := job.GetCopyCursor(); cursor < int64(len(plan.items)); {
-		end := cursor + snapshotExportCheckpointBatchSize
-		if end > int64(len(plan.items)) {
-			end = int64(len(plan.items))
-		}
-		if err := copySnapshotExportPlan(
-			operationCtx,
-			resolved.Copier,
-			instanceCfg.BucketName,
-			resolved.ForeignBucket,
-			plan.items[cursor:end],
-			copyConcurrency,
-		); err != nil {
-			return err
-		}
-		updated, _, err := m.meta.UpdateJob(operationCtx, jobID, func(latest *datapb.ExportSnapshotJob) (bool, error) {
-			if err := ensureSnapshotExportCanAdvance(operationCtx, latest); err != nil {
-				return false, err
-			}
-			if latest.GetCopyCursor() != cursor {
-				return false, merr.WrapErrDataIntegrityMsg(
-					"snapshot export job %d copy cursor changed from %d to %d",
-					jobID,
-					cursor,
-					latest.GetCopyCursor(),
-				)
-			}
-			latest.CopyCursor = end
-			latest.CopiedFiles = end
-			latest.Progress = snapshotExportCopyProgress(end, int64(len(plan.items)))
-			return false, nil
-		})
-		if err != nil {
-			return err
-		}
-		cursor = updated.GetCopyCursor()
-		mlog.Info(operationCtx, "snapshot export checkpoint persisted",
-			mlog.FieldJobID(jobID),
-			mlog.Int64("copiedFiles", cursor),
-			mlog.Int64("totalFiles", int64(len(plan.items))))
-	}
-
-	totalBytes, err := prepareSnapshotExportPlanWithSize(
-		operationCtx,
-		resolved.ForeignCM,
-		snapshot,
-		plan,
-	)
-	if err != nil {
-		return err
-	}
-	job, _, err = m.meta.UpdateJob(operationCtx, jobID, func(latest *datapb.ExportSnapshotJob) (bool, error) {
-		if err := ensureSnapshotExportCanAdvance(operationCtx, latest); err != nil {
-			return false, err
-		}
-		if latest.GetCopyCursor() != int64(len(plan.items)) ||
-			latest.GetCopiedFiles() != int64(len(plan.items)) {
-			return false, merr.WrapErrDataIntegrityMsg(
-				"snapshot export job %d cannot publish an incomplete copy plan",
-				jobID,
-			)
-		}
-		latest.State = datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing
-		latest.Progress = 99
-		latest.SnapshotMetadataUri = plan.metadataURI
-		latest.TotalBytes = totalBytes
-		return false, nil
-	})
-	if err != nil {
-		return err
-	}
-	return m.completeSnapshotExportPublication(ctx, job, resolved.ForeignCM, targetRoot)
+	return m.executeSnapshotExportPublication(ctx, latest)
 }
 
 func (m *snapshotExportManager) executeSnapshotExportPublication(
@@ -571,14 +473,17 @@ func (m *snapshotExportManager) executeSnapshotExportPublication(
 	if err := validateSnapshotExportPublishingJob(ctx, job); err != nil {
 		return err
 	}
+	// Publication is source-independent, including recovery after the deadline.
+	m.enqueueExportCleanup(job)
 	instanceCfg := snapshotstorage.InstanceConfigFromParamtable(Params)
-	resolved, err := snapshotstorage.ResolveForeignStorage(
-		ctx,
-		instanceCfg,
-		snapshotstorage.DirectionExport,
-		job.GetTargetS3Path(),
-		job.GetExternalSpec(),
-	)
+	externalSpec := job.GetExternalSpec()
+	if req := job.GetCopyRequest(); req != nil {
+		// The worker prepared this target with the frozen job configuration.
+		// Only legacy Publishing records without a request use current settings.
+		instanceCfg = snapshotstorage.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
+		externalSpec = req.GetExternalSpec()
+	}
+	resolved, err := snapshotstorage.ResolveForeignStorage(ctx, instanceCfg, snapshotstorage.DirectionExport, job.GetTargetS3Path(), externalSpec)
 	if err != nil {
 		return classifySnapshotExportPublicationError(ctx, err)
 	}
@@ -626,6 +531,7 @@ func (m *snapshotExportManager) completeSnapshotExportPublication(
 		latest.Progress = 100
 		latest.EndTime = uint64(time.Now().UnixMilli())
 		latest.ExternalSpec = ""
+		latest.CopyRequest = nil
 		return false, nil
 	})
 	if err != nil {
@@ -664,64 +570,29 @@ func validateSnapshotExportPublishingJob(ctx context.Context, job *datapb.Export
 	if job.GetCopyCursor() != job.GetTotalFiles() || job.GetCopiedFiles() != job.GetTotalFiles() {
 		return merr.WrapErrDataIntegrityMsg("publishing snapshot export job has an incomplete copy plan")
 	}
-	if job.GetTotalBytes() <= 0 {
-		return merr.WrapErrDataIntegrityMsg("publishing snapshot export job has no prepared bundle size")
+	if job.GetTotalBytes() < 0 {
+		return merr.WrapErrDataIntegrityMsg("publishing snapshot export job has negative copied data size")
 	}
 	return nil
 }
 
-func (m *snapshotExportManager) persistOrValidatePlan(
-	ctx context.Context,
-	jobID int64,
-	plan *snapshotExportPlan,
-) (*datapb.ExportSnapshotJob, error) {
-	updated, _, err := m.meta.UpdateJob(ctx, jobID, func(job *datapb.ExportSnapshotJob) (bool, error) {
-		if job.GetState() != datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting {
-			return false, errSnapshotExportJobStopped
-		}
-		if err := ensureSnapshotExportCanAdvance(ctx, job); err != nil {
-			return false, err
-		}
-		if job.GetPlanFingerprint() == "" {
-			job.PlanVersion = plan.version
-			job.PlanFingerprint = plan.fingerprint
-			job.SnapshotFingerprint = plan.snapshotFingerprint
-			job.TotalFiles = int64(len(plan.items))
-			job.CopyCursor = 0
-			job.CopiedFiles = 0
-			job.Progress = 5
-			return false, nil
-		}
-		if job.GetPlanVersion() != plan.version ||
-			job.GetPlanFingerprint() != plan.fingerprint ||
-			job.GetSnapshotFingerprint() != plan.snapshotFingerprint ||
-			job.GetTotalFiles() != int64(len(plan.items)) {
-			return false, merr.WrapErrDataIntegrityMsg("snapshot export plan changed during recovery")
-		}
-		if job.GetCopyCursor() < 0 || job.GetCopyCursor() > job.GetTotalFiles() ||
-			job.GetCopiedFiles() != job.GetCopyCursor() {
-			return false, merr.WrapErrDataIntegrityMsg("snapshot export checkpoint is invalid")
-		}
-		return true, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return updated, nil
-}
-
 func (m *snapshotExportManager) failJob(jobID int64, reason string) bool {
-	return m.updateFailedJob(jobID, reason, false, true)
+	return m.updateFailedJob(jobID, reason, false, true, 0)
 }
 
 func (m *snapshotExportManager) tryFailJob(jobID int64, reason string) bool {
-	return m.updateFailedJob(jobID, reason, true, false)
+	return m.updateFailedJob(jobID, reason, true, false, 0)
 }
 
-func (m *snapshotExportManager) updateFailedJob(jobID int64, reason string, tryLock bool, allowPublishing bool) bool {
+func (m *snapshotExportManager) updateFailedJob(jobID int64, reason string, tryLock bool, allowPublishing bool, taskID int64) bool {
 	ctx, cancel := context.WithTimeout(m.ctx, snapshotPinCleanupTimeout)
 	defer cancel()
 	mutate := func(job *datapb.ExportSnapshotJob) (bool, error) {
+		// Check assignment under the same lock as the terminal transition. A
+		// late failure from a replaced generation must not fail its successor.
+		if taskID != 0 && (findExportTask(job, taskID) == nil || isRetiredExportTask(job, taskID)) {
+			return true, nil
+		}
 		if isSnapshotExportTerminal(job.GetState()) ||
 			(!allowPublishing && job.GetState() == datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing) {
 			return true, nil
@@ -731,6 +602,7 @@ func (m *snapshotExportManager) updateFailedJob(jobID int64, reason string, tryL
 		job.EndTime = uint64(time.Now().UnixMilli())
 		job.SnapshotMetadataUri = ""
 		job.ExternalSpec = ""
+		job.CopyRequest = nil
 		return false, nil
 	}
 	var (
@@ -763,6 +635,10 @@ func (m *snapshotExportManager) updateFailedJob(jobID int64, reason string, tryL
 }
 
 func (m *snapshotExportManager) cleanupTerminalJob(job *datapb.ExportSnapshotJob, now uint64) {
+	pendingShards := m.enqueueExportCleanup(job)
+	if pendingShards {
+		return
+	}
 	if job.GetExternalSpec() != "" {
 		ctx, cancel := context.WithTimeout(m.ctx, snapshotPinCleanupTimeout)
 		_, _, err := m.meta.UpdateJob(ctx, job.GetJobId(), func(latest *datapb.ExportSnapshotJob) (bool, error) {
@@ -770,6 +646,7 @@ func (m *snapshotExportManager) cleanupTerminalJob(job *datapb.ExportSnapshotJob
 				return true, nil
 			}
 			latest.ExternalSpec = ""
+			latest.CopyRequest = nil
 			return false, nil
 		})
 		cancel()
@@ -934,44 +811,6 @@ func observeSnapshotExportTerminal(job *datapb.ExportSnapshotJob) {
 }
 
 func sanitizeSnapshotExportReason(err error, externalSpec string) string {
-	if err == nil {
-		return ""
-	}
-	reason := strings.TrimSpace(err.Error())
-	for _, secret := range snapshotExportSecretValues(externalSpec) {
-		reason = strings.ReplaceAll(reason, secret, "<redacted>")
-	}
-	if len(reason) > snapshotExportFailureReasonLimit {
-		reason = reason[:snapshotExportFailureReasonLimit]
-	}
-	return reason
-}
-
-func snapshotExportSecretValues(externalSpec string) []string {
-	if strings.TrimSpace(externalSpec) == "" {
-		return nil
-	}
-	values := []string{externalSpec}
-	var spec struct {
-		Extfs map[string]json.RawMessage `json:"extfs"`
-	}
-	if err := json.Unmarshal([]byte(externalSpec), &spec); err != nil {
-		return values
-	}
-	for _, key := range []string{
-		externalspec.ExtfsKeyAccessKeyID,
-		externalspec.ExtfsKeyAccessKeyValue,
-		externalspec.ExtfsKeySSLCACert,
-		externalspec.ExtfsKeyExternalID,
-		"credential_json",
-		// Azure source-read SAS: SDK copy errors can echo the SAS-bearing
-		// source URL, so scrub the token from failure reasons too.
-		"source_sas_token",
-	} {
-		var value string
-		if err := json.Unmarshal(spec.Extfs[key], &value); err == nil && value != "" {
-			values = append(values, value)
-		}
-	}
-	return values
+	return snapshotstorage.SanitizeSnapshotExportReason(err,
+		&datapb.SnapshotExportCopyRequest{ExternalSpec: externalSpec})
 }
