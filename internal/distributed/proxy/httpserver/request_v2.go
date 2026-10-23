@@ -869,6 +869,36 @@ type FieldSchema struct {
 	DefaultValue      interface{}            `json:"defaultValue"`
 }
 
+// UnmarshalJSON retains integer defaults as JSON numbers so schema conversion
+// can validate the original literal before float64 would round it. Other field
+// values keep their existing decoding behavior.
+func (field *FieldSchema) UnmarshalJSON(data []byte) error {
+	type plainFieldSchema FieldSchema
+	decoded := struct {
+		*plainFieldSchema
+		DefaultValue json.RawMessage `json:"defaultValue"`
+	}{plainFieldSchema: (*plainFieldSchema)(field)}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return merr.WrapErrParameterInvalidErr(err, "invalid field schema JSON")
+	}
+	field.DefaultValue = nil
+	if len(decoded.DefaultValue) == 0 {
+		return nil
+	}
+	switch field.DataType {
+	case "Int8", "Int16", "Int32", "Int64":
+		literal := strings.TrimSpace(string(decoded.DefaultValue))
+		if ch := literal[0]; ch == '-' || isJSONDigit(ch) {
+			field.DefaultValue = json.Number(literal)
+			return nil
+		}
+	}
+	if err := json.Unmarshal(decoded.DefaultValue, &field.DefaultValue); err != nil {
+		return merr.WrapErrParameterInvalidErr(err, "invalid field defaultValue JSON")
+	}
+	return nil
+}
+
 func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, error) {
 	fieldDataType, ok := schemapb.DataType_value[field.DataType]
 	if !ok {
