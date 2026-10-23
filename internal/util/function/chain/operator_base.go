@@ -64,6 +64,42 @@ func pickByIndices[T any, A typedArray[T], B typedBuilder[T]](arr A, builder B, 
 	return builder.NewArray(), nil
 }
 
+// pickStructByIndices gathers complete rows so StructArray's nested children
+// retain the same selection, including repeated rows. Consecutive rows share
+// one slice, and a single concatenate avoids incremental nested-list copies.
+// Slice and Concatenate preserve the parent validity bitmap and recursively
+// preserve child bitmaps; a null parent still masks its children's values.
+func pickStructByIndices(pool memory.Allocator, arr *array.Struct, indices []int) (arrow.Array, error) {
+	if len(indices) == 0 {
+		return array.NewSlice(arr, 0, 0), nil
+	}
+	for _, index := range indices {
+		if index < 0 || index >= arr.Len() {
+			return nil, merr.WrapErrServiceInternalMsg("struct selection index %d exceeds row count %d", index, arr.Len())
+		}
+	}
+	runs := make([]arrow.Array, 0, len(indices))
+	defer func() {
+		for _, run := range runs {
+			run.Release()
+		}
+	}()
+	for start := 0; start < len(indices); {
+		end := start + 1
+		for end < len(indices) && indices[end] == indices[end-1]+1 {
+			end++
+		}
+		runs = append(runs, array.NewSlice(arr, int64(indices[start]), int64(indices[end-1]+1)))
+		start = end
+	}
+	result, err := array.Concatenate(runs, pool)
+	if err != nil {
+		// Concatenate reports Arrow implementation errors, not Milvus error codes.
+		return nil, merr.WrapErrServiceInternalErr(err, "gather struct rows")
+	}
+	return result, nil
+}
+
 // compareTyped compares two values in a typed array using cmp.Ordered.
 func compareTyped[T cmp.Ordered, A typedArray[T]](arr A, i, j int) int {
 	return cmp.Compare(arr.Value(i), arr.Value(j))
@@ -100,6 +136,8 @@ func dispatchPickByIndices(pool memory.Allocator, data arrow.Array, indices []in
 		return pickByIndices(arr, array.NewFloat64Builder(pool), indices)
 	case *array.String:
 		return pickByIndices(arr, array.NewStringBuilder(pool), indices)
+	case *array.Struct:
+		return pickStructByIndices(pool, arr, indices)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported array type %T", data)
 	}

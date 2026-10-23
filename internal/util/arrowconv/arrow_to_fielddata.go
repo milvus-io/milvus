@@ -18,13 +18,16 @@ package arrowconv
 
 import (
 	"encoding/binary"
+	"math"
 	"strconv"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -36,7 +39,6 @@ import (
 // is not in the map are skipped (the field may have been dropped).
 func ArrowFieldsToProto(rec arrow.Record, fieldSchemaMap map[int64]*schemapb.FieldSchema) ([]*schemapb.FieldData, error) {
 	numCols := int(rec.NumCols())
-	numRows := int(rec.NumRows())
 	result := make([]*schemapb.FieldData, 0, numCols)
 
 	for i := 0; i < numCols; i++ {
@@ -54,7 +56,7 @@ func ArrowFieldsToProto(rec arrow.Record, fieldSchemaMap map[int64]*schemapb.Fie
 		if !ok {
 			continue
 		}
-		fd, err := arrowColumnToFieldData(rec.Column(i), schema, numRows)
+		fd, err := recordColumnToFieldData(rec.Column(i), schema, rec.NumRows())
 		if err != nil {
 			// Wrapf, not WrapErrServiceInternal(..., err.Error()):
 			// arrowColumnToFieldData returns merr-coded errors of its own, and
@@ -90,7 +92,6 @@ func ArrowFieldsToProtoOrdered(
 	fieldSchemaMap map[int64]*schemapb.FieldSchema,
 ) ([]*schemapb.FieldData, error) {
 	numCols := int(rec.NumCols())
-	numRows := int(rec.NumRows())
 	if len(fieldIDs) != numCols {
 		return nil, merr.WrapErrServiceInternalMsg(
 			"arrow record has %d columns but %d field ids were supplied",
@@ -105,7 +106,7 @@ func ArrowFieldsToProtoOrdered(
 				"arrow column %d has field id %d, which is not in the schema",
 				i, fieldIDs[i])
 		}
-		fd, err := arrowColumnToFieldData(rec.Column(i), schema, numRows)
+		fd, err := recordColumnToFieldData(rec.Column(i), schema, rec.NumRows())
 		if err != nil {
 			// Wrapf, not WrapErrServiceInternal(..., err.Error()), per the
 			// repo's error-handling rule 2.
@@ -128,7 +129,175 @@ func ArrowFieldsToProtoOrdered(
 	return result, nil
 }
 
+// Arrow records may expose only a prefix of a longer backing column.
+func recordColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, rows int64) (*schemapb.FieldData, error) {
+	if rows < 0 || rows > int64(col.Len()) {
+		return nil, merr.WrapErrServiceInternalMsg("Arrow record row count exceeds its column length")
+	}
+	if rows == int64(col.Len()) {
+		return ArrowColumnToFieldData(col, schema)
+	}
+	prefix := array.NewSlice(col, 0, rows)
+	defer prefix.Release()
+	return ArrowColumnToFieldData(prefix, schema)
+}
+
+// NewEmptyNativeColumn creates a zero-row column with the same physical layout
+// as native Query output. The caller owns the returned array.
+func NewEmptyNativeColumn(schema *schemapb.FieldSchema) (arrow.Array, error) {
+	if schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("missing empty output field schema")
+	}
+	var dtype arrow.DataType
+	switch schema.DataType {
+	case schemapb.DataType_Bool:
+		dtype = arrow.FixedWidthTypes.Boolean
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		dtype = arrow.PrimitiveTypes.Int32
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+		dtype = arrow.PrimitiveTypes.Int64
+	case schemapb.DataType_Float:
+		dtype = arrow.PrimitiveTypes.Float32
+	case schemapb.DataType_Double:
+		dtype = arrow.PrimitiveTypes.Float64
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
+		dtype = arrow.BinaryTypes.String
+	case schemapb.DataType_JSON, schemapb.DataType_Array, schemapb.DataType_Geometry, schemapb.DataType_SparseFloatVector:
+		dtype = arrow.BinaryTypes.Binary
+	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector, schemapb.DataType_ArrayOfVector:
+		dim, err := typeutil.GetDim(schema)
+		if err != nil {
+			return nil, merr.Wrap(err, "empty native output column")
+		}
+		element := schema.DataType
+		if element == schemapb.DataType_ArrayOfVector {
+			element = schema.ElementType
+		}
+		width := dim
+		switch element {
+		case schemapb.DataType_FloatVector:
+			width *= 4
+		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+			width *= 2
+		case schemapb.DataType_BinaryVector:
+			width /= 8
+		case schemapb.DataType_Int8Vector:
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("unsupported empty vector element type %s", element)
+		}
+		if width <= 0 || int64(int(width)) != width {
+			return nil, merr.WrapErrServiceInternalMsg("invalid empty vector byte width %d", width)
+		}
+		dtype = &arrow.FixedSizeBinaryType{ByteWidth: int(width)}
+		if schema.DataType == schemapb.DataType_ArrayOfVector {
+			dtype = arrow.ListOf(dtype)
+		}
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported empty native output type %s", schema.DataType)
+	}
+	builder := array.NewBuilder(memory.DefaultAllocator, dtype)
+	defer builder.Release()
+	return builder.NewArray(), nil
+}
+
+// ArrowChunkedColumnToFieldData converts chunks directly into owned protobuf
+// payloads, without concatenating an intermediate Arrow array. Validity is
+// normalized across chunks before merging, including all-valid chunks next to
+// chunks with nulls. A zero-chunk column still exports its declared type.
+func ArrowChunkedColumnToFieldData(col *arrow.Chunked, schema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
+	if col == nil || schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("missing Arrow column or field schema")
+	}
+	if len(col.Chunks()) == 0 {
+		builder := array.NewBuilder(memory.DefaultAllocator, col.DataType())
+		empty := builder.NewArray()
+		builder.Release()
+		defer empty.Release()
+		return ArrowColumnToFieldData(empty, schema)
+	}
+	var output *schemapb.FieldData
+	for _, chunk := range col.Chunks() {
+		field, err := ArrowColumnToFieldData(chunk, schema)
+		if err != nil {
+			return nil, err
+		}
+		if col.NullN() > 0 && len(typeutil.GetFieldDataValidData(field)) == 0 {
+			valid := make([]bool, chunk.Len())
+			for i := range valid {
+				valid[i] = true
+			}
+			typeutil.SetFieldDataValidData(field, valid)
+		}
+		if output == nil {
+			output = field
+		} else {
+			if err := typeutil.MergeFieldData([]*schemapb.FieldData{output}, []*schemapb.FieldData{field}); err != nil {
+				return nil, merr.Wrap(err, "merge converted Arrow chunks")
+			}
+			if schema.DataType == schemapb.DataType_SparseFloatVector {
+				output.GetVectors().Dim = output.GetVectors().GetSparseFloatVector().Dim
+			}
+		}
+	}
+	return output, nil
+}
+
+// ArrowColumnToFieldData converts one Arrow column using its declared field
+// schema, including native retrieval and DataFrame scalar layouts. It owns all returned payloads and borrows the array.
+func ArrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
+	if col == nil || schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("missing Arrow column or field schema")
+	}
+	var expected arrow.Type
+	switch schema.DataType {
+	case schemapb.DataType_Bool:
+		expected = arrow.BOOL
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		expected = arrow.INT32
+		// Native retrieval uses Int32; DataFrame operators also use narrow integers.
+		if col.DataType().ID() == arrow.INT8 || col.DataType().ID() == arrow.INT16 {
+			expected = col.DataType().ID()
+		}
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+		expected = arrow.INT64
+	case schemapb.DataType_Float:
+		expected = arrow.FLOAT32
+	case schemapb.DataType_Double:
+		expected = arrow.FLOAT64
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
+		expected = arrow.STRING
+	case schemapb.DataType_JSON, schemapb.DataType_Array, schemapb.DataType_SparseFloatVector:
+		expected = arrow.BINARY
+	case schemapb.DataType_Geometry:
+		expected = arrow.BINARY
+		if col.DataType().ID() == arrow.STRING {
+			expected = arrow.STRING
+		}
+	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector:
+		expected = arrow.FIXED_SIZE_BINARY
+	case schemapb.DataType_ArrayOfVector:
+		expected = arrow.LIST
+		if list, ok := col.DataType().(*arrow.ListType); !ok || list.Elem().ID() != arrow.FIXED_SIZE_BINARY {
+			return nil, merr.WrapErrServiceInternalMsg("unsupported type %s for native Arrow vector array layout %s", schema.DataType, col.DataType())
+		}
+	}
+	if col.DataType().ID() != expected || expected == arrow.NULL {
+		return nil, merr.WrapErrServiceInternalMsg("unsupported type %s for native Arrow layout %s", schema.DataType, col.DataType())
+	}
+	return arrowColumnToFieldData(col, schema, col.Len())
+}
+
 func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRows int) (*schemapb.FieldData, error) {
+	var dim int64
+	switch schema.DataType {
+	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector, schemapb.DataType_ArrayOfVector:
+		var err error
+		dim, err = vectorDimension(col.DataType(), schema)
+		if err != nil {
+			return nil, err
+		}
+	}
 	fd := &schemapb.FieldData{
 		Type:      schema.GetDataType(),
 		FieldName: schema.GetName(),
@@ -151,11 +320,22 @@ func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRo
 		}
 
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		// INT8/INT16/INT32 all live in protobuf's int_data, and
-		// FieldDataToArrow exports all three as int32.
-		arr := col.(*array.Int32)
+		// All integer widths share protobuf int_data.
 		data := make([]int32, numRows)
-		copy(data, arr.Int32Values())
+		switch arr := col.(type) {
+		case *array.Int8:
+			for i := range data {
+				data[i] = int32(arr.Value(i))
+			}
+		case *array.Int16:
+			for i := range data {
+				data[i] = int32(arr.Value(i))
+			}
+		case *array.Int32:
+			copy(data, arr.Int32Values())
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("unsupported integer Arrow layout %s", col.DataType())
+		}
 		fd.Field = intFieldData(data)
 
 	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
@@ -222,7 +402,6 @@ func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRo
 
 	case schemapb.DataType_FloatVector:
 		arr := col.(*array.FixedSizeBinary)
-		dim := resolveVectorDim(schema, arr)
 		floatData := compactFloatVector(arr, numRows, int(dim))
 		fd.Field = &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
@@ -234,7 +413,7 @@ func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRo
 		}
 
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		fd.Field = bytesVectorFieldData(col.(*array.FixedSizeBinary), schema, numRows)
+		fd.Field = bytesVectorFieldData(col.(*array.FixedSizeBinary), schema, numRows, dim)
 
 	case schemapb.DataType_JSON:
 		arr := col.(*array.Binary)
@@ -266,10 +445,18 @@ func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRo
 		}
 
 	case schemapb.DataType_Geometry:
-		arr := col.(*array.Binary)
 		rows := make([][]byte, numRows)
-		for j := 0; j < numRows; j++ {
-			rows[j] = append([]byte{}, arr.Value(j)...)
+		switch arr := col.(type) {
+		case *array.String:
+			for j := range rows {
+				rows[j] = []byte(arr.Value(j))
+			}
+		case *array.Binary:
+			for j := range rows {
+				rows[j] = append([]byte{}, arr.Value(j)...)
+			}
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("unsupported geometry Arrow layout %s", col.DataType())
 		}
 		fd.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
@@ -281,7 +468,6 @@ func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRo
 
 	case schemapb.DataType_Int8Vector:
 		arr := col.(*array.FixedSizeBinary)
-		dim := resolveVectorDim(schema, arr)
 		data := compactBytesVector(arr, numRows)
 		fd.Field = &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
@@ -291,7 +477,7 @@ func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRo
 		}
 
 	case schemapb.DataType_ArrayOfVector:
-		fieldsData, err := arrowListToVectorArray(col, schema, numRows)
+		fieldsData, err := arrowListToVectorArray(col, schema, numRows, dim)
 		if err != nil {
 			return nil, err
 		}
@@ -346,31 +532,63 @@ func setArrowValidData(fd *schemapb.FieldData, col arrow.Array, numRows int, nul
 	}
 }
 
-// resolveVectorDim returns the vector dimension for a FixedSizeBinary vector
-// column, preferring the FieldSchema's declared dim. If the schema doesn't
-// carry a usable dim (typeutil.GetDim fails), it falls back to deriving the
-// dim from the Arrow column's own byte width.
-func resolveVectorDim(schema *schemapb.FieldSchema, arr *array.FixedSizeBinary) int64 {
-	dim, err := typeutil.GetDim(schema)
-	if err == nil {
-		return dim
+// vectorDimension validates declared dimensions against physical byte width.
+// If no dimension is declared, the unambiguous physical layout supplies it.
+// Invalid declarations never fall back to inference or pad/truncate payloads.
+func vectorDimension(dtype arrow.DataType, schema *schemapb.FieldSchema) (int64, error) {
+	logical := schema.DataType
+	if logical == schemapb.DataType_ArrayOfVector {
+		logical = schema.ElementType
+		if list, ok := dtype.(*arrow.ListType); ok {
+			dtype = list.Elem()
+		}
 	}
-
-	byteWidth := arr.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
-	var fallback int64
-	switch schema.GetDataType() {
+	fixed, ok := dtype.(*arrow.FixedSizeBinaryType)
+	if !ok || fixed.ByteWidth <= 0 {
+		return 0, merr.WrapErrServiceInternalMsg("invalid vector layout for %s", schema.Name)
+	}
+	width := int64(fixed.ByteWidth)
+	var physical int64
+	switch logical {
 	case schemapb.DataType_FloatVector:
-		fallback = int64(byteWidth / 4)
-	case schemapb.DataType_BinaryVector:
-		fallback = int64(byteWidth * 8)
+		if width%4 == 0 {
+			physical = width / 4
+		}
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		fallback = int64(byteWidth / 2)
+		if width%2 == 0 {
+			physical = width / 2
+		}
+	case schemapb.DataType_BinaryVector:
+		if width <= math.MaxInt64/8 {
+			physical = width * 8
+		}
+	case schemapb.DataType_Int8Vector:
+		physical = width
 	}
-	return fallback
+	if physical == 0 {
+		return 0, merr.WrapErrServiceInternalMsg("vector type %s does not match byte width %d", logical, width)
+	}
+	// Type parameters take precedence over index parameters, as in GetDim.
+	for _, params := range [][]*commonpb.KeyValuePair{schema.TypeParams, schema.IndexParams} {
+		found := false
+		for _, param := range params {
+			if param.GetKey() != "dim" {
+				continue
+			}
+			dim, err := strconv.ParseInt(param.GetValue(), 10, 64)
+			if found || err != nil || dim != physical {
+				return 0, merr.WrapErrServiceInternalMsg("vector %s declared dimension %q does not match physical dimension %d", schema.Name, param.GetValue(), physical)
+			}
+			found = true
+		}
+		if found {
+			return physical, nil
+		}
+	}
+	return physical, nil
 }
 
-func bytesVectorFieldData(arr *array.FixedSizeBinary, schema *schemapb.FieldSchema, numRows int) *schemapb.FieldData_Vectors {
-	dim := resolveVectorDim(schema, arr)
+func bytesVectorFieldData(arr *array.FixedSizeBinary, schema *schemapb.FieldSchema, numRows int, dim int64) *schemapb.FieldData_Vectors {
 	data := compactBytesVector(arr, numRows)
 
 	vf := &schemapb.VectorField{Dim: dim}
@@ -457,10 +675,9 @@ func compactBytesVector(arr *array.FixedSizeBinary, numRows int) []byte {
 
 // arrowListToVectorArray converts an Arrow List(FixedSizeBinary) column into
 // a proto VectorField_VectorArray.  Each list element is a single vector.
-func arrowListToVectorArray(col arrow.Array, schema *schemapb.FieldSchema, numRows int) (*schemapb.FieldData_Vectors, error) {
+func arrowListToVectorArray(col arrow.Array, schema *schemapb.FieldSchema, numRows int, dim int64) (*schemapb.FieldData_Vectors, error) {
 	listArr := col.(*array.List)
 	elemType := schema.GetElementType()
-	dim, _ := typeutil.GetDim(schema)
 
 	vectors := make([]*schemapb.VectorField, numRows)
 	for j := 0; j < numRows; j++ {

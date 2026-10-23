@@ -637,6 +637,18 @@ class SegmentInternalInterface : public SegmentInterface {
              int64_t size,
              const folly::CancellationToken& cancel_token) const override;
 
+    // Materialize only PK and timestamp for rows surviving Grep, independently
+    // of the output projection. IDs, offsets and timestamp preserve row order.
+    // The take gate applies only to the local identity projection.
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    RetrieveIdentitiesByOffsets(
+        tracer::TraceContext* trace_ctx,
+        const query::RetrievePlan* plan,
+        const int64_t* offsets,
+        int64_t size,
+        bool take_for_output_allowed,
+        const folly::CancellationToken& cancel_token = {}) const;
+
     virtual bool
     HasIndex(FieldId field_id) const = 0;
 

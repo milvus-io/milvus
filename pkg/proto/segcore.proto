@@ -62,6 +62,9 @@ message RetrieveResults {
   // Element indices per document (aligned with offset array)
   // element_indices[i] contains all matching element indices for offset[i]
   repeated ElementIndices element_indices = 9;
+  // Materialized computed columns, aligned with ids. QueryScan keeps Arrow
+  // details until final row selection and populates this field afterward.
+  repeated schema.FieldData computed_results = 10;
 }
 
 message LoadFieldMeta {

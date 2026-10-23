@@ -200,7 +200,11 @@ AsyncRetrieve(CTraceContext c_trace,
               uint64_t collection_ttl,
               uint64_t entity_ttl_physical_time_us);
 
-// CRetrieveArrowResult splits one retrieve result in two:
+// In QueryScan candidate mode this carries $seg_offset in Arrow and only
+// scalar statistics in header. Identity reads additionally carry $id and
+// $timestamp. No per-row data is serialized into either header.
+//
+// For ordinary Query, CRetrieveArrowResult splits one retrieve result in two:
 //
 //   header       the protobuf RetrieveResults with the *user* output columns
 //                removed from fields_data. ids, offset, element_indices, the
@@ -243,7 +247,8 @@ typedef struct CRetrieveArrowResult {
 // AsyncRetrieveAsArrow mirrors AsyncRetrieve, but splits the result as above
 // instead of serializing all of it to protobuf.
 //
-// Preconditions, all enforced by the Go caller
+// QueryScan candidate mode exports offsets regardless of ignore_non_pk.
+// For ordinary Query, preconditions are enforced by the Go caller
 // (shouldUseArrowTransport in querynodev2/segments/retrieve.go):
 //   - no aggregates and no group-by fields: aggregation columns carry
 //     field_id 0 and are identified positionally, so they cannot be matched
@@ -271,6 +276,17 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
                        CRetrievePlan c_plan,
                        int64_t* offsets,
                        int64_t len);
+
+// Read PK and timestamp for selected offsets, before reduction.
+// Returns Future<CRetrieveArrowResult>: $seg_offset, $id, $timestamp
+// Arrow columns, with only scalar statistics in the protobuf header.
+CFuture*
+AsyncRetrieveIdentitiesByOffsets(CTraceContext c_trace,
+                                 CSegmentInterface c_segment,
+                                 CRetrievePlan c_plan,
+                                 int64_t* offsets,
+                                 int64_t len,
+                                 bool take_for_output_allowed);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);

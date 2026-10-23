@@ -220,7 +220,9 @@ func assembleOperatorResult(ctx *types.FuncContext, inputDF *DataFrame, outputs 
 		}
 		builder.SetFieldNullable(col.Field.Name, col.Field.Nullable)
 		if typ, err := ToMilvusType(col.Field.Type); err == nil {
-			builder.SetFieldType(col.Field.Name, typ)
+			if err := builder.SetFieldType(col.Field.Name, typ); err != nil {
+				return nil, err
+			}
 		}
 		fields = append(fields, col.Field)
 	}

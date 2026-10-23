@@ -19,11 +19,17 @@
 package chain
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/util/function/grep/native"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type BaseOpTestSuite struct {
@@ -372,4 +378,86 @@ func (s *BaseOpTestSuite) TestSliceArrayEmptyInput() {
 	defer result.Release()
 
 	s.Equal(0, result.Len())
+}
+
+func TestStructArrayRowGather(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer pool.AssertSize(t, 0)
+	rows, _, err := array.FromJSON(pool, native.GrepDetailsType(), strings.NewReader(`[
+ {"content":["skip"],"starts":[[0]],"ends":[[4]]},
+ {"content":["foo bar foo","hello foo"],"starts":[[0,8],[6]],"ends":[[3,11],[9]]},
+ {"content":[],"starts":[],"ends":[]}]`))
+	require.NoError(t, err)
+	sliced := array.NewSlice(rows, 1, 3).(*array.Struct)
+	rows.Release()
+	defer sliced.Release()
+	for _, indices := range [][]int{nil, {1, 0, 0}, {0, 1}, {-1}, {2}} {
+		got, err := pickStructByIndices(pool, sliced, indices)
+		if len(indices) == 1 {
+			require.Nil(t, got)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			continue
+		}
+		require.NoError(t, err)
+		require.Equal(t, len(indices), got.Len())
+		for i, index := range indices {
+			expectedRow := array.NewSlice(sliced, int64(index), int64(index+1))
+			gotRow := array.NewSlice(got, int64(i), int64(i+1))
+			require.True(t, array.Equal(expectedRow, gotRow))
+			expectedRow.Release()
+			gotRow.Release()
+		}
+		got.Release()
+	}
+}
+
+func TestStructArrayRowGatherNulls(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer pool.AssertSize(t, 0)
+	dtype := arrow.StructOf(
+		arrow.Field{Name: "label", Type: arrow.BinaryTypes.String, Nullable: true},
+		arrow.Field{Name: "values", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64), Nullable: true},
+	)
+	rows, _, err := array.FromJSON(pool, dtype, strings.NewReader(`[
+		{"label":"skip","values":[99]},
+		null,
+		{"label":null,"values":[1,null]},
+		{"label":"x","values":null},
+		{"label":"empty","values":[]}]`))
+	require.NoError(t, err)
+	sliced := array.NewSlice(rows, 1, 5).(*array.Struct)
+	rows.Release()
+	// Reorder and duplicate both null parents and rows with null children.
+	got, err := pickStructByIndices(pool, sliced, []int{3, 0, 1, 1, 2, 0})
+	require.NoError(t, err)
+	defer got.Release()
+	validOnly, err := pickStructByIndices(pool, sliced, []int{3})
+	require.NoError(t, err)
+	defer validOnly.Release()
+	sliced.Release()
+	expected, _, err := array.FromJSON(pool, dtype, strings.NewReader(`[
+		{"label":"empty","values":[]},
+		null,
+		{"label":null,"values":[1,null]},
+		{"label":null,"values":[1,null]},
+		{"label":"x","values":null},
+		null]`))
+	require.NoError(t, err)
+	defer expected.Release()
+	require.True(t, array.Equal(expected, got))
+	require.Equal(t, 2, got.NullN())
+	require.True(t, got.IsNull(1))
+	require.True(t, got.IsNull(5))
+	fields := got.(*array.Struct)
+	require.False(t, fields.IsNull(2)) // A null child does not make its parent null.
+	require.True(t, fields.Field(0).IsNull(2))
+	values := fields.Field(1).(*array.List)
+	require.True(t, values.IsNull(4))
+	for _, row := range []int{2, 3} {
+		begin, end := values.ValueOffsets(row)
+		require.Equal(t, int64(2), end-begin)
+		require.True(t, values.ListValues().IsNull(int(begin+1)))
+	}
+	require.Zero(t, validOnly.NullN())
+	require.Zero(t, validOnly.(*array.Struct).Field(0).NullN())
 }

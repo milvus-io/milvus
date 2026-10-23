@@ -76,8 +76,13 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 // materializes selectedRows[start:end]. In particular, discarded vector rows
 // still participate in type inference, nullable checks, and bounds validation.
 func buildMergedRetrieveResultsRange(results []*internalpb.RetrieveResults, selectedRows []rowRef, start, end int, schema *schemapb.CollectionSchema) (*internalpb.RetrieveResults, error) {
+	pageRows := selectedRows[start:end]
+	computed, err := selectComputedResults(results, pageRows)
+	if err != nil {
+		return nil, err
+	}
 	if len(selectedRows) == 0 || len(results) == 0 {
-		return &internalpb.RetrieveResults{}, nil
+		return &internalpb.RetrieveResults{ComputedResults: computed}, nil
 	}
 
 	// Use first result as template for field count / metadata
@@ -143,10 +148,9 @@ func buildMergedRetrieveResultsRange(results []*internalpb.RetrieveResults, sele
 	}
 
 	merged := &internalpb.RetrieveResults{
-		FieldsData: make([]*schemapb.FieldData, numFields),
+		ComputedResults: computed,
+		FieldsData:      make([]*schemapb.FieldData, numFields),
 	}
-
-	pageRows := selectedRows[start:end]
 
 	// Build merged IDs only for the output page.
 	merged.Ids = buildMergedIDs(results, pageRows)
@@ -847,13 +851,27 @@ func buildMergedVectorFieldRange(results []*internalpb.RetrieveResults, selected
 // This is more efficient than sliceRetrieveResults for contiguous ranges since it uses
 // direct sub-slicing instead of element-by-element copying.
 func rangeSliceRetrieveResults(result *internalpb.RetrieveResults, start, end int) (*internalpb.RetrieveResults, error) {
+	var computed []*schemapb.FieldData
+	if result.GetComputedResults() != nil {
+		refs := make([]rowRef, 0, max(0, end-start))
+		for i := start; i < end; i++ {
+			refs = append(refs, rowRef{rowIdx: int64(i)})
+		}
+		var err error
+		computed, err = selectComputedResults([]*internalpb.RetrieveResults{result}, refs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if start >= end {
-		return &internalpb.RetrieveResults{}, nil
+		return &internalpb.RetrieveResults{ComputedResults: computed}, nil
 	}
 
 	newResult := &internalpb.RetrieveResults{
-		Ids:        rangeSliceIDs(result.GetIds(), start, end),
-		FieldsData: make([]*schemapb.FieldData, len(result.GetFieldsData())),
+		ComputedResults: computed,
+		Ids:             rangeSliceIDs(result.GetIds(), start, end),
+		FieldsData:      make([]*schemapb.FieldData, len(result.GetFieldsData())),
 	}
 
 	for i, fd := range result.GetFieldsData() {
@@ -1521,6 +1539,8 @@ func (c *rowSizeCalculator) withArrowRecord(rec arrow.Record) *rowSizeCalculator
 	return c
 }
 
+// rowSize accounts for ordinary output fields; computed columns are forwarded
+// without traversing their nested values for size accounting.
 func (c *rowSizeCalculator) rowSize(rowIdx int64) int64 {
 	var size int64
 	for fieldIdx, fd := range c.result.GetFieldsData() {
