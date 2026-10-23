@@ -1280,7 +1280,7 @@ func TestBroadcasterSchedulerAddTaskAfterClose(t *testing.T) {
 // shutdown -- mixcoord's GracefulStop closes the broadcaster, and a component
 // that also holds it can close it again -- so the second call must return
 // instead of parking the shutdown goroutine forever. Every step of Close is
-// re-entrant on its own: the lifetime state is a plain assignment, cancelling
+// re-entrant on its own: the lifetime state is a plain assignment, canceling
 // the manager's context twice is a no-op, and both schedulers' BlockUntilFinish waits on a
 // future that is already resolved.
 func TestBroadcasterCloseIsIdempotent(t *testing.T) {
