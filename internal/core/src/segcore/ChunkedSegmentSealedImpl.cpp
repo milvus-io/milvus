@@ -3398,7 +3398,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                     std::vector<Timestamp> ts(num_rows, commit_ts_);
                     auto timestamp_index =
                         std::make_shared<const TimestampIndex>(
-                            build_timestamp_index(ts.data(), num_rows));
+                            BuildTimestampIndex(ts.data(), num_rows));
                     auto timestamp_data = std::make_shared<TimestampData>();
                     timestamp_data->InitFromOwnedData(std::move(ts));
                     committer.Commit(
@@ -3532,7 +3532,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     std::fill(timestamps.begin(), timestamps.end(), commit_ts_);
                 }
                 auto timestamp_index = std::make_shared<const TimestampIndex>(
-                    build_timestamp_index(timestamps.data(), num_rows));
+                    BuildTimestampIndex(timestamps.data(), num_rows));
                 auto timestamp_data = std::make_shared<TimestampData>();
                 timestamp_data->InitFromOwnedData(std::move(timestamps));
                 committer.Commit([this,
@@ -8074,16 +8074,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     });
 }
 
-TimestampIndex
-ChunkedSegmentSealedImpl::build_timestamp_index(const Timestamp* data,
-                                                size_t num_rows) {
-    TimestampIndex index;
-    auto meta = GenerateFakeSlices(data, num_rows, 4096);
-    index.set_length_meta(std::move(meta));
-    index.build_with(data, num_rows);
-    return index;
-}
-
 void
 ChunkedSegmentSealedImpl::PrepareSchemaForReopen(const SchemaPtr& sch) {
     if (!sch) {
@@ -9643,7 +9633,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             if (commit_ts_ != 0) {
                 std::vector<Timestamp> ts(num_rows, commit_ts_);
                 auto timestamp_index = std::make_shared<const TimestampIndex>(
-                    build_timestamp_index(ts.data(), num_rows));
+                    BuildTimestampIndex(ts.data(), num_rows));
                 auto timestamp_data = std::make_shared<TimestampData>();
                 timestamp_data->InitFromOwnedData(std::move(ts));
                 committer.Commit([this,
