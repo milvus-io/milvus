@@ -1389,10 +1389,26 @@ func (f *splitHandoffFixture) setRecovery(channels []string, segmentChannels map
 			ID: id, CollectionID: f.collectionID, PartitionID: common.AllPartitionsID, InsertChannel: channel, NumOfRows: 10,
 		}
 	})
-	// the target resolves segment details from the shared store; a re-homed
-	// segment is re-put under its new channel.
+	// The target resolves segment details from the shared store, which holds
+	// datacoord's segment meta: a segment keeps the channel it was recorded
+	// under (a split target's flushed segment is recorded under the target
+	// even while the recovery view attributes it to the source), so only a
+	// segment the store has not seen yet is recorded here.
 	for _, segment := range f.segments {
-		f.store.PutSegment(segment)
+		if _, recorded := f.store.GetSegment(segment.GetID()); !recorded {
+			f.store.PutSegment(segment)
+		}
+	}
+}
+
+// record puts the segments in the shared store under the channel datacoord's
+// segment meta records for them, ahead of a recovery view that attributes them
+// elsewhere.
+func (f *splitHandoffFixture) record(segmentChannels map[int64]string) {
+	for id, channel := range segmentChannels {
+		f.store.PutSegment(&datapb.SegmentInfo{
+			ID: id, CollectionID: f.collectionID, PartitionID: common.AllPartitionsID, InsertChannel: channel, NumOfRows: 10,
+		})
 	}
 }
 
@@ -1450,6 +1466,7 @@ func TestSplitWindowTargetsHeldBackUntilWindowEnds(t *testing.T) {
 	// inside the window: the rewrite outputs are attributed to the listed source.
 	f.setShards([]string{"src", "t1", "t2"},
 		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.record(map[int64]string{segO1: "t1", segO2: "t2"})
 	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{segO1: "src", segO2: "src"})
 	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
 	assert.ElementsMatch(t, []string{"t1", "t2"}, f.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget).Collect())
@@ -1525,6 +1542,7 @@ func TestSplitWindowFenceRaceSnapshotHeldBack(t *testing.T) {
 	currentVersion := f.serveBeforeSplit(segS)
 
 	// the describe still returns the pre-fence meta; the pull sees the fence.
+	f.record(map[int64]string{segO1: "t1", segO2: "t2"})
 	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{segO1: "src", segO2: "src"})
 	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
 	assert.ElementsMatch(t, []string{"t1", "t2"}, f.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget).Collect())
@@ -1596,6 +1614,7 @@ func TestSplitWindowFenceRaceWithDescribeDownNeverBusyLoops(t *testing.T) {
 	// pull still succeeds (it goes through datacoord, not this broker call),
 	// and ReadShardStates falls back to the cached pre-fence entry to mark it.
 	f.describeErr = errors.New("rootcoord down")
+	f.record(map[int64]string{segO1: "t1", segO2: "t2"})
 	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{segO1: "src", segO2: "src"})
 	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
 	assert.ElementsMatch(t, []string{"t1", "t2"}, f.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget).Collect())
@@ -1633,6 +1652,7 @@ func TestCheck_NoCurrentTargetSkipsSplitWindowTargets(t *testing.T) {
 	ctx, collectionID := f.ctx, f.collectionID
 
 	f.setShards([]string{"src", "t1"}, schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating)
+	f.record(map[int64]string{11: "t1"})
 	f.setRecovery([]string{"src", "t1"}, map[int64]string{11: "src"})
 	f.setDist(map[string][]int64{"t1": {}})
 
@@ -1692,6 +1712,7 @@ func TestSplitWindowCurrentTargetServesTheSource(t *testing.T) {
 	// is a window snapshot, with the outputs attributed to the listed source.
 	f.setShards([]string{"src", "t1", "t2"},
 		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.record(map[int64]string{segO1: "t1", segO2: "t2"})
 	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{segO1: "src", segO2: "src"})
 	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
 	assert.ElementsMatch(t, []string{"t1", "t2"}, f.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget).Collect())
@@ -1755,6 +1776,7 @@ func TestSplitWindowCurrentTargetAdvancesAnAlreadyLoadedCollection(t *testing.T)
 
 	f.setShards([]string{"src", "t1", "t2"},
 		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.record(map[int64]string{segO1: "t1", segO2: "t2"})
 	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{segO1: "src", segO2: "src"})
 	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
 	f.setDist(map[string][]int64{"src": {segO1, segO2}})
@@ -1784,6 +1806,7 @@ func TestSplitWindowCurrentTargetRefusesAnEmptyServingSet(t *testing.T) {
 
 	f.setShards([]string{"src", "t1", "t2"},
 		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.record(map[int64]string{11: "t1"})
 	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{11: "src"})
 	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
 	f.setDist(map[string][]int64{"src": {11}})
