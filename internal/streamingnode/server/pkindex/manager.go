@@ -37,10 +37,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// defaultBackoffBase is the first wait after a failed manifest lookup or handover.
+const defaultBackoffBase = time.Second
+
 // Params are the tunables of the primary key index of a streaming node.
 type Params struct {
 	// Params of the Index: MemTableSize and ReuploadAfter.
 	index.Params
+	// ActiveBytes starts a handover when the active generation holds this many bytes.
+	ActiveBytes uint64
+	// TailBytes starts a handover when the WAL recovery tail reaches this size.
+	TailBytes uint64
+	// SoftWatermark is the WAL recovery tail size at which the WAL slows appends.
+	SoftWatermark uint64
+	// BackoffBase is the first wait after a failure.
+	BackoffBase time.Duration
+	// MaxBackoff is the longest wait after a failure.
+	MaxBackoff time.Duration
+	// StallTimeout is how long, by observed time, the index may hold the WAL
+	// checkpoint back before the driver hands over the oldest dirty Index.
+	StallTimeout time.Duration
 }
 
 // ParamsFromConfig reads the params from paramtable. ReuploadAfter is half
@@ -55,7 +71,26 @@ func ParamsFromConfig() Params {
 			MemTableSize:  uint64(cfg.PKIndexMemTableSize.GetAsSize()),
 			ReuploadAfter: grace / 2,
 		},
+		ActiveBytes:   uint64(cfg.PKIndexHandoverActiveBytes.GetAsSize()),
+		TailBytes:     uint64(cfg.PKIndexHandoverTailBytes.GetAsSize()),
+		SoftWatermark: uint64(cfg.WALRecoveryTailSoftWatermark.GetAsSize()),
+		BackoffBase:   defaultBackoffBase,
+		MaxBackoff:    cfg.PKIndexHandoverMaxBackoff.GetAsDurationByParse(),
+		StallTimeout:  paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second),
 	}
+}
+
+// WALTailSnapshot is what the WAL recovery storage knows about its tail when
+// it observes a persisted TimeTick. The observe passes it to
+// ObserveTimeTick, so the index never calls the recovery storage back.
+type WALTailSnapshot struct {
+	// Bytes is the size of the WAL recovery tail.
+	Bytes uint64
+	// CompletedTimeTick is the time tick of the completed point of the ack
+	// tracker: the WAL recovery checkpoint before the LastAcked of the
+	// modules bounds it. The index holds the checkpoint back when its
+	// LastAcked is below it.
+	CompletedTimeTick uint64
 }
 
 // ManagerConfig configures a Manager.

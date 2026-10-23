@@ -72,7 +72,7 @@ func TestHandoverNormal(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	insert(t, ch, idx, 10, 1, 2, 3)
-	ch.ObserveTimeTick(50)
+	ch.ObserveTimeTick(50, WALTailSnapshot{})
 
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestHandoverNothingToPublish(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	idx.SetLastCommittedForTest(10)
-	ch.ObserveTimeTick(20)
+	ch.ObserveTimeTick(20, WALTailSnapshot{})
 
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	insert(t, ch, idx, 10, 1, 2, 3)
-	ch.ObserveTimeTick(50)
+	ch.ObserveTimeTick(50, WALTailSnapshot{})
 
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestHandoverRejectsAManifestThatWentBack(t *testing.T) {
 			env, ch, idx := handoverIndex(t)
 			env.client.set(func(c *fakeClient) { c.rewrite = tc.rewrite })
 			insert(t, ch, idx, 10, 1)
-			ch.ObserveTimeTick(50)
+			ch.ObserveTimeTick(50, WALTailSnapshot{})
 			idx.SetInstalledVersionForTest(tc.installed)
 
 			p, err := idx.PrepareForTest(ctx)
@@ -227,7 +227,7 @@ func TestHandoverAcceptsTheSameVersion(t *testing.T) {
 	ctx := context.Background()
 	_, ch, idx := handoverIndex(t)
 	insert(t, ch, idx, 10, 1)
-	ch.ObserveTimeTick(50)
+	ch.ObserveTimeTick(50, WALTailSnapshot{})
 	idx.SetInstalledVersionForTest(1)
 
 	p, err := idx.PrepareForTest(ctx)
@@ -243,7 +243,7 @@ func TestHandoverAcceptsTheSameVersion(t *testing.T) {
 func TestHandoverLastObservedDidNotMove(t *testing.T) {
 	env, ch, idx := handoverIndex(t)
 	insert(t, ch, idx, 10, 1, 2)
-	ch.ObserveTimeTick(30)
+	ch.ObserveTimeTick(30, WALTailSnapshot{})
 	idx.SetLastCommittedForTest(30)
 
 	p, err := idx.PrepareForTest(context.Background())
@@ -261,7 +261,7 @@ func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	insert(t, ch, idx, 10, 1)
-	ch.ObserveTimeTick(50)
+	ch.ObserveTimeTick(50, WALTailSnapshot{})
 
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
@@ -288,7 +288,7 @@ func TestHandoverRetiresSeveralEmptyGenerationsInOneCall(t *testing.T) {
 	_, err := idx.EngineForTest().RotateIncrement(ctx)
 	require.NoError(t, err)
 	idx.SetLastCommittedForTest(10)
-	ch.ObserveTimeTick(20)
+	ch.ObserveTimeTick(20, WALTailSnapshot{})
 
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
