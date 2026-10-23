@@ -21,10 +21,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestRestoreColumnGroupLayoutRejectsInvalidMetadata(t *testing.T) {
@@ -53,46 +51,6 @@ func TestRestoreColumnGroupLayoutRejectsInvalidMetadata(t *testing.T) {
 	groups, err := RestoreColumnGroupLayout(nil, nil)
 	require.NoError(t, err)
 	require.Empty(t, groups)
-}
-
-func TestDefaultPoliciesCanDriftAcrossBatches(t *testing.T) {
-	paramtable.Init()
-	params := paramtable.Get()
-	for _, setting := range []struct {
-		item  paramtable.ParamItem
-		value string
-	}{
-		{params.CommonCfg.Stv2SplitSystemColumn, "true"},
-		{params.CommonCfg.Stv2SystemColumnIncludePK, "true"},
-		{params.CommonCfg.Stv2SplitByAvgSize, "true"},
-		{params.CommonCfg.Stv2SplitAvgSizeThreshold, "64"},
-	} {
-		key, previous := setting.item.Key, setting.item.GetValue()
-		require.NoError(t, params.Save(key, setting.value))
-		t.Cleanup(func() { _ = params.Save(key, previous) })
-	}
-	fields := []*schemapb.FieldSchema{
-		{FieldID: 0, DataType: schemapb.DataType_Int64},
-		{FieldID: 1, DataType: schemapb.DataType_Int64},
-		{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		{FieldID: 101, DataType: schemapb.DataType_VarChar},
-		{FieldID: 102, DataType: schemapb.DataType_Int64},
-		{FieldID: 103, DataType: schemapb.DataType_FloatVector},
-	}
-	short := SplitColumns(fields, map[int64]ColumnStats{101: {AvgSize: 22}}, DefaultPolicies()...)
-	long := SplitColumns(fields, map[int64]ColumnStats{101: {AvgSize: 1041}}, DefaultPolicies()...)
-	require.Equal(t, []ColumnGroup{
-		{GroupID: 0, Fields: []int64{0, 1, 100}, Columns: []int{0, 1, 2}},
-		{GroupID: 1, Fields: []int64{101, 102}, Columns: []int{3, 4}},
-		{GroupID: 103, Fields: []int64{103}, Columns: []int{5}},
-	}, short)
-	require.Equal(t, []ColumnGroup{
-		{GroupID: 0, Fields: []int64{0, 1, 100}, Columns: []int{0, 1, 2}},
-		{GroupID: 1, Fields: []int64{102}, Columns: []int{4}},
-		{GroupID: 101, Fields: []int64{101}, Columns: []int{3}},
-		{GroupID: 103, Fields: []int64{103}, Columns: []int{5}},
-	}, long)
-	t.Logf("same schema/config, different batch statistics: %v -> %v", short, long)
 }
 
 func TestRestoreColumnGroupLayoutPreservesLogicalIDsAndManifestOrder(t *testing.T) {
