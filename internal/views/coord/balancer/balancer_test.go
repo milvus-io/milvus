@@ -228,7 +228,7 @@ func TestBalancerLoopRetriesDetachedManager(t *testing.T) {
 	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
 	config := *cache.GetBalanceConfig()
-	config.TickerInterval = time.Hour
+	config.ReconcileInterval = time.Hour
 	cache.UpdateBalanceConfig(&config)
 	cache.MarkReady()
 

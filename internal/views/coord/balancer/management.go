@@ -165,7 +165,7 @@ func (b *DefaultBalancer) MoveSegments(ctx context.Context, cfg *loadmgr.LoadCon
 		if entry == nil || !entry.Info().Alive || entry.Info().Stopping {
 			return nil, merr.WrapErrServiceUnavailableMsg("destination node %d became unavailable", node)
 		}
-		rows[node] = entry.Info().TargetRowCount
+		rows[node] = entry.Info().TargetLogicalSize
 	}
 	moves := make(map[qviews.ShardID]*SegmentMove)
 	for _, segment := range segments {
@@ -186,7 +186,7 @@ func (b *DefaultBalancer) MoveSegments(ctx context.Context, cfg *loadmgr.LoadCon
 		if !ok {
 			return nil, merr.WrapErrServiceUnavailableMsg("segment %d left the DataView during manual balance", segment)
 		}
-		rows[destination] += info.RowNum
+		rows[destination] += info.LogicalSize
 	}
 	builders := make(map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder, len(moves))
 	for id, move := range moves {

@@ -43,7 +43,7 @@ func TestCoordinatorComponentsSixQNAndTwoSN(t *testing.T) {
 			view.Shards = append(view.Shards, &viewpb.DataViewOfShard{Vchannel: channel})
 			part := &api.PartitionDataView{PartitionID: 1}
 			for segment := int64(1); segment <= 12; segment++ {
-				part.Segments = append(part.Segments, &api.SegmentDataView{SegmentID: id*1000 + int64(shard)*100 + segment, PartitionID: 1, RowNum: 100000})
+				part.Segments = append(part.Segments, &api.SegmentDataView{SegmentID: id*1000 + int64(shard)*100 + segment, PartitionID: 1, LogicalSize: 100000})
 			}
 			data.Shards = append(data.Shards, &api.ShardDataView{VChannel: channel, GrowingTransformStartAfterTimetick: 100, CompactedTransformStartAfterTimetick: 90, Partitions: []*api.PartitionDataView{part}})
 		}

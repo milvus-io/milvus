@@ -40,7 +40,7 @@ func newPublishedRecoveryBase(id qviews.ShardID, recovery *coordview.PublishedRe
 				shard.Partitions = append(shard.Partitions, partition)
 			}
 			for i, segmentID := range part.GetSegmentIds() {
-				segment := &SegmentDataView{SegmentID: segmentID, RowNum: recovery.Rows[segmentID]}
+				segment := &SegmentDataView{SegmentID: segmentID, LogicalSize: recovery.Sizes[segmentID]}
 				if i < len(part.GetSegmentManifestVersions()) {
 					segment.ManifestVersion = part.GetSegmentManifestVersions()[i]
 				}

@@ -22,14 +22,14 @@ func cacheShard(collection, replica int64) qviews.ShardID {
 func cacheData(collection int64, channel string, rows ...int64) *CollectionDataView {
 	segments := make([]*SegmentDataView, 0, len(rows))
 	for i, row := range rows {
-		segments = append(segments, &SegmentDataView{SegmentID: collection*1000 + int64(i), PartitionID: 1, RowNum: row})
+		segments = append(segments, &SegmentDataView{SegmentID: collection*1000 + int64(i), PartitionID: 1, LogicalSize: row})
 	}
 	return api.PrepareCollectionDataView(&CollectionDataView{CollectionID: collection, DataVersion: qviews.DataVersion{StreamingVersion: 1}, Shards: []*ShardDataView{{VChannel: channel, Partitions: []*PartitionDataView{{PartitionID: 1, Segments: segments}}}}})
 }
 
 func cacheStats(segment, node, rows int64, state coordview.SegmentState, known bool) *coordview.ShardStats {
 	stats := testShardStats(ver(1, 0, 1), 1, placement(segment, 1, node, state))
-	stats.Segments[segment].RowNum, stats.Segments[segment].HasRowNum = rows, known
+	stats.Segments[segment].LogicalSize, stats.Segments[segment].LostStats = rows, !known
 	if state == coordview.SegmentStatePreparing || state == coordview.SegmentStateReady {
 		withPreparingVersion(stats, ver(1, 0, 2))
 	}
@@ -49,21 +49,21 @@ func TestPlanningPinsNodeContributionAlongsideTotal(t *testing.T) {
 	p := newPlanningContext(c)
 	c.PublishShard(shard, cacheStats(1000, 1, 40, coordview.SegmentStateReady, true))
 	// The collection is first read after the node baseline was acquired.
-	require.Equal(t, int64(40), p.GetShardStats(shard).Segments[1000].RowNum)
-	require.Equal(t, int64(100), p.CurrentRows(shard)[1])
-	require.Zero(t, withoutRows(initialProjectedRows(p.nodes), p.CurrentRows(shard))[1])
+	require.Equal(t, int64(40), p.GetShardStats(shard).Segments[1000].LogicalSize)
+	require.Equal(t, int64(100), p.CurrentSize(shard)[1])
+	require.Zero(t, withoutRows(initialProjectedRows(p.nodes), p.CurrentSize(shard))[1])
 	// The collection has a newer contribution than the pinned node. Each
 	// objective must subtract the contribution from its own aggregate version.
 	p.targets[10] = []int64{1}
 	p.fanouts = make(map[qviews.ShardID]int)
-	ctx := newAllocationContext(p, shard, map[int64]int64{1: 0}, []*SegmentDataView{{SegmentID: 1000, PartitionID: 1, RowNum: 100}})
+	ctx := newAllocationContext(p, shard, map[int64]int64{1: 0}, []*SegmentDataView{{SegmentID: 1000, PartitionID: 1, LogicalSize: 100}})
 	require.Zero(t, ctx.collectionBase[1])
 	p.acceptRows(shard, map[int64]int64{1: 50})
 	require.Equal(t, int64(10), p.replicaDelta[10][1])
 	old := p.GetCollection(1)
 	c.PublishDataView(1, cacheData(1, shard.VChannel, 200))
 	require.Same(t, old, p.GetCollection(1))
-	require.Equal(t, int64(100), p.DataViewForShard(shard).TotalRows)
+	require.Equal(t, int64(100), p.DataViewForShard(shard).LogicalSize)
 	require.Equal(t, []int64{1}, p.CandidateNodes("rg1"))
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg2"})
 	require.Equal(t, []int64{1}, p.CandidateNodes("rg1"), "candidate inputs are fixed within a batch")
@@ -168,7 +168,7 @@ func TestPlanningContextPinsAbsenceAndResolvesReplicaBinding(t *testing.T) {
 	c.PublishShard(short, cacheStats(100, 1, 42, coordview.SegmentStateUp, true))
 	next := newPlanningContext(c)
 	require.Equal(t, int64(1), next.ConfigForShard(short).CollectionID)
-	require.Equal(t, int64(42), next.CurrentRows(short)[1])
+	require.Equal(t, int64(42), next.CurrentSize(short)[1])
 	require.NotNil(t, next.GetShardStats(short))
 	short.ReplicaID = 999
 	require.Nil(t, next.ConfigForShard(short))

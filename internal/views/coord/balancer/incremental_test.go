@@ -37,16 +37,16 @@ func TestIncrementalFailureRejoinConvergesAndStaysStable(t *testing.T) {
 	}
 	run()
 	for _, node := range []int64{1, 2, 3} {
-		require.Equal(t, int64(2e6), c.GetNode(node).TargetRows())
+		require.Equal(t, int64(2e6), c.GetNode(node).TargetSize())
 	}
 	c.PublishNode(1, nil)
 	run()
-	require.Equal(t, int64(3e6), c.GetNode(2).TargetRows())
-	require.Equal(t, int64(3e6), c.GetNode(3).TargetRows())
+	require.Equal(t, int64(3e6), c.GetNode(2).TargetSize())
+	require.Equal(t, int64(3e6), c.GetNode(3).TargetSize())
 	c.PublishNode(4, &NodeInfo{NodeID: 4, Alive: true, ResourceGroup: "rg1"})
 	run()
 	for _, node := range []int64{2, 3, 4} {
-		require.Equal(t, int64(2e6), c.GetNode(node).TargetRows())
+		require.Equal(t, int64(2e6), c.GetNode(node).TargetSize())
 	}
 	for i := 0; i < 3; i++ {
 		require.Empty(t, policy.Plan(c, []qviews.ShardID{id}).Prepares)
@@ -70,7 +70,7 @@ func TestIncrementalPartialFailureReusesReadySegments(t *testing.T) {
 	}
 	c.PublishShard(id, failed)
 	for _, node := range []int64{1, 2, 3} {
-		require.Zero(t, c.GetNode(node).TargetRows(), "failed target contributes no intended load")
+		require.Zero(t, c.GetNode(node).TargetSize(), "failed target contributes no intended load")
 	}
 	plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{id})
 	require.Contains(t, plan.Prepares, id)
@@ -105,7 +105,7 @@ func TestIncrementalBoundedSearchContinuesPastUnhelpfulPrefix(t *testing.T) {
 		placement(1000, 1, 1, coordview.SegmentStateUp), placement(1001, 1, 1, coordview.SegmentStateUp), placement(1002, 1, 1, coordview.SegmentStateUp),
 		placement(1003, 1, 2, coordview.SegmentStateUp), placement(1004, 1, 2, coordview.SegmentStateUp), placement(1005, 1, 2, coordview.SegmentStateUp)))
 	profile := DefaultBalanceConfig()
-	profile.MaxCandidateEvaluations = 1
+	profile.MaxCandidateEvaluationsPerShard = 1
 	c.UpdateBalanceConfig(profile)
 	policy := NewDefaultBalancePolicy()
 	var moves int
@@ -122,7 +122,7 @@ func TestIncrementalBoundedSearchContinuesPastUnhelpfulPrefix(t *testing.T) {
 	}
 	require.Positive(t, moves)
 	for _, node := range []int64{1, 2, 3} {
-		require.Equal(t, int64(2e6), c.GetNode(node).TargetRows())
+		require.Equal(t, int64(2e6), c.GetNode(node).TargetSize())
 	}
 }
 
@@ -154,12 +154,12 @@ func TestIncrementalPreparingPublishesTargetBeforeReconcileReturns(t *testing.T)
 	controller := NewDefaultBalancer(c, registry, nil, nil)
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))
-	require.Equal(t, int64(100), c.GetNode(1).TargetRows())
-	require.Equal(t, int64(100), c.GetCollection(1).ReplicaRows(10, 1))
+	require.Equal(t, int64(100), c.GetNode(1).TargetSize())
+	require.Equal(t, int64(100), c.GetCollection(1).ReplicaSize(10, 1))
 	require.NotNil(t, c.GetCollection(1).GetShard(id).Stats().PreparingPlacement)
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))
-	require.Equal(t, int64(100), c.GetNode(1).TargetRows(), "next reconcile must not double count or see the node as empty")
+	require.Equal(t, int64(100), c.GetNode(1).TargetSize(), "next reconcile must not double count or see the node as empty")
 }
 
 func TestIncrementalTinyShardStaysConcentratedOnManyNodes(t *testing.T) {
@@ -188,7 +188,7 @@ func TestIncrementalLargeCollectionOfTinyShardsUsesLocalBalanceWithinRGBand(t *t
 	for i := int64(0); i < 9; i++ {
 		id := qviews.ShardID{ReplicaID: 10, VChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_1v%d", i)}
 		ids = append(ids, id)
-		segments[1000+i] = &SegmentDataView{SegmentID: 1000 + i, PartitionID: 1, RowNum: 100_000}
+		segments[1000+i] = &SegmentDataView{SegmentID: 1000 + i, PartitionID: 1, LogicalSize: 100_000}
 		shards = append(shards, shardDataView(id.VChannel, 1, 1000+i))
 	}
 	publishTestData(c, 1, version, segments, shards...)
@@ -210,6 +210,38 @@ func TestIncrementalLargeCollectionOfTinyShardsUsesLocalBalanceWithinRGBand(t *t
 	}
 	require.Empty(t, policy.Plan(c, ids).Prepares, "further local improvement must not worsen the RG penalty")
 	for _, node := range []int64{1, 2, 3} {
-		require.InDelta(t, 900_000, c.GetNode(node).TargetRows(), 100_000)
+		require.InDelta(t, 900_000, c.GetNode(node).TargetSize(), 100_000)
 	}
+}
+
+func TestBalanceConsumesLogicalSizeIndependentlyOfPhysicalRows(t *testing.T) {
+	c := newTestCache(cfgFor(1, 10, []int64{1}, nil))
+	id := cacheShard(1, 10)
+	data := cacheData(1, id.VChannel, 1e6, 1e6, 1e6, 1e6, 1e6, 1e6)
+	// Deliberately different physical sizes: the policy must use only LogicalSize.
+	// Rebuild the unpublished fixture so physical summaries are also consistent.
+	segments := make(map[int64]*SegmentDataView)
+	var ids []int64
+	for _, part := range data.Shards[0].Partitions {
+		for i, seg := range part.Segments {
+			seg.RowNum = int64(i) * 10_000_000
+			segments[seg.SegmentID] = seg
+			ids = append(ids, seg.SegmentID)
+		}
+	}
+	publishTestData(c, 1, data.DataVersion, segments, shardDataView(id.VChannel, 1, ids...))
+	for _, node := range []int64{1, 2, 3} {
+		c.PublishNode(node, &NodeInfo{NodeID: node, Alive: true, ResourceGroup: "rg1"})
+	}
+	policy := NewDefaultBalancePolicy()
+	plan := policy.Plan(c, []qviews.ShardID{id})
+	require.Contains(t, plan.Prepares, id)
+	assignments := publishSuccessfulPlan(c, id, plan.Prepares[id])
+	require.Len(t, distinctAssignmentNodes(assignments), 3)
+	for _, node := range []int64{1, 2, 3} {
+		require.Equal(t, int64(2e6), c.GetNode(node).TargetSize())
+	}
+	require.Equal(t, int64(150e6), c.GetCollection(1).DataView().TotalRows)
+	require.Equal(t, int64(6e6), c.GetCollection(1).DataView().LogicalSize)
+	require.Empty(t, policy.Plan(c, []qviews.ShardID{id}).Prepares)
 }

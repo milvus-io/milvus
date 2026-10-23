@@ -57,7 +57,7 @@ type ShardViewManager struct {
 	pendingRemovals []*CoordQueryViewStateMachine
 
 	// dataViewRefs acquires DataViewRefs for resident QueryViews so the
-	// published per-segment RowNum footprint stays visible while a view is
+	// published per-segment LogicalSize footprint stays visible while a view is
 	// alive (lifetime(QueryView) < lifetime(DataView)).
 	//
 	// Non-nil for the DataView-backed registry. The original standalone registry
@@ -275,28 +275,28 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 	}
 	sort.Slice(stats.ResidentNodes, func(i, j int) bool { return stats.ResidentNodes[i] < stats.ResidentNodes[j] })
 
-	m.fillShardRows(stats)
+	m.fillShardStats(stats)
 	return stats
 }
 
 func viewPlacement(sm *CoordQueryViewStateMachine) *ViewPlacement {
-	p := &ViewPlacement{Assignments: make(map[int64]int64), PartitionRows: make(map[int64]map[int64]int64)}
+	p := &ViewPlacement{Assignments: make(map[int64]int64), PartitionSizes: make(map[int64]map[int64]int64)}
 	for _, node := range sm.View().GetQueryNode() {
 		for _, part := range node.GetPartitions() {
-			rows := p.PartitionRows[part.GetPartitionId()]
+			rows := p.PartitionSizes[part.GetPartitionId()]
 			if rows == nil {
 				rows = make(map[int64]int64)
-				p.PartitionRows[part.GetPartitionId()] = rows
+				p.PartitionSizes[part.GetPartitionId()] = rows
 			}
 			for _, id := range part.GetSegmentIds() {
 				p.Assignments[id] = node.GetNodeId()
 				if sm.Ref() != nil {
 					if stats, ok := sm.Ref().Stats(id); ok {
-						rows[node.GetNodeId()] += stats.RowNum
+						rows[node.GetNodeId()] += stats.LogicalSize
 						continue
 					}
 				}
-				p.UnknownRows = append(p.UnknownRows, id)
+				p.LostStats = append(p.LostStats, id)
 			}
 		}
 	}
@@ -311,12 +311,12 @@ func viewNodeIDs(view *viewpb.QueryViewOfShard) []int64 {
 	return nodes
 }
 
-// fillShardRows attaches the published RowNum of each placed segment, read
+// fillShardStats attaches the complete published footprint of each placed segment, read
 // lock-free from the retained DataViewRefs. Each version has its own segment
 // membership and stats. Prefer the newest contributing view with known stats,
 // falling back to older views for segments no longer in the latest version.
 // Recovered versions may have no stats; preserve that distinction from zero.
-func (m *ShardViewManager) fillShardRows(stats *ShardStats) {
+func (m *ShardViewManager) fillShardStats(stats *ShardStats) {
 	views := make([]*CoordQueryViewStateMachine, 0, len(m.views))
 	for _, sm := range m.views {
 		if _, contributes := segmentStateFromViewState(sm.State()); contributes && sm.Ref() != nil {
@@ -330,7 +330,8 @@ func (m *ShardViewManager) fillShardRows(stats *ShardStats) {
 		for _, sm := range views {
 			if segmentStats, ok := sm.Ref().Stats(segmentID); ok {
 				segment.RowNum = segmentStats.RowNum
-				segment.HasRowNum = true
+				segment.LogicalSize = segmentStats.LogicalSize
+				segment.LostStats = false
 				break
 			}
 		}
@@ -372,6 +373,7 @@ func fillSegments(segments map[int64]*SegmentStats, queryNodes []*viewpb.QueryVi
 				segment := segments[segID]
 				if segment == nil {
 					segment = &SegmentStats{
+						LostStats:   true,
 						SegmentID:   segID,
 						PartitionID: partID,
 						Nodes:       make(map[int64]SegmentState),

@@ -6,6 +6,7 @@ import "github.com/milvus-io/milvus/internal/views/qviews"
 type CollectionDataView struct {
 	CollectionID int64
 	TotalRows    int64
+	LogicalSize  int64
 	DataVersion  qviews.DataVersion
 	Shards       []*ShardDataView
 	shardIndex   map[string]*ShardDataView
@@ -19,27 +20,29 @@ type ShardDataView struct {
 	CompactedTransformStartAfterTimetick uint64
 	Partitions                           []*PartitionDataView
 	TotalRows                            int64
+	LogicalSize                          int64
 	SegmentCount                         int
 }
 
 // PartitionDataView is one partition's segment list within a shard. The
 // segments are embedded (not IDs plus an external lookup), so traversal
-// paths read RowNum directly.
+// paths read the published LogicalSize directly.
 type PartitionDataView struct {
 	PartitionID int64
 	Segments    []*SegmentDataView
 	TotalRows   int64
+	LogicalSize int64
 }
 
-// SegmentDataView carries the per-segment metadata the Balancer needs. RowNum
-// is maintained by the DataView manager and never enters the viewpb wire
-// format.
+// SegmentDataView carries physical rows and the scheduling size frozen by the
+// DataView manager. Neither statistic enters the viewpb wire format.
 type SegmentDataView struct {
 	SegmentID                   int64
 	ManifestVersion             int64
 	TransformStartAfterTimetick uint64
 	PartitionID                 int64
 	RowNum                      int64
+	LogicalSize                 int64
 }
 
 // PrepareCollectionDataView takes ownership of an unpublished collection and
@@ -49,7 +52,7 @@ func PrepareCollectionDataView(coll *CollectionDataView) *CollectionDataView {
 	if coll.shardIndex != nil {
 		return coll
 	}
-	coll.TotalRows = 0
+	coll.TotalRows, coll.LogicalSize = 0, 0
 	coll.shardIndex = make(map[string]*ShardDataView, len(coll.Shards))
 	coll.segments = make(map[int64]*SegmentDataView)
 	for _, shard := range coll.Shards {
@@ -57,12 +60,12 @@ func PrepareCollectionDataView(coll *CollectionDataView) *CollectionDataView {
 			continue
 		}
 		coll.shardIndex[shard.VChannel] = shard
-		shard.TotalRows, shard.SegmentCount = 0, 0
+		shard.TotalRows, shard.LogicalSize, shard.SegmentCount = 0, 0, 0
 		for _, partition := range shard.Partitions {
 			if partition == nil {
 				continue
 			}
-			partition.TotalRows = 0
+			partition.TotalRows, partition.LogicalSize = 0, 0
 			for _, segment := range partition.Segments {
 				if segment == nil {
 					continue
@@ -72,6 +75,9 @@ func PrepareCollectionDataView(coll *CollectionDataView) *CollectionDataView {
 				partition.TotalRows += segment.RowNum
 				shard.TotalRows += segment.RowNum
 				coll.TotalRows += segment.RowNum
+				partition.LogicalSize += segment.LogicalSize
+				shard.LogicalSize += segment.LogicalSize
+				coll.LogicalSize += segment.LogicalSize
 				shard.SegmentCount++
 			}
 		}

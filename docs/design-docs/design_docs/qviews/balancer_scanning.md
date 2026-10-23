@@ -119,6 +119,33 @@ next interleaving point. No fixed millisecond latency is promised by this design
 Published schema retention, load-partition filtering, and view lifecycle rules
 remain unchanged by batching.
 
+## Configuration boundaries
+
+`queryView.logicalSize` belongs to DataView: `source` (`rowCount` or
+`insertBytes`) and `bytesPerUnit` (default `64KB`, parsed by `GetAsSize`) are
+fixed at manager initialization. `segmentBaseCost` defaults to 16 and is sampled
+on the next normal DataView update. None of these changes directly requests a
+balance pass or rewrites existing snapshots. See the [DataView cost model](data_view.md#native-scheduling-statistics).
+
+`queryView.balancer.reconcileInterval` controls periodic scans. The
+`optimization` group contains `enabled`, `minScoreGain` and
+`maxCandidateEvaluationsPerShard`; these affect optional placement improvements,
+not mandatory recovery and release. `minScoreGain` is the net weighted score
+gain after movement and loading costs.
+
+The `scoring` group separates `resourceGroup` load-band weights/tolerances,
+`concentration` shard/collection weights and relative tolerance, `fanout` weight
+and hysteresis, and `movement` per-unit move/load costs. Its shared
+`targetLogicalSizePerNode` determines preferred shard fanout and the collection
+concentration floor; it is not a node capacity limit. All size thresholds and
+costs consume published LogicalSize, independent of the DataView source.
+
+Balancer configuration remains refreshable as one validated profile pinned per
+batch. A changed scoring or optimization profile requests a scan; an
+interval-only change refreshes the timer without requesting a scan. Malformed
+profiles retain the last valid profile. Legacy `queryCoord.autoBalance` remains
+independent of these settings.
+
 ## Key packages and validation
 
 - `internal/views/coord/balancer/cache/scanner.go`: directory, cursor, compaction.

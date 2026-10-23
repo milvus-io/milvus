@@ -21,13 +21,13 @@ func cacheShard(collection, replica int64) qviews.ShardID {
 func cacheData(collection int64, channel string, rows ...int64) *api.CollectionDataView {
 	segments := make([]*api.SegmentDataView, 0, len(rows))
 	for i, row := range rows {
-		segments = append(segments, &api.SegmentDataView{SegmentID: collection*1000 + int64(i), PartitionID: 1, RowNum: row})
+		segments = append(segments, &api.SegmentDataView{SegmentID: collection*1000 + int64(i), PartitionID: 1, LogicalSize: row})
 	}
 	return api.PrepareCollectionDataView(&api.CollectionDataView{CollectionID: collection, DataVersion: qviews.DataVersion{StreamingVersion: 1}, Shards: []*api.ShardDataView{{VChannel: channel, Partitions: []*api.PartitionDataView{{PartitionID: 1, Segments: segments}}}}})
 }
 
 func cacheStats(segment, node, rows int64, state coordview.SegmentState, known bool) *coordview.ShardStats {
-	return &coordview.ShardStats{Segments: map[int64]*coordview.SegmentStats{segment: {SegmentID: segment, PartitionID: 1, RowNum: rows, HasRowNum: known, Nodes: map[int64]coordview.SegmentState{node: state}}}}
+	return &coordview.ShardStats{Segments: map[int64]*coordview.SegmentStats{segment: {SegmentID: segment, PartitionID: 1, LogicalSize: rows, LostStats: !known, Nodes: map[int64]coordview.SegmentState{node: state}}}}
 }
 
 func TestCacheImmutablePublicationAndFallback(t *testing.T) {
@@ -42,20 +42,20 @@ func TestCacheImmutablePublicationAndFallback(t *testing.T) {
 	c.PublishShard(shard, stats)
 	before := c.GetCollection(1)
 	node := c.GetNode(1)
-	require.Equal(t, int64(100), node.Info().UpRowCount)
-	require.Equal(t, int64(100), node.Contribution(shard).UpRowCount)
-	require.Equal(t, int64(100), data.Shards[0].TotalRows)
+	require.Equal(t, int64(100), node.Info().UpLogicalSize)
+	require.Equal(t, int64(100), node.Contribution(shard).UpLogicalSize)
+	require.Equal(t, int64(100), data.Shards[0].LogicalSize)
 	require.Equal(t, 2, data.Shards[0].SegmentCount)
 	c.PublishShard(shard, stats)
 	require.Same(t, node, c.GetNode(1), "duplicate publication preserves the immutable object")
 	c.PublishShard(shard, cacheStats(1000, 1, 0, coordview.SegmentStateReady, true))
-	require.Zero(t, c.GetNode(1).Info().PendingRowCount, "published zero must not use historical fallback")
-	require.Equal(t, int64(100), node.Info().UpRowCount, "retained readers remain immutable")
+	require.Zero(t, c.GetNode(1).Info().PendingLogicalSize, "published zero must not use historical fallback")
+	require.Equal(t, int64(100), node.Info().UpLogicalSize, "retained readers remain immutable")
 	require.Same(t, data, c.GetCollection(1).DataView())
 	require.Same(t, stats, before.GetShard(shard).Stats())
 	c.PublishShard(shard, cacheStats(1000, 1, 0, coordview.SegmentStatePreparing, false))
 	c.PublishDataView(1, cacheData(1, shard.VChannel))
-	require.Equal(t, int64(100), c.GetNode(1).Info().PendingRowCount, "resident old membership retains fallback")
+	require.Equal(t, int64(100), c.GetNode(1).Info().PendingLogicalSize, "resident old membership retains fallback")
 	c.PublishLoadConfig(1, nil, 2)
 	require.NotNil(t, c.GetCollection(1).GetShard(shard), "desired removal preserves cleanup scope")
 	var resident []qviews.ShardID
@@ -75,12 +75,12 @@ func TestCacheLateDataViewRefreshesOnlyUnknownFootprints(t *testing.T) {
 	c := New(nil)
 	shard := cacheShard(1, 10)
 	c.PublishShard(shard, cacheStats(1000, 1, 0, coordview.SegmentStateReady, false))
-	require.Zero(t, c.GetNode(1).Info().PendingRowCount)
+	require.Zero(t, c.GetNode(1).Info().PendingLogicalSize)
 	c.PublishDataView(1, cacheData(1, shard.VChannel, 42))
-	require.Equal(t, int64(42), c.GetNode(1).Info().PendingRowCount)
+	require.Equal(t, int64(42), c.GetNode(1).Info().PendingLogicalSize)
 	c.PublishShard(shard, cacheStats(1000, 1, 7, coordview.SegmentStateUp, true))
 	c.PublishDataView(1, cacheData(1, shard.VChannel, 99))
-	require.Equal(t, int64(7), c.GetNode(1).Info().UpRowCount)
+	require.Equal(t, int64(7), c.GetNode(1).Info().UpLogicalSize)
 }
 
 func TestCacheConcurrentFieldsAndContributions(t *testing.T) {
@@ -98,9 +98,9 @@ func TestCacheConcurrentFieldsAndContributions(t *testing.T) {
 				c.PublishShard(shard, cacheStats(id*1000, 1, id, coordview.SegmentStateUp, true))
 				node := c.GetNode(1)
 				var total int64
-				node.RangeShards(func(shard qviews.ShardID) bool { total += node.Contribution(shard).UpRowCount; return true })
-				if total != node.Info().UpRowCount {
-					t.Errorf("inconsistent published node: %d != %d", total, node.Info().UpRowCount)
+				node.RangeShards(func(shard qviews.ShardID) bool { total += node.Contribution(shard).UpLogicalSize; return true })
+				if total != node.Info().UpLogicalSize {
+					t.Errorf("inconsistent published node: %d != %d", total, node.Info().UpLogicalSize)
 				}
 			}
 		}(i)
@@ -113,7 +113,7 @@ func TestCacheConcurrentFieldsAndContributions(t *testing.T) {
 		}
 	}()
 	wg.Wait()
-	require.Equal(t, int64(136), c.GetNode(1).Info().UpRowCount)
+	require.Equal(t, int64(136), c.GetNode(1).Info().UpLogicalSize)
 	for i := int64(1); i <= 16; i++ {
 		entry := c.GetCollection(i)
 		require.NotNil(t, entry.LoadConfig())
@@ -136,7 +136,7 @@ func TestCacheConcurrentFieldsAndContributions(t *testing.T) {
 	}()
 	wg.Wait()
 	require.Equal(t, uint64(199), c.GetCollection(1).ConfigVersion())
-	require.Equal(t, int64(99), c.GetCollection(1).DataView().Shards[0].TotalRows)
+	require.Equal(t, int64(99), c.GetCollection(1).DataView().Shards[0].LogicalSize)
 }
 
 func BenchmarkCacheGetCollection(b *testing.B) {
@@ -207,8 +207,8 @@ func TestRetainedCacheVersionsShareUnchangedChildren(t *testing.T) {
 	for _, entry := range retained {
 		require.Same(t, original, entry.GetShard(untouched))
 	}
-	require.Equal(t, int64(1), retained[0].GetShard(cacheShard(1, 1)).Stats().Segments[1].RowNum)
-	require.Equal(t, int64(128), c.GetNode(1).Contribution(cacheShard(1, 1)).UpRowCount)
+	require.Equal(t, int64(1), retained[0].GetShard(cacheShard(1, 1)).Stats().Segments[1].LogicalSize)
+	require.Equal(t, int64(128), c.GetNode(1).Contribution(cacheShard(1, 1)).UpLogicalSize)
 }
 
 func BenchmarkCacheRetainedVersions(b *testing.B) {

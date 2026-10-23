@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// readBalanceConfig avoids the panic-on-invalid typed ParamItem accessors.
+// readBalanceConfig validates raw values before publishing a refreshed profile.
 // Validation is for the complete group, including the sum of scoring weights.
 func readBalanceConfig(params *paramtable.ComponentParam) (*BalanceConfig, bool) {
 	p := &params.QueryViewCfg
@@ -21,16 +21,16 @@ func readBalanceConfig(params *paramtable.ComponentParam) (*BalanceConfig, bool)
 		item *paramtable.ParamItem
 		dest *float64
 	}{
-		{&p.BalancerGlobalWeight, &value.GlobalWeight},
-		{&p.BalancerShardWeight, &value.ShardWeight},
-		{&p.BalancerCollectionWeight, &value.CollectionWeight},
-		{&p.BalancerFanoutPenaltyWeight, &value.FanoutPenaltyWeight},
-		{&p.BalancerMovePrice, &value.MovePrice},
-		{&p.BalancerLoadPrice, &value.LoadPrice},
-		{&p.BalancerRelativeTolerance, &value.RelativeTolerance},
-		{&p.BalancerLocalTolerance, &value.LocalTolerance},
+		{&p.BalancerResourceGroupWeight, &value.ResourceGroupWeight},
+		{&p.BalancerShardConcentrationWeight, &value.ShardConcentrationWeight},
+		{&p.BalancerCollectionConcentrationWeight, &value.CollectionConcentrationWeight},
+		{&p.BalancerFanoutWeight, &value.FanoutWeight},
+		{&p.BalancerMoveCostPerUnit, &value.MoveCostPerUnit},
+		{&p.BalancerLoadCostPerUnit, &value.LoadCostPerUnit},
+		{&p.BalancerResourceGroupRelativeTolerance, &value.ResourceGroupRelativeTolerance},
+		{&p.BalancerConcentrationRelativeTolerance, &value.ConcentrationRelativeTolerance},
 		{&p.BalancerFanoutHysteresis, &value.FanoutHysteresis},
-		{&p.BalancerMinGainRows, &value.MinGainRows},
+		{&p.BalancerMinScoreGain, &value.MinScoreGain},
 	} {
 		parsed, err := strconv.ParseFloat(field.item.GetValue(), 64)
 		if err != nil {
@@ -42,9 +42,9 @@ func readBalanceConfig(params *paramtable.ComponentParam) (*BalanceConfig, bool)
 		item *paramtable.ParamItem
 		dest *int64
 	}{
-		{&p.BalancerAbsoluteToleranceRows, &value.AbsoluteToleranceRows},
-		{&p.BalancerTargetRowsPerShardNode, &value.TargetRowsPerShardNode},
-		{&p.BalancerMaxCandidateEvaluations, &value.MaxCandidateEvaluations},
+		{&p.BalancerResourceGroupAbsoluteTolerance, &value.ResourceGroupAbsoluteTolerance},
+		{&p.BalancerTargetLogicalSizePerNode, &value.TargetLogicalSizePerNode},
+		{&p.BalancerMaxCandidateEvaluationsPerShard, &value.MaxCandidateEvaluationsPerShard},
 	} {
 		parsed, err := strconv.ParseInt(field.item.GetValue(), 10, 64)
 		if err != nil {
@@ -58,15 +58,15 @@ func readBalanceConfig(params *paramtable.ComponentParam) (*BalanceConfig, bool)
 	}
 	// The typed getter falls back to the default on malformed input. Validate
 	// first, and reject a concurrent change; its callback will refresh again.
-	value.TickerInterval = p.BalancerReconcileInterval.GetAsDurationByParse()
-	if value.TickerInterval != interval {
+	value.ReconcileInterval = p.BalancerReconcileInterval.GetAsDurationByParse()
+	if value.ReconcileInterval != interval {
 		return nil, false
 	}
-	enabled, err := strconv.ParseBool(p.BalancerAutoBalance.GetValue())
+	enabled, err := strconv.ParseBool(p.BalancerOptimizationEnabled.GetValue())
 	if err != nil {
 		return nil, false
 	}
-	value.AutoBalance = enabled
+	value.OptimizationEnabled = enabled
 	return value, value.Valid()
 }
 
@@ -79,21 +79,21 @@ func (b *DefaultBalancer) watchBalanceConfig(ctx context.Context, params *paramt
 	}
 	p := &params.QueryViewCfg
 	keys := []string{
-		p.BalancerAutoBalance.Key,
+		p.BalancerOptimizationEnabled.Key,
 		p.BalancerReconcileInterval.Key,
-		p.BalancerGlobalWeight.Key,
-		p.BalancerShardWeight.Key,
-		p.BalancerCollectionWeight.Key,
-		p.BalancerFanoutPenaltyWeight.Key,
-		p.BalancerMovePrice.Key,
-		p.BalancerLoadPrice.Key,
-		p.BalancerRelativeTolerance.Key,
-		p.BalancerLocalTolerance.Key,
+		p.BalancerResourceGroupWeight.Key,
+		p.BalancerShardConcentrationWeight.Key,
+		p.BalancerCollectionConcentrationWeight.Key,
+		p.BalancerFanoutWeight.Key,
+		p.BalancerMoveCostPerUnit.Key,
+		p.BalancerLoadCostPerUnit.Key,
+		p.BalancerResourceGroupRelativeTolerance.Key,
+		p.BalancerConcentrationRelativeTolerance.Key,
 		p.BalancerFanoutHysteresis.Key,
-		p.BalancerAbsoluteToleranceRows.Key,
-		p.BalancerTargetRowsPerShardNode.Key,
-		p.BalancerMinGainRows.Key,
-		p.BalancerMaxCandidateEvaluations.Key,
+		p.BalancerResourceGroupAbsoluteTolerance.Key,
+		p.BalancerTargetLogicalSizePerNode.Key,
+		p.BalancerMinScoreGain.Key,
+		p.BalancerMaxCandidateEvaluationsPerShard.Key,
 	}
 
 	var mu sync.Mutex

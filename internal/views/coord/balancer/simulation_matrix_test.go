@@ -272,8 +272,8 @@ func TestBalanceSimulationConfigAndBudget(t *testing.T) {
 			simulationPopulate(s, 4, 1, 2, 12, "uniform", 1)
 			s.settle("initial", nil, 0, 20)
 			cfg := DefaultBalanceConfig()
-			cfg.MovePrice = price * .2
-			cfg.LoadPrice = price * .8
+			cfg.MoveCostPerUnit = price * .2
+			cfg.LoadCostPerUnit = price * .8
 			s.cache.UpdateBalanceConfig(cfg)
 			s.node(3, "rg1", true, false)
 			s.settle("expand_with_price", nil, 0, 40)
@@ -285,7 +285,7 @@ func TestBalanceSimulationConfigAndBudget(t *testing.T) {
 			simulationPopulate(s, 1, 1, 1, 6, "uniform", 1)
 			s.settle("initial", nil, 0, 20)
 			cfg := DefaultBalanceConfig()
-			cfg.MaxCandidateEvaluations = budget
+			cfg.MaxCandidateEvaluationsPerShard = budget
 			s.cache.UpdateBalanceConfig(cfg)
 			s.node(3, "rg1", true, false)
 			r := s.settle("expand", nil, 0, 300)
@@ -297,12 +297,12 @@ func TestBalanceSimulationConfigAndBudget(t *testing.T) {
 		simulationPopulate(s, 4, 1, 2, 12, "uniform", 1)
 		s.settle("initial", nil, 0, 20)
 		cfg := DefaultBalanceConfig()
-		cfg.AutoBalance = false
+		cfg.OptimizationEnabled = false
 		s.cache.UpdateBalanceConfig(cfg)
 		s.node(3, "rg1", true, false)
 		r := s.settle("disabled_expand", nil, 0, 20)
 		require.Zero(t, r.Counters.Prepares)
-		cfg.AutoBalance = true
+		cfg.OptimizationEnabled = true
 		s.cache.UpdateBalanceConfig(cfg)
 		s.settle("enabled", nil, 0, 30)
 	})
@@ -344,7 +344,7 @@ func TestBalanceSimulationTargetReplacement(t *testing.T) {
 	s.node(3, "rg1", true, false)
 	s.step(s.collections, -1, false)
 	var sum int64
-	s.cache.RangeNodeIDs(func(id int64) bool { sum += s.cache.GetNode(id).TargetRows(); return true })
+	s.cache.RangeNodeIDs(func(id int64) bool { sum += s.cache.GetNode(id).TargetSize(); return true })
 	require.Equal(t, int64(6_000_000), sum)
 	for id, v := range s.views {
 		if v.preparing != nil {
@@ -394,8 +394,8 @@ func TestBalanceSimulationRetiredShardDiagnostic(t *testing.T) {
 		s.step(s.collections, -1, true)
 	}
 	var rows int64
-	s.cache.RangeNodeIDs(func(id int64) bool { rows += s.cache.GetNode(id).TargetRows(); return true })
-	desired := s.cache.GetCollection(1).DataView().TotalRows
+	s.cache.RangeNodeIDs(func(id int64) bool { rows += s.cache.GetNode(id).TargetSize(); return true })
+	desired := s.cache.GetCollection(1).DataView().LogicalSize
 	outcome := "stable_in_band"
 	if rows != desired || s.counters.Retries > start.Retries {
 		outcome = "retired_shard_residual"

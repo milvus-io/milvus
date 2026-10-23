@@ -31,31 +31,40 @@ func TestQueryViewConfiguration(t *testing.T) {
 	params.Init(bt)
 	p := &params.QueryViewCfg
 	require.Equal(t, time.Minute, p.BalancerReconcileInterval.GetAsDurationByParse())
+	require.Equal(t, "queryView.logicalSize.segmentBaseCost", p.LogicalSizeSegmentBaseCost.Key)
+	require.Equal(t, "queryView.balancer.scoring.targetLogicalSizePerNode", p.BalancerTargetLogicalSizePerNode.Key)
+	require.Equal(t, int64(16), p.LogicalSizeSegmentBaseCost.GetAsInt64())
+	require.Equal(t, "rowCount", p.LogicalSizeSource.GetValue())
+	require.Equal(t, int64(64*1024), p.LogicalSizeBytesPerUnit.GetAsSize())
+	require.Equal(t, int64(100000), p.BalancerTargetLogicalSizePerNode.GetAsInt64())
 	defaults := map[string]string{
-		"autoBalance":                     "true",
-		"reconcileInterval":               "1m",
-		"targetRowsPerShardNode":          "100000",
-		"scoring.globalWeight":            "1",
-		"scoring.shardWeight":             "1",
-		"scoring.collectionWeight":        "1",
-		"scoring.fanoutPenaltyWeight":     "1",
-		"scoring.movePrice":               "0.02",
-		"scoring.loadPrice":               "0.08",
-		"scoring.relativeTolerance":       "0.1",
-		"scoring.localTolerance":          "0.1",
-		"scoring.fanoutHysteresis":        "0.1",
-		"scoring.absoluteToleranceRows":   "100000",
-		"scoring.minGainRows":             "1",
-		"scoring.maxCandidateEvaluations": "100000",
+		"logicalSize.source":                                    "rowCount",
+		"logicalSize.bytesPerUnit":                              "64KB",
+		"logicalSize.segmentBaseCost":                           "16",
+		"balancer.reconcileInterval":                            "1m",
+		"balancer.optimization.enabled":                         "true",
+		"balancer.optimization.minScoreGain":                    "1",
+		"balancer.optimization.maxCandidateEvaluationsPerShard": "100000",
+		"balancer.scoring.targetLogicalSizePerNode":             "100000",
+		"balancer.scoring.resourceGroup.weight":                 "1",
+		"balancer.scoring.resourceGroup.relativeTolerance":      "0.1",
+		"balancer.scoring.resourceGroup.absoluteTolerance":      "100000",
+		"balancer.scoring.concentration.shardWeight":            "1",
+		"balancer.scoring.concentration.collectionWeight":       "1",
+		"balancer.scoring.concentration.relativeTolerance":      "0.1",
+		"balancer.scoring.fanout.weight":                        "1",
+		"balancer.scoring.fanout.hysteresis":                    "0.1",
+		"balancer.scoring.movement.moveCostPerUnit":             "0.02",
+		"balancer.scoring.movement.loadCostPerUnit":             "0.08",
 	}
 	// Projections contain configured source/overlay values, not unset defaults.
 	for key, value := range defaults {
-		require.NoError(t, params.Save("queryView.balancer."+key, value))
+		require.NoError(t, params.Save("queryView."+key, value))
 	}
 	for _, component := range []string{"querycoord", "querynode", "streamingnode", "proxy"} {
 		projected := params.GetComponentConfigurations(component, "queryview")
 		for key, want := range defaults {
-			require.Equal(t, want, projected[strings.ToLower(strings.ReplaceAll("queryviewbalancer"+key, ".", ""))], component+": "+key)
+			require.Equal(t, want, projected[strings.ToLower(strings.ReplaceAll("queryview"+key, ".", ""))], component+": "+key)
 		}
 	}
 	require.Empty(t, params.GetComponentConfigurations("querycoord", "queryCoord.queryView"))

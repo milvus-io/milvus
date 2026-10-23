@@ -6669,9 +6669,10 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 			InsertChannel: channel,
 			State:         state,
 			IsInvisible:   invisible,
+			Stats:         &datapb.Statistics{InsertBinlogSize: 2048, StatsBinlogSize: 1024, DeltaBinlogSize: 512},
 			Binlogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
-				Binlogs: []*datapb.Binlog{{LogID: id}},
+				Binlogs: []*datapb.Binlog{{LogID: id, MemorySize: 999999}},
 			}},
 		}})
 	}
@@ -6684,8 +6685,8 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	actual, err := meta.loadableProjection(ctx, 100)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []dataview.LoadableSegment{
-		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10},
-		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10},
+		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
+		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
 	}, actual)
 }
 

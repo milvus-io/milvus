@@ -22,7 +22,7 @@ type allocationResult struct {
 // allocated (missing DataView, missing replica, or any segment has no
 // eligible node).
 //
-// Segments are processed by RowNum descending and SegmentID ascending. A
+// Segments are processed by LogicalSize descending and SegmentID ascending. A
 // shard-local allocationContext tracks partial rows and opened nodes.
 //
 // This is the Phase 2 "allocation" step; Phase 1 classification and Phase 3
@@ -49,8 +49,8 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 		entries = append(entries, part.Segments...)
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].RowNum != entries[j].RowNum {
-			return entries[i].RowNum > entries[j].RowNum
+		if entries[i].LogicalSize != entries[j].LogicalSize {
+			return entries[i].LogicalSize > entries[j].LogicalSize
 		}
 		return entries[i].SegmentID < entries[j].SegmentID
 	})
@@ -95,14 +95,14 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 		}
 		more = ctx.optimize(entries, cursor)
 		after := ctx.score()
-		if after.global > before.global+scoreEpsilon || before.energy(ctx.config)-after.energy(ctx.config)-ctx.migrationCost(baseline) <= ctx.config.MinGainRows {
+		if after.global > before.global+scoreEpsilon || before.energy(ctx.config)-after.energy(ctx.config)-ctx.migrationCost(baseline) <= ctx.config.MinScoreGain {
 			ctx.assignments = baseline
 			clear(ctx.rows)
 			clear(ctx.counts)
 			ctx.opened = 0
 			for _, segment := range entries {
 				node := baseline[segment.SegmentID]
-				ctx.rows[node] += segment.RowNum
+				ctx.rows[node] += segment.LogicalSize
 				if ctx.counts[node] == 0 {
 					ctx.opened++
 				}

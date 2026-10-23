@@ -14,13 +14,13 @@ type (
 	demandBucket struct{ replicas, rows int64 }
 )
 
-func (n *NodeEntry) TargetRows() int64 { return n.info.TargetRowCount }
+func (n *NodeEntry) TargetSize() int64 { return n.info.TargetLogicalSize }
 func (n *NodeEntry) TargetContribution(id qviews.ShardID) int64 {
 	v, _ := n.targets.get(shardKey(id))
 	return v.rows
 }
 func (s *ShardEntry) Target() *coordview.ViewPlacement { return s.target }
-func (c *CollectionEntry) ReplicaRows(replica, node int64) int64 {
+func (c *CollectionEntry) ReplicaSize(replica, node int64) int64 {
 	v, _ := c.targetLoads.get(replicaNodeKey(replica, node))
 	return v.rows
 }
@@ -49,7 +49,7 @@ func demandGroups(c *CollectionEntry) (map[string]int64, int64) {
 		for _, replica := range c.config.Replicas {
 			groups[replica.ResourceGroup]++
 		}
-		rows = c.LoadedRows()
+		rows = c.LoadedSize()
 	}
 	return groups, rows
 }
@@ -140,7 +140,7 @@ func (c *Cache) selectTarget(entry *CollectionEntry, id qviews.ShardID, stats *c
 		return nil, nil
 	}
 	rows := make(map[int64]int64)
-	for partition, byNode := range target.PartitionRows {
+	for partition, byNode := range target.PartitionSizes {
 		if !entry.LoadsPartition(partition) {
 			continue
 		}
@@ -148,7 +148,7 @@ func (c *Cache) selectTarget(entry *CollectionEntry, id qviews.ShardID, stats *c
 			rows[node] += count
 		}
 	}
-	for _, segment := range target.UnknownRows {
+	for _, segment := range target.LostStats {
 		node := target.Assignments[segment]
 		if entry.LoadsPartition(stats.Segments[segment].PartitionID) && eligible(node) {
 			rows[node] += fallback[segment]
@@ -194,7 +194,7 @@ func (c *Cache) replaceTarget(entry *CollectionEntry, id qviews.ShardID, old, ne
 		slot := c.lockNode(node)
 		n := *slot.value.Load()
 		oldContribution := n.TargetContribution(id)
-		n.info.TargetRowCount += rows[node] - oldContribution
+		n.info.TargetLogicalSize += rows[node] - oldContribution
 		if rows[node] == 0 {
 			n.targets = n.targets.remove(shardKey(id))
 		} else {
@@ -213,5 +213,5 @@ func (c *Cache) replaceTarget(entry *CollectionEntry, id qviews.ShardID, old, ne
 	}
 }
 
-// TargetRows shares this immutable shard publication's selected contribution.
-func (s *ShardEntry) TargetRows() map[int64]int64 { return s.targetRows }
+// TargetSize shares this immutable shard publication's selected contribution.
+func (s *ShardEntry) TargetSize() map[int64]int64 { return s.targetRows }

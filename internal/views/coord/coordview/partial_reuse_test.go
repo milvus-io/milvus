@@ -12,7 +12,7 @@ import (
 
 func TestPartialReadyResourcesSurvivePrepareFailure(t *testing.T) {
 	patch := mockey.Mock((stubDataViewRef).Stats).To(func(_ stubDataViewRef, id int64) (qviews.SegmentStats, bool) {
-		return qviews.SegmentStats{RowNum: id}, true
+		return qviews.SegmentStats{LogicalSize: id}, true
 	}).Build()
 	defer patch.UnPatch()
 	view := buildTestViewWithVersion(2, 1, 1, 1)
@@ -22,8 +22,8 @@ func TestPartialReadyResourcesSurvivePrepareFailure(t *testing.T) {
 	mgr := &ShardViewManager{views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{sm.Version(): sm}}
 	before := mgr.Stats()
 	require.NotNil(t, before.PreparingPlacement)
-	require.Equal(t, int64(1000), before.PreparingPlacement.PartitionRows[10][1])
-	require.Equal(t, int64(1001), before.PreparingPlacement.PartitionRows[10][2])
+	require.Equal(t, int64(1000), before.PreparingPlacement.PartitionSizes[10][1])
+	require.Equal(t, int64(1001), before.PreparingPlacement.PartitionSizes[10][2])
 	key := ResourceKey{SegmentID: 1000, PartitionID: 10, DataVersion: sm.Version().DataVersion, LoadInfoVersion: 7}
 	require.Contains(t, before.Resources[1], key)
 	require.Empty(t, before.Resources[2])
@@ -39,7 +39,7 @@ func TestPartialReadyResourcesSurvivePrepareFailure(t *testing.T) {
 
 func TestViewPlacementPreservesPartitionFootprints(t *testing.T) {
 	patch := mockey.Mock((stubDataViewRef).Stats).To(func(_ stubDataViewRef, id int64) (qviews.SegmentStats, bool) {
-		return qviews.SegmentStats{RowNum: id}, id != 3000
+		return qviews.SegmentStats{LogicalSize: id}, id != 3000
 	}).Build()
 	defer patch.UnPatch()
 	view := buildTestView(1)
@@ -49,8 +49,8 @@ func TestViewPlacementPreservesPartitionFootprints(t *testing.T) {
 	sm := NewCoordQueryViewStateMachineWithRef(view, stubDataViewRef{})
 	p := viewPlacement(sm)
 	require.Equal(t, map[int64]int64{1000: 1, 2000: 1, 3000: 1}, p.Assignments)
-	require.Equal(t, int64(1000), p.PartitionRows[10][1])
-	require.Equal(t, int64(2000), p.PartitionRows[20][1])
-	require.Empty(t, p.PartitionRows[30])
-	require.Equal(t, []int64{3000}, p.UnknownRows)
+	require.Equal(t, int64(1000), p.PartitionSizes[10][1])
+	require.Equal(t, int64(2000), p.PartitionSizes[20][1])
+	require.Empty(t, p.PartitionSizes[30])
+	require.Equal(t, []int64{3000}, p.LostStats)
 }

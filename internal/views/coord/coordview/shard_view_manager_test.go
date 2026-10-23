@@ -456,7 +456,7 @@ func TestShardViewManagerUnpinsOnlyAfterDroppedPersist(t *testing.T) {
 }
 
 // TestShardViewManagerStatsCarriesRefRows verifies Stats().Segments carry the
-// published RowNum read from the resident QueryView's DataViewRef (lock-free
+// published LogicalSize read from the resident QueryView's DataViewRef (lock-free
 // Stats) for placed segments, and stay zero when the ref publishes no
 // footprint.
 func TestShardViewManagerStatsCarriesRefRows(t *testing.T) {
@@ -465,7 +465,7 @@ func TestShardViewManagerStatsCarriesRefRows(t *testing.T) {
 	}).Build()
 	mockey.Mock((stubDataViewRef).Stats).To(func(_ stubDataViewRef, segmentID int64) (qviews.SegmentStats, bool) {
 		if segmentID == 1001 {
-			return qviews.SegmentStats{RowNum: 42}, true
+			return qviews.SegmentStats{RowNum: 42, LogicalSize: 142}, true
 		}
 		return qviews.SegmentStats{}, false
 	}).Build()
@@ -480,10 +480,12 @@ func TestShardViewManagerStatsCarriesRefRows(t *testing.T) {
 	stats := mgr.Stats()
 	require.Contains(t, stats.Segments, int64(1001))
 	require.Equal(t, int64(42), stats.Segments[1001].RowNum)
+	require.Equal(t, int64(142), stats.Segments[1001].LogicalSize)
+	require.False(t, stats.Segments[1001].LostStats)
 }
 
 func TestShardViewManagerStatsRowsEmptyWhenRefUnpublished(t *testing.T) {
-	// The ref's Stats always miss: RowNum stays zero.
+	// The ref's Stats always miss: LogicalSize stays zero.
 	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
 		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
 	}).Build()
@@ -501,6 +503,8 @@ func TestShardViewManagerStatsRowsEmptyWhenRefUnpublished(t *testing.T) {
 	require.NotEmpty(t, stats.Segments)
 	for _, segment := range stats.Segments {
 		require.Zero(t, segment.RowNum)
+		require.Zero(t, segment.LogicalSize)
+		require.True(t, segment.LostStats)
 	}
 }
 

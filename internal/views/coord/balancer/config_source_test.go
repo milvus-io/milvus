@@ -35,10 +35,10 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 	require.Equal(t, DefaultBalanceConfig(), c.GetBalanceConfig())
 	require.True(t, b.queue.takePending().empty(), "identical defaults do not request a full pass")
 	pinned := newPlanningContext(c)
-	key := p.QueryViewCfg.BalancerMovePrice.Key
+	key := p.QueryViewCfg.BalancerMoveCostPerUnit.Key
 	require.NoError(t, p.Save(key, "3"))
-	require.Equal(t, 3.0, c.GetBalanceConfig().MovePrice)
-	require.Equal(t, 0.02, pinned.GetBalanceConfig().MovePrice, "an existing batch retains its config")
+	require.Equal(t, 3.0, c.GetBalanceConfig().MoveCostPerUnit)
+	require.Equal(t, 0.02, pinned.GetBalanceConfig().MoveCostPerUnit, "an existing batch retains its config")
 	require.True(t, b.queue.takePending().scan)
 	previous := c.GetBalanceConfig()
 	require.NoError(t, p.Save(key, "3"))
@@ -51,7 +51,7 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 		require.True(t, b.queue.takePending().empty())
 	}
 	require.NoError(t, p.Save(key, "3"))
-	for _, key := range []string{p.QueryViewCfg.BalancerAbsoluteToleranceRows.Key, p.QueryViewCfg.BalancerTargetRowsPerShardNode.Key} {
+	for _, key := range []string{p.QueryViewCfg.BalancerResourceGroupAbsoluteTolerance.Key, p.QueryViewCfg.BalancerTargetLogicalSizePerNode.Key} {
 		for _, value := range []string{"0", "-1", "1.5", "9223372036854775808"} {
 			require.NoError(t, p.Save(key, value))
 			require.Same(t, previous, c.GetBalanceConfig())
@@ -64,17 +64,17 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 		require.Same(t, previous, c.GetBalanceConfig())
 	}
 	require.NoError(t, p.Save(intervalKey, "10ms"))
-	require.Equal(t, 10*time.Millisecond, c.GetBalanceConfig().TickerInterval)
+	require.Equal(t, 10*time.Millisecond, c.GetBalanceConfig().ReconcileInterval)
 	require.True(t, b.queue.takePending().empty(), "interval-only refresh must not request full optimization")
 
-	require.NoError(t, p.Save(p.QueryViewCfg.BalancerAutoBalance.Key, "false"))
-	require.False(t, c.GetBalanceConfig().AutoBalance)
+	require.NoError(t, p.Save(p.QueryViewCfg.BalancerOptimizationEnabled.Key, "false"))
+	require.False(t, c.GetBalanceConfig().OptimizationEnabled)
 	require.True(t, b.queue.takePending().scan)
 	previous = c.GetBalanceConfig()
-	require.NoError(t, p.Save(p.QueryViewCfg.BalancerAutoBalance.Key, "invalid"))
+	require.NoError(t, p.Save(p.QueryViewCfg.BalancerOptimizationEnabled.Key, "invalid"))
 	require.Same(t, previous, c.GetBalanceConfig())
 	stop()
-	require.NoError(t, p.Save(p.QueryViewCfg.BalancerAutoBalance.Key, "true"))
+	require.NoError(t, p.Save(p.QueryViewCfg.BalancerOptimizationEnabled.Key, "true"))
 	require.Same(t, previous, c.GetBalanceConfig(), "unregistration prevents further updates")
 }
 
@@ -96,8 +96,8 @@ func TestBalanceConfigIndependentOfQueryCoord(t *testing.T) {
 	require.Equal(t, DefaultBalanceConfig(), c.GetBalanceConfig())
 	require.True(t, b.queue.takePending().empty())
 
-	require.NoError(t, p.Save(p.QueryViewCfg.BalancerAutoBalance.Key, "false"))
-	require.False(t, c.GetBalanceConfig().AutoBalance)
+	require.NoError(t, p.Save(p.QueryViewCfg.BalancerOptimizationEnabled.Key, "false"))
+	require.False(t, c.GetBalanceConfig().OptimizationEnabled)
 	require.True(t, b.queue.takePending().scan)
 	previous := c.GetBalanceConfig()
 	require.NoError(t, p.Save(p.QueryCoordCfg.AutoBalance.Key, "true"))
@@ -111,11 +111,11 @@ func TestBalanceConfigIndependentOfQueryCoord(t *testing.T) {
 		"1.5s":  1500 * time.Millisecond,
 	} {
 		require.NoError(t, p.Save(p.QueryViewCfg.BalancerReconcileInterval.Key, raw))
-		require.Equal(t, want, c.GetBalanceConfig().TickerInterval)
+		require.Equal(t, want, c.GetBalanceConfig().ReconcileInterval)
 		require.True(t, b.queue.takePending().empty())
 	}
 	require.NoError(t, p.Reset(p.QueryViewCfg.BalancerReconcileInterval.Key))
-	require.Equal(t, time.Minute, c.GetBalanceConfig().TickerInterval)
+	require.Equal(t, time.Minute, c.GetBalanceConfig().ReconcileInterval)
 }
 
 func TestBalanceConfigConcurrentUpdates(t *testing.T) {
@@ -126,10 +126,10 @@ func TestBalanceConfigConcurrentUpdates(t *testing.T) {
 	defer stop()
 	var wg sync.WaitGroup
 	for key, value := range map[string]string{
-		p.QueryViewCfg.BalancerGlobalWeight.Key:           "2",
-		p.QueryViewCfg.BalancerFanoutPenaltyWeight.Key:    "4",
-		p.QueryViewCfg.BalancerAbsoluteToleranceRows.Key:  "5000",
-		p.QueryViewCfg.BalancerTargetRowsPerShardNode.Key: "6000",
+		p.QueryViewCfg.BalancerResourceGroupWeight.Key:            "2",
+		p.QueryViewCfg.BalancerFanoutWeight.Key:                   "4",
+		p.QueryViewCfg.BalancerResourceGroupAbsoluteTolerance.Key: "5000",
+		p.QueryViewCfg.BalancerTargetLogicalSizePerNode.Key:       "6000",
 	} {
 		wg.Add(1)
 		go func() {
@@ -143,10 +143,10 @@ func TestBalanceConfigConcurrentUpdates(t *testing.T) {
 	got, valid := readBalanceConfig(p)
 	require.True(t, valid)
 	require.Equal(t, got, c.GetBalanceConfig())
-	require.Equal(t, 2.0, got.GlobalWeight)
-	require.Equal(t, 4.0, got.FanoutPenaltyWeight)
-	require.Equal(t, int64(5000), got.AbsoluteToleranceRows)
-	require.Equal(t, int64(6000), got.TargetRowsPerShardNode)
+	require.Equal(t, 2.0, got.ResourceGroupWeight)
+	require.Equal(t, 4.0, got.FanoutWeight)
+	require.Equal(t, int64(5000), got.ResourceGroupAbsoluteTolerance)
+	require.Equal(t, int64(6000), got.TargetLogicalSizePerNode)
 }
 
 func TestBalanceConfigRejectsZeroAndOverflowWeightSum(t *testing.T) {
@@ -155,7 +155,7 @@ func TestBalanceConfigRejectsZeroAndOverflowWeightSum(t *testing.T) {
 	b := NewDefaultBalancer(c, nil, nil, nil)
 	stop := b.watchBalanceConfig(t.Context(), p)
 	defer stop()
-	keys := []string{p.QueryViewCfg.BalancerShardWeight.Key, p.QueryViewCfg.BalancerCollectionWeight.Key, p.QueryViewCfg.BalancerGlobalWeight.Key, p.QueryViewCfg.BalancerFanoutPenaltyWeight.Key}
+	keys := []string{p.QueryViewCfg.BalancerShardConcentrationWeight.Key, p.QueryViewCfg.BalancerCollectionConcentrationWeight.Key, p.QueryViewCfg.BalancerResourceGroupWeight.Key, p.QueryViewCfg.BalancerFanoutWeight.Key}
 	for _, key := range keys[:3] {
 		require.NoError(t, p.Save(key, "0"))
 	}
@@ -184,7 +184,7 @@ func TestBalanceLoopRefreshesLongTimerAndUnwatchesOnStop(t *testing.T) {
 	defer patch.UnPatch()
 	b.Start(t.Context())
 	defer b.Stop()
-	require.Eventually(t, func() bool { return calls.Load() > 0 && c.GetBalanceConfig().TickerInterval == time.Hour }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return calls.Load() > 0 && c.GetBalanceConfig().ReconcileInterval == time.Hour }, time.Second, time.Millisecond)
 	before := calls.Load()
 	require.NoError(t, p.Save(key, "10ms"))
 	require.Eventually(t, func() bool { return calls.Load() > before }, time.Second, time.Millisecond)
@@ -192,4 +192,25 @@ func TestBalanceLoopRefreshesLongTimerAndUnwatchesOnStop(t *testing.T) {
 	previous := c.GetBalanceConfig()
 	require.NoError(t, p.Save(key, "50s"))
 	require.Same(t, previous, c.GetBalanceConfig())
+}
+
+func TestDataViewCostConfigDoesNotTriggerBalance(t *testing.T) {
+	p := newBalanceParams()
+	c := balancercache.New(nil)
+	b := NewDefaultBalancer(c, nil, nil, nil)
+	stop := b.watchBalanceConfig(t.Context(), p)
+	defer stop()
+	previous := c.GetBalanceConfig()
+	for key, value := range map[string]string{
+		p.QueryViewCfg.LogicalSizeSegmentBaseCost.Key: "1000",
+		p.QueryViewCfg.LogicalSizeSource.Key:          "insertBytes",
+		p.QueryViewCfg.LogicalSizeBytesPerUnit.Key:    "128KB",
+	} {
+		require.NoError(t, p.Save(key, value))
+		require.Same(t, previous, c.GetBalanceConfig())
+		require.True(t, b.queue.takePending().empty(), "only a future DataView publication changes scheduling size")
+	}
+	require.NoError(t, p.Save("queryView.balancer.scoring.targetLogicalSizePerNode", "200000"))
+	require.Equal(t, int64(200000), c.GetBalanceConfig().TargetLogicalSizePerNode)
+	require.True(t, b.queue.takePending().scan)
 }

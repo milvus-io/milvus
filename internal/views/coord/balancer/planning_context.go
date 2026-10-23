@@ -19,7 +19,7 @@ type balanceInput interface {
 	GetBalanceConfig() *BalanceConfig
 	NodesMap() map[int64]*BalanceNode
 	CandidateNodes(string) []int64
-	CurrentRows(qviews.ShardID) map[int64]int64
+	CurrentSize(qviews.ShardID) map[int64]int64
 	// TargetNodes returns a sorted, immutable target, including empty suspended targets.
 	TargetNodes(qviews.ShardID) ([]int64, bool)
 	ShardEntry(qviews.ShardID) *balancercache.ShardEntry
@@ -170,7 +170,7 @@ func (p *planningContext) CandidateNodes(name string) []int64 {
 	return nodes
 }
 
-func (p *planningContext) CurrentRows(id qviews.ShardID) map[int64]int64 {
+func (p *planningContext) CurrentSize(id qviews.ShardID) map[int64]int64 {
 	rows := make(map[int64]int64)
 	for nodeID, node := range p.nodeEntries {
 		if total := node.TargetContribution(id); total != 0 {
@@ -242,7 +242,7 @@ func (p *planningContext) acceptRows(id qviews.ShardID, rows map[int64]int64) {
 		p.replicaDelta[id.ReplicaID] = delta
 	}
 	if entry := p.ShardEntry(id); entry != nil {
-		for node, count := range entry.TargetRows() {
+		for node, count := range entry.TargetSize() {
 			delta[node] -= count
 		}
 	}
