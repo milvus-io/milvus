@@ -229,9 +229,20 @@ func (s *Server) mergeCommittedShardSplit(ctx context.Context, req *datapb.Commi
 		task.RoutingModulus = req.GetRoutingModulus()
 	}
 	task.Fenced = true
-	if task.GetState() == datapb.SplitShardTaskState_SplitShardTaskUnknown ||
-		task.GetState() == datapb.SplitShardTaskState_SplitShardTaskPreparing ||
-		task.GetState() == datapb.SplitShardTaskState_SplitShardTaskFencing {
+	switch task.GetState() {
+	case datapb.SplitShardTaskState_SplitShardTaskUnknown,
+		datapb.SplitShardTaskState_SplitShardTaskPreparing,
+		datapb.SplitShardTaskState_SplitShardTaskFencing:
+		task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+	case datapb.SplitShardTaskState_SplitShardTaskAborted:
+		// The planner aborted the task on a broadcast failure it took for
+		// definite, but the fence landed after all: the commit is the proof.
+		// A fenced task is forward-only, and leaving it Aborted would keep
+		// its source fenced with nothing ever moving its data or adopting its
+		// targets, so writes to that shard would be refused forever.
+		mlog.Error(ctx, "a fenced shard split commit arrived for an aborted task, rolling it forward",
+			mlog.Int64("collectionID", req.GetCollectionId()),
+			mlog.Int64("splitTaskID", req.GetSplitTaskId()))
 		task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
 	}
 	return task
