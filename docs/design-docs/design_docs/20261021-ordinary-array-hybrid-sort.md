@@ -22,69 +22,69 @@ are outside this change.
 
 ## Selection and compatibility
 
-| Input | Low cardinality | High cardinality |
+| HYBRID input | Low cardinality | High cardinality |
 | --- | --- | --- |
-| Ordinary ARRAY, software gate disabled or scalar engine version < 5 | BITMAP | INVERTED |
-| Ordinary ARRAY, software gate enabled and scalar engine version >= 5 | BITMAP | STL_SORT |
+| Ordinary ARRAY, scalar engine version < 6 | BITMAP | INVERTED |
+| Ordinary ARRAY, scalar engine version >= 6 | BITMAP | STL_SORT |
 | Nested ARRAY, scalar engine version < 4 | BITMAP | INVERTED |
 | Nested ARRAY, scalar engine version >= 4 | BITMAP | STL_SORT |
-| Typed JSON ARRAY HYBRID, software gate enabled, scalar engine version 3–4 | BITMAP | INVERTED |
-| Typed JSON ARRAY HYBRID, software gate enabled, scalar engine version >= 5 | BITMAP | STL_SORT |
+| Typed JSON ARRAY, scalar engine version >= 6 | BITMAP | STL_SORT |
 
-The table describes HYBRID selection. Explicit STL_SORT always uses SORT,
-requires the existing packed-V3 engine floor, and is independent of cardinality.
-
-ARRAY selection retains its existing cardinality threshold and ignores the
-configurable scalar low/high family choices. Default ordinary BOOL ARRAY
+Explicit ordinary ARRAY STL_SORT and typed JSON ARRAY HYBRID/STL_SORT
+require negotiated scalar engine version 6. Existing typed JSON ARRAY
+artifacts from older writers remain readable; this requirement applies to new
+public builds, not loading. Scalar JSON path indexes retain their version-4
+floor. ARRAY selection retains its existing cardinality threshold and ignores
+the configurable scalar low/high family choices. Default ordinary BOOL ARRAY
 AUTOINDEX remains directly BITMAP.
 
-This change enables ordinary ARRAY HYBRID to select SORT at engine version 5
-once the software gate opens, reusing previously available ARRAY SORT reader
-support. Before this change, high-cardinality ordinary ARRAY always selected
-INVERTED. JSON ARRAY HYBRID reuses the existing packed format and serializers:
-SORT/BITMAP entries, the HYBRID family selector, and JSON existence sidecars are
-unchanged. Master retains scalar current/maximum version 5; this feature does
-not change index engine versions or add DataNode capability reporting.
+Scalar engine current/maximum are 6/6. The version is a reader capability,
+not a change to the packed-V3 container layout. SORT/BITMAP entries, HYBRID
+selectors, parent-row validity and JSON existence sidecars keep their existing
+representation. NaN ordering and float encodings are not changed.
 
-Reader entry points still need to be upgraded: previous adapters reject
-explicit STL_SORT for ordinary ARRAY, while previous JSON readers reject
-ARRAY casts under HYBRID/SORT and treat JSON SORT/BITMAP values as one scalar
-per parent. Ordinary ARRAY HYBRID construction also observes the software gate.
-The existing VersionGateSwitcher controls the new configuration
-`dataCoord.enableArraySortIndex`. Its default `auto` resolves to false
-until registered online software versions reach `3.1.0` for the one-minute
-stability window, then the existing confirmator writes true to the config
-center. The setting is registered with the shared gate mechanism; no extra
-node watcher or version manager is introduced.
+This follows the index-engine capability approach in
+[PR #54537](https://github.com/milvus-io/milvus/pull/54537), while retaining
+all eight ordinary ARRAY element types and the three typed JSON ARRAY casts
+from [PR #54505](https://github.com/milvus-io/milvus/pull/54505).
+The separate `dataCoord.enableArraySortIndex` software switch and per-build
+`enable_array_sort_index` flag are removed.
+Capability negotiation follows the existing
+[Scalar Index Version Management design](https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/20260313-scalar_index_version_management.md).
 
-The switch protects ordinary ARRAY HYBRID SORT selection, ordinary ARRAY
-explicit SORT, and JSON ARRAY HYBRID/SORT. Each build request carries the
-coordinator-resolved `enable_array_sort_index` flag; missing or false keeps
-high-cardinality ordinary ARRAY HYBRID on INVERTED. This also covers new segment
-builds for existing HYBRID definitions, without rewriting their metadata.
-Nested ARRAY selection retains its existing engine-version rule.
-Before activation, AUTOINDEX requests for the new logical entry points fall
-back to INVERTED; explicit creation and snapshot restoration of those types
-return ServiceNotReady. Ordinary ARRAY HYBRID definitions remain admitted,
-with their high-cardinality build family kept on INVERTED. When enabled, new
-ARRAY entry points require the existing packed-V3 engine floor; ordinary
-JSON scalar paths retain their original version-4 threshold. The existing
-engine target resolver and worker clamping remain unchanged.
+With default target settings, DataCoord resolves the minimum current scalar
+engine version reported by online QueryNodes. Mixed v5/v6 readers therefore
+keep new ordinary ARRAY HYBRID segments on INVERTED at high cardinality; once
+all online readers report v6, those builds may select SORT. Administrator target
+settings and the existing minimum/maximum clamping rules still apply. A
+QueryNode reports its compiled capability when it registers after deployment;
+there is no software-release-number check or one-minute activation timer.
 
-Explicit true/false settings retain the shared framework's override semantics.
-This is a one-shot software-upgrade gate, not a continuous rollback guard: it
-does not reset after activation if an old binary later rejoins. Unregistered
-workers are outside its session scan. Rollout planning must account for these
-existing framework boundaries.
+Creation and snapshot restore share the v6 check for the new logical entry
+points. During creation, AUTOINDEX requests fall back to INVERTED when that
+capability is not ready; explicit requests return ServiceNotReady. Snapshot
+restore returns ServiceNotReady without rewriting saved index definitions.
+Existing ordinary ARRAY
+HYBRID definitions remain admitted and choose their physical child per build
+version. Every dispatch rechecks explicit ordinary ARRAY SORT and typed JSON
+ARRAY HYBRID/SORT so queued jobs wait when reader capability is unavailable,
+including the stock-binary no-QueryNode restart window with default target
+settings. The C++ build boundary rejects these
+new entry points below v6 if a request bypasses coordinator admission. Nested
+selection retains its existing version-4 rule.
 
-Existing indexes retain their persisted physical family. An AUTOINDEX
-definition already rewritten to INVERTED remains INVERTED; it is not silently
-rewritten to HYBRID after upgrade. Existing HYBRID definitions keep BITMAP for
-low cardinality; newly built high-cardinality segments use SORT only when both
-the build-time software gate and engine threshold permit it. No on-disk layout
-is changed.
-Rollback after writing these new index types requires compatible readers or
-rebuilding those indexes as INVERTED before downgrading.
+Build workers must be upgraded before readers enable v6 builds. The current
+manager negotiates reader capabilities; it does not add worker capability
+reporting or a persistent cluster version. The v6 format check does not define
+new upgrade/downgrade admission rules for older nodes rejoining the cluster.
+
+Existing indexes retain their saved physical family. AUTOINDEX definitions
+already rewritten to INVERTED remain INVERTED and require recreation to adopt
+HYBRID. Later builds and rebuilds use the resolved target. Upgrading the binary
+does not itself rewrite existing index files; the existing automatic/forced
+index-rebuild settings still apply. `autoUpgradeSegmentIndex` defaults to false.
+Downgrade after writing
+these entry points requires compatible readers or rebuilding them as INVERTED.
 
 ## Representation and queries
 
@@ -117,10 +117,16 @@ element types. Typed JSON ARRAY tests exercise HYBRID and explicit SORT, all
 three casts, low/high cardinality, missing
 and null paths, field NULL, empty and mixed arrays, duplicate terms, and real
 contains ANY/ALL comparisons with raw evaluation. The regression matrix includes
-HYBRID high-cardinality INVERTED at engine versions 3 and 4 and SORT at version
-5, plus closed/missing build gates, using the existing packed format. Go tests cover software
-gate activation and overrides, the existing packed-format floor, AUTOINDEX
-fallback, explicit creation, and snapshot restore. Existing INVERTED and full JSON behavior are retained.
+older HYBRID high-cardinality INVERTED artifacts at engine versions 3, 4 and 5,
+and SORT at version 6, using the existing packed format. CAPI adapter tests
+cover rejection below v6 and admission at v6 for all eight ordinary ARRAY
+types. JSON CAPI tests additionally build from binlogs, reload, and query all
+three casts at v6 after checking v5 rejection. Go tests cover the v6 engine floor,
+AUTOINDEX fallback, explicit
+creation, snapshot restore and queued-task retries across reader capability
+changes. The SDK compatibility test switches forced targets v5/v6 and restores
+the original settings; current-binary CI Helm values target v6. Existing
+INVERTED and full JSON behavior are retained.
 
 Separate-process ordinary ARRAY artifact readback checks the saved unchanged
 reader implementation; it is not a full stock-binary rolling-upgrade test and

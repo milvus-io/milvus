@@ -444,18 +444,13 @@ ParseHybridBuildParams(const BuildParams& params) {
         // ARRAY always uses BITMAP for low cardinality. High-cardinality
         // nested indexes use flattened element offsets, while ordinary ARRAY
         // indexes use parent-row postings. Each sorted representation has its
-        // own reader capability gate; ordinary ARRAY also requires the cluster
-        // software gate supplied by DataCoord. Older targets retain INVERTED. The
+        // own reader capability gate. Older targets retain INVERTED. The
         // configurable low/high index types do not apply to ARRAY.
         result.low_cardinality_family = families::kBitmap;
-        const auto min_sort_version = nested ? kNestedHybridStlSortMinVersion
-                                             : kArrayHybridStlSortMinVersion;
-        const bool sort_enabled =
-            nested || GetValueFromConfig<bool>(params, ENABLE_ARRAY_SORT_INDEX)
-                          .value_or(false);
+        const auto min_sort_version =
+            nested ? kNestedHybridStlSortMinVersion : kArrayStlSortMinVersion;
         result.high_cardinality_family =
-            sort_enabled && version >= min_sort_version ? families::kSort
-                                                        : families::kInverted;
+            version >= min_sort_version ? families::kSort : families::kInverted;
         return result;
     }
 

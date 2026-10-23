@@ -165,8 +165,7 @@ TEST(JsonProjectedExpressionTest, ContainsUsesIndexAndExactRawFallback) {
 TEST(JsonProjectedExpressionTest, HybridArrayContainsPreservesExactFallback) {
     CheckContainsUsesIndexAndExactRawFallback(
         index::HYBRID_INDEX_TYPE,
-        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion},
-         {index::ENABLE_ARRAY_SORT_INDEX, true},
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayStlSortMinVersion},
          {index::BITMAP_INDEX_CARDINALITY_LIMIT, 1}});
 }
 
@@ -229,8 +228,11 @@ TEST(JsonProjectedExpressionTest, TypedArraysMatchRawContainsAnyAndAll) {
               std::pair{index::ASCENDING_SORT, 1}}) {
             const bool hybrid =
                 std::string_view(index_type) == index::HYBRID_INDEX_TYPE;
+            // Old packed artifacts must keep their query semantics even though
+            // new CAPI builds require v6 for these array projections.
             for (const int engine_version :
-                 hybrid ? std::vector<int>{3, 4, 5} : std::vector<int>{5}) {
+                 hybrid ? std::vector<int>{3, 4, 5, kArrayStlSortMinVersion}
+                        : std::vector<int>{3, 5, kArrayStlSortMinVersion}) {
                 for (const bool mmap : {false, true}) {
                     SCOPED_TRACE(cast + "/index=" + index_type +
                                  "/version=" + std::to_string(engine_version) +
@@ -241,8 +243,7 @@ TEST(JsonProjectedExpressionTest, TypedArraysMatchRawContainsAnyAndAll) {
                     Config index_params{
                         {JSON_PATH, "/a"},
                         {JSON_CAST_TYPE, cast},
-                        {index::SCALAR_INDEX_ENGINE_VERSION, engine_version},
-                        {index::ENABLE_ARRAY_SORT_INDEX, true}};
+                        {index::SCALAR_INDEX_ENGINE_VERSION, engine_version}};
                     if (std::string_view(index_type) ==
                         index::HYBRID_INDEX_TYPE) {
                         index_params[index::BITMAP_INDEX_CARDINALITY_LIMIT] =
@@ -260,7 +261,7 @@ TEST(JsonProjectedExpressionTest, TypedArraysMatchRawContainsAnyAndAll) {
                               threshold != 1
                                   ? index::families::kBitmap
                                   : (hybrid && engine_version <
-                                                   kArrayHybridStlSortMinVersion
+                                                   kArrayStlSortMinVersion
                                          ? index::families::kInverted
                                          : index::families::kSort));
                     test::expr_index::InstallIndex(

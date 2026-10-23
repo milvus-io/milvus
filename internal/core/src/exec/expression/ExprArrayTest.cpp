@@ -1356,15 +1356,14 @@ TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
 TEST(Expr, TestArraySortedIndexEqualityReadsOnlyCandidates) {
     CheckArrayIndexEqualityReadsOnlyCandidates(
         index::HYBRID_INDEX_TYPE,
-        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion},
-         {index::ENABLE_ARRAY_SORT_INDEX, true},
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayStlSortMinVersion},
          {index::BITMAP_INDEX_CARDINALITY_LIMIT, 1}});
 }
 
 TEST(Expr, TestArrayExplicitSortedIndexEqualityReadsOnlyCandidates) {
     CheckArrayIndexEqualityReadsOnlyCandidates(
         index::ASCENDING_SORT,
-        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion}});
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayStlSortMinVersion}});
 }
 
 TEST(Expr, TestArrayNullExpr) {
@@ -4453,15 +4452,14 @@ TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
 TEST(Expr, TestArraySortedContainsIndexPathAcrossBatches) {
     CheckArrayContainsIndexPathAcrossBatches(
         index::HYBRID_INDEX_TYPE,
-        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion},
-         {index::ENABLE_ARRAY_SORT_INDEX, true},
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayStlSortMinVersion},
          {index::BITMAP_INDEX_CARDINALITY_LIMIT, 1}});
 }
 
 TEST(Expr, TestArrayExplicitSortedContainsIndexPathAcrossBatches) {
     CheckArrayContainsIndexPathAcrossBatches(
         index::ASCENDING_SORT,
-        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion}});
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayStlSortMinVersion}});
 }
 
 // A sealed segment with two chunks: the chunk-length path must resolve rows

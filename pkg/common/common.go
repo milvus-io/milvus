@@ -135,9 +135,11 @@ const (
 	//   An older QueryNode does not recognize FMINDEX and would fail to load
 	//   such a segment, so creation is gated on the whole cluster reporting >= 5
 	//   (see MinScalarIndexVersionForFMINDEX).
+	// Scalar index engine version 6 adds ordinary ARRAY SORT and typed JSON
+	// ARRAY HYBRID/SORT build capabilities. Existing packed layouts are unchanged.
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(5)
-	MaximumScalarIndexEngineVersion = int32(5)
+	CurrentScalarIndexEngineVersion = int32(6)
+	MaximumScalarIndexEngineVersion = int32(6)
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
@@ -156,6 +158,10 @@ const (
 	// that recognizes FMINDEX. Creating an FMINDEX while any node still reports a
 	// lower version would break rolling upgrade (old QueryNodes cannot load it).
 	MinScalarIndexVersionForFMINDEX = int32(5)
+
+	// MinScalarIndexVersionForArrayStlSort gates ordinary ARRAY SORT and typed
+	// JSON ARRAY HYBRID/SORT builds on readers supporting the new entry points.
+	MinScalarIndexVersionForArrayStlSort = int32(6)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.

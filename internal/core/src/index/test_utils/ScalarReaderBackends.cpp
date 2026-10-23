@@ -601,8 +601,7 @@ AddProjectedProfileVariants(BackendCatalog& catalog,
             if (std::string_view(family) == families::kHybrid &&
                 build_field_type == DataType::ARRAY) {
                 spec.build_params[SCALAR_INDEX_ENGINE_VERSION] =
-                    kArrayHybridStlSortMinVersion;
-                spec.build_params[ENABLE_ARRAY_SORT_INDEX] = true;
+                    kArrayStlSortMinVersion;
                 spec.load_families = {
                     families::kBitmap, families::kSort, families::kInverted};
             }

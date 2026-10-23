@@ -1199,8 +1199,14 @@ func (sm *snapshotManager) RestoreIndexes(
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
-		if err := checkOrdinaryArraySortIndex(typeutil.GetField(coll.GetSchema(), index.FieldID), GetIndexType(index.IndexParams), sm.indexEngineVersionManager); err != nil {
-			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
+		resolvedScalarVersion := int32(0)
+		if sm.indexEngineVersionManager != nil {
+			resolvedScalarVersion = sm.indexEngineVersionManager.ResolveScalarIndexVersion()
+		}
+		if isArraySortIndex(typeutil.GetField(coll.GetSchema(), index.FieldID), index.IndexParams) {
+			if err := checkArraySortIndexVersion(resolvedScalarVersion); err != nil {
+				return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
+			}
 		}
 
 		// Check scalar index engine version for JSON path indexes with new types
@@ -1212,10 +1218,6 @@ func (sm *snapshotManager) RestoreIndexes(
 		// same CreateIndex DDL directly, so it must apply the same gate
 		// Server.CreateIndex does (checkFMIndexEngineVersion), otherwise a
 		// snapshot could create an FMINDEX an old QueryNode cannot load.
-		resolvedScalarVersion := int32(0)
-		if sm.indexEngineVersionManager != nil {
-			resolvedScalarVersion = sm.indexEngineVersionManager.ResolveScalarIndexVersion()
-		}
 		if err := checkFMIndexEngineVersion(index.IndexParams, resolvedScalarVersion); err != nil {
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
@@ -1964,7 +1966,7 @@ func (sm *snapshotManager) calculateTimeCost(job CopySegmentJob) uint64 {
 
 // checkJSONPathIndexVersion rejects JSON path indexes with STL_SORT, BITMAP,
 // or HYBRID if the cluster's scalar index engine version is below
-// the existing scalar/packed-array format threshold, or the software gate is off.
+// the scalar/ARRAY capability threshold.
 func (sm *snapshotManager) checkJSONPathIndexVersion(index *model.Index) error {
 	indexType := GetIndexType(index.IndexParams)
 	if indexType != indexparamcheck.IndexSTLSORT &&
@@ -1978,8 +1980,12 @@ func (sm *snapshotManager) checkJSONPathIndexVersion(index *model.Index) error {
 		return nil
 	}
 
-	if err := checkJSONArrayIndexEnabled(indexType, indexParams[common.JSONCastTypeKey]); err != nil {
-		return err
+	if isTypedJSONArrayIndex(indexType, indexParams[common.JSONCastTypeKey]) {
+		resolved := int32(0)
+		if sm.indexEngineVersionManager != nil {
+			resolved = sm.indexEngineVersionManager.ResolveScalarIndexVersion()
+		}
+		return checkArraySortIndexVersion(resolved)
 	}
 	if sm.indexEngineVersionManager != nil {
 		resolved := sm.indexEngineVersionManager.ResolveScalarIndexVersion()

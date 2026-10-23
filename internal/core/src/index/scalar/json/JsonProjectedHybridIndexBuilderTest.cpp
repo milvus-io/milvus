@@ -71,7 +71,6 @@ BuildProjectedIndex(const std::vector<std::string>& raw,
         {JSON_PATH, std::string(path)},
         {FIELD_ID, 101},
         {SCALAR_INDEX_ENGINE_VERSION, engine_version},
-        {ENABLE_ARRAY_SORT_INDEX, true},
     };
     if (index_type == HYBRID_INDEX_TYPE) {
         params[BITMAP_INDEX_CARDINALITY_LIMIT] = cardinality_limit;
@@ -215,8 +214,11 @@ CheckProjectedArrayIndexes(std::string_view type_name,
           std::pair{HYBRID_INDEX_TYPE, 16},
           std::pair{ASCENDING_SORT, 1}}) {
         const bool hybrid = std::string_view(index_type) == HYBRID_INDEX_TYPE;
+        // Direct materialization recreates pre-v6 artifacts to verify reader
+        // compatibility; current CAPI build admission is tested separately.
         for (const int engine_version :
-             hybrid ? std::vector<int>{3, 4, 5} : std::vector<int>{5}) {
+             hybrid ? std::vector<int>{3, 4, 5, kArrayStlSortMinVersion}
+                    : std::vector<int>{3, 5, kArrayStlSortMinVersion}) {
             const auto persisted = BuildProjectedIndex(raw,
                                                        value_type,
                                                        cast,
@@ -227,11 +229,10 @@ CheckProjectedArrayIndexes(std::string_view type_name,
             if (hybrid) {
                 ASSERT_NO_FATAL_FAILURE(ExpectSelector(
                     persisted,
-                    threshold != 1
-                        ? ScalarIndexType::BITMAP
-                        : (engine_version < kArrayHybridStlSortMinVersion
-                               ? ScalarIndexType::INVERTED
-                               : ScalarIndexType::STLSORT)));
+                    threshold != 1 ? ScalarIndexType::BITMAP
+                                   : (engine_version < kArrayStlSortMinVersion
+                                          ? ScalarIndexType::INVERTED
+                                          : ScalarIndexType::STLSORT)));
             }
             for (const bool mmap : {false, true}) {
                 const auto& backend = ScalarReaderBackends().Get<ArrayView>(

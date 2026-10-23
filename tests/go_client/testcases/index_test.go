@@ -19,7 +19,7 @@ import (
 /*
 Info about scalar index
 TRIE: only support varchar
-STL_SORT: numeric, varchar, timestamptz and supported ARRAY elements (ARRAY requires the software upgrade gate)
+STL_SORT: numeric, varchar, timestamptz and supported ARRAY elements (ARRAY requires scalar index engine v6)
 INVERTED: all supported except Json
 Bitmap: all supported except Json, float, double. (If Array field, according to its ElementType)
 ScalarAutoIndex: {"int_*": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float/double": "HYBRID"}
@@ -474,7 +474,7 @@ func TestCreateTrieScalarIndex(t *testing.T) {
 	}
 }
 
-// SORT supports scalar fields and ARRAY fields after the software upgrade gate opens.
+// SORT supports scalar fields and ARRAY fields at scalar index engine v6.
 func TestCreateSortedScalarIndex(t *testing.T) {
 	t.Parallel()
 
@@ -506,12 +506,6 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 				}
 			} else {
 				idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-				if field.DataType == entity.FieldTypeArray && err != nil {
-					// CI may run before the release gate opens. ARRAY is supported,
-					// but only this specific upgrade-gate rejection is expected.
-					require.ErrorContains(t, err, "ARRAY STL_SORT is disabled by the cluster software upgrade gate")
-					continue
-				}
 				common.CheckErr(t, err, true)
 				err = idxTask.Await(ctx)
 				common.CheckErr(t, err, true)

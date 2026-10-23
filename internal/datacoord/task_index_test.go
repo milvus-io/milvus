@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1118,87 +1119,119 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 	})
 }
 
-func (s *indexTaskSuite) TestPrepareJobRequestArraySortSoftwareGate() {
+func (s *indexTaskSuite) TestArraySortDispatchWaitsForReaders() {
 	resetJSONVersionTargets(s.T())
-	gate := &Params.DataCoordCfg.EnableArraySortIndex
-	previousGate := gate.GetValue()
-	s.T().Cleanup(func() { s.NoError(Params.Save(gate.Key, previousGate)) })
+	for _, tc := range []struct {
+		name, indexType, cast string
+		dataType              schemapb.DataType
+	}{
+		{"ordinary_sort", "STL_SORT", "", schemapb.DataType_Array},
+		{"json_bool_sort", "STL_SORT", "ARRAY_BOOL", schemapb.DataType_JSON},
+		{"json_double_sort", "STL_SORT", "ARRAY_DOUBLE", schemapb.DataType_JSON},
+		{"json_varchar_sort", "STL_SORT", "ARRAY_VARCHAR", schemapb.DataType_JSON},
+		{"json_bool_hybrid", "HYBRID", "ARRAY_BOOL", schemapb.DataType_JSON},
+		{"json_double_hybrid", "HYBRID", "ARRAY_DOUBLE", schemapb.DataType_JSON},
+		{"json_varchar_hybrid", "HYBRID", "ARRAY_VARCHAR", schemapb.DataType_JSON},
+	} {
+		s.Run(tc.name, func() {
+			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			// Only a dispatched job may update its version and state. Capability
+			// waits must not persist Failed or create an obsolete worker job.
+			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Twice()
+			segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+			segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: s.segID, CollectionID: s.collID, PartitionID: s.partID,
+				NumOfRows: 65535, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2,
+			}}
+			segments.SetSegment(s.segID, segment)
+			mt := &meta{
+				segments:  segments,
+				indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+			}
+			segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+			s.Require().True(ok)
+			segIndex.NumRows = segment.NumOfRows
+			definition := mt.indexMeta.indexes[s.collID][s.indexID]
+			definition.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: tc.indexType}}
+			definition.TypeParams = nil
+			if tc.cast != "" {
+				definition.IndexParams = append(definition.IndexParams, &commonpb.KeyValuePair{Key: common.JSONCastTypeKey, Value: tc.cast},
+					&commonpb.KeyValuePair{Key: common.JSONPathKey, Value: "/a"})
+			}
+			field := &schemapb.FieldSchema{Name: "values", FieldID: s.fieldID, DataType: tc.dataType}
+			if tc.dataType == schemapb.DataType_Array {
+				field.ElementType = schemapb.DataType_Double
+			}
+			handler := NewNMockHandler(s.T())
+			handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+				ID: s.collID, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}},
+			}, nil)
+			cm := mocks.NewChunkManager(s.T())
+			cm.EXPECT().RootPath().Return("root").Once()
+			versions := newIndexEngineVersionManager()
+			// Clone persisted metadata, just as indexInspector.reloadFromMeta does.
+			it := newIndexBuildTask(model.CloneSegmentIndex(segIndex), 1, mt, handler, cm, versions)
+			cluster := session.NewMockCluster(s.T())
 
-	for _, dataType := range []schemapb.DataType{schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_FloatVector} {
-		for _, savedGate := range []string{"", "true", "false"} {
-			s.Run(dataType.String()+"/saved="+savedGate, func() {
-				catalog := catalogmocks.NewDataCoordCatalog(s.T())
-				mt := &meta{
-					indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+			for _, version := range []int32{0, 5} {
+				if version != 0 {
+					versions.AddNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{
+						ServerID: 1, ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: version, MaximumIndexVersion: 6},
+					}})
 				}
-				segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
-				s.Require().True(ok)
-				indexType := "HYBRID"
-				if dataType == schemapb.DataType_FloatVector {
-					indexType = "FLAT"
-				}
-				definition := mt.indexMeta.indexes[s.collID][s.indexID]
-				definition.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexType}}
-				definition.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}
-				if savedGate != "" && dataType != schemapb.DataType_FloatVector {
-					// A saved or user-supplied value in either bag must not bypass
-					// the current coordinator gate. C++ merges type params last.
-					definition.IndexParams = append(definition.IndexParams, &commonpb.KeyValuePair{Key: enableArraySortIndexKey, Value: savedGate})
-					definition.TypeParams = append(definition.TypeParams, &commonpb.KeyValuePair{Key: enableArraySortIndexKey, Value: savedGate})
-				}
-				field := &schemapb.FieldSchema{
-					Name: "values", FieldID: s.fieldID, DataType: dataType,
-					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
-				}
-				if dataType == schemapb.DataType_Array {
-					field.ElementType = schemapb.DataType_Int64
-				}
-				handler := NewNMockHandler(s.T())
-				handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
-					ID: s.collID, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}},
-				}, nil)
-				cm := mocks.NewChunkManager(s.T())
-				cm.EXPECT().RootPath().Return("root")
-				versions := jsonArrayVersionManager(s.T(), common.CurrentScalarIndexEngineVersion)
-				it := newIndexBuildTask(segIndex, 1, mt, handler, cm, versions)
-				segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-					ID: s.segID, CollectionID: s.collID, PartitionID: s.partID, NumOfRows: 4,
-				}}
-				// Reuse the same existing index definition across an upgrade and
-				// an explicit disable. Each new segment/retry resolves the gate anew.
-				for _, currentGate := range []string{"false", "true", "false"} {
-					s.Require().NoError(Params.Save(gate.Key, currentGate))
-					req, err := it.prepareJobRequest(context.Background(), segment, segIndex,
-						mt.indexMeta.GetIndexParams(s.collID, s.indexID), indexType)
-					s.Require().NoError(err)
-					value, err := getIndexParam(req.GetIndexParams(), enableArraySortIndexKey)
-					if dataType == schemapb.DataType_FloatVector {
-						s.Error(err, "do not send an unknown scalar option to Knowhere")
-					} else {
-						s.NoError(err)
-						s.Equal(currentGate, value)
-						count := 0
-						for _, param := range req.GetIndexParams() {
-							if param.GetKey() == enableArraySortIndexKey {
-								count++
-							}
-						}
-						s.Equal(1, count)
-					}
-					_, err = getIndexParam(req.GetTypeParams(), enableArraySortIndexKey)
-					s.Error(err, "schema params must not override the coordinator gate")
-					s.Equal(common.CurrentScalarIndexEngineVersion, req.GetCurrentScalarIndexVersion())
-					for _, params := range [][]*commonpb.KeyValuePair{definition.IndexParams, definition.TypeParams} {
-						value, err := getIndexParam(params, enableArraySortIndexKey)
-						if savedGate == "" || dataType == schemapb.DataType_FloatVector {
-							s.Error(err)
-						} else {
-							s.NoError(err)
-							s.Equal(savedGate, value, "build-time override must not mutate saved metadata")
-						}
-					}
-				}
-			})
-		}
+				s.Require().Equal(version, versions.ResolveScalarIndexVersion())
+				req, err := it.prepareJobRequest(context.Background(), segment, segIndex, definition.IndexParams, tc.indexType)
+				s.ErrorIs(err, merr.ErrServiceNotReady)
+				s.True(merr.Status(err).GetRetriable())
+				s.Nil(req)
+				it.CreateTaskOnWorker(1, cluster)
+				s.Equal(commonpb.IndexState_Unissued, it.IndexState)
+				s.Zero(it.IndexVersion)
+				persisted, exists := mt.indexMeta.GetIndexJob(s.taskID)
+				s.Require().True(exists)
+				s.Equal(commonpb.IndexState_Unissued, persisted.IndexState)
+				cluster.AssertNotCalled(s.T(), "CreateIndex", mock.Anything, mock.Anything)
+			}
+
+			// The SAME queued job can run once readers report v6; no new
+			// CreateIndex API call or task recreation is needed.
+			versions.AddNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1, ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 6, MaximumIndexVersion: 6},
+			}})
+			cluster.EXPECT().CreateIndex(int64(1), mock.MatchedBy(func(req *workerpb.CreateJobRequest) bool {
+				return req.GetCurrentScalarIndexVersion() == 6 && common.GetIndexType(req.GetIndexParams()) == tc.indexType
+			})).Return(nil).Once()
+			it.CreateTaskOnWorker(1, cluster)
+			s.Equal(commonpb.IndexState_InProgress, it.IndexState)
+			persisted, exists := mt.indexMeta.GetIndexJob(s.taskID)
+			s.Require().True(exists)
+			s.Equal(commonpb.IndexState_InProgress, persisted.IndexState)
+		})
+	}
+}
+
+func (s *indexTaskSuite) TestPrepareJobRequestArrayHybridLegacyVersion() {
+	resetJSONVersionTargets(s.T())
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	mt := &meta{indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID)}
+	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.Require().True(ok)
+	definition := mt.indexMeta.indexes[s.collID][s.indexID]
+	definition.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HYBRID"}}
+	definition.TypeParams = nil
+	field := &schemapb.FieldSchema{Name: "values", FieldID: s.fieldID, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double}
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID: s.collID, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}},
+	}, nil)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().RootPath().Return("root")
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: s.segID, CollectionID: s.collID}}
+	for _, version := range []int32{0, 5} {
+		it := newIndexBuildTask(segIndex, 1, mt, handler, cm, jsonArrayVersionManager(s.T(), version))
+		req, err := it.prepareJobRequest(context.Background(), segment, segIndex, definition.IndexParams, "HYBRID")
+		s.Require().NoError(err)
+		s.Equal(version, req.GetCurrentScalarIndexVersion())
+		s.Equal("HYBRID", common.GetIndexType(req.GetIndexParams()))
 	}
 }

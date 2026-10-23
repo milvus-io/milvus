@@ -128,32 +128,34 @@ func isTypedJSONArrayIndex(indexType, castType string) bool {
 	return indexparamcheck.IsJSONArrayCastType(castType)
 }
 
-func checkJSONArrayIndexEnabled(indexType, castType string) error {
-	if isTypedJSONArrayIndex(indexType, castType) &&
-		!Params.DataCoordCfg.EnableArraySortIndex.GetAsBool() {
-		return merr.WrapErrServiceNotReadyMsg("JSON ARRAY HYBRID and STL_SORT are disabled by the cluster software upgrade gate")
+// isArraySortIndex identifies indexes that require the ordinary ARRAY SORT
+// capability. Nested ARRAY SORT retains its existing element-domain policy.
+func isArraySortIndex(field *schemapb.FieldSchema, indexParams []*commonpb.KeyValuePair) bool {
+	indexType := common.GetIndexType(indexParams)
+	if field.GetDataType() == schemapb.DataType_Array {
+		return indexType == indexparamcheck.IndexSTLSORT && !typeutil.IsStructSubField(field.GetName())
 	}
-	return nil
+	if typeutil.IsJSONType(field.GetDataType()) {
+		castType, _ := getIndexParam(indexParams, common.JSONCastTypeKey)
+		return isTypedJSONArrayIndex(indexType, castType)
+	}
+	return false
 }
 
-// Explicit SORT on ordinary ARRAY is a new logical index type for old readers.
-// Nested ARRAY SORT retains its existing admission rules.
-func checkOrdinaryArraySortIndex(field *schemapb.FieldSchema, indexType string, versions IndexEngineVersionManager) error {
-	if indexType != indexparamcheck.IndexSTLSORT || field.GetDataType() != schemapb.DataType_Array || typeutil.IsStructSubField(field.GetName()) {
-		return nil
-	}
-	if !Params.DataCoordCfg.EnableArraySortIndex.GetAsBool() {
-		return merr.WrapErrServiceNotReadyMsg("ARRAY STL_SORT is disabled by the cluster software upgrade gate")
-	}
-	if versions.ResolveScalarIndexVersion() < 3 {
-		return merr.WrapErrParameterInvalidMsg("ARRAY STL_SORT requires the existing packed scalar index format (version >= 3)")
+// checkArraySortIndexVersion is shared by creation, snapshot restore and every
+// segment build. Capability can change while a queued task waits for a worker.
+func checkArraySortIndexVersion(resolved int32) error {
+	if resolved < common.MinScalarIndexVersionForArrayStlSort {
+		return merr.WrapErrServiceNotReadyMsg(
+			"ARRAY SORT and JSON ARRAY HYBRID/STL_SORT require scalar index engine version >= %d, current resolved version: %d (a rolling upgrade may still be in progress)",
+			common.MinScalarIndexVersionForArrayStlSort, resolved)
 	}
 	return nil
 }
 
 func requiredJSONPathIndexVersion(indexType, castType string) int32 {
 	if isTypedJSONArrayIndex(indexType, castType) {
-		return 3 // Existing packed scalar index format; no new engine version.
+		return common.MinScalarIndexVersionForArrayStlSort
 	}
 	return common.MinScalarIndexVersionForJsonPathMultiType
 }
@@ -220,14 +222,20 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
 	}
 
-	if err := checkOrdinaryArraySortIndex(typeutil.GetField(schema, req.GetFieldID()), common.GetIndexType(req.GetIndexParams()), s.indexEngineVersionManager); err != nil {
-		if !req.GetIsAutoIndex() {
-			return merr.Status(err), nil
+	if isArraySortIndex(typeutil.GetField(schema, req.GetFieldID()), req.GetIndexParams()) {
+		resolved := int32(0)
+		if s.indexEngineVersionManager != nil {
+			resolved = s.indexEngineVersionManager.ResolveScalarIndexVersion()
 		}
-		mlog.Info(ctx, "downgrading ARRAY AutoIndex to INVERTED",
-			mlog.FieldCollectionID(req.GetCollectionID()), mlog.FieldFieldID(req.GetFieldID()),
-			mlog.String("requestedType", common.GetIndexType(req.GetIndexParams())), mlog.Err(err))
-		setIndexParam(req.GetIndexParams(), common.IndexTypeKey, indexparamcheck.IndexINVERTED)
+		if err := checkArraySortIndexVersion(resolved); err != nil {
+			if !req.GetIsAutoIndex() {
+				return merr.Status(err), nil
+			}
+			mlog.Info(ctx, "downgrading ARRAY AutoIndex to INVERTED because cluster scalar index version is too low",
+				mlog.FieldCollectionID(req.GetCollectionID()), mlog.FieldFieldID(req.GetFieldID()),
+				mlog.String("requestedType", common.GetIndexType(req.GetIndexParams())), mlog.Err(err))
+			setIndexParam(req.GetIndexParams(), common.IndexTypeKey, indexparamcheck.IndexINVERTED)
+		}
 	}
 
 	isJSON := isJSONField(schema, req.GetFieldID())
@@ -253,23 +261,13 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
 
 		// JSON path index on STL_SORT, BITMAP, HYBRID requires scalar index
-		// engine version >= the existing scalar/packed-array format threshold.
+		// engine version >= the scalar/ARRAY capability threshold.
 		//
 		// For AutoIndex requests, transparently downgrade the requested type
 		// to INVERTED if the cluster version is too low — this keeps AutoIndex
 		// creating *some* usable index during rolling upgrade instead of
 		// failing outright. For explicit user requests, return an error.
 		indexType := common.GetIndexType(req.GetIndexParams())
-		if err := checkJSONArrayIndexEnabled(indexType, castType); err != nil {
-			if !req.GetIsAutoIndex() {
-				return merr.Status(err), nil
-			}
-			mlog.Info(ctx, "downgrading JSON ARRAY AutoIndex to INVERTED because the software upgrade gate is closed",
-				mlog.FieldCollectionID(req.GetCollectionID()), mlog.FieldFieldID(req.GetFieldID()),
-				mlog.String("requestedType", indexType), mlog.Err(err))
-			indexType = indexparamcheck.IndexINVERTED
-			setIndexParam(req.GetIndexParams(), common.IndexTypeKey, indexType)
-		}
 		if indexType == indexparamcheck.IndexSTLSORT ||
 			indexType == indexparamcheck.IndexBitmap ||
 			indexType == indexparamcheck.IndexHybrid {
@@ -284,9 +282,14 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 					setIndexParam(req.GetIndexParams(), common.IndexTypeKey,
 						indexparamcheck.IndexINVERTED)
 				} else {
-					err := merr.WrapErrParameterInvalidMsg(
-						"JSON path index with %s requires scalar index engine version >= %d, current resolved version: %d",
-						indexType, required, resolved)
+					var err error
+					if isTypedJSONArrayIndex(indexType, castType) {
+						err = checkArraySortIndexVersion(resolved)
+					} else {
+						err = merr.WrapErrParameterInvalidMsg(
+							"JSON path index with %s requires scalar index engine version >= %d, current resolved version: %d",
+							indexType, required, resolved)
+					}
 					mlog.Warn(ctx, "scalar index engine version too low for JSON path index", mlog.Err(err))
 					return merr.Status(err), nil
 				}

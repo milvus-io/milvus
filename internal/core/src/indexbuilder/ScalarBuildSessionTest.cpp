@@ -98,7 +98,8 @@ class ScalarBuildSessionTest : public ::testing::Test {
     }
 
     index::IIndexReaderBasePtr
-    BuildAndLoad(PreparedBuild prepared) const {
+    BuildAndLoad(PreparedBuild prepared,
+                 std::string_view expected_family = {}) const {
         const auto family = prepared.request.family;
         const auto params = prepared.request.params;
         const auto context = prepared.file_manager_context;
@@ -115,6 +116,9 @@ class ScalarBuildSessionTest : public ::testing::Test {
             {stats.Files()[0].file_name}, context);
         const auto resolved_family =
             index::ResolvePackedLoadFamily(family, source.Metadata(), params);
+        if (!expected_family.empty()) {
+            EXPECT_EQ(resolved_family, expected_family);
+        }
         // Cold-load planning annotates typed JSON completeness, as the sealed
         // index translator does before opening the reader.
         storage::LoadOptions options;
@@ -267,6 +271,142 @@ TYPED_TEST(ScalarMissingBinlogPrefixTest,
                         (lower_inclusive ? value >= lower : value > lower) &&
                         (upper_inclusive ? value <= upper : value < upper);
                     EXPECT_EQ(hits[row], valid && hit) << row;
+                }
+            }
+        }
+    }
+}
+
+TEST_F(ScalarBuildSessionTest, OrdinaryArraySortChecksBuildTarget) {
+    for (const auto element : {DataType::BOOL,
+                               DataType::INT8,
+                               DataType::INT16,
+                               DataType::INT32,
+                               DataType::INT64,
+                               DataType::FLOAT,
+                               DataType::DOUBLE,
+                               DataType::VARCHAR}) {
+        auto info = Info(DataType::ARRAY, index::ASCENDING_SORT);
+        info.mutable_field_schema()->set_element_type(
+            static_cast<proto::schema::DataType>(element));
+        for (const int version : {0, 3, 5, kArrayStlSortMinVersion}) {
+            SCOPED_TRACE(::testing::Message()
+                         << static_cast<int>(element) << "/" << version);
+            info.set_current_scalar_index_version(version);
+            if (version < kArrayStlSortMinVersion) {
+                try {
+                    static_cast<void>(
+                        AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex));
+                    FAIL() << "old ARRAY SORT build target must be rejected";
+                } catch (const SegcoreError& error) {
+                    EXPECT_EQ(error.get_error_code(), IndexBuildError);
+                }
+            } else {
+                auto prepared =
+                    AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+                EXPECT_EQ(prepared.request.family, index::families::kSort);
+            }
+        }
+    }
+}
+
+TEST_F(ScalarBuildSessionTest, TypedJsonArrayChecksBuildTargetAndKeepsRows) {
+    for (const auto* cast : {"ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"}) {
+        for (const auto* index_type :
+             {index::ASCENDING_SORT, index::HYBRID_INDEX_TYPE}) {
+            auto info = Info(DataType::JSON, index_type);
+            info.set_num_rows(5);
+            info.mutable_field_schema()->set_nullable(true);
+            for (const auto& [key, value] : {std::pair{JSON_CAST_TYPE, cast},
+                                             std::pair{JSON_PATH, "/a"}}) {
+                auto* param = info.add_index_params();
+                param->set_key(key);
+                param->set_value(value);
+            }
+            if (std::string_view(index_type) == index::HYBRID_INDEX_TYPE) {
+                for (auto& param : *info.mutable_index_params()) {
+                    if (param.key() == index::BITMAP_INDEX_CARDINALITY_LIMIT) {
+                        param.set_value("1");
+                    }
+                }
+            }
+            for (const int version : {5, kArrayStlSortMinVersion}) {
+                SCOPED_TRACE(::testing::Message()
+                             << cast << "/" << index_type << "/" << version);
+                info.set_current_scalar_index_version(version);
+                if (version < kArrayStlSortMinVersion) {
+                    try {
+                        static_cast<void>(AdaptBuildIndexInfo(
+                            info, BuildPurpose::ScalarIndex));
+                        FAIL()
+                            << "old JSON ARRAY build target must be rejected";
+                    } catch (const SegcoreError& error) {
+                        EXPECT_EQ(error.get_error_code(), IndexBuildError);
+                    }
+                    continue;
+                }
+                auto prepared =
+                    AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+                const std::string values =
+                    std::string_view(cast) == "ARRAY_BOOL" ? "false,true,true"
+                    : std::string_view(cast) == "ARRAY_DOUBLE"
+                        ? "1,100,100"
+                        : "\"a\",\"z\",\"z\"";
+                std::vector<Json> documents;
+                for (const auto& raw : {"{\"a\":[" + values + "]}",
+                                        std::string("{\"a\":[]}"),
+                                        std::string("{\"a\":null}"),
+                                        std::string("{}"),
+                                        std::string("{\"a\":[null,{}]}")}) {
+                    documents.emplace_back(simdjson::padded_string(raw));
+                }
+                auto data =
+                    std::make_shared<FieldData<Json>>(DataType::JSON, true);
+                const uint8_t validity = 0x1f;
+                FieldDataBase& output = *data;
+                output.FillFieldData(
+                    documents.data(), &validity, documents.size(), 0);
+                info.add_insert_files(
+                    WriteBinlog(prepared.file_manager_context, data));
+                prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+                auto reader =
+                    BuildAndLoad(std::move(prepared), index::families::kSort);
+                ASSERT_NE(reader, nullptr);
+                const auto* json =
+                    dynamic_cast<const index::IJsonIndexReader*>(reader.get());
+                ASSERT_NE(json, nullptr);
+                const auto resolved =
+                    json->Resolve("/a", JsonCastType::FromString(cast));
+                ASSERT_TRUE(static_cast<bool>(resolved));
+                EXPECT_EQ(resolved->CoordDomain(), index::Domain::Row);
+                const auto* nulls =
+                    dynamic_cast<const index::INullReader*>(resolved.get());
+                ASSERT_NE(nulls, nullptr);
+                const auto valid = nulls->IsNotNull();
+                ASSERT_EQ(valid.size(), 5);
+                for (size_t row = 0; row < 5; ++row) {
+                    EXPECT_EQ(valid[row], row == 0 || row == 1 || row == 4);
+                }
+                const auto check = [&](const auto& key) {
+                    using T = std::decay_t<decltype(key)>;
+                    const auto* predicate =
+                        dynamic_cast<const index::IScalarPredicateReader<T>*>(
+                            resolved.get());
+                    ASSERT_NE(predicate, nullptr);
+                    const auto hits = predicate->In(1, &key);
+                    EXPECT_EQ(hits.count(), 1);
+                    EXPECT_TRUE(hits[0]);
+                    const auto not_hits = predicate->NotIn(1, &key);
+                    EXPECT_EQ(not_hits.count(), 2);
+                    EXPECT_TRUE(not_hits[1]);
+                    EXPECT_TRUE(not_hits[4]);
+                };
+                if (std::string_view(cast) == "ARRAY_BOOL") {
+                    check(false);
+                } else if (std::string_view(cast) == "ARRAY_DOUBLE") {
+                    check(1.0);
+                } else {
+                    check(std::string_view("a"));
                 }
             }
         }

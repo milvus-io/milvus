@@ -566,7 +566,7 @@ ArrayRow(DataType type, std::initializer_list<T> values) {
 
 template <typename T>
 void
-CheckArrayHybridGate(std::string_view type_name, DataType type, T a, T b) {
+CheckArrayHybridVersion(std::string_view type_name, DataType type, T a, T b) {
     for (const bool mmap : {false, true}) {
         const auto name =
             "Hybrid" + std::string(type_name) + "Array" + (mmap ? "Mmap" : "");
@@ -580,62 +580,47 @@ CheckArrayHybridGate(std::string_view type_name, DataType type, T a, T b) {
         const ScalarTestInput<ArrayView> input(data);
         // Explicit SORT must pass the public adapter for every ARRAY element
         // type; it does not depend on HYBRID cardinality selection.
-        const auto adapted =
-            AdaptIndexType({.index_type = ASCENDING_SORT,
-                            .field_type = DataType::ARRAY,
-                            .element_type = type,
-                            .params = {{"nullable", true},
-                                       {SCALAR_INDEX_ENGINE_VERSION,
-                                        kArrayHybridStlSortMinVersion}}});
-        ASSERT_EQ(adapted.family, families::kSort);
-        auto explicit_builder =
-            BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
-                adapted.family, adapted.params);
-        ASSERT_NE(explicit_builder, nullptr);
-        auto explicit_artifact =
-            std::move(*explicit_builder).Build(input.View());
         const auto& sorted = ScalarReaderBackends().Get<ArrayView>(
             "Sorted" + std::string(type_name) + "Array" + (mmap ? "Mmap" : ""));
-        auto explicit_reader =
-            OpenV3(sorted, SerializeV3(*explicit_artifact), {.row_count = 4});
-        ASSERT_EQ(explicit_reader->Count(), 4);
-        EXPECT_FALSE(explicit_reader->Caps().value_lookup);
-        const auto* explicit_predicate =
-            dynamic_cast<const IScalarPredicateReader<T>*>(
-                explicit_reader.get());
-        const auto* explicit_nulls =
-            dynamic_cast<const INullReader*>(explicit_reader.get());
-        ASSERT_NE(explicit_predicate, nullptr);
-        ASSERT_NE(explicit_nulls, nullptr);
-        ExpectHits(explicit_predicate->In(1, &a), 4, {0, 3});
-        ExpectHits(explicit_nulls->IsNotNull(), 4, {0, 1, 3});
-        // A current format version alone must not bypass the software gate.
-        for (const auto& enabled :
-             {Config(nullptr), Config(false), Config("false")}) {
-            auto params = backend.BuildParams();
-            params[SCALAR_INDEX_ENGINE_VERSION] = kArrayHybridStlSortMinVersion;
-            params[BITMAP_INDEX_CARDINALITY_LIMIT] = 2;
-            params.erase(ENABLE_ARRAY_SORT_INDEX);
-            if (!enabled.is_null()) {
-                params[ENABLE_ARRAY_SORT_INDEX] = enabled;
-            }
-            auto builder =
+        // Low-level fixtures recreate old artifacts without passing through
+        // current build admission. All packed generations remain loadable.
+        for (const int version : {3, 4, 5, kArrayStlSortMinVersion}) {
+            SCOPED_TRACE("explicit version=" + std::to_string(version));
+            const auto adapted = AdaptIndexType(
+                {.index_type = ASCENDING_SORT,
+                 .field_type = DataType::ARRAY,
+                 .element_type = type,
+                 .params = {{"nullable", true},
+                            {SCALAR_INDEX_ENGINE_VERSION, version}}});
+            ASSERT_EQ(adapted.family, families::kSort);
+            auto explicit_builder =
                 BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
-                    families::kHybrid, params);
-            ASSERT_NE(builder, nullptr);
-            auto artifact = std::move(*builder).Build(input.View());
-            EXPECT_EQ(PersistedSelector(*artifact), ScalarIndexType::INVERTED);
+                    adapted.family, adapted.params);
+            ASSERT_NE(explicit_builder, nullptr);
+            auto explicit_artifact =
+                std::move(*explicit_builder).Build(input.View());
+            auto explicit_reader = OpenV3(
+                sorted, SerializeV3(*explicit_artifact), {.row_count = 4});
+            ASSERT_EQ(explicit_reader->Count(), 4);
+            EXPECT_FALSE(explicit_reader->Caps().value_lookup);
+            const auto* explicit_predicate =
+                dynamic_cast<const IScalarPredicateReader<T>*>(
+                    explicit_reader.get());
+            const auto* explicit_nulls =
+                dynamic_cast<const INullReader*>(explicit_reader.get());
+            ASSERT_NE(explicit_predicate, nullptr);
+            ASSERT_NE(explicit_nulls, nullptr);
+            ExpectHits(explicit_predicate->In(1, &a), 4, {0, 3});
+            ExpectHits(explicit_nulls->IsNotNull(), 4, {0, 1, 3});
         }
-        for (const int version : {kArrayHybridStlSortMinVersion - 1,
-                                  kArrayHybridStlSortMinVersion,
-                                  kArrayHybridStlSortMinVersion + 1}) {
+        for (const int version : {kArrayStlSortMinVersion - 1,
+                                  kArrayStlSortMinVersion,
+                                  kArrayStlSortMinVersion + 1}) {
             for (const int threshold : {2, 3}) {
                 SCOPED_TRACE(name + "/version=" + std::to_string(version) +
                              "/threshold=" + std::to_string(threshold));
                 auto params = backend.BuildParams();
                 params[SCALAR_INDEX_ENGINE_VERSION] = version;
-                // Exercise the string representation sent in build params too.
-                params[ENABLE_ARRAY_SORT_INDEX] = "true";
                 // A threshold of two exercises the BOOL high-cardinality
                 // branch as well, without inventing more than two bool keys.
                 params[BITMAP_INDEX_CARDINALITY_LIMIT] = threshold;
@@ -644,14 +629,13 @@ CheckArrayHybridGate(std::string_view type_name, DataType type, T a, T b) {
                         .Create(families::kHybrid, params);
                 ASSERT_NE(builder, nullptr);
                 auto artifact = std::move(*builder).Build(input.View());
-                const auto expected =
-                    threshold == 3 ? ScalarIndexType::BITMAP
-                                   : (version < kArrayHybridStlSortMinVersion
-                                          ? ScalarIndexType::INVERTED
-                                          : ScalarIndexType::STLSORT);
+                const auto expected = threshold == 3
+                                          ? ScalarIndexType::BITMAP
+                                          : (version < kArrayStlSortMinVersion
+                                                 ? ScalarIndexType::INVERTED
+                                                 : ScalarIndexType::STLSORT);
                 EXPECT_EQ(PersistedSelector(*artifact), expected);
-                if (version != kArrayHybridStlSortMinVersion ||
-                    threshold != 2) {
+                if (version != kArrayStlSortMinVersion || threshold != 2) {
                     continue;
                 }
 
@@ -709,15 +693,15 @@ CheckArrayHybridGate(std::string_view type_name, DataType type, T a, T b) {
     }
 }
 
-TEST(HybridIndexBuilderTest, ArrayRowsAllTypesSelectSortFromGateAndReload) {
-    CheckArrayHybridGate<bool>("Bool", DataType::BOOL, false, true);
-    CheckArrayHybridGate<int8_t>("Int8", DataType::INT8, 1, 100);
-    CheckArrayHybridGate<int16_t>("Int16", DataType::INT16, 1, 100);
-    CheckArrayHybridGate<int32_t>("Int32", DataType::INT32, 1, 100);
-    CheckArrayHybridGate<int64_t>("Int64", DataType::INT64, 1, 100);
-    CheckArrayHybridGate<float>("Float", DataType::FLOAT, 1, 100);
-    CheckArrayHybridGate<double>("Double", DataType::DOUBLE, 1, 100);
-    CheckArrayHybridGate<std::string_view>(
+TEST(HybridIndexBuilderTest, ArrayRowsAllTypesSelectSortFromVersionAndReload) {
+    CheckArrayHybridVersion<bool>("Bool", DataType::BOOL, false, true);
+    CheckArrayHybridVersion<int8_t>("Int8", DataType::INT8, 1, 100);
+    CheckArrayHybridVersion<int16_t>("Int16", DataType::INT16, 1, 100);
+    CheckArrayHybridVersion<int32_t>("Int32", DataType::INT32, 1, 100);
+    CheckArrayHybridVersion<int64_t>("Int64", DataType::INT64, 1, 100);
+    CheckArrayHybridVersion<float>("Float", DataType::FLOAT, 1, 100);
+    CheckArrayHybridVersion<double>("Double", DataType::DOUBLE, 1, 100);
+    CheckArrayHybridVersion<std::string_view>(
         "Varchar", DataType::VARCHAR, "a", "z");
 }
 

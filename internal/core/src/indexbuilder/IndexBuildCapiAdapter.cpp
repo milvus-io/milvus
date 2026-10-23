@@ -28,6 +28,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/JsonCastType.h"
 #include "common/Schema.h"
 #include "common/Utils.h"
 #include "index/Families.h"
@@ -374,6 +375,29 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
         vector_field ? false : IsStructSubField(info.field_schema().name());
     const auto element_type =
         static_cast<DataType>(info.field_schema().element_type());
+
+    const bool ordinary_array_sort = field_type == DataType::ARRAY &&
+                                     !is_nested &&
+                                     index_type == index::ASCENDING_SORT;
+    const bool typed_json_array =
+        field_type == DataType::JSON &&
+        (index_type == index::HYBRID_INDEX_TYPE ||
+         index_type == index::ASCENDING_SORT) &&
+        JsonCastType::FromString(
+            index::GetValueFromConfig<std::string>(params, JSON_CAST_TYPE)
+                .value_or(""))
+                .data_type() == JsonCastType::DataType::ARRAY;
+    // Recheck queued builds at the worker boundary. Admission and load are
+    // separate: an old artifact remains readable after the build target moves.
+    if ((ordinary_array_sort || typed_json_array) &&
+        info.current_scalar_index_version() < kArrayStlSortMinVersion) {
+        ThrowInfo(IndexBuildError,
+                  "{} ARRAY {} requires scalar index version >= {}, got {}",
+                  ordinary_array_sort ? "ordinary" : "typed JSON",
+                  index_type,
+                  kArrayStlSortMinVersion,
+                  info.current_scalar_index_version());
+    }
 
     params[index::SCALAR_INDEX_ENGINE_VERSION] =
         info.current_scalar_index_version();

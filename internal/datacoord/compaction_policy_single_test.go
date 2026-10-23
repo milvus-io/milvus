@@ -211,13 +211,14 @@ func (s *SingleCompactionPolicySuite) TestTriggerSortsInvisibleSegmentsFirst() {
 		segment.IsInvisible = invisible
 		return segment
 	}
-	meta := &meta{segments: NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+	store := metacache.NewMetaStore(nil)
+	meta := &meta{ctx: context.Background(), segments: NewSegmentsInfo(store), metaStore: store}
 	// Each collection has a visible and an invisible unsorted segment.
 	for _, segment := range []*SegmentInfo{newSegment(1, 100, false), newSegment(2, 100, true), newSegment(3, 200, false), newSegment(4, 200, true)} {
 		meta.segments.SetSegment(segment.GetID(), segment)
 	}
 	for _, collectionID := range []int64{100, 200} {
-		meta.collections.Insert(collectionID, &collectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{}})
+		meta.AddCollection(&collectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{}})
 	}
 	s.singlePolicy.meta = meta
 

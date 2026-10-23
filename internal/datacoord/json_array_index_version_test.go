@@ -68,39 +68,19 @@ func resetJSONVersionTargets(t *testing.T) {
 	})
 }
 
-func setJSONArrayIndexGate(t *testing.T, enabled bool) {
-	t.Helper()
-	previous := Params.DataCoordCfg.EnableArraySortIndex.SwapTempValue(fmt.Sprint(enabled))
-	t.Cleanup(func() { Params.DataCoordCfg.EnableArraySortIndex.SwapTempValue(previous) })
-}
-
-func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
+func TestCreateIndexArraySortEngineVersion(t *testing.T) {
 	resetJSONVersionTargets(t)
 	initStreamingSystem(t)
 	for _, indexType := range []string{indexparamcheck.IndexHybrid, indexparamcheck.IndexSTLSORT} {
-		casts := []string{"ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"}
-		if indexType == indexparamcheck.IndexSTLSORT {
-			casts = append(casts, "") // Ordinary ARRAY has no JSON cast parameters.
-		}
-		for _, cast := range casts {
-			for _, tc := range []struct {
-				name    string
-				enabled bool
-				version int32
-			}{
-				{"disabled", false, common.CurrentScalarIndexEngineVersion},
-				{"enabled", true, common.CurrentScalarIndexEngineVersion},
-				{"packed_v3", true, 3},
-				{"legacy_v2", true, 2},
-			} {
+		for _, cast := range []string{"", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"} {
+			for _, version := range []int32{0, 5, 6} {
 				for _, auto := range []bool{false, true} {
-					t.Run(fmt.Sprintf("%s/%s/%s/auto=%t", indexType, cast, tc.name, auto), func(t *testing.T) {
-						setJSONArrayIndexGate(t, tc.enabled)
+					t.Run(fmt.Sprintf("%s/%s/v%d/auto=%t", indexType, cast, version, auto), func(t *testing.T) {
 						field := &schemapb.FieldSchema{FieldID: 100, Name: "payload", DataType: schemapb.DataType_JSON}
 						params := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexType}}
 						if cast == "" {
 							field.DataType = schemapb.DataType_Array
-							field.ElementType = schemapb.DataType_Int64
+							field.ElementType = schemapb.DataType_Double
 						} else {
 							params = append(params, &commonpb.KeyValuePair{Key: common.JSONCastTypeKey, Value: cast},
 								&commonpb.KeyValuePair{Key: common.JSONPathKey, Value: `payload["a"]`})
@@ -112,35 +92,29 @@ func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
 								Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}},
 							}, nil).Twice()
 						alloc := allocator.NewMockAllocator(t)
-						incompatible := !tc.enabled || tc.version < 3
+						incompatible := version < 6 && (cast != "" || indexType == indexparamcheck.IndexSTLSORT)
 						blocked := incompatible && !auto
 						if !blocked {
 							// Stop after admission, before metadata or broadcasting.
 							alloc.EXPECT().AllocID(mock.Anything).Return(int64(0),
-								merr.WrapErrServiceInternalMsg("passed JSON software gate")).Once()
+								merr.WrapErrServiceInternalMsg("passed ARRAY capability gate")).Once()
 						}
 						server := &Server{
-							broker:                    broker.NewCoordinatorBroker(coordinator),
-							allocator:                 alloc,
-							indexEngineVersionManager: jsonArrayVersionManager(t, tc.version),
+							broker: broker.NewCoordinatorBroker(coordinator), allocator: alloc,
+							indexEngineVersionManager: jsonArrayVersionManager(t, version),
 						}
 						server.stateCode.Store(commonpb.StateCode_Healthy)
 						request := &indexpb.CreateIndexRequest{
-							CollectionID: 1, FieldID: 100, IndexName: "json_array",
-							IsAutoIndex: auto,
-							IndexParams: params,
+							CollectionID: 1, FieldID: 100, IndexName: "array_index", IsAutoIndex: auto, IndexParams: params,
 						}
 						status, err := server.CreateIndex(context.Background(), request)
 						require.NoError(t, err)
 						if blocked {
-							if !tc.enabled {
-								require.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
-							} else {
-								require.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
-							}
+							require.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
+							require.True(t, status.GetRetriable())
 							alloc.AssertNotCalled(t, "AllocID", mock.Anything)
 						} else {
-							require.Contains(t, status.GetReason(), "passed JSON software gate")
+							require.Contains(t, status.GetReason(), "passed ARRAY capability gate")
 						}
 						expectedType := indexType
 						if auto && incompatible {
@@ -154,33 +128,25 @@ func TestCreateIndexJSONArraySoftwareGate(t *testing.T) {
 	}
 }
 
-func TestRestoreJSONArraySoftwareGate(t *testing.T) {
+func TestRestoreJSONArrayEngineVersion(t *testing.T) {
 	resetJSONVersionTargets(t)
 	for _, indexType := range []string{indexparamcheck.IndexHybrid, indexparamcheck.IndexSTLSORT} {
 		for _, cast := range []string{"ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"} {
-			for _, enabled := range []bool{false, true} {
-				versions := []int32{common.CurrentScalarIndexEngineVersion}
-				if enabled {
-					versions = []int32{2, 3, common.CurrentScalarIndexEngineVersion}
-				}
-				for _, version := range versions {
-					t.Run(fmt.Sprintf("%s/%s/v%d/enabled=%t", indexType, cast, version, enabled), func(t *testing.T) {
-						setJSONArrayIndexGate(t, enabled)
-						manager := &snapshotManager{indexEngineVersionManager: jsonArrayVersionManager(t, version)}
-						err := manager.checkJSONPathIndexVersion(&model.Index{IndexParams: []*commonpb.KeyValuePair{
-							{Key: common.IndexTypeKey, Value: indexType},
-							{Key: common.JSONCastTypeKey, Value: cast},
-							{Key: common.JSONPathKey, Value: "/a"},
-						}})
-						if !enabled {
-							require.ErrorIs(t, err, merr.ErrServiceNotReady)
-						} else if version < 3 {
-							require.ErrorIs(t, err, merr.ErrParameterInvalid)
-						} else {
-							require.NoError(t, err)
-						}
-					})
-				}
+			for _, version := range []int32{0, 5, 6} {
+				t.Run(fmt.Sprintf("%s/%s/v%d", indexType, cast, version), func(t *testing.T) {
+					manager := &snapshotManager{indexEngineVersionManager: jsonArrayVersionManager(t, version)}
+					err := manager.checkJSONPathIndexVersion(&model.Index{IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: indexType},
+						{Key: common.JSONCastTypeKey, Value: cast},
+						{Key: common.JSONPathKey, Value: "/a"},
+					}})
+					if version < 6 {
+						require.ErrorIs(t, err, merr.ErrServiceNotReady)
+						require.True(t, merr.Status(err).GetRetriable())
+					} else {
+						require.NoError(t, err)
+					}
+				})
 			}
 		}
 	}
@@ -195,7 +161,6 @@ func TestRestoreJSONArraySoftwareGate(t *testing.T) {
 		{"full_json_inverted_v3", indexparamcheck.IndexINVERTED, "JSON", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			setJSONArrayIndexGate(t, false)
 			manager := &snapshotManager{indexEngineVersionManager: jsonArrayVersionManager(t, tc.version)}
 			require.NoError(t, manager.checkJSONPathIndexVersion(&model.Index{IndexParams: []*commonpb.KeyValuePair{
 				{Key: common.IndexTypeKey, Value: tc.indexType},
@@ -206,24 +171,32 @@ func TestRestoreJSONArraySoftwareGate(t *testing.T) {
 	}
 }
 
-func TestRestoreOrdinaryArraySortSoftwareGate(t *testing.T) {
+func TestRestoreArraySortEngineVersion(t *testing.T) {
 	resetJSONVersionTargets(t)
 	for _, tc := range []struct {
-		name     string
-		field    *schemapb.FieldSchema
-		enabled  bool
-		version  int32
-		expected error
+		name, indexType, cast string
+		field                 *schemapb.FieldSchema
+		version               int32
+		blocked               bool
 	}{
-		{"disabled", &schemapb.FieldSchema{Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, false, common.CurrentScalarIndexEngineVersion, merr.ErrServiceNotReady},
-		{"legacy_format", &schemapb.FieldSchema{Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, true, 2, merr.ErrParameterInvalid},
-		{"packed_v3", &schemapb.FieldSchema{Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, true, 3, nil},
-		{"existing_nested", &schemapb.FieldSchema{Name: "items[value]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, false, 4, nil},
-		{"existing_scalar", &schemapb.FieldSchema{Name: "value", DataType: schemapb.DataType_Int64}, false, common.CurrentScalarIndexEngineVersion, nil},
+		{"ordinary", indexparamcheck.IndexSTLSORT, "", &schemapb.FieldSchema{Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double}, 5, true},
+		{"ordinary_v6", indexparamcheck.IndexSTLSORT, "", &schemapb.FieldSchema{Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double}, 6, false},
+		{"ordinary_no_readers", indexparamcheck.IndexSTLSORT, "", &schemapb.FieldSchema{Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double}, 0, true},
+		{"json_sort", indexparamcheck.IndexSTLSORT, "ARRAY_DOUBLE", &schemapb.FieldSchema{Name: "payload", DataType: schemapb.DataType_JSON}, 5, true},
+		{"json_sort_v6", indexparamcheck.IndexSTLSORT, "ARRAY_DOUBLE", &schemapb.FieldSchema{Name: "payload", DataType: schemapb.DataType_JSON}, 6, false},
+		{"json_hybrid", indexparamcheck.IndexHybrid, "ARRAY_VARCHAR", &schemapb.FieldSchema{Name: "payload", DataType: schemapb.DataType_JSON}, 5, true},
+		{"json_hybrid_v6", indexparamcheck.IndexHybrid, "ARRAY_VARCHAR", &schemapb.FieldSchema{Name: "payload", DataType: schemapb.DataType_JSON}, 6, false},
+		{"existing_nested", indexparamcheck.IndexSTLSORT, "", &schemapb.FieldSchema{Name: "items[value]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, 4, false},
+		{"existing_scalar", indexparamcheck.IndexSTLSORT, "", &schemapb.FieldSchema{Name: "value", DataType: schemapb.DataType_Int64}, 5, false},
+		{"existing_array_hybrid", indexparamcheck.IndexHybrid, "", &schemapb.FieldSchema{Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, 5, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			setJSONArrayIndexGate(t, tc.enabled)
 			tc.field.FieldID = 100
+			params := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: tc.indexType}}
+			if tc.cast != "" {
+				params = append(params, &commonpb.KeyValuePair{Key: common.JSONCastTypeKey, Value: tc.cast},
+					&commonpb.KeyValuePair{Key: common.JSONPathKey, Value: "/a"})
+			}
 			mockBroker := broker.NewMockBroker(t)
 			mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(
 				&milvuspb.DescribeCollectionResponse{DbName: "default", Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{tc.field}}}, nil).Once()
@@ -232,17 +205,18 @@ func TestRestoreOrdinaryArraySortSoftwareGate(t *testing.T) {
 			sm := &snapshotManager{broker: mockBroker, allocator: alloc, indexEngineVersionManager: jsonArrayVersionManager(t, tc.version)}
 			broadcastStarted := false
 			err := sm.RestoreIndexes(context.Background(), &snapshotstorage.SnapshotData{Indexes: []*indexpb.IndexInfo{{
-				FieldID: 100, IndexName: "array_sort", IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT}},
+				FieldID: 100, IndexName: "array_index", IndexParams: params,
 			}}}, 1, func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) {
 				broadcastStarted = true
-				return nil, merr.WrapErrServiceInternalMsg("passed array SORT gate")
+				return nil, merr.WrapErrServiceInternalMsg("passed ARRAY capability gate")
 			}, "snapshot")
-			if tc.expected != nil {
-				require.ErrorIs(t, err, tc.expected)
+			if tc.blocked {
+				require.ErrorIs(t, err, merr.ErrServiceNotReady)
+				require.True(t, merr.Status(err).GetRetriable())
 				require.False(t, broadcastStarted)
 			} else {
 				require.True(t, broadcastStarted)
-				require.ErrorContains(t, err, "passed array SORT gate")
+				require.ErrorContains(t, err, "passed ARRAY capability gate")
 			}
 		})
 	}
