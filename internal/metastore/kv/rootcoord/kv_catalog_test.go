@@ -1178,6 +1178,63 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.NoError(t, err)
 	})
+
+	t.Run("modify removes stale schema keys", func(t *testing.T) {
+		var collectionID int64 = 1
+		snapshot := mocks.NewTxnKV(t)
+		snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+				assert.Contains(t, saves, BuildCollectionKey(0, collectionID))
+				assert.Contains(t, saves, BuildFieldKey(collectionID, 100))
+				assert.Contains(t, saves, BuildStructArrayFieldKey(collectionID, 200))
+				assert.Contains(t, saves, BuildFunctionKey(collectionID, 300))
+				assert.NotContains(t, saves, BuildFieldKey(collectionID, 101))
+				assert.NotContains(t, saves, BuildStructArrayFieldKey(collectionID, 201))
+				assert.NotContains(t, saves, BuildFunctionKey(collectionID, 301))
+				assert.ElementsMatch(t, []string{
+					BuildFieldKey(collectionID, 101),
+					BuildStructArrayFieldKey(collectionID, 201),
+					BuildFunctionKey(collectionID, 301),
+				}, removals)
+				return nil
+			})
+
+		kc := NewCatalog(snapshot).(*Catalog)
+		ctx := context.Background()
+		oldC := &model.Collection{
+			DBID:         0,
+			CollectionID: collectionID,
+			State:        pb.CollectionState_CollectionCreated,
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "keep_field"},
+				{FieldID: 101, Name: "drop_field"},
+			},
+			StructArrayFields: []*model.StructArrayField{
+				{FieldID: 200, Name: "keep_struct"},
+				{FieldID: 201, Name: "drop_struct"},
+			},
+			Functions: []*model.Function{
+				{ID: 300, Name: "keep_function"},
+				{ID: 301, Name: "drop_function"},
+			},
+		}
+		newC := &model.Collection{
+			DBID:         0,
+			CollectionID: collectionID,
+			State:        pb.CollectionState_CollectionCreated,
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "keep_field"},
+			},
+			StructArrayFields: []*model.StructArrayField{
+				{FieldID: 200, Name: "keep_struct"},
+			},
+			Functions: []*model.Function{
+				{ID: 300, Name: "keep_function"},
+			},
+		}
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		assert.NoError(t, err)
+	})
 }
 
 func TestCatalog_AlterCollectionDB(t *testing.T) {
