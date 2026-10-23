@@ -662,23 +662,39 @@ class Geometry {
         }
         const double d = std::max(distance_meters, 0.0);
 
+        // Rounding margin: the exact predicate compares `distance <= d` in
+        // meters while the box is in degrees; a row sitting exactly on the
+        // boundary must not fall off the box through conversion error.
+        constexpr double kRelativeMargin = 1e-9;
+        constexpr double kAbsoluteMarginDeg = 1e-9;  // ~0.1 mm
+
         // (1) point rows: spherical cap under the haversine metric.
         const double angular = d / kEarthRadiusMeters;  // radians
         const double cap_lat_deg = angular * 180.0 / kPi;
         double cap_lon_deg;
         bool full_longitude = false;
         const double lat_rad = query_lat * kPi / 180.0;
-        if (std::fabs(query_lat) + cap_lat_deg >= 90.0 ||
+        // Both pole tests are made with the margin already applied. When d is
+        // the pole distance to the ulp, cap_lat_deg and the sin/cos ratio
+        // each land a few ulp below their exact values; asin has infinite
+        // slope at 1, so a 1-ulp deficit in the ratio already costs ~1e-6 deg
+        // of longitude, far more than a margin added after asin can give
+        // back. Padding the inputs instead keeps the box a superset.
+        if (std::fabs(query_lat) + cap_lat_deg * (1.0 + kRelativeMargin) +
+                    kAbsoluteMarginDeg >=
+                90.0 ||
             std::cos(lat_rad) <= 0.0) {
-            full_longitude = true;  // cap contains a pole
+            full_longitude = true;  // cap contains or touches a pole
             cap_lon_deg = 180.0;
         } else {
-            double ratio = std::sin(angular) / std::cos(lat_rad);
-            if (ratio >= 1.0) {
+            const double ratio = std::sin(angular) / std::cos(lat_rad);
+            const double padded =
+                ratio * (1.0 + kRelativeMargin) + kRelativeMargin;
+            if (padded >= 1.0) {
                 full_longitude = true;
                 cap_lon_deg = 180.0;
             } else {
-                cap_lon_deg = std::asin(ratio) * 180.0 / kPi;
+                cap_lon_deg = std::asin(padded) * 180.0 / kPi;
             }
         }
 
@@ -691,12 +707,6 @@ class Geometry {
 
         double lat_half = std::max(cap_lat_deg, planar_deg);
         double lon_half = std::max(cap_lon_deg, planar_deg);
-
-        // Rounding margin: the exact predicate compares `distance <= d` in
-        // meters while the box is in degrees; a row sitting exactly on the
-        // boundary must not fall off the box through conversion error.
-        constexpr double kRelativeMargin = 1e-9;
-        constexpr double kAbsoluteMarginDeg = 1e-9;  // ~0.1 mm
         lat_half = lat_half * (1.0 + kRelativeMargin) + kAbsoluteMarginDeg;
         lon_half = lon_half * (1.0 + kRelativeMargin) + kAbsoluteMarginDeg;
 
@@ -748,7 +758,10 @@ class Geometry {
         return degrees_distance * avgMetersPerDegree;
     }
 
-    // Haversine formula to calculate great-circle distance between two points on Earth
+ public:
+    // Haversine formula to calculate great-circle distance between two points
+    // on Earth. This is the exact metric dwithin() applies to point rows; it
+    // is public so tests can place rows exactly on the distance boundary.
     static double
     haversine_distance_meters(double lat1,
                               double lon1,
@@ -775,7 +788,6 @@ class Geometry {
         return R * c;  // Distance in meters
     }
 
- public:
     // Export to WKT string
     std::string
     to_wkt_string() const {

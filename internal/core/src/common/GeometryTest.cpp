@@ -488,6 +488,39 @@ TEST_F(GeometryValueSemanticsTest, DWithinSearchEnvelopeEdgeCases) {
     EXPECT_LE(env.min_x, -180.0);
     EXPECT_GE(env.max_x, 180.0);
 
+    // A cap that touches a pole to within rounding: d is the pole distance
+    // to the ulp, so cap_lat_deg and the sin/cos ratio in the envelope both
+    // land a few ulp short of their exact values. The raw path accepts the
+    // pole row (distance <= d holds bit for bit); an envelope whose margin is
+    // applied only after asin stops ~1e-6 deg short of the full longitude
+    // range and prunes it on the indexed path (review of #54294).
+    struct PoleCase {
+        const char* query_wkt;
+        double query_lat, query_lon;
+        const char* row_wkt;
+        double row_lat, row_lon;
+    };
+    for (const PoleCase& pc :
+         {PoleCase{"POINT (0 -29)", -29, 0, "POINT (180 -90)", -90, 180},
+          PoleCase{"POINT (0 29)", 29, 0, "POINT (180 90)", 90, 180}}) {
+        SCOPED_TRACE(pc.query_wkt);
+        Geometry pole_query(ctx_, pc.query_wkt);
+        Geometry pole_row(ctx_, pc.row_wkt);
+        // Same argument order as Geometry::dwithin (row first, then query).
+        const double pole_distance = Geometry::haversine_distance_meters(
+            pc.row_lat, pc.row_lon, pc.query_lat, pc.query_lon);
+        ASSERT_TRUE(pole_row.dwithin(pole_query, pole_distance, ctx_));
+        ASSERT_TRUE(Geometry::DWithinSearchEnvelope(
+            ctx_, pole_query.GetGeometry(), pole_distance, env));
+        EXPECT_LE(env.min_x, -180.0);
+        EXPECT_GE(env.max_x, 180.0);
+        if (pc.row_lat < 0) {
+            EXPECT_LE(env.min_y, -90.0);
+        } else {
+            EXPECT_GE(env.max_y, 90.0);
+        }
+    }
+
     // Negative distance is treated as zero: a degenerate box at the point.
     Geometry q(ctx_, "POINT (10 20)");
     ASSERT_TRUE(

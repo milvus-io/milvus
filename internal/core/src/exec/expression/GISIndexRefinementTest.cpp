@@ -773,7 +773,15 @@ TEST_F(GISIndexRefinementTest, DWithinIndexPathMatchesRawPath) {
         // Clearly outside every query below (pruning sanity).
         {70, "POINT (125 35)"},
         {88, "POLYGON ((-10 -10, -9 -10, -9 -9, -10 -9, -10 -10))"},
+        // South pole, queried from (0 -29) at exactly its haversine distance:
+        // the cap touches the pole only to within rounding, so the envelope
+        // must still span every longitude (review of #54294).
+        {90, "POINT (180 -90)"},
     };
+    constexpr int kPoleRow = 90;
+    // Same argument order as Geometry::dwithin (row first, then query).
+    const double pole_distance =
+        Geometry::haversine_distance_meters(-90.0, 180.0, -29.0, 0.0);
     const std::set<int> empties = {3, 17, 41, 58, 77};
     const std::set<int> boundary_rows = {5, 23, 61, 30, 45};
     const std::set<int> far_rows = {70, 88};
@@ -818,13 +826,19 @@ TEST_F(GISIndexRefinementTest, DWithinIndexPathMatchesRawPath) {
     struct Query {
         std::string wkt;
         double distance;
+        // Whether both far rows lie outside this query's radius (the pole
+        // query reaches 6783 km, which covers the polygon at (-10 -10) but
+        // not the point at (125 35); the bitwise comparison above still
+        // holds either way).
+        bool far_rows_pruned;
     };
     const std::vector<Query> queries = {
-        {"POINT (115 35)", 500000},
-        {"POINT (10 10)", 50000},
-        {"POINT (120 30)", 50000},
-        {"POINT (-60 -40)", 1},
-        {"POINT EMPTY", 1e12},
+        {"POINT (115 35)", 500000, true},
+        {"POINT (10 10)", 50000, true},
+        {"POINT (120 30)", 50000, true},
+        {"POINT (-60 -40)", 1, true},
+        {"POINT EMPTY", 1e12, true},
+        {"POINT (0 -29)", pole_distance, false},
     };
     for (const auto& q : queries) {
         SCOPED_TRACE("ST_DWITHIN(geo, '" + q.wkt + "', " +
@@ -843,8 +857,10 @@ TEST_F(GISIndexRefinementTest, DWithinIndexPathMatchesRawPath) {
             EXPECT_FALSE(raw_bits[i]) << "empty row " << i << " (raw)";
             EXPECT_FALSE(idx_bits[i]) << "empty row " << i << " (indexed)";
         }
-        for (int i : far_rows) {
-            EXPECT_FALSE(idx_bits[i]) << "far row " << i;
+        if (q.far_rows_pruned) {
+            for (int i : far_rows) {
+                EXPECT_FALSE(idx_bits[i]) << "far row " << i;
+            }
         }
     }
 
@@ -867,6 +883,14 @@ TEST_F(GISIndexRefinementTest, DWithinIndexPathMatchesRawPath) {
     {
         BitsetType idx_bits = run(indexed, "POINT EMPTY", 1e12);
         EXPECT_EQ(idx_bits.count(), 0u);
+    }
+    // The pole row sits exactly on the boundary: accepted on the raw path, so
+    // the indexed path must not prune it in the coarse pass.
+    {
+        BitsetType raw_bits = run(raw, "POINT (0 -29)", pole_distance);
+        BitsetType idx_bits = run(indexed, "POINT (0 -29)", pole_distance);
+        ASSERT_TRUE(raw_bits[kPoleRow]) << "pole row is not on the boundary";
+        EXPECT_TRUE(idx_bits[kPoleRow]) << "pole row pruned by the envelope";
     }
 }
 
