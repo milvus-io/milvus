@@ -23,6 +23,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/search_agg"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -86,6 +88,25 @@ func (t *PipelineTrace) TraceMsg(opName string, msg opMsg) {
 }
 
 func (t *PipelineTrace) traceReduce(opName string, msg opMsg) {
+	if rows, ok := msg[reducedMsgKey].(*search_agg.ReducedRows); ok {
+		if rows == nil {
+			return
+		}
+		prefix := opName + "[0]"
+		t.Set(prefix+".topks", rows.Topks)
+		t.Set(prefix+".totalIDs", len(rows.Rows))
+		if len(rows.Rows) > 0 && len(rows.GroupFieldIDs) > 0 {
+			// Trace is opt-in: materialize only the first group column here to
+			// preserve the existing nullable cardinality diagnostic exactly.
+			data := &schemapb.SearchResultData{}
+			if err := reduce.WriteGroupByFieldValues(data, rows.Rows, rows.Sources, rows.GroupFieldIDs[:1]); err == nil {
+				group := data.GetGroupByFieldValues()[0]
+				t.Set(prefix+".groupByRows", fieldDataLen(group))
+				t.Set(prefix+".groupByCards", scalarGroupByCards(group.GetScalars(), rows.Topks, typeutil.GetFieldDataValidData(group)))
+			}
+		}
+		return
+	}
 	reduced, ok := msg[reducedMsgKey].([]*milvuspb.SearchResults)
 	if !ok {
 		return
