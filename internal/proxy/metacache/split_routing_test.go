@@ -114,7 +114,7 @@ func TestNewCollectionInfoCarriesTheSplitRouting(t *testing.T) {
 			shardInfo(schemapb.ShardState_ShardCreating, "v1", 0),
 			shardInfo(schemapb.ShardState_ShardCreating, "v2", 1),
 		},
-	}, schemaInfo, false, "", false, false)
+	}, schemaInfo, false, "")
 	require.NotNil(t, info.SplitRouting)
 	assert.Equal(t, []string{"v0"}, info.SplitRouting.Fenced)
 	assert.EqualValues(t, 2, info.RoutingModulus)
@@ -122,7 +122,7 @@ func TestNewCollectionInfoCarriesTheSplitRouting(t *testing.T) {
 	legacy := newCollectionInfo(&milvuspb.DescribeCollectionResponse{
 		Schema:              &schemapb.CollectionSchema{Name: "c"},
 		VirtualChannelNames: []string{"v0"},
-	}, schemaInfo, false, "", false, false)
+	}, schemaInfo, false, "")
 	assert.Nil(t, legacy.SplitRouting)
 }
 

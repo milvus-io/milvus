@@ -182,7 +182,6 @@ func (f *splitFenceFixture) insertTask(pks []int64) *InsertTask {
 func (f *splitFenceFixture) deleteTask(pks []int64) *DeleteTask {
 	return &DeleteTask{
 		baseTask:     baseTask{MetaCache: f.cache},
-		chMgr:        f.chMgr(),
 		collectionID: splitFenceTestCollectionID,
 		partitionID:  200,
 		vChannels:    f.routing().VChannels,
@@ -1007,7 +1006,6 @@ func TestDeleteByExpressionSettlesEachBatchPerMessage(t *testing.T) {
 	dr := DeleteRunner{
 		queue:           queue.DmQueue,
 		metaCache:       f.cache,
-		chMgr:           f.chMgr(),
 		schema:          schema,
 		collectionID:    splitFenceTestCollectionID,
 		partitionIDs:    []int64{200},
@@ -1199,6 +1197,9 @@ func TestInsertExecuteTakesTheLegacyChannelListFromTheRoutingLookup(t *testing.T
 	assertRowsLandedOnceOnTheirOwner(t, wal, post, pks, 1)
 }
 
+// A delete task carries no channel manager (master #54293), so its only
+// channel list is the one the routing lookup returns; the stale refresh still
+// exercises the never-split verdict against the grown list.
 func TestDeleteExecuteTakesTheLegacyChannelListFromTheRoutingLookup(t *testing.T) {
 	pre, post := twoShardSplit()
 	f := newSplitFenceFixture(t, pre, post)
@@ -1206,7 +1207,6 @@ func TestDeleteExecuteTakesTheLegacyChannelListFromTheRoutingLookup(t *testing.T
 	wal := installSplitFenceTestWAL(t, splitSource)
 	pks := seqPKs(16)
 	task := f.deleteTask(pks)
-	task.chMgr = staleVerdictChMgr(post)
 
 	require.NoError(t, task.Execute(context.Background()))
 	assertTombstonesLandedOnTheirOwner(t, wal, post, pks)
