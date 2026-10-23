@@ -1161,6 +1161,20 @@ class SnapshotClient(Requests):
         return self.post(url, headers=self.update_headers(), data=payload).json()
 
 
+class ServerClient(Requests):
+    def __init__(self, endpoint, token):
+        super().__init__(url=endpoint, api_key=token)
+        self.endpoint = endpoint
+        self.api_key = token
+        self.headers = self.update_headers()
+
+    def get_version(self, payload=None):
+        if payload is None:
+            payload = {}
+        url = f"{self.endpoint}/v2/vectordb/server/version"
+        return self.post(url, headers=self.update_headers(), data=payload).json()
+
+
 class StorageClient:
     def __init__(self, endpoint, access_key, secret_key, bucket_name, root_path="file"):
         self.endpoint = endpoint
