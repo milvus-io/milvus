@@ -3056,6 +3056,15 @@ func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldS
 	return ret
 }
 
+// HasVectorField reports whether the schema declares at least one vector typed
+// field, counting top-level fields, struct array sub-fields and function output
+// fields (function outputs are materialized as fields). A collection created
+// without a vector field keeps that property for its lifetime; every decision of
+// the form "does this collection have vectors" goes through this predicate.
+func HasVectorField(schema *schemapb.CollectionSchema) bool {
+	return len(GetVectorFieldSchemas(schema)) > 0
+}
+
 func GetDenseVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
 	ret := make([]*schemapb.FieldSchema, 0)
 	for _, fieldSchema := range schema.GetFields() {

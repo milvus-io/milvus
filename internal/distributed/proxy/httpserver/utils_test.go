@@ -5879,7 +5879,7 @@ func TestAnyToColumnsStructArrayAsOnlyVectorField(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_ArrayOfStruct, fds[1].GetType())
 }
 
-func TestAnyToColumnsRejectsSchemaWithoutVectorOrFunction(t *testing.T) {
+func TestAnyToColumnsAcceptsSchemaWithoutVectorOrFunction(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	schema.Fields = schema.Fields[:1]
 	schema.StructArrayFields[0].Fields = schema.StructArrayFields[0].Fields[:1]
@@ -5895,8 +5895,9 @@ func TestAnyToColumnsRejectsSchemaWithoutVectorOrFunction(t *testing.T) {
 	rows, _, err := checkAndSetData(body, schema, false)
 	require.NoError(t, err)
 
-	_, err = anyToColumns(rows, nil, schema, true, false)
-	require.ErrorContains(t, err, "has no vector field or functions")
+	columns, err := anyToColumns(rows, nil, schema, true, false)
+	require.NoError(t, err)
+	require.NotEmpty(t, columns)
 }
 
 func TestAnyToColumnsNullableStructArray(t *testing.T) {

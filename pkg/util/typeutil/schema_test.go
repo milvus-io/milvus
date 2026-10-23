@@ -7599,3 +7599,29 @@ func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
 	assert.Contains(t, string(merged), `"big":12345678901234567890`)
 	assert.Contains(t, string(merged), `"tag":"new"`)
 }
+
+func TestHasVectorField(t *testing.T) {
+	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	scalar := &schemapb.FieldSchema{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32}
+	vector := &schemapb.FieldSchema{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector}
+	sparse := &schemapb.FieldSchema{FieldID: 103, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true}
+
+	assert.False(t, HasVectorField(nil))
+	assert.False(t, HasVectorField(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, scalar}}))
+	assert.True(t, HasVectorField(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, vector}}))
+	assert.True(t, HasVectorField(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, sparse}}))
+	assert.True(t, HasVectorField(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{pk},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 104, Name: "s",
+			Fields: []*schemapb.FieldSchema{{FieldID: 105, Name: "s[vec]", DataType: schemapb.DataType_FloatVector}},
+		}},
+	}))
+	assert.False(t, HasVectorField(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{pk},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 104, Name: "s",
+			Fields: []*schemapb.FieldSchema{{FieldID: 105, Name: "s[i]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}},
+		}},
+	}))
+}

@@ -112,10 +112,11 @@ func TestRESTV2MutationFailureOmitsExplicitPayloadLogFields(t *testing.T) {
 	})
 
 	cases := []struct {
-		name   string
-		body   string
-		schema *schemapb.CollectionSchema
-		rows   bool
+		name        string
+		body        string
+		schema      *schemapb.CollectionSchema
+		rows        bool
+		failColumns bool
 	}{
 		{
 			name:   "row conversion",
@@ -123,12 +124,16 @@ func TestRESTV2MutationFailureOmitsExplicitPayloadLogFields(t *testing.T) {
 			schema: &schemapb.CollectionSchema{Name: "book"},
 		},
 		{
+			// A schema with only a primary key used to fail column conversion on
+			// the "no vector field or functions" check; that check is gone, so
+			// the column stage is made to fail explicitly.
 			name: "column conversion",
 			body: `{"collectionName":"book","data":[{"id":"REST_BODY_SECRET_SENTINEL"}]}`,
 			schema: &schemapb.CollectionSchema{Name: "book", Fields: []*schemapb.FieldSchema{
 				{FieldID: common.StartOfUserFieldID, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_VarChar},
 			}},
-			rows: true,
+			rows:        true,
+			failColumns: true,
 		},
 	}
 	for _, action := range []string{InsertAction, UpsertAction} {
@@ -139,6 +144,10 @@ func TestRESTV2MutationFailureOmitsExplicitPayloadLogFields(t *testing.T) {
 					Status: merr.Success(),
 				}, nil).Build()
 				defer describePatch.UnPatch()
+				if test.failColumns {
+					columnsPatch := mockey.Mock(anyToColumns).Return(nil, merr.WrapErrParameterInvalidMsg("column conversion failed")).Build()
+					defer columnsPatch.UnPatch()
+				}
 
 				logs := captureHTTPServerLogs(t)
 				body := []byte(test.body)
