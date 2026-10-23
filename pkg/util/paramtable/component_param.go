@@ -4391,6 +4391,8 @@ type queryNodeConfig struct {
 	InterimIndexRefineQuantType        ParamItem `refreshable:"false"`
 	InterimIndexRefineWithQuant        ParamItem `refreshable:"false"`
 	DenseVectorInterminIndexType       ParamItem `refreshable:"false"`
+	InterimIndexSparseIPAlgo           ParamItem `refreshable:"false"`
+	InterimIndexSparseBM25Algo         ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate          ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate      ParamItem `refreshable:"false"`
 	InterimIndexGrowingBuildThreadRate ParamItem `refreshable:"true"`
@@ -5101,6 +5103,26 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.DenseVectorInterminIndexType.Init(base.mgr)
+
+	p.InterimIndexSparseIPAlgo = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.sparseIPIndexAlgo",
+		Version:      "2.6.26",
+		DefaultValue: "",
+		Formatter:    func(v string) string { return strings.ToUpper(strings.TrimSpace(v)) },
+		Doc:          "Sparse IP interim index algorithm for growing and unindexed sealed segments. Empty inherits the collection index parameters. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE, BLOCK_MAX_WAND, BLOCK_MAX_MAXSCORE, SINDI. SINDI requires interimIndex.targetIndexVersion >= 10. Takes effect after restart.",
+		Export:       false,
+	}
+	p.InterimIndexSparseIPAlgo.Init(base.mgr)
+
+	p.InterimIndexSparseBM25Algo = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.sparseBM25IndexAlgo",
+		Version:      "2.6.26",
+		DefaultValue: "",
+		Formatter:    func(v string) string { return strings.ToUpper(strings.TrimSpace(v)) },
+		Doc:          "Sparse BM25 interim index algorithm for growing and unindexed sealed segments. Empty inherits the collection index parameters. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE, BLOCK_MAX_WAND, BLOCK_MAX_MAXSCORE, SINDI. SINDI requires interimIndex.targetIndexVersion >= 10. Takes effect after restart.",
+		Export:       false,
+	}
+	p.InterimIndexSparseBM25Algo.Init(base.mgr)
 
 	p.InterimIndexRefineQuantType = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.refineQuantType",
