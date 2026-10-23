@@ -2767,6 +2767,8 @@ type proxyConfig struct {
 	// deployment compatibility actually matters.
 	MaxMembershipFilterSize     ParamItem `refreshable:"true"`
 	MaxMembershipFilterPlanSize ParamItem `refreshable:"true"`
+	ExprCacheMaxBytes           ParamItem `refreshable:"false"`
+	ExprCacheMaxEntryBytes      ParamItem `refreshable:"false"`
 
 	MaxDimension                      ParamItem `refreshable:"true"`
 	GinLogging                        ParamItem `refreshable:"false"`
@@ -2828,6 +2830,26 @@ func positiveProxyLimitFormatter(defaultValue string) func(string) string {
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
+	p.ExprCacheMaxBytes = ParamItem{
+		Key:          "proxy.exprCache.maxBytes",
+		Version:      "3.0.2",
+		DefaultValue: "67108864",
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+		Doc:          "Total accounted byte budget for cached expression parse trees and syntax errors. Must be positive; invalid values fall back to 64 MiB. Requires a restart.",
+		Export:       true,
+	}
+	p.ExprCacheMaxBytes.Init(base.mgr)
+
+	p.ExprCacheMaxEntryBytes = ParamItem{
+		Key:          "proxy.exprCache.maxEntryBytes",
+		Version:      "3.0.2",
+		DefaultValue: "8388608",
+		Formatter:    positiveProxyLimitFormatter("8388608"),
+		Doc:          "Maximum accounted bytes for one cached expression parse tree or syntax error. Larger entries are returned uncached. Clamped to proxy.exprCache.maxBytes. Must be positive; invalid values fall back to 8 MiB. Requires a restart.",
+		Export:       true,
+	}
+	p.ExprCacheMaxEntryBytes.Init(base.mgr)
+
 	p.SplitChunkProxy = ParamItem{
 		Key:          "proxy.splitChunk",
 		Version:      "3.0.2",

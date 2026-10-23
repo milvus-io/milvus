@@ -64,6 +64,16 @@ func putLexer(lexer *antlrparser.PlanLexer) {
 func putParser(parser *antlrparser.PlanParser) {
 	parser.SetInputStream(nil)
 	parser.RemoveErrorListeners()
+	// Every context of a parse tree keeps a pointer to the parser that built
+	// it, and the parser's ATN simulator keeps the LAST parse it ran — its
+	// token stream and its whole tree — because antlr-go's simulator reset is
+	// a no-op. So a small cached tree used to pin whatever its parser parsed
+	// next, cached or not, and eviction freed nothing that was still pinned:
+	// the parse cache retained far more than its entries (#53754). A fresh
+	// simulator drops that; the DFA and prediction-context caches it is built
+	// from are shared and carry over.
+	old := parser.Interpreter
+	parser.Interpreter = antlr.NewParserATNSimulator(parser, old.ATN(), old.DecisionToDFA(), old.SharedContextCache())
 	parserPool.Put(parser)
 }
 
