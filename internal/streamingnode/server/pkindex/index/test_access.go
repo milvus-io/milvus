@@ -122,3 +122,23 @@ func (p *PendingHandover) SetUploadedAt(at time.Time) { p.uploadedAt = at }
 
 // CommittedPathForTest returns the local path of a committed table.
 func CommittedPathForTest(dir string, id sst.ID) string { return committedPath(dir, id) }
+
+// FailWritesForTest makes every engine write of Apply fail with err, nil
+// lets the writes through again.
+func (idx *Index) FailWritesForTest(err error) {
+	if err == nil {
+		idx.failWrites.Store(nil)
+		return
+	}
+	idx.failWrites.Store(&err)
+}
+
+// OnWriteForTest runs hook before every engine write of Apply with the
+// batch, nil removes it.
+func (idx *Index) OnWriteForTest(hook func(muts []engine.Mutation)) {
+	if hook == nil {
+		idx.onWrite.Store(nil)
+		return
+	}
+	idx.onWrite.Store(&hook)
+}

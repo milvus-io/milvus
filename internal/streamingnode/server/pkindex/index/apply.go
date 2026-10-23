@@ -79,7 +79,7 @@ func (idx *Index) Apply(ctx context.Context, w Write) (dirtied bool, err error) 
 	if len(muts) == 0 {
 		return false, nil
 	}
-	if err := idx.eng.Write(ctx, muts); err != nil {
+	if err := idx.write(ctx, muts); err != nil {
 		return false, err
 	}
 	keys := make([]authority.PK, 0, len(w.Deletes)+len(w.Puts))
@@ -89,4 +89,15 @@ func (idx *Index) Apply(ctx context.Context, w Write) (dirtied bool, err error) 
 	}
 	idx.auth.Applied(keys, w.TimeTick)
 	return idx.markDirty(), nil
+}
+
+// write writes one batch to the engine, through the test hooks.
+func (idx *Index) write(ctx context.Context, muts []engine.Mutation) error {
+	if fail := idx.failWrites.Load(); fail != nil {
+		return *fail
+	}
+	if hook := idx.onWrite.Load(); hook != nil {
+		(*hook)(muts)
+	}
+	return idx.eng.Write(ctx, muts)
 }

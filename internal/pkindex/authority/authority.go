@@ -301,6 +301,36 @@ func (d *Authority) probe(ctx context.Context, pks []PK) ([]PK, error) {
 	return present, nil
 }
 
+// WantsTimeTick reports whether a persisted TimeTick that writes no key of
+// this vchannel still matters to it: the vchannel is degraded until a time
+// tick the observe did not reach yet, or the in-flight set holds writes with
+// an unknown outcome that the TimeTick may retire. The observe of the WAL
+// recovery calls ObserveTimeTick only for the vchannels that want it, so a
+// TimeTick does not fan out to every idle vchannel.
+func (d *Authority) WantsTimeTick() bool {
+	return d.inflight.observedTimeTick() < d.degradedUntil.Load() || d.inflight.hasUncertain()
+}
+
+// RestorePending records a body of a transaction that the WAL accepted
+// before this WAL open, from the transaction buffer of the recovery
+// snapshot, so that the CommitTxn of the transaction is decided over all of
+// its bodies. The body is in the WAL already and the observe of the
+// recovery applies it with the commit, so it gets no in-flight entry.
+func (d *Authority) RestorePending(txnID int64, kind WriteKind, pks []PK) {
+	d.pendingMu.Lock()
+	defer d.pendingMu.Unlock()
+	txn, ok := d.pending[txnID]
+	if !ok {
+		txn = newPendingTxn()
+		d.pending[txnID] = txn
+	}
+	if kind == KindInsert {
+		txn.recordInsert(pks)
+	} else {
+		txn.recordDelete(pks)
+	}
+}
+
 // PendingTxnIDs returns the transactions that have pending writes.
 func (d *Authority) PendingTxnIDs() []int64 {
 	d.pendingMu.Lock()
