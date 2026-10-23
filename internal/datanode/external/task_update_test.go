@@ -1201,14 +1201,49 @@ func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumns
 	s.NoError(err)
 	s.False(hasColumns)
 
+	manifestReads := 0
 	mock := mockey.Mock(packed.ManifestHasColumns).To(
-		func(string, *indexpb.StorageConfig, []string) (bool, error) {
-			s.FailNow("ManifestHasColumns should not be called when ChildFields already prove the output field exists")
+		func(manifestPath string, _ *indexpb.StorageConfig, columns []string) (bool, error) {
+			manifestReads++
+			s.Equal("manifest", manifestPath)
+			s.Equal([]string{"101"}, columns)
 			return false, nil
 		}).Build()
-	defer mock.UnPatch()
 	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
 		ManifestPath: "manifest",
+		Binlogs: []*datapb.FieldBinlog{
+			{ChildFields: []int64{100, 101}},
+		},
+	}, []string{"101"})
+	s.NoError(err)
+	s.True(hasColumns)
+	s.Zero(manifestReads, "advertised Function outputs must not require a manifest read")
+	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
+		ManifestPath: "manifest",
+	}, []string{"101"})
+	s.NoError(err)
+	s.False(hasColumns)
+	s.Equal(1, manifestReads)
+	mock.UnPatch()
+
+	mock = mockey.Mock(packed.ManifestHasColumns).Return(true, nil).Build()
+	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
+		ManifestPath: "manifest",
+	}, []string{"101"})
+	s.NoError(err)
+	s.True(hasColumns)
+	mock.UnPatch()
+
+	mock = mockey.Mock(packed.ManifestHasColumns).Return(false, fmt.Errorf("manifest read failed")).Build()
+	_, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
+		ID:           10,
+		ManifestPath: "manifest",
+	}, []string{"101"})
+	s.Error(err)
+	s.ErrorContains(err, "check function output columns for segment 10")
+	mock.UnPatch()
+
+	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
 		Binlogs: []*datapb.FieldBinlog{
 			{ChildFields: []int64{100, 101}},
 		},

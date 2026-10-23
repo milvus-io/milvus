@@ -427,7 +427,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		}
 		var patchedSegment *datapb.SegmentInfo
 		if shouldRefreshDeltalogs {
-			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments)
+			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments, outputColumns)
 			if err != nil {
 				return nil, err
 			}
@@ -540,6 +540,9 @@ func (t *RefreshExternalCollectionTask) segmentHasFunctionOutputColumns(seg *dat
 	if len(outputColumns) == 0 {
 		return true, nil
 	}
+	// Published ChildFields describe the materialized Function outputs. Trust
+	// that metadata on the reuse path; repairing historical manifests that lost
+	// advertised outputs is outside the scope of delete-only refresh.
 	if segmentChildFieldsContainColumns(seg, outputColumns) {
 		return true, nil
 	}
