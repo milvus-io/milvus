@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
@@ -44,14 +45,14 @@ func TestCollectionTargetKeepsTheSplitSignalAcrossARestart(t *testing.T) {
 		ChannelName:  "v9",
 		SeekPosition: &msgpb.MsgPosition{ChannelName: "v9", Timestamp: 200},
 	}}
-	target := NewCollectionTarget(nil, map[string]*DmChannel{"src": src, "v9": other}, []int64{100})
+	target := NewCollectionTarget(nil, map[string]*DmChannel{"src": src, "v9": other}, []int64{100}, metacache.NewMetaStore(nil))
 
 	// what the catalog stores and a restarted QueryCoord reads back.
 	saved, err := proto.Marshal(target.toPbMsg())
 	require.NoError(t, err)
 	restoredPb := &querypb.CollectionTarget{}
 	require.NoError(t, proto.Unmarshal(saved, restoredPb))
-	restored := FromPbCollectionTarget(restoredPb)
+	restored := FromPbCollectionTarget(restoredPb, metacache.NewMetaStore(nil))
 
 	assert.Equal(t, []string{"t1", "t2"}, restored.GetAllDmChannels()["src"].GetSplitTargetChannels())
 	assert.Equal(t, uint64(200), restored.GetAllDmChannels()["src"].GetSeekPosition().GetTimestamp())
@@ -76,13 +77,13 @@ func TestCollectionTargetKeepsATimestampOnlyDeleteCheckpoint(t *testing.T) {
 		DeleteCheckpoint:    &msgpb.MsgPosition{ChannelName: "src", Timestamp: 150},
 		SplitTargetChannels: []string{"t1", "t2"},
 	}}
-	target := NewCollectionTarget(nil, map[string]*DmChannel{"src": src}, []int64{100})
+	target := NewCollectionTarget(nil, map[string]*DmChannel{"src": src}, []int64{100}, metacache.NewMetaStore(nil))
 
 	saved, err := proto.Marshal(target.toPbMsg())
 	require.NoError(t, err)
 	restoredPb := &querypb.CollectionTarget{}
 	require.NoError(t, proto.Unmarshal(saved, restoredPb))
-	restored := FromPbCollectionTarget(restoredPb)
+	restored := FromPbCollectionTarget(restoredPb, metacache.NewMetaStore(nil))
 
 	cp := restored.GetAllDmChannels()["src"].GetDeleteCheckpoint()
 	require.NotNil(t, cp, "a timestamp-only delete checkpoint must survive the round trip")

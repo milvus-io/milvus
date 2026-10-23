@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -63,7 +64,7 @@ func newSplitMoveServer(t *testing.T, c splitMoveCase) *Server {
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
-	m := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr)
+	m := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr, metacache.NewMetaStore(nil))
 	partition := utils.CreateTestPartition(1, 10)
 	partition.LoadPercentage = 100
 	require.NoError(t, m.PutCollection(ctx, utils.CreateTestCollection(1, 1), partition))

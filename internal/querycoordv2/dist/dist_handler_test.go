@@ -838,6 +838,8 @@ func TestRehomedSegmentReachesTheSplitTargetView(t *testing.T) {
 		Return(&datapb.SegmentInfo{ID: untouched, CollectionID: collectionID, InsertChannel: source}).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, target, meta.NextTarget).
 		Return(map[int64]*datapb.SegmentInfo{rehomed: {ID: rehomed, CollectionID: collectionID, InsertChannel: target}}).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, target, meta.NextTarget).
+		Return(typeutil.NewUniqueSet(rehomed)).Maybe()
 
 	nodeMgr := session.NewNodeManager()
 	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID, Address: "localhost", Hostname: "localhost"}))

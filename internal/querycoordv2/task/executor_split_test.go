@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -226,7 +227,7 @@ func TestWatchRequestCarriesTheSplitSignalOfARestoredTarget(t *testing.T) {
 			SeekPosition:        &msgpb.MsgPosition{ChannelName: "src", Timestamp: 200},
 			SplitTargetChannels: []string{"t1", "t2"},
 		}},
-	})
+	}, metacache.NewMetaStore(nil))
 	channelTask, err := NewChannelTask(context.Background(), time.Minute, WrapIDSource(0), 1, meta.NilReplica,
 		NewChannelAction(1, ActionTypeGrow, "src"))
 	require.NoError(t, err)
