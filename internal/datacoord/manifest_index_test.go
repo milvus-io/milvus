@@ -140,6 +140,76 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 	require.Equal(t, "../../../../../index_v1/1/2/3/102/4", info.Path)
 }
 
+// Both index publication and segment copying must preserve schema field names,
+// including qualified struct sub-field names, rather than storage column names.
+func TestManifestIndexColumnNames(t *testing.T) {
+	const collectionID = int64(1)
+	const indexID = int64(200)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vector"},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{FieldID: 101, Name: "chunks", Fields: []*schemapb.FieldSchema{
+				{FieldID: 102, Name: "chunks[embedding]"},
+				{FieldID: 103, Name: "chunks[label]"},
+			}},
+			{FieldID: 104, Name: "other", Fields: []*schemapb.FieldSchema{
+				{FieldID: 105, Name: "other[embedding]"},
+			}},
+		},
+	}
+	for _, tc := range []struct {
+		fieldID int64
+		name    string
+	}{
+		{100, "vector"},
+		{102, "chunks[embedding]"},
+		{103, "chunks[label]"},
+		{105, "other[embedding]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ms := metacache.NewMetaStore(nil)
+			ms.PutCollection(&collectionInfo{ID: collectionID, Schema: schema})
+			m := &meta{
+				metaStore:    ms,
+				chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
+				indexMeta: &indexMeta{
+					indexes: map[UniqueID]map[UniqueID]*model.Index{
+						collectionID: {indexID: {
+							CollectionID: collectionID,
+							FieldID:      tc.fieldID,
+							IndexID:      indexID,
+							IndexName:    "field_idx",
+						}},
+					},
+				},
+			}
+			segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 3, CollectionID: collectionID, PartitionID: 2,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("files/insert_log/1/2/3", 7),
+			}}
+			info, err := buildManifestIndexInfo(m, segment, &model.SegmentIndex{
+				CollectionID: collectionID, PartitionID: 2, SegmentID: 3,
+				IndexID: indexID, BuildID: 300, IndexVersion: 1,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexFileKeys:         []string{"0"},
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.name, info.ColumnName)
+			require.Equal(t, tc.fieldID, info.FieldID)
+			require.Equal(t, indexID, info.IndexID)
+
+			targets := buildCopySegmentTargetIndexes(m, collectionID, true)
+			require.Len(t, targets, 1)
+			require.Equal(t, tc.name, targets[0].GetColumnName())
+			require.Equal(t, tc.fieldID, targets[0].GetFieldId())
+			require.Equal(t, indexID, targets[0].GetIndexId())
+		})
+	}
+}
+
 // TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride covers a segment
 // whose index type was downgraded away from the collection definition.
 func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // buildManifestIndexInfo assembles the manifest entry for a completed index
@@ -106,7 +107,7 @@ func collectionFieldName(m *meta, collectionID, fieldID int64) string {
 	if collection == nil || collection.Schema == nil {
 		return ""
 	}
-	for _, field := range collection.Schema.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(collection.Schema) {
 		if field.GetFieldID() == fieldID {
 			return field.GetName()
 		}
