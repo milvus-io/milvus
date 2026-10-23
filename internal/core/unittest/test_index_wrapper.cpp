@@ -359,7 +359,7 @@ TEST(VectorMemIndexTest, LoadMmapSlicedValidData) {
     loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
 
     ASSERT_EQ(loaded_index.Count(), valid_count);
-    ASSERT_EQ(loaded_index.GetIdMap().OutCount(), kRows);
+    ASSERT_EQ(loaded_index.GetLogicalCount(), kRows);
     EXPECT_EQ(loaded_index.GetValidCount(), valid_count);
     for (int64_t i = 0; i < kRows; ++i) {
         EXPECT_EQ(loaded_index.IsRowValid(i), valid_data[i]) << i;

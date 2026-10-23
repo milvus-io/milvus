@@ -133,22 +133,17 @@ class VectorMemIndex : public VectorIndex {
                   bool is_cosine,
                   milvus::OpContext* op_context = nullptr) const override;
 
-    knowhere::IdMap&
-    GetIdMap() override {
-        return index_.GetIdMap();
-    }
-
-    const knowhere::IdMap&
-    GetIdMap() const override {
-        return index_.GetIdMap();
-    }
-
     void
-    SetIdMapType(knowhere::IdMap::Type type) override {
-        index_.SetIdMapType(type);
+    SetGrowingMapping() override {
+        build_options_.growing = true;
     }
 
  protected:
+    const knowhere::Index<knowhere::IndexNode>&
+    GetNativeIndex() const override {
+        return index_;
+    }
+
     virtual void
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
 
@@ -170,6 +165,7 @@ class VectorMemIndex : public VectorIndex {
 
     CreateIndexInfo create_index_info_;
     bool use_knowhere_build_pool_;
+    knowhere::BuildOptions build_options_;
     std::vector<size_t> empty_emb_list_offsets_;
 };
 
