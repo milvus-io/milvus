@@ -124,17 +124,24 @@ func BackupEZ(ezID int64) (string, error) {
 	return backupProvider.Backup(ezID)
 }
 
-func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+func requiredEZKey(ezID, collectionID int64) ([]byte, error) {
 	cipher := GetCipher()
 	if cipher == nil {
-		return nil, nil
+		return nil, merr.Wrapf(merr.ErrServiceUnavailable, "cipher plugin is unavailable for ezID=%d, collectionID=%d", ezID, collectionID)
 	}
 
 	key := cipher.GetUnsafeKey(ezID, collectionID)
 	if len(key) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID)
+		return nil, merr.Wrapf(merr.ErrServiceUnavailable, "cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID)
 	}
+	return key, nil
+}
 
+func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	key, err := requiredEZKey(ezID, collectionID)
+	if err != nil {
+		return nil, err
+	}
 	return []*commonpb.KeyValuePair{{
 		Key:   CipherConfigUnsafeEZK,
 		Value: encodeEZContext(ezID, key),

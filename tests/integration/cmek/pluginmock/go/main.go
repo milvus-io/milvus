@@ -23,9 +23,11 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 )
@@ -48,9 +50,38 @@ const (
 // implement hook.Cipher for the host type assertion to succeed.
 var CipherPlugin = fixtureCipher{}
 
-type fixtureCipher struct{}
+type fixtureCipher struct {
+	mu   sync.Mutex
+	role string
+	keys map[int64][]byte
+}
+
+type fixtureBackup struct {
+	EZID int64  `json:"ez_id"`
+	Key  []byte `json:"key"`
+}
 
 func (c *fixtureCipher) Init(params map[string]string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if role := params["cipher.milvusRoleName"]; role != "" {
+		c.role = role
+	}
+	if backup := params["cipher.ez.import"]; backup != "" {
+		data, err := base64.StdEncoding.DecodeString(backup)
+		if err != nil {
+			return fmt.Errorf("fixture cipher: decode backup: %w", err)
+		}
+		var source fixtureBackup
+		if err := json.Unmarshal(data, &source); err != nil {
+			return fmt.Errorf("fixture cipher: decode source EZ: %w", err)
+		}
+		if source.EZID <= 0 || !hmac.Equal(source.Key, deriveEZKey(source.EZID)) {
+			return fmt.Errorf("fixture cipher: invalid source EZ key")
+		}
+		c.register(source.EZID, source.Key)
+		return nil
+	}
 	ezText := params[createEZKey]
 	if ezText == "" {
 		return nil
@@ -85,17 +116,32 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 		if key != expectedFixtureRootKey {
 			return fmt.Errorf("fixture cipher: unexpected root key %q for EZ %d", key, ezID)
 		}
+		key = string(deriveEZKey(ezID))
 	}
+	c.register(ezID, []byte(key))
 	return nil
 }
 
+// register is called only after the received key or root-key identifier has
+// been validated. A fresh DataNode starts with no keys.
+func (c *fixtureCipher) register(ezID int64, key []byte) {
+	if c.keys == nil {
+		c.keys = make(map[int64][]byte)
+	}
+	c.keys[ezID] = append([]byte(nil), key...)
+	c.record(ezID, 0, "register", "available", nil)
+}
+
 func (c *fixtureCipher) GetEncryptor(ezID, collectionID int64) (hook.Encryptor, []byte, error) {
+	ezk := c.key(ezID, collectionID, "encrypt")
+	if len(ezk) == 0 {
+		return nil, nil, fmt.Errorf("fixture cipher: key unavailable for EZ %d and collection %d", ezID, collectionID)
+	}
 	nonce := make([]byte, nonceSize)
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, nil, fmt.Errorf("fixture cipher: generate nonce: %w", err)
 	}
 
-	ezk := deriveEZKey(ezID)
 	tag := deriveEDEKTag(ezk, nonce, ezID, collectionID)
 	edek := []byte(fmt.Sprintf("%s:%s:%s", edekVersion, hex.EncodeToString(nonce), hex.EncodeToString(tag)))
 	return &fixtureEncryptor{key: deriveDataKey(ezk, nonce, ezID, collectionID)}, edek, nil
@@ -107,7 +153,10 @@ func (c *fixtureCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (
 		return nil, fmt.Errorf("fixture cipher: decode EDEK for EZ %d: %w", ezID, err)
 	}
 
-	ezk := deriveEZKey(ezID)
+	ezk := c.key(ezID, collectionID, "decrypt")
+	if len(ezk) == 0 {
+		return nil, fmt.Errorf("fixture cipher: key unavailable for EZ %d and collection %d", ezID, collectionID)
+	}
 	expectedTag := deriveEDEKTag(ezk, nonce, ezID, collectionID)
 	if !hmac.Equal(tag, expectedTag) {
 		return nil, fmt.Errorf("fixture cipher: EDEK authentication failed for EZ %d and collection %d", ezID, collectionID)
@@ -115,8 +164,20 @@ func (c *fixtureCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (
 	return &fixtureDecryptor{key: deriveDataKey(ezk, nonce, ezID, collectionID)}, nil
 }
 
-func (c *fixtureCipher) GetUnsafeKey(ezID, _ int64) []byte {
-	return deriveEZKey(ezID)
+func (c *fixtureCipher) GetUnsafeKey(ezID, collectionID int64) []byte {
+	return c.key(ezID, collectionID, "unsafe")
+}
+
+func (c *fixtureCipher) Backup(ezID int64) (string, error) {
+	key := c.key(ezID, 0, "backup")
+	if ezID <= 0 || len(key) == 0 {
+		return "", fmt.Errorf("fixture cipher: cannot back up EZ %d", ezID)
+	}
+	data, err := json.Marshal(fixtureBackup{EZID: ezID, Key: key})
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 func deriveEZKey(ezID int64) []byte {
