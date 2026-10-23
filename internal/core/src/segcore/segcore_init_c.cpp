@@ -17,6 +17,7 @@
 #include <string>
 
 #include "cachinglayer/Manager.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
@@ -158,6 +159,17 @@ SegcoreSetDenseVectorInterminIndexType(const char* value) {
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
+}
+
+extern "C" CStatus
+SegcoreSetSparseInterimIndexAlgorithms(const char* ip_algo,
+                                       const char* bm25_algo) {
+    try {
+        SegcoreConfig::default_config().set_sparse_interim_index_algos(
+            ip_algo, bm25_algo);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 extern "C" CStatus

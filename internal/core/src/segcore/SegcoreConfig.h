@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 #include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
@@ -166,6 +167,38 @@ class SegcoreConfig {
     }
 
     void
+    set_sparse_interim_index_algos(std::string ip_algo, std::string bm25_algo) {
+        // Validate both before publishing either setting. These are startup
+        // settings, and must not silently turn an invalid override into a
+        // failed cold build followed by brute-force fallback.
+        for (const auto* algo : {&ip_algo, &bm25_algo}) {
+            if (!algo->empty() && valid_sparse_index_algos_.count(*algo) == 0) {
+                ThrowInfo(ConfigInvalid,
+                          "unsupported sparse interim index algorithm: {}",
+                          *algo);
+            }
+            if (*algo == "SINDI" && get_interim_index_version() < 10) {
+                ThrowInfo(ConfigInvalid,
+                          "sparse interim index algorithm SINDI requires "
+                          "targetIndexVersion >= 10, resolved version is {}",
+                          get_interim_index_version());
+            }
+        }
+        sparse_ip_index_algo_ = std::move(ip_algo);
+        sparse_bm25_index_algo_ = std::move(bm25_algo);
+    }
+
+    const std::string&
+    get_sparse_ip_interim_index_algo() const {
+        return sparse_ip_index_algo_;
+    }
+
+    const std::string&
+    get_sparse_bm25_interim_index_algo() const {
+        return sparse_bm25_index_algo_;
+    }
+
+    void
     set_refine_quant_type(const std::string& refine_type) {
         if (refine_type == "NONE") {
             refine_type_ = knowhere::RefineType::DATA_VIEW;
@@ -275,6 +308,15 @@ class SegcoreConfig {
             knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
     };
     inline static bool storage_v3_enabled_ = false;
+    inline static const std::unordered_set<std::string>
+        valid_sparse_index_algos_ = {"TAAT_NAIVE",
+                                     "DAAT_WAND",
+                                     "DAAT_MAXSCORE",
+                                     "BLOCK_MAX_WAND",
+                                     "BLOCK_MAX_MAXSCORE",
+                                     "SINDI"};
+    inline static std::string sparse_ip_index_algo_;
+    inline static std::string sparse_bm25_index_algo_;
     inline static bool enable_interim_segment_index_ = false;
     inline static int32_t interim_index_target_version_ = -1;
     inline static bool enable_growing_source_flush_ = false;
