@@ -1207,9 +1207,14 @@ func TestShardSplitRoutingAlterHonoursTheDecisionUnderTheLock(t *testing.T) {
 // naming a collection this cluster no longer knows.
 func TestAdoptionCallbackExpiresTheCachesOfTheCollectionItLoaded(t *testing.T) {
 	type expired struct{ db, name string }
-	run := func(t *testing.T, headerOpt func(*messagespb.AlterCollectionMessageHeader), byName func(*mockrootcoord.IMetaTable)) ([]expired, error) {
+	runRenamed := func(t *testing.T, headerOpt func(*messagespb.AlterCollectionMessageHeader), byName func(*mockrootcoord.IMetaTable), renamed *model.Collection) ([]expired, error) {
 		coll := splitTestMidSplitCollection()
 		h := newSplitCallbackHarness(t, nil)
+		if renamed != nil {
+			// The re-read for the cache expiry (available only) sees the rename
+			// that was applied after the gate's load.
+			h.meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, splitTestCollID, mock.Anything, false).Return(renamed, nil)
+		}
 		h.meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, splitTestCollID, mock.Anything, mock.Anything).Return(coll, nil)
 		byName(h.meta)
 		h.expectDrained(splitTestDrainResponse(true), nil).Once()
@@ -1231,6 +1236,9 @@ func TestAdoptionCallbackExpiresTheCachesOfTheCollectionItLoaded(t *testing.T) {
 		err := h.callback.alterCollectionV2AckCallback(context.Background(), result)
 		require.Equal(t, []string{"CheckShardSplitDrained", "ApplyShardSplitRouting"}, h.calls)
 		return got, err
+	}
+	run := func(t *testing.T, headerOpt func(*messagespb.AlterCollectionMessageHeader), byName func(*mockrootcoord.IMetaTable)) ([]expired, error) {
+		return runRenamed(t, headerOpt, byName, nil)
 	}
 	resolves := func(aliases ...string) func(*mockrootcoord.IMetaTable) {
 		return func(meta *mockrootcoord.IMetaTable) {
@@ -1262,6 +1270,16 @@ func TestAdoptionCallbackExpiresTheCachesOfTheCollectionItLoaded(t *testing.T) {
 		got, err := run(t, nil, resolves())
 		require.NoError(t, err)
 		require.Equal(t, []expired{own}, got)
+	})
+	t.Run("a rename applied after the load expires the collection's current name", func(t *testing.T) {
+		renamed := splitTestMidSplitCollection()
+		renamed.Name = "renamed_to"
+		got, err := runRenamed(t, func(h *messagespb.AlterCollectionMessageHeader) { h.CacheExpirations = nil }, func(meta *mockrootcoord.IMetaTable) {
+			meta.EXPECT().GetCollectionByName(mock.Anything, splitTestDB, "renamed_to", mock.Anything, mock.Anything).Return(renamed, nil)
+			meta.EXPECT().ListAliases(mock.Anything, splitTestDB, "renamed_to", mock.Anything).Return(nil, nil)
+		}, renamed)
+		require.NoError(t, err)
+		require.Equal(t, []expired{{splitTestDB, "renamed_to"}}, got)
 	})
 	t.Run("a collection being dropped expires only what the header names", func(t *testing.T) {
 		got, err := run(t, nil, func(meta *mockrootcoord.IMetaTable) {
