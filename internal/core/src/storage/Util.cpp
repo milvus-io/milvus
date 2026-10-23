@@ -1465,12 +1465,17 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     for (auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
-        auto result = milvus_storage::FileRowGroupReader::Make(
-            fs,
-            column_group_file,
-            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties(),
-            GetArrowReaderProperties());
+        auto prepared_result = milvus_storage::PreparedParquetFile::Open(
+            fs, column_group_file, GetReaderProperties());
+        AssertInfo(prepared_result.ok(),
+                   "[StorageV2] Failed to prepare file {}: {}",
+                   column_group_file,
+                   prepared_result.status().ToString());
+        auto prepared = std::move(prepared_result).ValueOrDie();
+        auto result =
+            prepared->MakeReader(nullptr,
+                                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                                 GetArrowReaderProperties());
         AssertInfo(result.ok(),
                    "[StorageV2] Failed to create file row group reader: " +
                        result.status().ToString());
@@ -1502,7 +1507,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                     row_group_lists,
                                     fs,
                                     nullptr,
-                                    milvus::proto::common::LoadPriority::HIGH);
+                                    milvus::proto::common::LoadPriority::HIGH,
+                                    {prepared});
         });
         // read field data from channel
         std::shared_ptr<milvus::ArrowDataWrapper> r;

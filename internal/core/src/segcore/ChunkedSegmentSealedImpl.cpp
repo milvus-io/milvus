@@ -366,6 +366,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
+                fs,
                 insert_files,
                 info.enable_mmap,
                 mmap_config.GetMmapPopulate(),
