@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -7876,10 +7877,14 @@ func (s *SearchPipelineSuite) TestAggregateOperatorRun() {
 		},
 	}
 
-	// aggregateOp consumes the single reduced *milvuspb.SearchResults produced
-	// upstream by searchReduceOp.
-	reduced := &milvuspb.SearchResults{Status: merr.Success(), Results: data}
-	outputs, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{reduced}, []string{"IP"})
+	// Use the actual upstream producer, including its row and group metadata.
+	data.TopK = aggCtx.DerivedTopK
+	data.AllSearchCount = 42
+	rows, err := reduceSearchAggregationRows(context.Background(),
+		[]*internalpb.SearchResults{{ResultData: data, MetricType: metric.IP}},
+		1, aggCtx.DerivedTopK, 0, aggCtx.DerivedGroupSize, aggCtx.AllGroupByFieldIDs(), metric.IP, schemapb.DataType_Int64, 0, nil)
+	s.Require().NoError(err)
+	outputs, err := op.run(context.Background(), s.span, rows, []string{"IP"})
 	s.NoError(err)
 	s.Len(outputs, 1)
 
@@ -7889,6 +7894,24 @@ func (s *SearchPipelineSuite) TestAggregateOperatorRun() {
 	s.Equal(int64(1), result.GetResults().GetNumQueries())
 	s.Equal([]int64{2}, result.GetResults().GetAggTopks())
 	s.Len(result.GetResults().GetAggBuckets(), 2)
+	s.Equal(int64(42), result.GetResults().GetAllSearchCount())
+
+	for _, tc := range []struct {
+		name   string
+		inputs []any
+	}{
+		{name: "missing_inputs"},
+		{name: "materialized_input", inputs: []any{[]*milvuspb.SearchResults{{Results: data}}, []string{metric.IP}}},
+		{name: "nil_rows", inputs: []any{(*search_agg.ReducedRows)(nil), []string{metric.IP}}},
+		{name: "wrong_metric_type", inputs: []any{rows, metric.IP}},
+		{name: "missing_metric", inputs: []any{rows, []string{}}},
+		{name: "multiple_metrics", inputs: []any{rows, []string{metric.IP, metric.L2}}},
+	} {
+		s.Run(tc.name, func() {
+			_, err := op.run(context.Background(), s.span, tc.inputs...)
+			s.ErrorIs(err, merr.ErrServiceInternal)
+		})
+	}
 }
 
 func (s *SearchPipelineSuite) TestNewRequeryOperator_WithHighlighterNoDynamicFields() {

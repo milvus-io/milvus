@@ -3,6 +3,7 @@ package search_agg
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 )
 
 const (
@@ -122,4 +123,20 @@ type HitResult struct {
 	PK     any
 	Score  float32
 	Fields map[int64]any
+}
+
+// ReducedRows is the request-local handoff from Proxy group reduce to
+// aggregation. Rows and GroupIDs share selection order; group IDs are unique
+// across queries, and each nonempty query's first group ID is its minimum.
+// Canonical keys use GroupFieldIDs order. Sources remain read-only and alive
+// until aggregation/serialization finishes.
+type ReducedRows struct {
+	Sources        []*schemapb.SearchResultData
+	Rows           []reduce.RowRef
+	Topks          []int64
+	GroupIDs       []int
+	GroupKeys      [][]any
+	GroupFieldIDs  []int64
+	AllSearchCount int64
+	NegateScores   bool
 }
