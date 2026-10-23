@@ -28,7 +28,54 @@ import (
 
 // ArrayOfVectorToFieldData converts a user-facing list-of-vectors value into
 // the per-row VectorField representation used by VectorArrayFieldData.
+//
+// A nil entry is a null vector. It is accepted only when the field is
+// element-nullable: the payload then holds the non-null vectors only, and
+// valid_data has one entry per logical element. A field that is not
+// element-nullable carries no valid_data.
 func ArrayOfVectorToFieldData(vectors []any, field *schemapb.FieldSchema, dim int) (*schemapb.VectorField, error) {
+	elementNullable := field.GetElementNullable()
+	var validData []bool
+	if elementNullable {
+		validData = make([]bool, len(vectors))
+	}
+	present := make([]positionedVector, 0, len(vectors))
+	for i, rawVector := range vectors {
+		if rawVector == nil {
+			if !elementNullable {
+				return nil, merr.WrapErrImportFailedMsg(
+					"field '%s' element %d is null, but the sub-field is not element-nullable", field.GetName(), i)
+			}
+			continue
+		}
+		vector, err := asVector(rawVector)
+		if err != nil {
+			return nil, err
+		}
+		present = append(present, positionedVector{position: i, values: vector})
+		if elementNullable {
+			validData[i] = true
+		}
+	}
+
+	row, err := presentVectorsToFieldData(present, field, dim)
+	if err != nil {
+		return nil, err
+	}
+	if elementNullable {
+		typeutil.SetVectorArrayElementValidData(row, validData)
+	}
+	return row, nil
+}
+
+// positionedVector is a non-null vector with its logical element position,
+// which error messages report.
+type positionedVector struct {
+	position int
+	values   []any
+}
+
+func presentVectorsToFieldData(vectors []positionedVector, field *schemapb.FieldSchema, dim int) (*schemapb.VectorField, error) {
 	switch field.GetElementType() {
 	case schemapb.DataType_FloatVector:
 		values, err := parseFloatVectorArray(vectors, field, dim)
@@ -93,17 +140,13 @@ func ArrayOfVectorToFieldData(vectors []any, field *schemapb.FieldSchema, dim in
 	}
 }
 
-func parseFloatVectorArray(vectors []any, field *schemapb.FieldSchema, dim int) ([]float32, error) {
+func parseFloatVectorArray(vectors []positionedVector, field *schemapb.FieldSchema, dim int) ([]float32, error) {
 	values := make([]float32, 0, len(vectors)*dim)
-	for i, rawVector := range vectors {
-		vector, err := asVector(rawVector)
-		if err != nil {
-			return nil, err
+	for _, vector := range vectors {
+		if len(vector.values) != dim {
+			return nil, vectorDimErr(field, vector.position, len(vector.values), dim)
 		}
-		if len(vector) != dim {
-			return nil, vectorDimErr(field, i, len(vector), dim)
-		}
-		for _, rawValue := range vector {
+		for _, rawValue := range vector.values {
 			value, err := asFloat32(rawValue)
 			if err != nil {
 				return nil, err
@@ -114,17 +157,13 @@ func parseFloatVectorArray(vectors []any, field *schemapb.FieldSchema, dim int) 
 	return values, nil
 }
 
-func parseByteVectorArray(vectors []any, field *schemapb.FieldSchema, bytesPerVector int) ([]byte, error) {
+func parseByteVectorArray(vectors []positionedVector, field *schemapb.FieldSchema, bytesPerVector int) ([]byte, error) {
 	values := make([]byte, 0, len(vectors)*bytesPerVector)
-	for i, rawVector := range vectors {
-		vector, err := asVector(rawVector)
-		if err != nil {
-			return nil, err
+	for _, vector := range vectors {
+		if len(vector.values) != bytesPerVector {
+			return nil, vectorByteSizeErr(field, vector.position, len(vector.values), bytesPerVector)
 		}
-		if len(vector) != bytesPerVector {
-			return nil, vectorByteSizeErr(field, i, len(vector), bytesPerVector)
-		}
-		for _, rawValue := range vector {
+		for _, rawValue := range vector.values {
 			value, err := asUint8(rawValue)
 			if err != nil {
 				return nil, err
@@ -136,21 +175,17 @@ func parseByteVectorArray(vectors []any, field *schemapb.FieldSchema, bytesPerVe
 }
 
 func parseHalfVectorArray(
-	vectors []any,
+	vectors []positionedVector,
 	field *schemapb.FieldSchema,
 	dim int,
 	convert func(float32) []byte,
 ) ([]byte, error) {
 	values := make([]byte, 0, len(vectors)*dim*2)
-	for i, rawVector := range vectors {
-		vector, err := asVector(rawVector)
-		if err != nil {
-			return nil, err
+	for _, vector := range vectors {
+		if len(vector.values) != dim {
+			return nil, vectorDimErr(field, vector.position, len(vector.values), dim)
 		}
-		if len(vector) != dim {
-			return nil, vectorDimErr(field, i, len(vector), dim)
-		}
-		for _, rawValue := range vector {
+		for _, rawValue := range vector.values {
 			value, err := asFloat32(rawValue)
 			if err != nil {
 				return nil, err
@@ -161,17 +196,13 @@ func parseHalfVectorArray(
 	return values, nil
 }
 
-func parseInt8VectorArray(vectors []any, field *schemapb.FieldSchema, dim int) ([]byte, error) {
+func parseInt8VectorArray(vectors []positionedVector, field *schemapb.FieldSchema, dim int) ([]byte, error) {
 	values := make([]byte, 0, len(vectors)*dim)
-	for i, rawVector := range vectors {
-		vector, err := asVector(rawVector)
-		if err != nil {
-			return nil, err
+	for _, vector := range vectors {
+		if len(vector.values) != dim {
+			return nil, vectorDimErr(field, vector.position, len(vector.values), dim)
 		}
-		if len(vector) != dim {
-			return nil, vectorDimErr(field, i, len(vector), dim)
-		}
-		for _, rawValue := range vector {
+		for _, rawValue := range vector.values {
 			value, err := asInt8(rawValue)
 			if err != nil {
 				return nil, err
@@ -200,7 +231,10 @@ func asFloat32(value any) (float32, error) {
 		return 0, numericTypeErr(value)
 	}
 	num, err := strconv.ParseFloat(v.String(), 32)
-	return float32(num), err
+	if err != nil {
+		return 0, numericParseErr(v, err)
+	}
+	return float32(num), nil
 }
 
 func asUint8(value any) (byte, error) {
@@ -209,7 +243,10 @@ func asUint8(value any) (byte, error) {
 		return 0, numericTypeErr(value)
 	}
 	num, err := strconv.ParseUint(v.String(), 0, 8)
-	return byte(num), err
+	if err != nil {
+		return 0, numericParseErr(v, err)
+	}
+	return byte(num), nil
 }
 
 func asInt8(value any) (int8, error) {
@@ -218,7 +255,10 @@ func asInt8(value any) (int8, error) {
 		return 0, numericTypeErr(value)
 	}
 	num, err := strconv.ParseInt(v.String(), 10, 8)
-	return int8(num), err
+	if err != nil {
+		return 0, numericParseErr(v, err)
+	}
+	return int8(num), nil
 }
 
 func vectorDimErr(field *schemapb.FieldSchema, position int, actual int, expected int) error {
@@ -235,4 +275,8 @@ func vectorByteSizeErr(field *schemapb.FieldSchema, position int, actual int, ex
 
 func numericTypeErr(value any) error {
 	return merr.WrapErrImportFailedMsg("expected numeric vector element, got type %T with value %v", value, value)
+}
+
+func numericParseErr(value json.Number, err error) error {
+	return merr.WrapErrImportFailedMsg("failed to parse vector element '%s': %v", value.String(), err)
 }

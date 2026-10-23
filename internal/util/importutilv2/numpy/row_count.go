@@ -51,6 +51,9 @@ func NumRows(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Coll
 // Import V3 reshard BFD packs tasks by; the physical size comes for free from the
 // SizingReaderAt so callers need not size the objects again.
 func NumRowsAndBytes(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (int64, int64, int64, error) {
+	if err := ValidateSchema(schema); err != nil {
+		return 0, 0, 0, err
+	}
 	var rows, logicalBytes, fileSize int64
 	for _, path := range SourcePaths(schema, paths) {
 		ra, err := common.NewSizingReaderAt(ctx, cm, path)
