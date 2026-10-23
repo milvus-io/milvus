@@ -4167,6 +4167,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			case *schemapb.IDs_StrId:
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
+			case nil:
+				// An empty search result can carry IDs with no IdField set.
 			default:
 				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
 			}
@@ -4386,6 +4388,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			case *schemapb.IDs_StrId:
 				stringPks := ids.GetStrId().GetData()
 				row[pkFieldName] = stringPks[i]
+			case nil:
 			default:
 				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
 			}
