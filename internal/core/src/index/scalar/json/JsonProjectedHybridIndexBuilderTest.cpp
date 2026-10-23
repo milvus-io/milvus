@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <tuple>
+#include <limits>
 
 #include <cstddef>
 #include <cstdint>
@@ -60,7 +62,8 @@ BuildProjectedIndex(const std::vector<std::string>& raw,
                     std::string_view path,
                     int cardinality_limit = 16,
                     int engine_version = 3,
-                    const std::string& index_type = HYBRID_INDEX_TYPE) {
+                    const std::string& index_type = HYBRID_INDEX_TYPE,
+                    const std::string& cast_function = {}) {
     Config params = {
         {"field_type", static_cast<int>(DataType::JSON)},
         {"value_type", static_cast<int>(value_type)},
@@ -73,6 +76,9 @@ BuildProjectedIndex(const std::vector<std::string>& raw,
         {SCALAR_INDEX_ENGINE_VERSION, engine_version},
         {ENABLE_ARRAY_SORT_INDEX, true},
     };
+    if (!cast_function.empty()) {
+        params[JSON_CAST_FUNCTION] = cast_function;
+    }
     if (index_type == HYBRID_INDEX_TYPE) {
         params[BITMAP_INDEX_CARDINALITY_LIMIT] = cardinality_limit;
         params[HYBRID_LOW_CARDINALITY_INDEX_TYPE] = BITMAP_INDEX_TYPE;
@@ -386,6 +392,95 @@ TEST(JsonProjectedHybridIndexBuilderTest, FullJsonKeepsInvertedFamily) {
              .field_type = DataType::JSON,
              .params = {{JSON_PATH, "/a"}, {JSON_CAST_TYPE, "BOOL"}}}));
     });
+}
+
+TEST(JsonProjectedHybridIndexBuilderTest,
+     StringCastNaNStaysValidAcrossAllNumericFamiliesAfterReload) {
+    const std::vector<std::string> raw{R"({"a":"NaN"})",
+                                       R"({"a":"-nan"})",
+                                       R"json({"a":"nan(payload)"})json",
+                                       R"({"a":"1"})",
+                                       R"({"a":2})",
+                                       R"({"a":"Inf"})",
+                                       R"({"a":"-Inf"})",
+                                       R"({"a":"-0"})",
+                                       R"({"b":0})",
+                                       R"({"a":"invalid-number"})",
+                                       R"({"a":null})"};
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    for (const auto& [index_type, threshold, backend_prefix] :
+         std::vector<std::tuple<std::string, int, std::string>>{
+             {ASCENDING_SORT, 1, "JsonProjectedSortedDouble"},
+             {INVERTED_INDEX_TYPE, 1, "JsonProjectedInvertedDouble"},
+             {HYBRID_INDEX_TYPE, 1, "JsonProjectedHybridDouble"},
+             {HYBRID_INDEX_TYPE, 16, "JsonProjectedHybridDouble"}}) {
+        const auto persisted = BuildProjectedIndex(raw,
+                                                   DataType::DOUBLE,
+                                                   "DOUBLE",
+                                                   "/a",
+                                                   threshold,
+                                                   6,
+                                                   index_type,
+                                                   "STRING_TO_DOUBLE");
+        if (index_type == HYBRID_INDEX_TYPE) {
+            ExpectSelector(persisted,
+                           threshold == 1 ? ScalarIndexType::STLSORT
+                                          : ScalarIndexType::BITMAP);
+        }
+        for (const bool mmap : {false, true}) {
+            for (const bool async : {false, true}) {
+                SCOPED_TRACE(index_type +
+                             "/threshold=" + std::to_string(threshold) +
+                             "/mmap=" + std::to_string(mmap) +
+                             "/async=" + std::to_string(async));
+                const auto& backend = ScalarReaderBackends().Get<double>(
+                    backend_prefix + (mmap ? "Mmap" : ""));
+                auto reader = OpenV3(
+                    backend, persisted, {.row_count = raw.size()}, async);
+                const auto* json =
+                    dynamic_cast<const IJsonIndexReader*>(reader.get());
+                ASSERT_NE(json, nullptr);
+                auto resolved =
+                    json->Resolve("/a", JsonCastType::FromString("DOUBLE"));
+                ASSERT_TRUE(static_cast<bool>(resolved));
+                const auto* predicate =
+                    dynamic_cast<const IScalarPredicateReader<double>*>(
+                        resolved.get());
+                const auto* nulls =
+                    dynamic_cast<const INullReader*>(resolved.get());
+                ASSERT_NE(predicate, nullptr);
+                ASSERT_NE(nulls, nullptr);
+                ExpectHits(
+                    nulls->IsNotNull(), raw.size(), {0, 1, 2, 3, 4, 5, 6, 7});
+                ExpectHits(nulls->IsNull(), raw.size(), {8, 9, 10});
+                ExpectHits(json->Exists("/a"),
+                           raw.size(),
+                           {0, 1, 2, 3, 4, 5, 6, 7, 9});
+                ExpectHits(predicate->In(1, &nan), raw.size(), {0, 1, 2});
+                ExpectHits(
+                    predicate->NotIn(1, &nan), raw.size(), {3, 4, 5, 6, 7});
+                ExpectHits(predicate->Range(inf, CompareOp::GreaterThan),
+                           raw.size(),
+                           {0, 1, 2});
+                ExpectHits(predicate->Range(nan, CompareOp::GreaterThan),
+                           raw.size(),
+                           {});
+                ExpectHits(predicate->Range(nan, CompareOp::GreaterEqual),
+                           raw.size(),
+                           {0, 1, 2});
+                ExpectHits(predicate->Range(nan, CompareOp::LessThan),
+                           raw.size(),
+                           {3, 4, 5, 6, 7});
+                ExpectHits(predicate->Range(-inf, true, nan, true),
+                           raw.size(),
+                           {0, 1, 2, 3, 4, 5, 6, 7});
+                ExpectHits(predicate->Range(-inf, true, nan, false),
+                           raw.size(),
+                           {3, 4, 5, 6, 7});
+            }
+        }
+    }
 }
 
 }  // namespace

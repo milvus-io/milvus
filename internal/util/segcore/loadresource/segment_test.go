@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -399,4 +400,117 @@ func TestEstimateSegmentLoadingResourceKeepsMilvusTableRealPKEager(t *testing.T)
 	require.EqualValues(t, 2000, usage.MemoryBytes)
 	require.Zero(t, usage.DiskBytes)
 	require.EqualValues(t, 100, loadInfo.GetEstimatedBytesPerRow())
+}
+
+// Exercise the public estimators with the same metadata the loader sees. In
+// particular, index mmap must not replace the in-memory raw-data budget when a
+// legacy floating index is ignored.
+func TestEstimateSegmentLegacyFloatingIndexUsesRawBudget(t *testing.T) {
+	paramtable.Init()
+	cases := []struct {
+		name        string
+		dataType    schemapb.DataType
+		elementType schemapb.DataType
+		castType    string
+	}{
+		{"float", schemapb.DataType_Float, schemapb.DataType_None, ""},
+		{"double", schemapb.DataType_Double, schemapb.DataType_None, ""},
+		{"float_array", schemapb.DataType_Array, schemapb.DataType_Float, ""},
+		{"double_array", schemapb.DataType_Array, schemapb.DataType_Double, ""},
+		{"json_double", schemapb.DataType_JSON, schemapb.DataType_None, "DOUBLE"},
+		{"json_array_double", schemapb.DataType_JSON, schemapb.DataType_None, "ARRAY_DOUBLE"},
+		{"json_flat", schemapb.DataType_JSON, schemapb.DataType_None, "JSON"},
+		{"json_missing_cast", schemapb.DataType_JSON, schemapb.DataType_None, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			field := &schemapb.FieldSchema{
+				FieldID: 100, Name: "value", DataType: tc.dataType, ElementType: tc.elementType,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "false"}},
+			}
+			schema := &schemapb.CollectionSchema{Name: "legacy_index", Fields: []*schemapb.FieldSchema{field}}
+			indexType := "INVERTED"
+			if tc.dataType == schemapb.DataType_Double || tc.dataType == schemapb.DataType_Float {
+				indexType = "STL_SORT"
+			}
+			index := &querypb.FieldIndexInfo{
+				FieldID: 100, IndexID: 10, BuildID: 11, IndexSize: 1024, NumRows: 100,
+				CurrentScalarIndexVersion: 5,
+				IndexFilePaths:            []string{"/must/not/read/legacy-index"},
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: indexType},
+					{Key: common.MmapEnabledKey, Value: "true"},
+				},
+			}
+			if tc.castType != "" {
+				index.IndexParams = append(index.IndexParams,
+					&commonpb.KeyValuePair{Key: "json_cast_type", Value: tc.castType},
+					&commonpb.KeyValuePair{Key: "json_path", Value: "value[\"x\"]"})
+			}
+			load := &querypb.SegmentLoadInfo{
+				CollectionID: 1, PartitionID: 2, SegmentID: 3, NumOfRows: 100,
+				BinlogPaths: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 800, LogSize: 400, EntriesNum: 100}}}},
+			}
+			calls := 0
+			runner := func(fn func() error) error { calls++; return fn() }
+			for _, tiered := range []bool{false, true} {
+				for _, preferRaw := range []bool{false, true} {
+					finalOptions := SegmentFinalEstimateOptions{
+						TieredEvictionEnabled: tiered, TieredEvictableMemoryCacheRatio: 0.5,
+						TieredEvictableDiskCacheRatio: 0.5, PreferFieldDataWhenIndexHasRawData: preferRaw,
+					}
+					loadingOptions := SegmentLoadingEstimateOptions{TieredEvictionEnabled: tiered, PreferFieldDataWhenIndexHasRawData: preferRaw}
+					load.IndexInfos = nil
+					wantFinal, err := EstimateSegmentFinalResource(context.Background(), schema, load, finalOptions, runner)
+					require.NoError(t, err)
+					wantLoading, err := EstimateSegmentLoadingResource(context.Background(), schema, load, loadingOptions, runner)
+					require.NoError(t, err)
+					for _, version := range []int32{0, 5} {
+						index.CurrentScalarIndexVersion = version
+						load.IndexInfos = []*querypb.FieldIndexInfo{index}
+						gotFinal, err := EstimateSegmentFinalResource(context.Background(), schema, load, finalOptions, runner)
+						require.NoError(t, err)
+						gotLoading, err := EstimateSegmentLoadingResource(context.Background(), schema, load, loadingOptions, runner)
+						require.NoError(t, err)
+						require.Equal(t, wantFinal, gotFinal)
+						require.Equal(t, wantLoading, gotLoading)
+						require.Zero(t, calls, "ignored indexes must never reach the estimator runner")
+						if !tiered {
+							require.GreaterOrEqual(t, gotFinal.MemoryBytes, uint64(800))
+							require.GreaterOrEqual(t, gotLoading.MemoryBytes, uint64(800))
+							require.Zero(t, gotFinal.DiskBytes)
+							require.Zero(t, gotLoading.DiskBytes)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestEstimateSegmentLegacyJsonCastRejectsBeforeEstimation(t *testing.T) {
+	paramtable.Init()
+	field := &schemapb.FieldSchema{FieldID: 100, Name: "value", DataType: schemapb.DataType_JSON}
+	schema := &schemapb.CollectionSchema{Name: "legacy_cast", Fields: []*schemapb.FieldSchema{field}}
+	index := &querypb.FieldIndexInfo{
+		FieldID: 100, CurrentScalarIndexVersion: 5, IndexFilePaths: []string{"/legacy-cast"},
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "INVERTED"},
+			{Key: "json_cast_type", Value: "DOUBLE"},
+			{Key: "json_cast_function", Value: "STRING_TO_DOUBLE"},
+		},
+	}
+	load := &querypb.SegmentLoadInfo{SegmentID: 3, IndexInfos: []*querypb.FieldIndexInfo{index}}
+	calls := 0
+	runner := func(fn func() error) error { calls++; return fn() }
+	_, indexErr := EstimateIndexLoadResourceWithRunner(context.Background(), field, load, index, runner)
+	_, finalErr := EstimateSegmentFinalResource(context.Background(), schema, load, SegmentFinalEstimateOptions{}, runner)
+	_, loadingErr := EstimateSegmentLoadingResource(context.Background(), schema, load, SegmentLoadingEstimateOptions{}, runner)
+	for _, err := range []error{indexErr, finalErr, loadingErr} {
+		require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
+		require.Contains(t, err.Error(), "must be rebuilt before loading")
+		require.False(t, merr.IsRetryableErr(err))
+		require.False(t, merr.Status(err).GetRetriable())
+	}
+	require.Zero(t, calls)
 }

@@ -1180,10 +1180,11 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 		{
 			fieldStats := make([]storage.FieldStats, 0)
 			fieldStat1 := storage.FieldStats{
-				FieldID: clusteringKeyFieldID,
-				Type:    schemapb.DataType_Float,
-				Min:     storage.NewFloatFieldValue(-3.0),
-				Max:     storage.NewFloatFieldValue(-1.0),
+				FloatBoundsComplete: true,
+				FieldID:             clusteringKeyFieldID,
+				Type:                schemapb.DataType_Float,
+				Min:                 storage.NewFloatFieldValue(-3.0),
+				Max:                 storage.NewFloatFieldValue(-1.0),
 			}
 			fieldStats = append(fieldStats, fieldStat1)
 			segStats[1] = *storage.NewSegmentStats(fieldStats, 80)
@@ -1192,10 +1193,11 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 		{
 			fieldStats := make([]storage.FieldStats, 0)
 			fieldStat1 := storage.FieldStats{
-				FieldID: clusteringKeyFieldID,
-				Type:    schemapb.DataType_Float,
-				Min:     storage.NewFloatFieldValue(-0.5),
-				Max:     storage.NewFloatFieldValue(2.0),
+				FloatBoundsComplete: true,
+				FieldID:             clusteringKeyFieldID,
+				Type:                schemapb.DataType_Float,
+				Min:                 storage.NewFloatFieldValue(-0.5),
+				Max:                 storage.NewFloatFieldValue(2.0),
 			}
 			fieldStats = append(fieldStats, fieldStat1)
 			segStats[2] = *storage.NewSegmentStats(fieldStats, 80)
@@ -1203,10 +1205,11 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 		{
 			fieldStats := make([]storage.FieldStats, 0)
 			fieldStat1 := storage.FieldStats{
-				FieldID: clusteringKeyFieldID,
-				Type:    schemapb.DataType_Float,
-				Min:     storage.NewFloatFieldValue(2.5),
-				Max:     storage.NewFloatFieldValue(5.0),
+				FloatBoundsComplete: true,
+				FieldID:             clusteringKeyFieldID,
+				Type:                schemapb.DataType_Float,
+				Min:                 storage.NewFloatFieldValue(2.5),
+				Max:                 storage.NewFloatFieldValue(5.0),
 			}
 			fieldStats = append(fieldStats, fieldStat1)
 			segStats[3] = *storage.NewSegmentStats(fieldStats, 80)
@@ -1214,10 +1217,11 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 		{
 			fieldStats := make([]storage.FieldStats, 0)
 			fieldStat1 := storage.FieldStats{
-				FieldID: clusteringKeyFieldID,
-				Type:    schemapb.DataType_Float,
-				Min:     storage.NewFloatFieldValue(5.5),
-				Max:     storage.NewFloatFieldValue(8.0),
+				FloatBoundsComplete: true,
+				FieldID:             clusteringKeyFieldID,
+				Type:                schemapb.DataType_Float,
+				Min:                 storage.NewFloatFieldValue(5.5),
+				Max:                 storage.NewFloatFieldValue(8.0),
 			}
 			fieldStats = append(fieldStats, fieldStat1)
 			segStats[4] = *storage.NewSegmentStats(fieldStats, 80)
@@ -1299,10 +1303,11 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 		{
 			fieldStats := make([]storage.FieldStats, 0)
 			fieldStat1 := storage.FieldStats{
-				FieldID: clusteringKeyFieldID,
-				Type:    schemapb.DataType_Double,
-				Min:     storage.NewDoubleFieldValue(-3.0),
-				Max:     storage.NewDoubleFieldValue(-1.0),
+				FloatBoundsComplete: true,
+				FieldID:             clusteringKeyFieldID,
+				Type:                schemapb.DataType_Double,
+				Min:                 storage.NewDoubleFieldValue(-3.0),
+				Max:                 storage.NewDoubleFieldValue(-1.0),
 			}
 			fieldStats = append(fieldStats, fieldStat1)
 			segStats[1] = *storage.NewSegmentStats(fieldStats, 80)
@@ -1311,10 +1316,11 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 		{
 			fieldStats := make([]storage.FieldStats, 0)
 			fieldStat1 := storage.FieldStats{
-				FieldID: clusteringKeyFieldID,
-				Type:    schemapb.DataType_Double,
-				Min:     storage.NewDoubleFieldValue(-0.5),
-				Max:     storage.NewDoubleFieldValue(1.0),
+				FloatBoundsComplete: true,
+				FieldID:             clusteringKeyFieldID,
+				Type:                schemapb.DataType_Double,
+				Min:                 storage.NewDoubleFieldValue(-0.5),
+				Max:                 storage.NewDoubleFieldValue(1.0),
 			}
 			fieldStats = append(fieldStats, fieldStat1)
 			segStats[2] = *storage.NewSegmentStats(fieldStats, 80)
@@ -1322,10 +1328,11 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 		{
 			fieldStats := make([]storage.FieldStats, 0)
 			fieldStat1 := storage.FieldStats{
-				FieldID: clusteringKeyFieldID,
-				Type:    schemapb.DataType_Double,
-				Min:     storage.NewDoubleFieldValue(1.5),
-				Max:     storage.NewDoubleFieldValue(3.0),
+				FloatBoundsComplete: true,
+				FieldID:             clusteringKeyFieldID,
+				Type:                schemapb.DataType_Double,
+				Min:                 storage.NewDoubleFieldValue(1.5),
+				Max:                 storage.NewDoubleFieldValue(3.0),
 			}
 			fieldStats = append(fieldStats, fieldStat1)
 			segStats[3] = *storage.NewSegmentStats(fieldStats, 80)
@@ -1333,10 +1340,11 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 		{
 			fieldStats := make([]storage.FieldStats, 0)
 			fieldStat1 := storage.FieldStats{
-				FieldID: clusteringKeyFieldID,
-				Type:    schemapb.DataType_Double,
-				Min:     storage.NewDoubleFieldValue(4.0),
-				Max:     storage.NewDoubleFieldValue(5.0),
+				FloatBoundsComplete: true,
+				FieldID:             clusteringKeyFieldID,
+				Type:                schemapb.DataType_Double,
+				Min:                 storage.NewDoubleFieldValue(4.0),
+				Max:                 storage.NewDoubleFieldValue(5.0),
 			}
 			fieldStats = append(fieldStats, fieldStat1)
 			segStats[4] = *storage.NewSegmentStats(fieldStats, 80)

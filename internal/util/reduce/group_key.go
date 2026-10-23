@@ -3,9 +3,9 @@ package reduce
 import (
 	"encoding/binary"
 	"hash/fnv"
-	"math"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	internaltypeutil "github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // NullHashSentinel is a fixed hash value for null group-by values so that two
@@ -25,7 +25,7 @@ func HashGroupValues(values []any) uint64 {
 			combined = h
 			continue
 		}
-		combined = typeutil.HashMix(combined, h)
+		combined = internaltypeutil.HashMix(combined, h)
 	}
 	return combined
 }
@@ -46,7 +46,7 @@ func hashOneGroupValue(v any) uint64 {
 		binary.LittleEndian.PutUint64(buf[:], uint64(val))
 		h.Write(buf[:8])
 	case float64:
-		bits := math.Float64bits(val)
+		bits := typeutil.Float64ToSortableUint64(val)
 		binary.LittleEndian.PutUint64(buf[:], bits)
 		h.Write(buf[:8])
 	case string:
@@ -61,9 +61,8 @@ func hashOneGroupValue(v any) uint64 {
 
 // EqualGroupValues compares two already-normalized group-by value slices.
 // Must stay in sync with HashGroupValues so hash-collision chains resolve
-// correctly. Both-null counts as equal; NaN never matches, not even another
-// NaN, mirroring standard comparison semantics so distinct NaN rows stay in
-// distinct buckets.
+// correctly. Both-null counts as equal; all NaNs and signed zeros use the
+// same typed sortable key as filtering, sorting and numeric indexes.
 func EqualGroupValues(a, b []any) bool {
 	if len(a) != len(b) {
 		return false
@@ -82,10 +81,7 @@ func EqualGroupValues(a, b []any) bool {
 			if !ok {
 				return false
 			}
-			if math.IsNaN(lhs) || math.IsNaN(rhs) {
-				return false
-			}
-			if lhs != rhs {
+			if typeutil.Float64ToSortableUint64(lhs) != typeutil.Float64ToSortableUint64(rhs) {
 				return false
 			}
 		default:

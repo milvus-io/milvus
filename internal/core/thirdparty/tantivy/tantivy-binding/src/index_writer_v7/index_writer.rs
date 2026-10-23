@@ -18,7 +18,7 @@ use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::index_reader_c::SetBitsetFn;
 use crate::index_writer::TantivyValue;
-use crate::util::{c_ptr_to_str, ptr_len_to_str};
+use crate::util::{c_ptr_to_str, canonical_f64, canonicalize_json_zeros, ptr_len_to_str};
 
 #[inline]
 pub(crate) fn schema_builder_add_field(
@@ -69,6 +69,14 @@ impl TantivyValue<TantivyDocument> for f64 {
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_f64(Field::from_field_id(field), *self);
     }
+
+    fn canonicalize(self, enabled: bool) -> Self {
+        if enabled {
+            canonical_f64(self)
+        } else {
+            self
+        }
+    }
 }
 
 impl TantivyValue<TantivyDocument> for &str {
@@ -90,6 +98,13 @@ impl TantivyValue<TantivyDocument> for serde_json::Value {
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_field_value(Field::from_field_id(field), self);
     }
+
+    fn canonicalize(mut self, enabled: bool) -> Self {
+        if enabled {
+            canonicalize_json_zeros(&mut self);
+        }
+        self
+    }
 }
 
 pub struct IndexWriterWrapperImpl {
@@ -98,6 +113,7 @@ pub struct IndexWriterWrapperImpl {
     pub(crate) index: Arc<Index>,
     pub(crate) id_field: Option<Field>,
     pub(crate) enable_user_specified_doc_id: bool,
+    pub(crate) supports_nan_total_order: bool,
 }
 
 impl IndexWriterWrapperImpl {
@@ -138,6 +154,7 @@ impl IndexWriterWrapperImpl {
             index: Arc::new(index),
             id_field,
             enable_user_specified_doc_id,
+            supports_nan_total_order: false,
         })
     }
 
@@ -159,7 +176,8 @@ impl IndexWriterWrapperImpl {
 
     pub fn add<T: TantivyValue<TantivyDocument>>(&mut self, data: T, offset: u32) -> Result<()> {
         let mut document = TantivyDocument::default();
-        data.add_to_document(self.field.field_id(), &mut document);
+        data.canonicalize(self.supports_nan_total_order)
+            .add_to_document(self.field.field_id(), &mut document);
 
         self.add_document(document, offset)
     }
@@ -173,8 +191,10 @@ impl IndexWriterWrapperImpl {
         I: IntoIterator<Item = T>,
     {
         let mut document = TantivyDocument::default();
-        data.into_iter()
-            .for_each(|d| d.add_to_document(self.field.field_id(), &mut document));
+        data.into_iter().for_each(|d| {
+            d.canonicalize(self.supports_nan_total_order)
+                .add_to_document(self.field.field_id(), &mut document)
+        });
 
         self.add_document(document, offset)
     }
@@ -208,7 +228,11 @@ impl IndexWriterWrapperImpl {
     pub fn add_json(&mut self, data: &str, offset: u32) -> Result<()> {
         let j = serde_json::from_str::<serde_json::Value>(data)?;
         let mut document = TantivyDocument::default();
-        j.add_to_document(self.field.field_id(), &mut document);
+        <serde_json::Value as TantivyValue<TantivyDocument>>::canonicalize(
+            j,
+            self.supports_nan_total_order,
+        )
+        .add_to_document(self.field.field_id(), &mut document);
 
         self.add_document(document, offset)
     }
@@ -219,7 +243,11 @@ impl IndexWriterWrapperImpl {
             let data = c_ptr_to_str(data_ptr)?;
             let j = serde_json::from_str::<serde_json::Value>(data)?;
             let mut document = TantivyDocument::default();
-            j.add_to_document(self.field.field_id(), &mut document);
+            <serde_json::Value as TantivyValue<TantivyDocument>>::canonicalize(
+                j,
+                self.supports_nan_total_order,
+            )
+            .add_to_document(self.field.field_id(), &mut document);
             self.add_document(document, offset_begin + i as u32)?;
         }
         Ok(())
@@ -230,7 +258,11 @@ impl IndexWriterWrapperImpl {
         for element in datas {
             let data = c_ptr_to_str(*element)?;
             let j = serde_json::from_str::<serde_json::Value>(data)?;
-            j.add_to_document(self.field.field_id(), &mut document);
+            <serde_json::Value as TantivyValue<TantivyDocument>>::canonicalize(
+                j,
+                self.supports_nan_total_order,
+            )
+            .add_to_document(self.field.field_id(), &mut document);
         }
 
         self.add_document(document, offset)

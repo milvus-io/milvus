@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include "common/ScalarComparison.h"
 
 namespace milvus::index {
 template <typename T>
@@ -29,23 +30,23 @@ struct IndexStructure {
     }
     bool
     operator<(const IndexStructure& b) const {
-        return a_ < b.a_;
+        return ScalarLess(a_, b.a_);
     }
     bool
     operator<=(const IndexStructure& b) const {
-        return a_ <= b.a_;
+        return ScalarLessEqual(a_, b.a_);
     }
     bool
     operator>(const IndexStructure& b) const {
-        return a_ > b.a_;
+        return ScalarGreater(a_, b.a_);
     }
     bool
     operator>=(const IndexStructure& b) const {
-        return a_ >= b.a_;
+        return ScalarGreaterEqual(a_, b.a_);
     }
     bool
     operator==(const IndexStructure& b) const {
-        return a_ == b.a_;
+        return ScalarEqual(a_, b.a_);
     }
     T a_;
     int32_t idx_;

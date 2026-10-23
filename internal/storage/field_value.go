@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ScalarFieldValue interface {
@@ -555,7 +556,7 @@ func (ifv *FloatFieldValue) GT(obj ScalarFieldValue) bool {
 		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
-	if ifv.Value > v.Value {
+	if typeutil.Float32ToSortableUint32(ifv.Value) > typeutil.Float32ToSortableUint32(v.Value) {
 		return true
 	}
 
@@ -568,7 +569,7 @@ func (ifv *FloatFieldValue) GE(obj ScalarFieldValue) bool {
 		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
-	if ifv.Value >= v.Value {
+	if typeutil.Float32ToSortableUint32(ifv.Value) >= typeutil.Float32ToSortableUint32(v.Value) {
 		return true
 	}
 
@@ -582,7 +583,7 @@ func (ifv *FloatFieldValue) LT(obj ScalarFieldValue) bool {
 		return false
 	}
 
-	if ifv.Value < v.Value {
+	if typeutil.Float32ToSortableUint32(ifv.Value) < typeutil.Float32ToSortableUint32(v.Value) {
 		return true
 	}
 
@@ -596,7 +597,7 @@ func (ifv *FloatFieldValue) LE(obj ScalarFieldValue) bool {
 		return false
 	}
 
-	if ifv.Value <= v.Value {
+	if typeutil.Float32ToSortableUint32(ifv.Value) <= typeutil.Float32ToSortableUint32(v.Value) {
 		return true
 	}
 
@@ -610,7 +611,7 @@ func (ifv *FloatFieldValue) EQ(obj ScalarFieldValue) bool {
 		return false
 	}
 
-	if ifv.Value == v.Value {
+	if typeutil.Float32ToSortableUint32(ifv.Value) == typeutil.Float32ToSortableUint32(v.Value) {
 		return true
 	}
 
@@ -675,7 +676,7 @@ func (ifv *DoubleFieldValue) GT(obj ScalarFieldValue) bool {
 		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
-	if ifv.Value > v.Value {
+	if typeutil.Float64ToSortableUint64(ifv.Value) > typeutil.Float64ToSortableUint64(v.Value) {
 		return true
 	}
 
@@ -688,7 +689,7 @@ func (ifv *DoubleFieldValue) GE(obj ScalarFieldValue) bool {
 		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
-	if ifv.Value >= v.Value {
+	if typeutil.Float64ToSortableUint64(ifv.Value) >= typeutil.Float64ToSortableUint64(v.Value) {
 		return true
 	}
 
@@ -702,7 +703,7 @@ func (ifv *DoubleFieldValue) LT(obj ScalarFieldValue) bool {
 		return false
 	}
 
-	if ifv.Value < v.Value {
+	if typeutil.Float64ToSortableUint64(ifv.Value) < typeutil.Float64ToSortableUint64(v.Value) {
 		return true
 	}
 
@@ -716,7 +717,7 @@ func (ifv *DoubleFieldValue) LE(obj ScalarFieldValue) bool {
 		return false
 	}
 
-	if ifv.Value <= v.Value {
+	if typeutil.Float64ToSortableUint64(ifv.Value) <= typeutil.Float64ToSortableUint64(v.Value) {
 		return true
 	}
 
@@ -730,7 +731,7 @@ func (ifv *DoubleFieldValue) EQ(obj ScalarFieldValue) bool {
 		return false
 	}
 
-	if ifv.Value == v.Value {
+	if typeutil.Float64ToSortableUint64(ifv.Value) == typeutil.Float64ToSortableUint64(v.Value) {
 		return true
 	}
 

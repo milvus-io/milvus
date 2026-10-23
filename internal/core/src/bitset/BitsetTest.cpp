@@ -1317,6 +1317,35 @@ INSTANTIATE_TYPED_TEST_SUITE_P(InplaceWithinRangeValTest,
 
 template <typename BitsetT, typename T>
 struct TestInplaceArithCompareImplS {
+    // Independent SQL ordering oracle: all NaNs form one value above every
+    // non-NaN. Keep the arithmetic itself unchanged, including division by zero.
+    template <typename L, typename R>
+    static bool
+    reference_compare(L left, R right, CompareOpType op) {
+        int order;
+        if (std::isnan(left) || std::isnan(right)) {
+            order = std::isnan(left) == std::isnan(right)
+                        ? 0
+                        : (std::isnan(left) ? 1 : -1);
+        } else {
+            order = left < right ? -1 : (left > right ? 1 : 0);
+        }
+        switch (op) {
+            case CompareOpType::EQ:
+                return order == 0;
+            case CompareOpType::NE:
+                return order != 0;
+            case CompareOpType::LT:
+                return order < 0;
+            case CompareOpType::LE:
+                return order <= 0;
+            case CompareOpType::GT:
+                return order > 0;
+            case CompareOpType::GE:
+                return order >= 0;
+        }
+        return false;
+    }
     static void
     process(BitsetT& bitset,
             ArithOpType a_op,
@@ -1348,27 +1377,45 @@ struct TestInplaceArithCompareImplS {
         for (size_t i = 0; i < n; i++) {
             if (a_op == ArithOpType::Add) {
                 if (cmp_op == CompareOpType::EQ) {
-                    ASSERT_EQ((left[i] + right_operand) == value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] + right_operand),
+                                                value,
+                                                CompareOpType::EQ),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GE) {
-                    ASSERT_EQ((left[i] + right_operand) >= value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] + right_operand),
+                                                value,
+                                                CompareOpType::GE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GT) {
-                    ASSERT_EQ((left[i] + right_operand) > value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] + right_operand),
+                                                value,
+                                                CompareOpType::GT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LE) {
-                    ASSERT_EQ((left[i] + right_operand) <= value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] + right_operand),
+                                                value,
+                                                CompareOpType::LE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LT) {
-                    ASSERT_EQ((left[i] + right_operand) < value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] + right_operand),
+                                                value,
+                                                CompareOpType::LT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::NE) {
-                    ASSERT_EQ((left[i] + right_operand) != value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] + right_operand),
+                                                value,
+                                                CompareOpType::NE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else {
@@ -1376,27 +1423,45 @@ struct TestInplaceArithCompareImplS {
                 }
             } else if (a_op == ArithOpType::Sub) {
                 if (cmp_op == CompareOpType::EQ) {
-                    ASSERT_EQ((left[i] - right_operand) == value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] - right_operand),
+                                                value,
+                                                CompareOpType::EQ),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GE) {
-                    ASSERT_EQ((left[i] - right_operand) >= value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] - right_operand),
+                                                value,
+                                                CompareOpType::GE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GT) {
-                    ASSERT_EQ((left[i] - right_operand) > value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] - right_operand),
+                                                value,
+                                                CompareOpType::GT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LE) {
-                    ASSERT_EQ((left[i] - right_operand) <= value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] - right_operand),
+                                                value,
+                                                CompareOpType::LE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LT) {
-                    ASSERT_EQ((left[i] - right_operand) < value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] - right_operand),
+                                                value,
+                                                CompareOpType::LT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::NE) {
-                    ASSERT_EQ((left[i] - right_operand) != value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] - right_operand),
+                                                value,
+                                                CompareOpType::NE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else {
@@ -1404,27 +1469,45 @@ struct TestInplaceArithCompareImplS {
                 }
             } else if (a_op == ArithOpType::Mul) {
                 if (cmp_op == CompareOpType::EQ) {
-                    ASSERT_EQ((left[i] * right_operand) == value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] * right_operand),
+                                                value,
+                                                CompareOpType::EQ),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GE) {
-                    ASSERT_EQ((left[i] * right_operand) >= value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] * right_operand),
+                                                value,
+                                                CompareOpType::GE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GT) {
-                    ASSERT_EQ((left[i] * right_operand) > value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] * right_operand),
+                                                value,
+                                                CompareOpType::GT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LE) {
-                    ASSERT_EQ((left[i] * right_operand) <= value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] * right_operand),
+                                                value,
+                                                CompareOpType::LE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LT) {
-                    ASSERT_EQ((left[i] * right_operand) < value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] * right_operand),
+                                                value,
+                                                CompareOpType::LT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::NE) {
-                    ASSERT_EQ((left[i] * right_operand) != value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] * right_operand),
+                                                value,
+                                                CompareOpType::NE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else {
@@ -1432,27 +1515,45 @@ struct TestInplaceArithCompareImplS {
                 }
             } else if (a_op == ArithOpType::Div) {
                 if (cmp_op == CompareOpType::EQ) {
-                    ASSERT_EQ((left[i] / right_operand) == value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] / right_operand),
+                                                value,
+                                                CompareOpType::EQ),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GE) {
-                    ASSERT_EQ((left[i] / right_operand) >= value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] / right_operand),
+                                                value,
+                                                CompareOpType::GE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GT) {
-                    ASSERT_EQ((left[i] / right_operand) > value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] / right_operand),
+                                                value,
+                                                CompareOpType::GT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LE) {
-                    ASSERT_EQ((left[i] / right_operand) <= value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] / right_operand),
+                                                value,
+                                                CompareOpType::LE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LT) {
-                    ASSERT_EQ((left[i] / right_operand) < value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] / right_operand),
+                                                value,
+                                                CompareOpType::LT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::NE) {
-                    ASSERT_EQ((left[i] / right_operand) != value, bitset[i])
+                    ASSERT_EQ(reference_compare((left[i] / right_operand),
+                                                value,
+                                                CompareOpType::NE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else {
@@ -1460,27 +1561,45 @@ struct TestInplaceArithCompareImplS {
                 }
             } else if (a_op == ArithOpType::Mod) {
                 if (cmp_op == CompareOpType::EQ) {
-                    ASSERT_EQ(fmod(left[i], right_operand) == value, bitset[i])
+                    ASSERT_EQ(reference_compare(fmod(left[i], right_operand),
+                                                value,
+                                                CompareOpType::EQ),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GE) {
-                    ASSERT_EQ(fmod(left[i], right_operand) >= value, bitset[i])
+                    ASSERT_EQ(reference_compare(fmod(left[i], right_operand),
+                                                value,
+                                                CompareOpType::GE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::GT) {
-                    ASSERT_EQ(fmod(left[i], right_operand) > value, bitset[i])
+                    ASSERT_EQ(reference_compare(fmod(left[i], right_operand),
+                                                value,
+                                                CompareOpType::GT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LE) {
-                    ASSERT_EQ(fmod(left[i], right_operand) <= value, bitset[i])
+                    ASSERT_EQ(reference_compare(fmod(left[i], right_operand),
+                                                value,
+                                                CompareOpType::LE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::LT) {
-                    ASSERT_EQ(fmod(left[i], right_operand) < value, bitset[i])
+                    ASSERT_EQ(reference_compare(fmod(left[i], right_operand),
+                                                value,
+                                                CompareOpType::LT),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else if (cmp_op == CompareOpType::NE) {
-                    ASSERT_EQ(fmod(left[i], right_operand) != value, bitset[i])
+                    ASSERT_EQ(reference_compare(fmod(left[i], right_operand),
+                                                value,
+                                                CompareOpType::NE),
+                              bitset[i])
                         << i << " " << size_t(cmp_op) << " " << left[i] << " "
                         << right_operand << " " << value;
                 } else {
@@ -1513,27 +1632,45 @@ struct TestInplaceArithCompareImplS {
 
         for (size_t i = 0; i < n; i++) {
             if (cmp_op == CompareOpType::EQ) {
-                ASSERT_EQ((left[i] / right_operand) == value, bitset[i])
+                ASSERT_EQ(
+                    reference_compare(
+                        (left[i] / right_operand), value, CompareOpType::EQ),
+                    bitset[i])
                     << i << " " << size_t(cmp_op) << " " << left[i] << " "
                     << right_operand << " " << value;
             } else if (cmp_op == CompareOpType::GE) {
-                ASSERT_EQ((left[i] / right_operand) >= value, bitset[i])
+                ASSERT_EQ(
+                    reference_compare(
+                        (left[i] / right_operand), value, CompareOpType::GE),
+                    bitset[i])
                     << i << " " << size_t(cmp_op) << " " << left[i] << " "
                     << right_operand << " " << value;
             } else if (cmp_op == CompareOpType::GT) {
-                ASSERT_EQ((left[i] / right_operand) > value, bitset[i])
+                ASSERT_EQ(
+                    reference_compare(
+                        (left[i] / right_operand), value, CompareOpType::GT),
+                    bitset[i])
                     << i << " " << size_t(cmp_op) << " " << left[i] << " "
                     << right_operand << " " << value;
             } else if (cmp_op == CompareOpType::LE) {
-                ASSERT_EQ((left[i] / right_operand) <= value, bitset[i])
+                ASSERT_EQ(
+                    reference_compare(
+                        (left[i] / right_operand), value, CompareOpType::LE),
+                    bitset[i])
                     << i << " " << size_t(cmp_op) << " " << left[i] << " "
                     << right_operand << " " << value;
             } else if (cmp_op == CompareOpType::LT) {
-                ASSERT_EQ((left[i] / right_operand) < value, bitset[i])
+                ASSERT_EQ(
+                    reference_compare(
+                        (left[i] / right_operand), value, CompareOpType::LT),
+                    bitset[i])
                     << i << " " << size_t(cmp_op) << " " << left[i] << " "
                     << right_operand << " " << value;
             } else if (cmp_op == CompareOpType::NE) {
-                ASSERT_EQ((left[i] / right_operand) != value, bitset[i])
+                ASSERT_EQ(
+                    reference_compare(
+                        (left[i] / right_operand), value, CompareOpType::NE),
+                    bitset[i])
                     << i << " " << size_t(cmp_op) << " " << left[i] << " "
                     << right_operand << " " << value;
             } else {
@@ -2957,4 +3094,101 @@ int
 main(int argc, char* argv[]) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
+}
+
+// Include both scalar and per-row bounds. The old AVX512 upper-bound mask
+// still used IEEE comparisons even when its lower bound used scalar order.
+template <typename BitsetT, typename T>
+void
+CheckFloatingRangeTotalOrder() {
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<T> cases = {-std::numeric_limits<T>::infinity(),
+                                  T(-1),
+                                  T(-0.0),
+                                  T(0),
+                                  T(1),
+                                  std::numeric_limits<T>::infinity(),
+                                  nan,
+                                  -nan};
+    // An independent order oracle: do not reproduce the SIMD/helper code.
+    const std::vector<int> ranks = {0, 1, 2, 2, 3, 4, 5, 5};
+    // 24 exercises AVX512's 8-float tail; 41 and offset views also exercise
+    // scalar tails. 8233 enters the interleaved 8-page scalar-bound loop.
+    for (size_t n : {size_t(8), size_t(24), size_t(41), size_t(8233)}) {
+        std::vector<T> values(n), lower(n), upper(n);
+        for (size_t i = 0; i < n; ++i) {
+            values[i] = cases[i % cases.size()];
+            lower[i] = cases[(i / cases.size()) % cases.size()];
+            upper[i] =
+                cases[(i / (cases.size() * cases.size())) % cases.size()];
+        }
+        for (const auto op : typical_range_types) {
+            const bool include_lower =
+                op == RangeType::IncInc || op == RangeType::IncExc;
+            const bool include_upper =
+                op == RangeType::IncInc || op == RangeType::ExcInc;
+            auto expected = [&](int low, int value, int high) {
+                return (include_lower ? low <= value : low < value) &&
+                       (include_upper ? value <= high : value < high);
+            };
+            for (size_t offset : {size_t(0), size_t(3)}) {
+                BitsetT column_result(n + offset);
+                auto view = column_result.view(offset);
+                view.inplace_within_range_column(
+                    lower.data(), upper.data(), values.data(), n, op);
+                for (size_t i = 0; i < n; ++i) {
+                    ASSERT_EQ(
+                        expected(ranks[(i / cases.size()) % cases.size()],
+                                 ranks[i % cases.size()],
+                                 ranks[(i / (cases.size() * cases.size())) %
+                                       cases.size()]),
+                        view[i])
+                        << "column n=" << n << " offset=" << offset
+                        << " i=" << i;
+                }
+                for (size_t li = 0; li < cases.size(); ++li) {
+                    for (size_t ui = 0; ui < cases.size(); ++ui) {
+                        BitsetT result(n + offset);
+                        auto value_view = result.view(offset);
+                        value_view.inplace_within_range_val(
+                            cases[li], cases[ui], values.data(), n, op);
+                        for (size_t i = 0; i < n; ++i) {
+                            ASSERT_EQ(expected(ranks[li],
+                                               ranks[i % cases.size()],
+                                               ranks[ui]),
+                                      value_view[i])
+                                << "scalar n=" << n << " offset=" << offset
+                                << " i=" << i << " lower=" << li
+                                << " upper=" << ui;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(FloatingRangeTotalOrder, Avx512FloatAndDouble) {
+#if defined(__x86_64__)
+    if (!milvus::bitset::detail::x86::cpu_support_avx512()) {
+        GTEST_SKIP() << "AVX512 is unavailable";
+    }
+    using Traits =
+        VectorizedImplTraits<uint8_t,
+                             uint8_t,
+                             milvus::bitset::detail::x86::VectorizedAvx512>;
+    CheckFloatingRangeTotalOrder<typename Traits::bitset_type, float>();
+    CheckFloatingRangeTotalOrder<typename Traits::bitset_type, double>();
+#else
+    GTEST_SKIP() << "AVX512 requires x86_64";
+#endif
+}
+
+TEST(FloatingRangeTotalOrder, DynamicFloatAndDouble) {
+    using Traits =
+        VectorizedImplTraits<uint8_t,
+                             uint8_t,
+                             milvus::bitset::detail::VectorizedDynamic>;
+    CheckFloatingRangeTotalOrder<typename Traits::bitset_type, float>();
+    CheckFloatingRangeTotalOrder<typename Traits::bitset_type, double>();
 }

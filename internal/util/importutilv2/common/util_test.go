@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
@@ -260,4 +261,15 @@ func TestUtil_CheckValidUTF8_WithSafeError(t *testing.T) {
 	// Test with valid UTF-8
 	err = CheckValidUTF8("valid string", fieldSchema)
 	assert.NoError(t, err)
+}
+
+func TestFloatLiteralKeepsStrictTypesAndAcceptsNonFiniteStrings(t *testing.T) {
+	for _, value := range []any{json.Number("1.5"), "NaN", "Infinity", "-Infinity"} {
+		_, ok := FloatLiteral(value)
+		assert.True(t, ok)
+	}
+	for _, value := range []any{"1.5", "invalid", "1e400", nil, true} {
+		_, ok := FloatLiteral(value)
+		assert.False(t, ok)
+	}
 }

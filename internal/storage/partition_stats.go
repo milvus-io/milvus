@@ -79,7 +79,24 @@ func DeserializePartitionsStatsSnapshot(data []byte) (*PartitionStatsSnapshot, e
 }
 
 func SerializePartitionStatsSnapshot(partStats *PartitionStatsSnapshot) ([]byte, error) {
-	partData, err := json.Marshal(partStats)
+	// Legacy readers only prune segment IDs present in the snapshot. Omit the
+	// entire entry when float bounds cannot be JSON numbers; an empty FieldStats
+	// list would crash those readers. The source snapshot keeps its exact bounds.
+	snapshot := *partStats
+	snapshot.SegmentStats = make(map[UniqueID]SegmentStats, len(partStats.SegmentStats))
+	for id, segment := range partStats.SegmentStats {
+		safe := len(segment.FieldStats) > 0
+		for _, stats := range segment.FieldStats {
+			if !stats.hasJSONSafeBounds() {
+				safe = false
+				break
+			}
+		}
+		if safe {
+			snapshot.SegmentStats[id] = segment
+		}
+	}
+	partData, err := json.Marshal(&snapshot)
 	if err != nil {
 		return nil, err
 	}

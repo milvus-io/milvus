@@ -23,6 +23,8 @@
 package queryutil
 
 import (
+	"cmp"
+
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"google.golang.org/protobuf/proto"
@@ -1900,26 +1902,10 @@ func compareValues(a, b any, dataType schemapb.DataType) int {
 		return 0
 
 	case schemapb.DataType_Float:
-		va := a.(float32)
-		vb := b.(float32)
-		if va < vb {
-			return -1
-		}
-		if va > vb {
-			return 1
-		}
-		return 0
+		return cmp.Compare(typeutil.Float32ToSortableUint32(a.(float32)), typeutil.Float32ToSortableUint32(b.(float32)))
 
 	case schemapb.DataType_Double:
-		va := a.(float64)
-		vb := b.(float64)
-		if va < vb {
-			return -1
-		}
-		if va > vb {
-			return 1
-		}
-		return 0
+		return cmp.Compare(typeutil.Float64ToSortableUint64(a.(float64)), typeutil.Float64ToSortableUint64(b.(float64)))
 
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		va := a.(string)

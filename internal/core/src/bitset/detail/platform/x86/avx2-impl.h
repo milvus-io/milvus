@@ -40,6 +40,80 @@ namespace avx2 {
 
 namespace {
 
+template <int Predicate>
+inline __m256
+total_mm256_cmp_ps_target(__m256 a, __m256 b, bool target_nan) {
+    constexpr int finite_predicate = Predicate == _CMP_GT_OQ   ? _CMP_NLE_UQ
+                                     : Predicate == _CMP_GE_OQ ? _CMP_NLT_UQ
+                                                               : Predicate;
+    constexpr int nan_predicate =
+        Predicate == _CMP_EQ_OQ || Predicate == _CMP_GE_OQ    ? _CMP_UNORD_Q
+        : Predicate == _CMP_NEQ_UQ || Predicate == _CMP_LT_OQ ? _CMP_ORD_Q
+        : Predicate == _CMP_LE_OQ                             ? _CMP_TRUE_UQ
+                                                              : _CMP_FALSE_OQ;
+    return target_nan ? _mm256_cmp_ps(a, a, nan_predicate)
+                      : _mm256_cmp_ps(a, b, finite_predicate);
+}
+
+template <int Predicate>
+inline __m256d
+total_mm256_cmp_pd_target(__m256d a, __m256d b, bool target_nan) {
+    constexpr int finite_predicate = Predicate == _CMP_GT_OQ   ? _CMP_NLE_UQ
+                                     : Predicate == _CMP_GE_OQ ? _CMP_NLT_UQ
+                                                               : Predicate;
+    constexpr int nan_predicate =
+        Predicate == _CMP_EQ_OQ || Predicate == _CMP_GE_OQ    ? _CMP_UNORD_Q
+        : Predicate == _CMP_NEQ_UQ || Predicate == _CMP_LT_OQ ? _CMP_ORD_Q
+        : Predicate == _CMP_LE_OQ                             ? _CMP_TRUE_UQ
+                                                              : _CMP_FALSE_OQ;
+    return target_nan ? _mm256_cmp_pd(a, a, nan_predicate)
+                      : _mm256_cmp_pd(a, b, finite_predicate);
+}
+
+template <int Predicate>
+inline __m256
+total_mm256_cmp_ps(__m256 a, __m256 b) {
+    const auto ordinary = _mm256_cmp_ps(a, b, Predicate);
+    const auto nan_a = _mm256_cmp_ps(a, a, _CMP_UNORD_Q);
+    const auto nan_b = _mm256_cmp_ps(b, b, _CMP_UNORD_Q);
+    if constexpr (Predicate == _CMP_EQ_OQ) {
+        return _mm256_or_ps(ordinary, _mm256_and_ps(nan_a, nan_b));
+    } else if constexpr (Predicate == _CMP_NEQ_UQ) {
+        return _mm256_andnot_ps(_mm256_and_ps(nan_a, nan_b), ordinary);
+    } else if constexpr (Predicate == _CMP_LT_OQ) {
+        return _mm256_or_ps(ordinary, _mm256_andnot_ps(nan_a, nan_b));
+    } else if constexpr (Predicate == _CMP_LE_OQ) {
+        return _mm256_or_ps(ordinary, nan_b);
+    } else if constexpr (Predicate == _CMP_GT_OQ) {
+        return _mm256_or_ps(ordinary, _mm256_andnot_ps(nan_b, nan_a));
+    } else {
+        static_assert(Predicate == _CMP_GE_OQ);
+        return _mm256_or_ps(ordinary, nan_a);
+    }
+}
+
+template <int Predicate>
+inline __m256d
+total_mm256_cmp_pd(__m256d a, __m256d b) {
+    const auto ordinary = _mm256_cmp_pd(a, b, Predicate);
+    const auto nan_a = _mm256_cmp_pd(a, a, _CMP_UNORD_Q);
+    const auto nan_b = _mm256_cmp_pd(b, b, _CMP_UNORD_Q);
+    if constexpr (Predicate == _CMP_EQ_OQ) {
+        return _mm256_or_pd(ordinary, _mm256_and_pd(nan_a, nan_b));
+    } else if constexpr (Predicate == _CMP_NEQ_UQ) {
+        return _mm256_andnot_pd(_mm256_and_pd(nan_a, nan_b), ordinary);
+    } else if constexpr (Predicate == _CMP_LT_OQ) {
+        return _mm256_or_pd(ordinary, _mm256_andnot_pd(nan_a, nan_b));
+    } else if constexpr (Predicate == _CMP_LE_OQ) {
+        return _mm256_or_pd(ordinary, nan_b);
+    } else if constexpr (Predicate == _CMP_GT_OQ) {
+        return _mm256_or_pd(ordinary, _mm256_andnot_pd(nan_b, nan_a));
+    } else {
+        static_assert(Predicate == _CMP_GE_OQ);
+        return _mm256_or_pd(ordinary, nan_a);
+    }
+}
+
 // count is expected to be in range [0, 32)
 inline uint32_t
 get_mask(const size_t count) {
@@ -462,12 +536,15 @@ OpCompareValImpl<float, Op>::op_compare_val(uint8_t* const __restrict res_u8,
 
     const __m256 target = _mm256_set1_ps(val);
 
+    const bool target_nan = std::isnan(val);
+
     // todo: aligned reads & writes
 
     const size_t size8 = (size / 8) * 8;
     for (size_t i = 0; i < size8; i += 8) {
         const __m256 v0 = _mm256_loadu_ps(src + i);
-        const __m256 cmp = _mm256_cmp_ps(v0, target, pred);
+        const __m256 cmp =
+            total_mm256_cmp_ps_target<pred>(v0, target, target_nan);
         const uint8_t mmask = _mm256_movemask_ps(cmp);
 
         res_u8[i / 8] = mmask;
@@ -490,14 +567,18 @@ OpCompareValImpl<double, Op>::op_compare_val(uint8_t* const __restrict res_u8,
 
     const __m256d target = _mm256_set1_pd(val);
 
+    const bool target_nan = std::isnan(val);
+
     // todo: aligned reads & writes
 
     const size_t size8 = (size / 8) * 8;
     for (size_t i = 0; i < size8; i += 8) {
         const __m256d v0 = _mm256_loadu_pd(src + i);
         const __m256d v1 = _mm256_loadu_pd(src + i + 4);
-        const __m256d cmp0 = _mm256_cmp_pd(v0, target, pred);
-        const __m256d cmp1 = _mm256_cmp_pd(v1, target, pred);
+        const __m256d cmp0 =
+            total_mm256_cmp_pd_target<pred>(v0, target, target_nan);
+        const __m256d cmp1 =
+            total_mm256_cmp_pd_target<pred>(v1, target, target_nan);
         const uint8_t mmask0 = _mm256_movemask_pd(cmp0);
         const uint8_t mmask1 = _mm256_movemask_pd(cmp1);
 
@@ -679,7 +760,7 @@ OpCompareColumnImpl<float, float, Op>::op_compare_column(
     for (size_t i = 0; i < size8; i += 8) {
         const __m256 v0l = _mm256_loadu_ps(left + i);
         const __m256 v0r = _mm256_loadu_ps(right + i);
-        const __m256 cmp = _mm256_cmp_ps(v0l, v0r, pred);
+        const __m256 cmp = total_mm256_cmp_ps<pred>(v0l, v0r);
         const uint8_t mmask = _mm256_movemask_ps(cmp);
 
         res_u8[i / 8] = mmask;
@@ -708,8 +789,8 @@ OpCompareColumnImpl<double, double, Op>::op_compare_column(
         const __m256d v1l = _mm256_loadu_pd(left + i + 4);
         const __m256d v0r = _mm256_loadu_pd(right + i);
         const __m256d v1r = _mm256_loadu_pd(right + i + 4);
-        const __m256d cmp0 = _mm256_cmp_pd(v0l, v0r, pred);
-        const __m256d cmp1 = _mm256_cmp_pd(v1l, v1r, pred);
+        const __m256d cmp0 = total_mm256_cmp_pd<pred>(v0l, v0r);
+        const __m256d cmp1 = total_mm256_cmp_pd<pred>(v1l, v1r);
         const uint8_t mmask0 = _mm256_movemask_pd(cmp0);
         const uint8_t mmask1 = _mm256_movemask_pd(cmp1);
 
@@ -937,8 +1018,8 @@ OpWithinRangeColumnImpl<float, Op>::op_within_range_column(
         const __m256 v0l = _mm256_loadu_ps(lower + i);
         const __m256 v0u = _mm256_loadu_ps(upper + i);
         const __m256 v0v = _mm256_loadu_ps(values + i);
-        const __m256 cmpl = _mm256_cmp_ps(v0l, v0v, pred_lower);
-        const __m256 cmpu = _mm256_cmp_ps(v0v, v0u, pred_upper);
+        const __m256 cmpl = total_mm256_cmp_ps<pred_lower>(v0l, v0v);
+        const __m256 cmpu = total_mm256_cmp_ps<pred_upper>(v0v, v0u);
         const __m256 cmp = _mm256_and_ps(cmpl, cmpu);
         const uint8_t mmask = _mm256_movemask_ps(cmp);
 
@@ -974,10 +1055,10 @@ OpWithinRangeColumnImpl<double, Op>::op_within_range_column(
         const __m256d v1u = _mm256_loadu_pd(upper + i + 4);
         const __m256d v0v = _mm256_loadu_pd(values + i);
         const __m256d v1v = _mm256_loadu_pd(values + i + 4);
-        const __m256d cmp0l = _mm256_cmp_pd(v0l, v0v, pred_lower);
-        const __m256d cmp0u = _mm256_cmp_pd(v0v, v0u, pred_upper);
-        const __m256d cmp1l = _mm256_cmp_pd(v1l, v1v, pred_lower);
-        const __m256d cmp1u = _mm256_cmp_pd(v1v, v1u, pred_upper);
+        const __m256d cmp0l = total_mm256_cmp_pd<pred_lower>(v0l, v0v);
+        const __m256d cmp0u = total_mm256_cmp_pd<pred_upper>(v0v, v0u);
+        const __m256d cmp1l = total_mm256_cmp_pd<pred_lower>(v1l, v1v);
+        const __m256d cmp1u = total_mm256_cmp_pd<pred_upper>(v1v, v1u);
         const __m256d cmp0 = _mm256_and_pd(cmp0l, cmp0u);
         const __m256d cmp1 = _mm256_and_pd(cmp1l, cmp1u);
         const uint8_t mmask0 = _mm256_movemask_pd(cmp0);
@@ -1204,8 +1285,8 @@ OpWithinRangeValImpl<float, Op>::op_within_range_val(
     const size_t size8 = (size / 8) * 8;
     for (size_t i = 0; i < size8; i += 8) {
         const __m256 v0v = _mm256_loadu_ps(values + i);
-        const __m256 cmpl = _mm256_cmp_ps(lower_v, v0v, pred_lower);
-        const __m256 cmpu = _mm256_cmp_ps(v0v, upper_v, pred_upper);
+        const __m256 cmpl = total_mm256_cmp_ps<pred_lower>(lower_v, v0v);
+        const __m256 cmpu = total_mm256_cmp_ps<pred_upper>(v0v, upper_v);
         const __m256 cmp = _mm256_and_ps(cmpl, cmpu);
         const uint8_t mmask = _mm256_movemask_ps(cmp);
 
@@ -1239,10 +1320,10 @@ OpWithinRangeValImpl<double, Op>::op_within_range_val(
     for (size_t i = 0; i < size8; i += 8) {
         const __m256d v0v = _mm256_loadu_pd(values + i);
         const __m256d v1v = _mm256_loadu_pd(values + i + 4);
-        const __m256d cmp0l = _mm256_cmp_pd(lower_v, v0v, pred_lower);
-        const __m256d cmp0u = _mm256_cmp_pd(v0v, upper_v, pred_upper);
-        const __m256d cmp1l = _mm256_cmp_pd(lower_v, v1v, pred_lower);
-        const __m256d cmp1u = _mm256_cmp_pd(v1v, upper_v, pred_upper);
+        const __m256d cmp0l = total_mm256_cmp_pd<pred_lower>(lower_v, v0v);
+        const __m256d cmp0u = total_mm256_cmp_pd<pred_upper>(v0v, upper_v);
+        const __m256d cmp1l = total_mm256_cmp_pd<pred_lower>(lower_v, v1v);
+        const __m256d cmp1u = total_mm256_cmp_pd<pred_upper>(v1v, upper_v);
         const __m256d cmp0 = _mm256_and_pd(cmp0l, cmp0u);
         const __m256d cmp1 = _mm256_and_pd(cmp1l, cmp1u);
         const uint8_t mmask0 = _mm256_movemask_pd(cmp0);
@@ -1321,7 +1402,7 @@ struct ArithHelperF32<ArithOpType::Add, CmpOp> {
     op(const __m256 left, const __m256 right, const __m256 value) {
         // left + right == value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm256_cmp_ps(_mm256_add_ps(left, right), value, pred);
+        return total_mm256_cmp_ps<pred>(_mm256_add_ps(left, right), value);
     }
 };
 
@@ -1331,7 +1412,7 @@ struct ArithHelperF32<ArithOpType::Sub, CmpOp> {
     op(const __m256 left, const __m256 right, const __m256 value) {
         // left - right == value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm256_cmp_ps(_mm256_sub_ps(left, right), value, pred);
+        return total_mm256_cmp_ps<pred>(_mm256_sub_ps(left, right), value);
     }
 };
 
@@ -1341,7 +1422,7 @@ struct ArithHelperF32<ArithOpType::Mul, CmpOp> {
     op(const __m256 left, const __m256 right, const __m256 value) {
         // left * right == value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm256_cmp_ps(_mm256_mul_ps(left, right), value, pred);
+        return total_mm256_cmp_ps<pred>(_mm256_mul_ps(left, right), value);
     }
 };
 
@@ -1352,14 +1433,14 @@ struct ArithHelperF32<ArithOpType::Div, CmpOp> {
         // this is valid for the positive denominator, == and != cases.
         // left == right * value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm256_cmp_ps(left, _mm256_mul_ps(right, value), pred);
+        return total_mm256_cmp_ps<pred>(left, _mm256_mul_ps(right, value));
     }
 
     static inline __m256
     op(const __m256 left, const __m256 right, const __m256 value) {
         // left / right == value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm256_cmp_ps(_mm256_div_ps(left, right), value, pred);
+        return total_mm256_cmp_ps<pred>(_mm256_div_ps(left, right), value);
     }
 };
 
@@ -1375,7 +1456,7 @@ struct ArithHelperF64<ArithOpType::Add, CmpOp> {
     op(const __m256d left, const __m256d right, const __m256d value) {
         // left + right == value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm256_cmp_pd(_mm256_add_pd(left, right), value, pred);
+        return total_mm256_cmp_pd<pred>(_mm256_add_pd(left, right), value);
     }
 };
 
@@ -1385,7 +1466,7 @@ struct ArithHelperF64<ArithOpType::Sub, CmpOp> {
     op(const __m256d left, const __m256d right, const __m256d value) {
         // left - right == value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm256_cmp_pd(_mm256_sub_pd(left, right), value, pred);
+        return total_mm256_cmp_pd<pred>(_mm256_sub_pd(left, right), value);
     }
 };
 
@@ -1395,7 +1476,7 @@ struct ArithHelperF64<ArithOpType::Mul, CmpOp> {
     op(const __m256d left, const __m256d right, const __m256d value) {
         // left * right == value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm256_cmp_pd(_mm256_mul_pd(left, right), value, pred);
+        return total_mm256_cmp_pd<pred>(_mm256_mul_pd(left, right), value);
     }
 };
 
@@ -1406,14 +1487,14 @@ struct ArithHelperF64<ArithOpType::Div, CmpOp> {
         // this is valid for the positive denominator, == and != cases.
         // left == right * value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm256_cmp_pd(left, _mm256_mul_pd(right, value), pred);
+        return total_mm256_cmp_pd<pred>(left, _mm256_mul_pd(right, value));
     }
 
     static inline __m256d
     op(const __m256d left, const __m256d right, const __m256d value) {
         // left / right == value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm256_cmp_pd(_mm256_div_pd(left, right), value, pred);
+        return total_mm256_cmp_pd<pred>(_mm256_div_pd(left, right), value);
     }
 };
 
@@ -1622,7 +1703,7 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     } else {
         if constexpr (AOp == ArithOpType::Div) {
             if (std::isfinite(value) && std::isfinite(right_operand) &&
-                right_operand > 0) {
+                std::isfinite(right_operand * value) && right_operand > 0) {
                 // a special case that allows faster processing by using the multiplication
                 //   operation instead of the division one.
 
@@ -1646,14 +1727,9 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
                 }
 
                 return true;
-            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
-                       right_operand < 0) {
-                // flip signs and go for the multiplication case
-                return OpArithCompareImpl<float,
-                                          AOp,
-                                          CompareOpDivFlip<CmpOp>::op>::
-                    op_arith_compare(res_u8, src, -right_operand, -value, size);
             }
+            // A negative divisor must use actual division: negating NaN
+            // preserves its maximal SQL order rather than reversing it.
 
             // go with the default case
         }
@@ -1699,7 +1775,7 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     } else {
         if constexpr (AOp == ArithOpType::Div) {
             if (std::isfinite(value) && std::isfinite(right_operand) &&
-                right_operand > 0) {
+                std::isfinite(right_operand * value) && right_operand > 0) {
                 // a special case that allows faster processing by using the multiplication
                 //   operation instead of the division one.
 
@@ -1727,14 +1803,9 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
                 }
 
                 return true;
-            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
-                       right_operand < 0) {
-                // flip signs and go for the multiplication case
-                return OpArithCompareImpl<double,
-                                          AOp,
-                                          CompareOpDivFlip<CmpOp>::op>::
-                    op_arith_compare(res_u8, src, -right_operand, -value, size);
             }
+            // A negative divisor must use actual division: negating NaN
+            // preserves its maximal SQL order rather than reversing it.
 
             // go with the default case
         }

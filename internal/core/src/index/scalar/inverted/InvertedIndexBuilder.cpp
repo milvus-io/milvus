@@ -233,6 +233,8 @@ ParseBuildParams(const Config& params,
         : engine_version <= 1   ? TANTIVY_INDEX_MINIMUM_VERSION
                                 : TANTIVY_INDEX_LATEST_VERSION;
     result.single_segment = engine_version == 0;
+    result.nan_total_order =
+        engine_version >= kMinScalarIndexVersionForNaNTotalOrder;
     if (result.tantivy_index_version != TANTIVY_INDEX_MINIMUM_VERSION &&
         result.tantivy_index_version != TANTIVY_INDEX_LATEST_VERSION) {
         ThrowInfo(DataTypeInvalid,
@@ -285,13 +287,15 @@ CheckAppend(size_t current, size_t count) {
 std::shared_ptr<milvus::tantivy::TantivyIndexWrapper>
 CreateEngine(const InvertedBuildParams& params,
              const std::shared_ptr<storage::LocalDirectory>& directory) {
-    return std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+    auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
         params.field_name.c_str(),
         TantivyType(params.value_type),
         directory->Path().c_str(),
         params.tantivy_index_version,
         params.single_segment,
         true);
+    engine->SetSupportsNaNTotalOrder(params.nan_total_order);
+    return engine;
 }
 
 template <typename T>
@@ -340,7 +344,22 @@ AddArrayDocument(milvus::tantivy::TantivyIndexWrapper& engine,
                  size_t offset,
                  bool single_segment) {
     const auto* values = static_cast<const T*>(array.data());
-    const auto length = static_cast<size_t>(array.length());
+    auto length = static_cast<size_t>(array.length());
+    std::unique_ptr<T[]> valid_values;
+    for (size_t i = 0; i < length; ++i) {
+        if (!array.is_element_valid(i)) {
+            valid_values = std::make_unique<T[]>(length);
+            size_t valid_count = 0;
+            for (size_t j = 0; j < length; ++j) {
+                if (array.is_element_valid(j)) {
+                    valid_values[valid_count++] = values[j];
+                }
+            }
+            values = valid_values.get();
+            length = valid_count;
+            break;
+        }
+    }
     if (single_segment) {
         engine.add_array_data_by_single_segment_writer(values, length);
     } else {
@@ -395,6 +414,9 @@ AddArrayByType(milvus::tantivy::TantivyIndexWrapper& engine,
             string_scratch.clear();
             string_scratch.reserve(static_cast<size_t>(array.length()));
             for (int i = 0; i < array.length(); ++i) {
+                if (!array.is_element_valid(i)) {
+                    continue;
+                }
                 string_scratch.emplace_back(
                     array.get_data_unchecked<std::string_view>(i));
             }

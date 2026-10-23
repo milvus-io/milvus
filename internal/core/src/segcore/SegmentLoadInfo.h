@@ -37,6 +37,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Types.h"
+#include "segcore/IndexLoadEligibility.h"
 
 namespace milvus::segcore {
 
@@ -1169,9 +1170,13 @@ class SegmentLoadInfo {
             if (!HasFieldInSchema(field_id)) {
                 continue;
             }
-            field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
+            if (!CanLoadIndex(load_index_info,
+                              index_info.current_scalar_index_version())) {
+                continue;
+            }
+            field_index_id_cache_[field_id].push_back(index_info.indexid());
             // Use metadata-only estimates for capabilities, not as an override
             // of the translator's file-aware loading resource estimate.
             auto request = milvus::index::IndexLoadResource(

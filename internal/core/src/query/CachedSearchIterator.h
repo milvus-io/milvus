@@ -25,6 +25,7 @@
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
+#include "common/ScalarComparison.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "index/contracts/query/IVectorReader.h"
@@ -94,6 +95,9 @@ class CachedSearchIterator {
     operator=(CachedSearchIterator&&) = delete;
 
  private:
+    friend class CachedSearchIteratorTestAccess;
+    CachedSearchIterator() = default;
+
     using DisIdPair = std::pair<float, int64_t>;
     using IterIdx = size_t;
     using IterIdDisIdPair = std::pair<IterIdx, DisIdPair>;
@@ -116,19 +120,30 @@ class CachedSearchIterator {
     size_t num_chunks_ = 1;
     size_t nq_ = 0;
 
+    // Distances are sign-normalized so smaller is better. Negation reverses
+    // finite order but not NaN: for similarity metrics, raw NaN is greatest
+    // and must therefore be first in the normalized ascending order.
+    static bool
+    DistanceLess(float lhs, float rhs, int8_t sign) {
+        return sign == -1 ? ScalarGreater(-lhs, -rhs) : ScalarLess(lhs, rhs);
+    }
+
     struct IterIdDisIdPairComparator {
+        int8_t sign = 1;
+
         bool
-        operator()(const IterIdDisIdPair& lhs, const IterIdDisIdPair& rhs) {
-            if (lhs.second.first == rhs.second.first) {
+        operator()(const IterIdDisIdPair& lhs,
+                   const IterIdDisIdPair& rhs) const {
+            if (ScalarEqual(lhs.second.first, rhs.second.first)) {
                 return lhs.second.second > rhs.second.second;
             }
-            return lhs.second.first > rhs.second.first;
+            return DistanceLess(rhs.second.first, lhs.second.first, sign);
         }
     };
-    std::vector<std::priority_queue<IterIdDisIdPair,
-                                    std::vector<IterIdDisIdPair>,
-                                    IterIdDisIdPairComparator>>
-        chunked_heaps_;
+    using ChunkHeap = std::priority_queue<IterIdDisIdPair,
+                                          std::vector<IterIdDisIdPair>,
+                                          IterIdDisIdPairComparator>;
+    std::vector<ChunkHeap> chunked_heaps_;
 
     inline bool
     IsValid(const DisIdPair& result,
@@ -136,19 +151,19 @@ class CachedSearchIterator {
             const std::optional<float>& radius,
             const std::optional<float>& range_filter) {
         const float dist = result.first;
-        const bool is_valid =
-            !last_bound.has_value() || dist > last_bound.value();
+        const bool is_valid = !last_bound.has_value() ||
+                              DistanceLess(last_bound.value(), dist, sign_);
 
         if (!radius.has_value()) {
             return is_valid;
         }
 
         if (!range_filter.has_value()) {
-            return is_valid && dist < radius.value();
+            return is_valid && DistanceLess(dist, radius.value(), sign_);
         }
 
-        return is_valid && dist < radius.value() &&
-               dist >= range_filter.value();
+        return is_valid && DistanceLess(dist, radius.value(), sign_) &&
+               !DistanceLess(dist, range_filter.value(), sign_);
     }
 
     inline DisIdPair

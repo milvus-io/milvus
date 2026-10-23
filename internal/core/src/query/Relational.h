@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <functional>
 #include <string>
 
@@ -23,7 +24,21 @@ namespace milvus::query {
 template <typename Op, typename T, typename U>
 bool
 RelationalImpl(const T& t, const U& u, FundamentalTag, FundamentalTag) {
-    return Op{}(t, u);
+    if constexpr (std::is_same_v<Op, std::equal_to<>>) {
+        return ScalarEqual(t, u);
+    } else if constexpr (std::is_same_v<Op, std::not_equal_to<>>) {
+        return !ScalarEqual(t, u);
+    } else if constexpr (std::is_same_v<Op, std::less<>>) {
+        return ScalarLess(t, u);
+    } else if constexpr (std::is_same_v<Op, std::greater<>>) {
+        return ScalarGreater(t, u);
+    } else if constexpr (std::is_same_v<Op, std::less_equal<>>) {
+        return ScalarLessEqual(t, u);
+    } else if constexpr (std::is_same_v<Op, std::greater_equal<>>) {
+        return ScalarGreaterEqual(t, u);
+    } else {
+        return Op{}(t, u);
+    }
 }
 
 template <typename Op, typename T, typename U>

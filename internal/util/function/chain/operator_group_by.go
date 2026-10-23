@@ -20,7 +20,6 @@ package chain
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 
@@ -29,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // GroupScorer defines how to compute the group score from individual scores.
@@ -243,15 +243,13 @@ func (o *GroupByOp) processChunk(ctx *types.FuncContext, input *DataFrame, chunk
 	// - same groupScore: larger group first
 	// - same groupScore and size: smaller first id first
 	sort.SliceStable(groups, func(i, j int) bool {
-		iNaN, jNaN := math.IsNaN(float64(groups[i].groupScore)), math.IsNaN(float64(groups[j].groupScore))
-		if iNaN != jNaN {
-			return !iNaN // NaN follows numeric scores in either direction.
-		}
-		if !iNaN && groups[i].groupScore != groups[j].groupScore {
+		si := typeutil.Float32ToSortableUint32(groups[i].groupScore)
+		sj := typeutil.Float32ToSortableUint32(groups[j].groupScore)
+		if si != sj {
 			if o.sortDescending {
-				return groups[i].groupScore > groups[j].groupScore
+				return si > sj
 			}
-			return groups[i].groupScore < groups[j].groupScore
+			return si < sj
 		}
 		if len(groups[i].rowIndices) != len(groups[j].rowIndices) {
 			return len(groups[i].rowIndices) > len(groups[j].rowIndices)
@@ -302,10 +300,19 @@ func (o *GroupByOp) buildGroups(groupChunk arrow.Array, scoreChunk *array.Float3
 
 	for i := 0; i < chunkLen; i++ {
 		key := getArrayValue(groupChunk, i)
+		// Arrow columns have one scalar type. Use canonical integer keys for
+		// floating identity while retaining the original value in the group.
+		mapKey := key
+		switch value := key.(type) {
+		case float32:
+			mapKey = typeutil.Float32ToSortableUint32(value)
+		case float64:
+			mapKey = typeutil.Float64ToSortableUint64(value)
+		}
 		score := scoreChunk.Value(i)
 		id := getArrayValue(idChunk, i)
 
-		if g, exists := groupMap[key]; exists {
+		if g, exists := groupMap[mapKey]; exists {
 			g.rowIndices = append(g.rowIndices, i)
 			g.scores = append(g.scores, score)
 			g.ids = append(g.ids, id)
@@ -316,8 +323,8 @@ func (o *GroupByOp) buildGroups(groupChunk arrow.Array, scoreChunk *array.Float3
 				scores:     []float32{score},
 				ids:        []any{id},
 			}
-			groupMap[key] = g
-			groupOrder = append(groupOrder, key)
+			groupMap[mapKey] = g
+			groupOrder = append(groupOrder, mapKey)
 		}
 	}
 
@@ -340,12 +347,9 @@ func (o *GroupByOp) sortAndLimitGroup(g *group) {
 	}
 
 	sort.SliceStable(indices, func(i, j int) bool {
-		si, sj := g.scores[indices[i]], g.scores[indices[j]]
-		iNaN, jNaN := math.IsNaN(float64(si)), math.IsNaN(float64(sj))
-		if iNaN != jNaN {
-			return !iNaN // Keep numeric candidates ahead of NaN before trimming.
-		}
-		if !iNaN && si != sj {
+		si := typeutil.Float32ToSortableUint32(g.scores[indices[i]])
+		sj := typeutil.Float32ToSortableUint32(g.scores[indices[j]])
+		if si != sj {
 			if o.sortDescending {
 				return si > sj
 			}

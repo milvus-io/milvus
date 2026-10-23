@@ -24,9 +24,12 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <algorithm>
+#include <cmath>
 #include "common/FastMem.h"
 #include <cstring>
+#include <type_traits>
 #include <vector>
 #include <xsimd/xsimd.hpp>
 #include "common/SimdUtil.h"
@@ -69,6 +72,7 @@ filterChunkImpl(
         (kIdealUnroll <= kMaxUnroll) ? kIdealUnroll : kMaxUnroll;
     constexpr int kStep = kLanes * kUnroll;
 
+    const bool match_nan = ScalarIsNaN(vals[num_vals - 1]);
     int i = 0;
 
     // ── Unrolled main loop ──────────────────────────────────────────────
@@ -78,6 +82,11 @@ filterChunkImpl(
         for (int u = 0; u < kUnroll; ++u) {
             d[u] = Batch::load_unaligned(data + i + u * kLanes);
             acc[u] = BatchBool(false);
+            if constexpr (std::is_floating_point_v<T>) {
+                if (match_nan) {
+                    acc[u] = xsimd::isnan(d[u]);
+                }
+            }
         }
 
         for (const auto& bcast : broadcast) {
@@ -122,6 +131,11 @@ filterChunkImpl(
         for (; i + kLanes <= size; i += kLanes) {
             auto d0 = Batch::load_unaligned(data + i);
             BatchBool acc0(false);
+            if constexpr (std::is_floating_point_v<T>) {
+                if (match_nan) {
+                    acc0 = xsimd::isnan(d0);
+                }
+            }
             for (const auto& bcast : broadcast) {
                 acc0 = acc0 | (d0 == bcast);
             }
@@ -159,7 +173,8 @@ filterChunkImpl(
 
     // ── Scalar tail ─────────────────────────────────────────────────────
     for (; i < size; ++i) {
-        if (std::binary_search(vals, vals + num_vals, data[i])) {
+        if (std::binary_search(
+                vals, vals + num_vals, data[i], ScalarLessThan<T>{})) {
             bitmap[i / 8] |= static_cast<uint8_t>(1 << (i % 8));
         }
     }

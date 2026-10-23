@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -421,7 +422,7 @@ class Array {
                         return false;
                     }
                     auto val = get_raw_data<bool>(i);
-                    if (val != arr2.array(i).bool_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).bool_val())) {
                         return false;
                     }
                 }
@@ -435,7 +436,7 @@ class Array {
                         return false;
                     }
                     auto val = get_raw_data<int>(i);
-                    if (val != arr2.array(i).int64_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).int64_val())) {
                         return false;
                     }
                 }
@@ -447,7 +448,7 @@ class Array {
                         return false;
                     }
                     auto val = get_raw_data<int64_t>(i);
-                    if (val != arr2.array(i).int64_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).int64_val())) {
                         return false;
                     }
                 }
@@ -459,7 +460,9 @@ class Array {
                         return false;
                     }
                     auto val = get_raw_data<float>(i);
-                    if (val != static_cast<float>(arr2.array(i).float_val())) {
+                    if (!ScalarEqual(
+                            val,
+                            static_cast<float>(arr2.array(i).float_val()))) {
                         return false;
                     }
                 }
@@ -471,7 +474,7 @@ class Array {
                         return false;
                     }
                     auto val = get_raw_data<double>(i);
-                    if (val != arr2.array(i).float_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).float_val())) {
                         return false;
                     }
                 }
@@ -485,7 +488,7 @@ class Array {
                         return false;
                     }
                     auto val = get_raw_data<std::string>(i);
-                    if (val != arr2.array(i).string_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).string_val())) {
                         return false;
                     }
                 }
@@ -841,7 +844,7 @@ class ArrayView {
                         return false;
                     }
                     auto val = get_raw_data<bool>(i);
-                    if (val != arr2.array(i).bool_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).bool_val())) {
                         return false;
                     }
                 }
@@ -855,7 +858,7 @@ class ArrayView {
                         return false;
                     }
                     auto val = get_raw_data<int>(i);
-                    if (val != arr2.array(i).int64_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).int64_val())) {
                         return false;
                     }
                 }
@@ -867,7 +870,7 @@ class ArrayView {
                         return false;
                     }
                     auto val = get_raw_data<int64_t>(i);
-                    if (val != arr2.array(i).int64_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).int64_val())) {
                         return false;
                     }
                 }
@@ -879,7 +882,9 @@ class ArrayView {
                         return false;
                     }
                     auto val = get_raw_data<float>(i);
-                    if (val != static_cast<float>(arr2.array(i).float_val())) {
+                    if (!ScalarEqual(
+                            val,
+                            static_cast<float>(arr2.array(i).float_val()))) {
                         return false;
                     }
                 }
@@ -891,7 +896,7 @@ class ArrayView {
                         return false;
                     }
                     auto val = get_raw_data<double>(i);
-                    if (val != arr2.array(i).float_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).float_val())) {
                         return false;
                     }
                 }
@@ -905,7 +910,7 @@ class ArrayView {
                         return false;
                     }
                     auto val = get_raw_data<std::string>(i);
-                    if (val != arr2.array(i).string_val()) {
+                    if (!ScalarEqual(val, arr2.array(i).string_val())) {
                         return false;
                     }
                 }

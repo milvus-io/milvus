@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
-	"math"
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -248,7 +247,7 @@ func (f32FieldAccessor *Float32FieldAccessor) Hash(idx int) uint64 {
 	}
 	f32FieldAccessor.hasher.Reset()
 	val := f32FieldAccessor.vals[idx]
-	binary.LittleEndian.PutUint32(f32FieldAccessor.buffer, math.Float32bits(val))
+	binary.LittleEndian.PutUint32(f32FieldAccessor.buffer, typeutil.Float32ToSortableUint32(val))
 	f32FieldAccessor.hasher.Write(f32FieldAccessor.buffer[:4])
 	return f32FieldAccessor.hasher.Sum64()
 }
@@ -294,7 +293,7 @@ func (f64Field *Float64FieldAccessor) Hash(idx int) uint64 {
 	}
 	f64Field.hasher.Reset()
 	val := f64Field.vals[idx]
-	binary.LittleEndian.PutUint64(f64Field.buffer, math.Float64bits(val))
+	binary.LittleEndian.PutUint64(f64Field.buffer, typeutil.Float64ToSortableUint64(val))
 	f64Field.hasher.Write(f64Field.buffer)
 	return f64Field.hasher.Sum64()
 }

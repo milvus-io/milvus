@@ -20,7 +20,7 @@
 
 #include "common/BitUtil.h"
 #include "common/EasyAssert.h"
-#include "common/float_util_c.h"
+#include "common/ScalarComparison.h"
 #include "folly/hash/Hash.h"
 
 namespace milvus {
@@ -58,7 +58,7 @@ VectorHasher::hashValues(const ColumnVectorPtr& column_data,
                 T raw_value = column_data->ValueAt<T>(row_idx);
                 uint64_t hash_value = kNullHash;
                 if constexpr (std::is_floating_point_v<T>) {
-                    hash_value = milvus::NaNAwareHash<T>()(raw_value);
+                    hash_value = milvus::ScalarHash<T>()(raw_value);
                 } else {
                     hash_value = folly::hasher<T>()(raw_value);
                 }
