@@ -540,14 +540,20 @@ func (t *RefreshExternalCollectionTask) segmentHasFunctionOutputColumns(seg *dat
 	if len(outputColumns) == 0 {
 		return true, nil
 	}
-	if seg.GetManifestPath() != "" {
-		hasColumns, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
-		if err != nil {
-			return false, merr.Wrapf(err, "check function output columns for segment %d", seg.GetID())
-		}
-		return hasColumns, nil
+	// Published ChildFields describe the materialized Function outputs. Trust
+	// that metadata on the reuse path; repairing historical manifests that lost
+	// advertised outputs is outside the scope of delete-only refresh.
+	if segmentChildFieldsContainColumns(seg, outputColumns) {
+		return true, nil
 	}
-	return segmentChildFieldsContainColumns(seg, outputColumns), nil
+	if seg.GetManifestPath() == "" {
+		return false, nil
+	}
+	hasColumns, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
+	if err != nil {
+		return false, merr.Wrapf(err, "check function output columns for segment %d", seg.GetID())
+	}
+	return hasColumns, nil
 }
 
 func segmentChildFieldsContainColumns(seg *datapb.SegmentInfo, columns []string) bool {
