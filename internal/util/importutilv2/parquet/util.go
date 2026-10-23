@@ -226,6 +226,14 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		}
 	}
 
+	// A file that provides no column of the collection cannot produce a row:
+	// with no column reader, Read would never reach EOF and the import task
+	// would loop forever. A vector field used to make this impossible, since
+	// it is never nullable and must be provided.
+	if len(crs) == 0 {
+		return nil, merr.WrapErrImportFailed("the parquet file provides no field of the collection")
+	}
+
 	mlog.Info(ctx, "create parquet column readers", mlog.Any("readFields", readFields))
 	return crs, nil
 }

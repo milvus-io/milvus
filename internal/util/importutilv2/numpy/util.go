@@ -180,6 +180,13 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 	}
 
 	mlog.Info(ctx, "create numpy readers", mlog.Any("readFields", readFields))
+	// Files that name no field of the collection cannot produce a row: with no
+	// field reader, Read would return empty batches without EOF and the import
+	// task would loop forever. A vector field used to make this impossible.
+	if len(readers) == 0 {
+		return nil, merr.WrapErrImportFailed("the numpy files provide no field of the collection")
+	}
+
 	return readers, nil
 }
 
