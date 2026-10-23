@@ -567,6 +567,15 @@ func execBit(f featureusage.Feature) uint64 {
 	return bit
 }
 
+func cloneSnapshotItems(sealed []SnapshotItem) []SnapshotItem {
+	if len(sealed) == 0 {
+		return nil
+	}
+	cloned := make([]SnapshotItem, len(sealed))
+	copy(cloned, sealed)
+	return cloned
+}
+
 // getVectorFieldDim returns the dimension of the vector field with the given field ID.
 // Returns 0 if the field is not found or dim cannot be determined.
 func (sd *shardDelegator) getVectorFieldDim(fieldID int64) int64 {
@@ -690,7 +699,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					searchReq.GetReq().MvccTimestamp = tSafe
 				}
 				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
-				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount)
+				results, err := sd.search(ctx, searchReq, cloneSnapshotItems(sealed), growing, sealedRowCount)
 				if err != nil {
 					return nil, err
 				}
