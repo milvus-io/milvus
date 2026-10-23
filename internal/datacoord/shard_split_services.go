@@ -415,9 +415,6 @@ func (s *Server) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckSh
 func (s *Server) splitSourcesDrained(ctx context.Context, task *datapb.SplitShardTask) bool {
 	for _, source := range task.GetSources() {
 		vchannel := source.GetVchannel()
-		if s.hasLiveSegmentOnVChannel(vchannel) {
-			return false
-		}
 		if source.GetSwitchTimeTick() == 0 {
 			// The fence has not been recorded for this source, so there is no
 			// tick to have caught up to and conjunct (b) below would compare
@@ -426,8 +423,15 @@ func (s *Server) splitSourcesDrained(ctx context.Context, task *datapb.SplitShar
 			// writes is never drained.
 			return false
 		}
+		// The checkpoint is read BEFORE the segments are scanned. A checkpoint
+		// at or past T_switch proves every segment the source wrote before its
+		// fence is already registered here; scanning first could miss one
+		// registered between the scan and a checkpoint that then passes.
 		cp := s.meta.GetChannelCheckpoint(vchannel)
 		if cp == nil || cp.GetTimestamp() < source.GetSwitchTimeTick() {
+			return false
+		}
+		if s.hasLiveSegmentOnVChannel(vchannel) {
 			return false
 		}
 	}
