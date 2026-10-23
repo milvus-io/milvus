@@ -111,20 +111,26 @@ in `docs/agent_guides/streaming-system/wal/timetick_and_txn.md`.
 
 ```
 internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin shell)
-        │ translates WAL messages into requests, appends what the decider asks for
+        │ translates WAL messages into DecideRequests, appends what the Authority asks for
         ▼
 internal/streamingnode/server/pkindex                    the index of the streaming node
-        │ Decider: in-flight set (also the key lock), probe, pending writes of transactions
-        │ Authority: the index of one vchannel, key-value semantics
-        │            (Get, MultiGet, NewBatch, Write)
+        │ PChannelIndexManager: the vchannels of one pchannel, Authority(vchannel)
         ▼
-Engine                                                   the storage behind it
-                                                         (in-memory in this step)
+internal/streamingnode/server/pkindex/index              the index of one vchannel
+        │ Index: it owns the engine and the Authority on it
+        ▼
+internal/pkindex/authority                               the write path decision
+        │ Authority: in-flight set (also the key lock), probe, pending writes of
+        │ transactions; WriteGuard: the decision until Apply or Discard
+        ▼
+internal/pkindex/engine                                  the storage behind it
 ```
 
-The package `internal/streamingnode/server/pkindex` holds the index logic and
-does not depend on the WAL. The interceptor is the only place that knows both
-sides.
+The packages `internal/streamingnode/server/pkindex`, its `index` and
+`internal/pkindex/authority` hold the index logic and do not depend on the WAL.
+The interceptor is the only place that knows both sides. The structure above
+the Authority, the handover of the index and its readiness are described in
+the [handover design](snapshot.md).
 
 The primary key payload of a message is read by `wal/utility/primarykey`. It
 checks the payload the way the write path needs it: a bad message gets an
@@ -191,7 +197,7 @@ while the switch was off, and every row written before the current WAL open are
 not in it. A key that the index does not know may still exist in the data.
 
 So the index only ever adds deletes. A delete of a client reaches the WAL
-unchanged. The decider still computes which keys of the delete exist, but that
+unchanged. The Authority still computes which keys of the delete exist, but that
 result is used for the metrics only.
 
 ### Failure
@@ -438,7 +444,7 @@ insert, so WAL record and byte counts under-report such an append.
 
 ## Test plan
 
-- Unit tests of the helper, the authority, the decider and the interceptor,
+- Unit tests of the helper, the Authority, the index and the interceptor,
   with a fake append operation.
 - Tests on the real interceptor chain (`wal/adaptor`): the consumer sees one
   transaction with the insert and the companion delete at the TimeTick of the
