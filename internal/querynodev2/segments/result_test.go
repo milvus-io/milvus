@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"testing"
@@ -99,7 +100,7 @@ func (suite *ResultSuite) TestResult_SelectSearchResultData_int() {
 		}
 	})
 
-	suite.Run("Integer ID with bad score", func() {
+	suite.Run("Integer ID with minimum finite score", func() {
 		tests := []struct {
 			name string
 			args args
@@ -137,7 +138,7 @@ func (suite *ResultSuite) TestResult_SelectSearchResultData_int() {
 					nq:            3,
 					qi:            0,
 				},
-				want: -1,
+				want: 1,
 			},
 		}
 		for _, tt := range tests {
@@ -643,4 +644,33 @@ func TestResult_MergeRequestCost(t *testing.T) {
 func TestResult(t *testing.T) {
 	paramtable.Init()
 	suite.Run(t, new(ResultSuite))
+}
+
+func TestSelectSearchResultDataFloatingTotalOrder(t *testing.T) {
+	for _, stringPK := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stringPK=%t", stringPK), func(t *testing.T) {
+			ids := []int64{7, 9, 5, 2, 8, 4, 6, 1, 3}
+			scores := []float32{float32(math.Inf(1)), math.Float32frombits(0x7fc00001), 0, float32(math.Inf(-1)), math.Float32frombits(0xffc00002), math.Float32frombits(0x80000000), float32(math.Inf(1)), float32(math.Inf(-1)), -1}
+			data := make([]*schemapb.SearchResultData, len(ids))
+			starts := make([][]int64, len(ids))
+			cursors := make([]int64, len(ids))
+			for i, id := range ids {
+				pk := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{id}}}}
+				if stringPK {
+					pk = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{fmt.Sprint(id)}}}}
+				}
+				data[i] = &schemapb.SearchResultData{Ids: pk, Scores: []float32{scores[i]}, Topks: []int64{1}, NumQueries: 1}
+				starts[i] = []int64{0}
+			}
+			for _, want := range []int64{8, 9, 6, 7, 4, 5, 3, 1, 2} {
+				selected := SelectSearchResultData(data, starts, cursors, 0)
+				if !assert.GreaterOrEqual(t, selected, 0) {
+					return
+				}
+				assert.Equal(t, want, ids[selected])
+				cursors[selected]++
+			}
+			assert.Equal(t, -1, SelectSearchResultData(data, starts, cursors, 0))
+		})
+	}
 }

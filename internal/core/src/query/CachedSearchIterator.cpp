@@ -118,7 +118,7 @@ CachedSearchIterator::InitializeChunkedIterators(
     const milvus::DataType& data_type,
     const GetChunkDataFunc& get_chunk_data) {
     int64_t offset = 0;
-    chunked_heaps_.resize(nq_);
+    chunked_heaps_.resize(nq_, ChunkHeap(IterIdDisIdPairComparator{sign_}));
     const auto source_chunks = num_chunks_;
     num_chunks_ = 0;
     for (int64_t chunk_id = 0; chunk_id < static_cast<int64_t>(source_chunks);
@@ -172,7 +172,7 @@ CachedSearchIterator::CachedSearchIterator(
     }
 
     iterators_.reserve(nq_ * source_chunks);
-    chunked_heaps_.resize(nq_);
+    chunked_heaps_.resize(nq_, ChunkHeap(IterIdDisIdPairComparator{sign_}));
     num_chunks_ = 0;
     const auto& offset_mapping = vec_data->get_offset_mapping();
     const bool has_offset_mapping = offset_mapping.IsEnabled() &&
@@ -408,11 +408,11 @@ CachedSearchIterator::MergeChunksResults(
         const auto [iterator_idx, cur_rst] = heap.top();
         heap.pop();
 
-        // last_bound may change between NextBatch calls, discard any invalid results
-        if (!IsValid(cur_rst, last_bound, radius, range_filter)) {
-            continue;
+        // The bound may change between batches. Refill the same chunk even
+        // when its cached head is discarded, so valid suffixes stay visible.
+        if (IsValid(cur_rst, last_bound, radius, range_filter)) {
+            rst.emplace_back(cur_rst);
         }
-        rst.emplace_back(cur_rst);
 
         if (auto next_result = GetNextValidResult(
                 iterator_idx, last_bound, radius, range_filter);
@@ -462,7 +462,12 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
     } else {
         MergeChunksResults(query_idx, last_bound, radius, range_filter, rst);
     }
-    std::sort(rst.begin(), rst.end());
+    std::sort(rst.begin(), rst.end(), [this](const auto& lhs, const auto& rhs) {
+        if (ScalarEqual(lhs.first, rhs.first)) {
+            return lhs.second < rhs.second;
+        }
+        return DistanceLess(lhs.first, rhs.first, sign_);
+    });
     if (sign_ == -1) {
         std::for_each(rst.begin(), rst.end(), [this](DisIdPair& x) {
             x.first = x.first * sign_;

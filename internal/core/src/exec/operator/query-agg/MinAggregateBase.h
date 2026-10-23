@@ -23,6 +23,7 @@
 
 #include "SimpleNumericAggregate.h"
 #include "common/Utils.h"
+#include "common/ScalarComparison.h"
 
 namespace milvus {
 namespace exec {
@@ -73,8 +74,15 @@ class MinAggregateBase
         char** groups, folly::Range<const vector_size_t*> indices) override {
         BaseAggregate::Aggregate::setAllNulls(groups, indices);
         for (auto i : indices) {
-            (*BaseAggregate::Aggregate::template value<TAccumulator>(
-                groups[i])) = std::numeric_limits<TAccumulator>::max();
+            if constexpr (std::is_floating_point_v<TAccumulator>) {
+                // Identity in the shared scalar order, including NaN/infinity.
+                (*BaseAggregate::Aggregate::template value<TAccumulator>(
+                    groups[i])) =
+                    std::numeric_limits<TAccumulator>::quiet_NaN();
+            } else {
+                (*BaseAggregate::Aggregate::template value<TAccumulator>(
+                    groups[i])) = std::numeric_limits<TAccumulator>::max();
+            }
         }
     }
 
@@ -96,7 +104,7 @@ class MinAggregateBase
     template <typename TData>
     static void
     updateSingleValue(TData& result, TData value) {
-        if (value < result) {
+        if (ScalarLess(value, result)) {
             result = value;
         }
     }

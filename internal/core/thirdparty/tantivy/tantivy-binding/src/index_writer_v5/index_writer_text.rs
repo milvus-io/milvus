@@ -60,6 +60,7 @@ impl IndexWriterWrapperImpl {
             index_writer: Either::Left(index_writer),
             id_field: Some(id_field),
             _index: Arc::new(index),
+            supports_nan_total_order: false,
         })
     }
 }

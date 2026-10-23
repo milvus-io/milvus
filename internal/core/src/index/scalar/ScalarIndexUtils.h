@@ -23,9 +23,38 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "common/ScalarComparison.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
 #include "index/ParamUtils.h"
 
 namespace milvus::index {
+
+// Old readers require their original floating-key representation. The writer
+// changes comparison/encoding only after scalar-engine v6 has been negotiated.
+inline bool
+SupportsNaNTotalOrder(const Config& params) {
+    return GetValueFromConfigOrFallback<int64_t>(
+               params, SCALAR_INDEX_ENGINE_VERSION, 1) >=
+           kMinScalarIndexVersionForNaNTotalOrder;
+}
+
+// Transparent comparison also supports string/string_view lookup. Artifact
+// maps retain the writer mode; loaded v6 maps use the total order by default.
+struct ScalarIndexLess {
+    using is_transparent = void;
+    bool total_order{true};
+
+    template <typename T, typename U>
+    bool
+    operator()(const T& left, const U& right) const {
+        if constexpr (std::is_floating_point_v<T> ||
+                      std::is_floating_point_v<U>) {
+            return total_order ? ScalarLess(left, right) : left < right;
+        }
+        return left < right;
+    }
+};
 
 inline bool
 ScalarValueTypesMatch(DataType actual, DataType expected) {

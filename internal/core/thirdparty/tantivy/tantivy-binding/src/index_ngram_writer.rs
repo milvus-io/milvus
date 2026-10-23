@@ -59,6 +59,7 @@ impl IndexWriterWrapper {
             index_writer,
             index: Arc::new(index),
             enable_user_specified_doc_id: true,
+            supports_nan_total_order: false,
             id_field: None,
         }))
     }

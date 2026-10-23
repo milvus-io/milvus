@@ -300,7 +300,8 @@ InstallIndex(segcore::SegmentSealed& segment,
     info.field_type = field_type;
     info.element_type = element_type;
     info.index_id = NextFixtureId();
-    info.index_engine_version = 3;
+    info.index_engine_version =
+        opened.params.value(index::SCALAR_INDEX_ENGINE_VERSION, int64_t{3});
     info.index_family = opened.family;
     info.index_value_type = opened.reader->ValueType();
     info.index_caps = opened.caps;

@@ -18,12 +18,13 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
+
+#include "common/ScalarComparison.h"
 
 namespace milvus::index::detail {
 
@@ -42,11 +43,11 @@ VisitOrderedMatches(size_t size,
         if (cursor == size) {
             break;
         }
-        if (value_at(cursor) < value) {
+        if (ScalarLess(value_at(cursor), value)) {
             const size_t remaining = size - cursor;
             size_t lo = 1;
             size_t hi = 1;
-            while (hi < remaining && value_at(cursor + hi) < value) {
+            while (hi < remaining && ScalarLess(value_at(cursor + hi), value)) {
                 lo = hi + 1;
                 hi = hi > remaining / 2 ? remaining : hi * 2;
             }
@@ -54,7 +55,7 @@ VisitOrderedMatches(size_t size,
             // signed extremes and infinities are ordinary comparison operands.
             while (lo < hi) {
                 const size_t mid = lo + (hi - lo) / 2;
-                if (value_at(cursor + mid) < value) {
+                if (ScalarLess(value_at(cursor + mid), value)) {
                     lo = mid + 1;
                 } else {
                     hi = mid;
@@ -80,7 +81,7 @@ VisitOrderedMatches(size_t size,
                         value_at,
                         match,
                         [](const auto& query, const auto& indexed) {
-                            return indexed == query;
+                            return ScalarEqual(indexed, query);
                         });
 }
 
@@ -106,7 +107,7 @@ VisitSortedMatches(Iterator first,
         visit(first[i].idx_);
     };
     const auto upper_bound_match = [](const auto& query, const auto& indexed) {
-        return !(query < indexed);
+        return !ScalarLess(query, indexed);
     };
     const size_t size = static_cast<size_t>(last - first);
     if constexpr (std::is_same_v<Value, bool>) {
@@ -132,42 +133,11 @@ VisitSortedMatches(Iterator first,
                                 upper_bound_match);
         }
     } else {
-        if constexpr (std::is_floating_point_v<Value>) {
-            // NaN is not a strict weak ordering operand. Preserve the original
-            // lower/upper-bound behavior (and validator diagnostics) for these
-            // exceptional queries instead of feeding NaNs into sort/unique.
-            // Stored entries have the existing sorted-index precondition;
-            // inserting NaNs is rejected by scalar input validation.
-            if (std::any_of(values, values + n, [](Value value) {
-                    return std::isnan(value);
-                })) {
-                for (size_t i = 0; i < n; ++i) {
-                    auto lb =
-                        std::lower_bound(first,
-                                         last,
-                                         values[i],
-                                         [](const auto& entry, Value value) {
-                                             return entry.a_ < value;
-                                         });
-                    auto ub =
-                        std::upper_bound(lb,
-                                         last,
-                                         values[i],
-                                         [](Value value, const auto& entry) {
-                                             return value < entry.a_;
-                                         });
-                    for (; lb != ub; ++lb) {
-                        validate(values[i], *lb);
-                        visit(lb->idx_);
-                    }
-                }
-                return;
-            }
-        }
         std::vector<Value> queries(values, values + n);
-        std::sort(queries.begin(), queries.end());
-        queries.erase(std::unique(queries.begin(), queries.end()),
-                      queries.end());
+        std::sort(queries.begin(), queries.end(), ScalarLessThan<Value>{});
+        queries.erase(
+            std::unique(queries.begin(), queries.end(), ScalarEqualTo<Value>{}),
+            queries.end());
         // Use upper-bound semantics so malformed ranges still reach validate.
         VisitOrderedMatches(size, queries, value_at, match, upper_bound_match);
     }

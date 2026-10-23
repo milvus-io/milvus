@@ -572,15 +572,27 @@ func (s *MapOpTestSuite) TestMapOpFiniteScoreConstraint() {
 						s.Require().NoError(exportErr)
 					}
 					if destination == types.ScoreFieldName && math.IsNaN(tc.value) {
-						sorted, err := ExecuteOperator(ctx, result, newSortOp(types.ScoreFieldName, true, types.IDFieldName))
-						s.Require().NoError(err)
-						defer sorted.Release()
-						limited, err := ExecuteOperator(ctx, sorted, NewLimitOp(1, 0))
-						s.Require().NoError(err)
-						defer limited.Release()
-						clean, err := ToSearchResultData(limited)
-						s.Require().NoError(err)
-						s.Equal([]float32{1, 2}, clean.Scores)
+						for _, desc := range []bool{true, false} {
+							sorted, err := ExecuteOperator(ctx, result, newSortOp(types.ScoreFieldName, desc, types.IDFieldName))
+							s.Require().NoError(err)
+							defer sorted.Release()
+							limited, err := ExecuteOperator(ctx, sorted, NewLimitOp(1, 0))
+							s.Require().NoError(err)
+							defer limited.Release()
+							clean, err := ToSearchResultData(limited)
+							if desc {
+								// NaN is the largest intermediate value. Keeping it
+								// after top-k must still fail final score validation.
+								s.Equal([]int64{3}, limited.Column(types.IDFieldName).Chunk(1).(*array.Int64).Int64Values())
+								s.Nil(clean)
+								s.Require().ErrorIs(err, merr.ErrFunctionFailed)
+								s.Contains(err.Error(), "chunk 1 at row 0")
+							} else {
+								// Ascending top-k removes NaN and can be exported.
+								s.Require().NoError(err)
+								s.Equal([]float32{1, 2}, clean.Scores)
+							}
+						}
 					}
 					column := result.Column(destination)
 					wantType := dataType

@@ -19,11 +19,14 @@
 package chain
 
 import (
+	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -1121,4 +1124,165 @@ func (s *GroupByOpTestSuite) TestCompareValues_TypeMismatch() {
 func (s *GroupByOpTestSuite) TestCompareValues_UnsupportedType() {
 	s.Equal(0, compareValues(float64(1.0), float64(2.0)))
 	s.Equal(0, compareValues(nil, nil))
+}
+
+// Custom L2 chains can group schema-backed floating columns even though the
+// ordinary search group_by parameter does not support those types.
+func TestGroupByOpFloatingIdentity(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		for _, groupSize := range []int64{1, 2} {
+			for _, limit := range []int64{3, 6} {
+				t.Run(fmt.Sprintf("%s/groupSize=%d/limit=%d", dataType, groupSize, limit), func(t *testing.T) {
+					pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer pool.AssertSize(t, 0)
+					repr, err := ProtoChainToRepr(&schemapb.FunctionChain{
+						Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+						Ops: []*schemapb.FunctionChainOp{{
+							Op: types.OpTypeGroupBy, Inputs: []string{"value", types.IDFieldName, types.ScoreFieldName},
+							Params: map[string]*schemapb.FunctionParamValue{
+								"field": stringParam("value"), "group_size": intParam(groupSize), "limit": intParam(limit),
+							},
+						}},
+					})
+					require.NoError(t, err)
+					plan, err := CompileDataFrameInputPlan(repr, &schemapb.CollectionSchema{
+						Fields: []*schemapb.FieldSchema{
+							{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+							{FieldID: 101, Name: "value", DataType: dataType, Nullable: true},
+						},
+					})
+					require.NoError(t, err)
+					require.Equal(t, []int64{101}, plan.PhysicalFieldIDs())
+					chain, err := FuncChainFromRepr(repr, pool)
+					require.NoError(t, err)
+
+					valid := []bool{true, true, true, true, true, true, true, false, false}
+					var values arrow.Array
+					if dataType == schemapb.DataType_Float {
+						b := array.NewFloat32Builder(pool)
+						b.AppendValues([]float32{math.Float32frombits(0x7fc00001), math.Float32frombits(0xffc00002), 0, math.Float32frombits(0x80000000), float32(math.Inf(1)), float32(math.Inf(-1)), 1, 0, 0}, valid)
+						values = b.NewArray()
+						b.Release()
+					} else {
+						b := array.NewFloat64Builder(pool)
+						b.AppendValues([]float64{math.Float64frombits(0x7ff8000000000001), math.Float64frombits(0xfff8000000000002), 0, math.Copysign(0, -1), math.Inf(1), math.Inf(-1), 1, 0, 0}, valid)
+						values = b.NewArray()
+						b.Release()
+					}
+					ids := array.NewInt64Builder(pool)
+					ids.AppendValues([]int64{1, 2, 3, 4, 5, 6, 7, 8, 9}, nil)
+					idArray := ids.NewArray()
+					ids.Release()
+					scores := array.NewFloat32Builder(pool)
+					scores.AppendValues([]float32{9, 8, 7, 6, 5, 4, 3, 2, 1}, nil)
+					scoreArray := scores.NewArray()
+					scores.Release()
+					builder := NewDataFrameBuilder()
+					defer builder.Release()
+					builder.SetChunkSizes([]int64{9})
+					require.NoError(t, builder.AddColumnFromChunks("value", []arrow.Array{values}))
+					require.NoError(t, builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{idArray}))
+					require.NoError(t, builder.AddColumnFromChunks(types.ScoreFieldName, []arrow.Array{scoreArray}))
+					df := builder.Build()
+					defer df.Release()
+					result, err := chain.Execute(df)
+					require.NoError(t, err)
+					defer result.Release()
+					want := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9}
+					if groupSize == 1 {
+						want = []int64{1, 3, 5, 6, 7, 8}
+					}
+					if limit == 3 {
+						if groupSize == 1 {
+							want = want[:3]
+						} else {
+							want = want[:5]
+						}
+					}
+					require.Equal(t, want, result.Column(types.IDFieldName).Chunk(0).(*array.Int64).Int64Values())
+				})
+			}
+		}
+	}
+}
+
+// Scores can originate from schema scalar fields, so grouping must preserve the
+// scalar order after a public function chain writes NumCombine output to $score.
+func TestGroupByOpScalarDerivedScoreOrder(t *testing.T) {
+	for _, withinGroup := range []bool{true, false} {
+		for _, descending := range []bool{true, false} {
+			for _, cutoff := range []int64{1, 3, 8} {
+				t.Run(fmt.Sprintf("withinGroup=%t/desc=%t/cutoff=%d", withinGroup, descending, cutoff), func(t *testing.T) {
+					pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer pool.AssertSize(t, 0)
+					groupSize, limit := int64(1), cutoff
+					if withinGroup {
+						groupSize, limit = cutoff, 1
+					}
+					repr, err := ProtoChainToRepr(&schemapb.FunctionChain{
+						Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+						Ops: []*schemapb.FunctionChainOp{
+							{Op: types.OpTypeMap, Outputs: []string{types.ScoreFieldName}, Expr: &schemapb.FunctionChainExpr{
+								Name: "num_combine", Args: []*schemapb.FunctionChainExprArg{columnArg("value"), columnArg(types.ScoreFieldName)},
+								Params: map[string]*schemapb.FunctionParamValue{"mode": stringParam("sum")},
+							}},
+							{
+								Op: types.OpTypeGroupBy, Inputs: []string{"category", types.IDFieldName, types.ScoreFieldName},
+								Params: map[string]*schemapb.FunctionParamValue{
+									"field": stringParam("category"), "group_size": intParam(groupSize), "limit": intParam(limit),
+								},
+							},
+						},
+					})
+					require.NoError(t, err)
+					plan, err := CompileDataFrameInputPlan(repr, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+						{FieldID: 101, Name: "value", DataType: schemapb.DataType_Float},
+						{FieldID: 102, Name: "category", DataType: schemapb.DataType_Int64},
+					}})
+					require.NoError(t, err)
+					require.Equal(t, []int64{101, 102}, plan.PhysicalFieldIDs())
+					chain, err := FuncChainFromRepr(repr, pool)
+					require.NoError(t, err)
+					// Public group_by defaults to DESC. The rerank builder also uses
+					// this operator's ASC mode for distance-oriented ranking.
+					chain.operators[1].(*GroupByOp).SetSortDescending(descending)
+
+					ids := []int64{5, 91, 90, 4, 3, 8, 2, 6}
+					values := []float32{0, math.Float32frombits(0x7fc00001), math.Float32frombits(0xffc00002), math.Float32frombits(0x80000000), float32(math.Inf(-1)), float32(math.Inf(1)), -1, 1}
+					categories := append([]int64(nil), ids...)
+					if withinGroup {
+						categories = make([]int64, len(ids))
+					}
+					builder := NewDataFrameBuilder()
+					defer builder.Release()
+					builder.SetChunkSizes([]int64{int64(len(ids))})
+					for name, data := range map[string][]int64{types.IDFieldName: ids, "category": categories} {
+						b := array.NewInt64Builder(pool)
+						b.AppendValues(data, nil)
+						arr := b.NewArray()
+						b.Release()
+						require.NoError(t, builder.AddColumnFromChunks(name, []arrow.Array{arr}))
+					}
+					for name, data := range map[string][]float32{"value": values, types.ScoreFieldName: make([]float32, len(ids))} {
+						b := array.NewFloat32Builder(pool)
+						b.AppendValues(data, nil)
+						arr := b.NewArray()
+						b.Release()
+						require.NoError(t, builder.AddColumnFromChunks(name, []arrow.Array{arr}))
+					}
+					df := builder.Build()
+					defer df.Release()
+					result, err := chain.Execute(df)
+					require.NoError(t, err)
+					defer result.Release()
+					want := []int64{90, 91, 8, 6, 4, 5, 2, 3}
+					if !descending {
+						want = []int64{3, 2, 4, 5, 6, 8, 90, 91}
+					}
+					require.Equal(t, want[:cutoff], result.Column(types.IDFieldName).Chunk(0).(*array.Int64).Int64Values())
+				})
+			}
+		}
+	}
 }

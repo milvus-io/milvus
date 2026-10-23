@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -1310,4 +1311,51 @@ func (s *ClusteringCompactionTaskSuite) TestRetryableWorkerFailureRequeueIsRecov
 		cluster.EXPECT().CreateCompaction(int64(9), mock.Anything, mock.Anything).Return(nil)
 		s.NoError(task.doCompact(9, cluster))
 	})
+}
+
+func (s *ClusteringCompactionTaskSuite) TestPartialPartitionStatsCapabilityAndRemapping() {
+	Params.Save(Params.CommonCfg.StorageType.Key, "local")
+	Params.Save(Params.LocalStorageCfg.Path.Key, s.T().TempDir())
+	defer Params.Reset(Params.CommonCfg.StorageType.Key)
+	defer Params.Reset(Params.LocalStorageCfg.Path.Key)
+	task := s.generateBasicTask(false)
+	for _, id := range task.GetTaskProto().GetInputSegments() {
+		s.Require().NoError(s.meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: 10, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+		}}))
+	}
+
+	// Rebuilding even a previously created task uses the upgraded coordinator's
+	// capability, rather than persisting an old worker plan indefinitely.
+	request, err := task.BuildCompactionRequest()
+	s.Require().NoError(err)
+	params, err := compaction.ParseParamsFromJSON(request.JsonParams)
+	s.Require().NoError(err)
+	s.True(params.SupportsPartialPartitionStats)
+
+	factory := storage.NewChunkManagerFactoryWithParam(Params)
+	cm, err := factory.NewPersistentStorageChunkManager(context.Background())
+	s.Require().NoError(err)
+	statsPath := path.Join(cm.RootPath(), common.PartitionStatsPath,
+		metautil.JoinIDPath(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID()),
+		task.GetTaskProto().GetChannel(), strconv.FormatInt(task.GetTaskProto().GetPlanID(), 10))
+	snapshot := storage.NewPartitionStatsSnapshot()
+	snapshot.UpdateSegmentStats(101, storage.SegmentStats{NumRows: 2, FieldStats: []storage.FieldStats{{
+		FieldID: 101, Type: schemapb.DataType_Double, Min: storage.NewDoubleFieldValue(-1), Max: storage.NewDoubleFieldValue(1), FloatBoundsComplete: true,
+	}}})
+	// Segment 102's nonfinite bounds were omitted by the worker. Its result
+	// segment IDs remain in CompactionPlanResult, independently of this snapshot.
+	encoded, err := storage.SerializePartitionStatsSnapshot(snapshot)
+	s.Require().NoError(err)
+	s.Require().NoError(cm.Write(context.Background(), statsPath, encoded))
+	s.Require().NoError(task.regeneratePartitionStats(map[int64][]int64{101: {201}, 102: {202, 203}}))
+	result, err := cm.Read(context.Background(), statsPath)
+	s.Require().NoError(err)
+	restored, err := storage.DeserializePartitionsStatsSnapshot(result)
+	s.Require().NoError(err)
+	s.Require().Len(restored.SegmentStats, 1)
+	s.Equal(2, restored.SegmentStats[201].NumRows)
+	s.True(restored.SegmentStats[201].FieldStats[0].FloatBoundsComplete)
+	s.NotContains(restored.SegmentStats, int64(202))
+	s.NotContains(restored.SegmentStats, int64(203))
 }

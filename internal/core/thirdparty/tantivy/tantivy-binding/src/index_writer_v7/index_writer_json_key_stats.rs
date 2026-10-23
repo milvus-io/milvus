@@ -43,6 +43,7 @@ impl IndexWriterWrapperImpl {
             index: Arc::new(index),
             id_field: Some(id_field),
             enable_user_specified_doc_id: false,
+            supports_nan_total_order: false,
         })
     }
 }

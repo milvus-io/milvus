@@ -2,11 +2,15 @@ package dql
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -1236,4 +1240,64 @@ func (struts *SearchReduceUtilTestSuite) TestReduceAdvanceGroupBy_MultiShardNull
 
 func TestSearchReduceUtilTestSuite(t *testing.T) {
 	suite.Run(t, new(SearchReduceUtilTestSuite))
+}
+
+func TestSelectHighestScoreIndexFloatingTotalOrder(t *testing.T) {
+	for _, stringPK := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stringPK=%t", stringPK), func(t *testing.T) {
+			ids := []int64{7, 9, 5, 2, 8, 4, 6, 1, 3}
+			scores := []float32{float32(math.Inf(1)), math.Float32frombits(0x7fc00001), 0, float32(math.Inf(-1)), math.Float32frombits(0xffc00002), math.Float32frombits(0x80000000), float32(math.Inf(1)), float32(math.Inf(-1)), -1}
+			data := make([]*schemapb.SearchResultData, len(ids))
+			starts := make([][]int64, len(ids))
+			cursors := make([]int64, len(ids))
+			for i, id := range ids {
+				pk := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{id}}}}
+				if stringPK {
+					pk = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{fmt.Sprint(id)}}}}
+				}
+				data[i] = &schemapb.SearchResultData{Ids: pk, Scores: []float32{scores[i]}, Topks: []int64{1}, NumQueries: 1}
+				starts[i] = []int64{0}
+			}
+			for _, want := range []int64{8, 9, 6, 7, 4, 5, 3, 1, 2} {
+				selected, row := selectHighestScoreIndex(context.Background(), data, starts, cursors, 0)
+				assert.Equal(t, int64(0), row)
+				if !assert.GreaterOrEqual(t, selected, 0) {
+					return
+				}
+				assert.Equal(t, want, ids[selected])
+				cursors[selected]++
+			}
+			selected, row := selectHighestScoreIndex(context.Background(), data, starts, cursors, 0)
+			assert.Equal(t, -1, selected)
+			assert.Equal(t, int64(-1), row)
+		})
+	}
+}
+
+func TestCollapseElementScalarDerivedScoreTotalOrder(t *testing.T) {
+	for _, descending := range []bool{true, false} {
+		t.Run(fmt.Sprintf("desc=%t", descending), func(t *testing.T) {
+			input := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+				NumQueries: 1, TopK: 6, Topks: []int64{6},
+				Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 1, 2, 3, 4, 5}}}},
+				Scores:         []float32{1, math.Float32frombits(0x7fc00001), float32(math.Inf(1)), math.Float32frombits(0xffc00002), 0, math.Float32frombits(0x80000000)},
+				ElementIndices: &schemapb.LongArray{Data: []int64{0, 1, 0, 0, 0, 0}},
+			}}
+			result, err := collapseElementLevelResultByBestScore(input, descending)
+			if !assert.NoError(t, err) {
+				return
+			}
+			want := []int64{1, 3, 2, 4, 5}
+			if !descending {
+				want = []int64{4, 5, 1, 2, 3}
+			}
+			assert.Equal(t, want, result.Results.GetIds().GetIntId().GetData())
+			if descending {
+				assert.True(t, math.IsNaN(float64(result.Results.Scores[0])))
+				assert.True(t, math.IsNaN(float64(result.Results.Scores[1])))
+			} else {
+				assert.Equal(t, float32(1), result.Results.Scores[2])
+			}
+		})
+	}
 }

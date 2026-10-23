@@ -35,6 +35,11 @@ type Heap[E any] interface {
 // heapArray is a heap backed by an array.
 type heapArray[E constraints.Ordered] []E
 
+// heapLess orders NaNs after all other values, with NaNs and signed zeros equal.
+func heapLess[E constraints.Ordered](a, b E) bool {
+	return a < b || (a == a && b != b)
+}
+
 // Len returns the length of the heap.
 func (h heapArray[E]) Len() int {
 	return len(h)
@@ -42,7 +47,7 @@ func (h heapArray[E]) Len() int {
 
 // Less returns true if the element at index i is less than the element at index j.
 func (h heapArray[E]) Less(i, j int) bool {
-	return h[i] < h[j]
+	return heapLess(h[i], h[j])
 }
 
 // Swap swaps the elements at indexes i and j.
@@ -81,7 +86,7 @@ func (h *objectHeapArray[O, E]) Len() int {
 }
 
 func (h *objectHeapArray[O, E]) Less(i, j int) bool {
-	return h.getOrderFunc(h.objects[i]) < h.getOrderFunc(h.objects[j])
+	return heapLess(h.getOrderFunc(h.objects[i]), h.getOrderFunc(h.objects[j]))
 }
 
 func (h *objectHeapArray[O, E]) Swap(i, j int) {

@@ -595,7 +595,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarAnalyzeSegmentFiltersDroppedOr
 
 	analyzeResult, err := s.task.scalarAnalyzeSegment(context.Background(), s.task.plan.SegmentBinlogs[0])
 	s.Require().NoError(err)
-	s.Equal(map[interface{}]int64{"varchar": 2}, analyzeResult)
+	s.Equal(map[interface{}]scalarAnalyzeEntry{"varchar": {value: "varchar", count: 2}}, analyzeResult)
 }
 
 // An import segment committed at birthday+2s carries a deltalog entry deleting
@@ -1038,7 +1038,7 @@ func TestClusteringAnalyzeRejectsMissingScalarColumn(t *testing.T) {
 					ttlFieldID:         104,
 					compactionParams:   compaction.GenParams(),
 				}
-				var result map[interface{}]int64
+				var result map[interface{}]scalarAnalyzeEntry
 				var err error
 				require.NotPanics(t, func() { result, err = task.scalarAnalyzeSegment(context.Background(), segment) })
 				require.Nil(t, result)
@@ -1292,7 +1292,11 @@ func TestClusteringSplitTimestamptzKeysInTimeOrder(t *testing.T) {
 	}
 	// int64 unix microseconds, inserted out of order, plus one null key.
 	jan, feb, mar, apr := int64(1735689600000000), int64(1738368000000000), int64(1740787200000000), int64(1743465600000000)
-	dict := map[interface{}]int64{mar: 1, jan: 1, apr: 1, feb: 1, nil: 1}
+	dict := map[interface{}]scalarAnalyzeEntry{
+		mar: {value: mar, count: 1}, jan: {value: jan, count: 1},
+		apr: {value: apr, count: 1}, feb: {value: feb, count: 1},
+		nil: {value: nil, count: 1},
+	}
 
 	buckets, hasNull := task.splitClusterByScalarValue(dict)
 	require.True(t, hasNull)

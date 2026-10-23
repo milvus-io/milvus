@@ -46,6 +46,108 @@ vmvnq_u64(const uint64x2_t value) {
     return veorq_u64(value, m1);
 }
 
+template <CompareOpType Op>
+inline uint32x4_t
+totalCompare(float32x4_t a, float32x4_t b) {
+    const auto nan_a = vmvnq_u32(vceqq_f32(a, a));
+    const auto nan_b = vmvnq_u32(vceqq_f32(b, b));
+    if constexpr (Op == CompareOpType::EQ) {
+        return vorrq_u32(vceqq_f32(a, b), vandq_u32(nan_a, nan_b));
+    } else if constexpr (Op == CompareOpType::LT) {
+        return vorrq_u32(vcltq_f32(a, b), vbicq_u32(nan_b, nan_a));
+    } else if constexpr (Op == CompareOpType::LE) {
+        return vorrq_u32(vcleq_f32(a, b), nan_b);
+    } else if constexpr (Op == CompareOpType::GT) {
+        return vorrq_u32(vcgtq_f32(a, b), vbicq_u32(nan_a, nan_b));
+    } else {
+        static_assert(Op == CompareOpType::GE);
+        return vorrq_u32(vcgeq_f32(a, b), nan_a);
+    }
+}
+
+template <CompareOpType Op>
+inline uint64x2_t
+totalCompare(float64x2_t a, float64x2_t b) {
+    const auto nan_a = vmvnq_u64(vceqq_f64(a, a));
+    const auto nan_b = vmvnq_u64(vceqq_f64(b, b));
+    if constexpr (Op == CompareOpType::EQ) {
+        return vorrq_u64(vceqq_f64(a, b), vandq_u64(nan_a, nan_b));
+    } else if constexpr (Op == CompareOpType::LT) {
+        return vorrq_u64(vcltq_f64(a, b), vbicq_u64(nan_b, nan_a));
+    } else if constexpr (Op == CompareOpType::LE) {
+        return vorrq_u64(vcleq_f64(a, b), nan_b);
+    } else if constexpr (Op == CompareOpType::GT) {
+        return vorrq_u64(vcgtq_f64(a, b), vbicq_u64(nan_a, nan_b));
+    } else {
+        static_assert(Op == CompareOpType::GE);
+        return vorrq_u64(vcgeq_f64(a, b), nan_a);
+    }
+}
+
+// A scalar target is uniform across lanes. Finite targets preserve the
+// original one-comparison kernels except GT/GE, where complementing an
+// ordered comparison includes source NaNs without another data scan.
+template <CompareOpType Op>
+inline uint32x4_t
+totalCompareTarget(float32x4_t a, float32x4_t b, bool target_nan) {
+    if (target_nan) {
+        if constexpr (Op == CompareOpType::LE) {
+            return vdupq_n_u32(~uint32_t(0));
+        } else if constexpr (Op == CompareOpType::GT) {
+            return vdupq_n_u32(0);
+        } else if constexpr (Op == CompareOpType::EQ ||
+                             Op == CompareOpType::GE) {
+            return vmvnq_u32(vceqq_f32(a, a));
+        } else {
+            return vceqq_f32(a, a);
+        }
+    }
+    if constexpr (Op == CompareOpType::EQ)
+        return vceqq_f32(a, b);
+    else if constexpr (Op == CompareOpType::NE)
+        return vmvnq_u32(vceqq_f32(a, b));
+    else if constexpr (Op == CompareOpType::LT)
+        return vcltq_f32(a, b);
+    else if constexpr (Op == CompareOpType::LE)
+        return vcleq_f32(a, b);
+    else if constexpr (Op == CompareOpType::GT)
+        return vmvnq_u32(vcleq_f32(a, b));
+    else
+        return vmvnq_u32(vcltq_f32(a, b));
+}
+
+// A scalar target is uniform across lanes. Finite targets preserve the
+// original one-comparison kernels except GT/GE, where complementing an
+// ordered comparison includes source NaNs without another data scan.
+template <CompareOpType Op>
+inline uint64x2_t
+totalCompareTarget(float64x2_t a, float64x2_t b, bool target_nan) {
+    if (target_nan) {
+        if constexpr (Op == CompareOpType::LE) {
+            return vreinterpretq_u64_u32(vdupq_n_u32(~uint32_t(0)));
+        } else if constexpr (Op == CompareOpType::GT) {
+            return vreinterpretq_u64_u32(vdupq_n_u32(0));
+        } else if constexpr (Op == CompareOpType::EQ ||
+                             Op == CompareOpType::GE) {
+            return vmvnq_u64(vceqq_f64(a, a));
+        } else {
+            return vceqq_f64(a, a);
+        }
+    }
+    if constexpr (Op == CompareOpType::EQ)
+        return vceqq_f64(a, b);
+    else if constexpr (Op == CompareOpType::NE)
+        return vmvnq_u64(vceqq_f64(a, b));
+    else if constexpr (Op == CompareOpType::LT)
+        return vcltq_f64(a, b);
+    else if constexpr (Op == CompareOpType::LE)
+        return vcleq_f64(a, b);
+    else if constexpr (Op == CompareOpType::GT)
+        return vmvnq_u64(vcleq_f64(a, b));
+    else
+        return vmvnq_u64(vcltq_f64(a, b));
+}
+
 // draft: movemask functions from sse2neon library.
 // todo: can this be made better?
 
@@ -181,15 +283,16 @@ struct CmpHelper<CompareOpType::EQ> {
 
     static inline uint32x4x2_t
     compare(const float32x4x2_t a, const float32x4x2_t b) {
-        return {vceqq_f32(a.val[0], b.val[0]), vceqq_f32(a.val[1], b.val[1])};
+        return {totalCompare<CompareOpType::EQ>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::EQ>(a.val[1], b.val[1])};
     }
 
     static inline uint64x2x4_t
     compare(const float64x2x4_t a, const float64x2x4_t b) {
-        return {vceqq_f64(a.val[0], b.val[0]),
-                vceqq_f64(a.val[1], b.val[1]),
-                vceqq_f64(a.val[2], b.val[2]),
-                vceqq_f64(a.val[3], b.val[3])};
+        return {totalCompare<CompareOpType::EQ>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::EQ>(a.val[1], b.val[1]),
+                totalCompare<CompareOpType::EQ>(a.val[2], b.val[2]),
+                totalCompare<CompareOpType::EQ>(a.val[3], b.val[3])};
     }
 };
 
@@ -230,15 +333,16 @@ struct CmpHelper<CompareOpType::GE> {
 
     static inline uint32x4x2_t
     compare(const float32x4x2_t a, const float32x4x2_t b) {
-        return {vcgeq_f32(a.val[0], b.val[0]), vcgeq_f32(a.val[1], b.val[1])};
+        return {totalCompare<CompareOpType::GE>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::GE>(a.val[1], b.val[1])};
     }
 
     static inline uint64x2x4_t
     compare(const float64x2x4_t a, const float64x2x4_t b) {
-        return {vcgeq_f64(a.val[0], b.val[0]),
-                vcgeq_f64(a.val[1], b.val[1]),
-                vcgeq_f64(a.val[2], b.val[2]),
-                vcgeq_f64(a.val[3], b.val[3])};
+        return {totalCompare<CompareOpType::GE>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::GE>(a.val[1], b.val[1]),
+                totalCompare<CompareOpType::GE>(a.val[2], b.val[2]),
+                totalCompare<CompareOpType::GE>(a.val[3], b.val[3])};
     }
 };
 
@@ -279,15 +383,16 @@ struct CmpHelper<CompareOpType::GT> {
 
     static inline uint32x4x2_t
     compare(const float32x4x2_t a, const float32x4x2_t b) {
-        return {vcgtq_f32(a.val[0], b.val[0]), vcgtq_f32(a.val[1], b.val[1])};
+        return {totalCompare<CompareOpType::GT>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::GT>(a.val[1], b.val[1])};
     }
 
     static inline uint64x2x4_t
     compare(const float64x2x4_t a, const float64x2x4_t b) {
-        return {vcgtq_f64(a.val[0], b.val[0]),
-                vcgtq_f64(a.val[1], b.val[1]),
-                vcgtq_f64(a.val[2], b.val[2]),
-                vcgtq_f64(a.val[3], b.val[3])};
+        return {totalCompare<CompareOpType::GT>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::GT>(a.val[1], b.val[1]),
+                totalCompare<CompareOpType::GT>(a.val[2], b.val[2]),
+                totalCompare<CompareOpType::GT>(a.val[3], b.val[3])};
     }
 };
 
@@ -328,15 +433,16 @@ struct CmpHelper<CompareOpType::LE> {
 
     static inline uint32x4x2_t
     compare(const float32x4x2_t a, const float32x4x2_t b) {
-        return {vcleq_f32(a.val[0], b.val[0]), vcleq_f32(a.val[1], b.val[1])};
+        return {totalCompare<CompareOpType::LE>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::LE>(a.val[1], b.val[1])};
     }
 
     static inline uint64x2x4_t
     compare(const float64x2x4_t a, const float64x2x4_t b) {
-        return {vcleq_f64(a.val[0], b.val[0]),
-                vcleq_f64(a.val[1], b.val[1]),
-                vcleq_f64(a.val[2], b.val[2]),
-                vcleq_f64(a.val[3], b.val[3])};
+        return {totalCompare<CompareOpType::LE>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::LE>(a.val[1], b.val[1]),
+                totalCompare<CompareOpType::LE>(a.val[2], b.val[2]),
+                totalCompare<CompareOpType::LE>(a.val[3], b.val[3])};
     }
 };
 
@@ -377,15 +483,16 @@ struct CmpHelper<CompareOpType::LT> {
 
     static inline uint32x4x2_t
     compare(const float32x4x2_t a, const float32x4x2_t b) {
-        return {vcltq_f32(a.val[0], b.val[0]), vcltq_f32(a.val[1], b.val[1])};
+        return {totalCompare<CompareOpType::LT>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::LT>(a.val[1], b.val[1])};
     }
 
     static inline uint64x2x4_t
     compare(const float64x2x4_t a, const float64x2x4_t b) {
-        return {vcltq_f64(a.val[0], b.val[0]),
-                vcltq_f64(a.val[1], b.val[1]),
-                vcltq_f64(a.val[2], b.val[2]),
-                vcltq_f64(a.val[3], b.val[3])};
+        return {totalCompare<CompareOpType::LT>(a.val[0], b.val[0]),
+                totalCompare<CompareOpType::LT>(a.val[1], b.val[1]),
+                totalCompare<CompareOpType::LT>(a.val[2], b.val[2]),
+                totalCompare<CompareOpType::LT>(a.val[3], b.val[3])};
     }
 };
 
@@ -429,16 +536,16 @@ struct CmpHelper<CompareOpType::NE> {
 
     static inline uint32x4x2_t
     compare(const float32x4x2_t a, const float32x4x2_t b) {
-        return {vmvnq_u32(vceqq_f32(a.val[0], b.val[0])),
-                vmvnq_u32(vceqq_f32(a.val[1], b.val[1]))};
+        return {vmvnq_u32(totalCompare<CompareOpType::EQ>(a.val[0], b.val[0])),
+                vmvnq_u32(totalCompare<CompareOpType::EQ>(a.val[1], b.val[1]))};
     }
 
     static inline uint64x2x4_t
     compare(const float64x2x4_t a, const float64x2x4_t b) {
-        return {vmvnq_u64(vceqq_f64(a.val[0], b.val[0])),
-                vmvnq_u64(vceqq_f64(a.val[1], b.val[1])),
-                vmvnq_u64(vceqq_f64(a.val[2], b.val[2])),
-                vmvnq_u64(vceqq_f64(a.val[3], b.val[3]))};
+        return {vmvnq_u64(totalCompare<CompareOpType::EQ>(a.val[0], b.val[0])),
+                vmvnq_u64(totalCompare<CompareOpType::EQ>(a.val[1], b.val[1])),
+                vmvnq_u64(totalCompare<CompareOpType::EQ>(a.val[2], b.val[2])),
+                vmvnq_u64(totalCompare<CompareOpType::EQ>(a.val[3], b.val[3]))};
     }
 };
 
@@ -589,12 +696,16 @@ OpCompareValImpl<float, Op>::op_compare_val(uint8_t* const __restrict res_u8,
     //
     const float32x4x2_t target = {vdupq_n_f32(val), vdupq_n_f32(val)};
 
+    const bool target_nan = std::isnan(val);
+
     // todo: aligned reads & writes
 
     const size_t size8 = (size / 8) * 8;
     for (size_t i = 0; i < size8; i += 8) {
         const float32x4x2_t v0 = {vld1q_f32(src + i), vld1q_f32(src + i + 4)};
-        const uint32x4x2_t cmp = CmpHelper<Op>::compare(v0, target);
+        const uint32x4x2_t cmp = {
+            totalCompareTarget<Op>(v0.val[0], target.val[0], target_nan),
+            totalCompareTarget<Op>(v0.val[1], target.val[1], target_nan)};
         const uint8_t mmask = movemask(cmp);
 
         res_u8[i / 8] = mmask;
@@ -616,6 +727,8 @@ OpCompareValImpl<double, Op>::op_compare_val(uint8_t* const __restrict res_u8,
     const float64x2x4_t target = {
         vdupq_n_f64(val), vdupq_n_f64(val), vdupq_n_f64(val), vdupq_n_f64(val)};
 
+    const bool target_nan = std::isnan(val);
+
     // todo: aligned reads & writes
 
     const size_t size8 = (size / 8) * 8;
@@ -624,7 +737,11 @@ OpCompareValImpl<double, Op>::op_compare_val(uint8_t* const __restrict res_u8,
                                   vld1q_f64(src + i + 2),
                                   vld1q_f64(src + i + 4),
                                   vld1q_f64(src + i + 6)};
-        const uint64x2x4_t cmp = CmpHelper<Op>::compare(v0, target);
+        const uint64x2x4_t cmp = {
+            totalCompareTarget<Op>(v0.val[0], target.val[0], target_nan),
+            totalCompareTarget<Op>(v0.val[1], target.val[1], target_nan),
+            totalCompareTarget<Op>(v0.val[2], target.val[2], target_nan),
+            totalCompareTarget<Op>(v0.val[3], target.val[3], target_nan)};
         const uint8_t mmask = movemask(cmp);
 
         res_u8[i / 8] = mmask;
@@ -1779,7 +1896,7 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     } else {
         if constexpr (AOp == ArithOpType::Div) {
             if (std::isfinite(value) && std::isfinite(right_operand) &&
-                right_operand > 0) {
+                std::isfinite(right_operand * value) && right_operand > 0) {
                 // a special case that allows faster processing by using the multiplication
                 //   operation instead of the division one.
 
@@ -1807,14 +1924,9 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
                 }
 
                 return true;
-            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
-                       right_operand < 0) {
-                // flip signs and go for the multiplication case
-                return OpArithCompareImpl<float,
-                                          AOp,
-                                          CompareOpDivFlip<CmpOp>::op>::
-                    op_arith_compare(res_u8, src, -right_operand, -value, size);
             }
+            // A negative divisor must use actual division: negating NaN
+            // preserves its maximal SQL order rather than reversing it.
 
             // go with the default case
         }
@@ -1863,7 +1975,7 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     } else {
         if constexpr (AOp == ArithOpType::Div) {
             if (std::isfinite(value) && std::isfinite(right_operand) &&
-                right_operand > 0) {
+                std::isfinite(right_operand * value) && right_operand > 0) {
                 // a special case that allows faster processing by using the multiplication
                 //   operation instead of the division one.
 
@@ -1897,14 +2009,9 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
                 }
 
                 return true;
-            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
-                       right_operand < 0) {
-                // flip signs and go for the multiplication case
-                return OpArithCompareImpl<double,
-                                          AOp,
-                                          CompareOpDivFlip<CmpOp>::op>::
-                    op_arith_compare(res_u8, src, -right_operand, -value, size);
             }
+            // A negative divisor must use actual division: negating NaN
+            // preserves its maximal SQL order rather than reversing it.
 
             // go with the default case
         }

@@ -563,7 +563,7 @@ DecodeFrozenPostings(const uint8_t* data,
         } else {
             local_io();
         }
-        std::map<T, std::pair<size_t, size_t>> locations;
+        std::map<T, std::pair<size_t, size_t>, ScalarIndexLess> locations;
         std::vector<uint8_t> frozen_buffer;
         size_t file_offset = 0;
         for (size_t i = 0; i < index_length; ++i) {

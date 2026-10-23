@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <stdint.h>
 #include <algorithm>
 #include <cstddef>
@@ -139,23 +140,24 @@ RangeShouldSkip(const T& value,
     bool should_skip = false;
     switch (op_type) {
         case OpType::Equal: {
-            should_skip = value > upper_bound || value < lower_bound;
+            should_skip = ScalarGreater(value, upper_bound) ||
+                          ScalarLess(value, lower_bound);
             break;
         }
         case OpType::LessThan: {
-            should_skip = value <= lower_bound;
+            should_skip = ScalarLessEqual(value, lower_bound);
             break;
         }
         case OpType::LessEqual: {
-            should_skip = value < lower_bound;
+            should_skip = ScalarLess(value, lower_bound);
             break;
         }
         case OpType::GreaterThan: {
-            should_skip = value >= upper_bound;
+            should_skip = ScalarGreaterEqual(value, upper_bound);
             break;
         }
         case OpType::GreaterEqual: {
-            should_skip = value > upper_bound;
+            should_skip = ScalarGreater(value, upper_bound);
             break;
         }
         default: {
@@ -175,13 +177,17 @@ RangeShouldSkip(const T& lower_val,
                 bool upper_inclusive) {
     bool should_skip = false;
     if (lower_inclusive && upper_inclusive) {
-        should_skip = (lower_val > upper_bound) || (upper_val < lower_bound);
+        should_skip = (ScalarGreater(lower_val, upper_bound)) ||
+                      (ScalarLess(upper_val, lower_bound));
     } else if (lower_inclusive && !upper_inclusive) {
-        should_skip = (lower_val > upper_bound) || (upper_val <= lower_bound);
+        should_skip = (ScalarGreater(lower_val, upper_bound)) ||
+                      (ScalarLessEqual(upper_val, lower_bound));
     } else if (!lower_inclusive && upper_inclusive) {
-        should_skip = (lower_val >= upper_bound) || (upper_val < lower_bound);
+        should_skip = (ScalarGreaterEqual(lower_val, upper_bound)) ||
+                      (ScalarLess(upper_val, lower_bound));
     } else {
-        should_skip = (lower_val >= upper_bound) || (upper_val <= lower_bound);
+        should_skip = (ScalarGreaterEqual(lower_val, upper_bound)) ||
+                      (ScalarLessEqual(upper_val, lower_bound));
     }
     return should_skip;
 }
@@ -386,7 +392,8 @@ template <typename T>
 class FloatFieldChunkMetrics : public FieldChunkMetrics {
  public:
     FloatFieldChunkMetrics() = default;
-    FloatFieldChunkMetrics(T min, T max) : min_(min), max_(max) {
+    FloatFieldChunkMetrics(T min, T max, bool may_hide_nan = false)
+        : min_(min), max_(max), may_hide_nan_(may_hide_nan) {
         this->has_value_ = true;
     }
 
@@ -395,8 +402,8 @@ class FloatFieldChunkMetrics : public FieldChunkMetrics {
         if (!this->has_value_) {
             return CloneWithMetadata(std::make_unique<NoneFieldChunkMetrics>());
         }
-        return CloneWithMetadata(
-            std::make_unique<FloatFieldChunkMetrics<T>>(min_, max_));
+        return CloneWithMetadata(std::make_unique<FloatFieldChunkMetrics<T>>(
+            min_, max_, may_hide_nan_));
     }
 
     bool
@@ -408,6 +415,12 @@ class FloatFieldChunkMetrics : public FieldChunkMetrics {
             return false;
         }
         const T& typed_val = std::get<T>(val);
+        if (may_hide_nan_ &&
+            (op_type == OpType::GreaterThan ||
+             op_type == OpType::GreaterEqual ||
+             (op_type == OpType::Equal && ScalarIsNaN(typed_val)))) {
+            return false;
+        }
         return RangeShouldSkip(typed_val, min_, max_, op_type);
     }
 
@@ -430,14 +443,21 @@ class FloatFieldChunkMetrics : public FieldChunkMetrics {
                 return false;  // Mixed types in IN list, cannot evaluate
             }
         }
+        if (may_hide_nan_) {
+            for (const auto& value : values) {
+                if (ScalarIsNaN(std::get<T>(value))) {
+                    return false;
+                }
+            }
+        }
         T typed_min = std::get<T>(values[0]);
         T typed_max = std::get<T>(values[0]);
         for (const auto& v : values) {
             const T& current_val = std::get<T>(v);
-            if (current_val < typed_min) {
+            if (ScalarLess(current_val, typed_min)) {
                 typed_min = current_val;
             }
-            if (current_val > typed_max) {
+            if (ScalarGreater(current_val, typed_max)) {
                 typed_max = current_val;
             }
         }
@@ -458,6 +478,9 @@ class FloatFieldChunkMetrics : public FieldChunkMetrics {
         }
         const T& typed_lower = std::get<T>(lower_val);
         const T& typed_upper = std::get<T>(upper_val);
+        if (may_hide_nan_ && upper_inclusive && ScalarIsNaN(typed_upper)) {
+            return false;
+        }
         return RangeShouldSkip(typed_lower,
                                typed_upper,
                                min_,
@@ -485,6 +508,9 @@ class FloatFieldChunkMetrics : public FieldChunkMetrics {
  private:
     T min_;
     T max_;
+    // Parquet extrema omit NaN. Such bounds cannot prove absence of a row
+    // satisfying a predicate whose total-order result includes NaN.
+    bool may_hide_nan_ = false;
 };
 
 template <typename T>
@@ -949,10 +975,10 @@ class SkipIndexStatsBuilder {
                     max = value;
                     has_first_valid = true;
                 } else {
-                    if (value < min) {
+                    if (ScalarLess(value, min)) {
                         min = value;
                     }
-                    if (value > max) {
+                    if (ScalarGreater(value, max)) {
                         max = value;
                     }
                 }
@@ -1000,10 +1026,10 @@ class SkipIndexStatsBuilder {
                     max = value;
                     has_first_valid = true;
                 } else {
-                    if (value < min) {
+                    if (ScalarLess(value, min)) {
                         min = value;
                     }
-                    if (value > max) {
+                    if (ScalarGreater(value, max)) {
                         max = value;
                     }
                 }

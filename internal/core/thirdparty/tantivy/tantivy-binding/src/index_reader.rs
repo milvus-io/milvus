@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use libc::c_char;
 use tantivy::fastfield::FastValue;
-use tantivy::query::{BooleanQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery};
+use tantivy::query::{
+    BooleanQuery, InvertedIndexRangeQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery,
+};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
@@ -14,7 +16,7 @@ use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
 use crate::index_reader_c::{RegexMatchFn, SetBitsetFn};
 use crate::log::init_log;
 use crate::milvus_id_collector::MilvusIdCollector;
-use crate::util::{c_ptr_to_str, make_bounds};
+use crate::util::{c_ptr_to_str, canonical_f64, make_bounds, CanonicalNumericValue};
 use crate::vec_collector::VecCollector;
 
 use crate::data_type::JsonExistValueType;
@@ -38,6 +40,7 @@ fn legacy_negative_zero_term(field: Field) -> Term {
 }
 
 fn f64_lower_bound(field: Field, value: f64, inclusive: bool) -> Bound<Term> {
+    let value = canonical_f64(value);
     let term = if value == 0.0 && inclusive {
         legacy_negative_zero_term(field)
     } else {
@@ -47,6 +50,7 @@ fn f64_lower_bound(field: Field, value: f64, inclusive: bool) -> Bound<Term> {
 }
 
 fn f64_upper_bound(field: Field, value: f64, inclusive: bool) -> Bound<Term> {
+    let value = canonical_f64(value);
     let term = if value == 0.0 && !inclusive {
         legacy_negative_zero_term(field)
     } else {
@@ -257,9 +261,12 @@ impl IndexReaderWrapper {
     }
 
     pub fn terms_query_f64(&self, terms: &[f64], bitset: *mut c_void) -> Result<()> {
-        self.batch_terms_query(terms, Term::from_field_f64, bitset)?;
-        // The regular constructor normalizes either sign to +0. Include the
-        // old persisted -0 term once, regardless of the query's zero sign.
+        self.batch_terms_query(
+            terms,
+            |field, value| Term::from_field_f64(field, canonical_f64(value)),
+            bitset,
+        )?;
+        // Older V5 artifacts may contain a separate negative-zero term.
         if terms.iter().any(|&term| term == 0.0) {
             self.single_term_query(legacy_negative_zero_term, bitset)?;
         }
@@ -412,9 +419,10 @@ impl IndexReaderWrapper {
         ub_inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        if lower_bound > upper_bound
-            || (lower_bound == upper_bound && !(lb_inclusive && ub_inclusive))
-        {
+        let lower_bound = canonical_f64(lower_bound);
+        let upper_bound = canonical_f64(upper_bound);
+        let order = lower_bound.total_cmp(&upper_bound);
+        if order.is_gt() || (order.is_eq() && !(lb_inclusive && ub_inclusive)) {
             return Ok(());
         }
         let lb = f64_lower_bound(self.field, lower_bound, lb_inclusive);
@@ -558,7 +566,7 @@ impl IndexReaderWrapper {
         bitset: *mut c_void,
     ) -> Result<()> {
         let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-        json_term.append_type_and_fast_value(term);
+        json_term.append_type_and_fast_value(canonical_f64(term));
         let q = TermQuery::new(json_term, IndexRecordOption::Basic);
         self.search(&q, bitset)
     }
@@ -649,7 +657,7 @@ impl IndexReaderWrapper {
             .iter()
             .map(|&t| {
                 let mut json_term = Term::from_field_json_path(self.field, json_path, false);
-                json_term.append_type_and_fast_value(t);
+                json_term.append_type_and_fast_value(canonical_f64(t));
                 json_term
             })
             .collect();
@@ -717,7 +725,7 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
-    pub fn json_range_query<T: FastValue>(
+    pub fn json_range_query<T: FastValue + CanonicalNumericValue>(
         &self,
         json_path: &str,
         lower_bound: T,
@@ -728,22 +736,39 @@ impl IndexReaderWrapper {
         ub_inclusive: bool,
         bitset: *mut c_void,
     ) -> Result<()> {
-        let lb = if lb_unbounded {
+        let has_nan_bound = (!lb_unbounded && lower_bound.is_nan_value())
+            || (!up_unbounded && higher_bound.is_nan_value());
+        let lb = if lb_unbounded && has_nan_bound {
+            let mut term = Term::from_field_json_path(self.field, json_path, false);
+            term.append_type_and_fast_value(f64::NEG_INFINITY);
+            Bound::Included(term)
+        } else if lb_unbounded {
             Bound::Unbounded
         } else {
             let mut term = Term::from_field_json_path(self.field, json_path, false);
-            term.append_type_and_fast_value::<T>(lower_bound);
+            term.append_type_and_fast_value::<T>(lower_bound.canonical_numeric());
             make_bounds(term, lb_inclusive)
         };
-        let ub = if up_unbounded {
+        let ub = if up_unbounded && has_nan_bound {
+            let mut term = Term::from_field_json_path(self.field, json_path, false);
+            term.append_type_and_fast_value(canonical_f64(f64::NAN));
+            Bound::Included(term)
+        } else if up_unbounded {
             Bound::Unbounded
         } else {
             let mut term = Term::from_field_json_path(self.field, json_path, false);
-            term.append_type_and_fast_value::<T>(higher_bound);
+            term.append_type_and_fast_value::<T>(higher_bound.canonical_numeric());
             make_bounds(term, ub_inclusive)
         };
-        let q = RangeQuery::new(lb, ub);
-        self.search(&q, bitset)
+        if has_nan_bound {
+            // JSON fast fields can coerce f64 bounds into an integer column.
+            // Their IEEE NaN-to-integer conversion loses the greatest-key order.
+            // Keep NaN bounds in the typed term domain; JsonFlatIndex adds the
+            // corresponding signed/unsigned integer ranges separately.
+            self.search(&InvertedIndexRangeQuery::new(lb, ub), bitset)
+        } else {
+            self.search(&RangeQuery::new(lb, ub), bitset)
+        }
     }
 
     pub fn json_range_query_keyword(

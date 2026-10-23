@@ -30,8 +30,8 @@ import (
 // sortAndExtractResults used to sort a []any with sort.SliceStable, looking each
 // score up in a map inside the comparator. It now sorts a slice of structs that
 // already carry the score. This pins the resulting order against the previous
-// formulation, including the tie-break by ID and the behavior for scores that
-// compare unequal in both directions (NaN).
+// formulation for finite scores, including the tie-break by ID. Nonfinite
+// scalar-derived scores have a separate total-order regression below.
 func TestSortAndExtractResultsMatchesPreviousOrdering(t *testing.T) {
 	legacyOrder := func(idScores map[any]float32, descending bool) []any {
 		ids := make([]any, 0, len(idScores))
@@ -96,9 +96,6 @@ func TestSortAndExtractResultsMatchesPreviousOrdering(t *testing.T) {
 		{"string ids", map[any]float32{
 			"b": 0.5, "a": 0.5, "c": 0.9,
 		}},
-		{"nan score", map[any]float32{
-			int64(1): float32(math.NaN()), int64(2): 0.5, int64(3): 0.9,
-		}},
 	}
 
 	for _, c := range cases {
@@ -131,4 +128,27 @@ func TestSortAndExtractResultsKeepsTuplesAligned(t *testing.T) {
 	scores, locs := sortAndExtractResults(idScores, idLocs, true)
 	assert.Equal(t, []float32{0.9, 0.5, 0.1}, scores)
 	assert.Equal(t, []idLocation{{inputIdx: 20, rowIdx: 200}, {inputIdx: 30, rowIdx: 300}, {inputIdx: 10, rowIdx: 100}}, locs)
+}
+
+func TestSortScoredIDsFloatingTotalOrder(t *testing.T) {
+	for _, descending := range []bool{true, false} {
+		entries := []scoredID{
+			{key: candidateKey{intID: 5}, score: 0},
+			{key: candidateKey{intID: 91}, score: math.Float32frombits(0x7fc00001)},
+			{key: candidateKey{intID: 8}, score: float32(math.Inf(1))},
+			{key: candidateKey{intID: 90}, score: math.Float32frombits(0xffc00002)},
+			{key: candidateKey{intID: 4}, score: math.Float32frombits(0x80000000)},
+			{key: candidateKey{intID: 2}, score: float32(math.Inf(-1))},
+		}
+		sortScoredIDs(entries, descending)
+		ids := make([]int64, len(entries))
+		for i, entry := range entries {
+			ids[i] = entry.key.intID
+		}
+		want := []int64{90, 91, 8, 4, 5, 2}
+		if !descending {
+			want = []int64{2, 4, 5, 8, 90, 91}
+		}
+		assert.Equal(t, want, ids)
+	}
 }
