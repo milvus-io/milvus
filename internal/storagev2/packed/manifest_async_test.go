@@ -500,18 +500,71 @@ func TestAsyncManifestCommitSubmissionsSingleWorker(t *testing.T) {
 	require.False(t, called)
 }
 
+func TestManifestIndexesAfterUpdatesUsesFieldID(t *testing.T) {
+	indexes := []ManifestIndexInfo{
+		{FieldID: 100, IndexID: 1, ColumnName: "vector"},
+		{FieldID: 100, IndexID: 2, ColumnName: ""},
+		{FieldID: 101, IndexID: 3, ColumnName: "100"},
+	}
+	for _, tc := range []struct {
+		name    string
+		columns []string
+		drops   []int64
+		add     bool
+		want    bool
+	}{
+		{
+			name: "unaffected field survives despite name collision", columns: []string{"100"}, want: true,
+		},
+		{
+			name: "all affected fields invalidated regardless of names", columns: []string{"100", "101"}, want: false,
+		},
+		{
+			name: "append invalidates both indexes on the same field", columns: []string{"100"}, drops: []int64{3}, want: false,
+		},
+		{
+			name: "explicit drop preserves another index on the field", columns: []string{"101"}, drops: []int64{1}, want: true,
+		},
+		{
+			name: "additions survive invalidation", columns: []string{"100", "101"}, add: true, want: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			updates := &ManifestUpdates{}
+			for _, id := range tc.drops {
+				updates.DropIndexes = append(updates.DropIndexes, DropIndexEntry{IndexID: id})
+			}
+			if tc.add {
+				updates.Indexes = indexes[:1]
+			}
+			got := manifestIndexesAfterUpdates(indexes, updates, tc.drops, tc.columns)
+			require.NotNil(t, got)
+			require.Equal(t, tc.want, *got)
+		})
+	}
+}
+
 // Compare the in-memory marker with the actual native resolver's persisted
 // output. This also guards the adapter against drift in index invalidation rules.
 func TestAsyncManifestIndexMarkerResult(t *testing.T) {
-	for _, scenario := range []string{"drop_one", "drop_all", "absent_drop", "drop_and_add", "stale_drop_and_add", "version_drift", "append_columns", "append_segment", "append_and_add", "add_column_group", "column_group_entry", "delta_only", "empty_updates"} {
+	for _, scenario := range []string{"drop_one", "drop_all", "absent_drop", "drop_and_add", "stale_drop_and_add", "version_drift", "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field", "add_column_group", "column_group_entry", "delta_only", "empty_updates"} {
 		t.Run(scenario, func(t *testing.T) {
 			cfg := manifestTestStorageConfig(t)
 			io := NewManifestIOContext(1)
 			defer io.Close()
 			base := path.Join(cfg.RootPath, scenario)
 			indexes := []ManifestIndexInfo{
-				{ColumnName: "100", IndexName: "one", IndexType: "FLAT", Path: "one", FieldID: 100, IndexID: 1, BuildID: 11},
-				{ColumnName: "101", IndexName: "two", IndexType: "FLAT", Path: "two", FieldID: 101, IndexID: 2, BuildID: 22},
+				{ColumnName: "vector", IndexName: "one", IndexType: "FLAT", Path: "one", FieldID: 100, IndexID: 1, BuildID: 11},
+				{ColumnName: "chunks[embedding]", IndexName: "two", IndexType: "FLAT", Path: "two", FieldID: 101, IndexID: 2, BuildID: 22},
+			}
+			switch scenario {
+			case "append_empty_name":
+				indexes[0].ColumnName, indexes[1].ColumnName = "", ""
+			case "append_name_collision":
+				indexes[0].ColumnName, indexes[1].ColumnName = "101", "100"
+			case "append_shared_field":
+				indexes[1].FieldID = indexes[0].FieldID
+				indexes[1].ColumnName = indexes[0].ColumnName
 			}
 			initial, err := CommitManifestUpdates(base, 0, cfg, &ManifestUpdates{Indexes: indexes})
 			require.NoError(t, err)
@@ -543,9 +596,9 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 				if scenario == "stale_drop_and_add" {
 					updates.DropIndexes[0].ExpectedBuildID = 99
 				}
-			case "append_columns", "append_segment", "append_and_add", "add_column_group":
+			case "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field", "add_column_group":
 				columns := []string{"100"}
-				if scenario == "append_segment" || scenario == "append_and_add" {
+				if scenario == "append_segment" || scenario == "append_and_add" || scenario == "append_empty_name" {
 					columns = append(columns, "101")
 				}
 				groups, err := createColumnGroups(columns, "parquet", []Fragment{{FilePath: path.Join(base, "data.parquet"), EndRow: 1}})
@@ -565,6 +618,9 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 				}
 				if scenario == "add_column_group" {
 					wantCount, wantMarker = 2, false
+				}
+				if scenario == "append_empty_name" || scenario == "append_shared_field" {
+					wantCount = 0
 				}
 			case "column_group_entry":
 				updates.ColumnGroups = []ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet"}}
@@ -586,6 +642,10 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 			actual, err := GetManifestIndexInfos(result.ManifestPath, cfg)
 			require.NoError(t, err)
 			require.Len(t, actual, wantCount)
+			if scenario == "append_columns" || scenario == "append_name_collision" {
+				require.Equal(t, int64(2), actual[0].IndexID)
+				require.Equal(t, indexes[1].ColumnName, actual[0].ColumnName)
+			}
 			if wantMarker {
 				require.NotNil(t, result.HasIndexes)
 				require.Equal(t, len(actual) > 0, *result.HasIndexes)
