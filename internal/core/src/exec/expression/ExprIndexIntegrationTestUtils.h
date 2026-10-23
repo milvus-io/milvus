@@ -178,7 +178,9 @@ BuildIndex(FieldId field_id,
     }
     AssertInfo(!chunks.empty(), "consumer index fixture needs input batches");
     params[index::FIELD_ID] = field_id.get();
-    params[index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+    if (!params.contains(index::SCALAR_INDEX_ENGINE_VERSION)) {
+        params[index::SCALAR_INDEX_ENGINE_VERSION] = 3;
+    }
     params["nullable"] = chunks.front()->IsNullable();
     params["num_rows"] = rows;
     auto adapted = index::AdaptIndexType({.index_type = index_type,
