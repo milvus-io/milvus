@@ -24,6 +24,8 @@
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "test_utils/GenExprProto.h"
+#include "exec/expression/IndexPathSelection.h"
+#include "index/Families.h"
 
 namespace milvus::test {
 
@@ -586,7 +588,7 @@ TEST_F(JsonFlatExpressionTest, RawFallbackPreservesLargeInt64LiteralPrecision) {
         proto::plan::OpType::Equal,
         value,
         std::vector<proto::plan::GenericValue>());
-    auto result = evaluate(equal_expr, false);
+    auto result = evaluate(equal_expr, true);
     TargetBitmapView result_view(result->GetRawData(), result->size());
     TargetBitmapView valid_view(result->GetValidRawData(), result->size());
     EXPECT_TRUE(valid_view[16]);
@@ -596,11 +598,26 @@ TEST_F(JsonFlatExpressionTest, RawFallbackPreservesLargeInt64LiteralPrecision) {
     EXPECT_TRUE(result_view[17]);
     EXPECT_FALSE(result_view[18]);
 
+    auto not_equal_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        proto::plan::OpType::NotEqual,
+        value,
+        std::vector<proto::plan::GenericValue>());
+    result = evaluate(not_equal_expr, true);
+    result_view = TargetBitmapView(result->GetRawData(), result->size());
+    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    EXPECT_TRUE(valid_view[16]);
+    EXPECT_TRUE(valid_view[17]);
+    EXPECT_TRUE(valid_view[18]);
+    EXPECT_TRUE(result_view[16]);
+    EXPECT_FALSE(result_view[17]);
+    EXPECT_TRUE(result_view[18]);
+
     auto term_expr = std::make_shared<expr::TermFilterExpr>(
         expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
         std::vector<proto::plan::GenericValue>{value},
         false);
-    result = evaluate(term_expr, false);
+    result = evaluate(term_expr, true);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
     EXPECT_TRUE(valid_view[16]);
@@ -697,6 +714,52 @@ TEST_F(JsonFlatExpressionTest, EmptyJsonInIsDeterministicForEveryRow) {
           true);
 }
 
+TEST(JsonFlatNullExpressionTest, FieldNullUsesRawValidityWithoutPinningIndex) {
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = schema->AddDebugField("json", DataType::JSON, true);
+    const std::vector<std::string> rows = {
+        R"({"a":null})", R"({})", R"(null)", R"({"a":1})", R"({"b":2})"};
+    const uint8_t validity[] = {0x1B};
+    auto field = expr_index::JsonField(rows, true, validity);
+    expr_index::RawFieldFiles files;
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(files.Prepare(field_id, {field}));
+    auto opened =
+        expr_index::BuildIndex(field_id,
+                               DataType::JSON,
+                               index::INVERTED_INDEX_TYPE,
+                               {field},
+                               {{JSON_PATH, ""}, {JSON_CAST_TYPE, "JSON"}});
+    OpContext untouched;
+    OpContext* observed_pin = &untouched;
+    expr_index::InstallIndex(*segment,
+                             field_id,
+                             DataType::JSON,
+                             std::move(opened),
+                             DataType::NONE,
+                             &observed_pin);
+
+    for (const auto op : {proto::plan::NullExpr_NullOp_IsNull,
+                          proto::plan::NullExpr_NullOp_IsNotNull}) {
+        auto column = expr::ColumnInfo(field_id, DataType::JSON);
+        column.nullable_ = true;
+        auto filter = std::make_shared<expr::NullExpr>(column, op);
+        EXPECT_FALSE(
+            CanExprExecuteAllAtOnce(filter, segment.get(), rows.size()));
+        auto evaluation = EvalExprInBatches(filter, segment.get(), rows.size());
+        auto result = evaluation.result;
+        TargetBitmapView bits(result->GetRawData(), result->size());
+        TargetBitmapView valid(result->GetValidRawData(), result->size());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            EXPECT_TRUE(valid[row]);
+            EXPECT_EQ(bits[row],
+                      op == proto::plan::NullExpr_NullOp_IsNull ? row == 2
+                                                                : row != 2);
+        }
+        EXPECT_EQ(observed_pin, &untouched);
+    }
+}
+
 TEST_F(JsonFlatExpressionTest, RootExistsRejectsMissingAndNullValues) {
     auto expr = std::make_shared<expr::ExistsExpr>(
         expr::ColumnInfo(json_fid_, DataType::JSON, {""}));
@@ -710,4 +773,29 @@ TEST_F(JsonFlatExpressionTest, RootExistsRejectsMissingAndNullValues) {
     EXPECT_FALSE(final[14]);
     EXPECT_FALSE(final[15]);
 }
+TEST(JsonFlatPrefixSelectionTest, LongerRootBreaksEqualScoreTie) {
+    const FieldId field_id(100);
+    exec::ExprIndexRequirement requirement{
+        .field_id = field_id,
+        .reader = exec::RequiredReader::Predicate,
+        .value_type = DataType::INT64,
+        .is_json_field = true,
+        .json_path = "/profile/age",
+        .accepts_candidates = true};
+    segcore::IndexCapabilityEntry broad{
+        .key = {field_id, segcore::IndexIdentity::PreBuiltIndex(10)},
+        .json_path = "",
+        .family = index::families::kJsonFlat,
+        .value_type = DataType::JSON,
+        .caps = {.json_paths = true, .exact = true}};
+    auto narrow = broad;
+    narrow.key.identity = segcore::IndexIdentity::PreBuiltIndex(20);
+    narrow.json_path = "/profile";
+    const auto decision = exec::DetermineExecPath(
+        requirement, segcore::FieldIndexCapability(field_id, {broad, narrow}));
+    EXPECT_EQ(decision.path, exec::ExprExecPath::ScalarIndex);
+    ASSERT_TRUE(decision.key.has_value());
+    EXPECT_TRUE(decision.key->identity == narrow.key.identity);
+}
+
 }  // namespace milvus::test

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <string>
 #include <string_view>
 
 #include "index/contracts/build/IArtifactBuilder.h"
@@ -30,7 +31,7 @@ namespace milvus::index {
 class MarisaIndexBuilder final
     : public IArtifactBuilder<ScalarBuildInput<std::string_view>> {
  public:
-    explicit MarisaIndexBuilder(DataType value_type);
+    MarisaIndexBuilder(DataType value_type, std::string local_dir);
 
     ~MarisaIndexBuilder() override;
 
@@ -40,6 +41,7 @@ class MarisaIndexBuilder final
 
  private:
     DataType value_type_;
+    std::string local_dir_;
 };
 
 }  // namespace milvus::index

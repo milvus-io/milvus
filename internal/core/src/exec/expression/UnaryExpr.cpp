@@ -166,14 +166,19 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<proto::plan::Array>(
 
 void
 PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
+    auto input = context.get_offset_input();
+    // Lazy offset readers must bind their mode before selecting an index.
+    // A prefetch worker may read this plain bool, so join it before writing.
+    if (input != nullptr && !prefetch_future_.has_value()) {
+        SetHasOffsetInput(true);
+    }
     WaitPrefetch();
+    SetHasOffsetInput(input != nullptr);
     tracer::AutoSpan span(
         "PhyUnaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));
     span.SetAttribute("op_type", static_cast<int>(expr_->op_type_));
 
-    auto input = context.get_offset_input();
-    SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
         data_type = expr_->column_.element_type_;
@@ -2093,6 +2098,8 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     }
 
     if (data_type == DataType::JSON &&
+        expr_->op_type_ != proto::plan::OpType::Equal &&
+        expr_->op_type_ != proto::plan::OpType::NotEqual &&
         expr_->val_.val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val &&
         !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
@@ -2439,6 +2446,13 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
     AssertInfo(ngram_reader_ != nullptr,
                "ngram index should not be null, field_id: {}",
                field_id_.get());
+
+    // Single Unary and fused LIKE AND share this entry. A complete InnerMatch
+    // gram already has exact phase-1 hits; validity is handled by the caller.
+    if (ngram_reader_->CandidatesAreExact(literal,
+                                          ToIndexPatternOp(expr_->op_type_))) {
+        return;
+    }
 
     TargetBitmapView res(candidates);
     auto apply_string_predicate = [&](auto&& predicate) {

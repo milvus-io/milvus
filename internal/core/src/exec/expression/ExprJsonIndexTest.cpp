@@ -17,6 +17,7 @@
 #include "ConsumerExprTestBase.h"
 #include "ExprBatchTestUtils.h"
 #include "ExprIndexIntegrationTestUtils.h"
+#include "TermExpr.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
@@ -708,6 +709,29 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         expr::ColumnInfo(json_fid, DataType::JSON, {"a"}),
         std::vector<proto::plan::GenericValue>{value},
         false);
+    class TermPinProbe : public exec::PhyTermFilterExpr {
+     public:
+        using exec::PhyTermFilterExpr::PhyTermFilterExpr;
+        bool
+        HasSelectedPin() const {
+            return static_cast<bool>(selected_root_pin_);
+        }
+    };
+    TermPinProbe physical_expr({},
+                               term_expr,
+                               "term-pin-probe",
+                               nullptr,
+                               seg.get(),
+                               json_strs.size(),
+                               MAX_TIMESTAMP,
+                               2,
+                               0);
+    physical_expr.DetermineExecPath();
+    EXPECT_EQ(physical_expr.GetExecPath(), exec::ExprExecPath::RawData);
+    EXPECT_FALSE(physical_expr.HasSelectedPin());
+    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+        term_expr, seg.get(), json_strs.size()));
+
     result = evaluate(term_expr);
     result_view = TargetBitmapView(result->GetRawData(), result->size());
     valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
