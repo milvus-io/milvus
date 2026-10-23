@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -2667,6 +2668,45 @@ func (suite *ServiceSuite) TestSyncDistribution_Failed() {
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestSyncDistribution_UpdateVersionSyncsIndexMeta() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	collection := suite.node.manager.Collection.Get(suite.collectionID)
+	indexInfos := lo.Map(collection.GetCCollection().IndexMeta().GetIndexMetas(), func(meta *segcorepb.FieldIndexMeta, i int) *indexpb.IndexInfo {
+		return &indexpb.IndexInfo{CollectionID: suite.collectionID, FieldID: meta.GetFieldID(), IndexID: int64(i + 1), IndexParams: meta.GetIndexParams()}
+	})
+	newFieldID := int64(999)
+	indexInfos = append(indexInfos, &indexpb.IndexInfo{CollectionID: suite.collectionID, FieldID: newFieldID, IndexID: 999})
+	req := &querypb.SyncDistributionRequest{
+		Base:         &commonpb.MsgBase{MsgID: rand.Int63(), TargetID: suite.node.session.ServerID},
+		CollectionID: suite.collectionID,
+		Channel:      suite.vchannel,
+		LoadMeta:     &querypb.LoadMetaInfo{PartitionIDs: suite.partitionIDs, IndexInfoVersion: time.Now().UnixNano()},
+		Actions: []*querypb.SyncAction{{
+			Type:          querypb.SyncType_UpdateVersion,
+			TargetVersion: time.Now().UnixMilli(),
+		}},
+		IndexInfoList: indexInfos,
+	}
+
+	status, err := suite.node.SyncDistribution(ctx, req)
+	suite.NoError(merr.CheckRPCCall(status, err))
+	suite.True(lo.ContainsBy(collection.GetCCollection().IndexMeta().GetIndexMetas(), func(meta *segcorepb.FieldIndexMeta) bool {
+		return meta.GetFieldID() == newFieldID
+	}))
+
+	// The target version must not move when the workers did not get the list.
+	mockDelegator := delegator.NewMockShardDelegator(suite.T())
+	mockDelegator.EXPECT().SyncIndexMeta(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrServiceUnavailableMsg("mocked"))
+	req.Channel = "test_sync_index_meta"
+	suite.node.delegators.Insert(req.Channel, mockDelegator)
+	defer suite.node.delegators.GetAndRemove(req.Channel)
+	status, err = suite.node.SyncDistribution(ctx, req)
+	suite.Error(merr.CheckRPCCall(status, err))
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_RejectV25Message() {

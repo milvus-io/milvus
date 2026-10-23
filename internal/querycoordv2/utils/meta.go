@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -37,6 +38,24 @@ func GetPartitions(ctx context.Context, targetMgr meta.TargetManagerInterface, c
 	// fetch next target first, sync next target contains the wanted partition list
 	// if not found, current will be used instead for dist adjustment requests
 	return targetMgr.GetPartitions(ctx, collectionID, meta.NextTargetFirst)
+}
+
+// ListIndexesWithVersion lists the indexes of a collection for QueryNodes,
+// together with the version of the list (see LoadMetaInfo.index_info_version).
+// The version is a TSO timestamp taken before the list is read, so a list with
+// a larger version includes every index change that finished before a list
+// with a smaller version was read, also when the lists come from different
+// QueryCoord processes.
+func ListIndexesWithVersion(ctx context.Context, broker meta.Broker, collectionID int64) ([]*indexpb.IndexInfo, int64, error) {
+	ts, err := broker.AllocTimestamp(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	indexInfos, err := broker.ListIndexes(ctx, collectionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return indexInfos, int64(ts), nil
 }
 
 // GroupNodesByReplica groups nodes by replica,

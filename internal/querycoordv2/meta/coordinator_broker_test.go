@@ -611,6 +611,28 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionLoadInfo() {
 	})
 }
 
+func (s *CoordinatorBrokerRootCoordSuite) TestAllocTimestamp() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("normal_case", func() {
+		s.mixcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).
+			Return(&rootcoordpb.AllocTimestampResponse{Status: merr.Success(), Timestamp: 100, Count: 1}, nil)
+		ts, err := s.broker.AllocTimestamp(ctx)
+		s.NoError(err)
+		s.EqualValues(100, ts)
+		s.resetMock()
+	})
+
+	s.Run("rootcoord_return_failure_status", func() {
+		s.mixcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).
+			Return(&rootcoordpb.AllocTimestampResponse{Status: merr.Status(merr.WrapErrServiceNotReady("rootcoord", 1, "initializing"))}, nil)
+		_, err := s.broker.AllocTimestamp(ctx)
+		s.Error(err)
+		s.resetMock()
+	})
+}
+
 func TestCoordinatorBroker(t *testing.T) {
 	suite.Run(t, new(CoordinatorBrokerRootCoordSuite))
 	suite.Run(t, new(CoordinatorBrokerDataCoordSuite))
