@@ -20,30 +20,22 @@ package httpserver
 
 import (
 	"bytes"
-
 	"fmt"
 	"math"
-
 	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cast"
 	"github.com/tidwall/gjson"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	"github.com/milvus-io/milvus/internal/json"
-
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -290,7 +282,6 @@ func legacyCheckAndSetData(body []byte, collSchema *schemapb.CollectionSchema, p
 					vectorJSON := gjson.Get(data.Raw, fieldName)
 
 					if vectorJSON.IsArray() {
-
 						var vectorArray []float32
 						err := json.Unmarshal([]byte(dataString), &vectorArray)
 						if err != nil {
@@ -298,7 +289,6 @@ func legacyCheckAndSetData(body []byte, collSchema *schemapb.CollectionSchema, p
 						}
 						reallyData[fieldName] = vectorArray
 					} else if vectorJSON.Type == gjson.String {
-
 						vectorStr := gjson.Get(data.Raw, fieldName).Raw
 						var vectorArray []byte
 						err := json.Unmarshal([]byte(vectorStr), &vectorArray)
@@ -962,7 +952,6 @@ func legacyAnyToColumns(rows []map[string]interface{}, validDataMap map[string][
 	fieldLen := make(map[string]int)
 
 	for _, row := range rows {
-
 		v := reflect.ValueOf(row)
 		set, err := reflectValueCandi(v)
 		if err != nil {
@@ -1100,7 +1089,6 @@ func legacyAnyToColumns(rows []map[string]interface{}, validDataMap map[string][
 			}
 		}
 		if fieldLen[name] != rowsLen && partialUpdate && (!hasValidData || len(validData) != rowsLen) {
-
 			log.Info("field len is not equal to rows len",
 				zap.String("fieldName", name),
 				zap.Int("fieldLen", fieldLen[name]),
@@ -1399,7 +1387,6 @@ func legacySerializeFloatOrByteVectors(jsonResult gjson.Result, dataType schemap
 	if firstElement.IsArray() {
 		return legacySerializeFloatVectors(jsonResult.Raw, dataType, dimension, dimension*2, fpArrayToBytesFunc)
 	} else if firstElement.Type == gjson.String || !firstElement.Exists() {
-
 		return serializeByteVectors(jsonResult.Raw, dataType, dimension, dimension*2)
 	}
 	return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], jsonResult.Raw, "invalid type")
@@ -1718,7 +1705,6 @@ func legacyGenerateTemplateArrayData(list []interface{}) *schemapb.TemplateArray
 		result := make([][]byte, len(list))
 		for i, item := range list {
 			bytes, err := json.Marshal(item)
-
 			if err != nil {
 				panic(fmt.Sprintf("marshal data(%v) fail, please check it!", item))
 			}

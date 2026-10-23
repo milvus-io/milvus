@@ -19,11 +19,12 @@ package httpserver
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 func setStrictValidationForTest(t *testing.T, enabled bool) {

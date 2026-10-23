@@ -106,7 +106,8 @@ Restart all proxies to apply; use the same value on every proxy.`,
 validation work. When true the server keeps the previous lenient behavior: a missing or null non-nullable field is
 stored as an empty value, out-of-range integers wrap instead of being rejected, numbers reach VarChar and JSON fields
 through their float64 rendering, and integers too large for the JSON engine become 0. This is a temporary escape hatch
-for clients that have not been corrected yet: every one of those behaviors silently changes what is stored.`,
+for clients that have not been corrected yet: every one of those behaviors silently changes what is stored.
+Only effective when proxy.http.strictValidation is true.`,
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -118,7 +119,8 @@ for clients that have not been corrected yet: every one of those behaviors silen
 		Doc: `high-level restful api, the deepest nesting an expression template parameter may use. Converting a
 parameter walks its arrays and objects recursively, so the depth a caller may send has to be bounded; requests past the
 bound are rejected as invalid rather than served. Values above 1024 are read as 1024, since past that the recursion
-itself is the risk the setting exists to remove; values below 1 are read as 1.`,
+itself is the risk the setting exists to remove; values below 1 are read as 1.
+Only effective when proxy.http.strictValidation is true.`,
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -131,7 +133,8 @@ itself is the risk the setting exists to remove; values below 1 are read as 1.`,
 A JSON field reads back as "{\"a\":1}" by default, while the same value in the dynamic field reads back as {"a":1}.
 Turning this on removes that difference. Rows written before the insert path stopped storing non-JSON bytes may not
 hold a document; if any row in a response is such a row, every JSON field in that response falls back to the string
-form and a warning is logged, so a caller always sees one shape or the other and never a mixture.`,
+form and a warning is logged, so a caller always sees one shape or the other and never a mixture.
+Only effective when proxy.http.strictValidation is true.`,
 		PanicIfEmpty: false,
 		Export:       true,
 	}
