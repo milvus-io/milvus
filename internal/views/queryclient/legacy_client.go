@@ -41,9 +41,7 @@ type LegacySearchResult struct {
 }
 
 type LegacyQueryRequest struct {
-	// ReadProofAfter requests a WAL-certified read prefix for internal CAS reads.
-	ReadProofAfter uint64
-	Req            *internalpb.RetrieveRequest
+	Req *internalpb.RetrieveRequest
 	// Schema is the immutable read schema used to build Req.
 	Schema *schemapb.CollectionSchema
 	// MVCC fixes the read boundary across replanning; nil samples by consistency.
@@ -155,12 +153,11 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (*Leg
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
-				ReadProofAfter: req.ReadProofAfter,
-				VChannel:       vchannels[i],
-				Req:            req.Req,
-				MVCC:           req.MVCC,
-				BarrierMVCC:    req.BarrierMVCC,
-				Reducer:        collector,
+				VChannel:    vchannels[i],
+				Req:         req.Req,
+				MVCC:        req.MVCC,
+				BarrierMVCC: req.BarrierMVCC,
+				Reducer:     collector,
 			})
 			if err != nil {
 				return err

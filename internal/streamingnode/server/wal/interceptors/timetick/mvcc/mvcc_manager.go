@@ -12,7 +12,6 @@ import (
 func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 	return &MVCCManager{
 		query:                  NewQueryMVCCManager(lastConfirmedTimeTick),
-		readProof:              newReadProofManager(),
 		pchannelMVCCTimestamp:  lastConfirmedTimeTick,
 		recoveryTimeTick:       lastConfirmedTimeTick,
 		vchannelMVCCTimestamps: make(map[string]uint64),
@@ -24,7 +23,6 @@ func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 // relevant persisted write. VChannel entries survive confirmation and are freed
 // on DropCollection, so the map size is bounded by the number of live VChannels.
 type MVCCManager struct {
-	readProof              *readProofManager
 	query                  *QueryMVCCManager
 	mu                     sync.Mutex
 	retiredTimeTick        uint64            // shared fence for retired/unknown identities, without per-shard tombstones.
@@ -57,7 +55,7 @@ func (cm *MVCCManager) GetConfirmedTimeTick() uint64 {
 
 // UpdateMVCC updates the mvcc state by incoming message.
 func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
-	cm.query.UpdateMVCC(msg)
+	cm.query.ObserveAppend(msg)
 	if !msg.IsPersisted() {
 		// Volatile confirmations do not change durable MVCC. Scoped query
 		// progress is handled separately by QueryMVCCManager.
@@ -120,8 +118,8 @@ type VChannelMVCC struct {
 	Confirmed bool   // the mvcc is confirmed by the timeticksync operation.
 }
 
-func (cm *MVCCManager) GetQueryMVCCOfVChannel(vchannel string) QueryVChannelMVCC {
-	return cm.query.GetQueryMVCCOfVChannel(vchannel)
+func (cm *MVCCManager) QueryMVCC() *QueryMVCCManager {
+	return cm.query
 }
 
 // ApplyRecoveryBarrier registers live shards before WAL append admission opens.
@@ -131,5 +129,4 @@ func (cm *MVCCManager) ApplyRecoveryBarrier(vchannel string, timetick uint64) {
 	cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], timetick)
 	cm.mu.Unlock()
 	cm.query.ApplyRecoveryBarrier(vchannel, timetick)
-	cm.readProof.applyRecoveryBarrier(vchannel, timetick)
 }

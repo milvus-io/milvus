@@ -68,7 +68,7 @@ only supplies their query contracts.
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
 - **Scope:** retained requery uses `QueryOnView` with the original View/MVCC.
   Production Proxy wiring
-  remains integration work. See [plan/schema/read-proof contracts](query/query_plan.md).
+  remains integration work. See [plan/schema/snapshot contracts](query/query_plan.md).
 
 Key source paths: `internal/streamingnode/server/queryplan/server.go`,
 `internal/streamingnode/server/wal/adaptor/query_plan.go`,
@@ -420,13 +420,15 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 
 The query client always targets the primary SN by vchannel. Strong and Session
 are sent as Strong; Bounded and Eventually preserve the requested enum.
-`wal/adaptor/query_plan.go` samples local query frontiers on the RW WAL for all
-consistency levels and rejects non-RW WALs with NotPrimary. `GetMVCCTimestamp`
+`wal/adaptor/query_plan.go` reads paired frontiers from one complete RW WAL
+prefix and rejects non-RW WALs with NotPrimary. Strong/Session covers completed
+writes, Eventually can reuse the current complete snapshot, and Bounded also
+requires coverage of its guarantee timestamp. `GetMVCCTimestamp`
 also requires RW access. Secondary replica selection remains future work.
 
-Explicit executor MVCC, scalar BarrierMVCC and a published-prefix CAS read proof
-have distinct contracts; see [Query plan](query/query_plan.md). They must not be
-collapsed into one timestamp or inferred from the consistency enum.
+Explicit executor MVCC and scalar BarrierMVCC have distinct contracts; see
+[Query plan](query/query_plan.md). CAS uses the ordinary Strong snapshot with
+write-side conflict and history checks, without a separate read certificate.
 
 Target changes:
 - GuaranteeTS assignment logic is moved down to StreamingNode, obtained from the WAL system.

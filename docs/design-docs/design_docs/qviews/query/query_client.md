@@ -20,7 +20,8 @@ but its field-name-to-ID wiring still has TODOs; it is not the production entry.
 For each resolved vchannel, Phase 1 targets the primary StreamingNode using
 `UnknownReplicaID`. The returned plan supplies the actual shard/replica identity.
 Strong and Session are sent as Strong; Bounded and Eventually retain their enum
-values. All currently use primary-WAL planning. The presence of
+values. Strong/Session waits for completed writes; Eventually reuses the current complete
+snapshot, and Bounded also enforces the request guarantee timestamp. All use primary-WAL planning. The presence of
 `GetMVCCTimestamp` does not implement secondary replica selection.
 
 Phase 2 sends `SearchOnView` or `QueryOnView` concurrently to every worker in the
@@ -28,7 +29,7 @@ plan. Requests retain the plan's View version and `QueryPlanMVCC`. The legacy
 request timestamp is GrowingTimetick on SN and TransformingTimetick on QN.
 The request is cloned for each worker. Empty successful retrieve responses do
 not enter reduction, but the successful shard plan is retained even for an empty
-worker set or an empty result. CAS consumers need that certificate too.
+worker set or an empty result. CAS consumers use the retained Strong snapshot too.
 
 A retryable View error restarts the shard from Phase 1. The client first cancels
 and joins all workers in that attempt, then clears the shard's partial results.
