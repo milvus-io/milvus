@@ -1700,6 +1700,32 @@ queryView:
     lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
     sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.
   leaseDuration: 60s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
+  logicalSize:
+    source: rowCount # LogicalSize source: rowCount uses physical rows; insertBytes uses ceil(segment insert_binlog_size / bytesPerUnit). Unsupported values use rowCount. Missing size falls back to rows, then segmentBaseCost is added. Sampled once when the DataView manager is initialized; requires coordinator restart.
+    bytesPerUnit: 64KB # Bytes per logical unit for the insertBytes source, parsed as a size (for example 64KB or 1MB). Non-positive or invalid values use 64KB. Sampled once when the DataView manager is initialized; requires coordinator restart. Missing segment size estimates one unit per physical row.
+    segmentBaseCost: 16 # Non-negative fixed cost in logical units added to physical rows or normalized segment bytes when building each new DataView LogicalSize. Changes apply on the next DataView update, never to existing snapshots. Invalid values retain the last valid sampled cost; zero disables the fixed cost.
+  balancer:
+    reconcileInterval: 1m # Positive duration with a unit between periodic reconciles. Decrease for faster convergence and more coordinator work; increase to reduce scan frequency. Events reconcile independently.
+    optimization:
+      enabled: true # Enables optional placement optimization. Disable to stop optional movement; mandatory recovery, version updates and releases continue independently of queryCoord.autoBalance.
+      minScoreGain: 1 # Positive minimum net weighted score gain after movement and loading costs for optional optimization. Increase to reject marginal moves; decrease to accept smaller improvements.
+      maxCandidateEvaluationsPerShard: 100000 # Positive maximum optional candidate evaluations per shard pass. Increase to search more candidates at higher CPU cost; decrease to yield earlier and continue on a later reconcile. Mandatory placement is not capped.
+    scoring:
+      targetLogicalSizePerNode: 100000 # Positive concentration scale in logical size units for preferred shard fanout and the collection concentration floor. Increase to favor fewer participants; decrease to favor spreading. Not a capacity limit.
+      resourceGroup:
+        weight: 1 # Weight of RG load-band improvement. Increase to favor reducing aggregate logical-size skew over local concentration and loading cost.
+        relativeTolerance: 0.1 # Fractional RG load tolerance, in [0,1). Increase to accept more relative skew and reduce movement; decrease to pursue closer logical-size balance.
+        absoluteTolerance: 100000 # Positive minimum RG tolerance in logical size units. Increase to keep tiny shards concentrated at low total volume; decrease to rebalance smaller absolute load differences.
+      concentration:
+        shardWeight: 1 # Weight of excess shard logical size units on one node. Increase to spread large shards more strongly; small shards within their preferred footprint receive no spreading reward.
+        collectionWeight: 1 # Weight of excess collection-replica logical size units on one node. Increase to distribute large collections made of many small shards more evenly.
+        relativeTolerance: 0.1 # Fractional allowance above shard and collection concentration targets. Increase to retain more concentrated layouts; decrease to spread large data more strongly.
+      fanout:
+        weight: 1 # Weight of net excess shard fanout. Increase to favor consolidation and fewer query participants; decrease to permit wider spreading.
+        hysteresis: 0.1 # Fractional growth/shrink margin for preferred fanout, in [0,1). Increase to reduce fanout changes near size boundaries; decrease to react sooner to data growth and shrinkage.
+      movement:
+        moveCostPerUnit: 0.02 # Cost multiplier on published LogicalSize whose node changes. Increase to reduce movement; decrease to accept smaller placement improvements, even when destination resources already exist.
+        loadCostPerUnit: 0.08 # Additional cost multiplier on logical size units needing a compatible destination load. Increase to favor protected ready-resource reuse; decrease to favor balance despite additional loading.
 
 # Any configuration related to the streaming service.
 streaming:

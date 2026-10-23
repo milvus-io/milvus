@@ -139,12 +139,14 @@ func (dv DataVersion) IntoProto() *viewpb.DataVersion {
 	}
 }
 
-// SegmentStats is the per-segment load footprint published by the DataView
-// Manager for one DataView version. It currently carries only the segment
-// RowNum; future metrics (e.g. MemSize) extend this struct without changing
-// the map shape or the DataViewRef access contract.
+// SegmentStats is the immutable per-segment footprint of one DataView version.
+// RowNum is physical membership; LogicalSize is computed when the DataView is
+// built and consumed by placement without knowing the cost model.
 type SegmentStats struct {
 	RowNum int64
+	// Size retains the raw byte footprint for subsequent incremental DataViews.
+	Size        int64
+	LogicalSize int64
 }
 
 // DataViewRef is a read-only reference to one DataView version. The Manager
