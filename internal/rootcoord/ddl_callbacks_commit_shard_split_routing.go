@@ -127,7 +127,7 @@ func (c *DDLCallback) expireShardSplitRoutingCaches(ctx context.Context, logger 
 		CacheExpirations: slices.Clone(header.GetCacheExpirations().GetCacheExpirations()),
 	}
 	if coll != nil {
-		own, err := c.getCacheExpireForCollection(ctx, coll.DBName, coll.Name)
+		own, err := c.currentCacheExpireForCollection(ctx, coll.CollectionID)
 		switch {
 		case err == nil:
 			for _, expiration := range own.GetCacheExpirations() {
@@ -138,9 +138,9 @@ func (c *DDLCallback) expireShardSplitRoutingCaches(ctx context.Context, logger 
 				}
 			}
 		case errors.Is(err, merr.ErrCollectionNotFound):
-			// The collection entered Dropping between the gate's lookup by id
-			// and this lookup by name. Its caches are invalidated by the drop
-			// itself, so only what the header names is left to expire.
+			// The collection entered Dropping after the gate's lookup. Its
+			// caches are invalidated by the drop itself, so only what the
+			// header names is left to expire.
 			logger.Warn(ctx, "collection is being dropped, expiring only the header's caches after the shard split routing commit")
 		default:
 			return merr.Wrap(err, "collect the cache expirations after the shard split routing commit")

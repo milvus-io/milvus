@@ -212,19 +212,33 @@ func (c *DDLCallback) splitShardV2AckCallback(ctx context.Context, result messag
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.GetCollectionId()); err != nil {
 		return merr.Wrap(err, "broadcast the altered collection after the split shard commit")
 	}
-	cacheExpirations, err := c.getCacheExpireForCollection(ctx, coll.DBName, coll.Name)
+	cacheExpirations, err := c.currentCacheExpireForCollection(ctx, header.GetCollectionId())
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) {
-			// The collection entered Dropping between the lookup above and here:
-			// it resolves by id but no longer by name. Its caches are about to be
-			// invalidated by the drop itself, so there is nothing left to expire
-			// and nothing a retry could achieve.
+			// The collection entered Dropping after the lookup above. Its caches
+			// are about to be invalidated by the drop itself, so there is
+			// nothing left to expire and nothing a retry could achieve.
 			logger.Warn(ctx, "collection is being dropped, skipping the cache expiry after the split shard commit")
 			return nil
 		}
 		return merr.Wrap(err, "collect the cache expirations after the split shard commit")
 	}
 	return c.ExpireCaches(ctx, cacheExpirations)
+}
+
+// currentCacheExpireForCollection collects the proxy cache expirations of a
+// collection under the name and aliases this cluster holds for it NOW, re-read
+// by id. A callback must not reuse the name it loaded before its own writes: a
+// rename takes a different resource key, so on a secondary it can be applied
+// in between, and expiring the old name would leave every proxy cache of the
+// renamed collection on the pre-commit routing. A collection that is gone or
+// being dropped is ErrCollectionNotFound.
+func (c *DDLCallback) currentCacheExpireForCollection(ctx context.Context, collectionID int64) (*message.CacheExpirations, error) {
+	coll, err := c.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
+	if err != nil {
+		return nil, err
+	}
+	return c.getCacheExpireForCollection(ctx, coll.DBName, coll.Name)
 }
 
 // splitShardDelta names what the split may change -- its header's source and

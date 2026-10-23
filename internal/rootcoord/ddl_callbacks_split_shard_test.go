@@ -949,6 +949,50 @@ func TestSplitShardAckCallbackStopsOnADroppingCollection(t *testing.T) {
 	require.Equal(t, 1, h.broadcasts)
 }
 
+// TestSplitShardAckCallbackExpiresTheCurrentName: on a secondary a rename takes
+// a different resource key, so it can be applied while this callback runs. The
+// caches are expired under the name the collection has after the commit, not
+// the one it had when the callback loaded it.
+func TestSplitShardAckCallbackExpiresTheCurrentName(t *testing.T) {
+	coll := splitTestCollectionMeta([]string{splitTestSource}, map[string]*model.ShardInfo{
+		splitTestSource: {VChannelName: splitTestSource, State: schemapb.ShardState_ShardNormal},
+	}, 0)
+	renamed := splitTestCollectionMeta(coll.VirtualChannelNames, coll.ShardInfos, 0)
+	renamed.Name = "renamed_to"
+	h := newSplitCallbackHarness(t, nil)
+	h.meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, splitTestCollID, mock.Anything, true).Return(coll, nil)
+	h.meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, splitTestCollID, mock.Anything, false).Return(renamed, nil)
+	h.expectCommit(merr.Success(), nil).Once()
+	h.expectApply(nil).Once()
+	var names []string
+	cacheMocker := mockey.Mock((*Core).getCacheExpireForCollection).To(func(_ *Core, _ context.Context, dbName string, name string) (*message.CacheExpirations, error) {
+		names = append(names, name)
+		return &message.CacheExpirations{}, nil
+	}).Build()
+	defer cacheMocker.UnPatch()
+
+	require.NoError(t, h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(splitTestPostImage())))
+	require.Equal(t, []string{"renamed_to"}, names)
+}
+
+// TestSplitShardAckCallbackStopsWhenTheReReadFindsNoCollection: the collection
+// entered Dropping after the commit, so its re-read by id finds nothing; the
+// drop invalidates its caches itself.
+func TestSplitShardAckCallbackStopsWhenTheReReadFindsNoCollection(t *testing.T) {
+	coll := splitTestCollectionMeta([]string{splitTestSource}, map[string]*model.ShardInfo{
+		splitTestSource: {VChannelName: splitTestSource, State: schemapb.ShardState_ShardNormal},
+	}, 0)
+	h := newSplitCallbackHarness(t, nil)
+	h.meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, splitTestCollID, mock.Anything, true).Return(coll, nil)
+	h.meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, splitTestCollID, mock.Anything, false).
+		Return(nil, merr.WrapErrCollectionNotFound(splitTestCollID))
+	h.expectCommit(merr.Success(), nil).Once()
+	h.expectApply(nil).Once()
+
+	require.NoError(t, h.callback.splitShardV2AckCallback(context.Background(), splitTestResult(splitTestPostImage())))
+	require.Equal(t, 1, h.broadcasts)
+}
+
 // TestSplitShardAckCallbackReportsAMetaFailure: an apply that fails for anything
 // other than a vanished collection is retried, not swallowed.
 func TestSplitShardAckCallbackReportsAMetaFailure(t *testing.T) {
