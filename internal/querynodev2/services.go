@@ -229,6 +229,14 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Success(), nil
 	}
 
+	// This can create the collection with an index list older than one that a
+	// delegator on another node already published to this node, and no
+	// delegator is told about it. The collection is created only when no
+	// segment or channel of it is on this node, so this node has left the
+	// shards of those delegators. Each of them drops it from its published set
+	// at its next SyncIndexMeta, and a node that comes back before that comes
+	// back through the delegator's LoadSegments, which calls
+	// forgetIndexMetaWorker.
 	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		segments.ComposeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	if err != nil {

@@ -396,6 +396,7 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	suite.dist.SegmentDistManager.Update(3, segments103Node3...)
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
