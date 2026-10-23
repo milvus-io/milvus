@@ -1,0 +1,247 @@
+package view
+
+import (
+	"fmt"
+	"math"
+	"sort"
+	"time"
+
+	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+// resolveLatestDeletePos returns the position used as the L0 trigger Pos.
+// When dataCoord.compaction.levelzero.forceSelectAllSegments is enabled, it
+// returns a max-timestamp position so that all L1/L2 segments pass the
+// startPos < taskPos filter in selectFlushedSegment — used during repair to
+// recover from wrong StartPosition metadata caused by the import position bug.
+func resolveLatestDeletePos(latestL0DmlPos *msgpb.MsgPosition) *msgpb.MsgPosition {
+	if paramtable.Get().DataCoordCfg.LevelZeroCompactionForceSelectAll.GetAsBool() {
+		channel := ""
+		if latestL0DmlPos != nil {
+			channel = latestL0DmlPos.GetChannelName()
+		}
+		return &msgpb.MsgPosition{
+			ChannelName: channel,
+			Timestamp:   math.MaxUint64,
+		}
+	}
+	return latestL0DmlPos
+}
+
+// LevelZeroCompactionView holds all compactable L0 segments in a compaction group
+// Trigger use static algorithm, it will selects l0Segments according to the min and max threshold
+//
+//	to limit the memory and io usages per L0 Compaction.
+//
+// Given the same l0Segments, Trigger is idempotent, it'll give consist result.
+type LevelZeroCompactionView struct {
+	TriggerID       int64
+	Label           *CompactionGroupLabel
+	L0Segments      []*SegmentView
+	LatestDeletePos *msgpb.MsgPosition
+}
+
+var _ CompactionView = (*LevelZeroCompactionView)(nil)
+
+func (v *LevelZeroCompactionView) String() string {
+	l0strings := lo.Map(v.L0Segments, func(v *SegmentView, _ int) string {
+		return v.LevelZeroString()
+	})
+
+	count := lo.SumBy(v.L0Segments, func(v *SegmentView) int {
+		return v.DeltaRowCount
+	})
+	return fmt.Sprintf("L0SegCount=%d, DeltaRowCount=%d, label=<%s>, posT=<%v>, L0 segments=%v",
+		len(v.L0Segments),
+		count,
+		v.Label.String(),
+		v.LatestDeletePos.GetTimestamp(),
+		l0strings)
+}
+
+func (v *LevelZeroCompactionView) Append(segments ...*SegmentView) {
+	if v.L0Segments == nil {
+		v.L0Segments = segments
+		return
+	}
+
+	v.L0Segments = append(v.L0Segments, segments...)
+}
+
+func (v *LevelZeroCompactionView) GetGroupLabel() *CompactionGroupLabel {
+	if v == nil {
+		return &CompactionGroupLabel{}
+	}
+	return v.Label
+}
+
+func (v *LevelZeroCompactionView) GetSegmentsView() []*SegmentView {
+	if v == nil {
+		return nil
+	}
+
+	return v.L0Segments
+}
+
+func (v *LevelZeroCompactionView) GetTotalSize() float64 {
+	if v == nil {
+		return 0
+	}
+	return SumSegmentSize(v.L0Segments)
+}
+
+func (v *LevelZeroCompactionView) GetCollectionTTL() time.Duration {
+	return 0
+}
+
+// ForceTrigger triggers all qualified LevelZeroSegments according to views
+func (v *LevelZeroCompactionView) ForceTrigger() (CompactionView, string) {
+	sort.Slice(v.L0Segments, func(i, j int) bool {
+		return v.L0Segments[i].DmlPos.GetTimestamp() < v.L0Segments[j].DmlPos.GetTimestamp()
+	})
+
+	targetViews, reason := v.forceTrigger(v.L0Segments)
+
+	// Use the max dmlPos timestamp as the latestDeletePos
+	latestL0 := lo.MaxBy(targetViews, func(view1, view2 *SegmentView) bool {
+		return view1.DmlPos.GetTimestamp() > view2.DmlPos.GetTimestamp()
+	})
+	if len(targetViews) > 0 {
+		return &LevelZeroCompactionView{
+			Label:           v.Label,
+			L0Segments:      targetViews,
+			LatestDeletePos: resolveLatestDeletePos(latestL0.DmlPos),
+			TriggerID:       v.TriggerID,
+		}, reason
+	}
+
+	return nil, ""
+}
+
+func (v *LevelZeroCompactionView) ForceTriggerAll() ([]CompactionView, string) {
+	sort.Slice(v.L0Segments, func(i, j int) bool {
+		return v.L0Segments[i].DmlPos.GetTimestamp() < v.L0Segments[j].DmlPos.GetTimestamp()
+	})
+
+	var resultViews []CompactionView
+	remainingSegments := v.L0Segments
+
+	// Multi-round force trigger loop
+	for len(remainingSegments) > 0 {
+		targetViews, _ := v.forceTrigger(remainingSegments)
+		if len(targetViews) == 0 {
+			// No more segments can be force triggered, break the loop
+			break
+		}
+
+		// Create a new LevelZeroSegmentsView for this round's target views
+		latestL0 := lo.MaxBy(targetViews, func(view1, view2 *SegmentView) bool {
+			return view1.DmlPos.GetTimestamp() > view2.DmlPos.GetTimestamp()
+		})
+		roundView := &LevelZeroCompactionView{
+			Label:           v.Label,
+			L0Segments:      targetViews,
+			LatestDeletePos: resolveLatestDeletePos(latestL0.DmlPos),
+			TriggerID:       v.TriggerID,
+		}
+		resultViews = append(resultViews, roundView)
+
+		// Remove the target segments from remaining segments for next round
+		targetSegmentIDs := lo.Map(targetViews, func(view *SegmentView, _ int) int64 {
+			return view.ID
+		})
+		remainingSegments = lo.Filter(remainingSegments, func(view *SegmentView, _ int) bool {
+			return !lo.Contains(targetSegmentIDs, view.ID)
+		})
+	}
+
+	return resultViews, "force trigger all"
+}
+
+func (v *LevelZeroCompactionView) GetTriggerID() int64 {
+	return v.TriggerID
+}
+
+// Trigger triggers all qualified LevelZeroSegments according to views
+func (v *LevelZeroCompactionView) Trigger() (CompactionView, string) {
+	latestL0 := lo.MaxBy(v.L0Segments, func(view1, view2 *SegmentView) bool {
+		return view1.DmlPos.GetTimestamp() > view2.DmlPos.GetTimestamp()
+	})
+
+	targetViews, reason := v.minCountSizeTrigger(v.L0Segments)
+	if len(targetViews) > 0 {
+		return &LevelZeroCompactionView{
+			Label:           v.Label,
+			L0Segments:      targetViews,
+			LatestDeletePos: resolveLatestDeletePos(latestL0.DmlPos),
+			TriggerID:       v.TriggerID,
+		}, reason
+	}
+
+	return nil, ""
+}
+
+// minCountSizeTrigger tries to trigger LevelZeroCompaction when segmentViews reaches minimum trigger conditions:
+// 1. count >= minDeltaCount, OR
+// 2. size >= minDeltaSize
+func (v *LevelZeroCompactionView) minCountSizeTrigger(segments []*SegmentView) (picked []*SegmentView, reason string) {
+	var (
+		minDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMinSize.GetAsFloat()
+		maxDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMaxSize.GetAsFloat()
+		minDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.GetAsInt()
+		maxDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.GetAsInt()
+	)
+
+	pickedSize := float64(0)
+	pickedCount := 0
+
+	// count >= minDeltaCount
+	if lo.SumBy(segments, func(view *SegmentView) int { return view.DeltalogCount }) >= minDeltaCount {
+		picked, pickedSize, pickedCount = pickByMaxCountSize(segments, maxDeltaSize, maxDeltaCount)
+		reason = fmt.Sprintf("level zero segments count reaches minForceTriggerCountLimit=%d, pickedSize=%.2fB, pickedCount=%d", minDeltaCount, pickedSize, pickedCount)
+		return
+	}
+
+	// size >= minDeltaSize
+	if lo.SumBy(segments, func(view *SegmentView) float64 { return view.DeltaSize }) >= minDeltaSize {
+		picked, pickedSize, pickedCount = pickByMaxCountSize(segments, maxDeltaSize, maxDeltaCount)
+		reason = fmt.Sprintf("level zero segments size reaches minForceTriggerSizeLimit=%.2fB, pickedSize=%.2fB, pickedCount=%d", minDeltaSize, pickedSize, pickedCount)
+		return
+	}
+
+	return
+}
+
+// forceTrigger tries to trigger LevelZeroCompaction even when segmentsViews don't meet the minimum condition,
+// the picked plan is still satisfied with the maximum condition
+func (v *LevelZeroCompactionView) forceTrigger(segments []*SegmentView) (picked []*SegmentView, reason string) {
+	var (
+		maxDeltaSize  = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerMaxSize.GetAsFloat()
+		maxDeltaCount = paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMaxNum.GetAsInt()
+	)
+
+	picked, pickedSize, pickedCount := pickByMaxCountSize(segments, maxDeltaSize, maxDeltaCount)
+	reason = fmt.Sprintf("level zero views force to trigger, pickedSize=%.2fB, pickedCount=%d", pickedSize, pickedCount)
+	return picked, reason
+}
+
+// pickByMaxCountSize picks segments that count <= maxCount or size <= maxSize
+func pickByMaxCountSize(segments []*SegmentView, maxSize float64, maxCount int) (picked []*SegmentView, pickedSize float64, pickedCount int) {
+	idx := 0
+	for _, view := range segments {
+		targetCount := view.DeltalogCount + pickedCount
+		targetSize := view.DeltaSize + pickedSize
+
+		if (pickedCount != 0 && pickedSize != float64(0)) && (targetSize > maxSize || targetCount > maxCount) {
+			break
+		}
+
+		pickedCount = targetCount
+		pickedSize = targetSize
+		idx += 1
+	}
+	return segments[:idx], pickedSize, pickedCount
+}

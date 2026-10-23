@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -49,8 +50,8 @@ func (c *countingAlterCatalog) AlterSegments(ctx context.Context, segments []*da
 	return c.DataCoordCatalog.AlterSegments(ctx, segments, binlogs...)
 }
 
-func addV3Segment(t *testing.T, meta *meta, segmentID int64, basePath string, version int64, state commonpb.SegmentState) {
-	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+func addV3Segment(t *testing.T, mt *meta.Meta, segmentID int64, basePath string, version int64, state commonpb.SegmentState) {
+	require.NoError(t, mt.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		State:          state,
 		StorageVersion: storage.StorageV3,
@@ -63,7 +64,7 @@ func addV3Segment(t *testing.T, meta *meta, segmentID int64, basePath string, ve
 func bumpVersionMock() *mockey.Mocker {
 	return mockey.Mock(packed.SubmitManifestUpdates).To(
 		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
-			complete(mockManifestUpdateResult(packed.MarshalManifestPath(base, version+1), nil), nil)
+			complete(meta.MockManifestUpdateResult(packed.MarshalManifestPath(base, version+1), nil), nil)
 			return nil
 		},
 	).Build()
@@ -73,35 +74,35 @@ func bumpVersionMock() *mockey.Mocker {
 // segments' manifest pointers advance, but the catalog sees exactly one AlterSegments
 // transaction for the whole batch.
 func TestCommitSegmentManifestsBatchesInSingleCatalogWrite(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	baseA := "/tmp/milvus/insert_log/1/10/300"
 	baseB := "/tmp/milvus/insert_log/1/10/301"
-	addV3Segment(t, meta, 300, baseA, 5, commonpb.SegmentState_Flushed)
-	addV3Segment(t, meta, 301, baseB, 9, commonpb.SegmentState_Flushed)
-	catalog := &countingAlterCatalog{DataCoordCatalog: meta.catalog}
-	meta.catalog = catalog
+	addV3Segment(t, mt, 300, baseA, 5, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 301, baseB, 9, commonpb.SegmentState_Flushed)
+	catalog := &countingAlterCatalog{DataCoordCatalog: mt.Catalog}
+	mt.Catalog = catalog
 
 	mock := bumpVersionMock()
 	defer mock.UnPatch()
 
-	require.NoError(t, meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
-		commitUpdates(300, baseA),
-		commitUpdates(301, baseB),
+	require.NoError(t, mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
+		meta.CommitUpdates(300, baseA),
+		meta.CommitUpdates(301, baseB),
 	}))
 
-	require.Equal(t, packed.MarshalManifestPath(baseA, 6), meta.GetSegment(context.Background(), 300).GetManifestPath())
-	require.Equal(t, packed.MarshalManifestPath(baseB, 10), meta.GetSegment(context.Background(), 301).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseA, 6), mt.GetSegment(context.Background(), 300).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseB, 10), mt.GetSegment(context.Background(), 301).GetManifestPath())
 	require.EqualValues(t, 1, catalog.alterCalls.Load())
 }
 
 func TestCommitSegmentManifestsRejectsNewSegment(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	err = meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{{
+	err = mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{{
 		SegmentID: 310,
-		Mutation:  ManifestMutation{Type: ManifestMutationNoop, ManifestPath: packed.MarshalManifestPath("/tmp/x", 1)},
-		CatalogMutation: SegmentCatalogMutation{NewSegment: &datapb.SegmentInfo{
+		Mutation:  meta.ManifestMutation{Type: meta.ManifestMutationNoop, ManifestPath: packed.MarshalManifestPath("/tmp/x", 1)},
+		CatalogMutation: meta.SegmentCatalogMutation{NewSegment: &datapb.SegmentInfo{
 			ID: 310, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
 		}},
 	}})
@@ -110,12 +111,12 @@ func TestCommitSegmentManifestsRejectsNewSegment(t *testing.T) {
 }
 
 func TestCommitSegmentManifestsRejectsDuplicateSegmentID(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	base := "/tmp/milvus/insert_log/1/10/311"
-	err = meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
-		commitUpdates(311, base),
-		commitUpdates(311, base),
+	err = mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
+		meta.CommitUpdates(311, base),
+		meta.CommitUpdates(311, base),
 	})
 	require.Error(t, err)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
@@ -124,44 +125,44 @@ func TestCommitSegmentManifestsRejectsDuplicateSegmentID(t *testing.T) {
 // A dropped segment in the set is a benign skip: the healthy siblings still commit
 // atomically and the batch reports success.
 func TestCommitSegmentManifestsSkipsDroppedSegment(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	baseHealthy := "/tmp/milvus/insert_log/1/10/320"
 	baseDropped := "/tmp/milvus/insert_log/1/10/321"
-	addV3Segment(t, meta, 320, baseHealthy, 1, commonpb.SegmentState_Flushed)
-	addV3Segment(t, meta, 321, baseDropped, 1, commonpb.SegmentState_Dropped)
-	catalog := &countingAlterCatalog{DataCoordCatalog: meta.catalog}
-	meta.catalog = catalog
+	addV3Segment(t, mt, 320, baseHealthy, 1, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 321, baseDropped, 1, commonpb.SegmentState_Dropped)
+	catalog := &countingAlterCatalog{DataCoordCatalog: mt.Catalog}
+	mt.Catalog = catalog
 
 	mock := bumpVersionMock()
 	defer mock.UnPatch()
 
-	require.NoError(t, meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
-		commitUpdates(320, baseHealthy),
-		commitUpdates(321, baseDropped),
+	require.NoError(t, mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
+		meta.CommitUpdates(320, baseHealthy),
+		meta.CommitUpdates(321, baseDropped),
 	}))
 
-	require.Equal(t, packed.MarshalManifestPath(baseHealthy, 2), meta.GetSegment(context.Background(), 320).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseHealthy, 2), mt.GetSegment(context.Background(), 320).GetManifestPath())
 	// The dropped segment's pointer must not advance.
-	require.Equal(t, packed.MarshalManifestPath(baseDropped, 1), meta.GetSegment(context.Background(), 321).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseDropped, 1), mt.GetSegment(context.Background(), 321).GetManifestPath())
 	require.EqualValues(t, 1, catalog.alterCalls.Load())
 }
 
 // If every segment in the batch is skipped and there are no extra operators, the
 // batch is a no-op that never touches the catalog.
 func TestCommitSegmentManifestsAllSkippedIsNoop(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	base := "/tmp/milvus/insert_log/1/10/322"
-	addV3Segment(t, meta, 322, base, 1, commonpb.SegmentState_Dropped)
-	catalog := &countingAlterCatalog{DataCoordCatalog: meta.catalog}
-	meta.catalog = catalog
+	addV3Segment(t, mt, 322, base, 1, commonpb.SegmentState_Dropped)
+	catalog := &countingAlterCatalog{DataCoordCatalog: mt.Catalog}
+	mt.Catalog = catalog
 
 	mock := bumpVersionMock()
 	defer mock.UnPatch()
 
-	require.NoError(t, meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
-		commitUpdates(322, base),
+	require.NoError(t, mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
+		meta.CommitUpdates(322, base),
 	}))
 	require.EqualValues(t, 0, catalog.alterCalls.Load())
 }
@@ -170,122 +171,122 @@ func TestCommitSegmentManifestsAllSkippedIsNoop(t *testing.T) {
 // neither the stale segment nor its healthy siblings advance. (Structured members
 // cannot pin a CAS; ExpectedManifest is the externally-prepared adopter's guard.)
 func TestCommitSegmentManifestsAbortsAtomicallyOnStaleNoopCAS(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	baseGood := "/tmp/milvus/insert_log/1/10/330"
 	baseStale := "/tmp/milvus/insert_log/1/10/331"
-	addV3Segment(t, meta, 330, baseGood, 5, commonpb.SegmentState_Flushed)
-	addV3Segment(t, meta, 331, baseStale, 5, commonpb.SegmentState_Flushed)
-	catalog := &countingAlterCatalog{DataCoordCatalog: meta.catalog}
-	meta.catalog = catalog
+	addV3Segment(t, mt, 330, baseGood, 5, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 331, baseStale, 5, commonpb.SegmentState_Flushed)
+	catalog := &countingAlterCatalog{DataCoordCatalog: mt.Catalog}
+	mt.Catalog = catalog
 
-	noopAdopt := func(segmentID int64, basePath string, expectedVer, preparedVer int64) SegmentManifestCommit {
-		return SegmentManifestCommit{
+	noopAdopt := func(segmentID int64, basePath string, expectedVer, preparedVer int64) meta.SegmentManifestCommit {
+		return meta.SegmentManifestCommit{
 			SegmentID:        segmentID,
 			ExpectedManifest: packed.MarshalManifestPath(basePath, expectedVer),
-			Mutation: ManifestMutation{
-				Type:         ManifestMutationNoop,
+			Mutation: meta.ManifestMutation{
+				Type:         meta.ManifestMutationNoop,
 				ManifestPath: packed.MarshalManifestPath(basePath, preparedVer),
 			},
 		}
 	}
 	// 331 declares an ExpectedManifest older than its actual pointer -> stale CAS.
-	err = meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
+	err = mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
 		noopAdopt(330, baseGood, 5, 6),
 		noopAdopt(331, baseStale, 4, 6),
 	})
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	require.ErrorIs(t, err, errSegmentManifestStale)
+	require.ErrorIs(t, err, meta.ErrSegmentManifestStale)
 
-	require.Equal(t, packed.MarshalManifestPath(baseGood, 5), meta.GetSegment(context.Background(), 330).GetManifestPath())
-	require.Equal(t, packed.MarshalManifestPath(baseStale, 5), meta.GetSegment(context.Background(), 331).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseGood, 5), mt.GetSegment(context.Background(), 330).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseStale, 5), mt.GetSegment(context.Background(), 331).GetManifestPath())
 	require.EqualValues(t, 0, catalog.alterCalls.Load())
 }
 
 // A structured batch member must not pin ExpectedManifest; the batch rejects it
 // up front, before any lock or manifest I/O.
 func TestCommitSegmentManifestsRejectExpectedManifestOnStructuredMutation(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	base := "/tmp/milvus/insert_log/1/10/312"
-	addV3Segment(t, meta, 312, base, 1, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 312, base, 1, commonpb.SegmentState_Flushed)
 
-	commit := commitUpdates(312, base)
+	commit := meta.CommitUpdates(312, base)
 	commit.ExpectedManifest = packed.MarshalManifestPath(base, 1)
-	err = meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{commit})
+	err = mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{commit})
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.Equal(t, packed.MarshalManifestPath(base, 1), meta.GetSegment(context.Background(), 312).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(base, 1), mt.GetSegment(context.Background(), 312).GetManifestPath())
 }
 
 // A caller operator that fails during publication aborts the whole batch before the
 // single catalog write, leaving every member's pointer untouched.
 func TestCommitSegmentManifestsAbortsAtomicallyOnOperatorFailure(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	baseA := "/tmp/milvus/insert_log/1/10/340"
 	baseB := "/tmp/milvus/insert_log/1/10/341"
-	addV3Segment(t, meta, 340, baseA, 1, commonpb.SegmentState_Flushed)
-	addV3Segment(t, meta, 341, baseB, 1, commonpb.SegmentState_Flushed)
-	catalog := &countingAlterCatalog{DataCoordCatalog: meta.catalog}
-	meta.catalog = catalog
+	addV3Segment(t, mt, 340, baseA, 1, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 341, baseB, 1, commonpb.SegmentState_Flushed)
+	catalog := &countingAlterCatalog{DataCoordCatalog: mt.Catalog}
+	mt.Catalog = catalog
 
 	mock := bumpVersionMock()
 	defer mock.UnPatch()
 
-	failing := func(modPack *updateSegmentPack) bool {
-		return modPack.fail(merr.WrapErrServiceInternalMsg("operator boom"))
+	failing := func(modPack *meta.UpdateSegmentPack) bool {
+		return modPack.Fail(merr.WrapErrServiceInternalMsg("operator boom"))
 	}
-	err = meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
-		commitUpdates(340, baseA),
-		commitUpdates(341, baseB, failing),
+	err = mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
+		meta.CommitUpdates(340, baseA),
+		meta.CommitUpdates(341, baseB, failing),
 	})
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 
-	require.Equal(t, packed.MarshalManifestPath(baseA, 1), meta.GetSegment(context.Background(), 340).GetManifestPath())
-	require.Equal(t, packed.MarshalManifestPath(baseB, 1), meta.GetSegment(context.Background(), 341).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseA, 1), mt.GetSegment(context.Background(), 340).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseB, 1), mt.GetSegment(context.Background(), 341).GetManifestPath())
 	require.EqualValues(t, 0, catalog.alterCalls.Load())
 }
 
 // extraOperators ride in the same atomic transaction as the manifest commits.
 func TestCommitSegmentManifestsCommitsExtraOperatorsAtomically(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	baseCommit := "/tmp/milvus/insert_log/1/10/350"
 	baseExtra := "/tmp/milvus/insert_log/1/10/351"
-	addV3Segment(t, meta, 350, baseCommit, 1, commonpb.SegmentState_Flushed)
-	addV3Segment(t, meta, 351, baseExtra, 1, commonpb.SegmentState_Flushed)
-	catalog := &countingAlterCatalog{DataCoordCatalog: meta.catalog}
-	meta.catalog = catalog
+	addV3Segment(t, mt, 350, baseCommit, 1, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 351, baseExtra, 1, commonpb.SegmentState_Flushed)
+	catalog := &countingAlterCatalog{DataCoordCatalog: mt.Catalog}
+	mt.Catalog = catalog
 
 	mock := bumpVersionMock()
 	defer mock.UnPatch()
 
-	require.NoError(t, meta.CommitSegmentManifests(context.Background(),
-		[]SegmentManifestCommit{commitUpdates(350, baseCommit)},
-		UpdateIsImporting(351, true),
+	require.NoError(t, mt.CommitSegmentManifests(context.Background(),
+		[]meta.SegmentManifestCommit{meta.CommitUpdates(350, baseCommit)},
+		meta.UpdateIsImporting(351, true),
 	))
 
-	require.Equal(t, packed.MarshalManifestPath(baseCommit, 2), meta.GetSegment(context.Background(), 350).GetManifestPath())
-	require.True(t, meta.GetSegment(context.Background(), 351).GetIsImporting())
+	require.Equal(t, packed.MarshalManifestPath(baseCommit, 2), mt.GetSegment(context.Background(), 350).GetManifestPath())
+	require.True(t, mt.GetSegment(context.Background(), 351).GetIsImporting())
 	require.EqualValues(t, 1, catalog.alterCalls.Load())
 }
 
 // With no manifest commits, a batch degenerates to committing the extra operators.
 func TestCommitSegmentManifestsExtraOperatorsOnly(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	base := "/tmp/milvus/insert_log/1/10/360"
-	addV3Segment(t, meta, 360, base, 1, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 360, base, 1, commonpb.SegmentState_Flushed)
 
-	require.NoError(t, meta.CommitSegmentManifests(context.Background(), nil, UpdateIsImporting(360, true)))
-	require.True(t, meta.GetSegment(context.Background(), 360).GetIsImporting())
+	require.NoError(t, mt.CommitSegmentManifests(context.Background(), nil, meta.UpdateIsImporting(360, true)))
+	require.True(t, mt.GetSegment(context.Background(), 360).GetIsImporting())
 }
 
 // An empty batch with no operators is a silent no-op.
 func TestCommitSegmentManifestsEmptyIsNoop(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	require.NoError(t, meta.CommitSegmentManifests(context.Background(), nil))
+	require.NoError(t, mt.CommitSegmentManifests(context.Background(), nil))
 }
 
 // A batch member whose pointer is advanced mid-I/O by an out-of-lock writer aborts
@@ -293,15 +294,15 @@ func TestCommitSegmentManifestsEmptyIsNoop(t *testing.T) {
 // built on the concurrent revision, so publishing any member would break batch
 // atomicity or drop that revision. Nothing from the batch reaches the catalog.
 func TestCommitSegmentManifestsAbortsWhenPointerAdvancesDuringManifestIO(t *testing.T) {
-	mockManifestUpdateSubmissions(t)
-	meta, err := newMemoryMeta(t)
+	meta.MockManifestUpdateSubmissions(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	baseMoved := "/tmp/milvus/insert_log/1/10/390"
 	baseQuiet := "/tmp/milvus/insert_log/1/10/391"
-	addV3Segment(t, meta, 390, baseMoved, 7, commonpb.SegmentState_Flushed)
-	addV3Segment(t, meta, 391, baseQuiet, 7, commonpb.SegmentState_Flushed)
-	catalog := &countingAlterCatalog{DataCoordCatalog: meta.catalog}
-	meta.catalog = catalog
+	addV3Segment(t, mt, 390, baseMoved, 7, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 391, baseQuiet, 7, commonpb.SegmentState_Flushed)
+	catalog := &countingAlterCatalog{DataCoordCatalog: mt.Catalog}
+	mt.Catalog = catalog
 
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
@@ -309,32 +310,32 @@ func TestCommitSegmentManifestsAbortsWhenPointerAdvancesDuringManifestIO(t *test
 		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			entered <- struct{}{}
 			<-release
-			return mockManifestUpdateResult(packed.MarshalManifestPath(base, version+2), nil), nil
+			return meta.MockManifestUpdateResult(packed.MarshalManifestPath(base, version+2), nil), nil
 		},
 	).Build()
 	defer mock.UnPatch()
 
 	result := make(chan error, 1)
 	go func() {
-		result <- meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
-			commitUpdates(390, baseMoved),
-			commitUpdates(391, baseQuiet),
+		result <- mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
+			meta.CommitUpdates(390, baseMoved),
+			meta.CommitUpdates(391, baseQuiet),
 		})
 	}()
 
 	// One mock entry proves stage-2 snapshots are taken; inject the out-of-lock
 	// ack on 390 while its revision generation is still in flight.
 	<-entered
-	require.NoError(t, meta.UpdateSegmentsInfo(context.Background(), UpdateManifestVersion(390, 8)))
+	require.NoError(t, mt.UpdateSegmentsInfo(context.Background(), meta.UpdateManifestVersion(390, 8)))
 	close(release)
 
 	err = <-result
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	require.ErrorIs(t, err, errSegmentManifestStale)
+	require.ErrorIs(t, err, meta.ErrSegmentManifestStale)
 
 	// The ack's pointer survives; the untouched sibling did not advance either.
-	require.Equal(t, packed.MarshalManifestPath(baseMoved, 8), meta.GetSegment(context.Background(), 390).GetManifestPath())
-	require.Equal(t, packed.MarshalManifestPath(baseQuiet, 7), meta.GetSegment(context.Background(), 391).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseMoved, 8), mt.GetSegment(context.Background(), 390).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(baseQuiet, 7), mt.GetSegment(context.Background(), 391).GetManifestPath())
 	// Exactly one catalog write happened: the injected ack's own AlterSegments.
 	// The aborted batch contributed none.
 	require.EqualValues(t, 1, catalog.alterCalls.Load())
@@ -348,13 +349,13 @@ func TestAcquireSegmentManifestLocksEscalatesInsteadOfTimingOut(t *testing.T) {
 	// Hold one requested key so TryLockMany can never win {5,7}.
 	locks.Lock(7)
 
-	restore := segmentManifestLockEscalationThreshold
-	segmentManifestLockEscalationThreshold = 20 * time.Millisecond
-	defer func() { segmentManifestLockEscalationThreshold = restore }()
+	restore := meta.SegmentManifestLockEscalationThreshold
+	meta.SegmentManifestLockEscalationThreshold = 20 * time.Millisecond
+	defer func() { meta.SegmentManifestLockEscalationThreshold = restore }()
 
 	done := make(chan error, 1)
 	go func() {
-		done <- acquireSegmentManifestLocks(context.Background(), locks, []int64{5, 7})
+		done <- meta.AcquireSegmentManifestLocks(context.Background(), locks, []int64{5, 7})
 	}()
 
 	// Well past the threshold the batch must be parked in phase 2, not failed.
@@ -382,9 +383,9 @@ func TestAcquireSegmentManifestLocksEscalatesInsteadOfTimingOut(t *testing.T) {
 // The batch must still complete in bounded time via escalation.
 func TestAcquireSegmentManifestLocksCompletesUnderSustainedContention(t *testing.T) {
 	locks := lock.NewKeyLock[int64]()
-	restore := segmentManifestLockEscalationThreshold
-	segmentManifestLockEscalationThreshold = 20 * time.Millisecond
-	defer func() { segmentManifestLockEscalationThreshold = restore }()
+	restore := meta.SegmentManifestLockEscalationThreshold
+	meta.SegmentManifestLockEscalationThreshold = 20 * time.Millisecond
+	defer func() { meta.SegmentManifestLockEscalationThreshold = restore }()
 
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
@@ -409,7 +410,7 @@ func TestAcquireSegmentManifestLocksCompletesUnderSustainedContention(t *testing
 
 	done := make(chan error, 1)
 	go func() {
-		done <- acquireSegmentManifestLocks(context.Background(), locks, []int64{5, 7})
+		done <- meta.AcquireSegmentManifestLocks(context.Background(), locks, []int64{5, 7})
 	}()
 	select {
 	case err := <-done:
@@ -433,7 +434,7 @@ func TestAcquireSegmentManifestLocksRespectsContextCancel(t *testing.T) {
 	cancel()
 
 	start := time.Now()
-	err := acquireSegmentManifestLocks(ctx, locks, []int64{7})
+	err := meta.AcquireSegmentManifestLocks(ctx, locks, []int64{7})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Less(t, time.Since(start), 5*time.Second)
 }
@@ -441,7 +442,7 @@ func TestAcquireSegmentManifestLocksRespectsContextCancel(t *testing.T) {
 // Two batches over disjoint segment sets run fully concurrently and both succeed:
 // atomic multi-lock acquisition never deadlocks disjoint acquirers.
 func TestCommitSegmentManifestsConcurrentDisjointBatches(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	bases := map[int64]string{
 		370: "/tmp/milvus/insert_log/1/10/370",
@@ -450,7 +451,7 @@ func TestCommitSegmentManifestsConcurrentDisjointBatches(t *testing.T) {
 		373: "/tmp/milvus/insert_log/1/10/373",
 	}
 	for id, base := range bases {
-		addV3Segment(t, meta, id, base, 1, commonpb.SegmentState_Flushed)
+		addV3Segment(t, mt, id, base, 1, commonpb.SegmentState_Flushed)
 	}
 	mock := bumpVersionMock()
 	defer mock.UnPatch()
@@ -459,9 +460,9 @@ func TestCommitSegmentManifestsConcurrentDisjointBatches(t *testing.T) {
 	errs := make(chan error, 2)
 	run := func(a, b int64) {
 		defer wg.Done()
-		errs <- meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
-			commitUpdates(a, bases[a]),
-			commitUpdates(b, bases[b]),
+		errs <- mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
+			meta.CommitUpdates(a, bases[a]),
+			meta.CommitUpdates(b, bases[b]),
 		})
 	}
 	wg.Add(2)
@@ -473,7 +474,7 @@ func TestCommitSegmentManifestsConcurrentDisjointBatches(t *testing.T) {
 		require.NoError(t, err)
 	}
 	for id, base := range bases {
-		require.Equal(t, packed.MarshalManifestPath(base, 2), meta.GetSegment(context.Background(), id).GetManifestPath())
+		require.Equal(t, packed.MarshalManifestPath(base, 2), mt.GetSegment(context.Background(), id).GetManifestPath())
 	}
 }
 
@@ -483,14 +484,14 @@ func TestCommitSegmentManifestsConcurrentDisjointBatches(t *testing.T) {
 // in-lock base is the sole authority for structured mutations, so the shared
 // segment advances exactly twice instead of one batch failing a caller-pinned CAS.
 func TestCommitSegmentManifestsConcurrentOverlappingBatches(t *testing.T) {
-	meta, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	shared := "/tmp/milvus/insert_log/1/10/380"
 	onlyA := "/tmp/milvus/insert_log/1/10/381"
 	onlyB := "/tmp/milvus/insert_log/1/10/382"
-	addV3Segment(t, meta, 380, shared, 1, commonpb.SegmentState_Flushed)
-	addV3Segment(t, meta, 381, onlyA, 1, commonpb.SegmentState_Flushed)
-	addV3Segment(t, meta, 382, onlyB, 1, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 380, shared, 1, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 381, onlyA, 1, commonpb.SegmentState_Flushed)
+	addV3Segment(t, mt, 382, onlyB, 1, commonpb.SegmentState_Flushed)
 	mock := bumpVersionMock()
 	defer mock.UnPatch()
 
@@ -499,16 +500,16 @@ func TestCommitSegmentManifestsConcurrentOverlappingBatches(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		errs <- meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
-			commitUpdates(380, shared),
-			commitUpdates(381, onlyA),
+		errs <- mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
+			meta.CommitUpdates(380, shared),
+			meta.CommitUpdates(381, onlyA),
 		})
 	}()
 	go func() {
 		defer wg.Done()
-		errs <- meta.CommitSegmentManifests(context.Background(), []SegmentManifestCommit{
-			commitUpdates(380, shared),
-			commitUpdates(382, onlyB),
+		errs <- mt.CommitSegmentManifests(context.Background(), []meta.SegmentManifestCommit{
+			meta.CommitUpdates(380, shared),
+			meta.CommitUpdates(382, onlyB),
 		})
 	}()
 	wg.Wait()
@@ -519,23 +520,23 @@ func TestCommitSegmentManifestsConcurrentOverlappingBatches(t *testing.T) {
 	}
 	// The shared segment advanced exactly twice — once per batch, the second
 	// generated from the first's published pointer under the lock.
-	require.Equal(t, packed.MarshalManifestPath(shared, 3), meta.GetSegment(context.Background(), 380).GetManifestPath())
-	require.Equal(t, packed.MarshalManifestPath(onlyA, 2), meta.GetSegment(context.Background(), 381).GetManifestPath())
-	require.Equal(t, packed.MarshalManifestPath(onlyB, 2), meta.GetSegment(context.Background(), 382).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(shared, 3), mt.GetSegment(context.Background(), 380).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(onlyA, 2), mt.GetSegment(context.Background(), 381).GetManifestPath())
+	require.Equal(t, packed.MarshalManifestPath(onlyB, 2), mt.GetSegment(context.Background(), 382).GetManifestPath())
 }
 
 func TestCommitSegmentManifestsDrainsCallbacksBeforeUnlock(t *testing.T) {
-	mt, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	mt.manifestCommitExecutor.close()
-	mt.manifestCommitExecutor = newManifestCommitExecutor(1)
-	catalog := &countingAlterCatalog{DataCoordCatalog: mt.catalog}
-	mt.catalog = catalog
+	mt.ManifestCommitExecutor.Close()
+	mt.ManifestCommitExecutor = meta.NewManifestCommitExecutor(1)
+	catalog := &countingAlterCatalog{DataCoordCatalog: mt.Catalog}
+	mt.Catalog = catalog
 	const base = "/tmp/milvus/batch-callback"
-	var commits []SegmentManifestCommit
+	var commits []meta.SegmentManifestCommit
 	for id := int64(1); id <= 3; id++ {
 		addV3Segment(t, mt, id, base, 7, commonpb.SegmentState_Flushed)
-		commits = append(commits, commitUpdates(id, base))
+		commits = append(commits, meta.CommitUpdates(id, base))
 	}
 	type submission struct {
 		ctx      context.Context
@@ -562,7 +563,7 @@ func TestCommitSegmentManifestsDrainsCallbacksBeforeUnlock(t *testing.T) {
 			t.Fatal("batch waited for completion before submitting remaining work")
 		}
 	}
-	pending[0].complete(mockManifestUpdateResult(packed.MarshalManifestPath(base, 8), nil), nil)
+	pending[0].complete(meta.MockManifestUpdateResult(packed.MarshalManifestPath(base, 8), nil), nil)
 	pending[1].complete(packed.ManifestUpdateResult{}, merr.ErrServiceUnavailable)
 	require.ErrorIs(t, pending[2].ctx.Err(), context.Canceled)
 	select {
@@ -570,7 +571,7 @@ func TestCommitSegmentManifestsDrainsCallbacksBeforeUnlock(t *testing.T) {
 		t.Fatalf("returned before final callback: %v", err)
 	default:
 	}
-	locks := mt.getSegmentManifestLocks()
+	locks := mt.GetSegmentManifestLocks()
 	for _, commit := range commits {
 		locked := locks.TryLock(commit.SegmentID)
 		if locked {
@@ -590,14 +591,14 @@ func TestCommitSegmentManifestsDrainsCallbacksBeforeUnlock(t *testing.T) {
 }
 
 func TestCommitSegmentManifestsSingleWorkerClearsIndexMarkers(t *testing.T) {
-	mt, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	mt.manifestCommitExecutor.close()
-	mt.manifestCommitExecutor = newManifestCommitExecutor(1)
+	mt.ManifestCommitExecutor.Close()
+	mt.ManifestCommitExecutor = meta.NewManifestCommitExecutor(1)
 	read := mockey.Mock(packed.SubmitManifestIndexInfos).Return(merr.ErrServiceInternal).Build()
 	defer read.UnPatch()
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
-	var commits []SegmentManifestCommit
+	var commits []meta.SegmentManifestCommit
 	for id := int64(1); id <= 3; id++ {
 		base := fmt.Sprintf("%s/segment-%d", cfg.RootPath, id)
 		manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{
@@ -607,11 +608,11 @@ func TestCommitSegmentManifestsSingleWorkerClearsIndexMarkers(t *testing.T) {
 		_, version, err := packed.UnmarshalManifestPath(manifest)
 		require.NoError(t, err)
 		addV3Segment(t, mt, id, base, version, commonpb.SegmentState_Flushed)
-		mt.segments.GetSegment(id).ManifestHasIndex = true
-		commits = append(commits, SegmentManifestCommit{
+		mt.Segments.GetSegment(id).ManifestHasIndex = true
+		commits = append(commits, meta.SegmentManifestCommit{
 			SegmentID:     id,
 			StorageConfig: cfg,
-			Mutation: ManifestMutation{Type: ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+			Mutation: meta.ManifestMutation{Type: meta.ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
 				DropIndexes: []packed.DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}},
 			}},
 		})

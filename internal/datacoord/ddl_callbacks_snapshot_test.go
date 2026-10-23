@@ -16,12 +16,791 @@
 
 package datacoord
 
-// --- Test createSnapshotV2AckCallback ---
+import (
+	"context"
+	"testing"
 
-// --- Test dropSnapshotV2AckCallback ---
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 
-// --- Test dropSnapshotsByCollectionV2AckCallback ---
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
 
-// --- Test restoreSnapshotV2AckCallback ---
+func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
+	ctx := context.Background()
 
-// --- Test ValidateRestoreSnapshotResources ---
+	// Track if CreateSnapshot was called
+	createSnapshotCalled := false
+
+	// Mock snapshotManager.CreateSnapshot using mockey
+	mockCreateSnapshot := mockey.Mock((*snapshot.Manager).CreateSnapshot).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		collectionID int64,
+		name, description string,
+		compactionProtectionSeconds int64,
+		positions []*msgpb.MsgPosition,
+	) (int64, error) {
+		createSnapshotCalled = true
+		assert.Equal(t, int64(100), collectionID)
+		assert.Equal(t, "test_snapshot", name)
+		assert.Equal(t, "test description", description)
+		assert.Equal(t, int64(3600), compactionProtectionSeconds)
+		assert.Len(t, positions, 2)
+		assert.Equal(t, "p1_100v0", positions[0].GetChannelName())
+		assert.Equal(t, uint64(100), positions[0].GetTimestamp())
+		assert.Equal(t, "p2_100v1", positions[1].GetChannelName())
+		assert.Equal(t, uint64(200), positions[1].GetTimestamp())
+		return 1001, nil
+	}).Build()
+	defer mockCreateSnapshot.UnPatch()
+
+	// Create DDLCallbacks with real snapshotManager (mocked methods)
+	server := &Server{
+		snapshotManager: &snapshot.Manager{},
+	}
+	callbacks := newDDLCallbacks(server)
+
+	// Create test broadcast result using message builder
+	broadcastMsg := message.NewCreateSnapshotMessageBuilderV2().
+		WithHeader(&message.CreateSnapshotMessageHeader{
+			CollectionId:                100,
+			Name:                        "test_snapshot",
+			Description:                 "test description",
+			CompactionProtectionSeconds: 3600,
+		}).
+		WithBody(&message.CreateSnapshotMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	// Convert to typed broadcast message
+	typedMsg := message.MustAsBroadcastCreateSnapshotMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultCreateSnapshotMessageV2{
+		Message: typedMsg,
+		Results: map[string]*message.AppendResult{
+			"p1_100v0":                       {TimeTick: 100, LastConfirmedMessageID: rmq.NewRmqID(10)},
+			"p2_100v1":                       {TimeTick: 200, LastConfirmedMessageID: rmq.NewRmqID(20)},
+			funcutil.GetControlChannel("p0"): {TimeTick: 999, LastConfirmedMessageID: rmq.NewRmqID(30)},
+		},
+	}
+
+	// Execute
+	err := callbacks.CreateSnapshotV2AckCallback(ctx, result)
+
+	// Verify
+	assert.NoError(t, err)
+	assert.True(t, createSnapshotCalled)
+}
+
+func TestDDLCallbacks_CreateSnapshotV2AckCallback_CreateError(t *testing.T) {
+	ctx := context.Background()
+
+	expectedErr := errors.New("create snapshot error")
+
+	// Mock snapshotManager.CreateSnapshot to return error
+	mockCreateSnapshot := mockey.Mock((*snapshot.Manager).CreateSnapshot).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		collectionID int64,
+		name, description string,
+		compactionProtectionSeconds int64,
+		positions []*msgpb.MsgPosition,
+	) (int64, error) {
+		return 0, expectedErr
+	}).Build()
+	defer mockCreateSnapshot.UnPatch()
+
+	// Create DDLCallbacks
+	server := &Server{
+		snapshotManager: &snapshot.Manager{},
+	}
+	callbacks := newDDLCallbacks(server)
+
+	// Create test broadcast result
+	broadcastMsg := message.NewCreateSnapshotMessageBuilderV2().
+		WithHeader(&message.CreateSnapshotMessageHeader{
+			CollectionId: 100,
+			Name:         "test_snapshot",
+			Description:  "test description",
+		}).
+		WithBody(&message.CreateSnapshotMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastCreateSnapshotMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultCreateSnapshotMessageV2{
+		Message: typedMsg,
+	}
+
+	// Execute
+	err := callbacks.CreateSnapshotV2AckCallback(ctx, result)
+
+	// Verify
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+}
+
+func TestDDLCallbacks_DropSnapshotV2AckCallback_Success(t *testing.T) {
+	ctx := context.Background()
+
+	// Track if DropSnapshot was called
+	dropSnapshotCalled := false
+
+	// Mock snapshotManager.DropSnapshot using mockey
+	mockDropSnapshot := mockey.Mock((*snapshot.Manager).DropSnapshot).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		collectionID int64,
+		name string,
+	) error {
+		dropSnapshotCalled = true
+		assert.Equal(t, "test_snapshot", name)
+		assert.Equal(t, int64(100), collectionID)
+		return nil
+	}).Build()
+	defer mockDropSnapshot.UnPatch()
+
+	// Create DDLCallbacks
+	server := &Server{
+		snapshotManager: &snapshot.Manager{},
+	}
+	callbacks := newDDLCallbacks(server)
+
+	// Create test broadcast result
+	broadcastMsg := message.NewDropSnapshotMessageBuilderV2().
+		WithHeader(&message.DropSnapshotMessageHeader{
+			Name:         "test_snapshot",
+			CollectionId: 100,
+		}).
+		WithBody(&message.DropSnapshotMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastDropSnapshotMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultDropSnapshotMessageV2{
+		Message: typedMsg,
+	}
+
+	// Execute
+	err := callbacks.DropSnapshotV2AckCallback(ctx, result)
+
+	// Verify
+	assert.NoError(t, err)
+	assert.True(t, dropSnapshotCalled)
+}
+
+func TestDDLCallbacks_DropSnapshotV2AckCallback_DropError(t *testing.T) {
+	ctx := context.Background()
+
+	expectedErr := errors.New("drop snapshot error")
+
+	// Mock snapshotManager.DropSnapshot to return error
+	mockDropSnapshot := mockey.Mock((*snapshot.Manager).DropSnapshot).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		collectionID int64,
+		name string,
+	) error {
+		return expectedErr
+	}).Build()
+	defer mockDropSnapshot.UnPatch()
+
+	// Create DDLCallbacks
+	server := &Server{
+		snapshotManager: &snapshot.Manager{},
+	}
+	callbacks := newDDLCallbacks(server)
+
+	// Create test broadcast result
+	broadcastMsg := message.NewDropSnapshotMessageBuilderV2().
+		WithHeader(&message.DropSnapshotMessageHeader{
+			Name:         "test_snapshot",
+			CollectionId: 100,
+		}).
+		WithBody(&message.DropSnapshotMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastDropSnapshotMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultDropSnapshotMessageV2{
+		Message: typedMsg,
+	}
+
+	// Execute
+	err := callbacks.DropSnapshotV2AckCallback(ctx, result)
+
+	// Verify
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+}
+
+func TestDDLCallbacks_DropSnapshotsByCollectionV2AckCallback_Success(t *testing.T) {
+	ctx := context.Background()
+
+	dropCalled := false
+	var capturedCollectionID int64
+
+	mockDropByCollection := mockey.Mock((*snapshot.Manager).DropSnapshotsByCollection).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		collectionID int64,
+	) error {
+		dropCalled = true
+		capturedCollectionID = collectionID
+		return nil
+	}).Build()
+	defer mockDropByCollection.UnPatch()
+
+	server := &Server{
+		snapshotManager: &snapshot.Manager{},
+	}
+	callbacks := newDDLCallbacks(server)
+
+	broadcastMsg := message.NewDropSnapshotsByCollectionMessageBuilderV2().
+		WithHeader(&message.DropSnapshotsByCollectionMessageHeader{
+			CollectionId: 100,
+		}).
+		WithBody(&message.DropSnapshotsByCollectionMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastDropSnapshotsByCollectionMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultDropSnapshotsByCollectionMessageV2{
+		Message: typedMsg,
+	}
+
+	err := callbacks.DropSnapshotsByCollectionV2AckCallback(ctx, result)
+
+	assert.NoError(t, err)
+	assert.True(t, dropCalled)
+	assert.Equal(t, int64(100), capturedCollectionID)
+}
+
+func TestDDLCallbacks_DropSnapshotsByCollectionV2AckCallback_Error(t *testing.T) {
+	ctx := context.Background()
+
+	expectedErr := errors.New("drop by collection error")
+
+	mockDropByCollection := mockey.Mock((*snapshot.Manager).DropSnapshotsByCollection).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		collectionID int64,
+	) error {
+		return expectedErr
+	}).Build()
+	defer mockDropByCollection.UnPatch()
+
+	server := &Server{
+		snapshotManager: &snapshot.Manager{},
+	}
+	callbacks := newDDLCallbacks(server)
+
+	broadcastMsg := message.NewDropSnapshotsByCollectionMessageBuilderV2().
+		WithHeader(&message.DropSnapshotsByCollectionMessageHeader{
+			CollectionId: 100,
+		}).
+		WithBody(&message.DropSnapshotsByCollectionMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastDropSnapshotsByCollectionMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultDropSnapshotsByCollectionMessageV2{
+		Message: typedMsg,
+	}
+
+	err := callbacks.DropSnapshotsByCollectionV2AckCallback(ctx, result)
+
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+}
+
+func TestDDLCallbacks_RestoreSnapshotV2AckCallback_Success(t *testing.T) {
+	ctx := context.Background()
+
+	// Track calls
+	readSnapshotDataCalled := false
+	restoreDataCalled := false
+	getRestoreStateCalled := false
+
+	// Mock snapshotManager.ReadSnapshotData
+	mockReadSnapshotData := mockey.Mock((*snapshot.Manager).ReadSnapshotData).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		collectionID int64,
+		name string,
+	) (*snapshotstorage.SnapshotData, error) {
+		readSnapshotDataCalled = true
+		assert.Equal(t, "test_snapshot", name)
+		return &snapshotstorage.SnapshotData{
+			SnapshotInfo: &datapb.SnapshotInfo{Name: name},
+		}, nil
+	}).Build()
+	defer mockReadSnapshotData.UnPatch()
+
+	// Mock snapshotManager.RestoreData
+	mockRestoreData := mockey.Mock((*snapshot.Manager).RestoreData).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		sourceCollectionID int64,
+		snapshotName string,
+		collectionID int64,
+		jobID int64,
+		pinID int64,
+	) (int64, error) {
+		restoreDataCalled = true
+		assert.Equal(t, "test_snapshot", snapshotName)
+		assert.Equal(t, int64(200), collectionID)
+		assert.Equal(t, int64(12345), jobID) // Verify jobID is passed from header
+		return jobID, nil
+	}).Build()
+	defer mockRestoreData.UnPatch()
+
+	// Mock snapshotManager.GetRestoreState to return completed immediately
+	mockGetRestoreState := mockey.Mock((*snapshot.Manager).GetRestoreState).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		jobID int64,
+	) (*datapb.RestoreSnapshotInfo, error) {
+		getRestoreStateCalled = true
+		assert.Equal(t, int64(12345), jobID)
+		return &datapb.RestoreSnapshotInfo{
+			State:    datapb.RestoreSnapshotState_RestoreSnapshotCompleted,
+			Progress: 100,
+		}, nil
+	}).Build()
+	defer mockGetRestoreState.UnPatch()
+
+	// Create DDLCallbacks
+	server := &Server{
+		snapshotManager: &snapshot.Manager{},
+	}
+	callbacks := newDDLCallbacks(server)
+
+	// Create test broadcast result with pre-allocated jobID
+	broadcastMsg := message.NewRestoreSnapshotMessageBuilderV2().
+		WithHeader(&message.RestoreSnapshotMessageHeader{
+			SnapshotName:       "test_snapshot",
+			CollectionId:       200,
+			JobId:              12345, // Pre-allocated jobID
+			SourceCollectionId: 100,
+		}).
+		WithBody(&message.RestoreSnapshotMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultRestoreSnapshotMessageV2{
+		Message: typedMsg,
+	}
+
+	// Execute
+	err := callbacks.RestoreSnapshotV2AckCallback(ctx, result)
+
+	// Verify
+	assert.NoError(t, err)
+	// restoreSnapshotV2AckCallback no longer reads snapshot data directly.
+	assert.False(t, readSnapshotDataCalled)
+	assert.True(t, restoreDataCalled)
+	assert.False(t, getRestoreStateCalled)
+}
+
+func TestDDLCallbacks_RestoreSnapshotV2AckCallback_RestoreDataError(t *testing.T) {
+	ctx := context.Background()
+
+	expectedErr := errors.New("restore data error")
+
+	// Mock snapshotManager.RestoreData to return error
+	mockRestoreData := mockey.Mock((*snapshot.Manager).RestoreData).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		sourceCollectionID int64,
+		snapshotName string,
+		collectionID int64,
+		jobID int64,
+		pinID int64,
+	) (int64, error) {
+		return 0, expectedErr
+	}).Build()
+	defer mockRestoreData.UnPatch()
+
+	// Create DDLCallbacks
+	server := &Server{
+		snapshotManager: &snapshot.Manager{},
+	}
+	callbacks := newDDLCallbacks(server)
+
+	// Create test broadcast result
+	broadcastMsg := message.NewRestoreSnapshotMessageBuilderV2().
+		WithHeader(&message.RestoreSnapshotMessageHeader{
+			SnapshotName:       "test_snapshot",
+			CollectionId:       200,
+			JobId:              12345,
+			SourceCollectionId: 100,
+		}).
+		WithBody(&message.RestoreSnapshotMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	typedMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(broadcastMsg)
+
+	result := message.BroadcastResultRestoreSnapshotMessageV2{
+		Message: typedMsg,
+	}
+
+	// Execute
+	err := callbacks.RestoreSnapshotV2AckCallback(ctx, result)
+
+	// Verify
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
+}
+
+func TestDDLCallbacks_RestoreSnapshotV2AckCallback_External(t *testing.T) {
+	ctx := context.Background()
+
+	restoreExternalDataCalled := false
+	mockRestoreExternalData := mockey.Mock((*snapshot.Manager).RestoreExternalData).To(func(
+		sm *snapshot.Manager,
+		ctx context.Context,
+		sourceCollectionID int64,
+		snapshotName string,
+		snapshotS3Location string,
+		collectionID int64,
+		jobID int64,
+		externalSpec string,
+		snapshotFingerprint string,
+	) (int64, error) {
+		restoreExternalDataCalled = true
+		assert.Equal(t, int64(100), sourceCollectionID)
+		assert.Equal(t, "test_snapshot", snapshotName)
+		assert.Equal(t, "s3://bucket/files/snapshots/meta.json", snapshotS3Location)
+		assert.Equal(t, int64(200), collectionID)
+		assert.Equal(t, int64(12345), jobID)
+		assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, externalSpec)
+		assert.Empty(t, snapshotFingerprint)
+		return jobID, nil
+	}).Build()
+	defer mockRestoreExternalData.UnPatch()
+
+	mockRestoreData := mockey.Mock((*snapshot.Manager).RestoreData).Return(int64(0), errors.New("must not call local restore")).Build()
+	defer mockRestoreData.UnPatch()
+
+	server := &Server{
+		snapshotManager: &snapshot.Manager{},
+	}
+	callbacks := newDDLCallbacks(server)
+
+	broadcastMsg := message.NewRestoreSnapshotMessageBuilderV2().
+		WithHeader(&message.RestoreSnapshotMessageHeader{
+			SnapshotName:       "test_snapshot",
+			CollectionId:       200,
+			JobId:              12345,
+			SourceCollectionId: 100,
+			External:           true,
+			SnapshotS3Location: "s3://bucket/files/snapshots/meta.json",
+			ExternalSpec:       `{"extfs":{"region":"us-west-2"}}`,
+		}).
+		WithBody(&message.RestoreSnapshotMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+
+	err := callbacks.RestoreSnapshotV2AckCallback(ctx, message.BroadcastResultRestoreSnapshotMessageV2{
+		Message: message.MustAsBroadcastRestoreSnapshotMessageV2(broadcastMsg),
+	})
+
+	assert.NoError(t, err)
+	assert.True(t, restoreExternalDataCalled)
+}
+
+// newTestSnapshotMeta creates a snapshotMeta with initialized ConcurrentMaps for testing.
+// If snapshots is non-nil, the entries are populated into the maps.
+func newTestSnapshotMeta(snapshots map[string]*datapb.SnapshotInfo) *snapshot.SnapshotMeta {
+	sm := &snapshot.SnapshotMeta{
+		SnapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		SnapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *snapshot.SnapshotRefIndex](),
+		SnapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		CollectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+	for name, info := range snapshots {
+		collID := info.GetCollectionId()
+		nameMap, _ := sm.SnapshotName2ID.GetOrInsert(collID, typeutil.NewConcurrentMap[string, UniqueID]())
+		nameMap.Insert(name, info.GetId())
+		sm.SnapshotID2Info.Insert(info.GetId(), info)
+	}
+	return sm
+}
+
+// buildValidateTestServer creates a Server with mocked meta for ValidateRestoreSnapshotResources tests.
+// snapshotFound controls whether GetSnapshot will find the snapshot.
+func buildValidateTestServer(t *testing.T, snapshotFound bool) *Server {
+	mockBroker := broker.NewMockBroker(t)
+	var sm *snapshot.SnapshotMeta
+	if snapshotFound {
+		sm = newTestSnapshotMeta(map[string]*datapb.SnapshotInfo{
+			"snap1": {Id: 1, Name: "snap1", CollectionId: 100},
+		})
+	} else {
+		sm = newTestSnapshotMeta(nil)
+	}
+	return &Server{
+		broker: mockBroker,
+		meta: &meta.Meta{
+			CompactionProtection: sm,
+		},
+		domainMetas: domainMetas{
+			snapshotMeta: sm,
+			indexMeta:    &index.IndexMeta{},
+		},
+	}
+}
+
+// buildBaseSnapshotData creates a snapshotstorage.SnapshotData with a default partition and one index.
+func buildBaseSnapshotData() *snapshotstorage.SnapshotData {
+	return &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Collection: &datapb.CollectionDescription{
+			Partitions: map[string]int64{"_default": 1},
+		},
+		Indexes: []*indexpb.IndexInfo{
+			{IndexID: 1001, IndexName: "vec_idx", FieldID: 100},
+		},
+	}
+}
+
+// mockDescribeCollection mocks DescribeCollectionInternal to return success.
+func mockDescribeCollection() *mockey.Mocker {
+	return mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeCollectionInternal")).To(
+		func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+			return &milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				CollectionID:   collectionID,
+				CollectionName: "test_coll",
+				DbName:         "default",
+			}, nil
+		}).Build()
+}
+
+// mockShowPartitions mocks ShowPartitions to return the given partition names.
+func mockShowPartitions(names []string) *mockey.Mocker {
+	return mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(
+		func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
+			ids := make([]int64, len(names))
+			for i := range names {
+				ids[i] = int64(i + 1)
+			}
+			return &milvuspb.ShowPartitionsResponse{
+				Status:         merr.Success(),
+				PartitionNames: names,
+				PartitionIDs:   ids,
+			}, nil
+		}).Build()
+}
+
+// mockGetIndexes mocks GetIndexesForCollection to return the given indexes.
+func mockGetIndexes(indexes []*model.Index) *mockey.Mocker {
+	return mockey.Mock((*index.IndexMeta).GetIndexesForCollection).To(
+		func(_ *index.IndexMeta, collectionID int64, indexName string) []*model.Index {
+			return indexes
+		}).Build()
+}
+
+func TestValidateRestoreSnapshotResources_SnapshotNotFound(t *testing.T) {
+	ctx := context.Background()
+	server := buildValidateTestServer(t, false) // snapshot NOT in map
+
+	snapshotData := buildBaseSnapshotData()
+	err := newDDLCallbacks(server).ValidateRestoreSnapshotResources(ctx, 100, snapshotData)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "snap1")
+	assert.Contains(t, err.Error(), "does not exist")
+}
+
+func TestValidateRestoreSnapshotResources_CollectionNotFound(t *testing.T) {
+	ctx := context.Background()
+	server := buildValidateTestServer(t, true)
+
+	m := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeCollectionInternal")).To(
+		func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+			return nil, errors.New("collection gone")
+		}).Build()
+	defer m.UnPatch()
+
+	err := newDDLCallbacks(server).ValidateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection 100 does not exist")
+}
+
+func TestValidateRestoreSnapshotResources_ShowPartitionsError(t *testing.T) {
+	ctx := context.Background()
+	server := buildValidateTestServer(t, true)
+
+	m1 := mockDescribeCollection()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(
+		func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
+			return nil, errors.New("rpc failure")
+		}).Build()
+	defer m2.UnPatch()
+
+	err := newDDLCallbacks(server).ValidateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get partitions")
+}
+
+func TestValidateRestoreSnapshotResources_PartitionNotFound(t *testing.T) {
+	ctx := context.Background()
+	server := buildValidateTestServer(t, true)
+
+	m1 := mockDescribeCollection()
+	defer m1.UnPatch()
+	// Return partitions that do NOT include "_default"
+	m2 := mockShowPartitions([]string{"other_partition"})
+	defer m2.UnPatch()
+
+	err := newDDLCallbacks(server).ValidateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "_default")
+	assert.Contains(t, err.Error(), "does not exist in collection")
+}
+
+func TestValidateRestoreSnapshotResources_IndexNotFound(t *testing.T) {
+	ctx := context.Background()
+	server := buildValidateTestServer(t, true)
+
+	m1 := mockDescribeCollection()
+	defer m1.UnPatch()
+	m2 := mockShowPartitions([]string{"_default"})
+	defer m2.UnPatch()
+	// Return empty indexes — snapshot expects vec_idx
+	m3 := mockGetIndexes([]*model.Index{})
+	defer m3.UnPatch()
+
+	err := newDDLCallbacks(server).ValidateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index for field 100 does not exist")
+	assert.Contains(t, err.Error(), "vec_idx")
+}
+
+func TestValidateRestoreSnapshotResources_IndexFieldMismatch(t *testing.T) {
+	ctx := context.Background()
+	server := buildValidateTestServer(t, true)
+
+	m1 := mockDescribeCollection()
+	defer m1.UnPatch()
+	m2 := mockShowPartitions([]string{"_default"})
+	defer m2.UnPatch()
+	// Index name matches but field ID does not
+	m3 := mockGetIndexes([]*model.Index{
+		{FieldID: 999, IndexName: "vec_idx"},
+	})
+	defer m3.UnPatch()
+
+	err := newDDLCallbacks(server).ValidateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "index for field 100 does not exist")
+	assert.Contains(t, err.Error(), "vec_idx")
+}
+
+func TestValidateRestoreSnapshotResources_Success(t *testing.T) {
+	ctx := context.Background()
+	server := buildValidateTestServer(t, true)
+
+	m1 := mockDescribeCollection()
+	defer m1.UnPatch()
+	m2 := mockShowPartitions([]string{"_default"})
+	defer m2.UnPatch()
+	m3 := mockGetIndexes([]*model.Index{
+		{FieldID: 100, IndexName: "vec_idx"},
+	})
+	defer m3.UnPatch()
+
+	err := newDDLCallbacks(server).ValidateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
+
+	assert.NoError(t, err)
+}
+
+func TestValidateRestoreSnapshotResources_SuccessNoIndexes(t *testing.T) {
+	ctx := context.Background()
+	server := buildValidateTestServer(t, true)
+
+	m1 := mockDescribeCollection()
+	defer m1.UnPatch()
+	m2 := mockShowPartitions([]string{"_default"})
+	defer m2.UnPatch()
+
+	// No indexes in snapshot data
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Collection: &datapb.CollectionDescription{
+			Partitions: map[string]int64{"_default": 1},
+		},
+		Indexes: []*indexpb.IndexInfo{},
+	}
+
+	err := newDDLCallbacks(server).ValidateRestoreSnapshotResources(ctx, 100, snapshotData)
+
+	assert.NoError(t, err)
+}
+
+func TestValidateRestoreSnapshotResources_MultiplePartitionsAndIndexes(t *testing.T) {
+	ctx := context.Background()
+	server := buildValidateTestServer(t, true)
+
+	m1 := mockDescribeCollection()
+	defer m1.UnPatch()
+	m2 := mockShowPartitions([]string{"_default", "part_a", "part_b"})
+	defer m2.UnPatch()
+	m3 := mockGetIndexes([]*model.Index{
+		{FieldID: 100, IndexName: "vec_idx"},
+		{FieldID: 200, IndexName: "scalar_idx"},
+	})
+	defer m3.UnPatch()
+
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Collection: &datapb.CollectionDescription{
+			Partitions: map[string]int64{
+				"_default": 1,
+				"part_a":   2,
+				"part_b":   3,
+			},
+		},
+		Indexes: []*indexpb.IndexInfo{
+			{IndexID: 1001, IndexName: "vec_idx", FieldID: 100},
+			{IndexID: 1002, IndexName: "scalar_idx", FieldID: 200},
+		},
+	}
+
+	err := newDDLCallbacks(server).ValidateRestoreSnapshotResources(ctx, 100, snapshotData)
+
+	assert.NoError(t, err)
+}

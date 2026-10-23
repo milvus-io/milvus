@@ -19,15 +19,15 @@ package datacoord
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
-
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
 // newMemoryMetaWithDomainMetas builds a meta over an in-memory catalog and returns the domain metas built with it.
-func newMemoryMetaWithDomainMetas(t *testing.T) (*meta, *domainMetas, error) {
+func newMemoryMetaWithDomainMetas(t *testing.T) (*meta.Meta, *domainMetas, error) {
 	dm := &domainMetas{}
-	m, err := newMemoryMetaWithLoader(t, func(catalog metastore.DataCoordCatalog, cm storage.ChunkManager) DomainMetaLoader {
+	m, err := meta.NewMemoryMetaWithLoader(t, func(catalog metastore.DataCoordCatalog, cm storage.ChunkManager) meta.DomainMetaLoader {
 		return loadDomainMetas(catalog, cm, dm)
 	})
 	return m, dm, err
@@ -57,7 +57,7 @@ func (t *mockCompactionTrigger) triggerManualCompaction(collectionID int64) (Uni
 	panic("not implemented")
 }
 
-func (t *mockCompactionTrigger) start() {
+func (t *mockCompactionTrigger) Start() {
 	if f, ok := t.methods["start"]; ok {
 		if ff, ok := f.(func()); ok {
 			ff()
@@ -67,7 +67,7 @@ func (t *mockCompactionTrigger) start() {
 	panic("not implemented")
 }
 
-func (t *mockCompactionTrigger) stop() {
+func (t *mockCompactionTrigger) Stop() {
 	if f, ok := t.methods["stop"]; ok {
 		if ff, ok := f.(func()); ok {
 			ff()

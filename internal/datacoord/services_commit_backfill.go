@@ -222,14 +222,14 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 	if rawPath == "" {
 		return nil, merr.WrapErrParameterMissingMsg("result_path is required")
 	}
-	bucket := bucketFromChunkManager(s.meta.chunkManager)
+	bucket := bucketFromChunkManager(s.meta.ChunkManager)
 	key, err := normalizeObjectKey(rawPath, bucket)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
 	}
 	// Pre-check the object size so an untrusted external caller cannot force
 	// an unbounded in-memory Read.
-	size, err := s.meta.chunkManager.Size(ctx, key)
+	size, err := s.meta.ChunkManager.Size(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 			"backfill result JSON " + strconv.FormatInt(size, 10) +
 				" bytes exceeds limit " + strconv.FormatInt(maxBackfillResultBytes, 10))
 	}
-	raw, err := s.meta.chunkManager.Read(ctx, key)
+	raw, err := s.meta.ChunkManager.Read(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 // statuses recorded during pre-validation (so callers can surface them to the
 // client even when a segment never reached broadcast).
 func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult) ([]*messagespb.BatchUpdateManifestItem, []*datapb.CommitBackfillResultSegmentStatus) {
-	bucket := bucketFromChunkManager(s.meta.chunkManager)
+	bucket := bucketFromChunkManager(s.meta.ChunkManager)
 	items := make([]*messagespb.BatchUpdateManifestItem, 0, len(result.Segments))
 	statuses := make([]*datapb.CommitBackfillResultSegmentStatus, 0)
 

@@ -23,6 +23,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -79,34 +81,34 @@ func readinessExternalSchema() *schemapb.CollectionSchema {
 // newReadinessIndexMeta builds an indexMeta over the given per-field indexes and
 // per-segment index states. Field indexes carry the given fieldID keyed by
 // IndexID; segment indexes are keyed by SegmentID.
-func newReadinessIndexMeta(collectionID int64, fieldIndexes map[int64]*model.Index, segIndexes map[int64][]*model.SegmentIndex) *indexMeta {
-	im := newSegmentIndexMeta(datacoord.NewCatalog(NewMetaMemoryKV(), "", ""))
-	im.indexes[collectionID] = fieldIndexes
+func newReadinessIndexMeta(collectionID int64, fieldIndexes map[int64]*model.Index, segIndexes map[int64][]*model.SegmentIndex) *index.IndexMeta {
+	im := index.NewSegmentIndexMeta(datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", ""))
+	im.Indexes[collectionID] = fieldIndexes
 	for segID, segs := range segIndexes {
 		mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		for _, s := range segs {
 			mm.Insert(s.IndexID, s)
 		}
-		im.segmentIndexes.Insert(segID, mm)
+		im.SegmentIndexes.Insert(segID, mm)
 	}
 	return im
 }
 
 // readinessMeta builds a meta whose collection cache holds the given collection
 // and whose index catalog is the given index meta.
-func readinessMeta(coll *collectionInfo, im *indexMeta) *meta {
-	mt := newEmptyTestMeta()
-	mt.indexCatalog = im
+func readinessMeta(coll *meta.CollectionInfo, im *index.IndexMeta) *meta.Meta {
+	mt := meta.NewEmptyTestMeta()
+	mt.IndexCatalog = im
 	mt.AddCollection(coll)
 	return mt
 }
 
-func readinessCollection(id int64, schema *schemapb.CollectionSchema) *collectionInfo {
-	return &collectionInfo{ID: id, Schema: schema}
+func readinessCollection(id int64, schema *schemapb.CollectionSchema) *meta.CollectionInfo {
+	return &meta.CollectionInfo{ID: id, Schema: schema}
 }
 
-func readyFlushedSegment(id int64) *SegmentInfo {
-	return &SegmentInfo{
+func readyFlushedSegment(id int64) *meta.SegmentInfo {
+	return &meta.SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:           id,
 			CollectionID: readinessCollID,
@@ -142,45 +144,45 @@ func segmentIndex(segID, indexID int64, state commonpb.IndexState) *model.Segmen
 func TestSegmentReadiness_DataReady(t *testing.T) {
 	coll := readinessCollection(readinessCollID, readinessVectorSchema())
 	// No index on the collection: isolate the data term.
-	r := readinessMeta(coll, newReadinessIndexMeta(readinessCollID, map[int64]*model.Index{}, nil)).prepareReadiness(coll)
+	r := readinessMeta(coll, newReadinessIndexMeta(readinessCollID, map[int64]*model.Index{}, nil)).PrepareReadiness(coll)
 	require.NotNil(t, r)
 
 	cases := []struct {
 		name    string
-		segment *SegmentInfo
+		segment *meta.SegmentInfo
 		ready   bool
 	}{
 		{
 			name: "growing not ready",
-			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			segment: &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{{FieldID: 2}},
 			}},
 			ready: false,
 		},
 		{
 			name: "flushed with binlogs ready",
-			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			segment: &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Flushed, Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			}},
 			ready: true,
 		},
 		{
 			name: "flushing with binlogs ready",
-			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			segment: &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Flushing, Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			}},
 			ready: true,
 		},
 		{
 			name: "flushed with manifest ready",
-			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			segment: &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Flushed, ManifestPath: "s3://segments/1/manifest",
 			}},
 			ready: true,
 		},
 		{
 			name: "flushed with no footprint not ready",
-			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			segment: &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Flushed,
 			}},
 			ready: false,
@@ -188,7 +190,7 @@ func TestSegmentReadiness_DataReady(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.ready, r.dataReady(tc.segment))
+			require.Equal(t, tc.ready, r.DataReady(tc.segment))
 		})
 	}
 }
@@ -199,12 +201,12 @@ func TestSegmentReadiness_IndexTerm_NoIndexCollection(t *testing.T) {
 	// §5.3 "skipNoIndexCollection=true" semantics).
 	coll := readinessCollection(readinessCollID, readinessVectorSchema())
 	im := newReadinessIndexMeta(readinessCollID, map[int64]*model.Index{}, nil)
-	r := readinessMeta(coll, im).prepareReadiness(coll)
+	r := readinessMeta(coll, im).PrepareReadiness(coll)
 	require.NotNil(t, r)
-	require.False(t, r.hasIndex)
+	require.False(t, r.HasIndex)
 
 	seg := readyFlushedSegment(1)
-	require.True(t, r.indexReady(seg), "no-index collection must be index-ready without any index")
+	require.True(t, r.IndexReady(seg), "no-index collection must be index-ready without any index")
 }
 
 func TestSegmentReadiness_IndexTerm_VectorIndex(t *testing.T) {
@@ -217,55 +219,55 @@ func TestSegmentReadiness_IndexTerm_VectorIndex(t *testing.T) {
 		map[int64]*model.Index{indexID: vectorIndex(fieldID, indexID)},
 		nil,
 	)
-	r := readinessMeta(coll, im).prepareReadiness(coll)
+	r := readinessMeta(coll, im).PrepareReadiness(coll)
 	require.NotNil(t, r)
-	require.True(t, r.hasIndex)
+	require.True(t, r.HasIndex)
 
 	t.Run("finished index ready", func(t *testing.T) {
 		seg := readyFlushedSegment(1)
-		im.segmentIndexes.Insert(seg.GetID(), func() *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
+		im.SegmentIndexes.Insert(seg.GetID(), func() *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
 			mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 			mm.Insert(indexID, segmentIndex(seg.GetID(), indexID, commonpb.IndexState_Finished))
 			return mm
 		}())
-		require.True(t, r.indexReady(seg))
+		require.True(t, r.IndexReady(seg))
 	})
 
 	t.Run("unissued index not ready", func(t *testing.T) {
 		seg := readyFlushedSegment(2)
-		im.segmentIndexes.Insert(seg.GetID(), func() *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
+		im.SegmentIndexes.Insert(seg.GetID(), func() *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
 			mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 			mm.Insert(indexID, segmentIndex(seg.GetID(), indexID, commonpb.IndexState_Unissued))
 			return mm
 		}())
-		require.False(t, r.indexReady(seg))
+		require.False(t, r.IndexReady(seg))
 	})
 
 	t.Run("in-progress index not ready", func(t *testing.T) {
 		seg := readyFlushedSegment(3)
-		im.segmentIndexes.Insert(seg.GetID(), func() *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
+		im.SegmentIndexes.Insert(seg.GetID(), func() *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
 			mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 			mm.Insert(indexID, segmentIndex(seg.GetID(), indexID, commonpb.IndexState_InProgress))
 			return mm
 		}())
-		require.False(t, r.indexReady(seg))
+		require.False(t, r.IndexReady(seg))
 	})
 
 	t.Run("missing segment index record not ready", func(t *testing.T) {
 		seg := readyFlushedSegment(4)
-		require.False(t, r.indexReady(seg))
+		require.False(t, r.IndexReady(seg))
 	})
 
 	t.Run("small sorted leaf exempt", func(t *testing.T) {
 		seg := readyFlushedSegment(5)
 		seg.NumOfRows = 100
 		seg.IsSorted = true
-		require.True(t, r.indexReady(seg), "small sorted leaf below MinSegmentNumRowsToEnableIndex is exempt")
+		require.True(t, r.IndexReady(seg), "small sorted leaf below MinSegmentNumRowsToEnableIndex is exempt")
 
 		large := readyFlushedSegment(6)
 		large.NumOfRows = 5000
 		large.IsSorted = true
-		require.False(t, r.indexReady(large), "large sorted segment is not exempt")
+		require.False(t, r.IndexReady(large), "large sorted segment is not exempt")
 	})
 }
 
@@ -288,25 +290,25 @@ func TestSegmentReadiness_IndexTerm_PureScalarDegradation(t *testing.T) {
 		map[int64]*model.Index{indexID: {CollectionID: readinessCollID, FieldID: fieldID, IndexID: indexID, IndexName: "scalar_index"}},
 		nil,
 	)
-	r := readinessMeta(coll, im).prepareReadiness(coll)
+	r := readinessMeta(coll, im).PrepareReadiness(coll)
 	require.NotNil(t, r)
-	require.True(t, r.hasIndex)
-	require.Equal(t, []int64{fieldID}, r.targetFieldIDs)
+	require.True(t, r.HasIndex)
+	require.Equal(t, []int64{fieldID}, r.TargetFieldIDs)
 
 	t.Run("scalar index finished ready", func(t *testing.T) {
 		seg := readyFlushedSegment(1)
 		mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		mm.Insert(indexID, segmentIndex(seg.GetID(), indexID, commonpb.IndexState_Finished))
-		im.segmentIndexes.Insert(seg.GetID(), mm)
-		require.True(t, r.indexReady(seg))
+		im.SegmentIndexes.Insert(seg.GetID(), mm)
+		require.True(t, r.IndexReady(seg))
 	})
 
 	t.Run("scalar index unissued not ready", func(t *testing.T) {
 		seg := readyFlushedSegment(2)
 		mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		mm.Insert(indexID, segmentIndex(seg.GetID(), indexID, commonpb.IndexState_Unissued))
-		im.segmentIndexes.Insert(seg.GetID(), mm)
-		require.False(t, r.indexReady(seg))
+		im.SegmentIndexes.Insert(seg.GetID(), mm)
+		require.False(t, r.IndexReady(seg))
 	})
 }
 
@@ -335,17 +337,17 @@ func TestSegmentReadiness_IndexTerm_DVForceAllIndexReady(t *testing.T) {
 		},
 		nil,
 	)
-	r := readinessMeta(coll, im).prepareReadiness(coll)
+	r := readinessMeta(coll, im).PrepareReadiness(coll)
 	require.NotNil(t, r)
-	require.Contains(t, r.targetFieldIDs, vecFieldID)
-	require.Contains(t, r.targetFieldIDs, scalarFieldID)
+	require.Contains(t, r.TargetFieldIDs, vecFieldID)
+	require.Contains(t, r.TargetFieldIDs, scalarFieldID)
 
 	t.Run("vector only finished not ready", func(t *testing.T) {
 		seg := readyFlushedSegment(1)
 		mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		mm.Insert(vecIndexID, segmentIndex(seg.GetID(), vecIndexID, commonpb.IndexState_Finished))
-		im.segmentIndexes.Insert(seg.GetID(), mm)
-		require.False(t, r.indexReady(seg), "scalar-indexed field must also be finished when DVForceAllIndexReady")
+		im.SegmentIndexes.Insert(seg.GetID(), mm)
+		require.False(t, r.IndexReady(seg), "scalar-indexed field must also be finished when DVForceAllIndexReady")
 	})
 
 	t.Run("all indexes finished ready", func(t *testing.T) {
@@ -353,8 +355,8 @@ func TestSegmentReadiness_IndexTerm_DVForceAllIndexReady(t *testing.T) {
 		mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		mm.Insert(vecIndexID, segmentIndex(seg.GetID(), vecIndexID, commonpb.IndexState_Finished))
 		mm.Insert(scalarIndexID, segmentIndex(seg.GetID(), scalarIndexID, commonpb.IndexState_Finished))
-		im.segmentIndexes.Insert(seg.GetID(), mm)
-		require.True(t, r.indexReady(seg))
+		im.SegmentIndexes.Insert(seg.GetID(), mm)
+		require.True(t, r.IndexReady(seg))
 	})
 }
 
@@ -363,33 +365,33 @@ func TestSegmentReadiness_SortTerm(t *testing.T) {
 	// default true so enableSortCompaction() is true.
 	coll := readinessCollection(readinessCollID, readinessVectorSchema())
 	im := newReadinessIndexMeta(readinessCollID, map[int64]*model.Index{}, nil)
-	r := readinessMeta(coll, im).prepareReadiness(coll)
+	r := readinessMeta(coll, im).PrepareReadiness(coll)
 	require.NotNil(t, r)
-	require.True(t, r.requireSorted)
+	require.True(t, r.RequireSorted)
 
 	seg := readyFlushedSegment(1)
-	require.False(t, r.sortReady(seg), "unsorted segment is not sort-ready when sort compaction is enabled")
+	require.False(t, r.SortReady(seg), "unsorted segment is not sort-ready when sort compaction is enabled")
 
 	seg.IsSorted = true
-	require.True(t, r.sortReady(seg))
+	require.True(t, r.SortReady(seg))
 	seg.IsSorted = false
 	seg.IsSortedByNamespace = true
-	require.True(t, r.sortReady(seg), "IsSortedByNamespace satisfies the sort term")
+	require.True(t, r.SortReady(seg), "IsSortedByNamespace satisfies the sort term")
 
 	t.Run("sort compaction disabled exempts", func(t *testing.T) {
 		Params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
 		defer Params.Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
-		r2 := readinessMeta(coll, im).prepareReadiness(coll)
-		require.False(t, r2.requireSorted)
-		require.True(t, r2.sortReady(readyFlushedSegment(2)))
+		r2 := readinessMeta(coll, im).PrepareReadiness(coll)
+		require.False(t, r2.RequireSorted)
+		require.True(t, r2.SortReady(readyFlushedSegment(2)))
 	})
 
 	t.Run("external collection exempts", func(t *testing.T) {
 		ext := readinessCollection(readinessCollID+1, readinessExternalSchema())
 		require.True(t, ext.IsExternal())
-		r2 := readinessMeta(ext, im).prepareReadiness(ext)
-		require.False(t, r2.requireSorted)
-		require.True(t, r2.sortReady(readyFlushedSegment(3)))
+		r2 := readinessMeta(ext, im).PrepareReadiness(ext)
+		require.False(t, r2.RequireSorted)
+		require.True(t, r2.SortReady(readyFlushedSegment(3)))
 	})
 }
 
@@ -402,10 +404,10 @@ func TestSegmentReadiness_StatsTerm(t *testing.T) {
 
 	coll := readinessCollection(readinessCollID, readinessStatsSchema())
 	im := newReadinessIndexMeta(readinessCollID, map[int64]*model.Index{}, nil)
-	r := readinessMeta(coll, im).prepareReadiness(coll)
+	r := readinessMeta(coll, im).PrepareReadiness(coll)
 	require.NotNil(t, r)
-	require.True(t, r.requireTextStats)
-	require.True(t, r.requireJSONKeyStats)
+	require.True(t, r.RequireTextStats)
+	require.True(t, r.RequireJSONKeyStats)
 
 	// Segments are marked sorted so the text/JSON-key needDo* predicates
 	// actually evaluate the stats-presence branch.
@@ -413,36 +415,36 @@ func TestSegmentReadiness_StatsTerm(t *testing.T) {
 	seg.IsSorted = true
 
 	t.Run("no stats written not ready", func(t *testing.T) {
-		require.False(t, r.statsReady(seg))
+		require.False(t, r.StatsReady(seg))
 	})
 
 	t.Run("text stats only not ready", func(t *testing.T) {
 		withText := seg.Clone()
 		withText.TextStatsLogs = map[int64]*datapb.TextIndexStats{2: {}}
-		require.False(t, r.statsReady(withText), "JSON-key stats still pending")
+		require.False(t, r.StatsReady(withText), "JSON-key stats still pending")
 	})
 
 	t.Run("both stats written ready", func(t *testing.T) {
 		withStats := seg.Clone()
 		withStats.TextStatsLogs = map[int64]*datapb.TextIndexStats{2: {}}
 		withStats.JsonKeyStats = map[int64]*datapb.JsonKeyStats{3: {JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion}}
-		require.True(t, r.statsReady(withStats))
+		require.True(t, r.StatsReady(withStats))
 	})
 
 	t.Run("stale json key format not ready", func(t *testing.T) {
 		withStats := seg.Clone()
 		withStats.TextStatsLogs = map[int64]*datapb.TextIndexStats{2: {}}
 		withStats.JsonKeyStats = map[int64]*datapb.JsonKeyStats{3: {JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion - 1}}
-		require.False(t, r.statsReady(withStats), "an outdated JSON-key stats format must be rebuilt")
+		require.False(t, r.StatsReady(withStats), "an outdated JSON-key stats format must be rebuilt")
 	})
 
 	t.Run("external v2 segment json exempt", func(t *testing.T) {
 		ext := readinessCollection(readinessCollID+1, readinessExternalSchema())
-		r2 := readinessMeta(ext, im).prepareReadiness(ext)
-		require.True(t, r2.requireJSONKeyStats)
+		r2 := readinessMeta(ext, im).PrepareReadiness(ext)
+		require.True(t, r2.RequireJSONKeyStats)
 		v2 := readyFlushedSegment(4)
 		v2.StorageVersion = storage.StorageV1
-		require.True(t, r2.statsReady(v2), "external V2 segment can never build JSON-key stats and is exempt")
+		require.True(t, r2.StatsReady(v2), "external V2 segment can never build JSON-key stats and is exempt")
 	})
 }
 
@@ -450,18 +452,18 @@ func TestSegmentReadiness_SchemaTerm(t *testing.T) {
 	coll := readinessCollection(readinessCollID, readinessVectorSchema())
 	coll.Schema.Version = 5
 	im := newReadinessIndexMeta(readinessCollID, map[int64]*model.Index{}, nil)
-	r := readinessMeta(coll, im).prepareReadiness(coll)
+	r := readinessMeta(coll, im).PrepareReadiness(coll)
 	require.NotNil(t, r)
-	require.Equal(t, int32(5), r.schemaVersion)
+	require.Equal(t, int32(5), r.SchemaVersion)
 
 	seg := readyFlushedSegment(1)
-	require.False(t, r.schemaReady(seg), "segment behind the collection schema version is not ready")
+	require.False(t, r.SchemaReady(seg), "segment behind the collection schema version is not ready")
 
 	seg.SchemaVersion = 5
-	require.True(t, r.schemaReady(seg))
+	require.True(t, r.SchemaReady(seg))
 
 	seg.SchemaVersion = 6
-	require.True(t, r.schemaReady(seg), "ahead-of-collection schema version is ready")
+	require.True(t, r.SchemaReady(seg), "ahead-of-collection schema version is ready")
 }
 
 func TestSegmentReadiness_Ready(t *testing.T) {
@@ -471,14 +473,14 @@ func TestSegmentReadiness_Ready(t *testing.T) {
 		indexID = int64(10)
 	)
 	im := newReadinessIndexMeta(readinessCollID, map[int64]*model.Index{indexID: vectorIndex(fieldID, indexID)}, nil)
-	r := readinessMeta(coll, im).prepareReadiness(coll)
+	r := readinessMeta(coll, im).PrepareReadiness(coll)
 
 	seg := readyFlushedSegment(1)
 	seg.NumOfRows = 4096
 	seg.IsSorted = true
 	mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	mm.Insert(indexID, segmentIndex(seg.GetID(), indexID, commonpb.IndexState_Finished))
-	im.segmentIndexes.Insert(seg.GetID(), mm)
+	im.SegmentIndexes.Insert(seg.GetID(), mm)
 
 	require.True(t, r.Ready(seg), "all terms satisfied")
 	require.True(t, r.Predicate()(seg), "Predicate() must agree with Ready()")
@@ -497,14 +499,14 @@ func TestSegmentReadiness_Ready(t *testing.T) {
 	t.Run("index regression makes it not ready", func(t *testing.T) {
 		mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		mm.Insert(indexID, segmentIndex(seg.GetID(), indexID, commonpb.IndexState_Unissued))
-		im.segmentIndexes.Insert(seg.GetID(), mm)
+		im.SegmentIndexes.Insert(seg.GetID(), mm)
 		seg.IsInvisible = true
 		require.False(t, r.Ready(seg))
 	})
 }
 
 func TestPrepareReadiness_NilCollection(t *testing.T) {
-	mt := newEmptyTestMeta()
-	require.Nil(t, mt.prepareReadiness(nil))
-	require.Nil(t, mt.prepareReadiness(&collectionInfo{ID: 1}))
+	mt := meta.NewEmptyTestMeta()
+	require.Nil(t, mt.PrepareReadiness(nil))
+	require.Nil(t, mt.PrepareReadiness(&meta.CollectionInfo{ID: 1}))
 }

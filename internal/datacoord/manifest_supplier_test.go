@@ -23,12 +23,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 func TestPublishedManifestSnapshot(t *testing.T) {
-	s := &Server{meta: newEmptyTestMeta()}
+	s := &Server{meta: meta.NewEmptyTestMeta()}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	fixtures := []*datapb.SegmentInfo{
 		{ID: 1, CollectionID: 10, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, ManifestPath: "collection10/v1"},
@@ -43,16 +44,16 @@ func TestPublishedManifestSnapshot(t *testing.T) {
 		{ID: 9, State: commonpb.SegmentState_SegmentStateNone, ManifestPath: "none"},
 	}
 	for _, segment := range fixtures {
-		s.meta.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
+		s.meta.Segments.SetSegment(segment.ID, meta.NewSegmentInfo(segment))
 	}
 	got, err := s.GetPublishedManifestPaths(context.Background())
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"collection10/v1", "collection20/v1", "collection20/v2", packed.MarshalManifestPath("files/insert_log/30/1/10", 0)}, got)
 	// Returned strings are detached from later metadata publication; no clones of
 	// schemas/binlogs/index metadata are necessary.
-	s.meta.segMu.Lock()
+	s.meta.SegMu.Lock()
 	fixtures[0].ManifestPath = "collection10/v2"
-	s.meta.segMu.Unlock()
+	s.meta.SegMu.Unlock()
 	require.Contains(t, got, "collection10/v1")
 	// A caller can take the write lock after enumeration; no lock spans Talon I/O.
 	ctx, cancel := context.WithCancel(context.Background())

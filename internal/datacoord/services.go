@@ -34,6 +34,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/ddl"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -123,7 +129,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 }
 
 // broadcastManualFlush waits for L1 and L0 completion on every collection VChannel.
-func (s *Server) broadcastManualFlush(ctx context.Context, bc broadcaster.BroadcastAPI, coll *collectionInfo) error {
+func (s *Server) broadcastManualFlush(ctx context.Context, bc broadcaster.BroadcastAPI, coll *meta.CollectionInfo) error {
 	msg := message.NewManualFlushMessageBuilderV2().
 		WithUnreplicable().
 		WithHeader(&message.ManualFlushMessageHeader{CollectionId: coll.ID}).
@@ -179,12 +185,12 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toF
 
 	segments := s.meta.GetSegmentsOfCollection(ctx, collectionID)
 	flushSegmentIDs := make([]UniqueID, 0, len(segments))
-	for _, segment := range segments {
-		if segment != nil &&
-			isFlushState(segment.GetState()) &&
-			segment.GetLevel() != datapb.SegmentLevel_L0 && // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
-			!sealedSegmentsIDDict[segment.GetID()] {
-			flushSegmentIDs = append(flushSegmentIDs, segment.GetID())
+	for _, seg := range segments {
+		if seg != nil &&
+			meta.IsFlushState(seg.GetState()) &&
+			seg.GetLevel() != datapb.SegmentLevel_L0 && // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
+			!sealedSegmentsIDDict[seg.GetID()] {
+			flushSegmentIDs = append(flushSegmentIDs, seg.GetID())
 		}
 	}
 
@@ -337,7 +343,7 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	// Alloc new growing segment and return the segment info.
 	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
 		ctx,
-		AllocNewGrowingSegmentRequest{
+		segment.AllocNewGrowingSegmentRequest{
 			CollectionID:         req.GetCollectionId(),
 			PartitionID:          req.GetPartitionId(),
 			SegmentID:            req.GetSegmentId(),
@@ -393,16 +399,16 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		}, nil
 	}
 
-	segment := s.meta.GetHealthySegment(ctx, req.GetSegmentID())
-	if segment == nil {
+	seg := s.meta.GetHealthySegment(ctx, req.GetSegmentID())
+	if seg == nil {
 		return &datapb.GetInsertBinlogPathsResponse{
 			Status: merr.Status(merr.WrapErrSegmentNotFound(req.GetSegmentID())),
 		}, nil
 	}
 
-	segment = segment.Clone()
+	seg = seg.Clone()
 
-	err := binlog.DecompressBinLog(storage.InsertBinlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), segment.GetBinlogs())
+	err := binlog.DecompressBinLog(storage.InsertBinlog, seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID(), seg.GetBinlogs())
 	if err != nil {
 		return &datapb.GetInsertBinlogPathsResponse{
 			Status: merr.Status(err),
@@ -411,7 +417,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	resp := &datapb.GetInsertBinlogPathsResponse{
 		Status: merr.Success(),
 	}
-	binlogs := segment.GetBinlogs()
+	binlogs := seg.GetBinlogs()
 	fids := make([]UniqueID, 0, len(binlogs))
 	paths := make([]*internalpb.StringList, 0, len(binlogs))
 	for _, field := range binlogs {
@@ -466,8 +472,8 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 		//
 		// TODO: remove the Growing exclusion once #48865 lands and streaming-created
 		// segments carry the correct SchemaVersion from creation.
-		segments := s.meta.SelectSegments(ctx, WithCollection(req.CollectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
-			return isSegmentHealthy(si) &&
+		segments := s.meta.SelectSegments(ctx, meta.WithCollection(req.CollectionID), meta.SegmentFilterFunc(func(si *meta.SegmentInfo) bool {
+			return meta.IsSegmentHealthy(si) &&
 				!si.GetIsImporting() &&
 				!si.GetIsInvisible() &&
 				si.GetLevel() != datapb.SegmentLevel_L0 &&
@@ -478,8 +484,8 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 		// proxy treats the absent keys as "no backfill in progress" and allows the DDL through.
 		if len(segments) > 0 {
 			consistentCount := 0
-			for _, segment := range segments {
-				if segment.GetSchemaVersion() == collectionSchemaVersion {
+			for _, seg := range segments {
+				if seg.GetSchemaVersion() == collectionSchemaVersion {
 					consistentCount++
 				}
 			}
@@ -555,7 +561,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	channelCPs := make(map[string]*msgpb.MsgPosition)
 
 	for _, id := range req.SegmentIDs {
-		var info *SegmentInfo
+		var info *meta.SegmentInfo
 		if req.IncludeUnHealthy {
 			info = s.meta.GetSegment(ctx, id)
 			// info may be not-nil, but ok is false when the segment is being dropped concurrently.
@@ -600,7 +606,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 // appendCompactToDeleteSources mutates clonedInfo with delete sources from all
 // compact-to descendants of segmentID. Manifest-backed descendants stay as
 // manifest paths; legacy descendants contribute decompressed deltalog entries.
-func (s *Server) appendCompactToDeleteSources(ctx context.Context, clonedInfo *SegmentInfo, segmentID UniqueID) error {
+func (s *Server) appendCompactToDeleteSources(ctx context.Context, clonedInfo *meta.SegmentInfo, segmentID UniqueID) error {
 	children, ok := s.meta.GetCompactionTo(segmentID)
 	if !ok {
 		mlog.Warn(ctx, "failed to get segment, this may have been cleaned",
@@ -679,24 +685,24 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return merr.Status(err), nil
 	}
 
-	operators := []UpdateOperator{}
+	operators := []meta.UpdateOperator{}
 	var flushedVersion *viewpb.DataVersion
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
-		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
+		operators = append(operators, meta.CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
 	} else {
-		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
+		seg := s.meta.GetSegment(ctx, req.GetSegmentID())
 		// validate level one segment
-		if segment == nil {
+		if seg == nil {
 			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
 			mlog.Warn(context.TODO(), "failed to get segment", mlog.Err(err))
 			return merr.Status(err), nil
 		}
 
-		if req.GetFlushed() && segment.GetSealedAtDataVersion() != nil {
-			return dataview.FlushResultStatus(segment.GetSealedAtDataVersion()), nil
+		if req.GetFlushed() && seg.GetSealedAtDataVersion() != nil {
+			return dataview.FlushResultStatus(seg.GetSealedAtDataVersion()), nil
 		}
-		if segment.State == commonpb.SegmentState_Dropped {
+		if seg.State == commonpb.SegmentState_Dropped {
 			mlog.Info(ctx, "save to dropped segment, ignore this request")
 			if req.GetFlushed() {
 				return dataview.FlushResultStatus(nil), nil
@@ -704,7 +710,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Success(), nil
 		}
 
-		if !isSegmentHealthy(segment) {
+		if !meta.IsSegmentHealthy(seg) {
 			err := merr.WrapErrSegmentNotFound(req.GetSegmentID())
 			mlog.Warn(context.TODO(), "failed to get segment, the segment not healthy", mlog.Err(err))
 			return merr.Status(err), nil
@@ -715,51 +721,51 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 
-		operators = append(operators, ValidateSaveBinlogStorageVersion(req.GetSegmentID(), incomingStorageVersion))
+		operators = append(operators, meta.ValidateSaveBinlogStorageVersion(req.GetSegmentID(), incomingStorageVersion))
 
 		// Set segment state
 		if req.GetDropped() {
 			// segmentManager manages growing segments
 			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
-			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
+			operators = append(operators, meta.UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
 			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			// keep the original SegmentMeta persistence semantics: when sort
 			// compaction is enabled, a flushed non-L0 Segment stays invisible
 			// until its sorted output replaces it (see data_view.md TODO).
-			if enableSortCompaction() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
-				operators = append(operators, SetSegmentIsInvisible(req.GetSegmentID(), true))
+			if meta.EnableSortCompaction() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+				operators = append(operators, meta.SetSegmentIsInvisible(req.GetSegmentID(), true))
 			}
 			// set segment to SegmentState_Flushed
-			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushed))
+			operators = append(operators, meta.UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushed))
 		}
 	}
 
 	if req.GetWithFullBinlogs() {
 		// check checkpoint will be executed at updateSegmentPack validation to ignore the illegal checkpoint update.
-		operators = append(operators, UpdateBinlogsFromSaveBinlogPathsOperator(
+		operators = append(operators, meta.UpdateBinlogsFromSaveBinlogPathsOperator(
 			req.GetSegmentID(),
 			req.GetField2BinlogPaths(),
 			req.GetField2StatslogPaths(),
 			req.GetDeltalogs(),
 			req.GetField2Bm25LogPaths(),
-		), UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints(), true))
+		), meta.UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints(), true))
 	} else {
-		operators = append(operators, AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
-			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
+		operators = append(operators, meta.AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
+			meta.UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
 	}
 
 	// save manifest, start positions and checkpoints
 	operators = append(operators,
-		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
-		UpdateStartPosition(req.GetStartPositions()),
-		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
+		meta.UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
+		meta.UpdateStartPosition(req.GetStartPositions()),
+		meta.UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 		// The request ships the complete cumulative Statistics published
 		// from the growing-segment collector; the receiver stores it
 		// wholesale. Only nil-stats flushes (storage V1 / pre-Statistics
 		// datanodes during rolling upgrade) fall back to deriving from
 		// the binlog arrays. See UpdateSegmentStats for the full contract.
-		UpdateSegmentStats(req.GetSegmentID(), req.GetStats()),
+		meta.UpdateSegmentStats(req.GetSegmentID(), req.GetStats()),
 	)
 
 	// Update segment info in memory and meta. Stale updates (segment already
@@ -786,7 +792,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// contradiction that StreamingNode-side sorting of flushed segments will
 	// eliminate in the future.
 	if s.dataViewManager != nil && req.GetFlushed() && !req.GetDropped() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
-		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
+		seg := s.meta.GetSegment(ctx, req.GetSegmentID())
 		// Skip zero-row segments: the same txn marks them Dropped via
 		// UpdateAsDroppedIfEmptyWhenFlushing, so publishing them here would
 		// serve a DataView listing a Dropped segment with no binlog or
@@ -798,7 +804,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// the row count the request itself carries (the checkpoint rows that
 		// the txn will commit, falling back to the current meta value) so the
 		// flush is not left out of the DataView.
-		hasRows := segment != nil && segment.GetNumOfRows() > 0
+		hasRows := seg != nil && seg.GetNumOfRows() > 0
 		if !hasRows {
 			for _, cp := range req.GetCheckPoints() {
 				if cp.GetSegmentID() == req.GetSegmentID() && cp.GetNumOfRows() > 0 {
@@ -814,14 +820,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			// 0 marker - otherwise the next recompute rewrites the membership
 			// and burns another snapshot version.
 			manifestPath := req.GetManifestPath()
-			if manifestPath == "" && segment != nil {
-				manifestPath = segment.GetManifestPath()
+			if manifestPath == "" && seg != nil {
+				manifestPath = seg.GetManifestPath()
 			}
 			manifestVersion := int64(0)
 			if manifestPath != "" {
 				if _, manifestVersion, err = packed.UnmarshalManifestPath(manifestPath); err != nil {
 					mlog.Warn(ctx, "failed to parse Manifest path for DataView flush publish",
-						mlog.Int64("segmentID", segment.GetID()), mlog.Err(err))
+						mlog.Int64("segmentID", seg.GetID()), mlog.Err(err))
 					return merr.Status(err), nil
 				}
 			}
@@ -830,7 +836,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			// authoritative cumulative count UpdateCheckPointOperator stores
 			// into SegmentInfo, so prefer them over the (possibly stale/zero)
 			// pre-txn meta value - aligning the DataView with SegmentInfo.
-			rowNum := segment.GetNumOfRows()
+			rowNum := seg.GetNumOfRows()
 			for _, cp := range req.GetCheckPoints() {
 				if cp.GetSegmentID() == req.GetSegmentID() && cp.GetNumOfRows() > 0 {
 					rowNum = cp.GetNumOfRows()
@@ -838,11 +844,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				}
 			}
 			flushView, commitView, abortView, err := s.dataViewManager.PrepareFlush(ctx, FlushDataViewEvent{
-				CollectionID: segment.GetCollectionID(),
+				CollectionID: seg.GetCollectionID(),
 				Segments: []dataview.LoadableSegment{{
-					SegmentID:       segment.GetID(),
-					VChannel:        segment.GetInsertChannel(),
-					PartitionID:     segment.GetPartitionID(),
+					SegmentID:       seg.GetID(),
+					VChannel:        seg.GetInsertChannel(),
+					PartitionID:     seg.GetPartitionID(),
 					ManifestVersion: manifestVersion,
 					RowNum:          rowNum,
 				}},
@@ -864,7 +870,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			}
 			flushedVersion = flushView.GetDataVersion()
 			if flushedVersion != nil {
-				operators = append(operators, setSealedAtDataVersion(req.GetSegmentID(), flushedVersion))
+				operators = append(operators, meta.SetSealedAtDataVersion(req.GetSegmentID(), flushedVersion))
 			}
 			committed, err := s.meta.UpdateSegmentsInfoAndDataView(ctx, flushView, operators...)
 			if err != nil {
@@ -904,21 +910,21 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
 	mlog.Info(context.TODO(), "SaveBinlogPaths sync segment with meta",
 		mlog.Any("checkpoints", req.GetCheckPoints()),
-		mlog.Strings("binlogs", stringifyBinlogs(req.GetField2BinlogPaths())),
-		mlog.Strings("deltalogs", stringifyBinlogs(req.GetDeltalogs())),
-		mlog.Strings("statslogs", stringifyBinlogs(req.GetField2StatslogPaths())),
-		mlog.Strings("bm25logs", stringifyBinlogs(req.GetField2Bm25LogPaths())),
+		mlog.Strings("binlogs", meta.StringifyBinlogs(req.GetField2BinlogPaths())),
+		mlog.Strings("deltalogs", meta.StringifyBinlogs(req.GetDeltalogs())),
+		mlog.Strings("statslogs", meta.StringifyBinlogs(req.GetField2StatslogPaths())),
+		mlog.Strings("bm25logs", meta.StringifyBinlogs(req.GetField2Bm25LogPaths())),
 	)
 
 	// Validate manifest segment after update
-	if segment := s.meta.GetSegment(ctx, req.GetSegmentID()); segment != nil {
-		if msg := ValidateManifestSegment(segment); msg != "" {
+	if seg := s.meta.GetSegment(ctx, req.GetSegmentID()); seg != nil {
+		if msg := meta.ValidateManifestSegment(seg); msg != "" {
 			mlog.Warn(context.TODO(), "manifest segment validation warning", mlog.String("detail", msg))
 		}
 	}
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
-		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
+		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(compaction.CalculateL0SegmentSize(req.GetField2StatslogPaths()))
 
 		s.compactionTriggerManager.OnCollectionUpdate(req.GetCollectionID())
 		return merr.Success(), nil
@@ -931,7 +937,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 		// notify compaction
 		_, err := s.compactionTrigger.TriggerCompaction(ctx,
-			NewCompactionSignal().
+			compaction.NewCompactionSignal().
 				WithWaitResult(false).
 				WithCollectionID(req.GetCollectionID()).
 				WithPartitionID(req.GetPartitionID()).
@@ -951,7 +957,7 @@ func (s *Server) validateTextSegmentStorage(req *datapb.SaveBinlogPathsRequest, 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 || req.GetDropped() {
 		return nil
 	}
-	textFieldIDs := s.meta.collectionTextFieldIDs(req.GetCollectionID())
+	textFieldIDs := s.meta.CollectionTextFieldIDs(req.GetCollectionID())
 	if len(textFieldIDs) == 0 {
 		return nil
 	}
@@ -996,7 +1002,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	mlog.Info(context.TODO(), "receive DropVirtualChannel request",
 		mlog.String("channelName", channel))
 
-	segments := make([]*SegmentInfo, 0, len(req.GetSegments()))
+	segments := make([]*meta.SegmentInfo, 0, len(req.GetSegments()))
 	for _, seg2Drop := range req.GetSegments() {
 		info := &datapb.SegmentInfo{
 			ID:            seg2Drop.GetSegmentID(),
@@ -1009,8 +1015,8 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 			DmlPosition:   seg2Drop.GetCheckPoint(),
 			NumOfRows:     seg2Drop.GetNumOfRows(),
 		}
-		segment := NewSegmentInfo(info)
-		segments = append(segments, segment)
+		seg := meta.NewSegmentInfo(info)
+		segments = append(segments, seg)
 	}
 
 	err := s.meta.UpdateDropChannelSegmentInfo(ctx, channel, segments)
@@ -1020,7 +1026,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		return resp, nil
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
-	s.compactionInspector.removeTasksByChannel(channel)
+	s.compactionInspector.RemoveTasksByChannel(channel)
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	s.meta.MarkChannelCheckpointDropped(ctx, channel)
 
@@ -1108,7 +1114,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	flushedIDs := make(typeutil.UniqueSet)
 	for _, c := range channels {
-		channelInfo := s.handler.GetQueryVChanPositions(&channelMeta{Name: c, CollectionID: collectionID}, partitionID)
+		channelInfo := s.handler.GetQueryVChanPositions(&meta.ChannelMeta{Name: c, CollectionID: collectionID}, partitionID)
 		channelInfos = append(channelInfos, channelInfo)
 		mlog.Info(context.TODO(), "datacoord append channelInfo in GetRecoveryInfo",
 			mlog.String("channel", channelInfo.GetChannelName()),
@@ -1128,25 +1134,25 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	segmentsNumOfRows := make(map[UniqueID]int64)
 	segment2TextStatsLogs := make(map[UniqueID]map[UniqueID]*datapb.TextIndexStats)
 	for id := range flushedIDs {
-		segment := s.meta.GetSegment(ctx, id)
-		if segment == nil {
+		seg := s.meta.GetSegment(ctx, id)
+		if seg == nil {
 			err := merr.WrapErrSegmentNotFound(id)
 			mlog.Warn(context.TODO(), "failed to get segment", mlog.Int64("segmentID", id))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
 		// Skip non-flushing, non-flushed and dropped segments.
-		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing && segment.State != commonpb.SegmentState_Dropped {
+		if seg.State != commonpb.SegmentState_Flushed && seg.State != commonpb.SegmentState_Flushing && seg.State != commonpb.SegmentState_Dropped {
 			continue
 		}
 		// Also skip bulk insert & fake segments.
-		if segment.GetIsImporting() || segment.GetIsFake() {
+		if seg.GetIsImporting() || seg.GetIsFake() {
 			continue
 		}
-		segment2InsertChannel[segment.ID] = segment.InsertChannel
-		binlogs := segment.GetBinlogs()
+		segment2InsertChannel[seg.ID] = seg.InsertChannel
+		binlogs := seg.GetBinlogs()
 
-		if len(binlogs) == 0 && segment.GetManifestPath() == "" {
+		if len(binlogs) == 0 && seg.GetManifestPath() == "" {
 			flushedIDs.Remove(id)
 			continue
 		}
@@ -1176,23 +1182,23 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			segment2Binlogs[id] = append(segment2Binlogs[id], fieldBinlogs)
 		}
 
-		if segment.GetStorageVersion() != storage.StorageV3 {
-			if newCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); newCount != segment.NumOfRows && newCount > 0 {
+		if seg.GetStorageVersion() != storage.StorageV3 {
+			if newCount := segmentutil.CalcRowCountFromBinLog(seg.SegmentInfo); newCount != seg.NumOfRows && newCount > 0 {
 				mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
-					mlog.Int64("segmentID", segment.GetID()),
-					mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
+					mlog.Int64("segmentID", seg.GetID()),
+					mlog.Int64("segment meta row count (wrong)", seg.GetNumOfRows()),
 					mlog.Int64("segment bin log row count (correct)", newCount))
 				segmentsNumOfRows[id] = newCount
 			} else {
-				segmentsNumOfRows[id] = segment.NumOfRows
+				segmentsNumOfRows[id] = seg.NumOfRows
 			}
 		} else {
 			// V3 segments: NumOfRows is authoritative (advanced from the writer
 			// checkpoint); binlog arrays may be empty or delta-only.
-			segmentsNumOfRows[id] = segment.NumOfRows
+			segmentsNumOfRows[id] = seg.NumOfRows
 		}
 
-		statsBinlogs := segment.GetStatslogs()
+		statsBinlogs := seg.GetStatslogs()
 		field2StatsBinlog := make(map[UniqueID][]*datapb.Binlog)
 		for _, field := range statsBinlogs {
 			field2StatsBinlog[field.GetFieldID()] = append(field2StatsBinlog[field.GetFieldID()], field.GetBinlogs()...)
@@ -1206,10 +1212,10 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			segment2StatsBinlogs[id] = append(segment2StatsBinlogs[id], fieldBinlogs)
 		}
 
-		segment2TextStatsLogs[id] = segment.GetTextStatsLogs()
+		segment2TextStatsLogs[id] = seg.GetTextStatsLogs()
 
-		if segment.EnsureStats().GetDeltaBinlogCount() > 0 {
-			segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], segment.GetDeltalogs()...)
+		if seg.EnsureStats().GetDeltaBinlogCount() > 0 {
+			segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], seg.GetDeltalogs()...)
 		}
 	}
 
@@ -1272,48 +1278,48 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 
 	segmentInfos := make([]*datapb.SegmentInfo, 0)
 	for id := range flushedIDs {
-		segment := s.meta.GetSegment(ctx, id)
-		if segment == nil {
+		seg := s.meta.GetSegment(ctx, id)
+		if seg == nil {
 			err := merr.WrapErrSegmentNotFound(id)
 			mlog.Warn(context.TODO(), "failed to get segment", mlog.Int64("segmentID", id))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
 		// Skip non-flushing, non-flushed and dropped segments.
-		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing && segment.State != commonpb.SegmentState_Dropped {
+		if seg.State != commonpb.SegmentState_Flushed && seg.State != commonpb.SegmentState_Flushing && seg.State != commonpb.SegmentState_Dropped {
 			continue
 		}
 		// Also skip bulk insert segments.
-		if segment.GetIsImporting() {
+		if seg.GetIsImporting() {
 			continue
 		}
 
-		binlogs := segment.GetBinlogs()
-		if len(binlogs) == 0 && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetManifestPath() == "" {
+		binlogs := seg.GetBinlogs()
+		if len(binlogs) == 0 && seg.GetLevel() != datapb.SegmentLevel_L0 && seg.GetManifestPath() == "" {
 			continue
 		}
-		rowCount := segment.NumOfRows
-		if segment.GetStorageVersion() != storage.StorageV3 {
-			if binlogCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); binlogCount != segment.NumOfRows && binlogCount > 0 {
+		rowCount := seg.NumOfRows
+		if seg.GetStorageVersion() != storage.StorageV3 {
+			if binlogCount := segmentutil.CalcRowCountFromBinLog(seg.SegmentInfo); binlogCount != seg.NumOfRows && binlogCount > 0 {
 				mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
-					mlog.Int64("segmentID", segment.GetID()),
-					mlog.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
+					mlog.Int64("segmentID", seg.GetID()),
+					mlog.Int64("segment meta row count (wrong)", seg.GetNumOfRows()),
 					mlog.Int64("segment bin log row count (correct)", binlogCount))
 				rowCount = binlogCount
 			}
 		}
 
 		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
-			ID:                  segment.ID,
-			PartitionID:         segment.PartitionID,
-			CollectionID:        segment.CollectionID,
-			InsertChannel:       segment.InsertChannel,
+			ID:                  seg.ID,
+			PartitionID:         seg.PartitionID,
+			CollectionID:        seg.CollectionID,
+			InsertChannel:       seg.InsertChannel,
 			NumOfRows:           rowCount,
-			Level:               segment.GetLevel(),
-			IsSorted:            segment.GetIsSorted(),
-			IsSortedByNamespace: segment.GetIsSortedByNamespace(),
-			ManifestPath:        segment.GetManifestPath(),
-			DataVersion:         segment.GetDataVersion(),
+			Level:               seg.GetLevel(),
+			IsSorted:            seg.GetIsSorted(),
+			IsSortedByNamespace: seg.GetIsSortedByNamespace(),
+			ManifestPath:        seg.GetManifestPath(),
+			DataVersion:         seg.GetDataVersion(),
 		})
 	}
 
@@ -1335,7 +1341,7 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 	}
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
 
-	channelInfo := s.handler.GetDataVChanPositions(&channelMeta{
+	channelInfo := s.handler.GetDataVChanPositions(&meta.ChannelMeta{
 		Name:         req.GetVchannel(),
 		CollectionID: collectionID,
 	}, allPartitionID)
@@ -1346,11 +1352,11 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 	}
 	segmentsNotCreatedByStreaming := make([]*datapb.SegmentNotCreatedByStreaming, 0)
 	for _, segmentID := range channelInfo.GetUnflushedSegmentIds() {
-		segment := s.meta.GetSegment(ctx, segmentID)
-		if segment != nil && !segment.IsCreatedByStreaming {
+		seg := s.meta.GetSegment(ctx, segmentID)
+		if seg != nil && !seg.IsCreatedByStreaming {
 			segmentsNotCreatedByStreaming = append(segmentsNotCreatedByStreaming, &datapb.SegmentNotCreatedByStreaming{
-				CollectionId: segment.CollectionID,
-				PartitionId:  segment.PartitionID,
+				CollectionId: seg.CollectionID,
+				PartitionId:  seg.PartitionID,
 				SegmentId:    segmentID,
 			})
 		}
@@ -1397,15 +1403,15 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
-		segment := s.meta.GetSegment(ctx, id)
+		seg := s.meta.GetSegment(ctx, id)
 		// if this segment == nil, we assume this segment has been gc
-		if segment == nil ||
-			(segment.GetState() != commonpb.SegmentState_Dropped &&
-				segment.GetState() != commonpb.SegmentState_Flushed &&
-				segment.GetState() != commonpb.SegmentState_Flushing) {
+		if seg == nil ||
+			(seg.GetState() != commonpb.SegmentState_Dropped &&
+				seg.GetState() != commonpb.SegmentState_Flushed &&
+				seg.GetState() != commonpb.SegmentState_Flushing) {
 			continue
 		}
-		if !req.GetIncludeUnhealthy() && segment.GetState() == commonpb.SegmentState_Dropped {
+		if !req.GetIncludeUnhealthy() && seg.GetState() == commonpb.SegmentState_Dropped {
 			continue
 		}
 		ret = append(ret, id)
@@ -1458,23 +1464,23 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 
 	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
-		segment := s.meta.GetHealthySegment(ctx, id)
-		if segment != nil && statesDict[segment.GetState()] {
+		seg := s.meta.GetHealthySegment(ctx, id)
+		if seg != nil && statesDict[seg.GetState()] {
 			ret = append(ret, id)
 		}
 	}
 
 	if statesDict[commonpb.SegmentState_Dropped] {
 		droppedSegments := s.meta.SelectSegments(ctx,
-			WithCollection(collectionID),
-			SegmentFilterFunc(func(segment *SegmentInfo) bool {
-				return segment != nil &&
-					segment.GetState() == commonpb.SegmentState_Dropped &&
-					(partitionID < 0 || segment.GetPartitionID() == partitionID)
+			meta.WithCollection(collectionID),
+			meta.SegmentFilterFunc(func(seg *meta.SegmentInfo) bool {
+				return seg != nil &&
+					seg.GetState() == commonpb.SegmentState_Dropped &&
+					(partitionID < 0 || seg.GetPartitionID() == partitionID)
 			}),
 		)
-		for _, segment := range droppedSegments {
-			ret = append(ret, segment.GetID())
+		for _, seg := range droppedSegments {
+			ret = append(ret, seg.GetID())
 		}
 	}
 
@@ -1554,10 +1560,10 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	var id int64
 	var err error
 	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 ||
-		isTargetBasedManualRewriteCompactionRequest(req) {
+		compaction.IsTargetBasedManualRewriteCompactionRequest(req) {
 		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req)
 	} else {
-		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
+		id, err = s.compactionTrigger.TriggerCompaction(ctx, compaction.NewCompactionSignal().
 			WithIsForce(true).
 			WithCollectionID(req.GetCollectionID()).
 			WithPartitionID(req.GetPartitionId()).
@@ -1571,7 +1577,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	if isTargetBasedManualRewriteCompactionRequest(req) {
+	if compaction.IsTargetBasedManualRewriteCompactionRequest(req) {
 		targetID := id
 		// Manual rewrite records a durable target first. The reconciler later
 		// uses the same target ID as the trigger ID for generated compaction tasks,
@@ -1582,7 +1588,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	taskCnt := s.compactionInspector.getCompactionTasksNumBySignalID(id)
+	taskCnt := s.compactionInspector.GetCompactionTasksNumBySignalID(id)
 	if taskCnt == 0 {
 		resp.CompactionID = -1
 		resp.CompactionPlanCount = 0
@@ -1614,15 +1620,15 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		return resp, nil
 	}
 
-	info := s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
+	info := s.compactionInspector.GetCompactionInfo(ctx, req.GetCompactionID())
 
-	resp.State = info.state
-	resp.ExecutingPlanNo = int64(info.executingCnt)
-	resp.CompletedPlanNo = int64(info.completedCnt)
-	resp.TimeoutPlanNo = int64(info.timeoutCnt)
-	resp.FailedPlanNo = int64(info.failedCnt)
-	mlog.Info(context.TODO(), "success to get compaction state", mlog.Any("state", info.state), mlog.Int("executing", info.executingCnt),
-		mlog.Int("completed", info.completedCnt), mlog.Int("failed", info.failedCnt), mlog.Int("timeout", info.timeoutCnt))
+	resp.State = info.State
+	resp.ExecutingPlanNo = int64(info.ExecutingCnt)
+	resp.CompletedPlanNo = int64(info.CompletedCnt)
+	resp.TimeoutPlanNo = int64(info.TimeoutCnt)
+	resp.FailedPlanNo = int64(info.FailedCnt)
+	mlog.Info(context.TODO(), "success to get compaction state", mlog.Any("state", info.State), mlog.Int("executing", info.ExecutingCnt),
+		mlog.Int("completed", info.CompletedCnt), mlog.Int("failed", info.FailedCnt), mlog.Int("timeout", info.TimeoutCnt))
 
 	return resp, nil
 }
@@ -1645,21 +1651,21 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		return resp, nil
 	}
 
-	var info *compactionInfo
+	var info *policy.CompactionInfo
 	if req.GetCollectionId() != 0 {
 		tasksByTrigger := s.compactionTaskMeta.GetCompactionTasksByCollection(req.GetCollectionId())
 		tasks := lo.Flatten(lo.Values(tasksByTrigger))
-		info = summaryCompactionState(0, tasks)
+		info = policy.SummaryCompactionState(0, tasks)
 	} else {
-		info = s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
+		info = s.compactionInspector.GetCompactionInfo(ctx, req.GetCompactionID())
 	}
-	resp.State = info.state
-	planIDs := lo.Keys(info.mergeInfos)
+	resp.State = info.State
+	planIDs := lo.Keys(info.MergeInfos)
 	sort.Slice(planIDs, func(i, j int) bool { return planIDs[i] < planIDs[j] })
 	for _, planID := range planIDs {
-		resp.MergeInfos = append(resp.MergeInfos, info.mergeInfos[planID])
+		resp.MergeInfos = append(resp.MergeInfos, info.MergeInfos[planID])
 	}
-	mlog.Info(ctx, "success to get state with plans", mlog.Any("state", info.state), mlog.Any("merge infos", resp.MergeInfos),
+	mlog.Info(ctx, "success to get state with plans", mlog.Any("state", info.State), mlog.Any("merge infos", resp.MergeInfos),
 		mlog.Int64s("plans", planIDs))
 	return resp, nil
 }
@@ -1679,7 +1685,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	}
 	for _, channelName := range req.GetChannelNames() {
 		// TODO: redundant channel mark by now, remove it in future.
-		if err := s.meta.metaStore.MarkChannelAdded(ctx, channelName); err != nil {
+		if err := s.meta.MetaStore.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
 			mlog.Error(context.TODO(), "failed to mark channel added", mlog.Err(err))
 			resp.Status = merr.Status(err)
@@ -1687,7 +1693,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}
 
 		// try to init channel checkpoint, if failed, we will log it and continue
-		startPos := toMsgPositionWithWALNames(channelName, req.GetStartPositions(), req.ChannelWalNames)
+		startPos := meta.ToMsgPositionWithWALNames(channelName, req.GetStartPositions(), req.ChannelWalNames)
 		if startPos != nil {
 			startPos.Timestamp = req.GetCreateTimestamp()
 			if err := s.meta.UpdateChannelCheckpoint(ctx, channelName, startPos); err != nil {
@@ -1717,9 +1723,9 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 	if len(req.GetSegmentIDs()) > 0 {
 		var unflushed []UniqueID
 		for _, sid := range req.GetSegmentIDs() {
-			segment := s.meta.GetHealthySegment(ctx, sid)
+			seg := s.meta.GetHealthySegment(ctx, sid)
 			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
-			if segment == nil || isFlushState(segment.GetState()) {
+			if seg == nil || meta.IsFlushState(seg.GetState()) {
 				continue
 			}
 			unflushed = append(unflushed, sid)
@@ -1773,7 +1779,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 }
 
 // getChannelsByCollectionID gets the channels of the collection.
-func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int64) ([]RWChannel, error) {
+func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int64) ([]meta.RWChannel, error) {
 	describeRsp, err := s.mixCoord.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_DescribeCollection,
@@ -1783,10 +1789,10 @@ func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int
 	if err != nil {
 		return nil, err
 	}
-	channels := make([]RWChannel, 0, len(describeRsp.GetVirtualChannelNames()))
+	channels := make([]meta.RWChannel, 0, len(describeRsp.GetVirtualChannelNames()))
 	for _, channel := range describeRsp.GetVirtualChannelNames() {
-		startPos := toMsgPosition(channel, describeRsp.GetStartPositions())
-		channels = append(channels, &channelMeta{
+		startPos := meta.ToMsgPosition(channel, describeRsp.GetStartPositions())
+		channels = append(channels, &meta.ChannelMeta{
 			Name:          channel,
 			CollectionID:  collectionID,
 			StartPosition: startPos,
@@ -1904,7 +1910,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	// and a cross-database rename left DatabaseName stale for the resource-key
 	// locks built from it. CreatedAt is the one field the request lacks, so it
 	// is carried over.
-	info := &collectionInfo{
+	info := &meta.CollectionInfo{
 		ID:             req.GetCollectionID(),
 		Schema:         req.GetSchema(),
 		Partitions:     req.GetPartitionIDs(),
@@ -1929,7 +1935,7 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 		}, nil
 	}
 
-	if err := CheckCheckPointsHealth(s.meta); err != nil {
+	if err := meta.CheckCheckPointsHealth(s.meta); err != nil {
 		return componentutil.CheckHealthRespWithErr(err), nil
 	}
 
@@ -2161,7 +2167,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 
 	body := result.Message.MustBody()
 	options := funcutil.Map2KeyValuePair(body.GetOptions())
-	files := importFilesFromMessage(body.GetFiles(), options)
+	files := ddl.ImportFilesFromMessage(body.GetFiles(), options)
 	if body.Schema != nil {
 		body.Schema.DbName = body.DbName
 	}
@@ -2203,7 +2209,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		// branch run instead of logging "waiting for channels" every 2s tick; the
 		// channels have by definition all just signaled. UpdateJobState(Failed)
 		// below sets the real cleanup ts (now + retention).
-		job := &importJob{
+		job := &bulkimport.Job{
 			ImportJob: &datapb.ImportJob{
 				JobID:          body.GetJobID(),
 				CollectionID:   body.GetCollectionID(),
@@ -2216,10 +2222,10 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 				AutoCommit:     importutilv2.IsAutoCommit(options),
 				Version:        internalpb.ImportVersion_ImportVersionV2,
 			},
-			tr: timerecord.NewTimeRecorder("import job"),
+			Tr: timerecord.NewTimeRecorder("import job"),
 		}
-		UpdateJobState(internalpb.ImportJobState_Failed)(job)
-		UpdateJobReason(merr.WrapErrServiceInternalMsg("unsupported import task version %d", msgVersion).Error())(job)
+		bulkimport.UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		bulkimport.UpdateJobReason(merr.WrapErrServiceInternalMsg("unsupported import task version %d", msgVersion).Error())(job)
 		if err := s.importMeta.AddJob(ctx, job); err != nil {
 			resp.Status = merr.Status(merr.Wrap(err, "add import job failed"))
 			return resp, nil
@@ -2266,7 +2272,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 
 	isBackup := importutilv2.IsBackup(options)
 	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil {
-		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, options)
+		files, err = bulkimport.ListBinlogImportRequestFiles(ctx, s.meta.ChunkManager, files, options)
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -2302,7 +2308,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		jobID = idStart
 	}
 	createTime := time.Now()
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:               jobID,
 			CollectionID:        body.GetCollectionID(),
@@ -2322,21 +2328,21 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 			CommitByCoordinator: result.Message.Header().GetCommitByCoordinator(),
 			Version:             jobVersion,
 		},
-		tr: timerecord.NewTimeRecorder("import job"),
+		Tr: timerecord.NewTimeRecorder("import job"),
 	}
 	if l0ImportDisabled {
 		mlog.Warn(ctx, "l0 import is disabled, creating the job in Failed state",
 			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", body.GetCollectionID()))
-		UpdateJobState(internalpb.ImportJobState_Failed)(job)
-		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
+		bulkimport.UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		bulkimport.UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
 			"into data segment deltalogs before restore, or set the config to true on this cluster " +
 			"to re-enable the legacy L0 import")(job)
 	}
 	if sourceErr != nil {
 		// ACK callbacks retry indefinitely. Persist malformed/lost source
 		// context as a terminal job instead of retrying or omitting deletes.
-		UpdateJobState(internalpb.ImportJobState_Failed)(job)
-		UpdateJobReason(sourceErr.Error())(job)
+		bulkimport.UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		bulkimport.UpdateJobReason(sourceErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {
@@ -2390,7 +2396,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportSysFailedMsg("import job does not exist, jobID=%d", jobID))
 		return resp, nil
 	}
-	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta, s.indexMeta)
+	progress, state, importedRows, totalRows, reason := bulkimport.GetJobProgress(ctx, jobID, s.importMeta, s.meta, s.indexMeta)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
@@ -2400,7 +2406,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp.CompleteTime = job.GetCompleteTime()
 	resp.ImportedRows = importedRows
 	resp.TotalRows = totalRows
-	resp.TaskProgresses = GetTaskProgresses(ctx, jobID, s.importMeta, s.meta)
+	resp.TaskProgresses = bulkimport.GetTaskProgresses(ctx, jobID, s.importMeta, s.meta)
 	mlog.Info(context.TODO(), "GetImportProgress done", mlog.String("jobState", job.GetState().String()), mlog.Any("resp", resp))
 	return resp, nil
 }
@@ -2420,15 +2426,15 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		Progresses: make([]int64, 0),
 	}
 
-	var jobs []ImportJob
+	var jobs []bulkimport.ImportJob
 	if req.GetCollectionID() != 0 {
-		jobs = s.importMeta.GetJobBy(ctx, WithCollectionID(req.GetCollectionID()))
+		jobs = s.importMeta.GetJobBy(ctx, bulkimport.WithCollectionID(req.GetCollectionID()))
 	} else {
 		jobs = s.importMeta.GetJobBy(ctx)
 	}
 
 	for _, job := range jobs {
-		progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), s.importMeta, s.meta, s.indexMeta)
+		progress, state, _, _, reason := bulkimport.GetJobProgress(ctx, job.GetJobID(), s.importMeta, s.meta, s.indexMeta)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)
@@ -2455,7 +2461,7 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, collec
 	}
 	// The SegmentMeta mutation is committed (segments Dropped); reconcile the
 	// DataView snapshot asynchronously - the recompute reads the dropped state.
-	s.meta.recomputeDataView(ctx, collectionID)
+	s.meta.RecomputeDataView(ctx, collectionID)
 	return nil
 }
 
@@ -2478,7 +2484,7 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 	}
 	// The SegmentMeta mutation is committed (segments Dropped); reconcile the
 	// DataView snapshot asynchronously - the recompute reads the dropped state.
-	s.meta.recomputeDataView(ctx, collectionID)
+	s.meta.RecomputeDataView(ctx, collectionID)
 
 	return nil
 }
@@ -3311,7 +3317,7 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 // Business vchannels supply their own commit timestamps; CChannel supplies the
 // common ordering point for replicated broadcast callbacks. The callback makes
 // the imported segments visible and completes the job.
-func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
+func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimport.ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
@@ -3338,10 +3344,10 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
 // Targets the job's data vchannels and CChannel, matching CommitImport routing.
-func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
+func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job bulkimport.ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
-		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
+		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), bulkimport.ErrRollbackImportNoVchannels)
 	}
 	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
@@ -3375,7 +3381,7 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 // WAL message, not local memory, decides which range is applied, and if a retry races a
 // persisted-but-errored broadcast, the control-channel order makes the first range win on
 // every cluster (a duplicate is ignored, never applied on one cluster only).
-func (s *Server) broadcastUpdateImportMessage(ctx context.Context, job ImportJob, fileRows []int64) error {
+func (s *Server) broadcastUpdateImportMessage(ctx context.Context, job bulkimport.ImportJob, fileRows []int64) error {
 	ranges, err := importid.ReserveFileIDRanges(fileRows, s.allocator.AllocN, Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return err
@@ -3420,8 +3426,8 @@ func (s *Server) broadcastUpdateImportMessage(ctx context.Context, job ImportJob
 func (s *Server) validateAndExecuteImportAction(
 	ctx context.Context,
 	jobID int64,
-	validateState func(job ImportJob) *commonpb.Status,
-	action func(ctx context.Context, job ImportJob) error,
+	validateState func(job bulkimport.ImportJob) *commonpb.Status,
+	action func(ctx context.Context, job bulkimport.ImportJob) error,
 ) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -3460,7 +3466,7 @@ func (s *Server) validateAndExecuteImportAction(
 // The call is idempotent: if the job is already Committing or Completed it returns success.
 func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
 	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
-		func(job ImportJob) *commonpb.Status {
+		func(job bulkimport.ImportJob) *commonpb.Status {
 			switch job.GetState() {
 			case internalpb.ImportJobState_Committing, internalpb.ImportJobState_Completed:
 				return merr.Success()
@@ -3471,7 +3477,7 @@ func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportReque
 					fmt.Sprintf("job %d is in state %s, expected Uncommitted", req.GetJobId(), job.GetState())))
 			}
 		},
-		func(ctx context.Context, job ImportJob) error {
+		func(ctx context.Context, job bulkimport.ImportJob) error {
 			mlog.Info(context.TODO(), "committing import job via WAL broadcast")
 			return s.broadcastCommitImportMessage(ctx, job)
 		},
@@ -3492,17 +3498,17 @@ func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportReque
 // flag in this change; that idempotency is a follow-up).
 func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
 	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
-		func(job ImportJob) *commonpb.Status {
+		func(job bulkimport.ImportJob) *commonpb.Status {
 			state := job.GetState()
 			// Idempotent only for a job that was previously Uncommitted and then
 			// user-aborted (its reason is rewritten to importJobReasonAbortedByUser). A
 			// source that failed on its own keeps its real failure reason, so this does
 			// NOT fire for it and each abort re-broadcasts (see the note above).
-			if state == internalpb.ImportJobState_Failed && job.GetReason() == importJobReasonAbortedByUser {
+			if state == internalpb.ImportJobState_Failed && job.GetReason() == bulkimport.ImportJobReasonAbortedByUser {
 				return merr.Success()
 			}
 			// Committed states are truly terminal and cannot be rolled back.
-			if UnfailableJobStates.Contain(state) {
+			if bulkimport.UnfailableJobStates.Contain(state) {
 				return merr.Status(merr.WrapErrImportFailed(
 					fmt.Sprintf("job %d is in terminal/committed state %s, abort not allowed", req.GetJobId(), state)))
 			}
@@ -3510,7 +3516,7 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 			// rollback so the peer cluster's replicated Uncommitted job is released.
 			return nil
 		},
-		func(ctx context.Context, job ImportJob) error {
+		func(ctx context.Context, job bulkimport.ImportJob) error {
 			mlog.Info(context.TODO(), "aborting import job via WAL broadcast")
 			return s.broadcastRollbackImportMessage(ctx, job)
 		},
@@ -3525,7 +3531,7 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	}
 	job := s.importMeta.GetJob(ctx, req.GetJobId())
 	if job == nil {
-		forgotten, err := importJobForgotten(ctx, req.GetJobId())
+		forgotten, err := ddl.ImportJobForgotten(ctx, req.GetJobId())
 		if err != nil {
 			return merr.Status(err), nil
 		}
@@ -3538,11 +3544,11 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	}
 	// Fetch IDs before importMeta takes its write lock. The callback must not
 	// reenter importMeta while updating segment visibility.
-	ids := getImportSegmentIDsByVchannel(ctx, s.importMeta, s.meta, req.GetJobId(), req.GetVchannel())
+	ids := bulkimport.GetImportSegmentIDsByVchannel(ctx, s.importMeta, s.meta, req.GetJobId(), req.GetVchannel())
 	err := s.importMeta.HandleCommitVchannel(ctx, req.GetJobId(), req.GetVchannel(), func() error {
-		ops := make([]UpdateOperator, 0, len(ids)*2)
+		ops := make([]meta.UpdateOperator, 0, len(ids)*2)
 		for _, id := range ids {
-			ops = append(ops, UpdateCommitTimestamp(id, req.GetCommitTimestamp()), UpdateIsImporting(id, false))
+			ops = append(ops, meta.UpdateCommitTimestamp(id, req.GetCommitTimestamp()), meta.UpdateIsImporting(id, false))
 		}
 		if len(ops) == 0 {
 			return nil
@@ -3553,7 +3559,7 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 		return merr.Status(err), nil
 	}
 	if job != nil && s.meta != nil {
-		s.meta.recomputeDataView(ctx, job.GetCollectionID())
+		s.meta.RecomputeDataView(ctx, job.GetCollectionID())
 	}
 	return merr.Success(), nil
 }

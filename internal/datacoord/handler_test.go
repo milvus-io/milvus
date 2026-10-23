@@ -15,6 +15,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -34,8 +37,8 @@ import (
 )
 
 func TestRetrieveSegment(t *testing.T) {
-	segment := func(id int64, state commonpb.SegmentState, parents ...int64) *SegmentInfo {
-		return NewSegmentInfo(&datapb.SegmentInfo{
+	segment := func(id int64, state commonpb.SegmentState, parents ...int64) *meta.SegmentInfo {
+		return meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             id,
 			State:          state,
 			CompactionFrom: parents,
@@ -43,7 +46,7 @@ func TestRetrieveSegment(t *testing.T) {
 	}
 
 	t.Run("all direct parents indexed", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Dropped),
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
@@ -62,7 +65,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("one direct parent unindexed", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Dropped),
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
@@ -81,7 +84,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("does not walk to indexed grandparent", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Dropped, 1),
 			3: segment(3, commonpb.SegmentState_Flushed, 2),
@@ -100,7 +103,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("indexed child wins", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
@@ -118,7 +121,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("keeps compactFrom before retirement starts", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Flushed),
 			2: segment(2, commonpb.SegmentState_Flushed),
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
@@ -137,7 +140,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("keeps compactTo after retirement starts", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Flushed),
 			2: segment(2, commonpb.SegmentState_Dropped),
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
@@ -156,7 +159,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("deduplicates candidates from an immutable snapshot", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Flushed),
 			2: segment(2, commonpb.SegmentState_Flushed),
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
@@ -174,7 +177,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("deduplicates selected ancestors across multiple generations", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Dropped),
 			3: segment(3, commonpb.SegmentState_Dropped, 1, 2),
@@ -197,7 +200,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("keeps child when fallback parent is not explicitly ready", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
@@ -214,7 +217,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("cancels fallback on partial ancestor coverage", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Dropped),
 			3: segment(3, commonpb.SegmentState_Dropped, 1, 2),
@@ -236,7 +239,7 @@ func TestRetrieveSegment(t *testing.T) {
 	})
 
 	t.Run("expands partial coverage through ready parents", func(t *testing.T) {
-		segments := map[int64]*SegmentInfo{
+		segments := map[int64]*meta.SegmentInfo{
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Dropped),
 			3: segment(3, commonpb.SegmentState_Dropped, 1, 2),
@@ -261,10 +264,10 @@ func TestRetrieveSegment(t *testing.T) {
 func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
-	schema := newTestSchema()
+	schema := meta.NewTestSchema()
 
 	channel := "ch1"
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&meta.CollectionInfo{
 		ID:         1,
 		Partitions: []int64{0},
 		Schema:     schema,
@@ -307,7 +310,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 	compactTos := []int64{403, 404}
 
 	for _, arg := range segArgs {
-		seg := NewSegmentInfo(&datapb.SegmentInfo{
+		seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:            arg.segID,
 			CollectionID:  1,
 			InsertChannel: channel,
@@ -341,7 +344,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 		}
 	}
 
-	info := svr.handler.GetQueryVChanPositions(&channelMeta{Name: channel, CollectionID: 1}, -1)
+	info := svr.handler.GetQueryVChanPositions(&meta.ChannelMeta{Name: channel, CollectionID: 1}, -1)
 
 	totalSegs := len(info.GetLevelZeroSegmentIds()) +
 		len(info.GetUnflushedSegmentIds()) +
@@ -364,8 +367,8 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 func TestGetQueryVChanPositions(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
-	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	schema := meta.NewTestSchema()
+	svr.meta.AddCollection(&meta.CollectionInfo{
 		ID:         0,
 		Partitions: []int64{0, 1},
 		Schema:     schema,
@@ -376,7 +379,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&meta.CollectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -408,7 +411,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		},
 		NumOfRows: 2048,
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s1))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(s1))
 	assert.NoError(t, err)
 	err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 		SegmentID: 1,
@@ -439,7 +442,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 			Timestamp:   1,
 		},
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s2))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(s2))
 	assert.NoError(t, err)
 	s3 := &datapb.SegmentInfo{
 		ID:            3,
@@ -459,7 +462,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 			Timestamp:   2,
 		},
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s3))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(s3))
 	assert.NoError(t, err)
 
 	s4 := &datapb.SegmentInfo{
@@ -482,17 +485,17 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		},
 		Level: datapb.SegmentLevel_L0,
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s4))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(s4))
 	assert.NoError(t, err)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
-		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "chx1", CollectionID: 0})
+		vchan := svr.handler.GetQueryVChanPositions(&meta.ChannelMeta{Name: "chx1", CollectionID: 0})
 		assert.Empty(t, vchan.UnflushedSegmentIds)
 		assert.Empty(t, vchan.FlushedSegmentIds)
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
-		infos := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch0_suffix", CollectionID: 1})
+		infos := svr.handler.GetQueryVChanPositions(&meta.ChannelMeta{Name: "ch0_suffix", CollectionID: 1})
 		assert.EqualValues(t, 1, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 0, len(infos.UnflushedSegmentIds))
@@ -500,7 +503,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
-		infos := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0}, 1)
+		infos := svr.handler.GetQueryVChanPositions(&meta.ChannelMeta{Name: "ch1", CollectionID: 0}, 1)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 1, len(infos.GetLevelZeroSegmentIds()))
 		assert.EqualValues(t, uint64(1), infos.GetDeleteCheckpoint().GetTimestamp())
@@ -509,7 +512,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	t.Run("empty collection with passed positions", func(t *testing.T) {
 		vchannel := "ch_no_segment_1"
 		pchannel := funcutil.ToPhysicalChannel(vchannel)
-		infos := svr.handler.GetQueryVChanPositions(&channelMeta{
+		infos := svr.handler.GetQueryVChanPositions(&meta.ChannelMeta{
 			Name:         vchannel,
 			CollectionID: 0,
 			StartPosition: &msgpb.MsgPosition{
@@ -526,37 +529,37 @@ func TestGetQueryVChanPositions(t *testing.T) {
 func TestGetQueryVChanPositions_PartitionStats(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
-	schema := newTestSchema()
+	schema := meta.NewTestSchema()
 	collectionID := int64(0)
 	partitionID := int64(1)
 	vchannel := "test_vchannel"
 	version := int64(100)
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&meta.CollectionInfo{
 		ID:     collectionID,
 		Schema: schema,
 	})
-	svr.partitionStatsMeta.partitionStatsInfos = map[string]map[int64]*partitionStatsInfo{
+	svr.partitionStatsMeta.PartitionStatsInfos = map[string]map[int64]*partitionstats.PartitionStatsInfo{
 		vchannel: {
 			partitionID: {
-				currentVersion: version,
-				infos: map[int64]*datapb.PartitionStatsInfo{
+				CurrentVersion: version,
+				Infos: map[int64]*datapb.PartitionStatsInfo{
 					version: {Version: version},
 				},
 			},
 			partitionID + 1: {
-				currentVersion: version + 1,
-				infos: map[int64]*datapb.PartitionStatsInfo{
+				CurrentVersion: version + 1,
+				Infos: map[int64]*datapb.PartitionStatsInfo{
 					version + 1: {Version: version + 1},
 				},
 			},
 		},
 	}
-	vChannelInfo := svr.handler.GetQueryVChanPositions(&channelMeta{Name: vchannel, CollectionID: collectionID}, partitionID)
+	vChannelInfo := svr.handler.GetQueryVChanPositions(&meta.ChannelMeta{Name: vchannel, CollectionID: collectionID}, partitionID)
 	statsVersions := vChannelInfo.GetPartitionStatsVersions()
 	assert.Equal(t, 1, len(statsVersions))
 	assert.Equal(t, int64(100), statsVersions[partitionID])
 
-	vChannelInfo2 := svr.handler.GetQueryVChanPositions(&channelMeta{Name: vchannel, CollectionID: collectionID})
+	vChannelInfo2 := svr.handler.GetQueryVChanPositions(&meta.ChannelMeta{Name: vchannel, CollectionID: collectionID})
 	statsVersions2 := vChannelInfo2.GetPartitionStatsVersions()
 	assert.Equal(t, 2, len(statsVersions2))
 }
@@ -565,8 +568,8 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 	t.Run("ab GC-ed, cde unIndexed", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		schema := meta.NewTestSchema()
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     0,
 			Schema: schema,
 		})
@@ -590,7 +593,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			CompactionFrom: []int64{99, 100}, // a, b which have been GC-ed
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(c))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(c))
 		assert.NoError(t, err)
 		d := &datapb.SegmentInfo{
 			ID:            2,
@@ -605,7 +608,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				Timestamp:   1,
 			},
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(d))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(d))
 		assert.NoError(t, err)
 		e := &datapb.SegmentInfo{
 			ID:            3,
@@ -623,7 +626,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			NumOfRows:      2048,
 		}
 
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(e))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(e))
 		assert.NoError(t, err)
 		// vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
 		// assert.EqualValues(t, 2, len(vchan.FlushedSegmentIds))
@@ -634,8 +637,8 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 	t.Run("a GC-ed, bcde unIndexed", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		schema := meta.NewTestSchema()
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     0,
 			Schema: schema,
 		})
@@ -658,7 +661,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				Timestamp:   1,
 			},
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(a))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(a))
 		assert.NoError(t, err)
 
 		c := &datapb.SegmentInfo{
@@ -675,7 +678,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			CompactionFrom: []int64{99, 100}, // a, b which have been GC-ed
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(c))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(c))
 		assert.NoError(t, err)
 		d := &datapb.SegmentInfo{
 			ID:            2,
@@ -690,7 +693,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				Timestamp:   1,
 			},
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(d))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(d))
 		assert.NoError(t, err)
 		e := &datapb.SegmentInfo{
 			ID:            3,
@@ -708,7 +711,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			NumOfRows:      2048,
 		}
 
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(e))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(e))
 		assert.NoError(t, err)
 		// vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
 		// assert.EqualValues(t, 2, len(vchan.FlushedSegmentIds))
@@ -719,8 +722,8 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 	t.Run("ab GC-ed, c unIndexed, de indexed", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		schema := meta.NewTestSchema()
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     0,
 			Schema: schema,
 		})
@@ -744,7 +747,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			CompactionFrom: []int64{99, 100}, // a, b which have been GC-ed
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(c))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(c))
 		assert.NoError(t, err)
 		d := &datapb.SegmentInfo{
 			ID:            2,
@@ -759,7 +762,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 				Timestamp:   1,
 			},
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(d))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(d))
 		assert.NoError(t, err)
 		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: 2,
@@ -787,7 +790,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom: []int64{1, 2}, // c, d
 			NumOfRows:      2048,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(e))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(e))
 		assert.NoError(t, err)
 		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: 3,
@@ -828,8 +831,8 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		// Expected: flushed [16, 17, 20, 21], growing [18].
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		schema := meta.NewTestSchema()
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:         0,
 			Partitions: []int64{0},
 			Schema:     schema,
@@ -854,7 +857,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			NumOfRows: 100,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
 		seg2 := &datapb.SegmentInfo{
 			ID:            2,
@@ -870,7 +873,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			NumOfRows: 100,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 		// seg3 was GCed
 		seg4 := &datapb.SegmentInfo{
@@ -887,7 +890,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			NumOfRows: 100,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg4))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg4))
 		assert.NoError(t, err)
 		seg5 := &datapb.SegmentInfo{
 			ID:            5,
@@ -903,7 +906,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			NumOfRows: 100,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg5))
 		assert.NoError(t, err)
 		seg6 := &datapb.SegmentInfo{
 			ID:            6,
@@ -919,7 +922,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			NumOfRows: 100,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg6))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg6))
 		assert.NoError(t, err)
 		seg7 := &datapb.SegmentInfo{
 			ID:            7,
@@ -935,7 +938,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			NumOfRows: 2048,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg7))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg7))
 		assert.NoError(t, err)
 		seg8 := &datapb.SegmentInfo{
 			ID:            8,
@@ -953,7 +956,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{1, 2, 3},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg8))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg8))
 		assert.NoError(t, err)
 		seg9 := &datapb.SegmentInfo{
 			ID:            9,
@@ -971,7 +974,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{1, 2, 3},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg9))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg9))
 		assert.NoError(t, err)
 		seg10 := &datapb.SegmentInfo{
 			ID:            10,
@@ -989,7 +992,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{1, 2, 3},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg10))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg10))
 		assert.NoError(t, err)
 		seg11 := &datapb.SegmentInfo{
 			ID:            11,
@@ -1007,7 +1010,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{4, 5, 6},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg11))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg11))
 		assert.NoError(t, err)
 		seg12 := &datapb.SegmentInfo{
 			ID:            12,
@@ -1025,7 +1028,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{4, 5, 6},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg12))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg12))
 		assert.NoError(t, err)
 		seg13 := &datapb.SegmentInfo{
 			ID:            13,
@@ -1043,7 +1046,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{7, 8, 9},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg13))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg13))
 		assert.NoError(t, err)
 		seg14 := &datapb.SegmentInfo{
 			ID:            14,
@@ -1061,7 +1064,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{10, 11},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg14))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg14))
 		assert.NoError(t, err)
 		seg15 := &datapb.SegmentInfo{
 			ID:            15,
@@ -1079,7 +1082,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{10, 11},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg15))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg15))
 		assert.NoError(t, err)
 		seg16 := &datapb.SegmentInfo{
 			ID:            16,
@@ -1097,7 +1100,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{13, 14},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg16))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg16))
 		assert.NoError(t, err)
 		seg17 := &datapb.SegmentInfo{
 			ID:            17,
@@ -1115,7 +1118,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{12, 15},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg17))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg17))
 		assert.NoError(t, err)
 		seg18 := &datapb.SegmentInfo{
 			ID:            18,
@@ -1135,7 +1138,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IsInvisible:    true,
 			IsSorted:       false,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg18))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg18))
 		assert.NoError(t, err)
 		seg19 := &datapb.SegmentInfo{
 			ID:            19,
@@ -1155,7 +1158,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IsInvisible:    true,
 			IsSorted:       false,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg19))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg19))
 		assert.NoError(t, err)
 		seg20 := &datapb.SegmentInfo{
 			ID:            20,
@@ -1176,7 +1179,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IsInvisible:         false,
 			IsSorted:            true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg20))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg20))
 		assert.NoError(t, err)
 		seg21 := &datapb.SegmentInfo{
 			ID:            21,
@@ -1196,10 +1199,10 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IsInvisible:    false,
 			IsSorted:       false,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg21))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg21))
 		assert.NoError(t, err)
 
-		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
+		vchan := svr.handler.GetQueryVChanPositions(&meta.ChannelMeta{Name: "ch1", CollectionID: 0})
 		assert.ElementsMatch(t, []int64{16, 17, 20, 21}, vchan.FlushedSegmentIds)
 		assert.ElementsMatch(t, []int64{18}, vchan.UnflushedSegmentIds)
 		assert.ElementsMatch(t, []int64{1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19}, vchan.DroppedSegmentIds)
@@ -1208,8 +1211,8 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 	t.Run("compaction iterate", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		schema := meta.NewTestSchema()
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:         0,
 			Partitions: []int64{0},
 			Schema:     schema,
@@ -1234,7 +1237,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			NumOfRows: 100,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
 		seg2 := &datapb.SegmentInfo{
 			ID:            2,
@@ -1250,7 +1253,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			},
 			NumOfRows: 100,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 		seg3 := &datapb.SegmentInfo{
 			ID:            3,
@@ -1269,7 +1272,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IsInvisible:         true,
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg3))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg3))
 		assert.NoError(t, err)
 		seg4 := &datapb.SegmentInfo{
 			ID:            4,
@@ -1288,7 +1291,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IsInvisible:         true,
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg4))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg4))
 		assert.NoError(t, err)
 		seg5 := &datapb.SegmentInfo{
 			ID:            5,
@@ -1306,7 +1309,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{3},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg5))
 		assert.NoError(t, err)
 		seg6 := &datapb.SegmentInfo{
 			ID:            6,
@@ -1324,7 +1327,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{4},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg6))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg6))
 		assert.NoError(t, err)
 		seg7 := &datapb.SegmentInfo{
 			ID:            7,
@@ -1343,7 +1346,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IsInvisible:         true,
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg7))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg7))
 		assert.NoError(t, err)
 		seg8 := &datapb.SegmentInfo{
 			ID:            8,
@@ -1362,7 +1365,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			IsInvisible:         true,
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg8))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg8))
 		assert.NoError(t, err)
 		seg9 := &datapb.SegmentInfo{
 			ID:            9,
@@ -1380,7 +1383,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{7},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg9))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg9))
 		assert.NoError(t, err)
 		seg10 := &datapb.SegmentInfo{
 			ID:            10,
@@ -1398,10 +1401,10 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 			CompactionFrom:      []int64{8},
 			CreatedByCompaction: true,
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg10))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg10))
 		assert.NoError(t, err)
 
-		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
+		vchan := svr.handler.GetQueryVChanPositions(&meta.ChannelMeta{Name: "ch1", CollectionID: 0})
 		assert.ElementsMatch(t, []int64{5, 6}, vchan.FlushedSegmentIds)
 		assert.ElementsMatch(t, []int64{}, vchan.UnflushedSegmentIds)
 		assert.ElementsMatch(t, []int64{1, 2}, vchan.DroppedSegmentIds)
@@ -1411,8 +1414,8 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 func TestGetCurrentSegmentsView(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
-	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	schema := meta.NewTestSchema()
+	svr.meta.AddCollection(&meta.CollectionInfo{
 		ID:         0,
 		Partitions: []int64{0},
 		Schema:     schema,
@@ -1438,7 +1441,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		},
 		NumOfRows: 100,
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 	assert.NoError(t, err)
 	seg2 := &datapb.SegmentInfo{
 		ID:            2,
@@ -1455,7 +1458,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		NumOfRows:      100,
 		CompactionFrom: []int64{1},
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 	assert.NoError(t, err)
 	seg3 := &datapb.SegmentInfo{
 		ID:            3,
@@ -1471,7 +1474,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		},
 		NumOfRows: 100,
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg3))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg3))
 	assert.NoError(t, err)
 	seg4 := &datapb.SegmentInfo{
 		ID:            4,
@@ -1487,7 +1490,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		},
 		NumOfRows: 100,
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg4))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg4))
 	assert.NoError(t, err)
 	seg5 := &datapb.SegmentInfo{
 		ID:            5,
@@ -1504,7 +1507,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		NumOfRows:      100,
 		CompactionFrom: []int64{3, 4},
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg5))
 	assert.NoError(t, err)
 	seg6 := &datapb.SegmentInfo{
 		ID:            6,
@@ -1521,7 +1524,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		NumOfRows:      100,
 		CompactionFrom: []int64{3, 4},
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg6))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg6))
 	assert.NoError(t, err)
 	seg7 := &datapb.SegmentInfo{
 		ID:            7,
@@ -1537,7 +1540,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 			Timestamp:   1,
 		},
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg7))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg7))
 	assert.NoError(t, err)
 	seg8 := &datapb.SegmentInfo{
 		ID:            8,
@@ -1553,7 +1556,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		},
 		NumOfRows: 100,
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg8))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg8))
 	assert.NoError(t, err)
 	seg9 := &datapb.SegmentInfo{
 		ID:            9,
@@ -1569,10 +1572,10 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 		},
 		NumOfRows: 100,
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg9))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg9))
 	assert.NoError(t, err)
 
-	view := svr.handler.GetCurrentSegmentsView(context.Background(), &channelMeta{Name: "ch1", CollectionID: 0})
+	view := svr.handler.GetCurrentSegmentsView(context.Background(), &meta.ChannelMeta{Name: "ch1", CollectionID: 0})
 	assert.ElementsMatch(t, []int64{2, 3, 4}, view.FlushedSegmentIDs)
 	assert.ElementsMatch(t, []int64{8}, view.GrowingSegmentIDs)
 	assert.ElementsMatch(t, []int64{1}, view.DroppedSegmentIDs)
@@ -1599,8 +1602,8 @@ func TestShouldDropChannel(t *testing.T) {
 
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
-	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	schema := meta.NewTestSchema()
+	svr.meta.AddCollection(&meta.CollectionInfo{
 		ID:     0,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1610,7 +1613,7 @@ func TestShouldDropChannel(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&meta.CollectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1626,7 +1629,7 @@ func TestShouldDropChannel(t *testing.T) {
 	})
 
 	t.Run("channel in remove flag", func(t *testing.T) {
-		err := svr.meta.catalog.Update(context.TODO(), metastore.MarkChannelDropped("ch1"))
+		err := svr.meta.Catalog.Update(context.TODO(), metastore.MarkChannelDropped("ch1"))
 		require.NoError(t, err)
 		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
 	})
@@ -1635,8 +1638,8 @@ func TestShouldDropChannel(t *testing.T) {
 func TestGetDataVChanPositions(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
-	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	schema := meta.NewTestSchema()
+	svr.meta.AddCollection(&meta.CollectionInfo{
 		ID:     0,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1646,7 +1649,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&meta.CollectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1668,7 +1671,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 			MsgID:       []byte{1, 2, 3},
 		},
 	}
-	err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s1))
+	err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(s1))
 	require.Nil(t, err)
 	s2 := &datapb.SegmentInfo{
 		ID:            2,
@@ -1686,7 +1689,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 			Timestamp:   1,
 		},
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s2))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(s2))
 	require.Nil(t, err)
 	s3 := &datapb.SegmentInfo{
 		ID:            3,
@@ -1704,7 +1707,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 			Timestamp:   2,
 		},
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s3))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(s3))
 	require.Nil(t, err)
 	l0Segment := &datapb.SegmentInfo{
 		ID:            4,
@@ -1723,17 +1726,17 @@ func TestGetDataVChanPositions(t *testing.T) {
 		},
 		Level: datapb.SegmentLevel_L0,
 	}
-	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(l0Segment))
+	err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(l0Segment))
 	require.Nil(t, err)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
-		vchan := svr.handler.GetDataVChanPositions(&channelMeta{Name: "chx1", CollectionID: 0}, allPartitionID)
+		vchan := svr.handler.GetDataVChanPositions(&meta.ChannelMeta{Name: "chx1", CollectionID: 0}, allPartitionID)
 		assert.Empty(t, vchan.UnflushedSegmentIds)
 		assert.Empty(t, vchan.FlushedSegmentIds)
 	})
 
 	t.Run("get existed channel", func(t *testing.T) {
-		vchan := svr.handler.GetDataVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0}, allPartitionID)
+		vchan := svr.handler.GetDataVChanPositions(&meta.ChannelMeta{Name: "ch1", CollectionID: 0}, allPartitionID)
 		assert.EqualValues(t, 1, len(vchan.FlushedSegmentIds))
 		assert.EqualValues(t, 1, vchan.FlushedSegmentIds[0])
 		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
@@ -1743,14 +1746,14 @@ func TestGetDataVChanPositions(t *testing.T) {
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
-		infos := svr.handler.GetDataVChanPositions(&channelMeta{Name: "ch0_suffix", CollectionID: 1}, allPartitionID)
+		infos := svr.handler.GetDataVChanPositions(&meta.ChannelMeta{Name: "ch0_suffix", CollectionID: 1}, allPartitionID)
 		assert.EqualValues(t, 1, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 0, len(infos.UnflushedSegmentIds))
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
-		infos := svr.handler.GetDataVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0}, 1)
+		infos := svr.handler.GetDataVChanPositions(&meta.ChannelMeta{Name: "ch1", CollectionID: 0}, 1)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 1, len(infos.UnflushedSegmentIds))
@@ -1759,7 +1762,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 	t.Run("empty collection with passed positions", func(t *testing.T) {
 		vchannel := "ch_no_segment_1"
 		pchannel := funcutil.ToPhysicalChannel(vchannel)
-		infos := svr.handler.GetDataVChanPositions(&channelMeta{
+		infos := svr.handler.GetDataVChanPositions(&meta.ChannelMeta{
 			Name:         vchannel,
 			CollectionID: 0,
 			StartPosition: &msgpb.MsgPosition{
@@ -1778,7 +1781,7 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		// Add a segment with no compaction children
-		seg := NewSegmentInfo(&datapb.SegmentInfo{
+		seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:           1001,
 			CollectionID: 100,
 			PartitionID:  10,
@@ -1807,7 +1810,7 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		// Create parent segment
-		parent := NewSegmentInfo(&datapb.SegmentInfo{
+		parent := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:           1000,
 			CollectionID: 100,
 			PartitionID:  10,
@@ -1817,7 +1820,7 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create child segment with delta logs
-		child := NewSegmentInfo(&datapb.SegmentInfo{
+		child := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             1001,
 			CollectionID:   100,
 			PartitionID:    10,
@@ -1847,7 +1850,7 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		// Create compaction chain: seg1 -> seg2 -> seg3
-		seg1 := NewSegmentInfo(&datapb.SegmentInfo{
+		seg1 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:           1001,
 			CollectionID: 100,
 			PartitionID:  10,
@@ -1856,7 +1859,7 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), seg1)
 		require.NoError(t, err)
 
-		seg2 := NewSegmentInfo(&datapb.SegmentInfo{
+		seg2 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             1002,
 			CollectionID:   100,
 			PartitionID:    10,
@@ -1874,7 +1877,7 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 		err = svr.meta.AddSegment(context.TODO(), seg2)
 		require.NoError(t, err)
 
-		seg3 := NewSegmentInfo(&datapb.SegmentInfo{
+		seg3 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             1003,
 			CollectionID:   100,
 			PartitionID:    10,
@@ -1903,7 +1906,7 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		// Create parent segment
-		parent := NewSegmentInfo(&datapb.SegmentInfo{
+		parent := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:           1000,
 			CollectionID: 100,
 			PartitionID:  10,
@@ -1913,7 +1916,7 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create multiple children from the same parent
-		child1 := NewSegmentInfo(&datapb.SegmentInfo{
+		child1 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             1001,
 			CollectionID:   100,
 			PartitionID:    10,
@@ -1931,7 +1934,7 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 		err = svr.meta.AddSegment(context.TODO(), child1)
 		require.NoError(t, err)
 
-		child2 := NewSegmentInfo(&datapb.SegmentInfo{
+		child2 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             1002,
 			CollectionID:   100,
 			PartitionID:    10,
@@ -1957,12 +1960,12 @@ func TestGetDeltaLogFromCompactTo(t *testing.T) {
 }
 
 func TestGenSnapshot(t *testing.T) {
-	schema := newTestSchema()
+	schema := meta.NewTestSchema()
 
 	// Create minimal components for testing
-	mockIndexMeta := &indexMeta{}
-	mockMeta := &meta{
-		indexCatalog: mockIndexMeta,
+	mockIndexMeta := &index.IndexMeta{}
+	mockMeta := &meta.Meta{
+		IndexCatalog: mockIndexMeta,
 	}
 
 	// Create mock mixCoord
@@ -1999,7 +2002,7 @@ func TestGenSnapshot(t *testing.T) {
 		{ChannelName: "dml_0_200v0", Timestamp: 12345, MsgID: []byte{1}},
 	}
 
-	mock4 := mockey.Mock((*indexMeta).GetIndexesForCollection).To(func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
+	mock4 := mockey.Mock((*index.IndexMeta).GetIndexesForCollection).To(func(im *index.IndexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 		return []*model.Index{
 			{
 				IndexID:      1,
@@ -2012,8 +2015,8 @@ func TestGenSnapshot(t *testing.T) {
 	}).Build()
 	defer mock4.UnPatch()
 
-	mock5 := mockey.Mock((*meta).SelectSegments).To(func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-		seg := NewSegmentInfo(&datapb.SegmentInfo{
+	mock5 := mockey.Mock((*meta.Meta).SelectSegments).To(func(m *meta.Meta, ctx context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
+		seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:               1001,
 			CollectionID:     200,
 			PartitionID:      0,
@@ -2030,13 +2033,13 @@ func TestGenSnapshot(t *testing.T) {
 				},
 			},
 		})
-		return []*SegmentInfo{seg}
+		return []*meta.SegmentInfo{seg}
 	}).Build()
 	defer mock5.UnPatch()
 
-	mock6 := mockey.Mock((*meta).GetSegment).To(func(m *meta, ctx context.Context, segmentID int64) *SegmentInfo {
+	mock6 := mockey.Mock((*meta.Meta).GetSegment).To(func(m *meta.Meta, ctx context.Context, segmentID int64) *meta.SegmentInfo {
 		if segmentID == 1001 {
-			return NewSegmentInfo(&datapb.SegmentInfo{
+			return meta.NewSegmentInfo(&datapb.SegmentInfo{
 				ID:           1001,
 				CollectionID: 200,
 				PartitionID:  0,
@@ -2056,12 +2059,12 @@ func TestGenSnapshot(t *testing.T) {
 	}).Build()
 	defer mock6.UnPatch()
 
-	mock7 := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+	mock7 := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 		return map[int64]*model.SegmentIndex{}
 	}).Build()
 	defer mock7.UnPatch()
 
-	mock8 := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
+	mock8 := mockey.Mock((*meta.Meta).GetCompactionTo).To(func(m *meta.Meta, segmentID int64) ([]*meta.SegmentInfo, bool) {
 		return nil, false // No compaction children
 	}).Build()
 	defer mock8.UnPatch()
@@ -2090,21 +2093,21 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		{Key: common.MmapEnabledKey, Value: "false"},
 		{Key: common.AllowInsertAutoIDKey, Value: "false"},
 	}
-	schema := newTestSchema()
+	schema := meta.NewTestSchema()
 	schema.Properties = common.CloneKeyValuePairs(properties)
 
-	mixCoord := newMockMixCoord()
-	mockMeta := &meta{}
+	mixCoord := meta.NewMockMixCoord()
+	mockMeta := &meta.Meta{}
 	handler := &ServerHandler{
 		s: &Server{
 			broker:      broker.NewCoordinatorBroker(mixCoord),
 			meta:        mockMeta,
-			domainMetas: domainMetas{indexMeta: &indexMeta{}},
+			domainMetas: domainMetas{indexMeta: &index.IndexMeta{}},
 		},
 	}
 
-	mockDescribe := mockey.Mock((*mockMixCoord).DescribeCollectionInternal).To(
-		func(_ *mockMixCoord, _ context.Context, _ *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	mockDescribe := mockey.Mock((*meta.MockMixCoord).DescribeCollectionInternal).To(
+		func(_ *meta.MockMixCoord, _ context.Context, _ *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 			return &milvuspb.DescribeCollectionResponse{
 				Status:              merr.Success(),
 				Schema:              schema,
@@ -2118,8 +2121,8 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		}).Build()
 	defer mockDescribe.UnPatch()
 
-	mockShowPartitions := mockey.Mock((*mockMixCoord).ShowPartitionsInternal).To(
-		func(_ *mockMixCoord, _ context.Context, _ *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	mockShowPartitions := mockey.Mock((*meta.MockMixCoord).ShowPartitionsInternal).To(
+		func(_ *meta.MockMixCoord, _ context.Context, _ *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 			return &milvuspb.ShowPartitionsResponse{
 				Status:         merr.Success(),
 				PartitionIDs:   []int64{0},
@@ -2132,13 +2135,13 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
 	}
 
-	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).
+	mockIndexes := mockey.Mock((*index.IndexMeta).GetIndexesForCollection).
 		Return([]*model.Index{}).
 		Build()
 	defer mockIndexes.UnPatch()
 
-	mockSelectSegments := mockey.Mock((*meta).SelectSegments).
-		Return([]*SegmentInfo{}).
+	mockSelectSegments := mockey.Mock((*meta.Meta).SelectSegments).
+		Return([]*meta.SegmentInfo{}).
 		Build()
 	defer mockSelectSegments.UnPatch()
 
@@ -2152,8 +2155,8 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 }
 
 func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
-	schema := newTestSchema()
-	segCh1 := NewSegmentInfo(&datapb.SegmentInfo{
+	schema := meta.NewTestSchema()
+	segCh1 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            1001,
 		CollectionID:  200,
 		PartitionID:   0,
@@ -2165,7 +2168,7 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 			{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1, LogSize: 100}}},
 		},
 	})
-	segCh2 := NewSegmentInfo(&datapb.SegmentInfo{
+	segCh2 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            1002,
 		CollectionID:  200,
 		PartitionID:   0,
@@ -2178,17 +2181,17 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		},
 	})
 
-	mockMeta := &meta{}
+	mockMeta := &meta.Meta{}
 	handler := &ServerHandler{
 		s: &Server{
-			broker:      broker.NewCoordinatorBroker(newMockMixCoord()),
+			broker:      broker.NewCoordinatorBroker(meta.NewMockMixCoord()),
 			meta:        mockMeta,
-			domainMetas: domainMetas{indexMeta: &indexMeta{}},
+			domainMetas: domainMetas{indexMeta: &index.IndexMeta{}},
 		},
 	}
 
-	mockDescribe := mockey.Mock((*mockMixCoord).DescribeCollectionInternal).To(
-		func(m *mockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	mockDescribe := mockey.Mock((*meta.MockMixCoord).DescribeCollectionInternal).To(
+		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 			return &milvuspb.DescribeCollectionResponse{
 				Status:              merr.Success(),
 				Schema:              schema,
@@ -2201,8 +2204,8 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		}).Build()
 	defer mockDescribe.UnPatch()
 
-	mockShowPartitions := mockey.Mock((*mockMixCoord).ShowPartitionsInternal).To(
-		func(m *mockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	mockShowPartitions := mockey.Mock((*meta.MockMixCoord).ShowPartitionsInternal).To(
+		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 			return &milvuspb.ShowPartitionsResponse{
 				Status:         merr.Success(),
 				PartitionIDs:   []int64{0},
@@ -2216,16 +2219,16 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		{ChannelName: "ch-2", Timestamp: 1000, MsgID: []byte{2}},
 	}
 
-	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
-		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
+	mockIndexes := mockey.Mock((*index.IndexMeta).GetIndexesForCollection).To(
+		func(im *index.IndexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 			return []*model.Index{}
 		}).Build()
 	defer mockIndexes.UnPatch()
 
-	mockSelectSegments := mockey.Mock((*meta).SelectSegments).To(
-		func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-			candidates := []*SegmentInfo{segCh1, segCh2}
-			var result []*SegmentInfo
+	mockSelectSegments := mockey.Mock((*meta.Meta).SelectSegments).To(
+		func(m *meta.Meta, ctx context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
+			candidates := []*meta.SegmentInfo{segCh1, segCh2}
+			var result []*meta.SegmentInfo
 			for _, seg := range candidates {
 				pass := true
 				for _, filter := range filters {
@@ -2242,13 +2245,13 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		}).Build()
 	defer mockSelectSegments.UnPatch()
 
-	mockCompactionTo := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
+	mockCompactionTo := mockey.Mock((*meta.Meta).GetCompactionTo).To(func(m *meta.Meta, segmentID int64) ([]*meta.SegmentInfo, bool) {
 		return nil, false
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
-	mockSegmentIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(
-		func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+	mockSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(
+		func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
 	defer mockSegmentIndexes.UnPatch()
@@ -2271,32 +2274,32 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 func TestHasCommittedManifest(t *testing.T) {
 	tests := []struct {
 		name        string
-		segment     *SegmentInfo
+		segment     *meta.SegmentInfo
 		expected    bool
 		expectedErr error
 	}{
 		{
 			name: "empty manifest path",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
+			segment: meta.NewSegmentInfo(&datapb.SegmentInfo{
 				StorageVersion: storage.StorageV3,
 			}),
 		},
 		{
 			name: "non-v3 manifest path",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
+			segment: meta.NewSegmentInfo(&datapb.SegmentInfo{
 				ManifestPath: packed.MarshalManifestPath("/data/segments/2000", 1),
 			}),
 		},
 		{
 			name: "earliest manifest",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
+			segment: meta.NewSegmentInfo(&datapb.SegmentInfo{
 				StorageVersion: storage.StorageV3,
 				ManifestPath:   packed.MarshalManifestPath("/data/segments/2001", packed.ManifestEarliest),
 			}),
 		},
 		{
 			name: "committed manifest version one",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
+			segment: meta.NewSegmentInfo(&datapb.SegmentInfo{
 				StorageVersion: storage.StorageV3,
 				ManifestPath:   packed.MarshalManifestPath("/data/segments/2002", 1),
 			}),
@@ -2304,7 +2307,7 @@ func TestHasCommittedManifest(t *testing.T) {
 		},
 		{
 			name: "committed manifest version three",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
+			segment: meta.NewSegmentInfo(&datapb.SegmentInfo{
 				StorageVersion: storage.StorageV3,
 				ManifestPath:   packed.MarshalManifestPath("/data/segments/2003", 3),
 			}),
@@ -2312,7 +2315,7 @@ func TestHasCommittedManifest(t *testing.T) {
 		},
 		{
 			name: "invalid manifest path",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
+			segment: meta.NewSegmentInfo(&datapb.SegmentInfo{
 				ID:             2004,
 				StorageVersion: storage.StorageV3,
 				ManifestPath:   "invalid",
@@ -2340,9 +2343,9 @@ func TestHasCommittedManifest(t *testing.T) {
 // KVs are not persisted for V3) must be retained only after its manifest is
 // committed. A growing segment's earliest manifest is only a placeholder.
 func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
-	schema := newTestSchema()
+	schema := meta.NewTestSchema()
 	// Committed V3 manifest with empty legacy arrays must be kept.
-	manifestSeg := NewSegmentInfo(&datapb.SegmentInfo{
+	manifestSeg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:              2001,
 		CollectionID:    200,
 		PartitionID:     0,
@@ -2355,7 +2358,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		CommitTimestamp: 700,
 	})
 	// A growing V3 segment only has an allocation placeholder and must be dropped.
-	growingSeg := NewSegmentInfo(&datapb.SegmentInfo{
+	growingSeg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2002,
 		CollectionID:   200,
 		PartitionID:    0,
@@ -2367,7 +2370,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		ManifestPath:   packed.MarshalManifestPath("/data/segments/2002", packed.ManifestEarliest),
 	})
 	// Empty segment with no manifest — must be dropped.
-	emptySeg := NewSegmentInfo(&datapb.SegmentInfo{
+	emptySeg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            2003,
 		CollectionID:  200,
 		PartitionID:   0,
@@ -2376,19 +2379,19 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
 		DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
 	})
-	candidates := []*SegmentInfo{manifestSeg, growingSeg, emptySeg}
+	candidates := []*meta.SegmentInfo{manifestSeg, growingSeg, emptySeg}
 
-	mockMeta := &meta{}
+	mockMeta := &meta.Meta{}
 	handler := &ServerHandler{
 		s: &Server{
-			broker:      broker.NewCoordinatorBroker(newMockMixCoord()),
+			broker:      broker.NewCoordinatorBroker(meta.NewMockMixCoord()),
 			meta:        mockMeta,
-			domainMetas: domainMetas{indexMeta: &indexMeta{}},
+			domainMetas: domainMetas{indexMeta: &index.IndexMeta{}},
 		},
 	}
 
-	mockDescribe := mockey.Mock((*mockMixCoord).DescribeCollectionInternal).To(
-		func(m *mockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	mockDescribe := mockey.Mock((*meta.MockMixCoord).DescribeCollectionInternal).To(
+		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 			return &milvuspb.DescribeCollectionResponse{
 				Status:              merr.Success(),
 				Schema:              schema,
@@ -2401,8 +2404,8 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		}).Build()
 	defer mockDescribe.UnPatch()
 
-	mockShowPartitions := mockey.Mock((*mockMixCoord).ShowPartitionsInternal).To(
-		func(m *mockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	mockShowPartitions := mockey.Mock((*meta.MockMixCoord).ShowPartitionsInternal).To(
+		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 			return &milvuspb.ShowPartitionsResponse{
 				Status:         merr.Success(),
 				PartitionIDs:   []int64{0},
@@ -2415,15 +2418,15 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
 	}
 
-	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
-		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
+	mockIndexes := mockey.Mock((*index.IndexMeta).GetIndexesForCollection).To(
+		func(im *index.IndexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 			return []*model.Index{}
 		}).Build()
 	defer mockIndexes.UnPatch()
 
-	mockSelectSegments := mockey.Mock((*meta).SelectSegments).To(
-		func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-			var result []*SegmentInfo
+	mockSelectSegments := mockey.Mock((*meta.Meta).SelectSegments).To(
+		func(m *meta.Meta, ctx context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
+			var result []*meta.SegmentInfo
 			for _, seg := range candidates {
 				pass := true
 				for _, filter := range filters {
@@ -2440,13 +2443,13 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		}).Build()
 	defer mockSelectSegments.UnPatch()
 
-	mockCompactionTo := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
+	mockCompactionTo := mockey.Mock((*meta.Meta).GetCompactionTo).To(func(m *meta.Meta, segmentID int64) ([]*meta.SegmentInfo, bool) {
 		return nil, false
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
-	mockSegmentIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(
-		func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+	mockSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(
+		func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
 	defer mockSegmentIndexes.UnPatch()
@@ -2459,7 +2462,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
 	assert.EqualValues(t, 700, snapshotData.Segments[0].GetCommitTimestamp())
 
-	candidates = []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{
+	candidates = []*meta.SegmentInfo{meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2004,
 		CollectionID:   200,
 		PartitionID:    0,
@@ -2487,11 +2490,11 @@ func TestGenSnapshotDependencyErrors(t *testing.T) {
 				}
 				return nil
 			}
-			handler := &ServerHandler{s: &Server{broker: &snapshotBroker{}, meta: &meta{
-				chunkManager: storage.NewLocalChunkManager(),
-			}, domainMetas: domainMetas{indexMeta: &indexMeta{}}}}
+			handler := &ServerHandler{s: &Server{broker: &snapshotBroker{}, meta: &meta.Meta{
+				ChunkManager: storage.NewLocalChunkManager(),
+			}, domainMetas: domainMetas{indexMeta: &index.IndexMeta{}}}}
 			describe := mockey.Mock((*snapshotBroker).DescribeCollectionInternal).Return(
-				&milvuspb.DescribeCollectionResponse{Schema: newTestSchema()}, errFor("describe")).Build()
+				&milvuspb.DescribeCollectionResponse{Schema: meta.NewTestSchema()}, errFor("describe")).Build()
 			defer describe.UnPatch()
 			partitions := mockey.Mock((*snapshotBroker).ShowPartitions).Return(
 				&milvuspb.ShowPartitionsResponse{PartitionNames: []string{"_default"}, PartitionIDs: []int64{10}}, errFor("partitions")).Build()
@@ -2504,14 +2507,14 @@ func TestGenSnapshotDependencyErrors(t *testing.T) {
 			if stage == "empty_positions" {
 				positions = nil
 			}
-			indexes := mockey.Mock((*indexMeta).GetIndexesForCollection).Return([]*model.Index(nil)).Build()
+			indexes := mockey.Mock((*index.IndexMeta).GetIndexesForCollection).Return([]*model.Index(nil)).Build()
 			defer indexes.UnPatch()
-			segment := NewSegmentInfo(&datapb.SegmentInfo{
+			segment := meta.NewSegmentInfo(&datapb.SegmentInfo{
 				ID: 1, CollectionID: 2, PartitionID: 10, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
 				Binlogs:      []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 				JsonKeyStats: map[int64]*datapb.JsonKeyStats{101: {FieldID: 101}},
 			})
-			segments := mockey.Mock((*meta).SelectSegments).Return([]*SegmentInfo{segment}).Build()
+			segments := mockey.Mock((*meta.Meta).SelectSegments).Return([]*meta.SegmentInfo{segment}).Build()
 			defer segments.UnPatch()
 			decompress := mockey.Mock(binlog.DecompressMultiBinLogs).Return(errFor("decompress")).Build()
 			defer decompress.UnPatch()
@@ -2539,20 +2542,20 @@ func TestGenSnapshotDependencyErrors(t *testing.T) {
 }
 
 func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
-	schema := newTestSchema()
-	var seg *SegmentInfo
+	schema := meta.NewTestSchema()
+	var seg *meta.SegmentInfo
 
-	mockMeta := &meta{}
+	mockMeta := &meta.Meta{}
 	handler := &ServerHandler{
 		s: &Server{
-			broker:      broker.NewCoordinatorBroker(newMockMixCoord()),
+			broker:      broker.NewCoordinatorBroker(meta.NewMockMixCoord()),
 			meta:        mockMeta,
-			domainMetas: domainMetas{indexMeta: &indexMeta{}},
+			domainMetas: domainMetas{indexMeta: &index.IndexMeta{}},
 		},
 	}
 
-	mockDescribe := mockey.Mock((*mockMixCoord).DescribeCollectionInternal).To(
-		func(m *mockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	mockDescribe := mockey.Mock((*meta.MockMixCoord).DescribeCollectionInternal).To(
+		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 			return &milvuspb.DescribeCollectionResponse{
 				Status:              merr.Success(),
 				Schema:              schema,
@@ -2565,8 +2568,8 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 		}).Build()
 	defer mockDescribe.UnPatch()
 
-	mockShowPartitions := mockey.Mock((*mockMixCoord).ShowPartitionsInternal).To(
-		func(m *mockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	mockShowPartitions := mockey.Mock((*meta.MockMixCoord).ShowPartitionsInternal).To(
+		func(m *meta.MockMixCoord, ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 			return &milvuspb.ShowPartitionsResponse{
 				Status:         merr.Success(),
 				PartitionIDs:   []int64{0},
@@ -2579,20 +2582,20 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 		{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
 	}
 
-	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
-		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
+	mockIndexes := mockey.Mock((*index.IndexMeta).GetIndexesForCollection).To(
+		func(im *index.IndexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 			return []*model.Index{}
 		}).Build()
 	defer mockIndexes.UnPatch()
 
-	mockSelectSegments := mockey.Mock((*meta).SelectSegments).To(
-		func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+	mockSelectSegments := mockey.Mock((*meta.Meta).SelectSegments).To(
+		func(m *meta.Meta, ctx context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
 			for _, filter := range filters {
 				if !filter.Match(seg) {
 					return nil
 				}
 			}
-			return []*SegmentInfo{seg}
+			return []*meta.SegmentInfo{seg}
 		}).Build()
 	defer mockSelectSegments.UnPatch()
 
@@ -2604,7 +2607,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 		{name: "empty channel", insertChannel: ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			seg = NewSegmentInfo(&datapb.SegmentInfo{
+			seg = meta.NewSegmentInfo(&datapb.SegmentInfo{
 				ID:            1001,
 				CollectionID:  200,
 				PartitionID:   0,
@@ -2628,14 +2631,14 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	handler := &ServerHandler{
 		s: &Server{
-			meta: &meta{
-				chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
+			meta: &meta.Meta{
+				ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
 			},
-			domainMetas: domainMetas{indexMeta: &indexMeta{}},
+			domainMetas: domainMetas{indexMeta: &index.IndexMeta{}},
 		},
 	}
 
-	mockGetSegmentIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+	mockGetSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 		return map[int64]*model.SegmentIndex{
 			10: {
 				CollectionID:          collectionID,
@@ -2652,16 +2655,16 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	}).Build()
 	defer mockGetSegmentIndexes.UnPatch()
 
-	mockFieldID := mockey.Mock((*indexMeta).GetFieldIDByIndexID).Return(int64(100)).Build()
+	mockFieldID := mockey.Mock((*index.IndexMeta).GetFieldIDByIndexID).Return(int64(100)).Build()
 	defer mockFieldID.UnPatch()
 
-	mockIndexName := mockey.Mock((*indexMeta).GetIndexNameByID).Return("vec_idx").Build()
+	mockIndexName := mockey.Mock((*index.IndexMeta).GetIndexNameByID).Return("vec_idx").Build()
 	defer mockIndexName.UnPatch()
 
-	mockIndexParams := mockey.Mock((*indexMeta).GetIndexParams).Return(nil).Build()
+	mockIndexParams := mockey.Mock((*index.IndexMeta).GetIndexParams).Return(nil).Build()
 	defer mockIndexParams.UnPatch()
 
-	mockTypeParams := mockey.Mock((*indexMeta).GetTypeParams).Return(nil).Build()
+	mockTypeParams := mockey.Mock((*index.IndexMeta).GetTypeParams).Return(nil).Build()
 	defer mockTypeParams.UnPatch()
 
 	indexFiles := uncompressIndexFiles(handler, 1, 2)
@@ -2674,8 +2677,8 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {
 	handler := &ServerHandler{
 		s: &Server{
-			meta: &meta{
-				chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
+			meta: &meta.Meta{
+				ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
 			},
 		},
 	}
@@ -2728,11 +2731,11 @@ func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {
 // TestGenSnapshot_CommitTimestamp verifies that import segments with a
 // commit_timestamp are correctly included/excluded based on snapshotTs.
 func TestGenSnapshot_CommitTimestamp(t *testing.T) {
-	schema := newTestSchema()
+	schema := meta.NewTestSchema()
 
 	// importSeg has start_position.ts=1000 and commit_timestamp=5000.
 	// Its effective timestamp is 5000.
-	importSeg := NewSegmentInfo(&datapb.SegmentInfo{
+	importSeg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:              999,
 		CollectionID:    200,
 		PartitionID:     0,
@@ -2746,8 +2749,8 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 	})
 
 	setupHandlerMocks := func(t *testing.T) (*ServerHandler, []*mockey.Mocker) {
-		mockIndexMeta := &indexMeta{}
-		mockMeta := &meta{indexCatalog: mockIndexMeta}
+		mockIndexMeta := &index.IndexMeta{}
+		mockMeta := &meta.Meta{IndexCatalog: mockIndexMeta}
 
 		mockMixCoord := mocks2.NewMixCoord(t)
 		mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -2773,15 +2776,15 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 
 		var mockers []*mockey.Mocker
 
-		m2 := mockey.Mock((*indexMeta).GetIndexesForCollection).To(func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
+		m2 := mockey.Mock((*index.IndexMeta).GetIndexesForCollection).To(func(im *index.IndexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 			return []*model.Index{}
 		}).Build()
 		mockers = append(mockers, m2)
 
-		m3 := mockey.Mock((*meta).SelectSegments).To(func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+		m3 := mockey.Mock((*meta.Meta).SelectSegments).To(func(m *meta.Meta, ctx context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
 			// Apply each filter to the candidate segment list.
-			candidates := []*SegmentInfo{importSeg}
-			var result []*SegmentInfo
+			candidates := []*meta.SegmentInfo{importSeg}
+			var result []*meta.SegmentInfo
 			for _, seg := range candidates {
 				pass := true
 				for _, f := range filters {
@@ -2798,17 +2801,17 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		}).Build()
 		mockers = append(mockers, m3)
 
-		m4 := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
+		m4 := mockey.Mock((*meta.Meta).GetCompactionTo).To(func(m *meta.Meta, segmentID int64) ([]*meta.SegmentInfo, bool) {
 			return nil, false
 		}).Build()
 		mockers = append(mockers, m4)
 
-		m5 := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+		m5 := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
 		mockers = append(mockers, m5)
 
-		m6 := mockey.Mock((*meta).GetSegment).To(func(m *meta, ctx context.Context, segmentID int64) *SegmentInfo {
+		m6 := mockey.Mock((*meta.Meta).GetSegment).To(func(m *meta.Meta, ctx context.Context, segmentID int64) *meta.SegmentInfo {
 			return nil
 		}).Build()
 		mockers = append(mockers, m6)

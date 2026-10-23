@@ -11,6 +11,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/ddl"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -28,14 +30,14 @@ func TestManualFlushSyncCompletion(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			coll := &collectionInfo{ID: 100, DatabaseName: "db", Schema: &schemapb.CollectionSchema{Name: "coll"}, VChannelNames: []string{"v1", "v2"}}
+			coll := &meta.CollectionInfo{ID: 100, DatabaseName: "db", Schema: &schemapb.CollectionSchema{Name: "coll"}, VChannelNames: []string{"v1", "v2"}}
 			bc := &embeddedBroadcastAPI{}
-			server := &Server{handler: &embeddedHandler{}, meta: &meta{}}
+			server := &Server{handler: &embeddedHandler{}, meta: &meta.Meta{}}
 			// No allocator is installed: streaming Flush must not allocate a separate TSO.
 			server.stateCode.Store(commonpb.StateCode_Healthy)
 			patch := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
 			defer patch.UnPatch()
-			patchLock := mockey.Mock((*DDLCallbacks).StartLocalFlushBroadcast).To(func(_ *DDLCallbacks, _ context.Context, id int64) (broadcaster.BroadcastAPI, error) {
+			patchLock := mockey.Mock((*ddl.Callbacks).StartLocalFlushBroadcast).To(func(_ *ddl.Callbacks, _ context.Context, id int64) (broadcaster.BroadcastAPI, error) {
 				require.Equal(t, coll.ID, id)
 				return bc, nil
 			}).Build()
@@ -45,7 +47,7 @@ func TestManualFlushSyncCompletion(t *testing.T) {
 			patchColl := mockey.Mock((*embeddedHandler).GetCollection).Return(coll, nil).Build()
 			defer patchColl.UnPatch()
 			// A stale or missing checkpoint cannot block the synchronous broadcast.
-			patchCP := mockey.Mock((*meta).GetChannelCheckpoint).To(func(_ *meta, channel string) *msgpb.MsgPosition {
+			patchCP := mockey.Mock((*meta.Meta).GetChannelCheckpoint).To(func(_ *meta.Meta, channel string) *msgpb.MsgPosition {
 				if channel == "v1" {
 					return &msgpb.MsgPosition{Timestamp: 1}
 				}
@@ -69,13 +71,13 @@ func TestManualFlushSyncCompletion(t *testing.T) {
 				return &types.BroadcastAppendResult{AppendResults: map[string]*types.AppendResult{"v1": {TimeTick: 10}, "v2": {TimeTick: 20}}}, nil
 			}).Build()
 			defer patchBroadcast.UnPatch()
-			patchSegments := mockey.Mock((*meta).GetSegmentsOfCollection).To(func(_ *meta, _ context.Context, _ int64) []*SegmentInfo {
+			patchSegments := mockey.Mock((*meta.Meta).GetSegmentsOfCollection).To(func(_ *meta.Meta, _ context.Context, _ int64) []*meta.SegmentInfo {
 				select {
 				case <-ack:
 				default:
 					t.Error("segment metadata read before broadcast completion")
 				}
-				return []*SegmentInfo{
+				return []*meta.SegmentInfo{
 					{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1}},
 					{SegmentInfo: &datapb.SegmentInfo{ID: 2, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0}},
 					{SegmentInfo: &datapb.SegmentInfo{ID: 3, State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1}},
@@ -131,11 +133,11 @@ func TestManualFlushSyncCompletion(t *testing.T) {
 }
 
 func TestGetFlushStateZeroTimestamp(t *testing.T) {
-	server := &Server{meta: &meta{}}
+	server := &Server{meta: &meta.Meta{}}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
-	patch := mockey.Mock((*meta).GetHealthySegment).To(func(_ *meta, _ context.Context, id int64) *SegmentInfo {
+	patch := mockey.Mock((*meta.Meta).GetHealthySegment).To(func(_ *meta.Meta, _ context.Context, id int64) *meta.SegmentInfo {
 		if id == 1 {
-			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, State: commonpb.SegmentState_Growing}}
+			return &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, State: commonpb.SegmentState_Growing}}
 		}
 		return nil
 	}).Build()

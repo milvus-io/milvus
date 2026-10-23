@@ -36,7 +36,7 @@ func (s *Server) FeatureUsageEntries(cc featureusage.CollectionContext) []*inter
 	if s.indexMeta != nil {
 		entries = append(entries, featureusage.ComputeIndexEntries(s.indexMeta.ListAllIndexes())...)
 	}
-	if s.meta.segments != nil {
+	if s.meta.Segments != nil {
 		segs := s.meta.GetAllSegmentsUnsafe()
 		infos := make([]*datapb.SegmentInfo, 0, len(segs))
 		for _, seg := range segs {
