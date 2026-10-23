@@ -167,6 +167,13 @@ func JudgeCommit(coll *model.Collection, updates *messagespb.AlterCollectionMess
 	if err := CheckShardByAdmission(updates.GetShardBy(), coll.Properties); err != nil {
 		return merr.Wrapf(err, "commit shard split routing failed, collection %q", coll.Name)
 	}
+	// The routing key is set once and never changes: every row already placed
+	// was placed by it. Only a collection that carries none may take one.
+	if coll.ShardBy != "" && updates.GetShardBy() != "" && updates.GetShardBy() != coll.ShardBy {
+		return merr.WrapErrServiceInternalMsg(
+			"commit shard split routing failed, collection %q routes by %q and a commit cannot change it to %q",
+			coll.Name, coll.ShardBy, updates.GetShardBy())
+	}
 	if delta.Adoption && !delta.Recorded {
 		return errors.Mark(merr.WrapErrServiceUnavailableMsg(
 			"commit shard split routing of collection %q is not applicable yet: this cluster has no record of split task %d, "+
