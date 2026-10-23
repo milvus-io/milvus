@@ -930,78 +930,96 @@ func TestCreateTasksForJob_TerminalJobRejectsLatePlanAndCleansExplore(t *testing
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResults(t *testing.T) {
-	ctx := context.Background()
-	catalog := &stubCatalog{}
-	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
-	assert.NoError(t, err)
+	for _, test := range []struct {
+		name         string
+		source       string
+		wantNotified []UniqueID
+	}{
+		// Refreshed segments are ready for stats only once the collection
+		// carries the job's source; until then its publish notifies them.
+		{name: "source published", source: "s3://refreshed", wantNotified: []UniqueID{10, 20}},
+		{name: "source not yet published", source: "s3://previous"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			catalog := &stubCatalog{}
+			refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+			assert.NoError(t, err)
 
-	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
-		TaskId:          1001,
-		JobId:           1,
-		CollectionId:    100,
-		State:           indexpb.JobState_JobStateFinished,
-		ResultReady:     true,
-		KeptSegments:    []int64{1},
-		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
-	}, 1)
-	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
-		TaskId:          1002,
-		JobId:           1,
-		CollectionId:    100,
-		State:           indexpb.JobState_JobStateFinished,
-		ResultReady:     true,
-		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(20, 100, 7)},
-	}, 2)
-	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
+			addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
+				TaskId:          1001,
+				JobId:           1,
+				CollectionId:    100,
+				State:           indexpb.JobState_JobStateFinished,
+				ResultReady:     true,
+				KeptSegments:    []int64{1},
+				UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
+			}, 1)
+			addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
+				TaskId:          1002,
+				JobId:           1,
+				CollectionId:    100,
+				State:           indexpb.JobState_JobStateFinished,
+				ResultReady:     true,
+				UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(20, 100, 7)},
+			}, 2)
+			publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
 
-	ms := metacache.NewMetaStore(nil)
-	ms.PutCollection(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"by-dev-rootcoord-dml_0_v1"},
-		Partitions:    []int64{1},
-	})
-	segments := NewSegmentsInfo(ms)
-	segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:           1,
-		CollectionID: 100,
-		State:        commonpb.SegmentState_Flushed,
-		NumOfRows:    5,
-	}})
-	segments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:           2,
-		CollectionID: 100,
-		State:        commonpb.SegmentState_Flushed,
-		NumOfRows:    6,
-	}})
-	segments.SetSegment(3, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID:           3,
-		CollectionID: 100,
-		State:        commonpb.SegmentState_Flushed,
-		NumOfRows:    9,
-	}})
-	mt := &meta{
-		catalog:   catalog,
-		segments:  segments,
-		metaStore: ms,
+			ms := metacache.NewMetaStore(nil)
+			ms.PutCollection(&collectionInfo{
+				ID:            100,
+				VChannelNames: []string{"by-dev-rootcoord-dml_0_v1"},
+				Partitions:    []int64{1},
+				Schema:        &schemapb.CollectionSchema{ExternalSource: test.source},
+			})
+			segments := NewSegmentsInfo(ms)
+			segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 100,
+				State:        commonpb.SegmentState_Flushed,
+				NumOfRows:    5,
+			}})
+			segments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:           2,
+				CollectionID: 100,
+				State:        commonpb.SegmentState_Flushed,
+				NumOfRows:    6,
+			}})
+			segments.SetSegment(3, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:           3,
+				CollectionID: 100,
+				State:        commonpb.SegmentState_Flushed,
+				NumOfRows:    9,
+			}})
+			mt := &meta{
+				catalog:   catalog,
+				segments:  segments,
+				metaStore: ms,
+			}
+			drainStatsBuildChForTest()
+			defer drainStatsBuildChForTest()
+			mgr := &externalCollectionRefreshManager{
+				mt:          mt,
+				refreshMeta: refreshMeta,
+			}
+
+			err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+				JobId:          1,
+				CollectionId:   100,
+				ExternalSource: "s3://refreshed",
+			})
+			assert.NoError(t, err)
+
+			assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(1).GetState())
+			assert.Equal(t, commonpb.SegmentState_Dropped, mt.segments.GetSegment(2).GetState())
+			assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(3).GetState())
+			assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
+			assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(20).GetState())
+			assert.Equal(t, int64(7), mt.segments.GetSegment(10).GetNumOfRows())
+			assert.Equal(t, int64(7), mt.segments.GetSegment(20).GetNumOfRows())
+			assert.ElementsMatch(t, test.wantNotified, drainStatsBuildChForTest())
+		})
 	}
-	mgr := &externalCollectionRefreshManager{
-		mt:          mt,
-		refreshMeta: refreshMeta,
-	}
-
-	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
-		JobId:        1,
-		CollectionId: 100,
-	})
-	assert.NoError(t, err)
-
-	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(1).GetState())
-	assert.Equal(t, commonpb.SegmentState_Dropped, mt.segments.GetSegment(2).GetState())
-	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(3).GetState())
-	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
-	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(20).GetState())
-	assert.Equal(t, int64(7), mt.segments.GetSegment(10).GetNumOfRows())
-	assert.Equal(t, int64(7), mt.segments.GetSegment(20).GetNumOfRows())
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsCrossTaskResult(t *testing.T) {

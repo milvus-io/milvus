@@ -1926,6 +1926,9 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	if externalSourceChanged(oldSchema, req.GetSchema()) {
 		notifyCollectionIndexBuild(s.notifyIndexChan, req.GetCollectionID())
 	}
+	// An added field may need text or JSON key stats on existing segments, and a
+	// published external source/spec makes refreshed segments ready for them.
+	notifyCollectionStatsBuild(s.notifyStatsChan, req.GetCollectionID())
 	return merr.Success(), nil
 }
 
