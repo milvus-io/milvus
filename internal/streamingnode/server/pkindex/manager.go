@@ -171,14 +171,6 @@ func (m *Manager) New(cfg PChannelConfig) *PChannelIndexManager {
 	return c
 }
 
-// Get returns the primary key index of a pchannel, nil when none is open.
-// The WAL interceptor borrows it from here; it does not own it.
-func (m *Manager) Get(pchannel string) *PChannelIndexManager {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.channels[pchannel]
-}
-
 // Root returns the local root directory of the indexes of the node.
 func (m *Manager) Root() string { return m.cfg.Root }
 

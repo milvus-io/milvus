@@ -21,23 +21,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex/authority"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-func toPKs(keys primarykey.Keys) []authority.PK {
-	pks := make([]authority.PK, 0, keys.Len())
-	for _, v := range keys.Int64Values {
-		pks = append(pks, authority.Int64PK(v))
-	}
-	for _, v := range keys.StringValues {
-		pks = append(pks, authority.VarCharPK(v))
-	}
-	return pks
-}
 
 func toIDs(pks []authority.PK) *schemapb.IDs {
 	if len(pks) == 0 {

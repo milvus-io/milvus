@@ -129,8 +129,10 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 }
 
 // drop removes the target of a vchannel, closes its index and removes the
-// local files of the index. A failed removal leaves the files on disk and is
-// only logged, because the caller can not undo its append.
+// local files of the index. The rollback of a CreateCollection whose append
+// failed calls it: the observe never sees that collection, so nobody else
+// would close the index. A failed removal leaves the files on disk and is
+// only logged.
 //
 // TODO: files that a failed removal or a crash leaves stay on disk. A sweep at
 // the WAL open removes the directories of the vchannels that it does not open.
@@ -148,7 +150,16 @@ func (r *registry) drop(ctx context.Context, vchannel string) {
 	}
 }
 
-// close drops every target and closes the Channel.
+// forget removes the target of a vchannel and leaves its index open. The
+// append of a DropCollection calls it: the observe of the WAL recovery
+// closes the index when it reaches the drop, after it applied the writes
+// before the drop, which must still find the engine open.
+func (r *registry) forget(vchannel string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.targets, vchannel)
+}
+
 // close forgets the targets. It does not close the index of the pchannel: the
 // WAL recovery owns it.
 func (r *registry) close() {
