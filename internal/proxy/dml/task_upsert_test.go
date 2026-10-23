@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -5375,6 +5376,275 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "partial struct update is not supported")
 	})
+}
+
+// TestUpsertTask_queryPreExecute_NullableStructMixedBatch merges a nullable
+// struct for a batch that mixes existing rows, some with a null struct, and new
+// primary keys. Each case runs with the struct omitted and with the struct
+// supplied in the request.
+func TestUpsertTask_queryPreExecute_NullableStructMixedBatch(t *testing.T) {
+	const dim = 2
+	nestedTypeSchema := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+					},
+				},
+			},
+		},
+	}
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_nullable_struct_mixed_batch",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:  200,
+				Name:     "profile",
+				Nullable: true,
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: 201, Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+					},
+					{
+						FieldID: 202, Name: "profile[tags]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+						TypeSchema: nestedTypeSchema,
+					},
+					{
+						FieldID: 203, Name: "profile[emb]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}, {Key: common.MaxCapacityKey, Value: "16"}},
+					},
+				},
+			},
+		},
+	})
+
+	// A valid struct row of id has 1+id%2 elements; element j is age id*10+j,
+	// tags [id*100+j], and emb [id, j]. The offset keeps request values apart
+	// from stored ones.
+	elementCount := func(id int64) int { return 1 + int(id%2) }
+	ageRow := func(id, offset int64) *schemapb.ScalarField {
+		values := make([]int32, elementCount(id))
+		for j := range values {
+			values[j] = int32(offset + id*10 + int64(j))
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}}}
+	}
+	tagsRow := func(id, offset int64) *schemapb.ScalarField {
+		elements := make([]*schemapb.ScalarField, elementCount(id))
+		for j := range elements {
+			elements[j] = &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{
+				Data: []int32{int32(offset + id*100 + int64(j))},
+			}}}
+		}
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+			ElementType: schemapb.DataType_Int32,
+			Data:        elements,
+		}}}
+	}
+	embRow := func(id, offset int64) *schemapb.VectorField {
+		values := make([]float32, 0, elementCount(id)*dim)
+		for j := 0; j < elementCount(id); j++ {
+			values = append(values, float32(offset+id), float32(j))
+		}
+		return &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: values}}}
+	}
+	// profileField returns a struct column for ids. dense adds a placeholder
+	// payload row for each null row, as query results do; otherwise the
+	// payload is compact, as a request sends it.
+	profileField := func(ids []int64, nullIDs []int64, offset int64, dense bool) *schemapb.FieldData {
+		validData := make([]bool, len(ids))
+		var ages, tags []*schemapb.ScalarField
+		var embs []*schemapb.VectorField
+		for i, id := range ids {
+			validData[i] = !slices.Contains(nullIDs, id)
+			switch {
+			case validData[i]:
+				ages = append(ages, ageRow(id, offset))
+				tags = append(tags, tagsRow(id, offset))
+				embs = append(embs, embRow(id, offset))
+			case dense:
+				ages = append(ages, &schemapb.ScalarField{})
+				tags = append(tags, &schemapb.ScalarField{})
+				embs = append(embs, &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}})
+			}
+		}
+		subFields := []*schemapb.FieldData{
+			{
+				FieldName: "age", FieldId: 201, Type: schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Int32, Data: ages,
+				}}}},
+			},
+			{
+				FieldName: "tags", FieldId: 202, Type: schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Array, Data: tags,
+				}}}},
+			},
+			{
+				FieldName: "emb", FieldId: 203, Type: schemapb.DataType_ArrayOfVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+					Dim: dim, ElementType: schemapb.DataType_FloatVector, Data: embs,
+				}}}},
+			},
+		}
+		for _, subField := range subFields {
+			typeutil.SetFieldDataValidData(subField, slices.Clone(validData))
+		}
+		return &schemapb.FieldData{
+			FieldName: "profile", FieldId: 200, Type: schemapb.DataType_ArrayOfStruct,
+			Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: subFields}},
+		}
+	}
+	idField := func(ids []int64) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}}}},
+		}
+	}
+	valueField := func(ids []int64, offset int32) *schemapb.FieldData {
+		values := make([]int32, len(ids))
+		for i, id := range ids {
+			values[i] = offset + int32(id)
+		}
+		return &schemapb.FieldData{
+			FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}}}},
+		}
+	}
+
+	testCases := []struct {
+		name string
+		// existing rows in query result order, and those with a null struct
+		existing, existingNull []int64
+		// request order of primary keys; ids not in existing are new
+		request []int64
+		// with the struct in the request, the ids it sets to null
+		requestNull []int64
+	}{
+		{name: "one null one valid one new", existing: []int64{1, 2}, existingNull: []int64{2}, request: []int64{1, 2, 3}, requestNull: []int64{3}},
+		{name: "five existing one null one new", existing: []int64{1, 2, 3, 4, 5}, existingNull: []int64{3}, request: []int64{1, 2, 3, 4, 5, 6}, requestNull: []int64{1}},
+		{name: "several new interleaved", existing: []int64{3, 1, 5}, existingNull: []int64{1, 5}, request: []int64{1, 7, 3, 8, 5, 9}, requestNull: []int64{7, 5}},
+		{name: "existing all null", existing: []int64{1, 2}, existingNull: []int64{1, 2}, request: []int64{1, 2, 3}, requestNull: []int64{1, 2, 3}},
+		{name: "existing all valid", existing: []int64{1, 2}, request: []int64{1, 2, 3}},
+		{name: "only existing", existing: []int64{1, 2, 3}, existingNull: []int64{2}, request: []int64{3, 2, 1}, requestNull: []int64{2}},
+		{name: "only new", request: []int64{4, 5}, requestNull: []int64{5}},
+	}
+	for _, tc := range testCases {
+		for _, withStruct := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/struct_in_request=%v", tc.name, withStruct), func(t *testing.T) {
+				const requestOffset = 1000
+				fields := []*schemapb.FieldData{idField(tc.request), valueField(tc.request, requestOffset)}
+				if withStruct {
+					fields = append(fields, profileField(tc.request, tc.requestNull, requestOffset, false))
+				}
+				task := &UpsertTask{
+					ctx:    context.Background(),
+					schema: schema,
+					req: &milvuspb.UpsertRequest{
+						FieldsData:     fields,
+						NumRows:        uint32(len(tc.request)),
+						PartialUpdate:  true,
+						CollectionName: "test_nullable_struct_mixed_batch",
+					},
+					upsertMsg: &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{
+						InsertRequest: &msgpb.InsertRequest{
+							FieldsData: fields,
+							NumRows:    uint64(len(tc.request)),
+							Version:    msgpb.InsertDataVersion_ColumnBased,
+						},
+					}},
+					node: &mockUpsertNode{},
+				}
+				mockRetrieve := mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+					Status: merr.Success(),
+					FieldsData: []*schemapb.FieldData{
+						idField(tc.existing),
+						valueField(tc.existing, 0),
+						profileField(tc.existing, tc.existingNull, 0, true),
+					},
+				}, segcore.StorageCost{}, nil).Build()
+				defer mockRetrieve.UnPatch()
+
+				_, err := task.queryPreExecute(context.Background())
+				require.NoError(t, err)
+
+				var outIDs []int64
+				var profile *schemapb.FieldData
+				for _, field := range task.insertFieldData {
+					switch field.GetFieldName() {
+					case "id":
+						outIDs = field.GetScalars().GetLongData().GetData()
+					case "profile":
+						profile = field
+					}
+				}
+				require.ElementsMatch(t, tc.request, outIDs)
+				require.NotNil(t, profile)
+
+				// The expected struct of each output row, in output order.
+				var wantValid []bool
+				var wantAges, wantTags []*schemapb.ScalarField
+				var wantEmbs []*schemapb.VectorField
+				for _, id := range outIDs {
+					valid := false
+					var offset int64
+					if withStruct {
+						valid, offset = !slices.Contains(tc.requestNull, id), requestOffset
+					} else {
+						valid = slices.Contains(tc.existing, id) && !slices.Contains(tc.existingNull, id)
+					}
+					wantValid = append(wantValid, valid)
+					if valid {
+						wantAges = append(wantAges, ageRow(id, offset))
+						wantTags = append(wantTags, tagsRow(id, offset))
+						wantEmbs = append(wantEmbs, embRow(id, offset))
+					}
+				}
+				subFields := profile.GetStructArrays().GetFields()
+				require.Len(t, subFields, 3)
+				for _, subField := range subFields {
+					assert.Equal(t, wantValid, typeutil.GetFieldDataValidData(subField), subField.GetFieldName())
+					switch subField.GetFieldName() {
+					case "age":
+						assertProtoSlicesEqual(t, wantAges, subField.GetScalars().GetArrayData().GetData())
+					case "tags":
+						assertProtoSlicesEqual(t, wantTags, subField.GetScalars().GetArrayData().GetData())
+					case "emb":
+						assertProtoSlicesEqual(t, wantEmbs, subField.GetVectors().GetVectorArray().GetData())
+					default:
+						t.Fatalf("unexpected sub-field %q", subField.GetFieldName())
+					}
+				}
+
+				// insertPreExecute flattens the merged struct next; it accepts only
+				// a compact payload that matches ValidData.
+				require.NoError(t, checkAndFlattenStructFieldData(schema.CollectionSchema, &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						FieldsData: task.insertFieldData,
+						NumRows:    uint64(len(outIDs)),
+						Version:    msgpb.InsertDataVersion_ColumnBased,
+					},
+				}))
+			})
+		}
+	}
+}
+
+func assertProtoSlicesEqual[T proto.Message](t *testing.T, want, got []T) {
+	t.Helper()
+	require.Len(t, got, len(want))
+	for i := range want {
+		assert.True(t, proto.Equal(want[i], got[i]), "row %d: want %v, got %v", i, want[i], got[i])
+	}
 }
 
 func TestValidateWholeStructFieldDataForPartialUpdateNestedArray(t *testing.T) {
