@@ -29,7 +29,7 @@ func TestServerSearchOnViewDelegatesAndReleasesTasks(t *testing.T) {
 		LegacyReq: &internalpb.SearchRequest{CollectionID: 10},
 		ShardId:   testShardID().IntoProto(),
 		Version:   testVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 101, TransformingTimetick: 99}},
 	}
 
 	resp, err := server.SearchOnView(context.Background(), req)
@@ -83,7 +83,7 @@ func TestServerQueryOnViewDelegatesAndReleasesTasks(t *testing.T) {
 		LegacyReq: &internalpb.RetrieveRequest{CollectionID: 11},
 		ShardId:   testShardID().IntoProto(),
 		Version:   testVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 101, TransformingTimetick: 99}},
 	}
 
 	resp, err := server.QueryOnView(context.Background(), req)
@@ -145,13 +145,20 @@ func TestServerRejectsInvalidRequestShape(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-func TestServerRequeryOnViewIsUnimplemented(t *testing.T) {
-	server := NewServer(&fakeTaskProvider{}, &fakeScheduler{})
-
-	_, err := server.RequeryOnView(context.Background(), &viewpb.RequeryOnViewRequest{})
-
+func TestServerRejectsMissingSchemaBindingBeforeAcquiringTasks(t *testing.T) {
+	provider := &fakeTaskProvider{}
+	server := NewServer(provider, &fakeScheduler{})
+	search := validSearchRequest()
+	search.Mvcc.SchemaBinding = nil
+	_, err := server.SearchOnView(t.Context(), search)
 	require.Error(t, err)
-	assert.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Nil(t, provider.searchReq)
+
+	query := validQueryRequest()
+	query.Mvcc.SchemaBinding = nil
+	_, err = server.QueryOnView(t.Context(), query)
+	require.Error(t, err)
+	require.Nil(t, provider.queryReq)
 }
 
 func validSearchRequest() *viewpb.SearchOnViewRequest {
@@ -159,7 +166,7 @@ func validSearchRequest() *viewpb.SearchOnViewRequest {
 		LegacyReq: &internalpb.SearchRequest{CollectionID: 10},
 		ShardId:   testShardID().IntoProto(),
 		Version:   testVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 101, TransformingTimetick: 99}},
 	}
 }
 
@@ -168,7 +175,7 @@ func validQueryRequest() *viewpb.QueryOnViewRequest {
 		LegacyReq: &internalpb.RetrieveRequest{CollectionID: 10},
 		ShardId:   testShardID().IntoProto(),
 		Version:   testVersion().IntoProto(),
-		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99},
+		Mvcc:      &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{GrowingTimetick: 101, TransformingTimetick: 99}},
 	}
 }
 

@@ -145,6 +145,11 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     }
 
     void
+    SetReadSchema(SchemaPtr schema) {
+        read_schema_ = std::move(schema);
+    }
+
+    void
     SetFilterOnly(bool filter_only) {
         filter_only_ = filter_only;
     }
@@ -193,6 +198,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     bool expr_use_pk_index_ = false;
     bool filter_only_ = false;
     bool enable_expr_cache_ = false;
+    SchemaPtr read_schema_;
     milvus::tracer::SpanPtr trace_span_ = nullptr;
 };
 

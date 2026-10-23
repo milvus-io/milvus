@@ -303,88 +303,70 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     return schema;
 }
 
-const ArrowSchemaPtr
-Schema::ConvertToArrowSchema() const {
+ArrowSchemaPtr
+BuildFieldArrowSchema(const std::unordered_map<FieldId, FieldMeta>& fields,
+                      const std::vector<FieldId>& field_ids,
+                      bool use_field_ids,
+                      bool text_lob_as_binary) {
     arrow::FieldVector arrow_fields;
-    arrow_fields.reserve(field_ids_.size());
-    for (const auto& field_id : field_ids_) {
-        const auto& meta = fields_.at(field_id);
-        int dim = IsVectorDataType(meta.get_data_type()) &&
-                          !IsSparseFloatVectorDataType(meta.get_data_type())
+    arrow_fields.reserve(field_ids.size());
+    for (auto id : field_ids) {
+        const auto& meta = fields.at(id);
+        const auto type = meta.get_data_type();
+        int dim = IsVectorDataType(type) && !IsSparseFloatVectorDataType(type)
                       ? meta.get_dim()
                       : 1;
-
-        std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
-        auto data_type = meta.get_data_type();
-        if (data_type == DataType::VECTOR_ARRAY) {
-            arrow_data_type = GetArrowDataTypeForVectorArray(
-                meta.get_element_type(), meta.get_dim());
+        bool nullable_vector = use_field_ids && meta.is_nullable() &&
+                               IsVectorDataType(type) &&
+                               !IsSparseFloatVectorDataType(type) &&
+                               type != DataType::VECTOR_ARRAY;
+        std::shared_ptr<arrow::DataType> arrow_type;
+        if (nullable_vector ||
+            (use_field_ids && text_lob_as_binary && type == DataType::TEXT)) {
+            arrow_type = arrow::binary();
+        } else if (type == DataType::VECTOR_ARRAY) {
+            arrow_type = GetArrowDataTypeForVectorArray(meta.get_element_type(),
+                                                        meta.get_dim());
         } else {
-            arrow_data_type = GetArrowDataType(data_type, dim);
+            arrow_type = GetArrowDataType(type, dim);
         }
-
-        auto arrow_field = std::make_shared<arrow::Field>(
-            meta.get_name().get(),
-            arrow_data_type,
+        std::shared_ptr<arrow::KeyValueMetadata> metadata;
+        if (!use_field_ids) {
+            metadata =
+                arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                          {std::to_string(id.get())});
+        } else if (nullable_vector) {
+            metadata = arrow::key_value_metadata(
+                {"dim"}, {std::to_string(meta.get_dim())});
+        }
+        arrow_fields.push_back(std::make_shared<arrow::Field>(
+            use_field_ids ? std::to_string(id.get()) : meta.get_name().get(),
+            arrow_type,
             meta.is_nullable(),
-            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
-                                      {std::to_string(meta.get_id().get())}));
-        arrow_fields.push_back(arrow_field);
+            metadata));
     }
     return arrow::schema(arrow_fields);
+}
+
+const ArrowSchemaPtr
+Schema::ConvertToArrowSchema() const {
+    return BuildFieldArrowSchema(fields_, field_ids_, false);
 }
 
 const ArrowSchemaPtr
 Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
     if (text_lob_as_binary) {
         auto cached = std::atomic_load(&loon_arrow_lob_schema_cache_);
-        if (cached != nullptr) {
+        if (cached) {
             return cached;
         }
     }
-
-    arrow::FieldVector arrow_fields;
-    arrow_fields.reserve(field_ids_.size());
-    for (const auto& field_id : field_ids_) {
-        const auto& meta = fields_.at(field_id);
-        int dim = IsVectorDataType(meta.get_data_type()) &&
-                          !IsSparseFloatVectorDataType(meta.get_data_type())
-                      ? meta.get_dim()
-                      : 1;
-
-        std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
-        auto data_type = meta.get_data_type();
-        auto is_nullable_dense_vector =
-            meta.is_nullable() && IsVectorDataType(data_type) &&
-            !IsSparseFloatVectorDataType(data_type) &&
-            data_type != DataType::VECTOR_ARRAY;
-        if (is_nullable_dense_vector) {
-            arrow_data_type = arrow::binary();
-        } else if (text_lob_as_binary && data_type == DataType::TEXT) {
-            arrow_data_type = arrow::binary();
-        } else if (data_type == DataType::VECTOR_ARRAY) {
-            arrow_data_type = GetArrowDataTypeForVectorArray(
-                meta.get_element_type(), meta.get_dim());
-        } else {
-            arrow_data_type = GetArrowDataType(data_type, dim);
-        }
-
-        auto metadata = is_nullable_dense_vector
-                            ? arrow::key_value_metadata(
-                                  {"dim"}, {std::to_string(meta.get_dim())})
-                            : nullptr;
-        auto arrow_field =
-            std::make_shared<arrow::Field>(std::to_string(field_id.get()),
-                                           arrow_data_type,
-                                           meta.is_nullable(),
-                                           metadata);
-        arrow_fields.push_back(arrow_field);
-    }
-    auto loon_arrow_schema = arrow::schema(arrow_fields);
+    auto result =
+        BuildFieldArrowSchema(fields_, field_ids_, true, text_lob_as_binary);
     if (text_lob_as_binary) {
-        std::atomic_store(&loon_arrow_lob_schema_cache_, loon_arrow_schema);
+        std::atomic_store(&loon_arrow_lob_schema_cache_, result);
     }
-    return loon_arrow_schema;
+    return result;
 }
 
 proto::schema::CollectionSchema

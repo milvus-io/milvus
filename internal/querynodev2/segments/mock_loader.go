@@ -385,3 +385,18 @@ func NewMockLoader(t interface {
 
 	return mock
 }
+
+// LoadDeltaLogsWithoutResource is patched with mockey by QueryView tests.
+func (_m *MockLoader) LoadDeltaLogsWithoutResource(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
+	panic("patch LoadDeltaLogsWithoutResource with mockey")
+}
+
+// LoadSegment is patched with mockey by QueryView tests.
+func (_m *MockLoader) LoadSegment(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
+	panic("patch LoadSegment with mockey")
+}
+
+// ReserveLoadResource is patched with mockey by QueryView tests.
+func (_m *MockLoader) ReserveLoadResource(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error) {
+	panic("patch ReserveLoadResource with mockey")
+}

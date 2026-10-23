@@ -4545,7 +4545,7 @@ TEST(SealedSegmentCowState, ReopenNextStateMustNotInheritStaleFieldReadyBit) {
     next_runtime->struct_element_offsets_map.erase(payload);
 
     ChunkedSegmentSealedImpl::StateDelta delta;
-    delta.schema = current->schema;
+    delta.fields = current->fields;
     delta.load_info = current->load_info;
     delta.runtime =
         sealed->TestFreezeRuntimeResourceState(std::move(next_runtime));
@@ -4580,7 +4580,7 @@ TEST(SealedSegmentCowState, ReopenNextStateMustNotInheritStaleVectorIndexBit) {
     ASSERT_FALSE(current->published_index_has_raw_data.at(vec));
 
     ChunkedSegmentSealedImpl::StateDelta delta;
-    delta.schema = current->schema;
+    delta.fields = current->fields;
     delta.load_info = current->load_info;
     delta.runtime = current->runtime;
     delta.commit_ts = current->commit_ts;
@@ -4624,7 +4624,8 @@ TEST(SealedSegmentCowState, DropShrunkHighestFieldStateDoesNotReadPastBitset) {
     ASSERT_TRUE(current->published_index_has_raw_data.count(dropped_vec));
 
     ChunkedSegmentSealedImpl::StateDelta delta;
-    delta.schema = new_schema;
+    delta.fields = std::make_shared<const SealedFieldLayout>(
+        new_schema.get(), LoadScope::FromLegacySchema(*new_schema));
     delta.load_info = std::make_shared<const SegmentLoadInfo>(
         current->load_info->GetProto(), new_schema);
     delta.runtime = current->runtime;
@@ -4674,13 +4675,14 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
 
     auto current = sealed->TestGetPublishedStateSnapshot();
     ASSERT_EQ(current->index_ready_bitset.size(), 1);
-    ASSERT_FALSE(current->schema->get_fields().count(new_vec));
+    ASSERT_FALSE(current->fields->get_fields().count(new_vec));
 
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     auto staged_load_info = std::make_shared<const SegmentLoadInfo>(
         current->load_info->GetProto(), new_schema);
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
-    initial_delta.schema = new_schema;
+    initial_delta.fields = std::make_shared<const SealedFieldLayout>(
+        new_schema.get(), LoadScope::FromLegacySchema(*new_schema));
     initial_delta.load_info = staged_load_info;
     initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
@@ -4709,7 +4711,8 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
     load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
-    final_delta.schema = new_schema;
+    final_delta.fields = std::make_shared<const SealedFieldLayout>(
+        new_schema.get(), LoadScope::FromLegacySchema(*new_schema));
     final_delta.load_info = staged_load_info;
     final_delta.commit_ts = current->commit_ts;
 
@@ -4725,7 +4728,7 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
             auto published_after_staged_load =
                 sealed->TestGetPublishedStateSnapshot();
             EXPECT_FALSE(
-                published_after_staged_load->schema->get_fields().count(
+                published_after_staged_load->fields->get_fields().count(
                     new_vec));
             EXPECT_EQ(published_after_staged_load->index_ready_bitset.size(),
                       1);
@@ -4753,7 +4756,7 @@ TEST(SealedSegmentCowState,
     auto current = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(current, nullptr);
     ASSERT_LE(current->binlog_index_bitset.size(), 1);
-    ASSERT_FALSE(current->schema->get_fields().count(vec));
+    ASSERT_FALSE(current->fields->get_fields().count(vec));
 
     SegmentLoadInfo staged_load_info(current->load_info->GetProto(),
                                      new_schema);
@@ -5342,6 +5345,19 @@ TEST(SealedSegmentCowState, ResolvesCompleteVortexGroupsPerSchemaSnapshot) {
         next_expected);
     EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, schema),
               expected);
+
+    // Physical layout keeps alias/format metadata even outside a View scope,
+    // and remains valid after its preparing Schema is destroyed.
+    auto layout = std::make_shared<const SealedFieldLayout>(
+        next_schema.get(), LoadScope({101}));
+    next_schema.reset();
+    EXPECT_FALSE(layout->has_field(FieldId(102)));
+    EXPECT_EQ(layout->ResolveColumnFieldIds("shared"),
+              (std::vector<FieldId>{FieldId(101), FieldId(102)}));
+    EXPECT_FALSE(layout->IsVortexColumn("shared"));
+    EXPECT_TRUE(layout->IsVortexColumn("direct"));
+    EXPECT_EQ(sealed->TestResolveVortexColumnGroupLocalFormats(groups, layout),
+              next_expected);
 }
 
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
@@ -5396,7 +5412,8 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     auto staged_load_info = std::make_shared<const SegmentLoadInfo>(
         current->load_info->GetProto(), schema);
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
-    initial_delta.schema = schema;
+    initial_delta.fields = std::make_shared<const SealedFieldLayout>(
+        schema.get(), LoadScope::FromLegacySchema(*schema));
     initial_delta.load_info = staged_load_info;
     initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
@@ -5422,7 +5439,8 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
-    final_delta.schema = schema;
+    final_delta.fields = std::make_shared<const SealedFieldLayout>(
+        schema.get(), LoadScope::FromLegacySchema(*schema));
     final_delta.load_info = staged_load_info;
     final_delta.commit_ts = current->commit_ts;
 
@@ -5516,7 +5534,7 @@ TEST(SealedSegmentCowState,
         auto runtime = sealed->TestCloneMutableRuntimeResourceState();
         auto staged = sealed->TestBuildNextPublishedState(
             current,
-            {current->schema,
+            {current->fields,
              current->load_info,
              sealed->TestFreezeRuntimeResourceState(runtime),
              current->commit_ts});
@@ -5536,7 +5554,7 @@ TEST(SealedSegmentCowState,
             LoadResourceRequest{0, 0, 0, 0, true};
 
         ChunkedSegmentSealedImpl::StateDelta final_delta;
-        final_delta.schema = current->schema;
+        final_delta.fields = current->fields;
         final_delta.load_info = current->load_info;
         final_delta.commit_ts = current->commit_ts;
 
@@ -5544,7 +5562,7 @@ TEST(SealedSegmentCowState,
             sealed->TestStageLoadIndexThenPublish(
                 replacement,
                 true,
-                current->schema,
+                current->fields,
                 runtime,
                 staged.get(),
                 current,
@@ -5659,7 +5677,7 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
         first_cache_index);
 
     ChunkedSegmentSealedImpl::StateDelta delta;
-    delta.schema = staged_only->schema;
+    delta.fields = staged_only->fields;
     delta.load_info = staged_only->load_info;
     delta.runtime = sealed->TestFreezeRuntimeResourceState(std::move(runtime));
     delta.commit_ts = staged_only->commit_ts;
@@ -5734,7 +5752,7 @@ TEST(SealedSegmentCowState, ReplacePkStateIsInvisibleUntilFinalPublish) {
     auto stage_replacement = [&](bool fail_before_publish) {
         auto runtime = sealed->TestCloneMutableRuntimeResourceState();
         ChunkedSegmentSealedImpl::StateDelta initial_delta;
-        initial_delta.schema = current->schema;
+        initial_delta.fields = current->fields;
         initial_delta.load_info = current->load_info;
         initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
         initial_delta.commit_ts = current->commit_ts;
@@ -5742,7 +5760,7 @@ TEST(SealedSegmentCowState, ReplacePkStateIsInvisibleUntilFinalPublish) {
             sealed->TestBuildNextPublishedState(current, initial_delta);
 
         ChunkedSegmentSealedImpl::StateDelta final_delta;
-        final_delta.schema = current->schema;
+        final_delta.fields = current->fields;
         final_delta.load_info = current->load_info;
         final_delta.commit_ts = current->commit_ts;
 
@@ -5828,14 +5846,14 @@ TEST(SealedSegmentCowState, ReplaceProxyColumnClearsStaleSkipMetrics) {
     auto current = sealed->TestGetPublishedStateSnapshot();
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
-    initial_delta.schema = current->schema;
+    initial_delta.fields = current->fields;
     initial_delta.load_info = current->load_info;
     initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
     auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
-    final_delta.schema = current->schema;
+    final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;
     final_delta.commit_ts = current->commit_ts;
 
@@ -5923,14 +5941,14 @@ TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
                     .empty());
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
-    initial_delta.schema = current->schema;
+    initial_delta.fields = current->fields;
     initial_delta.load_info = current->load_info;
     initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
     auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
-    final_delta.schema = current->schema;
+    final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;
     final_delta.commit_ts = current->commit_ts;
     sealed->TestStageLoadIndexThenPublish(
@@ -6032,7 +6050,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
 
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
-    initial_delta.schema = current->schema;
+    initial_delta.fields = current->fields;
     initial_delta.load_info = current->load_info;
     initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
@@ -6041,7 +6059,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
     auto replacement = make_load_info("json-ngram-a", "a", true);
     auto replacement_index = replacement.cache_index;
     ChunkedSegmentSealedImpl::StateDelta final_delta;
-    final_delta.schema = current->schema;
+    final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;
     final_delta.commit_ts = current->commit_ts;
     sealed->TestStageLoadIndexThenPublish(
@@ -6194,7 +6212,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
 
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
-    initial_delta.schema = current->schema;
+    initial_delta.fields = current->fields;
     initial_delta.load_info = current->load_info;
     initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
@@ -6203,7 +6221,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
     auto replacement = make_load_info("json-scalar-a", "a", false);
     auto replacement_index = replacement.cache_index;
     ChunkedSegmentSealedImpl::StateDelta final_delta;
-    final_delta.schema = current->schema;
+    final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;
     final_delta.commit_ts = current->commit_ts;
     sealed->TestStageLoadIndexThenPublish(
@@ -6283,7 +6301,7 @@ TEST(SealedSegmentCowState, JsonStatsLivesInRuntimeSnapshot) {
     load_runtime->json_stats[json] = nullptr;
 
     ChunkedSegmentSealedImpl::StateDelta load_delta;
-    load_delta.schema = current->schema;
+    load_delta.fields = current->fields;
     load_delta.load_info = current->load_info;
     load_delta.runtime =
         sealed->TestFreezeRuntimeResourceState(std::move(load_runtime));
@@ -6301,7 +6319,7 @@ TEST(SealedSegmentCowState, JsonStatsLivesInRuntimeSnapshot) {
     drop_runtime->json_stats.erase(json);
 
     ChunkedSegmentSealedImpl::StateDelta delta;
-    delta.schema = after_load->schema;
+    delta.fields = after_load->fields;
     delta.load_info = after_load->load_info;
     delta.runtime =
         sealed->TestFreezeRuntimeResourceState(std::move(drop_runtime));
@@ -6411,7 +6429,7 @@ TEST(SealedSegmentCowState,
     auto current = sealed->TestGetPublishedStateSnapshot();
     auto next = sealed->TestBuildNextPublishedState(
         current,
-        {current->schema,
+        {current->fields,
          current->load_info,
          sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
          current->commit_ts});
@@ -6453,7 +6471,7 @@ TEST(SealedSegmentCowState,
     auto current = sealed->TestGetPublishedStateSnapshot();
     auto next = sealed->TestBuildNextPublishedState(
         current,
-        {current->schema,
+        {current->fields,
          current->load_info,
          sealed->TestFreezeRuntimeResourceState(std::move(runtime)),
          current->commit_ts});

@@ -1419,6 +1419,7 @@ TEST(MatchExprNullableStruct, PinnedSchemaBuildsOldMappingAfterStructReadded) {
     physical.SetSnapshot(read.get());
     exec::QueryContext query_context(
         "pinned_match", segment.get(), 5, MAX_TIMESTAMP);
+    query_context.set_read_schema(schema);
     query_context.set_read_snapshot(read);
     exec::ExecContext exec_context(&query_context);
     exec::EvalCtx eval_context(&exec_context);

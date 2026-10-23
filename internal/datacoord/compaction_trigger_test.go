@@ -2783,8 +2783,11 @@ func (s *CompactionTriggerSuite) TestHandleSignalStopsWhenInspectorFull() {
 			pt.Save(key, value)
 			s.T().Cleanup(func() { pt.Reset(key) })
 		}
-		for _, segment := range s.meta.segments.segments {
+		for _, segment := range s.meta.segments.GetSegments() {
+			segment = segment.Clone()
 			segment.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+			segment.Stats = nil
+			s.meta.segments.SetSegment(segment.GetID(), segment)
 		}
 		// Every subtest plans a single group.
 		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(&collectionInfo{

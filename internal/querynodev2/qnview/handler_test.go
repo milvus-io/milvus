@@ -1,6 +1,7 @@
 package qnview
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,6 +25,15 @@ type mockSegmentManager struct {
 	acquired        map[qviews.QueryViewKey]AcquireSegments
 	released        []qviews.QueryViewKey
 	releaseCallback map[qviews.QueryViewKey]func() // captured onDropped callbacks
+	queryHandles    []SealedSegmentHandle
+	queryErr        error
+	queryKey        qviews.QueryViewKey
+	queryView       *viewpb.QueryViewOfQueryNode
+	beforeQuery     func()
+	waitKey         qviews.QueryViewKey
+	waitTimetick    uint64
+	waitErr         error
+	waitCalled      bool
 }
 
 func newMockSegmentManager() *mockSegmentManager {
@@ -45,6 +55,29 @@ func (m *mockSegmentManager) Release(req ReleaseSegments) {
 	delete(m.acquired, req.Key)
 	m.released = append(m.released, req.Key)
 	m.releaseCallback[req.Key] = req.OnDropped
+}
+
+func (m *mockSegmentManager) AcquireSealedSegmentHandles(_ context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode, _ uint64) ([]SealedSegmentHandle, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.beforeQuery != nil {
+		m.beforeQuery()
+	}
+	m.queryKey = key
+	m.queryView = proto.Clone(view).(*viewpb.QueryViewOfQueryNode)
+	if m.queryErr != nil {
+		return nil, m.queryErr
+	}
+	return append([]SealedSegmentHandle(nil), m.queryHandles...), nil
+}
+
+func (m *mockSegmentManager) WaitTransformVisible(_ context.Context, key qviews.QueryViewKey, timetick uint64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.waitCalled = true
+	m.waitKey = key
+	m.waitTimetick = timetick
+	return m.waitErr
 }
 
 func (m *mockSegmentManager) invokeReleaseCallback(key qviews.QueryViewKey) {
@@ -110,6 +143,12 @@ func newPreparingQNView(nodeID int64, version int64) qviews.QueryViewAtWorkNode 
 func newDroppedQNView(nodeID int64, version int64) qviews.QueryViewAtWorkNode {
 	meta := buildHandlerTestMeta(version)
 	meta.State = viewpb.QueryViewState_QueryViewStateDropped
+	return qviews.NewQueryViewAtQueryNode(meta, buildHandlerTestQNView(nodeID))
+}
+
+func newQNViewWithState(nodeID int64, version int64, state viewpb.QueryViewState) qviews.QueryViewAtWorkNode {
+	meta := buildHandlerTestMeta(version)
+	meta.State = state
 	return qviews.NewQueryViewAtQueryNode(meta, buildHandlerTestQNView(nodeID))
 }
 
@@ -205,6 +244,26 @@ func TestQNHandler_ApplyViews_DroppedOnUnknownViewReportsBack(t *testing.T) {
 	require.Equal(t, 1, rc.count())
 	assert.Equal(t, qviews.QueryViewStateDropped, rc.last().State())
 	assert.Equal(t, 0, mgr.acquiredCount())
+}
+
+func TestQNHandler_ApplyViews_PrioritizesPreparingAndUpInBatch(t *testing.T) {
+	mgr := newMockSegmentManager()
+	h := NewQNQueryViewHandler(mgr)
+
+	var reportStates []qviews.QueryViewState
+	onReport := func(report qviews.QueryViewAtWorkNode) {
+		reportStates = append(reportStates, report.State())
+	}
+
+	h.ApplyViews([]handler.ApplyView{
+		{View: newDroppedQNView(1, 1), OnReport: onReport},
+		{View: newQNViewWithState(1, 2, viewpb.QueryViewState_QueryViewStateUp), OnReport: onReport},
+	})
+
+	require.Equal(t, []qviews.QueryViewState{
+		qviews.QueryViewStateUnrecoverable,
+		qviews.QueryViewStateDropped,
+	}, reportStates)
 }
 
 // ---------------------------------------------------------------------------
@@ -608,4 +667,40 @@ func TestQNHandler_FullLifecycle(t *testing.T) {
 	// 6. Further callbacks are no-op (entry removed).
 	req.OnReady(map[int64][]int64{10: {1000}})
 	assert.Equal(t, 3, rc.count())
+}
+
+func TestFailedPrepareReplacementAcquiresBeforeRelease(t *testing.T) {
+	mockey.PatchConvey("replacement protects references before failed-view teardown", t, func() {
+		mgr := newMockSegmentManager()
+		requests := make(map[qviews.QueryViewKey]AcquireSegments)
+		var events []string
+		mockey.Mock((*mockSegmentManager).Acquire).To(func(_ *mockSegmentManager, req AcquireSegments) {
+			requests[req.Key] = req
+			events = append(events, "acquire")
+		}).Build()
+		mockey.Mock((*mockSegmentManager).Release).To(func(_ *mockSegmentManager, req ReleaseSegments) {
+			require.Len(t, requests, 2, "replacement references must already exist")
+			delete(requests, req.Key)
+			events = append(events, "release")
+		}).Build()
+		h := NewQNQueryViewHandler(mgr)
+		collector := &reportCollector{}
+		old := newPreparingQNView(1, 1)
+		h.ApplyViews([]handler.ApplyView{{View: old, OnReport: collector.onReport}})
+		req := requests[old.QueryViewKey()]
+		req.OnReady(map[int64][]int64{10: {1000, 1001}})
+		req.OnUnrecoverable()
+		require.Len(t, requests, 1, "failure alone must not release successful loads")
+		meta := buildHandlerTestMeta(1)
+		meta.Version.QueryVersion = 2 // Same materialization, different holder.
+		replacement := qviews.NewQueryViewAtQueryNode(meta, buildHandlerTestQNView(1))
+		// Deliberately send teardown first: the handler must reorder the batch.
+		h.ApplyViews([]handler.ApplyView{
+			{View: newDroppedQNView(1, 1), OnReport: collector.onReport},
+			{View: replacement, OnReport: collector.onReport},
+		})
+		require.Equal(t, []string{"acquire", "acquire", "release"}, events)
+		require.Contains(t, requests, replacement.QueryViewKey())
+		require.NotContains(t, requests, old.QueryViewKey())
+	})
 }
