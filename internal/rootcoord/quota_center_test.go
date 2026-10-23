@@ -764,6 +764,98 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Reset(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key)
 	})
 
+	t.Run("test memory protection deny scope", func(t *testing.T) {
+		paramtable.Get().Save(Params.QuotaConfig.TtProtectionEnabled.Key, "false")
+		defer paramtable.Get().Reset(Params.QuotaConfig.TtProtectionEnabled.Key)
+		paramtable.Get().Save(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key, "0.8")
+		defer paramtable.Get().Reset(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key)
+		paramtable.Get().Save(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, "0.9")
+		defer paramtable.Get().Reset(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key)
+
+		// Collections 1, 2 and 3 in db 0 are loaded, collection 4 in db 1 is not.
+		newQuotaCenter := func(t *testing.T, queryNodeMetrics map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics) *QuotaCenter {
+			meta := mockrootcoord.NewIMetaTable(t)
+			meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+			meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrDatabaseNotFound).Maybe()
+			quotaCenter := NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
+			quotaCenter.writableCollections = map[int64]map[int64][]int64{
+				0: collectionIDToPartitionIDs,
+				1: {4: {}},
+			}
+			meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
+			quotaCenter.collectionIDToDBID = collectionIDToDBID
+			quotaCenter.resetAllCurrentRates()
+			quotaCenter.queryNodeMetrics = queryNodeMetrics
+			return quotaCenter
+		}
+		deniedCollections := func(quotaCenter *QuotaCenter) map[int64]commonpb.ErrorCode {
+			denied := make(map[int64]commonpb.ErrorCode)
+			for db, collections := range quotaCenter.writableCollections {
+				for collection := range collections {
+					states := quotaCenter.rateLimiter.GetCollectionLimiters(db, collection).GetQuotaStates()
+					if stateInfo, ok := states.Get(milvuspb.QuotaState_DenyToWrite); ok {
+						denied[collection] = stateInfo.ErrorCode
+					}
+				}
+			}
+			return denied
+		}
+		// Node 1 is over the high water level and loads collection 1.
+		// Node 2 is under the low water level and loads collections 2 and 3.
+		oneNodeOverHighWater := func() map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics {
+			return map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+				1: {
+					Hms:    metricsinfo.HardwareMetrics{MemoryUsage: 95, Memory: 100},
+					Effect: metricsinfo.NodeEffect{NodeID: 1, CollectionIDs: []int64{1}},
+				},
+				2: {
+					Hms:    metricsinfo.HardwareMetrics{MemoryUsage: 10, Memory: 100},
+					Effect: metricsinfo.NodeEffect{NodeID: 2, CollectionIDs: []int64{2, 3}},
+				},
+			}
+		}
+
+		t.Run("deny all loaded collections", func(t *testing.T) {
+			quotaCenter := newQuotaCenter(t, oneNodeOverHighWater())
+			assert.NoError(t, quotaCenter.calculateWriteRates())
+			assert.Equal(t, map[int64]commonpb.ErrorCode{
+				1: commonpb.ErrorCode_MemoryQuotaExhausted,
+				2: commonpb.ErrorCode_MemoryQuotaExhausted,
+				3: commonpb.ErrorCode_MemoryQuotaExhausted,
+			}, deniedCollections(quotaCenter))
+		})
+
+		t.Run("deny only collections on the node when disabled", func(t *testing.T) {
+			paramtable.Get().Save(Params.QuotaConfig.MemProtectionDenyAllLoaded.Key, "false")
+			defer paramtable.Get().Reset(Params.QuotaConfig.MemProtectionDenyAllLoaded.Key)
+			quotaCenter := newQuotaCenter(t, oneNodeOverHighWater())
+			assert.NoError(t, quotaCenter.calculateWriteRates())
+			assert.Equal(t, map[int64]commonpb.ErrorCode{
+				1: commonpb.ErrorCode_MemoryQuotaExhausted,
+			}, deniedCollections(quotaCenter))
+		})
+
+		t.Run("L0 overflow does not deny other loaded collections", func(t *testing.T) {
+			paramtable.Get().Save(Params.QuotaConfig.L0SegmentRowCountProtectionEnabled.Key, "true")
+			defer paramtable.Get().Reset(Params.QuotaConfig.L0SegmentRowCountProtectionEnabled.Key)
+			quotaCenter := newQuotaCenter(t, map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+				1: {
+					Hms:    metricsinfo.HardwareMetrics{MemoryUsage: 10, Memory: 100},
+					Effect: metricsinfo.NodeEffect{NodeID: 1, CollectionIDs: []int64{1, 2, 3}},
+				},
+			})
+			quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{
+				CollectionL0RowCount: map[int64]int64{
+					2: Params.QuotaConfig.L0SegmentRowCountHighWaterLevel.GetAsInt64(),
+				},
+			}
+			assert.NoError(t, quotaCenter.calculateWriteRates())
+			assert.Equal(t, map[int64]commonpb.ErrorCode{
+				2: commonpb.ErrorCode_MemoryQuotaExhausted,
+			}, deniedCollections(quotaCenter))
+		})
+	})
+
 	t.Run("test GrowingSegmentsSize factors", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
