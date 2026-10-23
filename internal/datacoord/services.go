@@ -1923,6 +1923,14 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	if existing := s.meta.GetCollection(req.GetCollectionID()); existing != nil {
 		info.CreatedAt = existing.CreatedAt
 		oldSchema = existing.Schema
+		// A vchannel the collection stops listing without being dropped -- a
+		// shard split's retired source -- stops reporting its checkpoint, so
+		// its gauge would otherwise stay frozen at the retire forever.
+		for _, vchannel := range existing.VChannelNames {
+			if isVChannelDelisted(info, vchannel) {
+				metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), vchannel)
+			}
+		}
 	}
 	s.meta.AddCollection(info)
 	// A refresh that rebinds an external collection applies its segments before
