@@ -888,7 +888,12 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				continue
 			}
 			if structSchema.GetNullable() {
-				insertFieldsToAppend = append(insertFieldsToAppend, GenNullableStructArrayFieldData(structSchema, upsertIDSize))
+				fieldData, err := GenNullableStructArrayFieldData(structSchema, upsertIDSize)
+				if err != nil {
+					log.Info(ctx, "generate nullable struct field data failed", mlog.Err(err))
+					return nil, err
+				}
+				insertFieldsToAppend = append(insertFieldsToAppend, fieldData)
 			}
 		}
 
@@ -1460,7 +1465,13 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 	}
 }
 
-func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchema, rowCount int) *schemapb.FieldData {
+// GenNullableStructArrayFieldData builds a null struct for every upsert row in
+// the full format the partial-update merge uses: each sub-field has one
+// placeholder payload row per logical row, like the queried existing rows and
+// the request structs expanded by FillWithNullValue. Rows from these sources
+// are merged into one column, so they must share the layout;
+// ToCompressedFormatNullableStructField drops the placeholders afterwards.
+func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchema, rowCount int) (*schemapb.FieldData, error) {
 	fields := make([]*schemapb.FieldData, 0, len(structField.GetFields()))
 	for _, subField := range structField.GetFields() {
 		fieldName := subField.GetName()
@@ -1469,14 +1480,58 @@ func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchem
 				fieldName = originalName
 			}
 		}
-		fields = append(fields, &schemapb.FieldData{
+		fieldData := &schemapb.FieldData{
 			FieldName: fieldName,
 			FieldId:   subField.GetFieldID(),
 			Type:      subField.GetDataType(),
 			// The source field is indexed by original upsert row IDs before
 			// appending the insert subset, so ValidData uses the same row domain.
 			ValidData: make([]bool, rowCount),
-		})
+		}
+		switch subField.GetDataType() {
+		case schemapb.DataType_Array:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data:        make([]*schemapb.ScalarField, rowCount),
+							ElementType: subField.GetElementType(),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_ArrayOfVector:
+			dim, err := typeutil.GetDim(subField)
+			if err != nil {
+				return nil, merr.Wrapf(err, "struct sub-field %q", subField.GetName())
+			}
+			emptyRow, err := typeutil.NewEmptyArrayOfVectorRow(dim, subField.GetElementType())
+			if err != nil {
+				return nil, merr.Wrapf(err, "struct sub-field %q", subField.GetName())
+			}
+			// Every row is null and is dropped by the compaction after the
+			// merge, so the rows can share one placeholder.
+			rows := make([]*schemapb.VectorField, rowCount)
+			for i := range rows {
+				rows[i] = emptyRow
+			}
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Dim:         dim,
+							ElementType: subField.GetElementType(),
+							Data:        rows,
+						},
+					},
+				},
+			}
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("struct sub-field %q has unexpected type %s",
+				subField.GetName(), subField.GetDataType().String())
+		}
+		fields = append(fields, fieldData)
 	}
 	return &schemapb.FieldData{
 		FieldId:   structField.GetFieldID(),
@@ -1485,7 +1540,7 @@ func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchem
 		Field: &schemapb.FieldData_StructArrays{
 			StructArrays: &schemapb.StructArrayField{Fields: fields},
 		},
-	}
+	}, nil
 }
 
 // ToCompressedFormatNullableStructField converts nullable struct sub-fields from full format to compressed format.
