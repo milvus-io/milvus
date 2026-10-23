@@ -44,9 +44,9 @@ func RestoreColumnGroupsFromManifest(ctx context.Context, manifestPath string, s
 	}
 	groups, err := readColumnGroupsFromManifest(manifestPath, config)
 	if err != nil {
-		// The FFI markers have no wire code of their own. Keep their identity
-		// for retry classification while giving them the storage wire code.
-		if errors.Is(err, ErrLoonTransient) || errors.Is(err, ErrLoonPermanent) {
+		// The 3.0 FFI marker has no wire code of its own. Preserve its retry
+		// identity while giving the failure the storage wire code.
+		if errors.Is(err, ErrLoonTransient) {
 			return nil, merr.WrapErrStorage(err, "read column-group layout")
 		}
 		return nil, merr.Wrap(err, "read column-group layout")

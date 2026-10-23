@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
@@ -134,7 +135,7 @@ func TestInitMetaCacheRestoresV3ColumnGroupsAfterMetadataReload(t *testing.T) {
 }
 
 func TestInitMetaCacheDoesNotIgnoreColumnGroupReadFailure(t *testing.T) {
-	for _, failure := range []error{packed.ErrLoonTransient, packed.ErrLoonPermanent} {
+	for _, failure := range []error{packed.ErrLoonTransient, merr.ErrDataIntegrity} {
 		mockey.PatchConvey("recovery read failure", t, func() {
 			mockey.Mock(packed.RestoreColumnGroupsFromManifest).Return(nil, failure).Build()
 			_, err := initMetaCache(context.Background(), nil, &datapb.ChannelWatchInfo{Vchan: &datapb.VchannelInfo{}}, nil,

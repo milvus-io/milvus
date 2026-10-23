@@ -92,14 +92,12 @@ func TestRestoreColumnGroupsFromManifest(t *testing.T) {
 }
 
 func TestRestoreColumnGroupsPreservesReadFailures(t *testing.T) {
-	for _, failure := range []error{ErrLoonTransient, ErrLoonPermanent} {
-		mockey.PatchConvey("read failure", t, func() {
-			mockey.Mock(readColumnGroupsFromManifest).Return(nil, failure).Build()
-			_, err := RestoreColumnGroupsFromManifest(context.Background(), MarshalManifestPath("segment", 1), nil, &indexpb.StorageConfig{})
-			require.ErrorIs(t, err, failure)
-			require.ErrorIs(t, err, merr.ErrStorage)
-		})
-	}
+	mockey.PatchConvey("read failure", t, func() {
+		mockey.Mock(readColumnGroupsFromManifest).Return(nil, ErrLoonTransient).Build()
+		_, err := RestoreColumnGroupsFromManifest(context.Background(), MarshalManifestPath("segment", 1), nil, &indexpb.StorageConfig{})
+		require.ErrorIs(t, err, ErrLoonTransient)
+		require.ErrorIs(t, err, merr.ErrStorage)
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := RestoreColumnGroupsFromManifest(ctx, "", nil, nil)
@@ -117,8 +115,9 @@ func TestRestoreColumnGroupsRejectsUnreadableManifest(t *testing.T) {
 			}
 			_, err := RestoreColumnGroupsFromManifest(context.Background(), MarshalManifestPath(root, 1), nil,
 				&indexpb.StorageConfig{StorageType: "local", RootPath: root})
-			require.ErrorIs(t, err, ErrLoonPermanent)
-			require.NotErrorIs(t, err, ErrLoonTransient)
+			// 3.0 maps all native failures to this marker, including logical
+			// errors. Recovery must preserve the branch's existing semantics.
+			require.ErrorIs(t, err, ErrLoonTransient)
 		})
 	}
 }

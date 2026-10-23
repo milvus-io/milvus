@@ -167,7 +167,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 					split, err := packed.RestoreColumnGroupsFromManifest(initCtx, segment.GetManifestPath(), segment.GetStats(), nil)
 					if err != nil {
 						err = merr.Wrapf(err, "restore column groups for segment %d", segment.GetID())
-						if errors.Is(err, merr.ErrDataIntegrity) || errors.Is(err, packed.ErrLoonPermanent) {
+						if errors.Is(err, merr.ErrDataIntegrity) {
 							return nil, retry.Unrecoverable(err)
 						}
 						return nil, err
